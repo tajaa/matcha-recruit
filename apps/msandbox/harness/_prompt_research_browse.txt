@@ -1,6 +1,6 @@
 - A real browser, but ONLY through this one command:
 
-      server/venv/bin/python scripts/kanban-autopr/browse-capture.py \
+      server/venv/bin/python apps/msandbox/harness/browse-capture.py \
           --url https://example.com/pricing --label pricing-page
 
   It opens the page, saves a screenshot the harness will attach to the

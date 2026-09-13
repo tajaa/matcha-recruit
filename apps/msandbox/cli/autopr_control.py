@@ -595,7 +595,7 @@ def recover(run_id: str, repo: Path):
                         "This runtime belongs to another run. Its files were not touched."
                     )
             command(
-                [str(repo / "scripts/agent-sandbox.sh"), "stop"],
+                [str(repo / "apps/msandbox/bin/agent-sandbox.sh"), "stop"],
                 env=manual_environment(run, repo, transferred=False, stopping=True),
             )
             if source != destination and not destination.exists():
@@ -637,7 +637,7 @@ def tmux_name(run: Run) -> str:
 
 def stop_manual(run: Run, repo: Path):
     env = manual_environment(run, repo, stopping=True)
-    command([str(repo / "scripts/agent-sandbox.sh"), "stop"], env=env)
+    command([str(repo / "apps/msandbox/bin/agent-sandbox.sh"), "stop"], env=env)
     # The container has stopped; only this run's host terminal may be removed.
     subprocess.run(
         ["tmux", "kill-session", "-t", "=" + tmux_name(run)],
@@ -878,10 +878,12 @@ def cleanup_resources(run: Run):
             "compose",
             "--project-name",
             run.project,
+            "--project-directory",
+            str(Path(run.repo)),
             "--file",
-            str(Path(run.repo) / "docker-compose.sandbox.yml"),
+            str(Path(run.repo) / "apps/msandbox/sandbox/docker-compose.sandbox.yml"),
             "--file",
-            str(Path(run.repo) / "docker-compose.autopr-sandbox.yml"),
+            str(Path(run.repo) / "apps/msandbox/sandbox/docker-compose.autopr-sandbox.yml"),
             "down",
             "--volumes",
         ],

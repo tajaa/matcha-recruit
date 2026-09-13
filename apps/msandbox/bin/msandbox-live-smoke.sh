@@ -40,7 +40,7 @@ run_check() {
 }
 
 validate_session_schema() {
-    python3 -m json.tool scripts/msandbox/schemas/session-v1.json >/dev/null
+    python3 -m json.tool apps/msandbox/cli/schemas/session-v1.json >/dev/null
 }
 
 cleanup() {
@@ -96,31 +96,31 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 run_check "Python capability/session suite" \
-    python3 -m pytest scripts/tests/test_msandbox_v2.py -q
+    python3 -m pytest apps/msandbox/tests/test_msandbox_v2.py -q
 run_check "Sandbox networking and mount contract" \
-    bash scripts/tests/test_agent_sandbox_networking.sh
+    bash apps/msandbox/tests/test_agent_sandbox_networking.sh
 run_check "Attachment import boundary" \
-    bash scripts/tests/test_msandbox_attachments.sh
+    bash apps/msandbox/tests/test_msandbox_attachments.sh
 run_check "Changed Python modules compile" \
     python3 -m py_compile \
-        scripts/msandbox/agent_adapters.py \
-        scripts/msandbox/capabilities.py \
-        scripts/msandbox/cli.py \
-        scripts/msandbox/docker_runtime.py \
-        scripts/msandbox/install.py \
-        scripts/msandbox/models.py \
-        scripts/msandbox/sessions.py \
-        scripts/msandbox/wizard.py
+        apps/msandbox/cli/agent_adapters.py \
+        apps/msandbox/cli/capabilities.py \
+        apps/msandbox/cli/cli.py \
+        apps/msandbox/cli/docker_runtime.py \
+        apps/msandbox/cli/install.py \
+        apps/msandbox/cli/models.py \
+        apps/msandbox/cli/sessions.py \
+        apps/msandbox/cli/wizard.py
 run_check "Session schema parses" \
     validate_session_schema
 run_check "Shell entrypoints parse" \
     bash -n \
-        scripts/agent-sandbox.sh \
-        scripts/msandbox-live-smoke.sh \
-        scripts/tests/test_agent_sandbox_networking.sh \
-        scripts/tests/test_msandbox_attachments.sh \
-        scripts/tests/test_msandbox_sessions.sh \
-        scripts/tests/test_msandbox_worktrees.sh
+        apps/msandbox/bin/agent-sandbox.sh \
+        apps/msandbox/bin/msandbox-live-smoke.sh \
+        apps/msandbox/tests/test_agent_sandbox_networking.sh \
+        apps/msandbox/tests/test_msandbox_attachments.sh \
+        apps/msandbox/tests/test_msandbox_sessions.sh \
+        apps/msandbox/tests/test_msandbox_worktrees.sh
 
 if [ "$FAILURES" -ne 0 ]; then
     fail "$FAILURES local check(s) failed; live session was not created"
@@ -128,7 +128,7 @@ fi
 
 if [ "$SKIP_INSTALL" != "1" ]; then
     say "Installing controller from the current checkout"
-    "$REPO_ROOT/scripts/agent-sandbox.sh" install \
+    "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" install \
         || fail "controller installation failed"
 fi
 

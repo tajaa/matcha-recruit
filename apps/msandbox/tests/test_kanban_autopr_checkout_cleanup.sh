@@ -3,8 +3,8 @@
 # files from the persistent Mac runner workspace.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-CLEANUP="$REPO_ROOT/scripts/kanban-autopr/leave-task-checkout.sh"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+CLEANUP="$REPO_ROOT/apps/msandbox/harness/leave-task-checkout.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 

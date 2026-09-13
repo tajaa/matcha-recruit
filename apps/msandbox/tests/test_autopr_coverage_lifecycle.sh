@@ -2,7 +2,7 @@
 # Durable owner-PR lifecycle tests for both automation lanes.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 TMP_DIR="$(mktemp -d "$REPO_ROOT/.autopr-coverage-test-XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir -p "$TMP_DIR/bin"
@@ -41,7 +41,7 @@ EOF
 
 set +e
 PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x AUTOFIX_CACHE_DIR="$TMP_DIR/prod-open" \
-  "$REPO_ROOT/scripts/error-autofix/select.sh" "$TMP_DIR/incidents.json" >/dev/null
+  "$REPO_ROOT/apps/msandbox/error-autofix/select.sh" "$TMP_DIR/incidents.json" >/dev/null
 rc=$?
 set -e
 [ "$rc" = 3 ]
@@ -49,14 +49,14 @@ printf 'PASS: open covering PR suppresses the production incident\n'
 
 selected="$(OWNER_STATE=CLOSED OWNER_CLOSED_AT='"2026-08-28T10:00:00Z"' \
   PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x AUTOFIX_CACHE_DIR="$TMP_DIR/prod-closed" \
-  "$REPO_ROOT/scripts/error-autofix/select.sh" "$TMP_DIR/incidents.json")"
+  "$REPO_ROOT/apps/msandbox/error-autofix/select.sh" "$TMP_DIR/incidents.json")"
 [ "$(printf '%s' "$selected" | jq -r '.stable_key')" = abc123abc123 ]
 printf 'PASS: closed-unmerged covering PR releases the production incident\n'
 
 set +e
 OWNER_SET=recurrent PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x \
   AUTOFIX_CACHE_DIR="$TMP_DIR/prod-recurrent" \
-  "$REPO_ROOT/scripts/error-autofix/select.sh" "$TMP_DIR/incidents.json" >/dev/null
+  "$REPO_ROOT/apps/msandbox/error-autofix/select.sh" "$TMP_DIR/incidents.json" >/dev/null
 rc=$?
 set -e
 [ "$rc" = 3 ]
@@ -67,7 +67,7 @@ cat > "$TMP_DIR/card.json" <<'EOF'
 EOF
 set +e
 OWNER_STATE=OPEN PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x AUTOPR_CACHE_DIR="$TMP_DIR/card-open" \
-  "$REPO_ROOT/scripts/kanban-autopr/select.sh" "$TMP_DIR/card.json" >/dev/null
+  "$REPO_ROOT/apps/msandbox/harness/select.sh" "$TMP_DIR/card.json" >/dev/null
 rc=$?
 set -e
 [ "$rc" = 3 ]
@@ -75,7 +75,7 @@ printf 'PASS: open cross-lane PR suppresses its linked Kanban card\n'
 
 selected="$(OWNER_STATE=CLOSED PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x \
   AUTOPR_CACHE_DIR="$TMP_DIR/card-closed" \
-  "$REPO_ROOT/scripts/kanban-autopr/select.sh" "$TMP_DIR/card.json")"
+  "$REPO_ROOT/apps/msandbox/harness/select.sh" "$TMP_DIR/card.json")"
 [ "$(printf '%s' "$selected" | jq -r '.mode')" = investigate ]
 printf 'PASS: closed-unmerged cross-lane PR releases its linked Kanban card\n'
 
@@ -101,7 +101,7 @@ chmod +x "$TMP_DIR/bin/gh-record"
 ln -sf "$TMP_DIR/bin/gh-record" "$TMP_DIR/bin/gh"
 : > "$TMP_DIR/record-calls"
 PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_CALLS="$TMP_DIR/record-calls" GITHUB_REPOSITORY=x/x \
-  "$REPO_ROOT/scripts/error-autofix/record-coverage.sh" "$TMP_DIR/incident.json" \
+  "$REPO_ROOT/apps/msandbox/error-autofix/record-coverage.sh" "$TMP_DIR/incident.json" \
     "$TMP_DIR/coverage.json" "$TMP_DIR/decision.json" >/dev/null 2>&1
 ! grep -q '^pr comment ' "$TMP_DIR/record-calls"
 grep -q '^pr edit 334 .*--add-label covers-prod-error' "$TMP_DIR/record-calls"

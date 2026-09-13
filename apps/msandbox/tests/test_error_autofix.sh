@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Exercises scripts/error-autofix/* without touching prod, GitHub, or a real
+# Exercises apps/msandbox/error-autofix/* without touching prod, GitHub, or a real
 # model. Stubs `ssh` and `gh` on PATH in the house style of
 # test_collect_silent_error_evidence.sh / test_ci_guards.sh. Run:
-#   ./scripts/tests/test_error_autofix.sh
+#   ./apps/msandbox/tests/test_error_autofix.sh
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-AUTOFIX_DIR="$REPO_ROOT/scripts/error-autofix"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+AUTOFIX_DIR="$REPO_ROOT/apps/msandbox/error-autofix"
 TMP_DIR="$(mktemp -d)"
 MODEL_OUTPUT_DIR="$(mktemp -d /tmp/matcha-error-autofix-output-XXXXXX)"
 trap 'rm -rf "$TMP_DIR" "$MODEL_OUTPUT_DIR"' EXIT
@@ -166,7 +166,7 @@ check "investigate.sh uses Sol with medium reasoning for code fixes" \
 workflow="$REPO_ROOT/.github/workflows/silent-error-autofix.yml"
 check "Mac dispatcher is the error workflow's only automatic clock" \
     $(! grep -qF 'schedule:' "$workflow" && grep -qF 'workflow_dispatch:' "$workflow" \
-      && grep -qF 'silent-error-autofix.yml' "$REPO_ROOT/scripts/kanban-autopr/dispatch-if-idle.sh" \
+      && grep -qF 'silent-error-autofix.yml' "$REPO_ROOT/apps/msandbox/harness/dispatch-if-idle.sh" \
       && echo 0 || echo 1)
 fallback_block="$(sed -n '/Fallback log-grep evidence/,/Select one incident/p' "$workflow")"
 check "fallback turns nonempty evidence into an incident" \
@@ -184,7 +184,7 @@ check "reconcile.sh uses sandboxed Sol with medium reasoning" \
 
 check "workflow delegates error-fix commit subjects to Luna medium" \
     $(grep -qF 'write-commit-subject.sh fix' "$workflow" \
-      && grep -qF 'AUTOPR_CODEX_MODEL=gpt-5.6-luna' "$REPO_ROOT/scripts/kanban-autopr/write-commit-subject.sh" \
+      && grep -qF 'AUTOPR_CODEX_MODEL=gpt-5.6-luna' "$REPO_ROOT/apps/msandbox/harness/write-commit-subject.sh" \
       && ! grep -qF 'git commit -m "fix: $EXC in $PATH_"' "$AUTOFIX_DIR/publish.sh" \
       && echo 0 || echo 1)
 
@@ -521,8 +521,8 @@ check "verify.sh with no interpreter reports unverified (AUTOFIX_NEW_FAILURES=1)
 # 10: publish.sh path guard — denylist and allowlist both fatal on bad paths
 ################################################################################
 FAKE_REPO="$TMP_DIR/fake-repo"
-mkdir -p "$FAKE_REPO/scripts/error-autofix" "$FAKE_REPO/server/app/matcha/routes"
-cp "$AUTOFIX_DIR"/*.sh "$FAKE_REPO/scripts/error-autofix/"
+mkdir -p "$FAKE_REPO/apps/msandbox/error-autofix" "$FAKE_REPO/server/app/matcha/routes"
+cp "$AUTOFIX_DIR"/*.sh "$FAKE_REPO/apps/msandbox/error-autofix/"
 (
     cd "$FAKE_REPO" && git init -q && git config user.email t@example.com && git config user.name t \
     && echo "x" > README.md && git add -A && git commit -q -m init
@@ -533,19 +533,19 @@ EOF
 cat > "$TMP_DIR/publish-incident.json" <<'EOF'
 {"stable_key":"aaa111111111","surface":"server","error_id":"id","kind":"http_error","level":"ERROR","exception_type":"DataError","message":"boom","traceback":"trace","source":"api","request_method":"GET","request_path":"/x","occurrences":1,"first_seen":"2026-08-20T00:00:00Z","last_seen":"2026-08-20T00:00:00Z"}
 EOF
-echo "changed" >> "$FAKE_REPO/scripts/error-autofix/collect.sh"
+echo "changed" >> "$FAKE_REPO/apps/msandbox/error-autofix/collect.sh"
 (
     cd "$FAKE_REPO" && GH_TOKEN=x GITHUB_REPOSITORY=x/x \
-    "$FAKE_REPO/scripts/error-autofix/publish.sh" "$TMP_DIR/publish-incident.json" \
+    "$FAKE_REPO/apps/msandbox/error-autofix/publish.sh" "$TMP_DIR/publish-incident.json" \
       "$TMP_DIR/publish-decision.json" /dev/null /dev/null
 ) > "$TMP_DIR/publish_out.txt" 2>&1
 check "publish.sh refuses a diff touching scripts/" $([ "$?" != "0" ] && echo 0 || echo 1)
 
-(cd "$FAKE_REPO" && git checkout -- scripts/error-autofix/collect.sh)
+(cd "$FAKE_REPO" && git checkout -- apps/msandbox/error-autofix/collect.sh)
 echo "docs change" >> "$FAKE_REPO/README.md"
 (
     cd "$FAKE_REPO" && GH_TOKEN=x GITHUB_REPOSITORY=x/x \
-    "$FAKE_REPO/scripts/error-autofix/publish.sh" "$TMP_DIR/publish-incident.json" \
+    "$FAKE_REPO/apps/msandbox/error-autofix/publish.sh" "$TMP_DIR/publish-incident.json" \
       "$TMP_DIR/publish-decision.json" /dev/null /dev/null
 ) > "$TMP_DIR/publish_out2.txt" 2>&1
 check "publish.sh refuses a diff outside server/app or server/tests" $([ "$?" != "0" ] && echo 0 || echo 1)
@@ -576,7 +576,7 @@ EOF
 (
     cd "$FAKE_REPO" && PATH="$TMP_DIR/bin:$PATH" GH_STUB_CALLS="$TMP_DIR/gh_calls.txt" \
     GH_TOKEN=x GITHUB_REPOSITORY=x/x \
-    "$FAKE_REPO/scripts/error-autofix/publish.sh" "$TMP_DIR/publish-incident.json" \
+    "$FAKE_REPO/apps/msandbox/error-autofix/publish.sh" "$TMP_DIR/publish-incident.json" \
       "$TMP_DIR/publish-decision.json" "$TMP_DIR/report.md" /dev/null
 ) > "$TMP_DIR/publish_out3.txt" 2>&1
 check "publish.sh replaces a placeholder no-fix issue body" \

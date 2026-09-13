@@ -2,7 +2,7 @@
 
 Reads stay local (scheduler status, run records, the cached card snapshot,
 the status-bar segment). Every board write goes through
-scripts/kanban-autopr/card-control.sh, which owns the bot login and the
+apps/msandbox/harness/card-control.sh, which owns the bot login and the
 one-card-only resolution rules; this module only relays its exit code.
 """
 
@@ -22,13 +22,13 @@ CARD_VERBS = ("hold", "release", "run-now", "unstick", "cancel-run", "log")
 def _kanban_script(name: str, repo: Path | None) -> Path | None:
     """Installed dispatcher copy first (what the LaunchAgent runs), then the checkout.
 
-    Releases never carry scripts/kanban-autopr, so a release alone cannot
+    Releases never carry apps/msandbox/harness, so a release alone cannot
     resolve these; the launcher exports MATCHA_REPO_ROOT for that case.
     """
     candidates = [Path.home() / ".local/share/matcha-kanban-autopr" / name]
     for root in (repo, os.environ.get("MATCHA_REPO_ROOT")):
         if root:
-            candidates.append(Path(root) / "scripts/kanban-autopr" / name)
+            candidates.append(Path(root) / "apps/msandbox/harness" / name)
     for candidate in candidates:
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return candidate
@@ -111,7 +111,7 @@ def card_action(
     script = _kanban_script("card-control.sh", repo)
     if script is None:
         print(
-            "msandbox: card-control.sh is not installed; run scripts/kanban-autopr/install-launch-agent.sh",
+            "msandbox: card-control.sh is not installed; run apps/msandbox/harness/install-launch-agent.sh",
             file=sys.stderr,
         )
         return 2

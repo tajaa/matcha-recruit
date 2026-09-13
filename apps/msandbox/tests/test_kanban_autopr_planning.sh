@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -34,17 +34,17 @@ fi
 EOF
 chmod +x "$TMP_DIR/collector-bin/gh"
 PATH="$TMP_DIR/collector-bin:$PATH" AUTOPR_TEST_COLLECTOR_GH_LOG="$TMP_DIR/collector-gh.log" \
-  GITHUB_REPOSITORY=example/repo "$REPO_ROOT/scripts/kanban-autopr/collect-pr-context.sh" \
+  GITHUB_REPOSITORY=example/repo "$REPO_ROOT/apps/msandbox/harness/collect-pr-context.sh" \
   > "$TMP_DIR/collected-prs.json"
 jq -e '.[0].headRefOid == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' \
   "$TMP_DIR/collected-prs.json" >/dev/null
 grep -q -- '--json number,title,isDraft,state,headRefName,headRefOid' "$TMP_DIR/collector-gh.log"
-grep -q 'jq -s' "$REPO_ROOT/scripts/kanban-autopr/collect-pr-context.sh"
-! grep -q -- '--argjson rows' "$REPO_ROOT/scripts/kanban-autopr/collect-pr-context.sh"
+grep -q 'jq -s' "$REPO_ROOT/apps/msandbox/harness/collect-pr-context.sh"
+! grep -q -- '--argjson rows' "$REPO_ROOT/apps/msandbox/harness/collect-pr-context.sh"
 
 # Path context must be specific enough to avoid one giant frontend/backend
 # cluster while still relating exact directories and sibling files.
-python3 - "$REPO_ROOT/scripts/kanban-autopr/plan.py" <<'PY'
+python3 - "$REPO_ROOT/apps/msandbox/harness/plan.py" <<'PY'
 import importlib.util
 import sys
 
@@ -104,7 +104,7 @@ assert module.card_base_key({
 })[0]
 PY
 
-python3 "$REPO_ROOT/scripts/kanban-autopr/plan.py" \
+python3 "$REPO_ROOT/apps/msandbox/harness/plan.py" \
   --cards "$TMP_DIR/cards.json" --prs "$TMP_DIR/prs.json" \
   --output "$TMP_DIR/plan.json" --cards-output "$TMP_DIR/planned.json"
 
@@ -132,14 +132,14 @@ jq -e '
 first_plan_id="$(jq -r '.plan_id' "$TMP_DIR/plan.json")"
 jq 'reverse' "$TMP_DIR/cards.json" > "$TMP_DIR/reordered-cards.json"
 jq 'reverse' "$TMP_DIR/prs.json" > "$TMP_DIR/reordered-prs.json"
-python3 "$REPO_ROOT/scripts/kanban-autopr/plan.py" \
+python3 "$REPO_ROOT/apps/msandbox/harness/plan.py" \
   --cards "$TMP_DIR/reordered-cards.json" --prs "$TMP_DIR/reordered-prs.json" \
   --output "$TMP_DIR/reordered-plan.json" --cards-output "$TMP_DIR/reordered-planned.json"
 [ "$(jq -r '.plan_id' "$TMP_DIR/reordered-plan.json")" = "$first_plan_id" ]
 
 jq '.[1].description = "A materially changed shared foundation" | .[0].autopr_reconsideration_pending = false' \
   "$TMP_DIR/cards.json" > "$TMP_DIR/changed-cards.json"
-python3 "$REPO_ROOT/scripts/kanban-autopr/plan.py" \
+python3 "$REPO_ROOT/apps/msandbox/harness/plan.py" \
   --cards "$TMP_DIR/changed-cards.json" --prs "$TMP_DIR/prs.json" \
   --output "$TMP_DIR/changed-plan.json" --cards-output "$TMP_DIR/changed-planned.json"
 [ "$(jq -r '.plan_id' "$TMP_DIR/changed-plan.json")" != "$first_plan_id" ]
@@ -153,7 +153,7 @@ jq -e '
 # metadata remains unchanged.
 jq '.[1].headRefOid = "cccccccccccccccccccccccccccccccccccccccc"' \
   "$TMP_DIR/prs.json" > "$TMP_DIR/changed-prs.json"
-python3 "$REPO_ROOT/scripts/kanban-autopr/plan.py" \
+python3 "$REPO_ROOT/apps/msandbox/harness/plan.py" \
   --cards "$TMP_DIR/cards.json" --prs "$TMP_DIR/changed-prs.json" \
   --output "$TMP_DIR/head-changed-plan.json" --cards-output "$TMP_DIR/head-changed-planned.json"
 [ "$(jq -r '.plan_id' "$TMP_DIR/head-changed-plan.json")" != "$first_plan_id" ]
@@ -169,13 +169,13 @@ chmod +x "$TMP_DIR/bin/gh"
 set +e
 PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" \
   AUTOPR_RELEASE_EXECUTE=true GITHUB_REPOSITORY=example/repo \
-  "$REPO_ROOT/scripts/kanban-autopr/release-plan.sh" \
+  "$REPO_ROOT/apps/msandbox/harness/release-plan.sh" \
   "$TMP_DIR/plan.json" "$(jq -r '.plan_id' "$TMP_DIR/plan.json")" >/dev/null 2>&1
 release_rc=$?
 set -e
 [ "$release_rc" -ne 0 ]
 [ ! -s "$TMP_DIR/gh.log" ]
-! grep -q -- '--admin' "$REPO_ROOT/scripts/kanban-autopr/release-plan.sh"
+! grep -q -- '--admin' "$REPO_ROOT/apps/msandbox/harness/release-plan.sh"
 
 # With every contingency resolved, the explicit release transitions the draft
 # to ready and conclusively merges it before moving on.
@@ -213,7 +213,7 @@ PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" \
   AUTOPR_TEST_LIVE_HEAD=cccccccccccccccccccccccccccccccccccccccc \
   AUTOPR_TEST_MERGED="$TMP_DIR/merged" AUTOPR_RELEASE_EXECUTE=true \
   GITHUB_REPOSITORY=example/repo \
-  "$REPO_ROOT/scripts/kanban-autopr/release-plan.sh" \
+  "$REPO_ROOT/apps/msandbox/harness/release-plan.sh" \
   "$TMP_DIR/releasable-plan.json" "$(jq -r '.plan_id' "$TMP_DIR/releasable-plan.json")" >/dev/null 2>&1
 head_changed_rc=$?
 set -e
@@ -229,7 +229,7 @@ PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" \
   AUTOPR_TEST_LIVE_HEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   AUTOPR_TEST_FAIL_CHECK=true AUTOPR_TEST_MERGED="$TMP_DIR/merged" \
   AUTOPR_RELEASE_EXECUTE=true GITHUB_REPOSITORY=example/repo \
-  "$REPO_ROOT/scripts/kanban-autopr/release-plan.sh" \
+  "$REPO_ROOT/apps/msandbox/harness/release-plan.sh" \
   "$TMP_DIR/releasable-plan.json" "$(jq -r '.plan_id' "$TMP_DIR/releasable-plan.json")" >/dev/null 2>&1
 check_failed_rc=$?
 set -e
@@ -244,7 +244,7 @@ PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" \
   AUTOPR_TEST_MERGED="$TMP_DIR/merged" AUTOPR_RELEASE_EXECUTE=true \
   AUTOPR_MERGE_WAIT_SECONDS=1 AUTOPR_MERGE_POLL_SECONDS=1 \
   GITHUB_REPOSITORY=example/repo \
-  "$REPO_ROOT/scripts/kanban-autopr/release-plan.sh" \
+  "$REPO_ROOT/apps/msandbox/harness/release-plan.sh" \
   "$TMP_DIR/releasable-plan.json" "$(jq -r '.plan_id' "$TMP_DIR/releasable-plan.json")" >/dev/null
 ready_line="$(grep -n '^pr ready ' "$TMP_DIR/gh.log" | cut -d: -f1)"
 merge_line="$(grep -n '^pr merge ' "$TMP_DIR/gh.log" | cut -d: -f1)"

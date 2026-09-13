@@ -11,7 +11,7 @@ services:
       # Installed msandbox releases keep their Compose templates immutable,
       # while the build context remains the selected Matcha checkout.
       context: ${SANDBOX_BUILD_CONTEXT:-.}
-      dockerfile: ${SANDBOX_DOCKERFILE:-docker/agent-sandbox/Dockerfile}
+      dockerfile: ${SANDBOX_DOCKERFILE:-apps/msandbox/sandbox/Dockerfile}
       args:
         CODEX_VERSION: ${CODEX_VERSION:-0.153.4}
         CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.263}
@@ -52,7 +52,7 @@ services:
       - ${SANDBOX_WORKSPACE_DIR:-.}:/workspace
       - sandbox_home:/home/agent
       - sandbox_npm_cache:/home/agent/.npm
-      # AWS static credentials, read-only. See docs/ops/AGENT_SANDBOX.md's
+      # AWS static credentials, read-only. See apps/msandbox/docs/AGENT_SANDBOX.md's
       # threat model — this is deliberately reachable, not an oversight.
       # AutoPR points this at an empty directory. Interactive sessions retain
       # the documented read-only host AWS mount by default.

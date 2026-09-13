@@ -15,10 +15,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from scripts.msandbox import autopr_cli
-from scripts.msandbox import autopr_control as control
-from scripts.msandbox import autopr_ui
-from scripts.msandbox import autopr_queue
+from apps.msandbox.cli import autopr_cli
+from apps.msandbox.cli import autopr_control as control
+from apps.msandbox.cli import autopr_ui
+from apps.msandbox.cli import autopr_queue
 
 
 class AutoPRTests(unittest.TestCase):
@@ -308,7 +308,7 @@ class AutoPRTests(unittest.TestCase):
     def test_installed_selector_ships_ownership_helper_and_skips_held_task(self):
         run = self.run_record()
         scripts = Path(__file__).resolve().parents[1]
-        installer = scripts / "kanban-autopr/install-launch-agent.sh"
+        installer = scripts / "harness/install-launch-agent.sh"
         install_root = self.path / "installed"
         # Only the pure file-copy function is invoked: no launchd, dashboard,
         # credential validation, or service startup during this test.
@@ -328,7 +328,7 @@ class AutoPRTests(unittest.TestCase):
         subprocess.run(["bash", "-c", source], env=env, check=True, capture_output=True)
         self.assertEqual(
             (install_root / "autopr_control.py").read_bytes(),
-            (scripts / "msandbox/autopr_control.py").read_bytes(),
+            (scripts / "cli/autopr_control.py").read_bytes(),
         )
         cards = self.path / "cards.json"
         cards.write_text(
@@ -363,8 +363,8 @@ class AutoPRTests(unittest.TestCase):
             mock.patch.object(
                 autopr_ui, "queue_return", side_effect=RuntimeError("offline")
             ),
-            mock.patch("scripts.msandbox.wizard.choose", return_value=True),
-            mock.patch("scripts.msandbox.manager.show"),
+            mock.patch("apps.msandbox.cli.wizard.choose", return_value=True),
+            mock.patch("apps.msandbox.cli.manager.show"),
         ):
             notice = autopr_ui.manage(
                 "return",
@@ -540,7 +540,7 @@ class AutoPRTests(unittest.TestCase):
         self.assertEqual(control.load(run.id).status, "resuming")
 
     def bridge(self, patch: bytes):
-        script_dir = Path(__file__).resolve().parents[1] / "kanban-autopr"
+        script_dir = Path(__file__).resolve().parents[1] / "harness"
         fake_bin = self.path / "bin"
         fake_bin.mkdir(exist_ok=True)
         codex = fake_bin / "codex"
@@ -823,7 +823,7 @@ class AutoPRTests(unittest.TestCase):
         # The board writes live in card-control.sh (bot login, one-card
         # resolution); the CLI and the tab only compose argv and pass the
         # exit code through so a refusal there is a refusal here.
-        script = self.repo / "scripts/kanban-autopr/card-control.sh"
+        script = self.repo / "apps/msandbox/harness/card-control.sh"
         script.parent.mkdir(parents=True)
         script.write_text("#!/bin/sh\nexit 0\n")
         script.chmod(0o755)
@@ -853,7 +853,7 @@ class AutoPRTests(unittest.TestCase):
         with mock.patch.object(autopr_ui, "choose", return_value=True, create=True), mock.patch.object(
             autopr_cli, "card_action", return_value=0
         ) as action, mock.patch.object(autopr_queue, "refresh", return_value="") as refresh:
-            import scripts.msandbox.wizard as wizard
+            import apps.msandbox.cli.wizard as wizard
             with mock.patch.object(wizard, "choose", return_value=True):
                 notice = autopr_ui.manage(
                     "hold",
@@ -868,7 +868,7 @@ class AutoPRTests(unittest.TestCase):
             refresh.assert_called_once()
 
     def test_acknowledged_pause_skips_report_validation_and_emits_workflow_output(self):
-        script = Path(__file__).resolve().parents[1] / "kanban-autopr/investigate.sh"
+        script = Path(__file__).resolve().parents[1] / "harness/investigate.sh"
         function = script.read_text().split("codex_pass() {", 1)[1].split("\n}\n", 1)[0]
         output = self.path / "workflow-output"
         result = subprocess.run(

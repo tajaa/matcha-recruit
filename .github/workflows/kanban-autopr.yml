@@ -54,7 +54,7 @@ jobs:
 
       - name: Require msandbox master switch
         run: |
-          if ! ./scripts/agent-sandbox.sh autopr-ready; then
+          if ! ./apps/msandbox/bin/agent-sandbox.sh autopr-ready; then
             echo "AutoPR is disabled. Start it explicitly with: msandbox start" >&2
             exit 1
           fi
@@ -69,7 +69,7 @@ jobs:
           # hours. This floor lives on GitHub's side so no local clock bug can
           # spin the runner again. API failure proceeds (spend guard only).
           set +e
-          ./scripts/kanban-autopr/hot-redispatch-guard.sh
+          ./apps/msandbox/harness/hot-redispatch-guard.sh
           rc=$?
           set -e
           if [ "$rc" -eq 3 ]; then
@@ -149,7 +149,7 @@ jobs:
         id: collect
         if: steps.guard.outputs.proceed == 'true'
         timeout-minutes: 2
-        run: ./scripts/kanban-autopr/collect.sh > "$RUNNER_TEMP/cards.json"
+        run: ./apps/msandbox/harness/collect.sh > "$RUNNER_TEMP/cards.json"
 
       - name: Collect open bot PR context
         if: steps.guard.outputs.proceed == 'true'
@@ -160,7 +160,7 @@ jobs:
           # One run-scoped snapshot of every open bot PR. The reconciler, the
           # planner, and the selector all read this file instead of each
           # re-querying GitHub for the same PRs.
-          ./scripts/kanban-autopr/collect-pr-context.sh > "$RUNNER_TEMP/bot-prs.json"
+          ./apps/msandbox/harness/collect-pr-context.sh > "$RUNNER_TEMP/bot-prs.json"
           echo "AUTOPR_BOT_PRS_FILE=$RUNNER_TEMP/bot-prs.json" >> "$GITHUB_ENV"
 
       - name: Reconcile merged or closed PR cards missed by the webhook
@@ -172,7 +172,7 @@ jobs:
           # GitHub delivery is the fast path; this is the one-minute repair
           # path. It also removes repaired cards from this run's candidate
           # snapshot, preventing a duplicate PR before the next collection.
-          ./scripts/kanban-autopr/reconcile-merged-cards.sh "$RUNNER_TEMP/cards.json" \
+          ./apps/msandbox/harness/reconcile-merged-cards.sh "$RUNNER_TEMP/cards.json" \
             > "$RUNNER_TEMP/reconciled-cards.json"
           mv "$RUNNER_TEMP/reconciled-cards.json" "$RUNNER_TEMP/cards.json"
 
@@ -186,7 +186,7 @@ jobs:
           # planning evidence. plan.py clusters related cards, excludes PRs
           # already marked ready for review, and assigns the proposed merge
           # order for the remaining drafts.
-          python3 ./scripts/kanban-autopr/plan.py \
+          python3 ./apps/msandbox/harness/plan.py \
             --cards "$RUNNER_TEMP/cards.json" \
             --prs "$RUNNER_TEMP/bot-prs.json" \
             --output "$RUNNER_TEMP/plan.json" \
@@ -204,7 +204,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set +e
-          ./scripts/kanban-autopr/select.sh "$RUNNER_TEMP/cards.json" > "$RUNNER_TEMP/card.json"
+          ./apps/msandbox/harness/select.sh "$RUNNER_TEMP/cards.json" > "$RUNNER_TEMP/card.json"
           rc=$?
           set -e
           if [ "$rc" -eq 3 ]; then
@@ -240,7 +240,7 @@ jobs:
         env:
           SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
         run: |
-          ./scripts/kanban-autopr/resolve-production-context.sh > "$RUNNER_TEMP/production-context.json"
+          ./apps/msandbox/harness/resolve-production-context.sh > "$RUNNER_TEMP/production-context.json"
           {
             echo '## Production baseline'
             jq '{build_number, release_sha, containers: {backend: .containers.backend.git_sha, frontend: .containers.frontend.git_sha}, database}' "$RUNNER_TEMP/production-context.json"
@@ -265,10 +265,10 @@ jobs:
           control_root="$RUNNER_TEMP/autopr-control"
           rm -rf "$control_root"
           mkdir -p "$control_root"
-          git archive main scripts/kanban-autopr scripts/error-autofix scripts/autopr-scope \
-              scripts/msandbox scripts/alembic_graph_snapshot.py scripts/alembic_graph.py \
+          git archive main apps/msandbox/harness apps/msandbox/error-autofix apps/msandbox/scope \
+              apps/msandbox/cli scripts/alembic_graph_snapshot.py scripts/alembic_graph.py \
             | tar -x -C "$control_root"
-          echo "AUTOPR_CONTROL_ROOT=$control_root/scripts" >> "$GITHUB_ENV"
+          echo "AUTOPR_CONTROL_ROOT=$control_root/apps/msandbox" >> "$GITHUB_ENV"
           echo "AUTOPR_WORKSPACE_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
           echo "AUTOPR_SANDBOX_REPO_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
 
@@ -277,7 +277,7 @@ jobs:
         if: steps.select.outputs.skip == 'false'
         timeout-minutes: 2
         run: |
-          "$AUTOPR_CONTROL_ROOT/kanban-autopr/runtime-policy.sh" \
+          "$AUTOPR_CONTROL_ROOT/harness/runtime-policy.sh" \
             "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/runtime-policy.json"
           echo "minutes=$(jq -r '.minutes' "$RUNNER_TEMP/runtime-policy.json")" >> "$GITHUB_OUTPUT"
           jq '{minutes,extended,checkpoint,approval_event_id:.source_event_id}' \
@@ -329,7 +329,7 @@ jobs:
           # Fail closed into the dedicated container/volume namespace. The
           # helper also mounts an empty AWS directory and never passes this
           # step's GitHub, Matcha, or production credentials through.
-          AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/scripts/agent-sandbox.sh
+          AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/apps/msandbox/bin/agent-sandbox.sh
           AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox
           # One resolution of the owner's directives for the whole run: the
           # budgeted runtime and the authority in the model's prompt must not
@@ -342,7 +342,7 @@ jobs:
         run: |
           date +%s > "$RUNNER_TEMP/investigation-started-at"
           rm -rf "$RUNNER_TEMP/research-artifacts"
-          "$AUTOPR_CONTROL_ROOT/kanban-autopr/investigate.sh" "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json"
+          "$AUTOPR_CONTROL_ROOT/harness/investigate.sh" "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json"
 
       - name: Checkpoint interrupted investigation
         id: checkpoint
@@ -350,7 +350,7 @@ jobs:
         timeout-minutes: 2
         continue-on-error: true
         env:
-          AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/scripts/agent-sandbox.sh
+          AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/apps/msandbox/bin/agent-sandbox.sh
           AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox
           # Present only if investigate.sh exited on its own. Its absence is
           # what distinguishes a real timeout (pause the card for approval)
@@ -358,7 +358,7 @@ jobs:
           AUTOPR_INVESTIGATION_EXIT_FILE: ${{ runner.temp }}/investigation-exit-code
         run: |
           started_at="$(cat "$RUNNER_TEMP/investigation-started-at" 2>/dev/null || date +%s)"
-          checkpoint="$($AUTOPR_CONTROL_ROOT/kanban-autopr/checkpoint.sh save \
+          checkpoint="$($AUTOPR_CONTROL_ROOT/harness/checkpoint.sh save \
             "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json" \
             "$started_at" "${{ steps.runtime.outputs.minutes || '20' }}")"
           echo "path=$checkpoint" >> "$GITHUB_OUTPUT"
@@ -396,7 +396,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           AUTOPR_SCOPE_DEDUPE_MODE: enforce
         run: |
-          "$AUTOPR_CONTROL_ROOT/autopr-scope/check-open-prs.sh" \
+          "$AUTOPR_CONTROL_ROOT/scope/check-open-prs.sh" \
             --lane kanban --identity "$(jq -r '.task_id' "$RUNNER_TEMP/card.json")" \
             --evidence "$RUNNER_TEMP/card.json" --report "$RUNNER_TEMP/report.md" \
             --output "$RUNNER_TEMP/coverage.json"
@@ -416,7 +416,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          "$AUTOPR_CONTROL_ROOT/kanban-autopr/record-coverage.sh" "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/coverage.json"
+          "$AUTOPR_CONTROL_ROOT/harness/record-coverage.sh" "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/coverage.json"
 
       - name: Verify (baseline vs branch)
         id: verify
@@ -436,10 +436,10 @@ jobs:
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.outcome != 'artifact'
         timeout-minutes: 5
         env:
-          AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/scripts/agent-sandbox.sh
+          AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/apps/msandbox/bin/agent-sandbox.sh
           AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox
         run: |
-          "$AUTOPR_CONTROL_ROOT/kanban-autopr/write-publication-copy.sh" \
+          "$AUTOPR_CONTROL_ROOT/harness/write-publication-copy.sh" \
             "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/decision.json" \
             "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md" \
             "$RUNNER_TEMP/publication-copy.json"
@@ -451,7 +451,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           AUTOPR_POSSIBLE_DUPLICATE: ${{ steps.coverage.outputs.possible_duplicate == 'true' && '1' || '0' }}
         run: |
-          "$AUTOPR_CONTROL_ROOT/kanban-autopr/publish.sh" \
+          "$AUTOPR_CONTROL_ROOT/harness/publish.sh" \
             "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/decision.json" \
             "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md" \
             "$RUNNER_TEMP/publication-copy.json"
@@ -481,13 +481,13 @@ jobs:
           # the step rather than leaving the card in Todo with no signal.
           case "$MODE" in
             research)
-              "$AUTOPR_CONTROL_ROOT/kanban-autopr/publish-research.sh" \
+              "$AUTOPR_CONTROL_ROOT/harness/publish-research.sh" \
                 "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json" \
                 "$RUNNER_TEMP/research-artifacts" \
                 | tee -a "$GITHUB_STEP_SUMMARY"
               ;;
             email)
-              "$AUTOPR_CONTROL_ROOT/kanban-autopr/publish-email.sh" \
+              "$AUTOPR_CONTROL_ROOT/harness/publish-email.sh" \
                 "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json" \
                 | tee -a "$GITHUB_STEP_SUMMARY"
               ;;
@@ -531,7 +531,7 @@ jobs:
           # and claim release below.
           record_outcome() {
             bash -c 'source "$1"; shift; autopr_record_outcome "$@"' _ \
-              "$AUTOPR_CONTROL_ROOT/kanban-autopr/lib.sh" "$@" \
+              "$AUTOPR_CONTROL_ROOT/harness/lib.sh" "$@" \
               || printf 'warning: could not record the run outcome for %s\n' "$1" >&2
           }
           task_id="$(jq -r '.task_id' "$RUNNER_TEMP/card.json")"
@@ -582,7 +582,7 @@ jobs:
           # already produced. Only an actual publication settles the card;
           # anything else leaves the checkpoint resumable for the next run.
           if [ "$PUBLISH_OUTCOME" = success ] || [ "$PUBLISH_ARTIFACT_OUTCOME" = success ]; then
-            "$AUTOPR_CONTROL_ROOT/kanban-autopr/checkpoint.sh" consume "$RUNNER_TEMP/card.json" \
+            "$AUTOPR_CONTROL_ROOT/harness/checkpoint.sh" consume "$RUNNER_TEMP/card.json" \
               || printf 'warning: could not consume the checkpoint for %s\n' "$task_id" >&2
           fi
           # The journal is the operator's view of this run on the ticket
@@ -603,7 +603,7 @@ jobs:
             # checkpoint's own runtime_limited verdict.
             journal_outcome=paused; journal_reason=operator_takeover
           fi
-          "$AUTOPR_CONTROL_ROOT/kanban-autopr/run-journal.sh" "$RUNNER_TEMP/card.json" \
+          "$AUTOPR_CONTROL_ROOT/harness/run-journal.sh" "$RUNNER_TEMP/card.json" \
             --outcome "$journal_outcome" --reason "$journal_reason" \
             --report "$RUNNER_TEMP/report.md" --decision "$RUNNER_TEMP/decision.json" \
             --checkpoint "$CHECKPOINT_PATH" --pr "$PUBLISHED_PR" --base-sha "$BRANCH_BASE_SHA" \
@@ -612,13 +612,13 @@ jobs:
           # submitted PR branch may remain checked out on the Mac runner.
           # Dirty state is preserved and reported instead of deleted.
           cleanup_rc=0
-          "$AUTOPR_CONTROL_ROOT/kanban-autopr/leave-task-checkout.sh" || cleanup_rc=$?
+          "$AUTOPR_CONTROL_ROOT/harness/leave-task-checkout.sh" || cleanup_rc=$?
           # Publication completed before releasing operator ownership. On any
           # failure the immutable hand-back remains available for an explicit retry.
           handoff_result=()
           if [ "$PUBLISHED_PRODUCT" = true ] && [[ "$PUBLISHED_PR" =~ ^[0-9]+$ ]]; then
             handoff_result=(--published-pr "$PUBLISHED_PR")
           fi
-          python3 "$AUTOPR_CONTROL_ROOT/msandbox/autopr_control.py" finish \
+          python3 "$AUTOPR_CONTROL_ROOT/cli/autopr_control.py" finish \
             "$(jq -r '.task_id' "$RUNNER_TEMP/card.json")" "${handoff_result[@]}"
           exit "$cleanup_rc"

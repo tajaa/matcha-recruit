@@ -2,9 +2,9 @@
 
 Review of the autonomous tooling around this repo: `msandbox` (the Docker agent
 sandbox and its control plane), the Kanban AutoPR lane
-(`scripts/kanban-autopr/`, `.github/workflows/kanban-autopr.yml`), the silent
-error autofix lane (`scripts/error-autofix/`, `silent-error-autofix.yml`), the
-AutoPR self-audit lane (`scripts/autopr-self-audit/`, `autopr-self-audit.yml`),
+(`apps/msandbox/harness/`, `.github/workflows/kanban-autopr.yml`), the silent
+error autofix lane (`apps/msandbox/error-autofix/`, `silent-error-autofix.yml`), the
+AutoPR self-audit lane (`apps/msandbox/self-audit/`, `autopr-self-audit.yml`),
 and the Espresso kanban they read/write through `mw_tasks` and the
 `pull_request` webhook.
 
@@ -73,10 +73,10 @@ Tests: `test_error_autofix.sh` (hostile id never reaches the ssh stub),
 `test_error_autofix_query.py`.
 
 **F2 (A, partial). Model-written scripts execute in the trusted job.**
-`kanban-autopr.yml` snapshotted only `scripts/kanban-autopr` +
-`scripts/error-autofix` into `$AUTOPR_CONTROL_ROOT`, but ran
-`./scripts/autopr-scope/check-open-prs.sh` and
-`./scripts/kanban-autopr/record-coverage.sh` from the workspace after the
+`kanban-autopr.yml` snapshotted only `apps/msandbox/harness` +
+`apps/msandbox/error-autofix` into `$AUTOPR_CONTROL_ROOT`, but ran
+`./apps/msandbox/scope/check-open-prs.sh` and
+`./apps/msandbox/harness/record-coverage.sh` from the workspace after the
 model's patch had been applied there (`run-codex-sandboxed.sh` checked only
 symlinks/gitlinks/file count; the `^scripts/` denylist lived in `publish.sh`,
 which runs later). The error and self-audit lanes ran *every* post-model step
@@ -85,7 +85,7 @@ touching `.github/`, `deploy/`, `docker/`, `scripts/`, `.claude/`, `.codex/`,
 `.githooks/`, `secrets/`, `opencode.jsonc`, compose files, Dockerfiles, `.env*`
 (`AUTOPR_SANDBOX_PATH_DENY_RE`; the self-audit lane narrows it to
 CI/deploy/secrets/capsule because repairing the harness is its job). The Kanban
-archive now includes `scripts/autopr-scope` and the alembic graph helpers, and
+archive now includes `apps/msandbox/scope` and the alembic graph helpers, and
 the scope check + coverage recording run from the control root. *Left as-is,
 documented:* `AUTOPR_MSANDBOX_BIN` still points at the workspace's
 `agent-sandbox.sh` — it resolves compose files and the `msandbox` package from
@@ -127,7 +127,7 @@ installed `dispatch-if-idle.sh` (2026-08-31) predates the twenty-minute Kanban
 floor, `run-snapshot.sh`, and the request watcher (which is not installed at
 all). The repo's five-minute/twenty-minute design never reached the machine.
 *Operator action (not done here — it changes the machine):*
-`./scripts/kanban-autopr/install-launch-agent.sh`. *Fixes in repo:*
+`./apps/msandbox/harness/install-launch-agent.sh`. *Fixes in repo:*
 `hot-redispatch-guard.sh` runs first in the workflow and skips a pass when the
 previous completed Kanban run ended < 5 min ago (GitHub-side floor, fails open
 on API error); the dispatcher remembers the request set it last forced so one
@@ -246,8 +246,8 @@ known-limitations section; the webhook table documents closed-unmerged.
 
 ### msandbox itself
 
-**F24 (B).** Two live control-plane implementations (`scripts/agent-sandbox.sh`
-1084 lines; `scripts/msandbox/` ~6k lines). Make the bash file a thin shim over
+**F24 (B).** Two live control-plane implementations (`apps/msandbox/bin/agent-sandbox.sh`
+1084 lines; `apps/msandbox/cli/` ~6k lines). Make the bash file a thin shim over
 `python -m msandbox` for the AutoPR verbs.
 
 **F25 (B).** CLI auto-update mints a ~5.75 GB image per upstream release for
@@ -273,7 +273,7 @@ least-privilege IAM profile is still not done.
 
 ### After merge — operator checklist
 
-1. `./scripts/kanban-autopr/install-launch-agent.sh` — installs the repo's
+1. `./apps/msandbox/harness/install-launch-agent.sh` — installs the repo's
    dispatcher (with `codex-backoff.sh`), the 300 s scheduler, and the 60 s
    request watcher. Until then the machine keeps running the 2026-08-31 copy.
 2. `msandbox audit` — expect the new `installed_dispatcher` check to pass and
@@ -298,7 +298,7 @@ least-privilege IAM profile is still not done.
 9. Bash shim over the Python control plane (F24).
 10. Daily-TTL CLI version resolution; one image lineage for AutoPR (F25).
 11. Least-privilege IAM profile for the sandbox (F26).
-12. Snapshot `agent-sandbox.sh` + compose + `scripts/msandbox` into the control
+12. Snapshot `agent-sandbox.sh` + compose + `apps/msandbox/cli` into the control
     root once it can take an explicit runtime root (F2 remainder).
 13. Web `/work` ticket parity with Espresso for research cards: a Proposed
     Outreach section (send / handled / dismiss), Run research now, and rendered

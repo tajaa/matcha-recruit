@@ -3,7 +3,7 @@
 `mw_project_collaborators` row on each of the four projects the loop is
 scoped to (WerkWerk, Beetlejuse, Gummfit, MATCHA — spanning two different
 company_ids, so per-project collaborator rows are used rather than a single
-`clients` row; see docs/ops/KANBAN_AUTOPR.md).
+`clients` row; see apps/msandbox/docs/KANBAN_AUTOPR.md).
 
 Prints SQL to stdout (the seed-prod.sh .py convention). --undo prints the
 reversing SQL.

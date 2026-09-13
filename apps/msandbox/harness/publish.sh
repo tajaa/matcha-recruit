@@ -7,9 +7,20 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
+
+# Every `git reset --hard` below targets $REPO_ROOT. Without
+# AUTOPR_WORKSPACE_ROOT that is the checkout THIS script runs from, and if that
+# checkout carries uncommitted edits to the harness itself, the reset destroys
+# work in progress on the very code being run — which is exactly what happened
+# once. The workflow always sets the variable; a local run that wants the
+# fallback has to start from a clean apps/msandbox.
+if [ -z "${AUTOPR_WORKSPACE_ROOT:-}" ] \
+    && [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no -- apps/msandbox 2>/dev/null)" ]; then
+    die "refusing to run against $REPO_ROOT: apps/msandbox has uncommitted changes and AUTOPR_WORKSPACE_ROOT is unset"
+fi
 # shellcheck source=./decision.sh
 source "$SCRIPT_DIR/decision.sh"
 
@@ -309,7 +320,7 @@ git add --all
 # script never runs a migration. Existing mainline migrations and all migration
 # runner/configuration files remain closed.
 changed_paths="$(git diff --cached --no-renames --name-only)"
-unsafe_paths="$(printf '%s\n' "$changed_paths" | grep -E '(^\.github/|^deploy/|^scripts/|^client/src/generated/|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
+unsafe_paths="$(printf '%s\n' "$changed_paths" | grep -E '(^\.github/|^apps/|^deploy/|^scripts/|^client/src/generated/|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
 unsafe_migrations="$(printf '%s\n' "$changed_paths" \
     | grep -E '^server/alembic/' \
     | grep -vE "$AUTOPR_MIGRATION_DRAFT_RE" || true)"

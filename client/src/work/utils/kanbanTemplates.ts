@@ -121,7 +121,7 @@ export const KANBAN_TEMPLATES: KanbanTemplate[] = [
   {
     // Assigned to the AutoPR bot, a research card runs the research lane
     // (web search + repo clone + attached screenshots) and the report lands
-    // under the card's attachments instead of a PR — docs/ops/KANBAN_AUTOPR.md.
+    // under the card's attachments instead of a PR — apps/msandbox/docs/KANBAN_AUTOPR.md.
     key: 'research',
     displayName: 'Research',
     icon: Search,
@@ -140,7 +140,7 @@ export const KANBAN_TEMPLATES: KanbanTemplate[] = [
     // The emails themselves arrive as `email-<id>.md` attachments from
     // Espresso's "Send to board"; assigned to the AutoPR bot on a board granted
     // `email`, the run attaches a triage report and stages reply drafts that a
-    // person approves one at a time — docs/ops/KANBAN_AUTOPR.md.
+    // person approves one at a time — apps/msandbox/docs/KANBAN_AUTOPR.md.
     key: 'email',
     displayName: 'Email',
     icon: Mail,

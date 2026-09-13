@@ -10,7 +10,7 @@ report failure rather than a green capability.
 
 One capability — ``host_credentials`` — is the opposite: the repo checkout's own
 secrets and the read-only ``~/.aws`` mount are reachable on purpose
-(docs/ops/AGENT_SANDBOX.md). It is measured, rendered with a warning, and never
+(apps/msandbox/docs/AGENT_SANDBOX.md). It is measured, rendered with a warning, and never
 counted as a leak, because a boundary the design does not claim must not be
 reported as one.
 
@@ -75,7 +75,7 @@ FORBIDDEN_CONTAINER_PATHS = (
 )
 # Broad host credentials an interactive session reaches *by design*: the repo
 # bind mount carries whatever the host checkout holds, and ~/.aws is mounted
-# read-only on purpose (docs/ops/AGENT_SANDBOX.md, "Threat model" — AutoPR
+# read-only on purpose (apps/msandbox/docs/AGENT_SANDBOX.md, "Threat model" — AutoPR
 # narrows both through SANDBOX_WORKSPACE_DIR/SANDBOX_AWS_DIR). Calling these a
 # leak would make every healthy interactive session red; the agent still has to
 # know they are reachable, so they are measured and rendered as a warning.

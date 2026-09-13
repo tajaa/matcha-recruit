@@ -1,7 +1,7 @@
 """Let a card pin the model and reasoning effort AutoPR runs it with.
 
 AutoPR picked its runtime from one place: the hardcoded `model`/`effort` rows in
-`autopr_kind_field` (scripts/kanban-autopr/lib.sh). Every `investigate` run got
+`autopr_kind_field` (apps/msandbox/harness/lib.sh). Every `investigate` run got
 `gpt-5.6-sol` at `medium`, whatever the card needed. A ticket that stalls
 because the model is out of its depth and a ticket that stalls with the work
 done but the tests unrun both re-ran identically, and the only way out was to

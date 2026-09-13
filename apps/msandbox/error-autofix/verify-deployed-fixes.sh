@@ -22,7 +22,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 INCIDENTS_FILE="${1:?usage: verify-deployed-fixes.sh incidents.json}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
-REPO_ROOT="${AUTOFIX_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+REPO_ROOT="${AUTOFIX_REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 CACHE_DIR="${AUTOFIX_CACHE_DIR:-$HOME/.cache/matcha-autofix}"
 DEPLOY_LEDGER="${AUTOFIX_DEPLOY_LEDGER:-$CACHE_DIR/deployed-sha-first-seen.json}"
 DEPLOY_GRACE_HOURS="${AUTOFIX_DEPLOY_GRACE_HOURS:-6}"

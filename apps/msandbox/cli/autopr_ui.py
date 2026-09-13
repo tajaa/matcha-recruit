@@ -338,7 +338,7 @@ def open_manual(run_id: str, repo: Path, *, shell=False):
             env = control.manual_environment(run, repo)
             control.update_manual(run_id, runtime_created=True)
             control.command(
-                [str(repo / "scripts/agent-sandbox.sh"), "start"], env=env, timeout=300
+                [str(repo / "apps/msandbox/bin/agent-sandbox.sh"), "start"], env=env, timeout=300
             )
             ids = (
                 control.command(
@@ -407,7 +407,7 @@ def queue_return(run_id: str, repo: Path):
     control.command(
         [
             "bash",
-            str(repo / "scripts/kanban-autopr/queue-handoff.sh"),
+            str(repo / "apps/msandbox/harness/queue-handoff.sh"),
             run.project_id,
             run.task_id,
         ],

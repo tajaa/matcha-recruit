@@ -18,7 +18,7 @@ INCIDENT_FILE="${1:?usage: investigate.sh incident.json report.md decision.json 
 REPORT_FILE="${2:?usage: investigate.sh incident.json report.md decision.json [correlated-log.txt]}"
 DECISION_FILE="${3:?usage: investigate.sh incident.json report.md decision.json [correlated-log.txt]}"
 CORRELATED_LOG="${4:-}"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
@@ -53,7 +53,7 @@ ATTACH_ARGS=(-f "$MODEL_INCIDENT")
 # Match the Kanban lane's isolation: production runs use a disposable,
 # tracked-files-only clone in the dedicated msandbox. Direct host execution is
 # an explicit local test seam and is forbidden in GitHub Actions.
-SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$REPO_ROOT/scripts/kanban-autopr/run-codex-sandboxed.sh}"
+SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$REPO_ROOT/apps/msandbox/harness/run-codex-sandboxed.sh}"
 TEST_DIRECT="${AUTOPR_SANDBOX_TEST_DIRECT:-0}"
 [ "$TEST_DIRECT" != 1 ] || [ "${GITHUB_ACTIONS:-}" != true ] \
     || die "direct Codex execution is forbidden in GitHub Actions"

@@ -15,8 +15,8 @@ DECISION_FILE="${3:?missing decision path}"
 shift 3
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${AUTOPR_SANDBOX_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
-MSANDBOX_BIN="${AUTOPR_MSANDBOX_BIN:-$REPO_ROOT/scripts/agent-sandbox.sh}"
+REPO_ROOT="${AUTOPR_SANDBOX_REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+MSANDBOX_BIN="${AUTOPR_MSANDBOX_BIN:-$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh}"
 SANDBOX_PROJECT="${AUTOPR_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
 GIT_DIR="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir)"
 RUNTIME_ROOT="${AUTOPR_SANDBOX_RUNTIME_ROOT:-$GIT_DIR/matcha-kanban-autopr-sandbox}"
@@ -70,9 +70,9 @@ MAX_DECISION_BYTES="${AUTOPR_SANDBOX_MAX_DECISION_BYTES:-262144}"
 # so a patch that rewrote one of them used to run as the runner user before
 # any guard looked at it. The self-audit lane, whose job is repairing the
 # harness, narrows this to CI/deploy/secrets via AUTOPR_SANDBOX_PATH_DENY_RE.
-PATH_DENY_RE="${AUTOPR_SANDBOX_PATH_DENY_RE:-^(\.github/|deploy/|docker/|scripts/|\.claude/|\.codex/|\.githooks/|secrets/|opencode\.jsonc$|(.*/)?docker-compose[^/]*\.ya?ml$|(.*/)?Dockerfile[^/]*$|(.*/)?\.env[^/]*$)}"
+PATH_DENY_RE="${AUTOPR_SANDBOX_PATH_DENY_RE:-^(\.github/|apps/|deploy/|docker/|scripts/|\.claude/|\.codex/|\.githooks/|secrets/|opencode\.jsonc$|(.*/)?docker-compose[^/]*\.ya?ml$|(.*/)?Dockerfile[^/]*$|(.*/)?\.env[^/]*$)}"
 CODEX_BACKOFF="${AUTOPR_CODEX_BACKOFF:-$SCRIPT_DIR/codex-backoff.sh}"
-HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/msandbox/autopr_control.py"
+HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/cli/autopr_control.py"
 
 die() {
     printf 'kanban-autopr sandbox: %s\n' "$1" >&2

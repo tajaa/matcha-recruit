@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run Codex, Claude Code, or OpenCode in the repository's isolated Docker
-# development sandbox. See docs/ops/AGENT_SANDBOX.md for the full writeup.
+# development sandbox. See apps/msandbox/docs/AGENT_SANDBOX.md for the full writeup.
 set -euo pipefail
 
 # Resolve through symlinks (e.g. ~/.local/bin/msandbox -> this file) so
@@ -11,7 +11,7 @@ while [[ -L "$SCRIPT_SOURCE" ]]; do
     SCRIPT_SOURCE="$(readlink "$SCRIPT_SOURCE")"
     [[ "$SCRIPT_SOURCE" != /* ]] && SCRIPT_SOURCE="$SCRIPT_DIR/$SCRIPT_SOURCE"
 done
-PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_SOURCE")/.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_SOURCE")/../../.." && pwd)"
 
 # The v2 controller is host-side and versionable. Keep the shell implementation
 # below as the compatibility/control-plane lane used by existing AutoPR jobs,
@@ -19,13 +19,13 @@ PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_SOURCE")/.." && pwd)"
 run_v2_controller() {
     PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
         MATCHA_REPO_ROOT="${MATCHA_REPO_ROOT:-$PROJECT_ROOT}" \
-        exec python3 -m scripts.msandbox --repo "$PROJECT_ROOT" "$@"
+        exec python3 -m apps.msandbox.cli --repo "$PROJECT_ROOT" "$@"
 }
 
 call_v2_controller() {
     PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
         MATCHA_REPO_ROOT="${MATCHA_REPO_ROOT:-$PROJECT_ROOT}" \
-        python3 -m scripts.msandbox --repo "$PROJECT_ROOT" "$@"
+        python3 -m apps.msandbox.cli --repo "$PROJECT_ROOT" "$@"
 }
 
 ensure_v2_system_plane() {
@@ -103,8 +103,12 @@ case "${1:-}" in
         esac
         ;;
 esac
-COMPOSE_FILE="$PROJECT_ROOT/docker-compose.sandbox.yml"
-AUTOPR_COMPOSE_FILE="$PROJECT_ROOT/docker-compose.autopr-sandbox.yml"
+COMPOSE_FILE="$PROJECT_ROOT/apps/msandbox/sandbox/docker-compose.sandbox.yml"
+AUTOPR_COMPOSE_FILE="$PROJECT_ROOT/apps/msandbox/sandbox/docker-compose.autopr-sandbox.yml"
+# Compose loads `.env` from, and resolves the build context against, its
+# project directory — which defaults to the first --file's directory. That was
+# the repo root while the compose files lived there; now it has to be said.
+COMPOSE_PROJECT_DIR=(--project-directory "$PROJECT_ROOT")
 PRIMARY_SANDBOX_PROJECT_NAME="${AGENT_SANDBOX_PRIMARY_PROJECT_NAME:-matcha-agent-sandbox}"
 KANBAN_AUTOPR_SANDBOX_PROJECT_NAME="${AUTOPR_KANBAN_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
 ERROR_AUTOPR_SANDBOX_PROJECT_NAME="${AUTOPR_ERROR_SANDBOX_PROJECT_NAME:-matcha-error-autofix-sandbox}"
@@ -138,7 +142,7 @@ AUTOPR_AUDIT_WORKFLOW="${AUTOPR_AUDIT_WORKFLOW:-autopr-self-audit.yml}"
 AUTOPR_ADMIN_UPDATES_WORKFLOW="${AUTOPR_ADMIN_UPDATES_WORKFLOW:-admin-updates-autopublish.yml}"
 MSANDBOX_ATTACHMENTS_DIR="${MSANDBOX_ATTACHMENTS_DIR:-$PROJECT_ROOT/.msandbox/attachments}"
 MSANDBOX_ATTACHMENT_MAX_BYTES="${MSANDBOX_ATTACHMENT_MAX_BYTES:-52428800}"
-PRIMARY_COMPOSE=(docker compose --project-name "$PRIMARY_SANDBOX_PROJECT_NAME" --file "$COMPOSE_FILE")
+PRIMARY_COMPOSE=(docker compose --project-name "$PRIMARY_SANDBOX_PROJECT_NAME" "${COMPOSE_PROJECT_DIR[@]}" --file "$COMPOSE_FILE")
 # Callers that need a separate trust boundary (Kanban AutoPR, for example)
 # get their own container and named volumes without duplicating this launcher.
 # The workspace and AWS mounts are explicit inputs so a trusted host wrapper
@@ -146,7 +150,7 @@ PRIMARY_COMPOSE=(docker compose --project-name "$PRIMARY_SANDBOX_PROJECT_NAME" -
 SANDBOX_PROJECT_NAME="${AGENT_SANDBOX_PROJECT_NAME:-matcha-agent-sandbox}"
 export SANDBOX_WORKSPACE_DIR="${SANDBOX_WORKSPACE_DIR:-$PROJECT_ROOT}"
 export SANDBOX_AWS_DIR="${SANDBOX_AWS_DIR:-$HOME/.aws}"
-COMPOSE=(docker compose --project-name "$SANDBOX_PROJECT_NAME" --file "$COMPOSE_FILE")
+COMPOSE=(docker compose --project-name "$SANDBOX_PROJECT_NAME" "${COMPOSE_PROJECT_DIR[@]}" --file "$COMPOSE_FILE")
 
 configure_autopr_lane() {
     local bootstrap_root="${AUTOPR_SANDBOX_BOOTSTRAP_ROOT:-$PROJECT_ROOT/.git/matcha-autopr-sandbox/bootstrap}"
@@ -164,12 +168,12 @@ configure_autopr_lane() {
         echo "AutoPR Codex auth file is not readable: $SANDBOX_CODEX_AUTH_FILE" >&2
         exit 1
     }
-    COMPOSE=(docker compose --project-name "$SANDBOX_PROJECT_NAME" --file "$COMPOSE_FILE" --file "$AUTOPR_COMPOSE_FILE")
+    COMPOSE=(docker compose --project-name "$SANDBOX_PROJECT_NAME" "${COMPOSE_PROJECT_DIR[@]}" --file "$COMPOSE_FILE" --file "$AUTOPR_COMPOSE_FILE")
 }
 
 usage() {
     cat <<'EOF'
-Usage: msandbox [command] [args]   (or ./scripts/agent-sandbox.sh [command] [args])
+Usage: msandbox [command] [args]   (or ./apps/msandbox/bin/agent-sandbox.sh [command] [args])
 
 Bare `msandbox` starts the primary sandbox and AutoPR control plane as one
 fail-closed operation, then opens the interactive host-side wizard. The wizard
@@ -216,7 +220,7 @@ Set INSTALL_PLAYWRIGHT_BROWSERS=true (or `build --playwright`) to include an
 isolated Chromium binary for Playwright. Set SANDBOX_UID/SANDBOX_GID to change
 the in-container user (defaults to your macOS uid/gid so file ownership matches
 on both sides). Host dev keeps ports 8001/5174; sandbox services publish on
-18001/15174 by default. See docs/ops/AGENT_SANDBOX.md for the complete map.
+18001/15174 by default. See apps/msandbox/docs/AGENT_SANDBOX.md for the complete map.
 EOF
 }
 
@@ -334,7 +338,7 @@ import_clipboard() {
 }
 
 run_autopr_audit() {
-    local draft=0 audit_dir="$PROJECT_ROOT/scripts/autopr-self-audit"
+    local draft=0 audit_dir="$PROJECT_ROOT/apps/msandbox/self-audit"
     if [ "${1:-}" = --draft ]; then draft=1; shift; fi
     [ "$#" = 0 ] || { echo "usage: msandbox audit [--draft]" >&2; return 2; }
     [ -x "$audit_dir/audit.sh" ] || {
@@ -402,7 +406,7 @@ refresh_agent_versions() {
     local runtime_root="${MSANDBOX_RUNTIME_ROOT:-$PROJECT_ROOT}" exports
     exports="$(
         PYTHONPATH="$runtime_root${PYTHONPATH:+:$PYTHONPATH}" \
-            python3 -m scripts.msandbox.agent_versions \
+            python3 -m apps.msandbox.cli.agent_versions \
             --runtime-root "$runtime_root" --shell
     )" || return 1
     eval "$exports"
@@ -505,7 +509,7 @@ autopr_system_ready() {
 
 container_has_agent_process() {
     local project="$1" container_id process_rows
-    container_id="$(docker compose --project-name "$project" --file "$COMPOSE_FILE" \
+    container_id="$(docker compose --project-name "$project" "${COMPOSE_PROJECT_DIR[@]}" --file "$COMPOSE_FILE" \
         ps --quiet workspace 2>/dev/null)" || return 1
     [ -n "$container_id" ] || return 1
     process_rows="$(docker exec "$container_id" ps -eo comm=,args= 2>/dev/null)" || return 1
@@ -745,7 +749,7 @@ enable_autopr_control_plane() {
     enable_autopr_notifications_unless_opted_out
 
     local dashboard_ensure="$AUTOPR_INSTALL_ROOT/ensure-dashboard.sh"
-    [ -x "$dashboard_ensure" ] || dashboard_ensure="$PROJECT_ROOT/scripts/kanban-autopr/ensure-dashboard.sh"
+    [ -x "$dashboard_ensure" ] || dashboard_ensure="$PROJECT_ROOT/apps/msandbox/harness/ensure-dashboard.sh"
     if [ ! -x "$dashboard_ensure" ]; then
         echo "AutoPR startup failed: dashboard helper is not installed." >&2
         disable_autopr_control_plane
@@ -764,7 +768,7 @@ enable_autopr_control_plane() {
 
     local domain="gui/$(id -u)" label="com.matcha.kanban-autopr-dispatch"
     if [ ! -x "$AUTOPR_LAUNCHCTL_BIN" ] || [ ! -f "$AUTOPR_LAUNCH_AGENT_PLIST" ]; then
-        echo "AutoPR startup failed: timer is not installed; run scripts/kanban-autopr/install-launch-agent.sh." >&2
+        echo "AutoPR startup failed: timer is not installed; run apps/msandbox/harness/install-launch-agent.sh." >&2
         disable_autopr_control_plane
         return 1
     fi
@@ -831,7 +835,7 @@ disable_autopr_control_plane() {
 stop_autopr_containers() {
     local project
     while IFS= read -r project; do
-        docker compose --project-name "$project" \
+        docker compose --project-name "$project" "${COMPOSE_PROJECT_DIR[@]}" \
             --file "$COMPOSE_FILE" stop workspace >/dev/null 2>&1 || true
     done < <(autopr_sandbox_projects)
 }
@@ -888,7 +892,7 @@ exec_workspace_with_file_proxy() {
     # path into a bounded copy under the workspace's mounted attachment inbox.
     # It preserves all non-file terminal input byte-for-byte.
     PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
-        python3 -m scripts.msandbox.legacy_pty_proxy \
+        python3 -m apps.msandbox.cli.legacy_pty_proxy \
         --inbox "$MSANDBOX_ATTACHMENTS_DIR" \
         --container-dir /workspace/.msandbox/attachments \
         -- "${COMPOSE[@]}" exec \
@@ -1047,7 +1051,7 @@ case "$command_name" in
         guard_interactive_entry "open another sandbox shell" || exit 3
         start_primary_and_enable_autopr
         if [[ "${MSANDBOX_WIZARD_SHELL:-0}" == 1 && $# -eq 0 ]]; then
-            exec_workspace_with_file_proxy bash --rcfile /workspace/scripts/msandbox/wizard-shell.bash
+            exec_workspace_with_file_proxy bash --rcfile /workspace/apps/msandbox/cli/wizard-shell.bash
         elif [[ $# -gt 0 ]]; then
             # Not a login shell: Debian's /etc/profile resets PATH for login
             # shells, dropping /opt/node/bin (where codex/claude/opencode

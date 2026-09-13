@@ -218,8 +218,8 @@ background without a GitHub call on every redraw. Runs started before the runner
 uses this release cannot be taken over retroactively. Error-autofix and self-audit
 lanes remain viewable through the full observer dashboard, not takeover controls.
 After merging, update both installed components from the updated checkout with
-`./scripts/agent-sandbox.sh install` and
-`./scripts/kanban-autopr/install-launch-agent.sh`. The latter preserves the
+`./apps/msandbox/bin/agent-sandbox.sh install` and
+`./apps/msandbox/harness/install-launch-agent.sh`. The latter preserves the
 existing master-switch state; installation is not permission to start AutoPR.
 
 1. Select a run and click **Take over / correct course**. Wait for ownership to
@@ -259,19 +259,19 @@ retain their existing no-code-change policy. No merge or deployment is implied.
 
 Controller changes are picked up by `msandbox install` from the checkout that
 contains them. The same command re-runs
-`scripts/kanban-autopr/install-launch-agent.sh` when a dispatcher LaunchAgent is
+`apps/msandbox/harness/install-launch-agent.sh` when a dispatcher LaunchAgent is
 already installed, because the two installed trees (the pinned release and
 `~/.local/share/matcha-kanban-autopr`) never update themselves and a merged
 control that is not installed looks exactly like one that does not exist;
 `--skip-dispatcher` opts out for one call. `msandbox doctor` (no session) prints
 both drifts and exits 1 when either tree is behind the checkout. No terminal GUI
 dependency or database migration is required.
-Unit coverage runs through `bash scripts/tests/test_msandbox_sessions.sh`.
+Unit coverage runs through `bash apps/msandbox/tests/test_msandbox_sessions.sh`.
 Optional browser smoke (one disposable container, no host data/credentials or
 network) uses an existing browser-enabled image:
 
 ```bash
-python3 -m scripts.tests.msandbox_manager_smoke --image <browser-enabled-image>
+python3 -m apps.msandbox.tests.msandbox_manager_smoke --image <browser-enabled-image>
 ```
 
 The AutoPR tab shows every card in the snapshot, not only queued ones: a queued card
@@ -377,7 +377,7 @@ Rules that make the report worth trusting:
   absent. A probe that *finds* one of those identities renders `⚠️ … LEAK` and
   makes `msandbox doctor` exit nonzero; it is never reported as a capability.
 - **`Host credentials in reach` is the opposite of a leak.** The repo bind mount
-  and the read-only `~/.aws` mount are deliberate (`docs/ops/AGENT_SANDBOX.md`,
+  and the read-only `~/.aws` mount are deliberate (`apps/msandbox/docs/AGENT_SANDBOX.md`,
   threat model). The report measures what they actually reach — an AWS profile
   counts only when STS answers for it — and renders `⚠️` with an
   operator-gated warning rather than failing a healthy session's own doctor.
@@ -386,7 +386,7 @@ Rules that make the report worth trusting:
   that can push can also dispatch `deploy.yml` and merge a pull request, so the
   `GitHub CLI` row states that authority instead of another row claiming it is
   denied. Ask the operator; do not dispatch or merge on your own.
-- **One registry.** `scripts/msandbox/capabilities.py` backs the picker, the
+- **One registry.** `apps/msandbox/cli/capabilities.py` backs the picker, the
   CLI, the create screen's planned list, and the agent's own context. There is
   no second probe list.
 
@@ -442,7 +442,7 @@ msandbox test payroll-fix --all --xcode all
 ```
 
 For a one-command smoke test of the current PR against the real local Docker
-boundary, run `./scripts/msandbox-live-smoke.sh`. It installs the controller
+boundary, run `./apps/msandbox/bin/msandbox-live-smoke.sh`. It installs the controller
 from the current checkout, creates a disposable no-agent session for the PR
 associated with the current branch, runs the focused unit/shell checks, doctor,
 capability persistence and isolation checks, and the session's `--pr`
@@ -545,7 +545,7 @@ updater cannot write to the read-only `/opt/node` toolchain. Which pin a
 container carries depends on its lineage — a session image bakes in the npm
 `latest` the host resolved at build time, while the AutoPR lanes' `:latest`
 image carries the Dockerfile defaults until it is rebuilt. See "Agent CLI
-updates" in `docs/ops/AGENT_SANDBOX.md`.
+updates" in `apps/msandbox/docs/AGENT_SANDBOX.md`.
 
 Host fetch, verification, and publication rewrite GitHub SSH remotes to HTTPS
 for that command only. This works on networks that block SSH port 22 while

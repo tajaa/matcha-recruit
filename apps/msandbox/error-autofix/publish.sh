@@ -7,7 +7,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
 # shellcheck source=./decision.sh
@@ -48,7 +48,7 @@ git add --all
 # this is what stops the bot rewriting its own harness. The allowlist is new
 # and strictly stronger: it closes every path the denylist didn't think to
 # name (CLAUDE.md, docs/, client/, opencode.jsonc, .claude/, ...).
-unsafe_paths="$(git diff --cached --no-renames --name-only | grep -E '(^\.github/|^deploy/|^scripts/|^server/alembic/|^client/src/generated/|^client/src/api/errorReporter\.ts$|^client/src/components/shared/ErrorBoundary\.tsx$|^server/app/core/routes/telemetry/|^server/app/core/services/error_reporter\.py$|^server/app/core/services/error_notifier\.py$|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
+unsafe_paths="$(git diff --cached --no-renames --name-only | grep -E '(^\.github/|^apps/|^deploy/|^scripts/|^server/alembic/|^client/src/generated/|^client/src/api/errorReporter\.ts$|^client/src/components/shared/ErrorBoundary\.tsx$|^server/app/core/routes/telemetry/|^server/app/core/services/error_reporter\.py$|^server/app/core/services/error_notifier\.py$|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
 if [ -n "$unsafe_paths" ]; then
     echo "Refusing unsafe automated change:" >&2
     printf '%s\n' "$unsafe_paths" >&2

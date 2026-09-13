@@ -2,13 +2,13 @@
 # Isolated coverage for cross-lane patch matching. No network or real model.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 TMP_DIR="$(mktemp -d "$REPO_ROOT/.autopr-scope-test-XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 TEST_REPO="$TMP_DIR/repo"
-mkdir -p "$TEST_REPO/scripts" "$TMP_DIR/bin"
-cp -R "$REPO_ROOT/scripts/autopr-scope" "$TEST_REPO/scripts/autopr-scope"
-chmod +x "$TEST_REPO/scripts/autopr-scope/check-open-prs.sh"
+mkdir -p "$TEST_REPO/apps/msandbox" "$TMP_DIR/bin"
+cp -R "$REPO_ROOT/apps/msandbox/scope" "$TEST_REPO/apps/msandbox/scope"
+chmod +x "$TEST_REPO/apps/msandbox/scope/check-open-prs.sh"
 git -C "$TEST_REPO" init -q
 git -C "$TEST_REPO" config user.email test@example.com
 git -C "$TEST_REPO" config user.name test
@@ -44,7 +44,7 @@ printf 'value = 2\n' > "$TEST_REPO/app.py"
 git -C "$TEST_REPO" diff --binary > "$TMP_DIR/exact.diff"
 PATH="$TMP_DIR/bin:$PATH" GH_TOKEN=secret GITHUB_REPOSITORY=x/x \
   AUTOPR_TEST_CANDIDATE_DIFF="$TMP_DIR/exact.diff" \
-  bash "$TEST_REPO/scripts/autopr-scope/check-open-prs.sh" \
+  bash "$TEST_REPO/apps/msandbox/scope/check-open-prs.sh" \
   --lane error --identity abc123abc123 --evidence "$TMP_DIR/evidence.json" \
   --report "$TMP_DIR/report.md" --output "$TMP_DIR/exact-result.json"
 jq -e '.decision == "covered" and .confidence == "high" and .covering_pr == 334 and .covering_head_sha == "owner-sha"' \
@@ -60,7 +60,7 @@ rm -f "$TMP_DIR/codex-not-called"
 PATH="$TMP_DIR/bin:$PATH" GH_TOKEN=secret GITHUB_TOKEN=also-secret GITHUB_REPOSITORY=x/x \
   AUTOPR_TEST_CODEX_CALLED="$TMP_DIR/codex-not-called" \
   AUTOPR_TEST_CANDIDATE_DIFF="$TMP_DIR/broader.diff" \
-  bash "$TEST_REPO/scripts/autopr-scope/check-open-prs.sh" \
+  bash "$TEST_REPO/apps/msandbox/scope/check-open-prs.sh" \
   --lane error --identity abc123abc123 --evidence "$TMP_DIR/evidence.json" \
   --report "$TMP_DIR/report.md" --output "$TMP_DIR/broader-result.json"
 jq -e '.decision == "uncertain" and .covering_pr == null and .possible_duplicate == true' "$TMP_DIR/broader-result.json" >/dev/null
@@ -68,7 +68,7 @@ jq -e '.decision == "uncertain" and .covering_pr == null and .possible_duplicate
 printf 'PASS: broader public patch requires human review without model execution\n'
 
 AUTOPR_SCOPE_DEDUPE_MODE=off PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x \
-  bash "$TEST_REPO/scripts/autopr-scope/check-open-prs.sh" \
+  bash "$TEST_REPO/apps/msandbox/scope/check-open-prs.sh" \
   --lane kanban --identity task-id --evidence "$TMP_DIR/evidence.json" \
   --report "$TMP_DIR/report.md" --output "$TMP_DIR/off-result.json"
 jq -e '.decision == "no_match" and .mode == "off"' "$TMP_DIR/off-result.json" >/dev/null
@@ -85,7 +85,7 @@ CONTROL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/autopr-scope-control-XXXXXX")"
 trap 'rm -rf "$TMP_DIR" "$CONTROL_DIR"' EXIT
 CONTROL_ROOT="$CONTROL_DIR/scripts"
 mkdir -p "$CONTROL_ROOT"
-cp -R "$REPO_ROOT/scripts/autopr-scope" "$CONTROL_ROOT/autopr-scope"
+cp -R "$REPO_ROOT/apps/msandbox/scope" "$CONTROL_ROOT/autopr-scope"
 chmod +x "$CONTROL_ROOT/autopr-scope/check-open-prs.sh"
 git -C "$CONTROL_DIR" rev-parse --git-dir >/dev/null 2>&1 && exit 1
 

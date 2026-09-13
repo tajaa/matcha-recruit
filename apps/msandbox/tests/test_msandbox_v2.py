@@ -15,16 +15,16 @@ from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from scripts.msandbox.agent_adapters import (
+from apps.msandbox.cli.agent_adapters import (
     AgentError,
     agent_argv,
     capability_context_args,
     launch_agent,
     refresh_capability_context,
 )
-from scripts.msandbox.agent_versions import resolve_agent_versions
-from scripts.msandbox.attachments import AttachmentError, import_files, parse_pasted_file_payload
-from scripts.msandbox.capabilities import (
+from apps.msandbox.cli.agent_versions import resolve_agent_versions
+from apps.msandbox.cli.attachments import AttachmentError, import_files, parse_pasted_file_payload
+from apps.msandbox.cli.capabilities import (
     CONTAINER_CONFIG_DIR,
     PRODUCTION_TEST_DIR,
     _PROD_TEST_API_SCRIPT,
@@ -40,9 +40,9 @@ from scripts.msandbox.capabilities import (
     report_paths,
     write_report,
 )
-from scripts.msandbox.cli import run as run_cli
-from scripts.msandbox.docker_gc import collect_garbage, reachable, runtime_roots
-from scripts.msandbox.docker_runtime import (
+from apps.msandbox.cli.cli import run as run_cli
+from apps.msandbox.cli.docker_gc import collect_garbage, reachable, runtime_roots
+from apps.msandbox.cli.docker_runtime import (
     BUILDER_NAME,
     BUILDER_BOOTSTRAP_TIMEOUT_S,
     DEFAULT_BUILD_CACHE_MAX,
@@ -55,7 +55,7 @@ from scripts.msandbox.docker_runtime import (
     compose_environment,
     session_home,
 )
-from scripts.msandbox.git_worktrees import (
+from apps.msandbox.cli.git_worktrees import (
     GitError,
     branch_publish_state,
     create_detached_worktree,
@@ -68,8 +68,8 @@ from scripts.msandbox.git_worktrees import (
     resolve_worktree_owner,
     session_git_dir,
 )
-from scripts.msandbox.host_actions import HostActionError, build_xcode_command
-from scripts.msandbox.install import (
+from apps.msandbox.cli.host_actions import HostActionError, build_xcode_command
+from apps.msandbox.cli.install import (
     dispatcher_drift,
     dispatcher_installed_files,
     installed_release_id,
@@ -80,7 +80,7 @@ from scripts.msandbox.install import (
     install_release,
     rollback_release,
 )
-from scripts.msandbox.models import (
+from apps.msandbox.cli.models import (
     CapabilityReport,
     PortSet,
     SessionRecord,
@@ -89,8 +89,8 @@ from scripts.msandbox.models import (
     ValidationReference,
     utc_now,
 )
-from scripts.msandbox.session_auth import SessionAuthError, refresh_github_auth
-from scripts.msandbox.pty_proxy import (
+from apps.msandbox.cli.session_auth import SessionAuthError, refresh_github_auth
+from apps.msandbox.cli.pty_proxy import (
     PASTE_END,
     PASTE_START,
     _sync_window_size,
@@ -99,7 +99,7 @@ from scripts.msandbox.pty_proxy import (
     rewrite_paste_stream_to_inbox,
     run_with_file_proxy,
 )
-from scripts.msandbox.sessions import (
+from apps.msandbox.cli.sessions import (
     SessionError,
     ensure_capability_report,
     _validation_current,
@@ -109,7 +109,7 @@ from scripts.msandbox.sessions import (
     stop_session,
     submit_session,
 )
-from scripts.msandbox.state import (
+from apps.msandbox.cli.state import (
     ARTIFACT_LIFECYCLE_LOCK,
     SCHEMA_VERSION,
     list_sessions,
@@ -117,8 +117,8 @@ from scripts.msandbox.state import (
     save_session,
     state_lock,
 )
-from scripts.msandbox.validation import build_test_plan, changed_paths, run_test_plan
-from scripts.msandbox.wizard import (
+from apps.msandbox.cli.validation import build_test_plan, changed_paths, run_test_plan
+from apps.msandbox.cli.wizard import (
     _choose_terminal,
     _open_session,
     _session_menu_title,
@@ -203,7 +203,7 @@ class MsandboxTestCase(unittest.TestCase):
 class AgentVersionTests(MsandboxTestCase):
     def runtime_root(self) -> Path:
         runtime = self.root / "runtime"
-        dockerfile = runtime / "docker/agent-sandbox/Dockerfile"
+        dockerfile = runtime / "apps/msandbox/sandbox/Dockerfile"
         dockerfile.parent.mkdir(parents=True)
         dockerfile.write_text(
             "ARG CODEX_VERSION=0.153.4\nARG CLAUDE_CODE_VERSION=2.1.263\n",
@@ -221,7 +221,7 @@ class AgentVersionTests(MsandboxTestCase):
             },
             clear=False,
         ), mock.patch(
-            "scripts.msandbox.agent_versions._latest_version",
+            "apps.msandbox.cli.agent_versions._latest_version",
             side_effect=lambda package, timeout: {
                 "@openai/codex": "0.154.0",
                 "@anthropic-ai/claude-code": "2.1.264",
@@ -262,7 +262,7 @@ class AgentVersionTests(MsandboxTestCase):
             },
             clear=False,
         ), mock.patch(
-            "scripts.msandbox.agent_versions._latest_version",
+            "apps.msandbox.cli.agent_versions._latest_version",
             side_effect=OSError("offline"),
         ):
             self.assertEqual(
@@ -295,9 +295,9 @@ class StateTests(MsandboxTestCase):
         first.phase = "running"
         second.phase = "stopped"
         with (
-            mock.patch("scripts.msandbox.cli.list_sessions", return_value=[first, second]),
+            mock.patch("apps.msandbox.cli.cli.list_sessions", return_value=[first, second]),
             mock.patch(
-                "scripts.msandbox.cli.reconcile_session", side_effect=lambda item: item
+                "apps.msandbox.cli.cli.reconcile_session", side_effect=lambda item: item
             ),
         ):
             self.assertEqual(
@@ -306,9 +306,9 @@ class StateTests(MsandboxTestCase):
 
         first.phase = "stopped"
         with (
-            mock.patch("scripts.msandbox.cli.list_sessions", return_value=[first, second]),
+            mock.patch("apps.msandbox.cli.cli.list_sessions", return_value=[first, second]),
             mock.patch(
-                "scripts.msandbox.cli.reconcile_session", side_effect=lambda item: item
+                "apps.msandbox.cli.cli.reconcile_session", side_effect=lambda item: item
             ),
         ):
             self.assertEqual(
@@ -317,8 +317,8 @@ class StateTests(MsandboxTestCase):
 
         output = io.StringIO()
         with (
-            mock.patch("scripts.msandbox.cli.list_sessions", return_value=[first, second]),
-            mock.patch("scripts.msandbox.cli.stop_session") as stop,
+            mock.patch("apps.msandbox.cli.cli.list_sessions", return_value=[first, second]),
+            mock.patch("apps.msandbox.cli.cli.stop_session") as stop,
             redirect_stdout(output),
         ):
             self.assertEqual(
@@ -359,7 +359,7 @@ class StateTests(MsandboxTestCase):
         record.phase = "released"
         record.ports = PortSet(18001, 15174, 15191, 15201, 18080)
         save_session(record)
-        with mock.patch("scripts.msandbox.docker_runtime._port_available", return_value=True):
+        with mock.patch("apps.msandbox.cli.docker_runtime._port_available", return_value=True):
             allocated = allocate_port_block()
         self.assertEqual(allocated, record.ports)
 
@@ -380,8 +380,8 @@ class WorktreeTests(MsandboxTestCase):
         def assert_registration_locked(_record: SessionRecord) -> None:
             self.assertIn(ARTIFACT_LIFECYCLE_LOCK, active_locks)
 
-        with mock.patch("scripts.msandbox.sessions.state_lock", tracked_lock), mock.patch(
-            "scripts.msandbox.sessions.provision_session_auth",
+        with mock.patch("apps.msandbox.cli.sessions.state_lock", tracked_lock), mock.patch(
+            "apps.msandbox.cli.sessions.provision_session_auth",
             side_effect=assert_registration_locked,
         ):
             create_session(self.repo, SessionSpec("locked", "codex", "main", start=False))
@@ -414,8 +414,8 @@ class WorktreeTests(MsandboxTestCase):
                 return subprocess.CompletedProcess(argv, 0, "", "")
             raise AssertionError(command)
 
-        with mock.patch("scripts.msandbox.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
-            "scripts.msandbox.session_auth.subprocess.run", side_effect=run
+        with mock.patch("apps.msandbox.cli.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
+            "apps.msandbox.cli.session_auth.subprocess.run", side_effect=run
         ):
             refresh_github_auth(record)
             refresh_github_auth(record)
@@ -453,8 +453,8 @@ class WorktreeTests(MsandboxTestCase):
                 return subprocess.CompletedProcess(argv, 0, "", "")
             raise AssertionError(command)
 
-        with mock.patch("scripts.msandbox.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
-            "scripts.msandbox.session_auth.subprocess.run", side_effect=run
+        with mock.patch("apps.msandbox.cli.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
+            "apps.msandbox.cli.session_auth.subprocess.run", side_effect=run
         ):
             refresh_github_auth(record)
 
@@ -474,8 +474,8 @@ class WorktreeTests(MsandboxTestCase):
         )
         token = subprocess.CompletedProcess([], 0, "test-token\n", "")
 
-        with mock.patch("scripts.msandbox.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
-            "scripts.msandbox.session_auth.subprocess.run", side_effect=(origin, token)
+        with mock.patch("apps.msandbox.cli.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
+            "apps.msandbox.cli.session_auth.subprocess.run", side_effect=(origin, token)
         ):
             with self.assertRaisesRegex(SessionAuthError, "unsafe private controller directory"):
                 refresh_github_auth(record)
@@ -509,8 +509,8 @@ class WorktreeTests(MsandboxTestCase):
                 return subprocess.CompletedProcess(argv, 0, "", "")
             raise AssertionError(command)
 
-        with mock.patch("scripts.msandbox.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
-            "scripts.msandbox.session_auth.subprocess.run", side_effect=run
+        with mock.patch("apps.msandbox.cli.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
+            "apps.msandbox.cli.session_auth.subprocess.run", side_effect=run
         ):
             with self.assertRaisesRegex(SessionAuthError, "isolated Git config is unsafe"):
                 refresh_github_auth(record)
@@ -523,8 +523,8 @@ class WorktreeTests(MsandboxTestCase):
             [], 0, "git@github.com:tajaa/matcha-recruit.git\n", ""
         )
         missing = subprocess.CompletedProcess([], 1, "", "not logged in")
-        with mock.patch("scripts.msandbox.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
-            "scripts.msandbox.session_auth.subprocess.run", side_effect=(origin, missing)
+        with mock.patch("apps.msandbox.cli.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
+            "apps.msandbox.cli.session_auth.subprocess.run", side_effect=(origin, missing)
         ):
             with self.assertRaisesRegex(SessionAuthError, "gh auth login"):
                 refresh_github_auth(record)
@@ -532,11 +532,11 @@ class WorktreeTests(MsandboxTestCase):
     def test_failed_pristine_startup_removes_all_session_state(self) -> None:
         with (
             mock.patch(
-                "scripts.msandbox.sessions.start_session",
+                "apps.msandbox.cli.sessions.start_session",
                 side_effect=RuntimeError("container startup failed"),
             ),
-            mock.patch("scripts.msandbox.sessions.stop_agent"),
-            mock.patch("scripts.msandbox.sessions.remove_container_project") as remove,
+            mock.patch("apps.msandbox.cli.sessions.stop_agent"),
+            mock.patch("apps.msandbox.cli.sessions.remove_container_project") as remove,
             self.assertRaisesRegex(RuntimeError, "container startup failed"),
         ):
             create_session(self.repo, SessionSpec("failed-start", "codex", "main"))
@@ -549,11 +549,11 @@ class WorktreeTests(MsandboxTestCase):
     def test_cancelled_pristine_startup_removes_all_session_state(self) -> None:
         with (
             mock.patch(
-                "scripts.msandbox.sessions.start_session",
+                "apps.msandbox.cli.sessions.start_session",
                 side_effect=KeyboardInterrupt,
             ),
-            mock.patch("scripts.msandbox.sessions.stop_agent"),
-            mock.patch("scripts.msandbox.sessions.remove_container_project") as remove,
+            mock.patch("apps.msandbox.cli.sessions.stop_agent"),
+            mock.patch("apps.msandbox.cli.sessions.remove_container_project") as remove,
             self.assertRaises(KeyboardInterrupt),
         ):
             create_session(self.repo, SessionSpec("cancelled-start", "codex", "main"))
@@ -586,7 +586,7 @@ class WorktreeTests(MsandboxTestCase):
         )
         fetched = subprocess.CompletedProcess([], 0, "", "")
         with mock.patch(
-            "scripts.msandbox.git_worktrees._git", side_effect=(origin, fetched)
+            "apps.msandbox.cli.git_worktrees._git", side_effect=(origin, fetched)
         ) as run:
             fetch_origin(self.repo, "main")
         command = run.call_args_list[1].args
@@ -636,8 +636,8 @@ class WorktreeTests(MsandboxTestCase):
         self.assertEqual(git(worktree, "rev-parse", "HEAD"), isolated_before)
         self.assertEqual(common_config.read_bytes(), config_before)
         with (
-            mock.patch("scripts.msandbox.sessions.ensure_container"),
-            mock.patch("scripts.msandbox.sessions.launch_agent"),
+            mock.patch("apps.msandbox.cli.sessions.ensure_container"),
+            mock.patch("apps.msandbox.cli.sessions.launch_agent"),
         ):
             start_session(record)
         self.assertEqual(git(worktree, "rev-parse", "HEAD"), isolated_head)
@@ -653,8 +653,8 @@ class WorktreeTests(MsandboxTestCase):
         git(record.worktree, "commit", "-m", "host commit")
         host_head = git(record.worktree, "rev-parse", "HEAD")
         with (
-            mock.patch("scripts.msandbox.sessions.stop_agent"),
-            mock.patch("scripts.msandbox.sessions.stop_container"),
+            mock.patch("apps.msandbox.cli.sessions.stop_agent"),
+            mock.patch("apps.msandbox.cli.sessions.stop_container"),
         ):
             stop_session(record)
         self.assertEqual(git(record.worktree, "rev-parse", "HEAD"), host_head)
@@ -757,8 +757,8 @@ class WorktreeTests(MsandboxTestCase):
         )
         git(self.repo, "worktree", "remove", str(record.worktree))
         with (
-            mock.patch("scripts.msandbox.sessions.stop_agent"),
-            mock.patch("scripts.msandbox.sessions.remove_orphaned_container_project"),
+            mock.patch("apps.msandbox.cli.sessions.stop_agent"),
+            mock.patch("apps.msandbox.cli.sessions.remove_orphaned_container_project"),
         ):
             released = release_session(record)
         self.assertFalse(released.released)
@@ -779,7 +779,7 @@ class WorktreeTests(MsandboxTestCase):
         )
         git(self.repo, "push", "origin", f"main:refs/heads/{record.target_branch}")
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
             self.assertRaises(SessionError),
         ):
             submit_session(record)
@@ -794,7 +794,7 @@ class WorktreeTests(MsandboxTestCase):
         git(self.repo, "switch", "main")
         main_sha = git(self.repo, "rev-parse", "HEAD")
         with mock.patch(
-            "scripts.msandbox.sessions.resolve_pr", return_value=("feature", feature_sha)
+            "apps.msandbox.cli.sessions.resolve_pr", return_value=("feature", feature_sha)
         ):
             record = create_session(
                 self.repo,
@@ -996,7 +996,7 @@ class AttachmentTests(MsandboxTestCase):
 
     def test_proxy_copies_terminal_window_size(self) -> None:
         window_size = b"\x18\x00\x50\x00\x00\x00\x00\x00"
-        with mock.patch("scripts.msandbox.pty_proxy.fcntl.ioctl") as ioctl:
+        with mock.patch("apps.msandbox.cli.pty_proxy.fcntl.ioctl") as ioctl:
             ioctl.return_value = window_size
             _sync_window_size(10, 11)
 
@@ -1018,28 +1018,28 @@ class AttachmentTests(MsandboxTestCase):
         previous_handler = mock.sentinel.previous_handler
 
         with (
-            mock.patch("scripts.msandbox.pty_proxy.sys.stdin", stdin),
-            mock.patch("scripts.msandbox.pty_proxy.sys.stdout", stdout),
+            mock.patch("apps.msandbox.cli.pty_proxy.sys.stdin", stdin),
+            mock.patch("apps.msandbox.cli.pty_proxy.sys.stdout", stdout),
             mock.patch(
-                "scripts.msandbox.pty_proxy.pty.fork",
+                "apps.msandbox.cli.pty_proxy.pty.fork",
                 return_value=(321, 12),
             ),
-            mock.patch("scripts.msandbox.pty_proxy.termios.tcgetattr", return_value=[]),
-            mock.patch("scripts.msandbox.pty_proxy.termios.tcsetattr"),
-            mock.patch("scripts.msandbox.pty_proxy.tty.setraw"),
+            mock.patch("apps.msandbox.cli.pty_proxy.termios.tcgetattr", return_value=[]),
+            mock.patch("apps.msandbox.cli.pty_proxy.termios.tcsetattr"),
+            mock.patch("apps.msandbox.cli.pty_proxy.tty.setraw"),
             mock.patch(
-                "scripts.msandbox.pty_proxy.select.select",
+                "apps.msandbox.cli.pty_proxy.select.select",
                 return_value=([12], [], []),
             ),
-            mock.patch("scripts.msandbox.pty_proxy.os.read", return_value=b""),
-            mock.patch("scripts.msandbox.pty_proxy.os.close"),
-            mock.patch("scripts.msandbox.pty_proxy.os.waitpid", return_value=(321, 0)),
+            mock.patch("apps.msandbox.cli.pty_proxy.os.read", return_value=b""),
+            mock.patch("apps.msandbox.cli.pty_proxy.os.close"),
+            mock.patch("apps.msandbox.cli.pty_proxy.os.waitpid", return_value=(321, 0)),
             mock.patch(
-                "scripts.msandbox.pty_proxy.signal.getsignal",
+                "apps.msandbox.cli.pty_proxy.signal.getsignal",
                 return_value=previous_handler,
             ),
-            mock.patch("scripts.msandbox.pty_proxy.signal.signal") as set_signal,
-            mock.patch("scripts.msandbox.pty_proxy._sync_window_size") as sync_window,
+            mock.patch("apps.msandbox.cli.pty_proxy.signal.signal") as set_signal,
+            mock.patch("apps.msandbox.cli.pty_proxy._sync_window_size") as sync_window,
         ):
             self.assertEqual(run_with_file_proxy(["true"], lambda data: (data, b"")), 0)
             resize_handler = set_signal.call_args_list[0].args[1]
@@ -1055,7 +1055,7 @@ class AttachmentTests(MsandboxTestCase):
         )
 
     def test_legacy_interactive_entrypoints_use_file_proxy(self) -> None:
-        launcher = (Path(__file__).resolve().parents[2] / "scripts/agent-sandbox.sh").read_text()
+        launcher = (Path(__file__).resolve().parents[3] / "apps/msandbox/bin/agent-sandbox.sh").read_text()
         self.assertIn("exec_workspace_with_file_proxy codex", launcher)
         self.assertIn("exec_workspace_with_file_proxy claude", launcher)
         self.assertIn("exec_workspace_with_file_proxy opencode", launcher)
@@ -1073,12 +1073,12 @@ class HostAndInstallTests(MsandboxTestCase):
 
         attributes = [0, 0, 0, 0, 0, 0, []]
         with (
-            mock.patch("scripts.msandbox.wizard.sys.stdin.fileno", return_value=12),
-            mock.patch("scripts.msandbox.wizard.termios.tcgetattr", return_value=attributes),
-            mock.patch("scripts.msandbox.wizard.termios.tcsetattr") as restore,
-            mock.patch("scripts.msandbox.wizard.tty.setcbreak"),
+            mock.patch("apps.msandbox.cli.wizard.sys.stdin.fileno", return_value=12),
+            mock.patch("apps.msandbox.cli.wizard.termios.tcgetattr", return_value=attributes),
+            mock.patch("apps.msandbox.cli.wizard.termios.tcsetattr") as restore,
+            mock.patch("apps.msandbox.cli.wizard.tty.setcbreak"),
             mock.patch(
-                "scripts.msandbox.wizard._read_terminal_key",
+                "apps.msandbox.cli.wizard._read_terminal_key",
                 side_effect=("down", "enter"),
             ),
         ):
@@ -1102,7 +1102,7 @@ class HostAndInstallTests(MsandboxTestCase):
 
     def test_initializer_creates_nested_cache_mountpoints_before_returning(self) -> None:
         entrypoint = (
-            Path(__file__).resolve().parents[2] / "docker/agent-sandbox/entrypoint.sh"
+            Path(__file__).resolve().parents[3] / "apps/msandbox/sandbox/entrypoint.sh"
         ).read_text(encoding="utf-8")
         mountpoint = entrypoint.index("/workspace/client/node_modules/.vite")
         initializer_return = entrypoint.index(
@@ -1131,25 +1131,25 @@ class HostAndInstallTests(MsandboxTestCase):
         record = self.record()
         completed = subprocess.CompletedProcess([], 0, "", "")
         with (
-            mock.patch("scripts.msandbox.agent_adapters.shutil.which", return_value="/bin/tmux"),
+            mock.patch("apps.msandbox.cli.agent_adapters.shutil.which", return_value="/bin/tmux"),
             mock.patch(
-                "scripts.msandbox.agent_adapters.tmux_running",
+                "apps.msandbox.cli.agent_adapters.tmux_running",
                 side_effect=(False, True),
             ),
             mock.patch(
-                "scripts.msandbox.agent_adapters.compose_command",
+                "apps.msandbox.cli.agent_adapters.compose_command",
                 return_value=["docker", "compose", "exec", "workspace", "codex"],
             ),
             mock.patch(
-                "scripts.msandbox.agent_adapters.compose_environment",
+                "apps.msandbox.cli.agent_adapters.compose_environment",
                 return_value={"SANDBOX_IMAGE": "workspace:test"},
             ),
             mock.patch(
-                "scripts.msandbox.agent_adapters.time.monotonic",
+                "apps.msandbox.cli.agent_adapters.time.monotonic",
                 side_effect=(0.0, 2.0),
             ),
             mock.patch(
-                "scripts.msandbox.agent_adapters.subprocess.run",
+                "apps.msandbox.cli.agent_adapters.subprocess.run",
                 return_value=completed,
             ) as run,
         ):
@@ -1175,11 +1175,11 @@ class HostAndInstallTests(MsandboxTestCase):
         record = self.record()
         record.phase = "running"
         answers = iter(("", "2", "", "", "", "", ""))
-        with mock.patch("scripts.msandbox.wizard.list_sessions", return_value=[]), mock.patch(
-            "scripts.msandbox.wizard.create_session", return_value=record
+        with mock.patch("apps.msandbox.cli.wizard.list_sessions", return_value=[]), mock.patch(
+            "apps.msandbox.cli.wizard.create_session", return_value=record
         ) as create, mock.patch(
-            "scripts.msandbox.wizard.ensure_capability_report", return_value=None
-        ), mock.patch("scripts.msandbox.wizard.attach_agent") as attach:
+            "apps.msandbox.cli.wizard.ensure_capability_report", return_value=None
+        ), mock.patch("apps.msandbox.cli.wizard.attach_agent") as attach:
             _new_session(
                 self.repo,
                 reader=lambda _prompt: next(answers),
@@ -1195,11 +1195,11 @@ class HostAndInstallTests(MsandboxTestCase):
         record = self.record()
         record.phase = "running"
         answers = iter(("", "", "", "", "", "", ""))
-        with mock.patch("scripts.msandbox.wizard.list_sessions", return_value=[]), mock.patch(
-            "scripts.msandbox.wizard.create_session", return_value=record
+        with mock.patch("apps.msandbox.cli.wizard.list_sessions", return_value=[]), mock.patch(
+            "apps.msandbox.cli.wizard.create_session", return_value=record
         ) as create, mock.patch(
-            "scripts.msandbox.wizard.ensure_capability_report", return_value=None
-        ), mock.patch("scripts.msandbox.wizard.attach_agent"):
+            "apps.msandbox.cli.wizard.ensure_capability_report", return_value=None
+        ), mock.patch("apps.msandbox.cli.wizard.attach_agent"):
             _new_session(
                 self.repo,
                 reader=lambda _prompt: next(answers),
@@ -1213,7 +1213,7 @@ class HostAndInstallTests(MsandboxTestCase):
         second = self.record("two")
         second.name = "codex-2"
         self.assertEqual(next_session_name("codex", [first, second]), "codex-3")
-        with mock.patch("scripts.msandbox.wizard.list_sessions", return_value=[]):
+        with mock.patch("apps.msandbox.cli.wizard.list_sessions", return_value=[]):
             self.assertEqual(
                 run_wizard(
                     self.repo,
@@ -1231,12 +1231,12 @@ class HostAndInstallTests(MsandboxTestCase):
             return ""
 
         with mock.patch(
-            "scripts.msandbox.wizard.list_sessions", return_value=[]
+            "apps.msandbox.cli.wizard.list_sessions", return_value=[]
         ), mock.patch(
-            "scripts.msandbox.wizard.choose",
+            "apps.msandbox.cli.wizard.choose",
             side_effect=(("new", None), ("exit", None)),
         ), mock.patch(
-            "scripts.msandbox.wizard._new_session",
+            "apps.msandbox.cli.wizard._new_session",
             side_effect=RuntimeError("fetch failed"),
         ):
             output = io.StringIO()
@@ -1271,9 +1271,9 @@ class HostAndInstallTests(MsandboxTestCase):
             build_xcode_command(record, "espresso", "open")
 
     def test_image_and_dependency_volumes_include_manifests_and_controller_toolchain(self) -> None:
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[3]
         runtime_root = self.root / "runtime"
-        shutil.copytree(project_root / "docker/agent-sandbox", runtime_root / "docker/agent-sandbox")
+        shutil.copytree(project_root / "apps/msandbox/sandbox", runtime_root / "apps/msandbox/sandbox")
         fixture = self.root / "fixture"
         for relative in (
             "server/requirements.txt",
@@ -1299,14 +1299,14 @@ class HostAndInstallTests(MsandboxTestCase):
         with (
             mock.patch.dict(os.environ, {"MSANDBOX_RUNTIME_ROOT": str(runtime_root)}),
             mock.patch(
-                "scripts.msandbox.docker_runtime.git_common_dir", return_value=git_metadata
+                "apps.msandbox.cli.docker_runtime.git_common_dir", return_value=git_metadata
             ),
         ):
             first = compose_environment(record)
             record.playwright = True
             browser = compose_environment(record)
             record.playwright = False
-            entrypoint = runtime_root / "docker/agent-sandbox/entrypoint.sh"
+            entrypoint = runtime_root / "apps/msandbox/sandbox/entrypoint.sh"
             entrypoint.write_text(
                 entrypoint.read_text(encoding="utf-8") + "\n# toolchain revision\n",
                 encoding="utf-8",
@@ -1334,11 +1334,11 @@ class HostAndInstallTests(MsandboxTestCase):
 
     def test_installed_launcher_is_a_copied_release_not_repo_symlink(self) -> None:
         bin_dir = self.root / "bin"
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[3]
         release = install_release(repo_root=project_root, bin_dir=bin_dir)
         launcher = bin_dir / "msandbox"
-        self.assertTrue((release / "scripts/msandbox/cli.py").is_file())
-        self.assertTrue((release / "scripts/msandbox/wizard-shell.bash").is_file())
+        self.assertTrue((release / "apps/msandbox/cli/cli.py").is_file())
+        self.assertTrue((release / "apps/msandbox/cli/wizard-shell.bash").is_file())
         self.assertTrue((release / "server/requirements.txt").is_file())
         self.assertTrue((release / "client/package-lock.json").is_file())
         self.assertFalse(launcher.is_symlink())
@@ -1351,7 +1351,7 @@ class HostAndInstallTests(MsandboxTestCase):
         )
         self.assertEqual(completed.stdout.strip(), "msandbox 2.0.1")
         launcher_text = launcher.read_text(encoding="utf-8")
-        self.assertIn("scripts/agent-sandbox.sh", launcher_text)
+        self.assertIn("apps/msandbox/bin/agent-sandbox.sh", launcher_text)
         self.assertIn("legacy control plane", launcher_text)
         self.assertEqual(rollback_release(release.name, bin_dir=bin_dir), release)
         with self.assertRaises(InstallError):
@@ -1363,7 +1363,7 @@ class HostAndInstallTests(MsandboxTestCase):
         # control that is not installed looks exactly like one that does not
         # exist, so both drifts must be observable from the checkout.
         bin_dir = self.root / "drift-bin"
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[3]
         self.assertIsNone(installed_release_id(bin_dir))
         release = install_release(repo_root=project_root, bin_dir=bin_dir)
         self.assertEqual(installed_release_id(bin_dir), release.name)
@@ -1402,12 +1402,16 @@ class HostAndInstallTests(MsandboxTestCase):
         )
 
     def test_installed_launcher_routes_legacy_control_plane_commands(self) -> None:
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[3]
         fixture = self.root / "controller-repo"
-        (fixture / "scripts").mkdir(parents=True)
-        shutil.copy2(project_root / "scripts/__init__.py", fixture / "scripts/__init__.py")
-        shutil.copytree(project_root / "scripts/msandbox", fixture / "scripts/msandbox")
-        legacy = fixture / "scripts/agent-sandbox.sh"
+        # The same shape RELEASE_PATHS expects of a checkout: the two package
+        # markers, the cli package, and the sandbox dir (compose files live
+        # inside it now, not at the root).
+        (fixture / "apps/msandbox/bin").mkdir(parents=True)
+        shutil.copy2(project_root / "apps/__init__.py", fixture / "apps/__init__.py")
+        shutil.copy2(project_root / "apps/msandbox/__init__.py", fixture / "apps/msandbox/__init__.py")
+        shutil.copytree(project_root / "apps/msandbox/cli", fixture / "apps/msandbox/cli")
+        legacy = fixture / "apps/msandbox/bin/agent-sandbox.sh"
         legacy.write_text(
             '#!/bin/sh\n'
             'if [ "$*" = "autopr-ready" ]; then exit "${MSANDBOX_TEST_READY_RC:-0}"; fi\n'
@@ -1417,15 +1421,7 @@ class HostAndInstallTests(MsandboxTestCase):
             encoding="utf-8",
         )
         legacy.chmod(0o755)
-        for relative in (
-            "docker-compose.sandbox.yml",
-            "docker-compose.sandbox-session.yml",
-            "docker-compose.sandbox-dev.yml",
-            "docker-compose.sandbox-test.yml",
-            "docker-compose.autopr-sandbox.yml",
-        ):
-            shutil.copy2(project_root / relative, fixture / relative)
-        shutil.copytree(project_root / "docker/agent-sandbox", fixture / "docker/agent-sandbox")
+        shutil.copytree(project_root / "apps/msandbox/sandbox", fixture / "apps/msandbox/sandbox")
         for relative in (
             "server/requirements.txt",
             "client/package.json",
@@ -1552,9 +1548,9 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertNotIn("legacy:", capabilities.stdout)
 
     def test_installed_launcher_falls_back_after_source_worktree_is_removed(self) -> None:
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[3]
         stable_repo = self.root / "stable-repo"
-        legacy = stable_repo / "scripts/agent-sandbox.sh"
+        legacy = stable_repo / "apps/msandbox/bin/agent-sandbox.sh"
         legacy.parent.mkdir(parents=True)
         legacy.write_text(
             '#!/bin/sh\nprintf "stable:%s\\n" "$*"\n',
@@ -1580,11 +1576,11 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertEqual(completed.stdout.strip(), "stable:system status")
 
     def test_primary_worktree_is_the_fallback_for_a_linked_install_source(self) -> None:
-        legacy = self.repo / "scripts/agent-sandbox.sh"
+        legacy = self.repo / "apps/msandbox/bin/agent-sandbox.sh"
         legacy.parent.mkdir(parents=True)
         legacy.write_text("#!/bin/sh\n", encoding="utf-8")
         legacy.chmod(0o755)
-        git(self.repo, "add", "scripts/agent-sandbox.sh")
+        git(self.repo, "add", "apps/msandbox/bin/agent-sandbox.sh")
         git(self.repo, "commit", "-m", "add legacy controller")
         linked = self.root / "linked-install-source"
         git(self.repo, "worktree", "add", "-b", "linked-install", str(linked), "main")
@@ -1593,9 +1589,9 @@ class HostAndInstallTests(MsandboxTestCase):
 
     def test_install_retains_only_current_and_one_rollback_release(self) -> None:
         bin_dir = self.root / "bin"
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[3]
         with mock.patch(
-            "scripts.msandbox.install._release_id",
+            "apps.msandbox.cli.install._release_id",
             side_effect=(
                 "release-one",
                 "release-two",
@@ -1621,9 +1617,9 @@ class HostAndInstallTests(MsandboxTestCase):
         environment = {"SANDBOX_IMAGE": "matcha-agent-sandbox-workspace:content"}
         record = self.record()
         with mock.patch(
-            "scripts.msandbox.docker_runtime._image_exists", return_value=True
-        ), mock.patch("scripts.msandbox.docker_runtime._ensure_builder") as builder, mock.patch(
-            "scripts.msandbox.docker_runtime.subprocess.run"
+            "apps.msandbox.cli.docker_runtime._image_exists", return_value=True
+        ), mock.patch("apps.msandbox.cli.docker_runtime._ensure_builder") as builder, mock.patch(
+            "apps.msandbox.cli.docker_runtime.subprocess.run"
         ) as run:
             built = _ensure_workspace_image(
                 record, environment, test_services=False
@@ -1637,13 +1633,13 @@ class HostAndInstallTests(MsandboxTestCase):
         record = self.record()
         completed = subprocess.CompletedProcess([], 0, "", "")
         with mock.patch(
-            "scripts.msandbox.docker_runtime._image_exists", return_value=False
+            "apps.msandbox.cli.docker_runtime._image_exists", return_value=False
         ), mock.patch(
-            "scripts.msandbox.docker_runtime._ensure_builder", return_value=BUILDER_NAME
+            "apps.msandbox.cli.docker_runtime._ensure_builder", return_value=BUILDER_NAME
         ), mock.patch(
-            "scripts.msandbox.docker_runtime.subprocess.run", return_value=completed
+            "apps.msandbox.cli.docker_runtime.subprocess.run", return_value=completed
         ) as run, mock.patch(
-            "scripts.msandbox.docker_runtime._prune_builder_cache"
+            "apps.msandbox.cli.docker_runtime._prune_builder_cache"
         ) as prune:
             built = _ensure_workspace_image(
                 record, environment, test_services=False
@@ -1659,13 +1655,13 @@ class HostAndInstallTests(MsandboxTestCase):
         record = self.record()
         completed = subprocess.CompletedProcess([], 0, "", "")
         with mock.patch(
-            "scripts.msandbox.docker_runtime._image_exists", return_value=False
+            "apps.msandbox.cli.docker_runtime._image_exists", return_value=False
         ), mock.patch(
-            "scripts.msandbox.docker_runtime._ensure_builder", return_value=None
+            "apps.msandbox.cli.docker_runtime._ensure_builder", return_value=None
         ), mock.patch(
-            "scripts.msandbox.docker_runtime.subprocess.run", return_value=completed
+            "apps.msandbox.cli.docker_runtime.subprocess.run", return_value=completed
         ) as run, mock.patch(
-            "scripts.msandbox.docker_runtime._prune_builder_cache"
+            "apps.msandbox.cli.docker_runtime._prune_builder_cache"
         ) as prune:
             built = _ensure_workspace_image(
                 record, environment, test_services=False
@@ -1678,7 +1674,7 @@ class HostAndInstallTests(MsandboxTestCase):
 
     def test_browser_image_layers_onto_existing_workspace(self) -> None:
         context = self.root / "browser-context"
-        overlay = context / "docker/agent-sandbox/Dockerfile.browser"
+        overlay = context / "apps/msandbox/sandbox/Dockerfile.browser"
         overlay.parent.mkdir(parents=True)
         overlay.write_text("ARG SANDBOX_BASE_IMAGE\n", encoding="utf-8")
         environment = {
@@ -1690,14 +1686,14 @@ class HostAndInstallTests(MsandboxTestCase):
         record.playwright = True
         completed = subprocess.CompletedProcess([], 0, "", "")
         with mock.patch(
-            "scripts.msandbox.docker_runtime._image_exists",
+            "apps.msandbox.cli.docker_runtime._image_exists",
             side_effect=(False, True),
         ), mock.patch(
-            "scripts.msandbox.docker_runtime._ensure_builder", return_value=BUILDER_NAME
+            "apps.msandbox.cli.docker_runtime._ensure_builder", return_value=BUILDER_NAME
         ), mock.patch(
-            "scripts.msandbox.docker_runtime.subprocess.run", return_value=completed
+            "apps.msandbox.cli.docker_runtime.subprocess.run", return_value=completed
         ) as run, mock.patch(
-            "scripts.msandbox.docker_runtime._prune_builder_cache"
+            "apps.msandbox.cli.docker_runtime._prune_builder_cache"
         ) as prune:
             built = _ensure_workspace_image(
                 record, environment, test_services=False
@@ -1717,7 +1713,7 @@ class HostAndInstallTests(MsandboxTestCase):
     def test_private_builder_bootstrap_timeout_falls_back(self) -> None:
         inspected = subprocess.CompletedProcess([], 0, "", "")
         with mock.patch(
-            "scripts.msandbox.docker_runtime.subprocess.run",
+            "apps.msandbox.cli.docker_runtime.subprocess.run",
             side_effect=(
                 inspected,
                 subprocess.TimeoutExpired([], BUILDER_BOOTSTRAP_TIMEOUT_S),
@@ -1730,7 +1726,7 @@ class HostAndInstallTests(MsandboxTestCase):
 
     def test_private_builder_cache_has_a_small_default_ceiling(self) -> None:
         with mock.patch(
-            "scripts.msandbox.docker_runtime.subprocess.run"
+            "apps.msandbox.cli.docker_runtime.subprocess.run"
         ) as run, mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("MSANDBOX_BUILD_CACHE_MAX", None)
             _prune_builder_cache()
@@ -1745,7 +1741,7 @@ class HostAndInstallTests(MsandboxTestCase):
 
 class ValidationPlannerTests(MsandboxTestCase):
     def test_pr_server_change_uses_isolated_services_migrations_and_full_suite(self) -> None:
-        with mock.patch("scripts.msandbox.validation.changed_paths", return_value=["server/app/example.py"]):
+        with mock.patch("apps.msandbox.cli.validation.changed_paths", return_value=["server/app/example.py"]):
             plan = build_test_plan(self.record(), "pr")
         identifiers = [check.id for check in plan.checks]
         self.assertIn("isolated-data-services", identifiers)
@@ -1762,7 +1758,7 @@ class ValidationPlannerTests(MsandboxTestCase):
 
     def test_pr_automatically_selects_affected_xcode_targets(self) -> None:
         with mock.patch(
-            "scripts.msandbox.validation.changed_paths",
+            "apps.msandbox.cli.validation.changed_paths",
             return_value=["platforms/ios/TellUs/App.swift"],
         ):
             plan = build_test_plan(self.record(), "pr")
@@ -1774,9 +1770,9 @@ class ValidationPlannerTests(MsandboxTestCase):
         )
         plan = TestPlan("pr", tuple(changed_paths(record)), ())
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session") as stop,
-            mock.patch("scripts.msandbox.validation.ensure_container") as ensure,
-            mock.patch("scripts.msandbox.validation.remove_container_project") as remove,
+            mock.patch("apps.msandbox.cli.sessions.stop_session") as stop,
+            mock.patch("apps.msandbox.cli.validation.ensure_container") as ensure,
+            mock.patch("apps.msandbox.cli.validation.remove_container_project") as remove,
         ):
             report = run_test_plan(record, plan)
         self.assertEqual(report.status, "pass")
@@ -1788,7 +1784,7 @@ class ValidationPlannerTests(MsandboxTestCase):
         remove.assert_called_once_with(validation_record, volumes=True)
 
     def test_all_selects_every_linux_and_xcode_target(self) -> None:
-        with mock.patch("scripts.msandbox.validation.changed_paths", return_value=[]):
+        with mock.patch("apps.msandbox.cli.validation.changed_paths", return_value=[]):
             plan = build_test_plan(self.record(), "all", browser=True, xcode="all")
         identifiers = {check.id for check in plan.checks}
         self.assertTrue(
@@ -1880,7 +1876,7 @@ class DockerGcTests(MsandboxTestCase):
     )
 
     def sandbox_tree(self, root: Path, marker: str) -> Path:
-        directory = root / "docker/agent-sandbox"
+        directory = root / "apps/msandbox/sandbox"
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "Dockerfile").write_text(
             "ARG CODEX_VERSION=0.153.4\n"
@@ -1936,8 +1932,8 @@ class DockerGcTests(MsandboxTestCase):
                 ("matcha-agent-sandbox-workspace-1", "exited", "matcha-agent-sandbox-workspace:latest", "matcha-agent-sandbox"),
             ),
         )
-        with mock.patch("scripts.msandbox.docker_gc._docker", docker), mock.patch(
-            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        with mock.patch("apps.msandbox.cli.docker_gc._docker", docker), mock.patch(
+            "apps.msandbox.cli.docker_gc.shutil.which", return_value="/usr/bin/docker"
         ):
             report = collect_garbage(self.repo, apply=True)
         collected = {(item.kind, item.name) for item in report.collected}
@@ -1987,8 +1983,8 @@ class DockerGcTests(MsandboxTestCase):
                 ("matcha-ms-dead-9999-workspace-1", "exited", "matcha-agent-sandbox-workspace:deadbeef", "matcha-ms-dead-9999"),
             ),
         )
-        with mock.patch("scripts.msandbox.docker_gc._docker", docker), mock.patch(
-            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        with mock.patch("apps.msandbox.cli.docker_gc._docker", docker), mock.patch(
+            "apps.msandbox.cli.docker_gc.shutil.which", return_value="/usr/bin/docker"
         ):
             report = collect_garbage(self.repo, apply=True)
         self.assertIn(shared, docker.volumes)
@@ -2005,8 +2001,8 @@ class DockerGcTests(MsandboxTestCase):
                 ("matcha-ms-dead-9999-workspace-1", "exited", "matcha-agent-sandbox-workspace:deadbeef", "matcha-ms-dead-9999"),
             ),
         )
-        with mock.patch("scripts.msandbox.docker_gc._docker", docker), mock.patch(
-            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        with mock.patch("apps.msandbox.cli.docker_gc._docker", docker), mock.patch(
+            "apps.msandbox.cli.docker_gc.shutil.which", return_value="/usr/bin/docker"
         ):
             report = collect_garbage(self.repo, apply=False)
         self.assertEqual(docker.removed, [])
@@ -2028,8 +2024,8 @@ class DockerGcTests(MsandboxTestCase):
         # indistinguishable from garbage; GC must refuse rather than guess.
         save_session(self.record("broken-1"))
         docker = FakeDocker(images=("matcha-agent-sandbox-workspace:deadbeef",))
-        with mock.patch("scripts.msandbox.docker_gc._docker", docker), mock.patch(
-            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        with mock.patch("apps.msandbox.cli.docker_gc._docker", docker), mock.patch(
+            "apps.msandbox.cli.docker_gc.shutil.which", return_value="/usr/bin/docker"
         ):
             report = collect_garbage(self.repo, apply=True)
         self.assertIsNotNone(report.skipped)
@@ -2047,8 +2043,8 @@ class DockerGcTests(MsandboxTestCase):
             images=("matcha-agent-sandbox-workspace:deadbeef",),
             volumes=("matcha-ms-dead-9999_sandbox_npm_cache",),
         )
-        with mock.patch("scripts.msandbox.docker_gc._docker", docker), mock.patch(
-            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        with mock.patch("apps.msandbox.cli.docker_gc._docker", docker), mock.patch(
+            "apps.msandbox.cli.docker_gc.shutil.which", return_value="/usr/bin/docker"
         ):
             report = collect_garbage(self.repo, apply=True)
         self.assertIn("invalid session record", report.skipped or "")
@@ -2077,9 +2073,9 @@ class DockerGcTests(MsandboxTestCase):
             return docker(*argv)
 
         with mock.patch(
-            "scripts.msandbox.docker_gc._docker", side_effect=failed_inventory
+            "apps.msandbox.cli.docker_gc._docker", side_effect=failed_inventory
         ), mock.patch(
-            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+            "apps.msandbox.cli.docker_gc.shutil.which", return_value="/usr/bin/docker"
         ):
             report = collect_garbage(self.repo, apply=True)
         self.assertIn("Docker inventory is incomplete", report.skipped or "")
@@ -2108,8 +2104,8 @@ class DockerGcTests(MsandboxTestCase):
             mounts={container: (mounted_volume,)},
             binds={container: (str(running_home),)},
         )
-        with mock.patch("scripts.msandbox.docker_gc._docker", docker), mock.patch(
-            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        with mock.patch("apps.msandbox.cli.docker_gc._docker", docker), mock.patch(
+            "apps.msandbox.cli.docker_gc.shutil.which", return_value="/usr/bin/docker"
         ):
             report = collect_garbage(self.repo, apply=True)
         self.assertTrue(running_home.is_dir())
@@ -2491,7 +2487,7 @@ class CapabilityTests(MsandboxTestCase):
                     run_host=fake_host,
                 )
                 with mock.patch(
-                    "scripts.msandbox.agent_adapters.collect_report", return_value=expected
+                    "apps.msandbox.cli.agent_adapters.collect_report", return_value=expected
                 ):
                     report = refresh_capability_context(record)
                 self.assertIsNotNone(report)
@@ -2521,7 +2517,7 @@ class CapabilityTests(MsandboxTestCase):
             run_host=fake_host,
         )
         with mock.patch(
-            "scripts.msandbox.agent_adapters.collect_report", return_value=expected
+            "apps.msandbox.cli.agent_adapters.collect_report", return_value=expected
         ):
             self.assertIsNotNone(refresh_capability_context(record))
         _, markdown_path = report_paths(record)
@@ -2539,33 +2535,33 @@ class CapabilityTests(MsandboxTestCase):
             run_host=fake_host,
         )
         with mock.patch(
-            "scripts.msandbox.agent_adapters.collect_report", return_value=expected
+            "apps.msandbox.cli.agent_adapters.collect_report", return_value=expected
         ):
             refresh_capability_context(record)
         completed = subprocess.CompletedProcess([], 0, "", "")
         with (
-            mock.patch("scripts.msandbox.agent_adapters.shutil.which", return_value="/bin/tmux"),
+            mock.patch("apps.msandbox.cli.agent_adapters.shutil.which", return_value="/bin/tmux"),
             # An agent that rejects the flag exits immediately, so the pane is
             # dead when the launcher checks it: the first attempt raises and the
             # retry without the flag succeeds.
             mock.patch(
-                "scripts.msandbox.agent_adapters.tmux_running",
+                "apps.msandbox.cli.agent_adapters.tmux_running",
                 side_effect=(False, False, True),
             ),
             mock.patch(
-                "scripts.msandbox.agent_adapters.compose_command",
+                "apps.msandbox.cli.agent_adapters.compose_command",
                 return_value=["docker", "compose", "exec", "workspace", "claude"],
             ) as compose,
             mock.patch(
-                "scripts.msandbox.agent_adapters.compose_environment",
+                "apps.msandbox.cli.agent_adapters.compose_environment",
                 return_value={"SANDBOX_IMAGE": "workspace:test"},
             ),
             mock.patch(
-                "scripts.msandbox.agent_adapters.time.monotonic",
+                "apps.msandbox.cli.agent_adapters.time.monotonic",
                 side_effect=(0.0, 2.0, 0.0, 2.0),
             ),
             mock.patch(
-                "scripts.msandbox.agent_adapters.subprocess.run", return_value=completed
+                "apps.msandbox.cli.agent_adapters.subprocess.run", return_value=completed
             ) as run,
         ):
             launch_agent(record)
@@ -2597,7 +2593,7 @@ class CapabilityTests(MsandboxTestCase):
             run_host=fake_host,
         )
         with mock.patch(
-            "scripts.msandbox.agent_adapters.collect_report", return_value=expected
+            "apps.msandbox.cli.agent_adapters.collect_report", return_value=expected
         ):
             refresh_capability_context(record)
         self.assertEqual(outside.read_text(encoding="utf-8"), "untouched")
@@ -2639,7 +2635,7 @@ class CapabilityTests(MsandboxTestCase):
         # A menu redraw must not launch Chromium, hit GitHub, and query
         # production before it can print its first line.
         with mock.patch(
-            "scripts.msandbox.wizard.ensure_capability_report"
+            "apps.msandbox.cli.wizard.ensure_capability_report"
         ) as measured:
             title = _session_menu_title(record)
         measured.assert_not_called()
@@ -2653,7 +2649,7 @@ class CapabilityTests(MsandboxTestCase):
     def test_an_unmeasured_session_asks_for_a_measurement_instead_of_guessing(self) -> None:
         record = self.session()
         save_session(record)
-        with mock.patch("scripts.msandbox.wizard.ensure_capability_report") as measured:
+        with mock.patch("apps.msandbox.cli.wizard.ensure_capability_report") as measured:
             title = _session_menu_title(record)
         measured.assert_not_called()
         self.assertIn("have not been measured yet", title)
@@ -2663,13 +2659,13 @@ class CapabilityTests(MsandboxTestCase):
         record.phase = "running"
         save_session(record)
         with mock.patch(
-            "scripts.msandbox.wizard.choose", side_effect=["open", "back"]
+            "apps.msandbox.cli.wizard.choose", side_effect=["open", "back"]
         ), mock.patch(
-            "scripts.msandbox.wizard.reconcile_session", side_effect=lambda item: item
-        ), mock.patch("scripts.msandbox.wizard.attach_agent") as attach, mock.patch(
-            "scripts.msandbox.wizard.start_session"
+            "apps.msandbox.cli.wizard.reconcile_session", side_effect=lambda item: item
+        ), mock.patch("apps.msandbox.cli.wizard.attach_agent") as attach, mock.patch(
+            "apps.msandbox.cli.wizard.start_session"
         ) as started, mock.patch(
-            "scripts.msandbox.wizard.ensure_capability_report"
+            "apps.msandbox.cli.wizard.ensure_capability_report"
         ) as measured:
             _open_session(record, reader=lambda prompt: "", output=io.StringIO())
         attach.assert_called_once()
@@ -2684,11 +2680,11 @@ class CapabilityTests(MsandboxTestCase):
         report, _ = self.collect(record)
         output = io.StringIO()
         with mock.patch(
-            "scripts.msandbox.wizard.choose", side_effect=["tools", "refresh", None, "back"]
+            "apps.msandbox.cli.wizard.choose", side_effect=["tools", "refresh", None, "back"]
         ), mock.patch(
-            "scripts.msandbox.wizard.reconcile_session", side_effect=lambda item: item
+            "apps.msandbox.cli.wizard.reconcile_session", side_effect=lambda item: item
         ), mock.patch(
-            "scripts.msandbox.manager.ensure_capability_report", return_value=report
+            "apps.msandbox.cli.manager.ensure_capability_report", return_value=report
         ) as measured:
             _open_session(record, reader=lambda prompt: "", output=output)
         self.assertEqual(measured.call_args.kwargs, {"refresh": True})
@@ -2710,7 +2706,7 @@ class CapabilityTests(MsandboxTestCase):
         report, _ = self.collect(record)
         output = io.StringIO()
         with mock.patch(
-            "scripts.msandbox.cli.ensure_capability_report", return_value=report
+            "apps.msandbox.cli.cli.ensure_capability_report", return_value=report
         ) as shared, redirect_stdout(output):
             self.assertEqual(run_cli(["--repo", str(self.repo), "doctor", record.name]), 0)
         shared.assert_called_once()
@@ -2724,11 +2720,11 @@ class CapabilityTests(MsandboxTestCase):
         write_report(record, report)
         output = io.StringIO()
         with mock.patch(
-            "scripts.msandbox.sessions.container_running", return_value=True
+            "apps.msandbox.cli.sessions.container_running", return_value=True
         ), mock.patch(
-            "scripts.msandbox.sessions.ensure_container"
+            "apps.msandbox.cli.sessions.ensure_container"
         ) as ensure, mock.patch(
-            "scripts.msandbox.agent_adapters.collect_report"
+            "apps.msandbox.cli.agent_adapters.collect_report"
         ) as remeasured, redirect_stdout(output):
             self.assertEqual(
                 run_cli(["--repo", str(self.repo), "capabilities", record.name]), 0
@@ -2744,9 +2740,9 @@ class CapabilityTests(MsandboxTestCase):
         write_report(record, report)
         self.assertTrue(load_report(record).container_available)
         with mock.patch(
-            "scripts.msandbox.sessions.container_running", return_value=False
-        ), mock.patch("scripts.msandbox.sessions.ensure_container") as ensure, mock.patch(
-            "scripts.msandbox.agent_adapters.collect_report",
+            "apps.msandbox.cli.sessions.container_running", return_value=False
+        ), mock.patch("apps.msandbox.cli.sessions.ensure_container") as ensure, mock.patch(
+            "apps.msandbox.cli.agent_adapters.collect_report",
             side_effect=lambda item, container_available=True: collect_report(
                 item,
                 run_container=FakeContainer(HEALTHY_CONTAINER),
@@ -2764,13 +2760,13 @@ class CapabilityTests(MsandboxTestCase):
         record = self.session()
         save_session(record)
         with mock.patch(
-            "scripts.msandbox.sessions.container_running", return_value=True
+            "apps.msandbox.cli.sessions.container_running", return_value=True
         ), mock.patch(
-            "scripts.msandbox.sessions.refresh_github_auth"
+            "apps.msandbox.cli.sessions.refresh_github_auth"
         ) as auth, mock.patch(
-            "scripts.msandbox.sessions.ensure_container"
+            "apps.msandbox.cli.sessions.ensure_container"
         ) as ensure, mock.patch(
-            "scripts.msandbox.agent_adapters.collect_report",
+            "apps.msandbox.cli.agent_adapters.collect_report",
             side_effect=lambda item, container_available=True: collect_report(
                 item,
                 run_container=FakeContainer(HEALTHY_CONTAINER),
@@ -2788,11 +2784,11 @@ class CapabilityTests(MsandboxTestCase):
         record = self.session()
         save_session(record)
         with mock.patch(
-            "scripts.msandbox.sessions.container_running", return_value=False
-        ), mock.patch("scripts.msandbox.sessions.ensure_container") as ensure, mock.patch(
-            "scripts.msandbox.sessions.refresh_github_auth"
+            "apps.msandbox.cli.sessions.container_running", return_value=False
+        ), mock.patch("apps.msandbox.cli.sessions.ensure_container") as ensure, mock.patch(
+            "apps.msandbox.cli.sessions.refresh_github_auth"
         ) as auth, mock.patch(
-            "scripts.msandbox.agent_adapters.collect_report",
+            "apps.msandbox.cli.agent_adapters.collect_report",
             side_effect=lambda item, container_available=True: collect_report(
                 item,
                 run_container=FakeContainer(HEALTHY_CONTAINER),
@@ -2830,7 +2826,7 @@ class CapabilityTests(MsandboxTestCase):
         self.assertIn("LEAK: Production admin/secrets", rendered)
         output = io.StringIO()
         with mock.patch(
-            "scripts.msandbox.cli.ensure_capability_report", return_value=report
+            "apps.msandbox.cli.cli.ensure_capability_report", return_value=report
         ), redirect_stdout(output):
             self.assertEqual(run_cli(["--repo", str(self.repo), "doctor", record.name]), 1)
 

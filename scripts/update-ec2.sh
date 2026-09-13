@@ -9,7 +9,7 @@ set -e
 
 # This deploys to live prod. The agent sandbox is otherwise capable of
 # running it (ssh/aws creds are reachable there — see
-# docs/ops/AGENT_SANDBOX.md), so require an explicit opt-in rather than
+# apps/msandbox/docs/AGENT_SANDBOX.md), so require an explicit opt-in rather than
 # letting a no-approval agent deploy by default.
 case "${AGENT_SANDBOX:-${CODEX_SANDBOX:-}}" in
     1|true|TRUE|yes|YES)

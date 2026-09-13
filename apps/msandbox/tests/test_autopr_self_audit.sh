@@ -2,20 +2,20 @@
 # Sealed self-audit lane contracts; no Docker, model, GitHub, or host state.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-AUDIT_DIR="$REPO_ROOT/scripts/autopr-self-audit"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+AUDIT_DIR="$REPO_ROOT/apps/msandbox/self-audit"
 WORKFLOW="$REPO_ROOT/.github/workflows/autopr-self-audit.yml"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/matcha-self-audit-test.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 ! grep -qF 'schedule:' "$WORKFLOW"
-grep -qF './scripts/agent-sandbox.sh autopr-ready' "$WORKFLOW"
+grep -qF './apps/msandbox/bin/agent-sandbox.sh autopr-ready' "$WORKFLOW"
 grep -qF 'matcha-autopr-self-audit-sandbox' "$WORKFLOW"
-grep -qF 'scripts/autopr-self-audit/verify.sh' "$WORKFLOW"
+grep -qF 'apps/msandbox/self-audit/verify.sh' "$WORKFLOW"
 grep -qF 'write-commit-subject.sh fix' "$WORKFLOW"
 grep -qF 'AUDIT_MAX_AGE_SECONDS="${AUTOPR_AUDIT_MAX_AGE_SECONDS:-21600}"' \
-    "$REPO_ROOT/scripts/kanban-autopr/dispatch-if-idle.sh"
-grep -qF 'scripts/autopr-self-audit/' "$AUDIT_DIR/_prompt.txt"
+    "$REPO_ROOT/apps/msandbox/harness/dispatch-if-idle.sh"
+grep -qF 'apps/msandbox/self-audit/' "$AUDIT_DIR/_prompt.txt"
 grep -qF "test_autopr_self_audit.sh'" "$AUDIT_DIR/publish.sh"
 printf 'PASS: self-audit uses the one local clock, master switch, verifier, and sealed prompt\n'
 
@@ -36,9 +36,9 @@ set -e
 printf 'PASS: trusted shell validates model decision/diff agreement\n'
 
 TEST_REPO="$TMP_DIR/repo"
-mkdir -p "$TEST_REPO/scripts/autopr-self-audit" "$TEST_REPO/scripts/kanban-autopr" "$TMP_DIR/bin"
-cp "$AUDIT_DIR/publish.sh" "$TEST_REPO/scripts/autopr-self-audit/publish.sh"
-printf 'before\n' > "$TEST_REPO/scripts/kanban-autopr/example.sh"
+mkdir -p "$TEST_REPO/apps/msandbox/self-audit" "$TEST_REPO/apps/msandbox/harness" "$TMP_DIR/bin"
+cp "$AUDIT_DIR/publish.sh" "$TEST_REPO/apps/msandbox/self-audit/publish.sh"
+printf 'before\n' > "$TEST_REPO/apps/msandbox/harness/example.sh"
 git -C "$TEST_REPO" init -q
 git -C "$TEST_REPO" config user.name test
 git -C "$TEST_REPO" config user.email test@example.com
@@ -67,9 +67,9 @@ cp "$TMP_DIR/decision.json" "$TMP_DIR/publish-decision.json"
 printf '### Root cause\ncontract failed\n' > "$TMP_DIR/report.md"
 printf '## Verification\nall green\n' > "$TMP_DIR/verification.md"
 printf '%s\n' '{"schema_version":1,"commit_subject":"fix: restore AutoPR dispatcher contract"}' > "$TMP_DIR/commit-subject.json"
-printf 'after\n' > "$TEST_REPO/scripts/kanban-autopr/example.sh"
+printf 'after\n' > "$TEST_REPO/apps/msandbox/harness/example.sh"
 PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" \
-    GITHUB_REPOSITORY=x/x "$TEST_REPO/scripts/autopr-self-audit/publish.sh" \
+    GITHUB_REPOSITORY=x/x "$TEST_REPO/apps/msandbox/self-audit/publish.sh" \
     "$TMP_DIR/audit.json" "$TMP_DIR/publish-decision.json" \
     "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/commit-subject.json" >/dev/null
 grep -q 'pr create' "$TMP_DIR/gh.log"
@@ -81,7 +81,7 @@ mkdir -p "$TEST_REPO/.github/workflows"
 printf 'forbidden\n' > "$TEST_REPO/.github/workflows/escape.yml"
 set +e
 PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" \
-    GITHUB_REPOSITORY=x/x "$TEST_REPO/scripts/autopr-self-audit/publish.sh" \
+    GITHUB_REPOSITORY=x/x "$TEST_REPO/apps/msandbox/self-audit/publish.sh" \
     "$TMP_DIR/audit.json" "$TMP_DIR/publish-decision.json" \
     "$TMP_DIR/report.md" "$TMP_DIR/verification.md" >/dev/null 2>&1
 forbidden_rc=$?
@@ -123,7 +123,7 @@ printf 'PASS: a repair is not retried for the same failing checks until the ledg
 # The repair lane may touch the harness, so the bridge's default apply-time
 # denylist is narrowed here — but never to CI, deploy, secrets, or the
 # sealed capsule itself.
-grep -qF "AUTOPR_SANDBOX_PATH_DENY_RE='^(\\.github/|deploy/|secrets/|\\.githooks/|(.*/)?\\.env[^/]*$|scripts/autopr-self-audit/)'" "$AUDIT_DIR/investigate.sh"
+grep -qF "AUTOPR_SANDBOX_PATH_DENY_RE='^(\\.github/|deploy/|secrets/|\\.githooks/|(.*/)?\\.env[^/]*$|apps/msandbox/self-audit/)'" "$AUDIT_DIR/investigate.sh"
 grep -qF 'check_installed_dispatcher' "$AUDIT_DIR/audit.sh"
 grep -qF 'git reset --hard HEAD' "$WORKFLOW"
 printf 'PASS: repair lane keeps CI/deploy/secrets/capsule out of reach and audits the installed dispatcher\n'

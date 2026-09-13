@@ -6,7 +6,7 @@
 # Multi-stage so BuildKit can run the independent installs (system apt deps,
 # Node + agent CLIs, each npm ci, python deps, AWS CLI) concurrently instead
 # of one long chain. `runtime` at the bottom assembles everything with COPY
-# --from=. See docker/agent-sandbox/Dockerfile.dockerignore for what build
+# --from=. See apps/msandbox/sandbox/Dockerfile.dockerignore for what build
 # context this actually receives — allowlisted to ~700KB of manifests, not
 # the whole repo.
 FROM python:3.12-slim-bookworm AS base
@@ -265,7 +265,7 @@ RUN { \
     } | sha256sum | awk '{print $1}' > /opt/bootstrap/.dependencies-sha \
     && chown "${USER_UID}:${USER_GID}" /opt/bootstrap /opt/bootstrap/.dependencies-sha
 
-COPY docker/agent-sandbox/entrypoint.sh /usr/local/bin/agent-sandbox-entrypoint
+COPY apps/msandbox/sandbox/entrypoint.sh /usr/local/bin/agent-sandbox-entrypoint
 RUN chmod 0755 /usr/local/bin/agent-sandbox-entrypoint \
     && install -d -m 0755 /etc/codex \
     && printf '%s\n' \

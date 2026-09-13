@@ -3,8 +3,8 @@
 # when nothing else already explained the stop. No network, no board.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-AUTOPR_DIR="$REPO_ROOT/scripts/kanban-autopr"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+AUTOPR_DIR="$REPO_ROOT/apps/msandbox/harness"
 JOURNAL="$AUTOPR_DIR/run-journal.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -375,10 +375,10 @@ check "the resume pointer is consumed after a publication, not at the end of the
     && grep -qF 'if [ "$PUBLISH_OUTCOME" = success ] || [ "$PUBLISH_ARTIFACT_OUTCOME" = success ]; then' "$WORKFLOW" && echo 0 || echo 1)
 
 check "both new suites run in CI, and both scripts are syntax-checked there" \
-  $(grep -qF 'test_kanban_autopr_run_journal.sh' "$REPO_ROOT/scripts/autopr-self-audit/audit.sh" \
-    && grep -qF 'test_kanban_autopr_card_control.sh' "$REPO_ROOT/scripts/autopr-self-audit/audit.sh" \
-    && grep -qF 'scripts/kanban-autopr/run-journal.sh' "$REPO_ROOT/.github/workflows/ci.yml" \
-    && grep -qF 'scripts/kanban-autopr/card-control.sh' "$REPO_ROOT/.github/workflows/ci.yml" && echo 0 || echo 1)
+  $(grep -qF 'test_kanban_autopr_run_journal.sh' "$REPO_ROOT/apps/msandbox/self-audit/audit.sh" \
+    && grep -qF 'test_kanban_autopr_card_control.sh' "$REPO_ROOT/apps/msandbox/self-audit/audit.sh" \
+    && grep -qF 'apps/msandbox/harness/run-journal.sh' "$REPO_ROOT/.github/workflows/ci.yml" \
+    && grep -qF 'apps/msandbox/harness/card-control.sh' "$REPO_ROOT/.github/workflows/ci.yml" && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

@@ -3,10 +3,10 @@
 # Compose config rendering is daemonless: this test never starts containers.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-COMPOSE_FILE="$REPO_ROOT/docker-compose.sandbox.yml"
-AUTOPR_COMPOSE_FILE="$REPO_ROOT/docker-compose.autopr-sandbox.yml"
-SESSION_COMPOSE_FILE="$REPO_ROOT/docker-compose.sandbox-session.yml"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+COMPOSE_FILE="$REPO_ROOT/apps/msandbox/sandbox/docker-compose.sandbox.yml"
+AUTOPR_COMPOSE_FILE="$REPO_ROOT/apps/msandbox/sandbox/docker-compose.autopr-sandbox.yml"
+SESSION_COMPOSE_FILE="$REPO_ROOT/apps/msandbox/sandbox/docker-compose.sandbox-session.yml"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir -p "$TMP_DIR/aws"
@@ -172,23 +172,23 @@ PY
 echo "PASS: interactive sessions mount only the reviewed capability surface"
 
 if grep -qF '/home/agent/.config/opencode/opencode.json' \
-    "$REPO_ROOT/docker/agent-sandbox/Dockerfile"; then
+    "$REPO_ROOT/apps/msandbox/sandbox/Dockerfile"; then
     echo "FAIL: Dockerfile must not bake autonomous OpenCode permissions" >&2
     exit 1
 fi
 echo "PASS: agent bypass settings require an explicit per-session permission mode"
 
 grep -qF '/opt/node/bin:/usr/local/aws-cli/v2/current/bin:$PATH' \
-    "$REPO_ROOT/docker/agent-sandbox/Dockerfile"
+    "$REPO_ROOT/apps/msandbox/sandbox/Dockerfile"
 echo "PASS: login shells restore the pinned Node and AWS toolchains"
 
-grep -qF 'ARG CODEX_VERSION=0.153.4' "$REPO_ROOT/docker/agent-sandbox/Dockerfile"
-grep -qF 'ARG CLAUDE_CODE_VERSION=2.1.263' "$REPO_ROOT/docker/agent-sandbox/Dockerfile"
-grep -qF 'CODEX_VERSION: ${CODEX_VERSION:-0.153.4}' "$REPO_ROOT/docker-compose.sandbox.yml"
-grep -qF 'CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.263}' "$REPO_ROOT/docker-compose.sandbox.yml"
-grep -qF 'python3 -m scripts.msandbox.agent_versions' "$REPO_ROOT/scripts/agent-sandbox.sh"
-grep -qF 'check_for_update_on_startup = false' "$REPO_ROOT/docker/agent-sandbox/Dockerfile"
-grep -qF 'in_app_updates = false' "$REPO_ROOT/docker/agent-sandbox/Dockerfile"
+grep -qF 'ARG CODEX_VERSION=0.153.4' "$REPO_ROOT/apps/msandbox/sandbox/Dockerfile"
+grep -qF 'ARG CLAUDE_CODE_VERSION=2.1.263' "$REPO_ROOT/apps/msandbox/sandbox/Dockerfile"
+grep -qF 'CODEX_VERSION: ${CODEX_VERSION:-0.153.4}' "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.sandbox.yml"
+grep -qF 'CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.263}' "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.sandbox.yml"
+grep -qF 'python3 -m apps.msandbox.cli.agent_versions' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh"
+grep -qF 'check_for_update_on_startup = false' "$REPO_ROOT/apps/msandbox/sandbox/Dockerfile"
+grep -qF 'in_app_updates = false' "$REPO_ROOT/apps/msandbox/sandbox/Dockerfile"
 echo "PASS: the immutable sandbox centrally manages Codex CLI updates"
 
 grep -qF 'VITE_HOST_ARGS="--host 127.0.0.1"' "$REPO_ROOT/scripts/dev-remote.sh"

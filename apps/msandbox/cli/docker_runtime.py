@@ -31,7 +31,7 @@ IMAGE_REPOSITORY = "matcha-agent-sandbox-workspace"
 BUILDER_NAME = "matcha-msandbox"
 DEFAULT_BUILD_CACHE_MAX = "2GB"
 BUILDER_BOOTSTRAP_TIMEOUT_S = 45
-BROWSER_DOCKERFILE = "docker/agent-sandbox/Dockerfile.browser"
+BROWSER_DOCKERFILE = "apps/msandbox/sandbox/Dockerfile.browser"
 
 
 def compose_project(session_id: str) -> str:
@@ -101,11 +101,11 @@ def _dependency_volume(prefix: str, paths: Sequence[Path], template_id: str) -> 
 def build_context_sources(record: SessionRecord, runtime_root: Path) -> dict[str, Path]:
     """The exact file set whose bytes name this session's image."""
     return {
-        "docker/agent-sandbox/Dockerfile": runtime_root / "docker/agent-sandbox/Dockerfile",
+        "apps/msandbox/sandbox/Dockerfile": runtime_root / "apps/msandbox/sandbox/Dockerfile",
         BROWSER_DOCKERFILE: runtime_root / BROWSER_DOCKERFILE,
-        "docker/agent-sandbox/Dockerfile.dockerignore": runtime_root
-        / "docker/agent-sandbox/Dockerfile.dockerignore",
-        "docker/agent-sandbox/entrypoint.sh": runtime_root / "docker/agent-sandbox/entrypoint.sh",
+        "apps/msandbox/sandbox/Dockerfile.dockerignore": runtime_root
+        / "apps/msandbox/sandbox/Dockerfile.dockerignore",
+        "apps/msandbox/sandbox/entrypoint.sh": runtime_root / "apps/msandbox/sandbox/entrypoint.sh",
         "server/requirements.txt": record.worktree / "server/requirements.txt",
         "client/package.json": record.worktree / "client/package.json",
         "client/package-lock.json": record.worktree / "client/package-lock.json",
@@ -229,7 +229,7 @@ def compose_environment(record: SessionRecord) -> dict[str, str]:
     environment.update(
         {
             "SANDBOX_BUILD_CONTEXT": str(build_context),
-            "SANDBOX_DOCKERFILE": "docker/agent-sandbox/Dockerfile",
+            "SANDBOX_DOCKERFILE": "apps/msandbox/sandbox/Dockerfile",
             "SANDBOX_IMAGE": image,
             "SANDBOX_WORKSPACE_DIR": str(record.worktree),
             "SANDBOX_GIT_OBJECTS_DIR": str(objects_dir),
@@ -294,15 +294,20 @@ def compose_command(record: SessionRecord, *argv: str, test_services: bool = Fal
         "compose",
         "--project-name",
         record.compose_project,
+        # Compose's project directory defaults to the first --file's directory,
+        # which is where it loads `.env` and resolves `context: .`. The compose
+        # files no longer sit at the root, so pin it.
+        "--project-directory",
+        str(root),
         "--file",
-        str(root / "docker-compose.sandbox.yml"),
+        str(root / "apps/msandbox/sandbox/docker-compose.sandbox.yml"),
         "--file",
-        str(root / "docker-compose.sandbox-session.yml"),
+        str(root / "apps/msandbox/sandbox/docker-compose.sandbox-session.yml"),
     ]
     if record.dev:
-        command.extend(["--file", str(root / "docker-compose.sandbox-dev.yml")])
+        command.extend(["--file", str(root / "apps/msandbox/sandbox/docker-compose.sandbox-dev.yml")])
     if test_services:
-        command.extend(["--file", str(root / "docker-compose.sandbox-test.yml")])
+        command.extend(["--file", str(root / "apps/msandbox/sandbox/docker-compose.sandbox-test.yml")])
     return [*command, *argv]
 
 

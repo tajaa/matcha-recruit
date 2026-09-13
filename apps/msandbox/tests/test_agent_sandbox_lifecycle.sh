@@ -3,8 +3,8 @@
 # launchd, tmux, GitHub, or the user's persistent state.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-MSANDBOX="$REPO_ROOT/scripts/agent-sandbox.sh"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+MSANDBOX="$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir -p "$TMP_DIR/bin" "$TMP_DIR/runtime" "$TMP_DIR/workspace" "$TMP_DIR/empty-aws"
@@ -53,6 +53,7 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --project-name) project="$2"; shift 2 ;;
         --file) shift 2 ;;
+        --project-directory) shift 2 ;;
         *) break ;;
     esac
 done

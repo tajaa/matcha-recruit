@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 AUDIT_FILE="${1:?usage: investigate.sh AUDIT REPORT DECISION}"
 REPORT_FILE="${2:?usage: investigate.sh AUDIT REPORT DECISION}"
 DECISION_FILE="${3:?usage: investigate.sh AUDIT REPORT DECISION}"
@@ -15,7 +15,7 @@ for output_file in "$REPORT_FILE" "$DECISION_FILE"; do
     rm -f "$output_file"
 done
 
-SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$REPO_ROOT/scripts/kanban-autopr/run-codex-sandboxed.sh}"
+SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$REPO_ROOT/apps/msandbox/harness/run-codex-sandboxed.sh}"
 [ -x "$SANDBOX_RUNNER" ] || { echo "sandbox runner is unavailable: $SANDBOX_RUNNER" >&2; exit 1; }
 LIVE_LOG="${AUTOPR_LIVE_LOG:-$HOME/Library/Logs/matcha-kanban-autopr-live.log}"
 live_log_ready=false
@@ -35,7 +35,7 @@ run_model() {
     # apply-time denylist (scripts/, docker/, …) would reject every repair.
     # Narrow it to what publish.sh's sealed allowlist can never accept anyway.
     env -u GH_TOKEN -u GITHUB_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
-        AUTOPR_SANDBOX_PATH_DENY_RE='^(\.github/|deploy/|secrets/|\.githooks/|(.*/)?\.env[^/]*$|scripts/autopr-self-audit/)' \
+        AUTOPR_SANDBOX_PATH_DENY_RE='^(\.github/|deploy/|secrets/|\.githooks/|(.*/)?\.env[^/]*$|apps/msandbox/self-audit/)' \
         AUTOPR_CODEX_MODEL=gpt-5.6-sol \
         AUTOPR_CODEX_REASONING_EFFORT=medium \
         "$SANDBOX_RUNNER" "$SCRIPT_DIR/_prompt.txt" "$REPORT_FILE" "$DECISION_FILE.raw" \

@@ -2,9 +2,9 @@
 # Isolated dispatcher tests: no GitHub, launchd, board, or model access.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DISPATCHER="$REPO_ROOT/scripts/kanban-autopr/dispatch-if-idle.sh"
-TEMPLATE="$REPO_ROOT/scripts/kanban-autopr/launchd/com.matcha.kanban-autopr-dispatch.plist.in"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+DISPATCHER="$REPO_ROOT/apps/msandbox/harness/dispatch-if-idle.sh"
+TEMPLATE="$REPO_ROOT/apps/msandbox/harness/launchd/com.matcha.kanban-autopr-dispatch.plist.in"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 PASS=0
@@ -100,11 +100,11 @@ touch "$TMP_DIR/autopr-enabled"
 AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_TEST_GH_CALLS="$TMP_DIR/snapshot-gh.log" \
   AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/shared-snapshot" \
   AUTOPR_GITHUB_SNAPSHOT_TTL_SECONDS=60 \
-  "$REPO_ROOT/scripts/kanban-autopr/run-snapshot.sh" >/dev/null
+  "$REPO_ROOT/apps/msandbox/harness/run-snapshot.sh" >/dev/null
 AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_TEST_GH_CALLS="$TMP_DIR/snapshot-gh.log" \
   AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/shared-snapshot" \
   AUTOPR_GITHUB_SNAPSHOT_TTL_SECONDS=60 \
-  "$REPO_ROOT/scripts/kanban-autopr/run-snapshot.sh" >/dev/null
+  "$REPO_ROOT/apps/msandbox/harness/run-snapshot.sh" >/dev/null
 check "dashboard panes share one cached GitHub run-list request" \
   $([ "$(grep -c '^run list ' "$TMP_DIR/snapshot-gh.log")" = 1 ] && echo 0 || echo 1)
 
@@ -262,11 +262,11 @@ check "LaunchAgent plist is valid and uses the required timer" \
 # and the errors lane is checked first. Keep the plist and the value the
 # dispatcher reports to the dashboard in step.
 check "dispatcher poll interval matches the LaunchAgent tick" \
-  $(grep -q 'AUTOPR_DISPATCH_POLL_SECONDS:-60' "$REPO_ROOT/scripts/kanban-autopr/dispatch-if-idle.sh" && echo 0 || echo 1)
+  $(grep -q 'AUTOPR_DISPATCH_POLL_SECONDS:-60' "$REPO_ROOT/apps/msandbox/harness/dispatch-if-idle.sh" && echo 0 || echo 1)
 check "LaunchAgent PATH can reach the Docker Desktop CLI used by msandbox" \
   $(grep -q '<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>' "$rendered" && echo 0 || echo 1)
 
-watch_template="$REPO_ROOT/scripts/kanban-autopr/launchd/com.matcha.kanban-autopr-request-watch.plist.in"
+watch_template="$REPO_ROOT/apps/msandbox/harness/launchd/com.matcha.kanban-autopr-request-watch.plist.in"
 watch_rendered="$TMP_DIR/com.matcha.kanban-autopr-request-watch.plist"
 sed -e "s|__DISPATCHER_PATH__|$DISPATCHER|g" -e "s|__USER_HOME__|$TMP_DIR|g" \
   "$watch_template" > "$watch_rendered"
@@ -280,16 +280,16 @@ check "request watcher runs the same dispatcher every minute in requested mode" 
     && grep -q '<string>--if-requested</string>' "$watch_rendered" \
     && grep -q "$DISPATCHER" "$watch_rendered" && echo 0 || echo 1)
 check "installer ships the probe and both LaunchAgents" \
-  $(grep -q 'has-run-request.sh' "$REPO_ROOT/scripts/kanban-autopr/install-launch-agent.sh" \
-    && grep -q 'WATCH_PLIST_DESTINATION' "$REPO_ROOT/scripts/kanban-autopr/install-launch-agent.sh" \
-    && grep -q 'kanban-autopr-request-watch' "$REPO_ROOT/scripts/agent-sandbox.sh" && echo 0 || echo 1)
+  $(grep -q 'has-run-request.sh' "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" \
+    && grep -q 'WATCH_PLIST_DESTINATION' "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" \
+    && grep -q 'kanban-autopr-request-watch' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" && echo 0 || echo 1)
 
 # ── one Codex login for every lane: a usage-limit exit holds all of them ──
 rm -f "$TMP_DIR/dispatches"
 mkdir -p "$TMP_DIR/state"
 printf 'ERROR: You have hit your usage limit. Try again at 5:31 AM.\n' > "$TMP_DIR/codex.log"
 AUTOPR_DISPATCH_STATE_DIR="$TMP_DIR/state" \
-  "$REPO_ROOT/scripts/kanban-autopr/codex-backoff.sh" record "$TMP_DIR/codex.log" 2>/dev/null || true
+  "$REPO_ROOT/apps/msandbox/harness/codex-backoff.sh" record "$TMP_DIR/codex.log" 2>/dev/null || true
 check "a usage-limit transcript writes the lane-wide backoff marker" \
   $(jq -e '.resume_at > now' "$TMP_DIR/state/codex-usage-limit.json" >/dev/null && echo 0 || echo 1)
 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
@@ -307,7 +307,7 @@ check "an expired backoff marker no longer blocks dispatch" \
 printf 'plain crash, no quota message\n' > "$TMP_DIR/codex-crash.log"
 rm -f "$TMP_DIR/state/codex-usage-limit.json"
 AUTOPR_DISPATCH_STATE_DIR="$TMP_DIR/state" \
-  "$REPO_ROOT/scripts/kanban-autopr/codex-backoff.sh" record "$TMP_DIR/codex-crash.log" 2>/dev/null || true
+  "$REPO_ROOT/apps/msandbox/harness/codex-backoff.sh" record "$TMP_DIR/codex-crash.log" 2>/dev/null || true
 check "an ordinary Codex crash writes no backoff marker" \
   $([ ! -e "$TMP_DIR/state/codex-usage-limit.json" ] && echo 0 || echo 1)
 
@@ -355,7 +355,7 @@ check "an oversized dispatch log is rotated once before the next event" \
   $([ -s "$TMP_DIR/log.jsonl.1" ] && [ "$(wc -c < "$TMP_DIR/log.jsonl" | tr -d ' ')" -lt 500 ] && echo 0 || echo 1)
 
 # ── GitHub-side floor: the workflow refuses a hot re-dispatch on its own ──
-GUARD="$REPO_ROOT/scripts/kanban-autopr/hot-redispatch-guard.sh"
+GUARD="$REPO_ROOT/apps/msandbox/harness/hot-redispatch-guard.sh"
 cat > "$TMP_DIR/gh-guard" <<'EOF'
 #!/usr/bin/env bash
 [ "${AUTOPR_TEST_GUARD_FAIL:-0}" = 0 ] || exit 1
@@ -387,21 +387,21 @@ check "the Kanban workflow runs the guard before any board or production read" \
     && grep -q "if: steps.guard.outputs.proceed == 'true'" "$REPO_ROOT/.github/workflows/kanban-autopr.yml" \
     && echo 0 || echo 1)
 check "installer ships the backoff helper next to the dispatcher" \
-  $(grep -q 'codex-backoff.sh' "$REPO_ROOT/scripts/kanban-autopr/install-launch-agent.sh" && echo 0 || echo 1)
+  $(grep -q 'codex-backoff.sh' "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" && echo 0 || echo 1)
 
 # The installed tree is the one launchd and the dashboard actually run. A helper
 # that an installed script shells out to by $SCRIPT_DIR path, but that the
 # installer never copies, fails quietly there and nowhere else: collect-pr-context.sh
 # and plan.py were both missing for days while the dashboard silently served a
 # stale cached PR pane under a red DEGRADED banner.
-installer_sh="$REPO_ROOT/scripts/kanban-autopr/install-launch-agent.sh"
+installer_sh="$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh"
 installed_names="$(sed -n '/^install_runtime()/,/^}/p' "$installer_sh" \
   | grep -oE '[A-Za-z0-9_.-]+\.(sh|py)' | sort -u)"
 missing_helpers=""
 for installed in $installed_names; do
-  [ -f "$REPO_ROOT/scripts/kanban-autopr/$installed" ] || continue
+  [ -f "$REPO_ROOT/apps/msandbox/harness/$installed" ] || continue
   for referenced in $(grep -ohE '\$SCRIPT_DIR/[A-Za-z0-9_.-]+\.(sh|py)' \
-      "$REPO_ROOT/scripts/kanban-autopr/$installed" 2>/dev/null | sed 's|.*/||' | sort -u); do
+      "$REPO_ROOT/apps/msandbox/harness/$installed" 2>/dev/null | sed 's|.*/||' | sort -u); do
     printf '%s\n' "$installed_names" | grep -qx "$referenced" \
       || missing_helpers="$missing_helpers $referenced"
   done
@@ -496,7 +496,7 @@ check "a tick with the sandbox back clears the off marker" \
   $([ ! -e "$TMP_DIR/state/notified-off" ] && echo 0 || echo 1)
 
 # The status-bar segment every agent session shows: file reads only.
-SEGMENT="$REPO_ROOT/scripts/kanban-autopr/status-segment.sh"
+SEGMENT="$REPO_ROOT/apps/msandbox/harness/status-segment.sh"
 mkdir -p "$TMP_DIR/seg-state" "$TMP_DIR/seg-github" "$TMP_DIR/seg-worktree"
 seg() {
   AUTOPR_SEGMENT_PLAIN=1 AUTOPR_ENABLE_FILE="$TMP_DIR/seg-enabled" \
@@ -525,7 +525,7 @@ git -C "$TMP_DIR/seg-worktree" init -q && git -C "$TMP_DIR/seg-worktree" checkou
 check "status segment names the running lane, its age, and the card being worked" \
   $([ "$(seg)" = "AUTOPR ▶ KANBAN 12m · Auto-map timezone when a" ] && echo 0 || echo 1)
 check "installer ships the status segment next to the dispatcher" \
-  $(grep -q 'status-segment.sh' "$REPO_ROOT/scripts/kanban-autopr/install-launch-agent.sh" && echo 0 || echo 1)
+  $(grep -q 'status-segment.sh' "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

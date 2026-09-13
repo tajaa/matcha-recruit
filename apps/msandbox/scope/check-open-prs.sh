@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # its budget. Same env override the other control-root scripts use; the
 # fallback keeps in-workspace callers (silent-error-autofix.yml,
 # error-autofix/reconcile.sh) unchanged.
-REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
 

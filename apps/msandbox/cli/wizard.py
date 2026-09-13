@@ -226,7 +226,7 @@ def next_session_name(
 
 
 def _legacy_script(repo: Path) -> Path:
-    script = repo / "scripts/agent-sandbox.sh"
+    script = repo / "apps/msandbox/bin/agent-sandbox.sh"
     if not script.is_file() or not os.access(script, os.X_OK):
         raise RuntimeError(f"legacy workspace launcher is unavailable: {script}")
     return script

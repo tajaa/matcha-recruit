@@ -9,7 +9,7 @@ PLAN="${1:?usage: write-content.sh PLAN PRODUCTION_CONTEXT OUTPUT REPORT}"
 PRODUCTION_CONTEXT="${2:?missing production context}"
 OUTPUT="${3:?missing output path}"
 REPORT="${4:?missing report path}"
-SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$REPO_ROOT/scripts/kanban-autopr/run-codex-sandboxed.sh}"
+SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$REPO_ROOT/apps/msandbox/harness/run-codex-sandboxed.sh}"
 LIVE_LOG="${AUTOPR_LIVE_LOG:-$HOME/Library/Logs/matcha-kanban-autopr-live.log}"
 WORK_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/admin-updates-draft.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT

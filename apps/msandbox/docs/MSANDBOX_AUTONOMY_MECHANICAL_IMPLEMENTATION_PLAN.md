@@ -69,16 +69,16 @@ must not inherit any capability introduced here.
 
 Observed on 2026-09-02 from the local development schema and current `main`:
 
-- `scripts/msandbox/wizard.py` offers three coarse choices: development,
+- `apps/msandbox/cli/wizard.py` offers three coarse choices: development,
   development plus browser, or agent-only. It does not render a capability
   matrix.
-- `scripts/msandbox/cli.py::_doctor()` probes Node, npm, npx, pytest, Vitest,
+- `apps/msandbox/cli/cli.py::_doctor()` probes Node, npm, npx, pytest, Vitest,
   GitHub auth, and the Actions API. It does not probe images, the running app,
   production-test access, SSH, AWS, or the local Xcode path.
-- `scripts/msandbox/session_auth.py` safely copies agent login state and
+- `apps/msandbox/cli/session_auth.py` safely copies agent login state and
   materializes the host GitHub token, but does not provision purpose-built
   production-test credentials.
-- `scripts/msandbox/docker_runtime.py` points `SANDBOX_AWS_DIR` at the host's
+- `apps/msandbox/cli/docker_runtime.py` points `SANDBOX_AWS_DIR` at the host's
   complete `~/.aws` directory.
 - Independent sessions use detached worktrees. Untracked files such as the
   existing production PEM and `server/.env` are not present in those
@@ -87,7 +87,7 @@ Observed on 2026-09-02 from the local development schema and current `main`:
 - `docker-compose.sandbox-test.yml` already supplies isolated PostgreSQL and
   Redis for validation, but ordinary development sessions still use the
   shared host development database and Redis.
-- `scripts/msandbox/host_actions.py` has a safe target/action registry for
+- `apps/msandbox/cli/host_actions.py` has a safe target/action registry for
   Xcode, but only the operator-triggered validation path can invoke it. It
   executes `xcodebuild` as the logged-in macOS user against the live worktree.
 - Session worktrees and homes persist, and validation JSON persists, but no
@@ -213,7 +213,7 @@ credentials while waiting for the restricted identities.
 
 ## A1. Data model
 
-Add to `scripts/msandbox/models.py`:
+Add to `apps/msandbox/cli/models.py`:
 
 ```python
 CapabilityStatus = Literal["available", "unavailable", "denied"]
@@ -241,12 +241,12 @@ Do not put credentials, tokens, connection strings, PEM paths, response
 bodies, or command output containing environment values into this model.
 
 Add `last_capability_check_at` and `capability_report_path` to `SessionRecord`.
-Keep `scripts/msandbox/schemas/session-v1.json` backward compatible by making
+Keep `apps/msandbox/cli/schemas/session-v1.json` backward compatible by making
 the fields optional; old records continue to load.
 
 ## A2. Probe registry
 
-Create `scripts/msandbox/capabilities.py` with one registry and two probe
+Create `apps/msandbox/cli/capabilities.py` with one registry and two probe
 phases:
 
 - **Host probes before container start:** Docker health, local native-builder
@@ -274,11 +274,11 @@ green capability.
 ## A3. CLI and wizard
 
 - Add `msandbox capabilities SESSION [--refresh]` in
-  `scripts/msandbox/cli.py`.
+  `apps/msandbox/cli/cli.py`.
 - Replace `_doctor()`'s independent probe list with the shared registry.
   `doctor` prints details and exits nonzero for a required unavailable
   capability or a failed denial assertion.
-- In `scripts/msandbox/wizard.py`, show the cached report when a session is
+- In `apps/msandbox/cli/wizard.py`, show the cached report when a session is
   selected and refresh stale reports before `Open agent`.
 - Show the planned capabilities in the new-session confirmation screen. After
   creation, show the live report and do not open the agent until the user has
@@ -290,7 +290,7 @@ green capability.
 ## A4. Agent-visible context
 
 - Render mode-600 JSON and Markdown under the session home.
-- Extend `scripts/msandbox/agent_adapters.py` with a per-agent
+- Extend `apps/msandbox/cli/agent_adapters.py` with a per-agent
   `capability_context_args()` implementation using a documented, supported
   system/developer prompt mechanism for Codex, Claude, and OpenCode.
 - The injected text must begin: “This capability report was measured for this
@@ -303,7 +303,7 @@ green capability.
 
 ## A5. Tests
 
-Extend `scripts/tests/test_msandbox_v2.py` to cover:
+Extend `apps/msandbox/tests/test_msandbox_v2.py` to cover:
 
 - full and partial probe reports;
 - timeout, missing executable, bad credentials, and malformed probe output;
@@ -313,7 +313,7 @@ Extend `scripts/tests/test_msandbox_v2.py` to cover:
 - the same report reaching each agent adapter; and
 - a leak probe turning the entire doctor result red.
 
-Update `scripts/tests/test_agent_sandbox_networking.sh` to assert the rendered
+Update `apps/msandbox/tests/test_agent_sandbox_networking.sh` to assert the rendered
 Compose configuration contains only the intended restricted mounts.
 
 ### PR A acceptance
@@ -458,7 +458,7 @@ generate the initial ledger, but the committed ledger resolves every table.
 
 ## C2. Schema auditor and policy generator
 
-Create `scripts/msandbox/test_tenant_schema.py` with these subcommands:
+Create `apps/msandbox/cli/test_tenant_schema.py` with these subcommands:
 
 ```text
 inventory --database-url ...
@@ -492,7 +492,7 @@ Requirements:
 After `alembic upgrade heads` on the isolated CI database, run:
 
 ```text
-python scripts/msandbox/test_tenant_schema.py validate-ledger --database-url "$DATABASE_URL"
+python apps/msandbox/cli/test_tenant_schema.py validate-ledger --database-url "$DATABASE_URL"
 ```
 
 Add it to the `automation-contracts` validation surface and CI. A PR creating a
@@ -616,7 +616,7 @@ child table.
 
 ## D4. Credential bootstrap
 
-Add `scripts/msandbox/bootstrap-production-test-access.sh` as a one-time,
+Add `apps/msandbox/cli/bootstrap-production-test-access.sh` as a one-time,
 operator-run setup script. It may:
 
 - verify the migration is installed;
@@ -891,10 +891,10 @@ uninstall and recovery procedure.
 Add:
 
 ```text
-scripts/msandbox/native_builder_server.py
-scripts/msandbox/native_builder_client.py
-scripts/msandbox/install-native-builder.sh
-scripts/msandbox/native_builder_protocol.json
+apps/msandbox/cli/native_builder_server.py
+apps/msandbox/cli/native_builder_client.py
+apps/msandbox/cli/install-native-builder.sh
+apps/msandbox/cli/native_builder_protocol.json
 ```
 
 The request schema accepts only:
@@ -999,13 +999,13 @@ usable. It never falls back to a broader host credential.
 
 Update together:
 
-- `docs/ops/MSANDBOX_SESSIONS.md` — picker, capabilities, ordinary invocations,
+- `apps/msandbox/docs/MSANDBOX_SESSIONS.md` — picker, capabilities, ordinary invocations,
   persistence, native builds, and test-production access;
-- `docs/ops/AGENT_SANDBOX.md` — replace the current broad AWS/PEM threat model;
+- `apps/msandbox/docs/AGENT_SANDBOX.md` — replace the current broad AWS/PEM threat model;
 - `docs/ops/DB_WORKFLOW.md` — role/policy setup, schema-ledger gate, canary, and
   revocation;
 - `CLAUDE.md` — concise capability and production-test boundary summary; and
-- `scripts/msandbox/test_targets.toml` — native target/action registry and
+- `apps/msandbox/cli/test_targets.toml` — native target/action registry and
   fallback workflow names.
 
 Explicitly distinguish:

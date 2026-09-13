@@ -5,8 +5,8 @@
 # Matcha, GitHub, and Codex stubbed on PATH.
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-AUTOPR_DIR="$REPO_ROOT/scripts/kanban-autopr"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+AUTOPR_DIR="$REPO_ROOT/apps/msandbox/harness"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir -p "$TMP_DIR/bin" "$TMP_DIR/runner" "$TMP_DIR/cache"
@@ -435,7 +435,7 @@ check "with the browse grant the model is told about the capture command" \
       && echo 0 || echo 1)
 run_browse_prompt env > "$TMP_DIR/browse-prompt-off.log" 2>&1
 check "without the browse grant the model is told there is no browser, not handed a tool whose output is dropped" \
-    $(! grep -q 'server/venv/bin/python scripts/kanban-autopr/browse-capture.py' "$TMP_DIR/codex-args" \
+    $(! grep -q 'server/venv/bin/python apps/msandbox/harness/browse-capture.py' "$TMP_DIR/codex-args" \
       && grep -q 'This board is not granted browsing' "$TMP_DIR/codex-args" \
       && ! grep -q 'BROWSE_TOOL_SECTION' "$TMP_DIR/codex-args" \
       && echo 0 || echo 1)
@@ -899,14 +899,14 @@ check "select.sh stamps the registry outcome on the card it picks" \
       && echo 0 || echo 1)
 check "workflow publishes research from the trusted control root without a GitHub token" \
     $(grep -qF 'name: Publish research report' "$workflow" \
-      && grep -qF '"$AUTOPR_CONTROL_ROOT/kanban-autopr/publish-research.sh"' "$workflow" \
+      && grep -qF '"$AUTOPR_CONTROL_ROOT/harness/publish-research.sh"' "$workflow" \
       && grep -qF "steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true' && steps.select.outputs.outcome == 'artifact'" "$workflow" \
       && ! grep -qF 'AUTOPR_RUN_STARTED_AT' "$workflow" \
       && ! awk '/name: Publish research report/,/name: Cleanup/' "$workflow" | grep -qE '^[[:space:]]*GH_TOKEN:' \
       && echo 0 || echo 1)
 check "ci syntax-checks the research publisher and the self-audit runs this suite" \
-    $(grep -qF 'scripts/kanban-autopr/publish-research.sh' "$REPO_ROOT/.github/workflows/ci.yml" \
-      && grep -qF 'test_kanban_autopr_research.sh' "$REPO_ROOT/scripts/autopr-self-audit/audit.sh" \
+    $(grep -qF 'apps/msandbox/harness/publish-research.sh' "$REPO_ROOT/.github/workflows/ci.yml" \
+      && grep -qF 'test_kanban_autopr_research.sh' "$REPO_ROOT/apps/msandbox/self-audit/audit.sh" \
       && echo 0 || echo 1)
 ################################################################################
 # An ungranted board with an explicit "Run research now": the request is still

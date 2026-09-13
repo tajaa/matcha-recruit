@@ -98,7 +98,7 @@ def build_test_plan(
             )
         )
     scripts_changed = all_mode or any(
-        path.startswith(("scripts/", "docker/", ".github/")) or path.startswith("docker-compose")
+        path.startswith(("apps/", "scripts/", "docker/", ".github/")) or path.startswith("docker-compose")
         for path in paths
     )
     server_changed = all_mode or any(path.startswith("server/") for path in paths)
@@ -122,11 +122,11 @@ def build_test_plan(
             _check(
                 "automation-contracts",
                 "msandbox and AutoPR contract tests",
-                "for test in scripts/tests/test_agent_sandbox_lifecycle.sh "
-                "scripts/tests/test_agent_sandbox_networking.sh "
-                "scripts/tests/test_msandbox_attachments.sh "
-                "scripts/tests/test_msandbox_sessions.sh "
-                "scripts/tests/test_msandbox_worktrees.sh; do bash \"$test\"; done",
+                "for test in apps/msandbox/tests/test_agent_sandbox_lifecycle.sh "
+                "apps/msandbox/tests/test_agent_sandbox_networking.sh "
+                "apps/msandbox/tests/test_msandbox_attachments.sh "
+                "apps/msandbox/tests/test_msandbox_sessions.sh "
+                "apps/msandbox/tests/test_msandbox_worktrees.sh; do bash \"$test\"; done",
             )
         )
     if server_changed:

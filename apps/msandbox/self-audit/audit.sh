@@ -6,7 +6,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 JSON_FILE=""
 SUMMARY_FILE=""
 
@@ -30,12 +30,12 @@ check_core_shell_syntax() {
     while IFS= read -r file; do
         bash -n "$file" || return 1
     done < <(find \
-        "$REPO_ROOT/scripts/kanban-autopr" \
-        "$REPO_ROOT/scripts/error-autofix" \
-        "$REPO_ROOT/scripts/autopr-scope" \
+        "$REPO_ROOT/apps/msandbox/harness" \
+        "$REPO_ROOT/apps/msandbox/error-autofix" \
+        "$REPO_ROOT/apps/msandbox/scope" \
         -type f -name '*.sh' -print | sort)
-    bash -n "$REPO_ROOT/scripts/agent-sandbox.sh"
-    python3 -m compileall -q "$REPO_ROOT/scripts/msandbox"
+    bash -n "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh"
+    python3 -m compileall -q "$REPO_ROOT/apps/msandbox/cli"
 }
 
 check_compose_contract() {
@@ -46,8 +46,8 @@ check_compose_contract() {
     mkdir -p "$compose_tmp/workspace" "$compose_tmp/empty-aws"
     : > "$compose_tmp/auth.json"
     SANDBOX_WORKSPACE_DIR="$REPO_ROOT" SANDBOX_AWS_DIR="$compose_tmp/empty-aws" \
-        docker compose --project-name matcha-agent-sandbox-audit \
-        --file "$REPO_ROOT/docker-compose.sandbox.yml" config --quiet || return 1
+        docker compose --project-name matcha-agent-sandbox-audit --project-directory "$REPO_ROOT" \
+        --file "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.sandbox.yml" config --quiet || return 1
     mkdir -p "$compose_tmp/git/objects" "$compose_tmp/isolated.git" \
         "$compose_tmp/home" "$compose_tmp/attachments"
     printf 'gitdir: /msandbox-git\n' > "$compose_tmp/workspace.git"
@@ -61,15 +61,15 @@ check_compose_contract() {
         SANDBOX_CLIENT_NODE_MODULES_VOLUME=matcha-ms-audit-client \
         SANDBOX_TELLUS_NODE_MODULES_VOLUME=matcha-ms-audit-tellus \
         SANDBOX_OCEANLAB_NODE_MODULES_VOLUME=matcha-ms-audit-oceanlab \
-        docker compose --project-name matcha-msandbox-session-audit \
-        --file "$REPO_ROOT/docker-compose.sandbox.yml" \
-        --file "$REPO_ROOT/docker-compose.sandbox-session.yml" \
-        --file "$REPO_ROOT/docker-compose.sandbox-test.yml" config --quiet || return 1
+        docker compose --project-name matcha-msandbox-session-audit --project-directory "$REPO_ROOT" \
+        --file "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.sandbox.yml" \
+        --file "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.sandbox-session.yml" \
+        --file "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.sandbox-test.yml" config --quiet || return 1
     SANDBOX_WORKSPACE_DIR="$compose_tmp/workspace" SANDBOX_AWS_DIR="$compose_tmp/empty-aws" \
         SANDBOX_CODEX_AUTH_FILE="$compose_tmp/auth.json" \
-        docker compose --project-name matcha-autopr-audit \
-        --file "$REPO_ROOT/docker-compose.sandbox.yml" \
-        --file "$REPO_ROOT/docker-compose.autopr-sandbox.yml" config --quiet || return 1
+        docker compose --project-name matcha-autopr-audit --project-directory "$REPO_ROOT" \
+        --file "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.sandbox.yml" \
+        --file "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.autopr-sandbox.yml" config --quiet || return 1
 }
 
 check_local_schema_state() {
@@ -109,7 +109,7 @@ check_local_schema_state() {
 check_control_plane_state() {
     command -v docker >/dev/null 2>&1 || return 77
     docker info >/dev/null 2>&1 || return 77
-    "$REPO_ROOT/scripts/agent-sandbox.sh" autopr-ready || {
+    "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" autopr-ready || {
         echo "AutoPR control plane is not fully ready. Run msandbox status, then msandbox start."
         return 1
     }
@@ -165,7 +165,7 @@ check_installed_controller() {
 # machine is not the clock the repo describes: on 2026-09-06 the installed
 # scheduler still ran every 60 s with no request watcher and re-fired a
 # no-op Kanban run every 66 s for hours. Nothing reported it. This is
-# operator-repairable only (`./scripts/kanban-autopr/install-launch-agent.sh`).
+# operator-repairable only (`./apps/msandbox/harness/install-launch-agent.sh`).
 check_installed_dispatcher() {
     local install_root="${AUTOPR_DISPATCH_INSTALL_ROOT:-$HOME/.local/share/matcha-kanban-autopr}"
     local agents_dir="${AUTOPR_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
@@ -176,7 +176,7 @@ check_installed_dispatcher() {
                 codex-backoff.sh lib.sh; do
         if [ ! -f "$install_root/$name" ]; then
             missing+=("$name")
-        elif ! cmp -s "$install_root/$name" "$REPO_ROOT/scripts/kanban-autopr/$name"; then
+        elif ! cmp -s "$install_root/$name" "$REPO_ROOT/apps/msandbox/harness/$name"; then
             stale+=("$name")
         fi
     done
@@ -197,7 +197,7 @@ check_installed_dispatcher() {
     [ "${#missing[@]}" -eq 0 ] || echo "Installed dispatcher files missing: ${missing[*]}"
     local problem
     for problem in "${problems[@]+"${problems[@]}"}"; do echo "$problem"; done
-    echo "Operator action: run ./scripts/kanban-autopr/install-launch-agent.sh (or msandbox install) to reinstall the scheduler and watcher from this checkout."
+    echo "Operator action: run ./apps/msandbox/harness/install-launch-agent.sh (or msandbox install) to reinstall the scheduler and watcher from this checkout."
     return 1
 }
 

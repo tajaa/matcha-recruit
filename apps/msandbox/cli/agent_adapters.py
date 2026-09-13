@@ -173,12 +173,12 @@ def autopr_status_segment_command() -> str | None:
     The installed dispatcher tree is preferred so a session shows the same
     state the LaunchAgent acts on; the repo copy covers a checkout that has
     not been installed yet. The release tree never carries it: releases copy
-    only ``scripts/msandbox``.
+    only ``apps/msandbox/cli``.
     """
     candidates = [Path.home() / ".local/share/matcha-kanban-autopr/status-segment.sh"]
     repo_root = os.environ.get("MATCHA_REPO_ROOT")
     if repo_root:
-        candidates.append(Path(repo_root) / "scripts/kanban-autopr/status-segment.sh")
+        candidates.append(Path(repo_root) / "apps/msandbox/harness/status-segment.sh")
     for candidate in candidates:
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return str(candidate)
@@ -221,7 +221,7 @@ def ensure_agent_pane_controls(record: SessionRecord) -> None:
     )
     # The AutoPR observer and every agent session share one tmux server, so
     # one server-global key toggles between them. Same binding as
-    # scripts/kanban-autopr/ensure-dashboard.sh; bind-key replaces, so
+    # apps/msandbox/harness/ensure-dashboard.sh; bind-key replaces, so
     # re-applying it on every session start is harmless.
     subprocess.run(
         [

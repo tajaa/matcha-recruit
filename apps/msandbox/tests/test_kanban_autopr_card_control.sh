@@ -3,8 +3,8 @@
 # unstick ordering, and the cancel-run sequence. No board, GitHub, or runner.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-CONTROL="$REPO_ROOT/scripts/kanban-autopr/card-control.sh"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+CONTROL="$REPO_ROOT/apps/msandbox/harness/card-control.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir -p "$TMP_DIR/bin" "$TMP_DIR/worktree"
@@ -179,8 +179,8 @@ check "cancel-run cancels the Kanban run, waits, then unsticks and holds the run
     && grep -q '^cancelled run #901$' <<< "$out" && echo 0 || echo 1)
 
 check "installer ships card-control.sh and its hand-off helper next to the dispatcher" \
-  $(grep -q 'card-control.sh' "$REPO_ROOT/scripts/kanban-autopr/install-launch-agent.sh" \
-    && grep -q 'queue-handoff.sh' "$REPO_ROOT/scripts/kanban-autopr/install-launch-agent.sh" && echo 0 || echo 1)
+  $(grep -q 'card-control.sh' "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" \
+    && grep -q 'queue-handoff.sh' "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" && echo 0 || echo 1)
 
 out="$(run_control log bbbb0000)"
 check "log lists the card's run journals newest first, prints the newest, the ledger, and checkpoints" \

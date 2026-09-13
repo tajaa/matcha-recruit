@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for scripts/kanban-autopr/*.sh. Source, don't execute.
+# Shared helpers for apps/msandbox/harness/*.sh. Source, don't execute.
 set -uo pipefail
 
 KANBAN_AUTOPR_PROD_API_URL="https://hey-matcha.com/api"
@@ -11,7 +11,7 @@ die() {
 }
 
 # Sources ~/.config/matcha-autopr/env (chmod 600, never committed, never a
-# GitHub secret — see docs/ops/KANBAN_AUTOPR.md) and hard-fails on any
+# GitHub secret — see apps/msandbox/docs/KANBAN_AUTOPR.md) and hard-fails on any
 # missing key, mirroring error-autofix's fail-loud posture on missing
 # SSH_KEY.
 _kanban_autopr_load_env() {
@@ -313,7 +313,7 @@ autopr_migration_draft_errors() {
         # Intentional word splitting: AUTOPR_MIGRATION_DRAFT_RE guarantees each
         # path is [A-Za-z0-9_/.] only.
         # shellcheck disable=SC2046
-        errors="$(cd "$repo_root" && python3 "$script_dir/../alembic_graph_snapshot.py" \
+        errors="$(cd "$repo_root" && python3 "$script_dir/../../../scripts/alembic_graph_snapshot.py" \
             --check-drafts server/alembic/versions $drafts 2>&1 >/dev/null || true)"
         [ -z "$errors" ] || errors="${errors}"$'\n'
     fi
@@ -536,7 +536,7 @@ autopr_strip_bookkeeping_history() {
 # publisher, not another branch in the PR path.
 #
 # autopr_kind_field MODE FIELD  → prints the value; exit 1 on an unknown pair.
-#   prompt     template under scripts/kanban-autopr/
+#   prompt     template under apps/msandbox/harness/
 #   model      Codex model for the investigation pass
 #   effort     Codex reasoning effort
 #   sandbox    extra AUTOPR_CODEX_* switches for run-codex-sandboxed.sh (an
@@ -631,7 +631,7 @@ autopr_kind_for_category() {
 # cheaper and faster half of the same idea.
 #
 # Keep the roster in sync with MODEL_CHOICES/EFFORTS in
-# scripts/msandbox/autopr_control.py and _ALLOWED_AUTOPR_MODELS in
+# apps/msandbox/cli/autopr_control.py and _ALLOWED_AUTOPR_MODELS in
 # server/app/matcha/services/matcha_work/project_task_service.py. A value from
 # here is handed to `codex --model`; an id no endpoint knows is a dead run.
 AUTOPR_RUNTIME_MODELS="gpt-5.6-sol gpt-5.6-luna gpt-6-astra gpt-5.5"

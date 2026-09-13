@@ -16,12 +16,12 @@ explicitly for each session. The CLI remains available for automation.
 unrelated devcontainer launcher elsewhere on this machine.)
 
 Parallel session, attachment, validation, PR-release, and host-only Xcode
-reference: `docs/ops/MSANDBOX_SESSIONS.md`. The broader isolation/threat model
-and legacy AutoPR control plane remain in `docs/ops/AGENT_SANDBOX.md`.
+reference: `apps/msandbox/docs/MSANDBOX_SESSIONS.md`. The broader isolation/threat model
+and legacy AutoPR control plane remain in `apps/msandbox/docs/AGENT_SANDBOX.md`.
 
 Set `INSTALL_PLAYWRIGHT_BROWSERS=true` (or `msandbox build --playwright`) to
 include an isolated Chromium binary for Playwright.
 
 Codex and Claude Code are checked against npm when msandbox starts, then baked
 into a new immutable image only when a newer release exists. See
-`docs/ops/AGENT_SANDBOX.md` for offline fallback and version-override controls.
+`apps/msandbox/docs/AGENT_SANDBOX.md` for offline fallback and version-override controls.

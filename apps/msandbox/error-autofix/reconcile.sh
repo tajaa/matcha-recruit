@@ -3,18 +3,18 @@
 # the same fix. GitHub metadata is collected before Codex runs; Codex receives
 # no credentials and writes a strict verdict to a temp file.
 #
-# Usage: GH_TOKEN=... ./scripts/error-autofix/reconcile.sh
+# Usage: GH_TOKEN=... ./apps/msandbox/error-autofix/reconcile.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
 LOOKBACK_DAYS="${AUTOFIX_RECONCILE_LOOKBACK_DAYS:-7}"
 MODEL="${AUTOFIX_RECONCILE_MODEL:-gpt-5.6-sol}"
 WORK_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/autofix-reconcile-XXXXXX")"
-SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$REPO_ROOT/scripts/kanban-autopr/run-codex-sandboxed.sh}"
+SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$REPO_ROOT/apps/msandbox/harness/run-codex-sandboxed.sh}"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 since="$(date -u -v"-${LOOKBACK_DAYS}d" +%Y-%m-%d 2>/dev/null || date -u -d "${LOOKBACK_DAYS} days ago" +%Y-%m-%d)"
@@ -37,7 +37,7 @@ while IFS= read -r draft_number; do
     gh pr diff "$draft_number" --repo "$REPO" > "$draft_diff"
     result="$WORK_DIR/open-result-$draft_number.json"
     AUTOPR_SCOPE_DEDUPE_MODE="${AUTOPR_SCOPE_DEDUPE_MODE:-enforce}" \
-        "$REPO_ROOT/scripts/autopr-scope/check-open-prs.sh" \
+        "$REPO_ROOT/apps/msandbox/scope/check-open-prs.sh" \
         --lane error --identity "draft-$draft_number" --evidence "$draft" --report "$draft" \
         --proposal-diff "$draft_diff" --exclude-pr "$draft_number" \
         --created-before "$draft_created" --output "$result"

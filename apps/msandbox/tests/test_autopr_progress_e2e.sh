@@ -18,8 +18,8 @@
 # no model call.
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-AUTOPR_DIR="$REPO_ROOT/scripts/kanban-autopr"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+AUTOPR_DIR="$REPO_ROOT/apps/msandbox/harness"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -316,7 +316,8 @@ check "the journal renders the progress log rather than 'no report was produced'
     && grep -q 'Checked off 1 checklist item' <<< "$body" && echo 0 || echo 1)
 
 check "the journal reports the checkpoint time in Pacific, converted from UTC" \
-  $(grep -qE 'saved 2026-09-1[12] [0-9]{2}:[0-9]{2} P[DS]T' <<< "$body" && echo 0 || echo 1)
+  $(grep -qE 'saved 20[0-9]{2}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} P[DS]T' <<< "$body" \
+    && ! grep -qE 'saved 20[0-9]{2}-[0-9]{2}-[0-9]{2}T' <<< "$body" && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

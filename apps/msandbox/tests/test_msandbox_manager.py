@@ -13,20 +13,20 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-from scripts.msandbox.agent_adapters import (
+from apps.msandbox.cli.agent_adapters import (
     AgentError,
     deliver_attachments,
     ensure_agent_pane_controls,
     exited_agent_output,
 )
-from scripts.msandbox.cli import run as run_cli
-from scripts.msandbox.docker_runtime import compose_command, session_home
-from scripts.msandbox.files import SandboxFile, export_file, list_files, read_file
-from scripts.msandbox.git_worktrees import dirty_fingerprint
-from scripts.msandbox.inspection import PROBE, Snapshot, inspect_session
-from scripts.msandbox.manager import manage
-from scripts.msandbox.models import Attachment, SessionSpec
-from scripts.msandbox.publication import (
+from apps.msandbox.cli.cli import run as run_cli
+from apps.msandbox.cli.docker_runtime import compose_command, session_home
+from apps.msandbox.cli.files import SandboxFile, export_file, list_files, read_file
+from apps.msandbox.cli.git_worktrees import dirty_fingerprint
+from apps.msandbox.cli.inspection import PROBE, Snapshot, inspect_session
+from apps.msandbox.cli.manager import manage
+from apps.msandbox.cli.models import Attachment, SessionSpec
+from apps.msandbox.cli.publication import (
     PublicationDraft,
     apply_draft,
     generate_copy,
@@ -34,7 +34,7 @@ from scripts.msandbox.publication import (
     save_draft,
     validate_copy,
 )
-from scripts.msandbox.sessions import (
+from apps.msandbox.cli.sessions import (
     create_session,
     reconcile_session,
     release_session,
@@ -42,18 +42,18 @@ from scripts.msandbox.sessions import (
     submit_session,
     switch_session,
 )
-from scripts.msandbox.state import load_session, save_session
-from scripts.msandbox.terminal_ui import clip, frame, mouse_key, plain
-from scripts.msandbox.tool_actions import tool_action
-from scripts.msandbox.wizard import _open_session
-from scripts.tests.test_msandbox_v2 import MsandboxTestCase, git
+from apps.msandbox.cli.state import load_session, save_session
+from apps.msandbox.cli.terminal_ui import clip, frame, mouse_key, plain
+from apps.msandbox.cli.tool_actions import tool_action
+from apps.msandbox.cli.wizard import _open_session
+from apps.msandbox.tests.test_msandbox_v2 import MsandboxTestCase, git
 
 
 class ManagerTests(MsandboxTestCase):
     def test_submenu_load_failure_has_a_back_choice(self):
         with (
-            mock.patch("scripts.msandbox.manager.list_files", side_effect=OSError("offline")),
-            mock.patch("scripts.msandbox.wizard.choose", return_value=False) as choose,
+            mock.patch("apps.msandbox.cli.manager.list_files", side_effect=OSError("offline")),
+            mock.patch("apps.msandbox.cli.wizard.choose", return_value=False) as choose,
         ):
             manage("files", self.record(), reader=lambda _: "", output=io.StringIO())
         self.assertEqual(choose.call_args.args[1][0], ("Back", False))
@@ -65,7 +65,7 @@ class ManagerTests(MsandboxTestCase):
         self.assertIn("Harness exited", screen)
 
     def test_truncated_mouse_report_does_not_block(self):
-        from scripts.msandbox.wizard import _read_terminal_key
+        from apps.msandbox.cli.wizard import _read_terminal_key
 
         read, write = os.pipe()
         try:
@@ -78,10 +78,10 @@ class ManagerTests(MsandboxTestCase):
             os.close(write)
 
     def test_validation_back_does_not_acknowledge(self):
-        from scripts.msandbox.wizard import _run_validation
+        from apps.msandbox.cli.wizard import _run_validation
 
         reader = mock.Mock()
-        with mock.patch("scripts.msandbox.wizard.choose", return_value=None):
+        with mock.patch("apps.msandbox.cli.wizard.choose", return_value=None):
             _run_validation(self.record(), reader=reader, output=io.StringIO())
         reader.assert_not_called()
 
@@ -99,7 +99,7 @@ class ManagerTests(MsandboxTestCase):
             connect.assert_not_called()
 
     def test_binary_preview_rejects_pdf_without_nuls_and_invalid_utf8(self):
-        from scripts.msandbox.files import text_preview
+        from apps.msandbox.cli.files import text_preview
 
         item = SandboxFile(self.root, Path("report.pdf"), "/report.pdf", 100)
         self.assertIsNone(text_preview(item, b"%PDF-1.4\nplain header"))
@@ -114,7 +114,7 @@ class ManagerTests(MsandboxTestCase):
         path.parent.mkdir(parents=True)
         path.write_bytes(b"abc" * 400000)
         item = list_files(record)[0]
-        with mock.patch("scripts.msandbox.files.read_file", side_effect=AssertionError("buffered")):
+        with mock.patch("apps.msandbox.cli.files.read_file", side_effect=AssertionError("buffered")):
             exported = export_file(record, item)
         self.assertEqual(exported.read_bytes(), path.read_bytes())
 
@@ -124,36 +124,36 @@ class ManagerTests(MsandboxTestCase):
         save_session(record)
         git(record.worktree, "push", "origin", f"HEAD:refs/heads/{record.target_branch}")
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
-            mock.patch("scripts.msandbox.sessions.remove_container_project"),
-            mock.patch("scripts.msandbox.sessions.remove_managed_local_branch", return_value="ref moved"),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.sessions.remove_container_project"),
+            mock.patch("apps.msandbox.cli.sessions.remove_managed_local_branch", return_value="ref moved"),
         ):
             result = release_session(record)
         self.assertTrue(result.released)
         self.assertIn("local branch retained", result.reason)
         self.assertEqual(load_session(record.id).phase, "released")
         self.assertIsNone(load_session(record.id).ports)
-        from scripts.msandbox.git_worktrees import session_git_dir
+        from apps.msandbox.cli.git_worktrees import session_git_dir
         self.assertFalse(session_git_dir(record.id).exists())
 
     def test_reconcile_skips_exclusion_repair(self):
         record = create_session(self.repo, SessionSpec("redraw", "codex", "main", start=False))
         with (
-            mock.patch("scripts.msandbox.sessions.exclude_generated_outputs") as repair,
-            mock.patch("scripts.msandbox.sessions.ensure_agent_pane_controls"),
-            mock.patch("scripts.msandbox.sessions.container_running", return_value=False),
+            mock.patch("apps.msandbox.cli.sessions.exclude_generated_outputs") as repair,
+            mock.patch("apps.msandbox.cli.sessions.ensure_agent_pane_controls"),
+            mock.patch("apps.msandbox.cli.sessions.container_running", return_value=False),
         ):
             reconcile_session(record)
         repair.assert_not_called()
 
     def test_picker_keeps_healthy_sessions_when_one_reconcile_fails(self):
-        from scripts.msandbox.wizard import run_wizard
+        from apps.msandbox.cli.wizard import run_wizard
 
         broken, healthy = self.record(), self.record("session-2")
         with (
-            mock.patch("scripts.msandbox.wizard.list_sessions", return_value=[broken, healthy]),
-            mock.patch("scripts.msandbox.wizard.reconcile_session", side_effect=[RuntimeError("broken git"), healthy]),
-            mock.patch("scripts.msandbox.wizard.choose", return_value=("exit", None)) as choose,
+            mock.patch("apps.msandbox.cli.wizard.list_sessions", return_value=[broken, healthy]),
+            mock.patch("apps.msandbox.cli.wizard.reconcile_session", side_effect=[RuntimeError("broken git"), healthy]),
+            mock.patch("apps.msandbox.cli.wizard.choose", return_value=("exit", None)) as choose,
         ):
             run_wizard(self.repo, reader=lambda _: "", output=io.StringIO())
         self.assertIn("broken git", choose.call_args.args[0])
@@ -173,7 +173,7 @@ class ManagerTests(MsandboxTestCase):
             self.skipTest("less unavailable")
         code = """
 import sys, termios
-from scripts.msandbox.manager import show
+from apps.msandbox.cli.manager import show
 before = termios.tcgetattr(0)
 try:
     show('SHORT RESULT', reader=input, output=sys.stdout)
@@ -232,7 +232,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
 
     def test_real_terminal_mouse_selects_action_and_restores_screen(self):
         master, slave = pty.openpty()
-        code = "from scripts.msandbox.wizard import choose; print('RESULT=' + choose('Sandbox', [('First', 'one'), ('Second', 'two'), ('Back', 'back')]))"
+        code = "from apps.msandbox.cli.wizard import choose; print('RESULT=' + choose('Sandbox', [('First', 'one'), ('Second', 'two'), ('Back', 'back')]))"
         child = subprocess.Popen(
             [sys.executable, "-c", code], stdin=slave, stdout=slave, stderr=slave
         )
@@ -268,10 +268,10 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         auth.write_text("{}")
         with (
             mock.patch(
-                "scripts.msandbox.publication.Path.home", return_value=self.root
+                "apps.msandbox.cli.publication.Path.home", return_value=self.root
             ),
             mock.patch(
-                "scripts.msandbox.publication.subprocess.run",
+                "apps.msandbox.cli.publication.subprocess.run",
                 return_value=subprocess.CompletedProcess([], 1, "", "failed"),
             ) as run,
             self.assertRaises(RuntimeError),
@@ -344,7 +344,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         self.assertNotIn("\x1b", plain("file\x1b]52;c;secret\a"))
 
     def test_legacy_mouse_payload_cannot_become_navigation_keys(self):
-        from scripts.msandbox.wizard import _read_terminal_key
+        from apps.msandbox.cli.wizard import _read_terminal_key
 
         read_fd, write_fd = os.pipe()
         try:
@@ -376,7 +376,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
                 )
             return subprocess.CompletedProcess(argv, 1, "", "")
 
-        with mock.patch("scripts.msandbox.inspection.run", side_effect=run) as calls:
+        with mock.patch("apps.msandbox.cli.inspection.run", side_effect=run) as calls:
             snapshot = inspect_session(record)
         self.assertIsNone(snapshot.container_id)
         self.assertTrue(any("not measured" in line for line in snapshot.lines))
@@ -409,7 +409,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
                 return subprocess.CompletedProcess(argv, 0, "null\n", "")
             return subprocess.CompletedProcess(argv, 1, "", "")
 
-        with mock.patch("scripts.msandbox.inspection.run", side_effect=run):
+        with mock.patch("apps.msandbox.cli.inspection.run", side_effect=run):
             snapshot = inspect_session(self.record())
         self.assertFalse(snapshot.reliable)
         self.assertEqual(snapshot.container_id, "workspace-id")
@@ -417,7 +417,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
 
     def test_docker_error_is_unknown_not_false_health(self):
         with mock.patch(
-            "scripts.msandbox.inspection.run",
+            "apps.msandbox.cli.inspection.run",
             return_value=subprocess.CompletedProcess([], 1, "", "secret"),
         ):
             snapshot = inspect_session(self.record())
@@ -439,7 +439,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         output = io.StringIO()
         with (
             mock.patch(
-                "scripts.msandbox.inspection.inspect_session", return_value=snapshot
+                "apps.msandbox.cli.inspection.inspect_session", return_value=snapshot
             ),
             mock.patch("sys.stdout", output),
         ):
@@ -490,8 +490,8 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             Path("/workspace/.msandbox/outputs/report\nq.txt"),
         )
         with (
-            mock.patch("scripts.msandbox.agent_adapters.tmux_running") as running,
-            mock.patch("scripts.msandbox.agent_adapters.subprocess.run") as run,
+            mock.patch("apps.msandbox.cli.agent_adapters.tmux_running") as running,
+            mock.patch("apps.msandbox.cli.agent_adapters.subprocess.run") as run,
             self.assertRaisesRegex(AgentError, "control characters"),
         ):
             deliver_attachments(record, [unsafe])
@@ -511,10 +511,10 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         )
         with (
             mock.patch(
-                "scripts.msandbox.agent_adapters.tmux_running", return_value=True
+                "apps.msandbox.cli.agent_adapters.tmux_running", return_value=True
             ),
             mock.patch(
-                "scripts.msandbox.agent_adapters.subprocess.run",
+                "apps.msandbox.cli.agent_adapters.subprocess.run",
                 return_value=subprocess.CompletedProcess([], 0, "", ""),
             ) as run,
         ):
@@ -543,12 +543,12 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         record = self.record()
         completed = subprocess.CompletedProcess([], 0, "", "")
         with (
-            mock.patch("scripts.msandbox.agent_adapters._configured_panes", set()),
+            mock.patch("apps.msandbox.cli.agent_adapters._configured_panes", set()),
             mock.patch(
-                "scripts.msandbox.agent_adapters._tmux_exists", return_value=True
+                "apps.msandbox.cli.agent_adapters._tmux_exists", return_value=True
             ),
             mock.patch(
-                "scripts.msandbox.agent_adapters.subprocess.run",
+                "apps.msandbox.cli.agent_adapters.subprocess.run",
                 return_value=completed,
             ) as run,
         ):
@@ -564,13 +564,13 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         record = self.record()
         with (
             mock.patch(
-                "scripts.msandbox.agent_adapters._tmux_exists", return_value=True
+                "apps.msandbox.cli.agent_adapters._tmux_exists", return_value=True
             ),
             mock.patch(
-                "scripts.msandbox.agent_adapters.tmux_running", return_value=False
+                "apps.msandbox.cli.agent_adapters.tmux_running", return_value=False
             ),
             mock.patch(
-                "scripts.msandbox.agent_adapters.subprocess.run",
+                "apps.msandbox.cli.agent_adapters.subprocess.run",
                 return_value=subprocess.CompletedProcess(
                     [], 0, "fatal: login expired\n", ""
                 ),
@@ -590,12 +590,12 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         output = io.StringIO()
         with (
             mock.patch(
-                "scripts.msandbox.wizard.exited_agent_output",
+                "apps.msandbox.cli.wizard.exited_agent_output",
                 return_value="fatal: login expired",
             ),
-            mock.patch("scripts.msandbox.wizard.choose", side_effect=choose),
+            mock.patch("apps.msandbox.cli.wizard.choose", side_effect=choose),
             mock.patch(
-                "scripts.msandbox.wizard.reconcile_session", return_value=record
+                "apps.msandbox.cli.wizard.reconcile_session", return_value=record
             ),
         ):
             _open_session(record, reader=lambda _prompt: "", output=output)
@@ -608,7 +608,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         record = self.record()
         with (
             mock.patch(
-                "scripts.msandbox.sessions.exited_agent_output", return_value="failure"
+                "apps.msandbox.cli.sessions.exited_agent_output", return_value="failure"
             ),
             self.assertRaisesRegex(RuntimeError, "output is preserved"),
         ):
@@ -618,11 +618,11 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         record = self.record()
         save_session(record)
         with (
-            mock.patch("scripts.msandbox.sessions._ensure_isolated_git"),
+            mock.patch("apps.msandbox.cli.sessions._ensure_isolated_git"),
             mock.patch(
-                "scripts.msandbox.sessions.ensure_agent_pane_controls"
+                "apps.msandbox.cli.sessions.ensure_agent_pane_controls"
             ) as controls,
-            mock.patch("scripts.msandbox.sessions.container_running", return_value=False),
+            mock.patch("apps.msandbox.cli.sessions.container_running", return_value=False),
         ):
             reconcile_session(record, _lock_held=True)
         controls.assert_called_once_with(record)
@@ -633,8 +633,8 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         record.agent_session_id = "old-conversation"
         save_session(record)
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
-            mock.patch("scripts.msandbox.sessions.provision_session_auth") as auth,
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.sessions.provision_session_auth") as auth,
         ):
             switch_session(record, "claude")
         saved = load_session(record.id)
@@ -655,8 +655,8 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             save_session(current)
 
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session", side_effect=orphan),
-            mock.patch("scripts.msandbox.sessions.provision_session_auth") as provision,
+            mock.patch("apps.msandbox.cli.sessions.stop_session", side_effect=orphan),
+            mock.patch("apps.msandbox.cli.sessions.provision_session_auth") as provision,
             self.assertRaisesRegex(RuntimeError, "became orphaned"),
         ):
             switch_session(record, "claude")
@@ -669,9 +669,9 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         record = self.record()
         save_session(record)
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
             mock.patch(
-                "scripts.msandbox.sessions.provision_session_auth",
+                "apps.msandbox.cli.sessions.provision_session_auth",
                 side_effect=RuntimeError("login failed"),
             ),
             self.assertRaises(RuntimeError),
@@ -680,7 +680,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         self.assertEqual(load_session(record.id).agent, "codex")
 
     def test_switch_removes_only_other_logins_and_reseeds_on_return(self):
-        from scripts.msandbox.session_auth import AGENT_AUTH_FILES
+        from apps.msandbox.cli.session_auth import AGENT_AUTH_FILES
 
         record = self.record()
         save_session(record)
@@ -694,9 +694,9 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         history = home / ".codex/history.jsonl"
         history.write_text("conversation")
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
             mock.patch(
-                "scripts.msandbox.session_auth.Path.home", return_value=self.root
+                "apps.msandbox.cli.session_auth.Path.home", return_value=self.root
             ),
         ):
             for selected in ("claude", "opencode", "codex"):
@@ -716,12 +716,12 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         new_source.parent.mkdir()
         new_source.write_text("new-login")
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
             mock.patch(
-                "scripts.msandbox.session_auth.Path.home", return_value=self.root
+                "apps.msandbox.cli.session_auth.Path.home", return_value=self.root
             ),
             mock.patch(
-                "scripts.msandbox.sessions.save_session",
+                "apps.msandbox.cli.sessions.save_session",
                 side_effect=OSError("disk full"),
             ),
             self.assertRaises(OSError),
@@ -740,7 +740,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         old.write_text("old-login")
         (home / ".claude").symlink_to(self.root, target_is_directory=True)
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
             self.assertRaises(RuntimeError),
         ):
             switch_session(record, "claude")
@@ -756,8 +756,8 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         old.parent.mkdir(parents=True)
         old.symlink_to(target)
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
-            mock.patch("scripts.msandbox.sessions.provision_session_auth"),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.sessions.provision_session_auth"),
         ):
             switch_session(record, "claude")
         self.assertFalse(old.is_symlink())
@@ -771,16 +771,16 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
                     record.agent, record.pr_number = agent, pr
                     with (
                         mock.patch(
-                            "scripts.msandbox.manager.load_draft", return_value=None
+                            "apps.msandbox.cli.manager.load_draft", return_value=None
                         ),
                         mock.patch(
-                            "scripts.msandbox.wizard.choose",
+                            "apps.msandbox.cli.wizard.choose",
                             side_effect=["submit", True],
                         ),
                         mock.patch(
-                            "scripts.msandbox.manager.generate_draft"
+                            "apps.msandbox.cli.manager.generate_draft"
                         ) as generate,
-                        mock.patch("scripts.msandbox.manager.submit_session") as submit,
+                        mock.patch("apps.msandbox.cli.manager.submit_session") as submit,
                     ):
                         submit.return_value.number = 7
                         submit.return_value.url = (
@@ -813,16 +813,16 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             return next(answers)
 
         with (
-            mock.patch("scripts.msandbox.manager.load_draft", return_value=draft),
-            mock.patch("scripts.msandbox.wizard.choose", side_effect=choose),
+            mock.patch("apps.msandbox.cli.manager.load_draft", return_value=draft),
+            mock.patch("apps.msandbox.cli.wizard.choose", side_effect=choose),
             mock.patch(
-                "scripts.msandbox.git_worktrees.current_head", return_value="head"
+                "apps.msandbox.cli.git_worktrees.current_head", return_value="head"
             ),
             mock.patch(
-                "scripts.msandbox.git_worktrees.dirty_fingerprint",
+                "apps.msandbox.cli.git_worktrees.dirty_fingerprint",
                 return_value="clean",
             ),
-            mock.patch("scripts.msandbox.manager.submit_session") as submit,
+            mock.patch("apps.msandbox.cli.manager.submit_session") as submit,
         ):
             manage("publish", record, reader=lambda _: "", output=io.StringIO())
         submit.assert_not_called()
@@ -846,10 +846,10 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
 
         with (
             mock.patch(
-                "scripts.msandbox.wizard.choose",
+                "apps.msandbox.cli.wizard.choose",
                 side_effect=lambda *args, **kwargs: next(choices),
             ) as choose,
-            mock.patch("scripts.msandbox.tool_actions.ensure_container"),
+            mock.patch("apps.msandbox.cli.tool_actions.ensure_container"),
         ):
             output = io.StringIO()
             manage("browser", record, reader=reader, output=output)
@@ -884,9 +884,9 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             return ""
 
         with (
-            mock.patch("scripts.msandbox.manager.load_draft", return_value=draft),
+            mock.patch("apps.msandbox.cli.manager.load_draft", return_value=draft),
             mock.patch(
-                "scripts.msandbox.wizard.choose",
+                "apps.msandbox.cli.wizard.choose",
                 side_effect=lambda *args, **kwargs: next(choices),
             ),
         ):
@@ -916,9 +916,9 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             return next(answers)
 
         with (
-            mock.patch("scripts.msandbox.manager.load_draft", return_value=draft),
-            mock.patch("scripts.msandbox.wizard.choose", side_effect=choose),
-            mock.patch("scripts.msandbox.publication.git", return_value="M README.md"),
+            mock.patch("apps.msandbox.cli.manager.load_draft", return_value=draft),
+            mock.patch("apps.msandbox.cli.wizard.choose", side_effect=choose),
+            mock.patch("apps.msandbox.cli.publication.git", return_value="M README.md"),
         ):
             manage("publish", record, reader=lambda _: "", output=io.StringIO())
         labels = [label for _, choices in menus for label in choices]
@@ -946,8 +946,8 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         record.playwright = True
         save_session(record)
         with (
-            mock.patch("scripts.msandbox.inspection.inspect_session") as inspect,
-            mock.patch("scripts.msandbox.tool_actions.ensure_container") as start,
+            mock.patch("apps.msandbox.cli.inspection.inspect_session") as inspect,
+            mock.patch("apps.msandbox.cli.tool_actions.ensure_container") as start,
         ):
             inspect.return_value.container_id = None
             self.assertIn("already stopped", tool_action(record, "browser-stop"))
@@ -963,14 +963,14 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
                 snapshot = mock.Mock(reliable=True, container_id="workspace-id")
                 with (
                     mock.patch(
-                        "scripts.msandbox.inspection.inspect_session",
+                        "apps.msandbox.cli.inspection.inspect_session",
                         return_value=snapshot,
                     ),
                     mock.patch(
-                        "scripts.msandbox.tool_actions.ensure_container"
+                        "apps.msandbox.cli.tool_actions.ensure_container"
                     ) as start,
                     mock.patch(
-                        "scripts.msandbox.tool_actions.exec_in_session",
+                        "apps.msandbox.cli.tool_actions.exec_in_session",
                         return_value=subprocess.CompletedProcess([], 1, "", ""),
                     ),
                 ):
@@ -983,9 +983,9 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         record.playwright = True
         save_session(record)
         with (
-            mock.patch("scripts.msandbox.tool_actions.ensure_container"),
+            mock.patch("apps.msandbox.cli.tool_actions.ensure_container"),
             mock.patch(
-                "scripts.msandbox.tool_actions.exec_in_session",
+                "apps.msandbox.cli.tool_actions.exec_in_session",
                 side_effect=[
                     subprocess.CompletedProcess([], 0, "", ""),
                     subprocess.CompletedProcess([], 0, "", ""),
@@ -1001,9 +1001,9 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         save_session(record)
         url = "http://localhost:5174/?q=$(touch%20/tmp/wrong)"
         with (
-            mock.patch("scripts.msandbox.tool_actions.ensure_container"),
+            mock.patch("apps.msandbox.cli.tool_actions.ensure_container"),
             mock.patch(
-                "scripts.msandbox.tool_actions.exec_in_session",
+                "apps.msandbox.cli.tool_actions.exec_in_session",
                 return_value=subprocess.CompletedProcess([], 0, "", ""),
             ) as execute,
         ):
@@ -1044,7 +1044,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         )
         (record.worktree / "README.md").write_text("new change")
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
             self.assertRaisesRegex(RuntimeError, "changed since"),
         ):
             apply_draft(record, draft, commit=True)
@@ -1064,7 +1064,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             head,
             "clean",
         )
-        with mock.patch("scripts.msandbox.sessions.stop_session"):
+        with mock.patch("apps.msandbox.cli.sessions.stop_session"):
             apply_draft(record, draft, commit=False)
         self.assertEqual(
             git(record.worktree, "rev-parse", "codex/generated-name"), head
@@ -1088,12 +1088,12 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             head,
             "clean",
         )
-        with mock.patch("scripts.msandbox.sessions.stop_session"):
+        with mock.patch("apps.msandbox.cli.sessions.stop_session"):
             apply_draft(record, draft, commit=False)
         git(record.worktree, "push", "origin", f"HEAD:refs/heads/{draft.branch}")
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
-            mock.patch("scripts.msandbox.sessions.remove_container_project"),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.sessions.remove_container_project"),
         ):
             released = release_session(record)
         self.assertTrue(released.released)
@@ -1120,7 +1120,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             head=git(next_record.worktree, "rev-parse", "HEAD"),
             fingerprint="clean",
         )
-        with mock.patch("scripts.msandbox.sessions.stop_session"):
+        with mock.patch("apps.msandbox.cli.sessions.stop_session"):
             apply_draft(next_record, next_draft, commit=False)
         self.assertEqual(load_session(next_record.id).target_branch, draft.branch)
 
@@ -1137,7 +1137,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             git(record.worktree, "rev-parse", "HEAD"),
             "clean",
         )
-        with mock.patch("scripts.msandbox.sessions.stop_session"):
+        with mock.patch("apps.msandbox.cli.sessions.stop_session"):
             apply_draft(record, draft, commit=False)
         saved = load_session(record.id)
         self.assertEqual(saved.target_branch, draft.branch)
@@ -1168,7 +1168,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             "clean",
         )
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
             self.assertRaisesRegex(RuntimeError, "outside this session"),
         ):
             apply_draft(record, draft, commit=False)
@@ -1183,9 +1183,9 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
     def test_capability_details_use_same_report_without_refresh(self):
         record = self.record()
         with (
-            mock.patch("scripts.msandbox.wizard.choose", side_effect=["view", None]),
-            mock.patch("scripts.msandbox.manager.load_report", return_value=None),
-            mock.patch("scripts.msandbox.manager.ensure_capability_report") as measure,
+            mock.patch("apps.msandbox.cli.wizard.choose", side_effect=["view", None]),
+            mock.patch("apps.msandbox.cli.manager.load_report", return_value=None),
+            mock.patch("apps.msandbox.cli.manager.ensure_capability_report") as measure,
         ):
             output = io.StringIO()
             manage("tools", record, reader=lambda _: "", output=output)
@@ -1209,7 +1209,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
                 git(record.worktree, "rev-parse", "HEAD"),
                 dirty_fingerprint(record.worktree),
             )
-            with mock.patch("scripts.msandbox.sessions.stop_session"):
+            with mock.patch("apps.msandbox.cli.sessions.stop_session"):
                 apply_draft(record, draft, commit=True)
             self.assertEqual(
                 git(record.worktree, "rev-parse", draft.branch),
@@ -1221,7 +1221,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             )
             self.assertTrue(output.exists())
             self.assertEqual(git(record.worktree, "status", "--porcelain"), "")
-        from scripts.msandbox.git_worktrees import session_git_dir
+        from apps.msandbox.cli.git_worktrees import session_git_dir
 
         self.assertEqual(
             git(
@@ -1252,15 +1252,15 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             dirty_fingerprint(record.worktree),
         )
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
             self.assertRaisesRegex(RuntimeError, "unstage"),
         ):
             apply_draft(record, draft, commit=True)
         self.assertEqual(git(record.worktree, "rev-parse", "HEAD"), head)
 
     def test_reconcile_repairs_old_excludes_preserving_existing_rules(self):
-        from scripts.msandbox.git_worktrees import session_git_dir
-        from scripts.msandbox.sessions import _ensure_isolated_git
+        from apps.msandbox.cli.git_worktrees import session_git_dir
+        from apps.msandbox.cli.sessions import _ensure_isolated_git
 
         record = create_session(
             self.repo, SessionSpec("old", "codex", "main", start=False)
@@ -1278,7 +1278,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             self.assertTrue(path.read_text().endswith("/.msandbox/outputs/\n"))
 
     def test_exclude_repair_refuses_symlinks(self):
-        from scripts.msandbox.git_worktrees import (
+        from apps.msandbox.cli.git_worktrees import (
             exclude_generated_outputs,
             session_git_dir,
         )
@@ -1296,7 +1296,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         self.assertEqual(target.read_text(), "preserved")
 
     def test_apply_does_not_overwrite_local_ref_changed_during_commit(self):
-        from scripts.msandbox.publication import git as publication_git
+        from apps.msandbox.cli.publication import git as publication_git
 
         record = create_session(
             self.repo, SessionSpec("race", "codex", "main", start=False)
@@ -1323,8 +1323,8 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             return result
 
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
-            mock.patch("scripts.msandbox.publication.git", side_effect=race),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.publication.git", side_effect=race),
             self.assertRaises(subprocess.CalledProcessError),
         ):
             apply_draft(record, draft, commit=True)
@@ -1337,8 +1337,8 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         old.parent.mkdir(parents=True)
         old.write_bytes(b"x" * (1024 * 1024 + 1))
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
-            mock.patch("scripts.msandbox.session_auth.Path.home", return_value=self.root),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.session_auth.Path.home", return_value=self.root),
             self.assertRaisesRegex(RuntimeError, "No host claude login"),
         ):
             switch_session(record, "claude")
@@ -1356,8 +1356,8 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             path.parent.mkdir(exist_ok=True)
             path.write_text("synthetic-login")
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
-            mock.patch("scripts.msandbox.session_auth.Path.home", return_value=self.root),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.session_auth.Path.home", return_value=self.root),
         ):
             switch_session(record, "claude")
             self.assertEqual((session_home(record) / ".claude.json").stat().st_size, config.stat().st_size)
@@ -1366,7 +1366,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         self.assertEqual((session_home(record) / ".claude.json").read_bytes(), config.read_bytes())
 
     def test_failed_commit_can_redraft_and_update_existing_local_branch(self):
-        from scripts.msandbox.publication import git as publication_git
+        from apps.msandbox.cli.publication import git as publication_git
 
         record = create_session(
             self.repo, SessionSpec("retry", "codex", "main", start=False)
@@ -1387,13 +1387,13 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             return publication_git(record, *args)
 
         with (
-            mock.patch("scripts.msandbox.sessions.stop_session"),
-            mock.patch("scripts.msandbox.publication.git", side_effect=fail_commit),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.publication.git", side_effect=fail_commit),
             self.assertRaises(subprocess.CalledProcessError),
         ):
             apply_draft(record, draft, commit=True)
         draft = replace(draft, fingerprint=dirty_fingerprint(record.worktree))
-        with mock.patch("scripts.msandbox.sessions.stop_session"):
+        with mock.patch("apps.msandbox.cli.sessions.stop_session"):
             apply_draft(record, draft, commit=True)
         self.assertNotEqual(git(record.worktree, "rev-parse", "HEAD"), draft.head)
         self.assertEqual(
@@ -1402,8 +1402,8 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         )
 
     def test_commit_keeps_isolated_git_reconcilable(self):
-        from scripts.msandbox.git_worktrees import dirty_fingerprint, session_git_head
-        from scripts.msandbox.sessions import start_session
+        from apps.msandbox.cli.git_worktrees import dirty_fingerprint, session_git_head
+        from apps.msandbox.cli.sessions import start_session
 
         record = create_session(
             self.repo, SessionSpec("commit-test", "codex", "main", start=False)
@@ -1418,21 +1418,21 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             head,
             dirty_fingerprint(record.worktree),
         )
-        with mock.patch("scripts.msandbox.sessions.stop_session"):
+        with mock.patch("apps.msandbox.cli.sessions.stop_session"):
             apply_draft(record, draft, commit=True)
         updated = git(record.worktree, "rev-parse", "HEAD")
         self.assertNotEqual(updated, head)
         self.assertEqual(git(record.worktree, "rev-parse", draft.branch), updated)
         with (
-            mock.patch("scripts.msandbox.sessions.ensure_container"),
-            mock.patch("scripts.msandbox.sessions.launch_agent"),
-            mock.patch("scripts.msandbox.sessions.refresh_capability_context"),
+            mock.patch("apps.msandbox.cli.sessions.ensure_container"),
+            mock.patch("apps.msandbox.cli.sessions.launch_agent"),
+            mock.patch("apps.msandbox.cli.sessions.refresh_capability_context"),
         ):
             start_session(record)
         self.assertEqual(session_git_head(record.id), updated)
 
     def test_pr_copy_is_transmitted_verbatim_via_body_file(self):
-        from scripts.msandbox.sessions import _find_or_create_pr
+        from apps.msandbox.cli.sessions import _find_or_create_pr
 
         record = self.record()
         body = "A multiline description.\n\nLiteral `code` and $variables.\n"
@@ -1450,9 +1450,9 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
 
         with (
             mock.patch(
-                "scripts.msandbox.sessions._github_repo", return_value="example/test"
+                "apps.msandbox.cli.sessions._github_repo", return_value="example/test"
             ),
-            mock.patch("scripts.msandbox.sessions.subprocess.run", side_effect=run),
+            mock.patch("apps.msandbox.cli.sessions.subprocess.run", side_effect=run),
         ):
             number, _ = _find_or_create_pr(record, draft=True, title="Title", body=body)
         self.assertEqual(number, 7)
@@ -1464,23 +1464,23 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         head = git(record.worktree, "rev-parse", "HEAD")
         with (
             mock.patch.dict(os.environ, {"MSANDBOX_NO_VERIFY": "1"}),
-            mock.patch("scripts.msandbox.sessions.stop_session"),
+            mock.patch("apps.msandbox.cli.sessions.stop_session"),
             mock.patch(
-                "scripts.msandbox.sessions.remote_branch_sha",
+                "apps.msandbox.cli.sessions.remote_branch_sha",
                 side_effect=[None, head],
             ),
             mock.patch(
-                "scripts.msandbox.sessions.push_detached_head", return_value=head
+                "apps.msandbox.cli.sessions.push_detached_head", return_value=head
             ) as push,
             mock.patch(
-                "scripts.msandbox.sessions._find_or_create_pr",
+                "apps.msandbox.cli.sessions._find_or_create_pr",
                 side_effect=[
                     RuntimeError("gh pr edit failed"),
                     (7, "https://github.com/example/test/pull/7"),
                 ],
             ),
             mock.patch(
-                "scripts.msandbox.sessions.release_session",
+                "apps.msandbox.cli.sessions.release_session",
                 return_value=mock.Mock(released=True),
             ),
         ):

@@ -16,7 +16,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 INCIDENTS_FILE="${1:?usage: select.sh incidents.json}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
-REPO_ROOT="${AUTOFIX_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+REPO_ROOT="${AUTOFIX_REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 CACHE_DIR="${AUTOFIX_CACHE_DIR:-$HOME/.cache/matcha-autofix}"
 ATTEMPTS_DIR="$CACHE_DIR/attempts"
 mkdir -p "$ATTEMPTS_DIR"

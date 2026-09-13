@@ -24,7 +24,7 @@ VERSION_PATTERN = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_-]*$")
 
 
 def _pinned_versions(runtime_root: Path) -> dict[str, str]:
-    dockerfile = runtime_root / "docker/agent-sandbox/Dockerfile"
+    dockerfile = runtime_root / "apps/msandbox/sandbox/Dockerfile"
     contents = dockerfile.read_text(encoding="utf-8")
     versions: dict[str, str] = {}
     for environment_name, (_, argument_name) in AGENTS.items():

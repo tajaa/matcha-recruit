@@ -17,14 +17,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from scripts.msandbox.dashboard import (
+from apps.msandbox.cli.dashboard import (
     LocalDetails,
     Observations,
     _screen,
     run_dashboard,
     session_rows,
 )
-from scripts.msandbox.dashboard_view import (
+from apps.msandbox.cli.dashboard_view import (
     TABS,
     Row,
     SidebarEntry,
@@ -32,16 +32,16 @@ from scripts.msandbox.dashboard_view import (
     build_layout,
     sidebar_entries,
 )
-from scripts.msandbox.autopr_ui import live_entry
-from scripts.msandbox.inspection import Snapshot
-from scripts.msandbox.models import (
+from apps.msandbox.cli.autopr_ui import live_entry
+from apps.msandbox.cli.inspection import Snapshot
+from apps.msandbox.cli.models import (
     CapabilityReport,
     CapabilityResult,
     SessionRecord,
     ValidationReference,
     port_lines,
 )
-from scripts.msandbox.wizard import _perform_session_action, run_wizard
+from apps.msandbox.cli.wizard import _perform_session_action, run_wizard
 
 
 def record(name="414"):
@@ -110,7 +110,7 @@ class Window:
 
 class DashboardTests(unittest.TestCase):
     def test_autopr_tab_opens_without_an_independent_session(self):
-        with mock.patch("scripts.msandbox.dashboard.AutoPRFeed") as feed:
+        with mock.patch("apps.msandbox.cli.dashboard.AutoPRFeed") as feed:
             feed.return_value.runs = []
             feed.return_value.error = ""
             result, state, window = self.screen(["7", "q"], records=[])
@@ -141,7 +141,7 @@ class DashboardTests(unittest.TestCase):
             mock.patch("curses.mousemask"),
             mock.patch("curses.has_colors", return_value=False),
             mock.patch("curses.getmouse", return_value=mouse),
-            mock.patch("scripts.msandbox.dashboard.AutoPRFeed", return_value=feed),
+            mock.patch("apps.msandbox.cli.dashboard.AutoPRFeed", return_value=feed),
             mock.patch.object(observations, "request"),
             mock.patch.object(details, "ensure"),
         ):
@@ -411,9 +411,9 @@ class DashboardTests(unittest.TestCase):
             raise TypeError("bad report")
 
         with (
-            mock.patch("scripts.msandbox.dashboard.load_report", side_effect=report),
+            mock.patch("apps.msandbox.cli.dashboard.load_report", side_effect=report),
             mock.patch(
-                "scripts.msandbox.dashboard.list_files", return_value=[]
+                "apps.msandbox.cli.dashboard.list_files", return_value=[]
             ) as files,
         ):
             before = time.monotonic()
@@ -442,7 +442,7 @@ class DashboardTests(unittest.TestCase):
             return Snapshot("now", None, ())
 
         with mock.patch(
-            "scripts.msandbox.dashboard.inspect_session", side_effect=inspect
+            "apps.msandbox.cli.dashboard.inspect_session", side_effect=inspect
         ) as probe:
             observations.request(record())
             self.assertTrue(started.wait(1))
@@ -470,7 +470,7 @@ class DashboardTests(unittest.TestCase):
             return Snapshot(item.id, None, ())
 
         with mock.patch(
-            "scripts.msandbox.dashboard.inspect_session", side_effect=inspect
+            "apps.msandbox.cli.dashboard.inspect_session", side_effect=inspect
         ):
             observations.request(record("b"))
             self.assertTrue(first.wait(1))
@@ -489,7 +489,7 @@ class DashboardTests(unittest.TestCase):
     def test_unexpected_probe_exception_releases_queue(self):
         observations = Observations()
         with mock.patch(
-            "scripts.msandbox.dashboard.inspect_session", side_effect=KeyboardInterrupt
+            "apps.msandbox.cli.dashboard.inspect_session", side_effect=KeyboardInterrupt
         ):
             observations.request(record())
             deadline = time.monotonic() + 2
@@ -500,7 +500,7 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("KeyboardInterrupt", observations.snapshots["414"])
 
     def test_shared_port_renderer_is_used_by_overview(self):
-        from scripts.msandbox.models import PortSet
+        from apps.msandbox.cli.models import PortSet
 
         item = record()
         item.ports = PortSet(18001, 15174, 15191, 15201, 18080)
@@ -511,17 +511,17 @@ class DashboardTests(unittest.TestCase):
     def test_runner_hands_action_to_existing_workflow(self):
         item = record()
         with (
-            mock.patch("scripts.msandbox.dashboard.list_sessions", return_value=[item]),
-            mock.patch("scripts.msandbox.dashboard.load_session", return_value=item),
+            mock.patch("apps.msandbox.cli.dashboard.list_sessions", return_value=[item]),
+            mock.patch("apps.msandbox.cli.dashboard.load_session", return_value=item),
             mock.patch(
-                "scripts.msandbox.sessions.reconcile_session", return_value=item
+                "apps.msandbox.cli.sessions.reconcile_session", return_value=item
             ),
             mock.patch(
-                "scripts.msandbox.dashboard._terminal_screen",
+                "apps.msandbox.cli.dashboard._terminal_screen",
                 side_effect=["publish", "exit"],
             ),
             mock.patch(
-                "scripts.msandbox.wizard._perform_session_action", return_value=item
+                "apps.msandbox.cli.wizard._perform_session_action", return_value=item
             ) as action,
         ):
             self.assertEqual(run_dashboard(Path("/repo"), output=io.StringIO()), 0)
@@ -544,14 +544,14 @@ class DashboardTests(unittest.TestCase):
 
         with (
             mock.patch(
-                "scripts.msandbox.dashboard.list_sessions",
+                "apps.msandbox.cli.dashboard.list_sessions",
                 return_value=[healthy, broken],
             ),
             mock.patch(
-                "scripts.msandbox.sessions.reconcile_session", side_effect=reconcile
+                "apps.msandbox.cli.sessions.reconcile_session", side_effect=reconcile
             ),
             mock.patch(
-                "scripts.msandbox.dashboard._terminal_screen", side_effect=screen
+                "apps.msandbox.cli.dashboard._terminal_screen", side_effect=screen
             ),
         ):
             self.assertEqual(run_dashboard(Path("/repo"), output=io.StringIO()), 0)
@@ -574,18 +574,18 @@ class DashboardTests(unittest.TestCase):
 
         with (
             mock.patch(
-                "scripts.msandbox.dashboard.list_sessions",
+                "apps.msandbox.cli.dashboard.list_sessions",
                 side_effect=[[old, selected], [old, selected, new]],
             ),
             mock.patch(
-                "scripts.msandbox.sessions.reconcile_session",
+                "apps.msandbox.cli.sessions.reconcile_session",
                 side_effect=lambda item: item,
             ),
             mock.patch(
-                "scripts.msandbox.dashboard.load_session", return_value=selected
+                "apps.msandbox.cli.dashboard.load_session", return_value=selected
             ),
             mock.patch(
-                "scripts.msandbox.dashboard._terminal_screen", side_effect=screen
+                "apps.msandbox.cli.dashboard._terminal_screen", side_effect=screen
             ),
             mock.patch.object(Observations, "request"),
         ):
@@ -594,13 +594,13 @@ class DashboardTests(unittest.TestCase):
     def test_action_failure_and_global_actions_return_to_dashboard(self):
         item = record()
         with (
-            mock.patch("scripts.msandbox.dashboard.list_sessions", return_value=[item]),
-            mock.patch("scripts.msandbox.dashboard.load_session", return_value=item),
+            mock.patch("apps.msandbox.cli.dashboard.list_sessions", return_value=[item]),
+            mock.patch("apps.msandbox.cli.dashboard.load_session", return_value=item),
             mock.patch(
-                "scripts.msandbox.sessions.reconcile_session", return_value=item
+                "apps.msandbox.cli.sessions.reconcile_session", return_value=item
             ),
             mock.patch(
-                "scripts.msandbox.dashboard._terminal_screen",
+                "apps.msandbox.cli.dashboard._terminal_screen",
                 side_effect=[
                     "shell",
                     "new",
@@ -612,15 +612,15 @@ class DashboardTests(unittest.TestCase):
                 ],
             ),
             mock.patch(
-                "scripts.msandbox.wizard._perform_session_action",
+                "apps.msandbox.cli.wizard._perform_session_action",
                 side_effect=OSError("offline"),
             ),
-            mock.patch("scripts.msandbox.wizard._new_session") as new,
-            mock.patch("scripts.msandbox.wizard._open_autopr_dashboard") as autopr,
-            mock.patch("scripts.msandbox.wizard._open_legacy_workspace") as legacy,
-            mock.patch("scripts.msandbox.wizard._cleanup") as cleanup,
-            mock.patch("scripts.msandbox.wizard._acknowledge"),
-            mock.patch("scripts.msandbox.manager.show") as show,
+            mock.patch("apps.msandbox.cli.wizard._new_session") as new,
+            mock.patch("apps.msandbox.cli.wizard._open_autopr_dashboard") as autopr,
+            mock.patch("apps.msandbox.cli.wizard._open_legacy_workspace") as legacy,
+            mock.patch("apps.msandbox.cli.wizard._cleanup") as cleanup,
+            mock.patch("apps.msandbox.cli.wizard._acknowledge"),
+            mock.patch("apps.msandbox.cli.manager.show") as show,
             mock.patch.object(Observations, "request") as refresh,
         ):
             self.assertEqual(run_dashboard(Path("/repo"), output=io.StringIO()), 0)
@@ -630,17 +630,17 @@ class DashboardTests(unittest.TestCase):
 
     def test_terminal_failure_falls_back_and_interrupt_remains_usable(self):
         with (
-            mock.patch("scripts.msandbox.dashboard.list_sessions", return_value=[]),
+            mock.patch("apps.msandbox.cli.dashboard.list_sessions", return_value=[]),
             mock.patch(
-                "scripts.msandbox.dashboard._terminal_screen",
+                "apps.msandbox.cli.dashboard._terminal_screen",
                 side_effect=[curses.error(), "exit"],
             ),
         ):
             self.assertEqual(run_dashboard(Path("/repo"), output=io.StringIO()), 0)
         with (
-            mock.patch("scripts.msandbox.dashboard.list_sessions", return_value=[]),
+            mock.patch("apps.msandbox.cli.dashboard.list_sessions", return_value=[]),
             mock.patch(
-                "scripts.msandbox.dashboard._terminal_screen",
+                "apps.msandbox.cli.dashboard._terminal_screen",
                 side_effect=[curses.error(), curses.error()],
             ),
         ):
@@ -652,7 +652,7 @@ class DashboardTests(unittest.TestCase):
     def test_probe_errors_are_visible_and_do_not_block_retry(self):
         observations = Observations()
         with mock.patch(
-            "scripts.msandbox.dashboard.inspect_session",
+            "apps.msandbox.cli.dashboard.inspect_session",
             side_effect=OSError("Docker offline"),
         ):
             observations.request(record())
@@ -665,26 +665,26 @@ class DashboardTests(unittest.TestCase):
 
     def test_interrupt_outside_key_read_reopens_dashboard(self):
         with (
-            mock.patch("scripts.msandbox.dashboard.list_sessions", return_value=[]),
+            mock.patch("apps.msandbox.cli.dashboard.list_sessions", return_value=[]),
             mock.patch(
-                "scripts.msandbox.dashboard._terminal_screen",
+                "apps.msandbox.cli.dashboard._terminal_screen",
                 side_effect=[KeyboardInterrupt(), "exit"],
             ),
         ):
             self.assertEqual(run_dashboard(Path("/repo"), output=io.StringIO()), 0)
 
     def test_single_release_result_waits_for_acknowledgement(self):
-        from scripts.msandbox.models import ReleaseResult
+        from apps.msandbox.cli.models import ReleaseResult
 
         item = record()
         with (
-            mock.patch("scripts.msandbox.wizard.choose", return_value=True),
+            mock.patch("apps.msandbox.cli.wizard.choose", return_value=True),
             mock.patch(
-                "scripts.msandbox.wizard.release_session",
+                "apps.msandbox.cli.wizard.release_session",
                 return_value=ReleaseResult(True, "released"),
             ),
-            mock.patch("scripts.msandbox.wizard.reconcile_session", return_value=item),
-            mock.patch("scripts.msandbox.wizard._acknowledge") as acknowledge,
+            mock.patch("apps.msandbox.cli.wizard.reconcile_session", return_value=item),
+            mock.patch("apps.msandbox.cli.wizard._acknowledge") as acknowledge,
         ):
             _perform_session_action(
                 item, "release", reader=lambda _: "", output=io.StringIO()
@@ -695,11 +695,11 @@ class DashboardTests(unittest.TestCase):
         item = record()
         with (
             mock.patch(
-                "scripts.msandbox.wizard.exited_agent_output",
+                "apps.msandbox.cli.wizard.exited_agent_output",
                 return_value="failed login",
             ),
-            mock.patch("scripts.msandbox.wizard.choose", return_value="back"),
-            mock.patch("scripts.msandbox.wizard.start_session") as start,
+            mock.patch("apps.msandbox.cli.wizard.choose", return_value="back"),
+            mock.patch("apps.msandbox.cli.wizard.start_session") as start,
         ):
             _perform_session_action(
                 item, "open", reader=lambda _: "", output=io.StringIO()
@@ -709,10 +709,10 @@ class DashboardTests(unittest.TestCase):
     def test_single_action_does_not_build_the_classic_menu(self):
         item = record()
         with (
-            mock.patch("scripts.msandbox.wizard.exited_agent_output") as exited,
-            mock.patch("scripts.msandbox.wizard._session_menu_title") as title,
-            mock.patch("scripts.msandbox.wizard.stop_session"),
-            mock.patch("scripts.msandbox.wizard.reconcile_session", return_value=item),
+            mock.patch("apps.msandbox.cli.wizard.exited_agent_output") as exited,
+            mock.patch("apps.msandbox.cli.wizard._session_menu_title") as title,
+            mock.patch("apps.msandbox.cli.wizard.stop_session"),
+            mock.patch("apps.msandbox.cli.wizard.reconcile_session", return_value=item),
         ):
             self.assertIs(
                 _perform_session_action(
@@ -726,10 +726,10 @@ class DashboardTests(unittest.TestCase):
     def test_tty_entry_and_classic_override(self):
         with (
             mock.patch(
-                "scripts.msandbox.wizard._can_use_terminal_menu", return_value=True
+                "apps.msandbox.cli.wizard._can_use_terminal_menu", return_value=True
             ),
             mock.patch(
-                "scripts.msandbox.dashboard.run_dashboard", return_value=0
+                "apps.msandbox.cli.dashboard.run_dashboard", return_value=0
             ) as dashboard,
             mock.patch.dict(os.environ, {"MSANDBOX_UI": "dashboard"}),
         ):
@@ -737,11 +737,11 @@ class DashboardTests(unittest.TestCase):
             dashboard.assert_called_once()
         with (
             mock.patch(
-                "scripts.msandbox.wizard._can_use_terminal_menu", return_value=True
+                "apps.msandbox.cli.wizard._can_use_terminal_menu", return_value=True
             ),
-            mock.patch("scripts.msandbox.dashboard.run_dashboard") as dashboard,
-            mock.patch("scripts.msandbox.wizard.list_sessions", return_value=[]),
-            mock.patch("scripts.msandbox.wizard.choose", return_value=("exit", None)),
+            mock.patch("apps.msandbox.cli.dashboard.run_dashboard") as dashboard,
+            mock.patch("apps.msandbox.cli.wizard.list_sessions", return_value=[]),
+            mock.patch("apps.msandbox.cli.wizard.choose", return_value=("exit", None)),
             mock.patch.dict(os.environ, {"MSANDBOX_UI": "classic"}),
         ):
             self.assertEqual(run_wizard(Path("/repo")), 0)
@@ -754,8 +754,8 @@ class DashboardTests(unittest.TestCase):
         before = termios.tcgetattr(slave)
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 100, 0, 0))
         script = (
-            "from scripts.msandbox.dashboard import _terminal_screen, Observations; "
-            "from scripts.msandbox.dashboard_view import ViewState; "
+            "from apps.msandbox.cli.dashboard import _terminal_screen, Observations; "
+            "from apps.msandbox.cli.dashboard_view import ViewState; "
             "_terminal_screen([], ViewState(), Observations())"
         )
         process = subprocess.Popen(

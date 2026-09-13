@@ -2,8 +2,8 @@
 # Tests the tmux layout and the dashboard renderers without GitHub or Matcha.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-AUTOPR_DIR="$REPO_ROOT/scripts/kanban-autopr"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+AUTOPR_DIR="$REPO_ROOT/apps/msandbox/harness"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 PASS=0

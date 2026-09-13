@@ -15,7 +15,7 @@ schedule: selection dedupes against GitHub and the local attempt cache, prioriti
 and a wide lookback catches incidents missed during runner downtime without
 reinvestigating handled incidents on every pass.
 
-Pipeline (`scripts/error-autofix/`):
+Pipeline (`apps/msandbox/error-autofix/`):
 
 1. **`reconcile.sh`** — before collection, compares each open `bot/err-*` draft with
    recent, later human-merged PRs that overlap its files. Codex Sol-medium must return a
@@ -68,7 +68,7 @@ Pipeline (`scripts/error-autofix/`):
    reports test results** — that's the next script's job, and anything it writes about
    tests there is discarded. The CLI is ephemeral, ignores user config, and receives no
    GitHub, production, or Matcha credentials.
-5. **Cross-lane scope check** — `scripts/autopr-scope/check-open-prs.sh` captures the
+5. **Cross-lane scope check** — `apps/msandbox/scope/check-open-prs.sh` captures the
    uncommitted proposal with a temporary Git index, prefilters open PRs targeting
    `main` by changed-file overlap, and suppresses publication only for an exact stable
    patch-id match. Broader overlaps are untrusted public input, so they are never
@@ -114,7 +114,7 @@ It never deploys or auto-merges. A human reads the PR body and decides.
    query and, as a fallback, log collection.
 4. Add repository variables `PROD_HEALTH_URL` / `PROD_API_HEALTH_URL` for the fallback
    path's health probes. Empty skips them.
-5. Install/reinstall `scripts/kanban-autopr/install-launch-agent.sh`; that one local
+5. Install/reinstall `apps/msandbox/harness/install-launch-agent.sh`; that one local
    timer owns all three AutoPR lanes. Use `workflow_dispatch` once to verify connectivity.
 6. `server/venv` on this Mac must have `pytest` and `pytest-asyncio` installed
    alongside the app's own requirements (`verify.sh` reuses this venv rather than

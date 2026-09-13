@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir "$TMP_DIR/bin"
@@ -43,7 +43,7 @@ chmod +x "$TMP_DIR/bin/gh" "$TMP_DIR/bin/curl"
 
 PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" \
   AUTOPR_TEST_PRS="$TMP_DIR/prs.json" GITHUB_REPOSITORY=example/repo \
-  "$REPO_ROOT/scripts/kanban-autopr/verify-production-fixes.sh" \
+  "$REPO_ROOT/apps/msandbox/harness/verify-production-fixes.sh" \
   "$head_sha" matcha > "$TMP_DIR/result.json"
 
 jq -e '.processed == 2 and .passed == 1 and .manual_required == 1 and .failed == 0' \
@@ -59,7 +59,7 @@ grep -q '^pr comment 502 ' "$TMP_DIR/gh.log"
 : > "$TMP_DIR/gh.log"
 PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" \
   AUTOPR_TEST_PRS="$TMP_DIR/prs.json" GITHUB_REPOSITORY=example/repo \
-  "$REPO_ROOT/scripts/kanban-autopr/verify-production-fixes.sh" \
+  "$REPO_ROOT/apps/msandbox/harness/verify-production-fixes.sh" \
   "$head_sha" backend > "$TMP_DIR/backend-result.json"
 jq -e '.processed == 0 and .passed == 0 and .manual_required == 0 and .failed == 0' \
   "$TMP_DIR/backend-result.json" >/dev/null

@@ -30,7 +30,7 @@ Two image lineages, two update policies — keep them straight:
 - **AutoPR lanes** (Kanban, production errors, self-audit) run the
   non-content-addressed `matcha-agent-sandbox-workspace:latest`, built from
   the `CODEX_VERSION` / `CLAUDE_CODE_VERSION` pins in
-  `docker/agent-sandbox/Dockerfile`. They do **not** pick up the host-side
+  `apps/msandbox/sandbox/Dockerfile`. They do **not** pick up the host-side
   `latest` resolution; they move only when that image is rebuilt (`msandbox
   build` / `msandbox install`). The 2026-09-07 self-audit transcript showed
   Codex 0.150.1 while the Dockerfile pinned 0.153.4 for exactly this reason.
@@ -38,7 +38,7 @@ Two image lineages, two update policies — keep them straight:
 Inside every container the CLI is pinned: Codex startup checks and in-app
 updates are disabled through `/etc/codex/requirements.toml`, and the
 `/opt/node` toolchain is read-only — never run a global npm update from inside
-it (see `docs/ops/MSANDBOX_SESSIONS.md`).
+it (see `apps/msandbox/docs/MSANDBOX_SESSIONS.md`).
 
 The Dockerfile defaults are the offline fallback. If npm cannot be reached,
 msandbox uses the last successfully resolved version (or those defaults) and
@@ -48,7 +48,7 @@ specific valid release for one invocation.
 
 Every session owns a detached Git worktree, Compose project, home directory,
 tmux TUI, attachment inbox, and validation record. Multiple sessions of the
-same agent can run simultaneously. See `docs/ops/MSANDBOX_SESSIONS.md` for the
+same agent can run simultaneously. See `apps/msandbox/docs/MSANDBOX_SESSIONS.md` for the
 complete session, attachment, testing, PR-submission, and recovery workflows.
 
 ```bash
@@ -79,7 +79,7 @@ The wizard can enter the legacy workspace, open the AutoPR dashboard, resume
 agents, run validation, publish/release sessions, and preview safe cleanup.
 Typing bare `msandbox` inside a wizard-opened shell returns to the host wizard
 through a reserved shell exit status. No host command, Docker, or tmux socket is
-mounted into the container. `scripts/agent-sandbox.sh` remains the repository
+mounted into the container. `apps/msandbox/bin/agent-sandbox.sh` remains the repository
 compatibility entrypoint used by existing automation.
 
 ## What's isolated, and what isn't
@@ -152,7 +152,7 @@ Reachability is deliberately conservative:
   login — losing it costs four interactive sign-ins.
 - **Every installed release** under `~/.local/share/matcha-msandbox/releases`
   contributes its own tags, because `msandbox install --rollback` can activate
-  any of them and each carries its own `docker/agent-sandbox` copy.
+  any of them and each carries its own `apps/msandbox/sandbox` copy.
 - Dependency volumes are matched by recomputed name, never by Compose label: a
   shared content-addressed volume keeps the label of whichever project created
   it first, so a label-based sweep would delete one a live session needs.
@@ -210,7 +210,7 @@ See `scripts/xcode-build.sh` for the full target list and the existing
 `release.sh` / `release-appstore.sh` / `run-prod.sh` for signing/notarization
 and prod-tunneled runs — this wrapper doesn't reimplement those.
 
-## Legacy/control-plane command reference (`scripts/agent-sandbox.sh`)
+## Legacy/control-plane command reference (`apps/msandbox/bin/agent-sandbox.sh`)
 
 The session-oriented command reference is in `MSANDBOX_SESSIONS.md`.
 
@@ -301,7 +301,7 @@ inputs, not options exposed to the model.
 ## Kanban AutoPR lane
 
 The Kanban worker does not run Codex in the normal interactive workspace.
-`scripts/kanban-autopr/run-codex-sandboxed.sh` creates a tracked-files-only
+`apps/msandbox/harness/run-codex-sandboxed.sh` creates a tracked-files-only
 clone of the selected task branch, removes its remote, and mounts that clone in
 a dedicated msandbox project. Untracked `.env` files, PEM files, the Actions
 checkout, host home, Docker socket, GitHub token, Matcha bot password,

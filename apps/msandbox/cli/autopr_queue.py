@@ -84,7 +84,7 @@ def refresh(repo: Path) -> str:
         temporary = None
         try:
             payload = control.command(
-                ["bash", str(repo / "scripts/kanban-autopr/collect.sh")], timeout=150
+                ["bash", str(repo / "apps/msandbox/harness/collect.sh")], timeout=150
             )
             if len(payload) > 4 * 1024 * 1024 or not isinstance(
                 json.loads(payload), list
@@ -183,7 +183,7 @@ def start(task_id: str, repo: Path) -> str:
     output = control.command(
         [
             "bash",
-            str(repo / "scripts/kanban-autopr/queue-handoff.sh"),
+            str(repo / "apps/msandbox/harness/queue-handoff.sh"),
             card["project_id"],
             task_id,
         ],

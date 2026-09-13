@@ -22,13 +22,13 @@ RELEASES_TO_KEEP = 2
 # The LaunchAgent dispatcher is a second installed tree (copied by this shell
 # installer, not by a release). `msandbox install` runs it after a release swap
 # and `msandbox doctor` reports when either tree no longer matches the checkout.
-DISPATCHER_INSTALLER = "scripts/kanban-autopr/install-launch-agent.sh"
+DISPATCHER_INSTALLER = "apps/msandbox/harness/install-launch-agent.sh"
 DISPATCHER_LAUNCH_AGENT_PLIST = "Library/LaunchAgents/com.matcha.kanban-autopr-dispatch.plist"
 _INSTALLED_NAME_RE = re.compile(r"[A-Za-z0-9_.-]+\.(?:sh|py)")
 
 
 def source_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def installed_release_id(bin_dir: Path | None = None) -> str | None:
@@ -73,8 +73,11 @@ def dispatcher_installed_files(repo_root: Path | None = None) -> list[tuple[Path
     installer = root / DISPATCHER_INSTALLER
     try:
         text = installer.read_text(encoding="utf-8")
-    except OSError:
-        return []
+    except OSError as exc:
+        # An empty list here reads as "nothing installed, nothing stale", so
+        # `msandbox doctor` would print "AutoPR dispatcher: current" for a
+        # tree it could not even inspect. Say what happened instead.
+        raise InstallError(f"dispatcher installer unreadable: {installer}: {exc}") from exc
     match = re.search(r"^install_runtime\(\) \{\n(.*?)^\}", text, re.S | re.M)
     body = match.group(1) if match else text
     # Comments in that body name scripts they merely talk about; only code
@@ -83,9 +86,9 @@ def dispatcher_installed_files(repo_root: Path | None = None) -> list[tuple[Path
     body = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
     pairs: list[tuple[Path, str]] = []
     for name in sorted(set(_INSTALLED_NAME_RE.findall(body))):
-        source = root / "scripts/msandbox" / name
+        source = root / "apps/msandbox/cli" / name
         if not source.is_file():
-            source = root / "scripts/kanban-autopr" / name
+            source = root / "apps/msandbox/harness" / name
         if source.is_file():
             pairs.append((source, name))
     return pairs
@@ -132,7 +135,35 @@ def install_dispatcher(*, repo_root: Path | None = None) -> bool:
     return True
 
 
+# Everything an installed release carries, relative to the checkout. One list,
+# read by both the dirt probe and the copy step, because the two drifted apart
+# once already. The dependency manifests are here so the Dockerfile stays
+# buildable after the checkout switches branches: a Dockerfile may only COPY
+# from inside its build context, and the release IS that context.
+RELEASE_PATHS = (
+    "apps/__init__.py",
+    "apps/msandbox/__init__.py",
+    "apps/msandbox/cli",
+    "apps/msandbox/sandbox",
+    "server/requirements.txt",
+    "client/package.json",
+    "client/package-lock.json",
+    "client/tellus/package.json",
+    "client/tellus/package-lock.json",
+    "client/oceanlab/package.json",
+    "client/oceanlab/package-lock.json",
+)
+
+
 def _release_id(root: Path) -> str:
+    # `git status --porcelain -- <pathspec>` exits 0 and prints nothing for a
+    # path that does not exist, so a stale RELEASE_PATHS would silently stop
+    # noticing dirt and let a dirty checkout reuse a clean release id. Refuse.
+    missing = [relative for relative in RELEASE_PATHS if not (root / relative).exists()]
+    if missing:
+        raise InstallError(
+            "msandbox release inputs missing from the checkout: " + ", ".join(missing)
+        )
     result = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "--short=12", "HEAD"],
         check=False,
@@ -148,21 +179,7 @@ def _release_id(root: Path) -> str:
             "status",
             "--porcelain",
             "--",
-            "scripts/__init__.py",
-            "scripts/msandbox",
-            "docker-compose.sandbox.yml",
-            "docker-compose.sandbox-session.yml",
-            "docker-compose.sandbox-dev.yml",
-            "docker-compose.sandbox-test.yml",
-            "docker-compose.autopr-sandbox.yml",
-            "docker/agent-sandbox",
-            "server/requirements.txt",
-            "client/package.json",
-            "client/package-lock.json",
-            "client/tellus/package.json",
-            "client/tellus/package-lock.json",
-            "client/oceanlab/package.json",
-            "client/oceanlab/package-lock.json",
+            *RELEASE_PATHS,
         ],
         check=False,
         text=True,
@@ -171,23 +188,7 @@ def _release_id(root: Path) -> str:
     if not dirty:
         return sha
     digest = hashlib.sha256()
-    for relative in (
-        "scripts/__init__.py",
-        "scripts/msandbox",
-        "docker-compose.sandbox.yml",
-        "docker-compose.sandbox-session.yml",
-        "docker-compose.sandbox-dev.yml",
-        "docker-compose.sandbox-test.yml",
-        "docker-compose.autopr-sandbox.yml",
-        "docker/agent-sandbox",
-        "server/requirements.txt",
-        "client/package.json",
-        "client/package-lock.json",
-        "client/tellus/package.json",
-        "client/tellus/package-lock.json",
-        "client/oceanlab/package.json",
-        "client/oceanlab/package-lock.json",
-    ):
+    for relative in RELEASE_PATHS:
         candidate = root / relative
         paths = sorted(candidate.rglob("*")) if candidate.is_dir() else [candidate]
         for path in paths:
@@ -216,7 +217,7 @@ def _primary_worktree(repo_root: Path) -> Path:
         return repo_root
     common_dir = Path(result.stdout.strip())
     candidate = common_dir.parent if common_dir.name == ".git" else repo_root
-    legacy = candidate / "scripts/agent-sandbox.sh"
+    legacy = candidate / "apps/msandbox/bin/agent-sandbox.sh"
     return candidate.resolve() if legacy.is_file() else repo_root
 
 
@@ -240,11 +241,11 @@ def _write_launcher(
                 f"runtime_root={shlex.quote(str(destination))}\n"
                 f"repo_root={shlex.quote(str(repo_root))}\n"
                 f"fallback_repo_root={shlex.quote(str(fallback))}\n"
-                "run_v2() { cd \"$runtime_root\" || exit 1; exec python3 -m scripts.msandbox \"$@\"; }\n"
-                "legacy=\"$repo_root/scripts/agent-sandbox.sh\"\n"
-                "if [ ! -x \"$legacy\" ] && [ -x \"$fallback_repo_root/scripts/agent-sandbox.sh\" ]; then\n"
+                "run_v2() { cd \"$runtime_root\" || exit 1; exec python3 -m apps.msandbox.cli \"$@\"; }\n"
+                "legacy=\"$repo_root/apps/msandbox/bin/agent-sandbox.sh\"\n"
+                "if [ ! -x \"$legacy\" ] && [ -x \"$fallback_repo_root/apps/msandbox/bin/agent-sandbox.sh\" ]; then\n"
                 "  repo_root=$fallback_repo_root\n"
-                "  legacy=\"$repo_root/scripts/agent-sandbox.sh\"\n"
+                "  legacy=\"$repo_root/apps/msandbox/bin/agent-sandbox.sh\"\n"
                 "fi\n"
                 "export MATCHA_REPO_ROOT=\"$repo_root\"\n"
                 "if [ ! -x \"$legacy\" ]; then\n"
@@ -393,37 +394,20 @@ def _install_release_locked(*, repo_root: Path | None = None, bin_dir: Path | No
     else:
         temporary = Path(tempfile.mkdtemp(prefix=f".{release_id}.", dir=releases))
         try:
-            (temporary / "scripts").mkdir(parents=True)
-            shutil.copy2(root / "scripts/__init__.py", temporary / "scripts/__init__.py")
-            shutil.copytree(
-                root / "scripts/msandbox",
-                temporary / "scripts/msandbox",
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-            )
-            for compose in (
-                "docker-compose.sandbox.yml",
-                "docker-compose.sandbox-session.yml",
-                "docker-compose.sandbox-dev.yml",
-                "docker-compose.sandbox-test.yml",
-                "docker-compose.autopr-sandbox.yml",
-            ):
-                shutil.copy2(root / compose, temporary / compose)
-            shutil.copytree(root / "docker/agent-sandbox", temporary / "docker/agent-sandbox")
-            # Dockerfiles may only COPY files inside their build context. Preserve
-            # the dependency manifests in the immutable release so `msandbox`
-            # remains buildable after the source checkout switches branches.
-            for relative in (
-                "server/requirements.txt",
-                "client/package.json",
-                "client/package-lock.json",
-                "client/tellus/package.json",
-                "client/tellus/package-lock.json",
-                "client/oceanlab/package.json",
-                "client/oceanlab/package-lock.json",
-            ):
+            # The release mirrors the checkout's layout for every path in
+            # RELEASE_PATHS, so `python3 -m apps.msandbox.cli` resolves from
+            # the release root exactly as it does from the checkout, and the
+            # compose files' root-relative defaults mean the same thing there.
+            for relative in RELEASE_PATHS:
+                source = root / relative
                 target = temporary / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(root / relative, target)
+                if source.is_dir():
+                    shutil.copytree(
+                        source, target, ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
+                    )
+                else:
+                    shutil.copy2(source, target)
             manifest = {
                 "version": __version__,
                 "release": release_id,

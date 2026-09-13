@@ -47,7 +47,7 @@ SESSION_PREFIX = "matcha-ms-"
 PROTECTED_IMAGES = frozenset({f"{IMAGE_REPOSITORY}:latest"})
 
 # Compose projects that live outside the session model entirely — the legacy
-# lane plus the three AutoPR lanes (scripts/agent-sandbox.sh:59-62). They have
+# lane plus the three AutoPR lanes (apps/msandbox/bin/agent-sandbox.sh:59-62). They have
 # no SessionRecord, so nothing below can mark their volumes reachable. Chief
 # among them is matcha-agent-sandbox_sandbox_home, which holds every agent's
 # login and cannot be regenerated without four interactive sign-ins.
@@ -165,7 +165,7 @@ def runtime_roots(repo: Path) -> list[Path]:
             raise DockerError(f"cannot resolve sandbox runtime root {candidate}: {exc}") from exc
         if resolved in seen:
             continue
-        dockerfile = resolved / "docker/agent-sandbox/Dockerfile"
+        dockerfile = resolved / "apps/msandbox/sandbox/Dockerfile"
         if not dockerfile.is_file():
             raise DockerError(f"sandbox runtime root is incomplete: {dockerfile} is missing")
         seen.add(resolved)

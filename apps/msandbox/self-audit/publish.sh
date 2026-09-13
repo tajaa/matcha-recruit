@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 AUDIT_FILE="${1:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION [COMMIT_SUBJECT]}"
 DECISION_FILE="${2:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION [COMMIT_SUBJECT]}"
 REPORT_FILE="${3:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION [COMMIT_SUBJECT]}"
@@ -17,9 +17,9 @@ cd "$REPO_ROOT"
 git add --all
 changed_paths="$(git diff --cached --name-only --no-renames)"
 disallowed_paths="$(printf '%s\n' "$changed_paths" | grep -vE \
-    '^(scripts/agent-sandbox\.sh|scripts/msandbox/.*|scripts/(kanban-autopr|error-autofix|autopr-scope)/[^/]+|scripts/tests/(test_msandbox_v2\.py|test_(agent_sandbox|msandbox_|kanban_autopr|error_autofix|autopr_)[^/]*\.(sh|py))|docker/agent-sandbox/[^/]+|docker-compose\.(sandbox|sandbox-session|sandbox-dev|sandbox-test|autopr-sandbox)\.yml|docs/ops/(AGENT_SANDBOX|MSANDBOX_SESSIONS|KANBAN_AUTOPR|SILENT_ERROR_AUTOFIX)\.md)$' || true)"
-if printf '%s\n' "$changed_paths" | grep -qx 'scripts/tests/test_autopr_self_audit.sh'; then
-    disallowed_paths="${disallowed_paths}${disallowed_paths:+$'\n'}scripts/tests/test_autopr_self_audit.sh"
+    '^(apps/msandbox/(bin/[^/]+|cli/.*|sandbox/[^/]+|(harness|error-autofix|scope|self-audit)/[^/]+|tests/(test_msandbox_v2\.py|test_(agent_sandbox|msandbox_|kanban_autopr|error_autofix|autopr_)[^/]*\.(sh|py))|docs/[^/]+))$' || true)"
+if printf '%s\n' "$changed_paths" | grep -qx 'apps/msandbox/tests/test_autopr_self_audit.sh'; then
+    disallowed_paths="${disallowed_paths}${disallowed_paths:+$'\n'}apps/msandbox/tests/test_autopr_self_audit.sh"
 fi
 if [ -n "$disallowed_paths" ]; then
     echo "Self-audit repair touched a forbidden path:" >&2

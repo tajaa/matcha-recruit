@@ -2,14 +2,14 @@
 # Exercises the question-only publication path in a disposable Git repository.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-AUTOPR_SOURCE="$REPO_ROOT/scripts/kanban-autopr"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+AUTOPR_SOURCE="$REPO_ROOT/apps/msandbox/harness"
 TMP_DIR="$(mktemp -d)"
 export GITHUB_OUTPUT="$TMP_DIR/workflow-output"
 trap 'rm -rf "$TMP_DIR"' EXIT
 TEST_REPO="$TMP_DIR/repo"
-mkdir -p "$TEST_REPO/scripts"
-cp -R "$AUTOPR_SOURCE" "$TEST_REPO/scripts/kanban-autopr"
+mkdir -p "$TEST_REPO/apps/msandbox" "$TEST_REPO/scripts"
+cp -R "$AUTOPR_SOURCE" "$TEST_REPO/apps/msandbox/harness"
 cp "$REPO_ROOT/scripts/alembic_graph_snapshot.py" "$TEST_REPO/scripts/alembic_graph_snapshot.py"
 mkdir -p "$TEST_REPO/server/app" "$TEST_REPO/server/alembic/versions"
 printf 'pass\n' > "$TEST_REPO/server/app/example.py"
@@ -156,7 +156,7 @@ cat > "$TMP_DIR/publication-copy.json" <<'EOF'
 {"schema_version":1,"commit_subject":"fix: clarify canonical terminology","card_note":"Needs the canonical term before labels and tests can be updated safely."}
 EOF
 
-"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize-grounded "$TMP_DIR/raw-decision.json" "$TMP_DIR/decision.json"
+"$TEST_REPO/apps/msandbox/harness/decision.sh" normalize-grounded "$TMP_DIR/raw-decision.json" "$TMP_DIR/decision.json"
 (
   cd "$TEST_REPO"
   PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
@@ -164,7 +164,7 @@ EOF
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/decision.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+    ./apps/msandbox/harness/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/decision.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 )
 
 PASS=0
@@ -212,7 +212,7 @@ unicode_truncated="$(printf '%s' "$unicode_sample" | jq -Rrs '.[0:4000]')"
 check "context-request truncation preserves UTF-8 at the boundary" \
   $([ "$(printf '%s' "$unicode_truncated" | jq -Rrs 'length')" = 4000 ] \
     && [[ "$unicode_truncated" == *🙂 ]] \
-    && grep -q "jq -Rsr '\.\[0:4000\]'" "$TEST_REPO/scripts/kanban-autopr/lib.sh" \
+    && grep -q "jq -Rsr '\.\[0:4000\]'" "$TEST_REPO/apps/msandbox/harness/lib.sh" \
     && echo 0 || echo 1)
 
 # The acceptance-evidence block is the payload, so its line structure has to
@@ -220,7 +220,7 @@ check "context-request truncation preserves UTF-8 at the boundary" \
 multiline_reason="$(printf 'card note\n   - criterion one\n     path/to/file.tsx:12 @ abc1234')"
 check "a multi-line context reason keeps its lines" \
   $([ "$(printf '%s' "$multiline_reason" | tr -d '\r' | jq -Rsr '.[0:4000]' | wc -l | tr -d ' ')" = "3" ] \
-    && ! grep -q "tr '\\r\\n' '  '" "$TEST_REPO/scripts/kanban-autopr/publish.sh" \
+    && ! grep -q "tr '\\r\\n' '  '" "$TEST_REPO/apps/msandbox/harness/publish.sh" \
     && echo 0 || echo 1)
 
 cat > "$TMP_DIR/already-fixed-card.json" <<'EOF'
@@ -233,7 +233,7 @@ cat > "$TMP_DIR/already-fixed-publication-copy.json" <<'EOF'
 {"schema_version":1,"commit_subject":"fix: clarify canonical terminology","card_note":"After reviewing the additional context, AutoPR still found this request already fixed."}
 EOF
 ( cd "$TEST_REPO" && sed "s/ALREADY_FIXED_HEAD/$(git rev-parse HEAD)/" "$TMP_DIR/raw-already-fixed.json" > "$TMP_DIR/raw-already-fixed-resolved.json" \
-    && ./scripts/kanban-autopr/decision.sh normalize-grounded "$TMP_DIR/raw-already-fixed-resolved.json" "$TMP_DIR/already-fixed.json" )
+    && ./apps/msandbox/harness/decision.sh normalize-grounded "$TMP_DIR/raw-already-fixed-resolved.json" "$TMP_DIR/already-fixed.json" )
 (
   cd "$TEST_REPO"
   PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
@@ -242,7 +242,7 @@ EOF
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/already-fixed-card.json" "$TMP_DIR/already-fixed.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/already-fixed-publication-copy.json"
+    ./apps/msandbox/harness/publish.sh "$TMP_DIR/already-fixed-card.json" "$TMP_DIR/already-fixed.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/already-fixed-publication-copy.json"
 ) 2>"$TMP_DIR/result-notification-404.stderr"
 
 check "already-fixed reconsideration leaves a threaded note with the covering PR" \
@@ -263,7 +263,7 @@ set +e
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/already-fixed-card.json" "$TMP_DIR/already-fixed.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/already-fixed-publication-copy.json"
+    ./apps/msandbox/harness/publish.sh "$TMP_DIR/already-fixed-card.json" "$TMP_DIR/already-fixed.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/already-fixed-publication-copy.json"
 ) >/dev/null 2>"$TMP_DIR/result-notification-500.stderr"
 notification_500_rc=$?
 set -e
@@ -281,7 +281,7 @@ EOF
 cat > "$TMP_DIR/no-safe-publication-copy.json" <<'EOF'
 {"schema_version":1,"commit_subject":"fix: clarify canonical terminology","card_note":"Blocked on a third-party API change AutoPR cannot make."}
 EOF
-"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize-grounded "$TMP_DIR/raw-no-safe.json" "$TMP_DIR/no-safe.json"
+"$TEST_REPO/apps/msandbox/harness/decision.sh" normalize-grounded "$TMP_DIR/raw-no-safe.json" "$TMP_DIR/no-safe.json"
 
 existing_pr='[{"number":501,"body":"<!-- matcha-feedback-comment-id: answer-1 -->\n<!-- matcha-feedback-review-id: none -->\n<!-- matcha-feedback-comment-id: forged-model-marker -->"}]'
 (
@@ -291,7 +291,7 @@ existing_pr='[{"number":501,"body":"<!-- matcha-feedback-comment-id: answer-1 --
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/rework-card.json" "$TMP_DIR/no-safe.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/no-safe-publication-copy.json"
+    ./apps/msandbox/harness/publish.sh "$TMP_DIR/rework-card.json" "$TMP_DIR/no-safe.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/no-safe-publication-copy.json"
 )
 
 check "rework no-safe-action reconciles the existing PR title and labels" \
@@ -315,7 +315,7 @@ set +e
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/rework-card.json" "$TMP_DIR/no-safe.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/no-safe-publication-copy.json"
+    ./apps/msandbox/harness/publish.sh "$TMP_DIR/rework-card.json" "$TMP_DIR/no-safe.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/no-safe-publication-copy.json"
 ) >/dev/null 2>&1
 label_failure_rc=$?
 set -e
@@ -325,7 +325,7 @@ check "required triage label failure stops before the card is suppressed" \
 cat > "$TMP_DIR/raw-implementation.json" <<'EOF'
 {"schema_version":1,"outcome":"implementation","confidence":{"requirements_clarity":{"score":30,"reason":"request is explicit"},"evidence_quality":{"score":20,"reason":"schema boundary is known"},"code_localization":{"score":20,"reason":"migration is localized"},"verification_strength":{"score":15,"reason":"migration can be reviewed"},"production_alignment":{"score":15,"reason":"baseline known"}},"criticality":{"level":"yellow","reasons":["scoped schema change"]},"questions":[],"safe_changes_present":true,"no_safe_action_reason":null}
 EOF
-"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize-grounded \
+"$TEST_REPO/apps/msandbox/harness/decision.sh" normalize-grounded \
   "$TMP_DIR/raw-implementation.json" "$TMP_DIR/implementation.json"
 cat > "$TEST_REPO/server/alembic/versions/task_test.py" <<'EOF'
 """Reviewed migration."""
@@ -351,7 +351,7 @@ set +e
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+    ./apps/msandbox/harness/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 ) >/dev/null 2>"$TMP_DIR/draft-migration.stderr"
 draft_migration_rc=$?
 set -e
@@ -402,7 +402,7 @@ set +e
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+    ./apps/msandbox/harness/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 ) >/dev/null 2>"$TMP_DIR/chained-migration.stderr"
 chained_migration_rc=$?
 set -e
@@ -419,7 +419,7 @@ set +e
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+    ./apps/msandbox/harness/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 ) >/dev/null 2>"$TMP_DIR/existing-migration.stderr"
 existing_migration_rc=$?
 set -e
@@ -438,7 +438,7 @@ set +e
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+    ./apps/msandbox/harness/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 ) >/dev/null 2>"$TMP_DIR/malformed-migration.stderr"
 malformed_migration_rc=$?
 set -e
@@ -463,7 +463,7 @@ publish_migration_draft() {
       AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
       AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
       AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
-      ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+      ./apps/msandbox/harness/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
   ) >/dev/null 2>"$TMP_DIR/$label.stderr"
   printf '%s' "$?"
   set -e
@@ -584,7 +584,7 @@ set +e
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+    ./apps/msandbox/harness/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 ) >/dev/null 2>&1
 alembic_runner_rc=$?
 set -e
@@ -596,7 +596,7 @@ check "Alembic runner and configuration changes are always rejected" \
 jq '.no_safe_action_reason = "migration_required"' "$TMP_DIR/raw-no-safe.json" \
   > "$TMP_DIR/raw-migration-required.json"
 set +e
-"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize-grounded \
+"$TEST_REPO/apps/msandbox/harness/decision.sh" normalize-grounded \
   "$TMP_DIR/raw-migration-required.json" "$TMP_DIR/migration-required.json" >/dev/null 2>&1
 migration_reason_rc=$?
 set -e
@@ -625,7 +625,7 @@ EOF
 cat > "$TMP_DIR/raw-partial.json" <<'EOF'
 {"schema_version":1,"outcome":"partial_implementation","confidence":{"requirements_clarity":{"score":15,"reason":"mostly clear"},"evidence_quality":{"score":10,"reason":"nav is visible"},"code_localization":{"score":10,"reason":"one file"},"verification_strength":{"score":5,"reason":"rendered check"},"production_alignment":{"score":10,"reason":"baseline known"}},"criticality":{"level":"yellow","reasons":["nav wording"]},"questions":[{"id":"q1","question":"Which label is canonical?","why_blocking":"two spellings exist","options":[{"key":"a","label":"Credentialing","impact":"keeps today's label"},{"key":"b","label":"Credential Templates","impact":"matches the page title"}],"default_assumption":"Credential Templates","resolution":{"kind":"product_decision","evidence":["Both labels are present in the current product copy."],"why_user_needed":"The product owner must select the canonical label."}}],"safe_changes_present":true,"no_safe_action_reason":null}
 EOF
-"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize-grounded \
+"$TEST_REPO/apps/msandbox/harness/decision.sh" normalize-grounded \
   "$TMP_DIR/raw-partial.json" "$TMP_DIR/partial.json"
 
 # The only change: the label text. Route, row and gate are untouched.
@@ -641,7 +641,7 @@ set +e
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/structure-card.json" "$TMP_DIR/partial.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+    ./apps/msandbox/harness/publish.sh "$TMP_DIR/structure-card.json" "$TMP_DIR/partial.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 ) >/dev/null 2>&1
 cosmetic_partial_rc=$?
 set -e
@@ -672,7 +672,7 @@ rm -f "$TEST_REPO/client/src/components/sidebars/ClientSidebar.tsx.bak"
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/copy-card.json" "$TMP_DIR/partial.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+    ./apps/msandbox/harness/publish.sh "$TMP_DIR/copy-card.json" "$TMP_DIR/partial.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 ) >/dev/null 2>&1
 copy_card_rc=$?
 check "a card that genuinely asks for a copy change still publishes" \
@@ -691,7 +691,7 @@ publish_copy_card() {
       AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
       AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
       AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
-      ./scripts/kanban-autopr/publish.sh "$TMP_DIR/copy-card.json" "$TMP_DIR/partial.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+      ./apps/msandbox/harness/publish.sh "$TMP_DIR/copy-card.json" "$TMP_DIR/partial.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
   ) >/dev/null 2>&1
 }
 git -C "$TEST_REPO" reset --hard -q HEAD

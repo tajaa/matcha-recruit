@@ -6,12 +6,12 @@
 #
 # Usage: (from repo root, on the fix branch, with the fix committed)
 #   AUTOFIX_BASE_SHA=<sha captured before investigate.sh ran> \
-#     ./scripts/error-autofix/verify.sh > verification.md
+#     ./apps/msandbox/error-autofix/verify.sh > verification.md
 # Always exits 0. Sets AUTOFIX_NEW_FAILURES in $GITHUB_ENV when running in CI.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 CACHE_DIR="${AUTOFIX_CACHE_DIR:-$HOME/.cache/matcha-autofix}"
 PY312="${PY312:-/opt/homebrew/bin/python3.12}"
 mkdir -p "$CACHE_DIR"

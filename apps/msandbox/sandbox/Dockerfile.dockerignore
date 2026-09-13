@@ -12,4 +12,4 @@
 !client/tellus/package-lock.json
 !client/oceanlab/package.json
 !client/oceanlab/package-lock.json
-!docker/agent-sandbox/entrypoint.sh
+!apps/msandbox/sandbox/entrypoint.sh

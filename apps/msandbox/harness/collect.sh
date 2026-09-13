@@ -7,7 +7,7 @@
 # that user action is the durable one-run authorization. One bundle fetch per
 # project (no company-wide list endpoint — the bot's access is per-project
 # mw_project_collaborators rows, not a single company scope; see
-# docs/ops/KANBAN_AUTOPR.md).
+# apps/msandbox/docs/KANBAN_AUTOPR.md).
 #
 # Usage: ./collect.sh > cards.json
 # Always exits 0; emits `[]` if nothing matches.

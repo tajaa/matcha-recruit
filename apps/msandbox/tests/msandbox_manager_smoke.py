@@ -8,7 +8,7 @@ import shlex
 import subprocess
 import uuid
 
-from scripts.msandbox.tool_actions import BROWSER_START, CAPTURE
+from apps.msandbox.cli.tool_actions import BROWSER_START, CAPTURE
 
 
 def main():

@@ -100,7 +100,7 @@ changes.
    `server/venv/bin/python -m playwright install chromium`. The credentials,
    cookies, headers, and response bodies never enter msandbox; only a screenshot
    and bounded same-origin status signals do.
-3. Install the checkout hook in the real clone: `./scripts/kanban-autopr/install-hooks.sh`.
+3. Install the checkout hook in the real clone: `./apps/msandbox/harness/install-hooks.sh`.
 4. Upgrade the repo's GitHub webhook to also deliver `pull_request` (idempotent — safe to
    re-run against an already-installed hook): call the existing
    `POST /matcha-work/projects/{id}/github/install-webhook` admin endpoint, or re-run
@@ -109,7 +109,7 @@ changes.
 5. Ensure the host Codex CLI is authenticated with the intended ChatGPT account
    (`codex login status`). Do **not** add an API key for the
    sandbox: each run securely reuses only the host auth file.
-6. Install the local timer: `./scripts/kanban-autopr/install-launch-agent.sh`. Installation
+6. Install the local timer: `./apps/msandbox/harness/install-launch-agent.sh`. Installation
    alone leaves autonomous work OFF. Its JSONL log is
    `~/Library/Logs/matcha-kanban-autopr-dispatch.log`.
 7. Run `msandbox` or `msandbox start`. This starts the primary sandbox, enables and kicks
@@ -146,7 +146,7 @@ changes.
    (`autopr_runtime_source`) and exports the spent model/effort to the job env
    so the pause note compares against what actually ran.
    The roster lives in three places that must agree: `AUTOPR_RUNTIME_MODELS`
-   (`lib.sh`), `MODEL_CHOICES` (`scripts/msandbox/autopr_control.py`), and
+   (`lib.sh`), `MODEL_CHOICES` (`apps/msandbox/cli/autopr_control.py`), and
    `_ALLOWED_AUTOPR_MODELS` (`project_task_service.py`).
 
    **Progress.** The model appends one JSON object per step to
@@ -178,7 +178,7 @@ or new round — a machine deferral (`pause:false`) never counts as a hold and n
 carries a reason.
 
 **Run journal on the ticket.** Every run ends by attaching `autopr-run-<run id>-<ts>.md`
-to its card (`scripts/kanban-autopr/run-journal.sh`, from the `always()` Cleanup step):
+to its card (`apps/msandbox/harness/run-journal.sh`, from the `always()` Cleanup step):
 what was done (report summary, PR number, files changed from the checkpoint or the
 branch diff), what is left (decision summary and open questions), why it stopped, whether
 a resumable checkpoint exists on the runner, and the next step. A run that died in a way
@@ -262,7 +262,7 @@ queueing (`run-defer`), `run-now` records a run request and kicks the dispatcher
 `unstick` moves a stranded In Progress card back to Todo (Changes Requested when it has
 a PR) and `--hold` parks it there, and `cancel-run [--hold]` cancels the active Kanban
 workflow run and unsticks the card the runner checkout is on. All of these are
-`scripts/kanban-autopr/card-control.sh` (installed next to the dispatcher), which logs
+`apps/msandbox/harness/card-control.sh` (installed next to the dispatcher), which logs
 in as the bot and refuses ambiguous targets (exit 2). `cancel-run` deliberately leaves
 `autopr_control.py finish` to the workflow's own Cleanup step. The same actions appear as
 rows on the manager's AutoPR tab.
@@ -416,7 +416,7 @@ TTL is `AUTOPR_GITHUB_SNAPSHOT_TTL_SECONDS`; do not lower it without accounting 
 observer pane. Override `AUTOPR_RUNNER_WORKTREE` only if the Actions runner is moved.
 
 The self-audit implementation and its sealed model allowlist are documented in
-`docs/ops/AGENT_SANDBOX.md`. Manual recovery commands are `msandbox audit` and
+`apps/msandbox/docs/AGENT_SANDBOX.md`. Manual recovery commands are `msandbox audit` and
 `msandbox audit --draft`; they use the same workflow rather than creating a
 second scheduler.
 
@@ -424,8 +424,7 @@ second scheduler.
 
 Everything that runs **after** the model has touched the workspace executes from a
 snapshot of `main`, never from the checkout. The `Snapshot trusted AutoPR control plane`
-step extracts `git archive main scripts/kanban-autopr scripts/error-autofix
-scripts/autopr-scope scripts/msandbox scripts/alembic_graph_snapshot.py scripts/alembic_graph.py` into
+step extracts `git archive main apps/msandbox/harness apps/msandbox/error-autofix apps/msandbox/scope apps/msandbox/cli scripts/alembic_graph_snapshot.py scripts/alembic_graph.py` into
 `$RUNNER_TEMP/autopr-control` and exports three variables:
 
 | Variable | Value | Means |
@@ -438,7 +437,7 @@ The contract for any script the lane runs from the control root, **including one
 only reaches transitively through `$SCRIPT_DIR`**:
 
 - A repo root must come from the environment: `REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd
-  "$SCRIPT_DIR/../.." && pwd)}"` (or `AUTOPR_SANDBOX_REPO_ROOT` for the sandbox bridge).
+  "$SCRIPT_DIR/../../.." && pwd)}"` (or `AUTOPR_SANDBOX_REPO_ROOT` for the sandbox bridge).
   The fallback keeps in-workspace callers — `silent-error-autofix.yml`,
   `error-autofix/reconcile.sh` — working unchanged; that lane exports neither variable.
 - Sibling *tooling* may stay `$SCRIPT_DIR`-relative, because it is in the archive too
@@ -454,11 +453,11 @@ Both halves are enforced by case 10 of `scripts/tests/test_ci_guards.sh`, which 
 the `$AUTOPR_CONTROL_ROOT` references in the workflow plus their `$SCRIPT_DIR` closure.
 This has failed twice in production: once with the scope checker and the migration-graph
 helper referenced before they were archived, and once (2026-09-06 → 2026-09-08) with
-`autopr-scope/check-open-prs.sh` resolving `$SCRIPT_DIR/../..` from the control root, so
+`autopr-scope/check-open-prs.sh` resolving `$SCRIPT_DIR/../../..` from the control root, so
 every run died at the scope check with `fatal: not a git repository` — after the model
 budget had already been spent.
 
-## Pipeline (`scripts/kanban-autopr/`)
+## Pipeline (`apps/msandbox/harness/`)
 
 1. **Production freshness** — the trusted local runner records the exact active frontend
    build plus backend/frontend SHAs and production migration heads. Once a card is
@@ -732,7 +731,7 @@ budget had already been spent.
    from the kind registry in `lib.sh` (`autopr_kind_field MODE FIELD`).
 
 7. **Cross-lane scope check** — for a fresh implementation patch, the shared
-   `scripts/autopr-scope/check-open-prs.sh` checks older open PRs before verification
+   `apps/msandbox/scope/check-open-prs.sh` checks older open PRs before verification
    or publication. Only an exact stable patch-id match suppresses the new PR; broader
    file-overlapping patches are untrusted public input and are surfaced with a
    `possible-duplicate` label for human review rather than executed by a model. The
@@ -740,7 +739,7 @@ budget had already been spent.
    the card stores that PR's URL/number and a visible `ALREADY SCOPED` note.
    Closed-unmerged owners make the card eligible again; merged owners move every linked
    card to Review through the webhook or reconciliation pass.
-8. **`verify.sh`** — there isn't one; this reuses `scripts/error-autofix/verify.sh`
+8. **`verify.sh`** — there isn't one; this reuses `apps/msandbox/error-autofix/verify.sh`
    unmodified. It already diffs baseline-vs-branch TypeScript diagnostics via
    `tsc -p tsconfig.app.json --noEmit` (the non-bare form — bare `tsc --noEmit` checks
    nothing, see root CLAUDE.md), so no separate frontend step was needed.
@@ -1037,7 +1036,7 @@ With the `browse` grant, `investigate.sh` sets `AUTOPR_CODEX_COLLECT_ARTIFACTS=1
 model may call exactly one command inside the sandbox:
 
 ```bash
-server/venv/bin/python scripts/kanban-autopr/browse-capture.py     --url https://example.com/pricing --label pricing-page [--full-page]
+server/venv/bin/python apps/msandbox/harness/browse-capture.py     --url https://example.com/pricing --label pricing-page [--full-page]
 ```
 
 It prints the page's title, its **final** URL (after redirects — that is what the model
@@ -1073,7 +1072,7 @@ every capture exits 3.
 Espresso opens `.md` attachments rendered through `JournalContentView` with a
 Rendered | Source toggle (tables stay plain text; the parser has no table case).
 
-Contract tests: `scripts/tests/test_kanban_autopr_research.sh` (registry, selection,
+Contract tests: `apps/msandbox/tests/test_kanban_autopr_research.sh` (registry, selection,
 bridge switches, validator, publisher, workflow wiring). Manual proof on the runner:
 create a Research card on one of the four boards with a screenshot attached, press
 **Run research now**, and confirm the live log shows `gpt-5.6-luna`, a
@@ -1178,7 +1177,7 @@ server-side moment to re-check it — the harness's stamp is the gate — but it
 mailbox: the snapshots were fetched by a person's own session, and sending re-checks
 `outreach` server-side.
 
-Contract tests: `scripts/tests/test_kanban_autopr_email.sh` (registry, sandbox switches
+Contract tests: `apps/msandbox/tests/test_kanban_autopr_email.sh` (registry, sandbox switches
 and the search/browse gate, prompt rules, validator, publisher, workflow wiring).
 
 ## Work/merge plan and explicit release
@@ -1246,7 +1245,7 @@ card mutation.
 
 ## `post-checkout` hook (checkout → in_progress)
 
-`scripts/kanban-autopr/hooks/post-checkout`, installed via `install-hooks.sh` as a
+`apps/msandbox/harness/hooks/post-checkout`, installed via `install-hooks.sh` as a
 symlink into `.git/hooks/post-checkout` in the real clone (never `core.hooksPath` — that
 would silently disable every other hook in the repo). Checking out a branch matching
 `^(bot/task|task)-?/?([0-9a-f]{8})` — which covers both bot branches and a hand-made
@@ -1326,7 +1325,7 @@ batch A fixed, and the structural backlog (batch B) — lives in
 - **`autopr-self-audit/audit.sh` reports a stale installed dispatcher** (files under
   `~/.local/share/matcha-kanban-autopr` differing from the repo, a scheduler
   `StartInterval` other than 60, or a missing request-watch agent) as an operator
-  action: `./scripts/kanban-autopr/install-launch-agent.sh` (or `msandbox install`,
+  action: `./apps/msandbox/harness/install-launch-agent.sh` (or `msandbox install`,
   which runs it; `msandbox doctor` shows the drift first).
 
 Still open (see the review doc for detail): the lanes rebuild the sandbox clone two to

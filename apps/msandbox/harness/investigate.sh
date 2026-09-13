@@ -10,13 +10,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
+# Every `git reset --hard` below targets $REPO_ROOT. Without
+# AUTOPR_WORKSPACE_ROOT that is the checkout THIS script runs from, and if that
+# checkout carries uncommitted edits to the harness itself, the reset destroys
+# work in progress on the very code being run — which is exactly what happened
+# once. The workflow always sets the variable; a local run that wants the
+# fallback has to start from a clean apps/msandbox.
+if [ -z "${AUTOPR_WORKSPACE_ROOT:-}" ] \
+    && [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no -- apps/msandbox 2>/dev/null)" ]; then
+    die "refusing to run against $REPO_ROOT: apps/msandbox has uncommitted changes and AUTOPR_WORKSPACE_ROOT is unset"
+fi
+
 CARD_FILE="${1:?usage: investigate.sh card.json report.md raw-decision.json}"
 REPORT_FILE="${2:?usage: investigate.sh card.json report.md raw-decision.json}"
 RAW_DECISION_FILE="${3:?usage: investigate.sh card.json report.md raw-decision.json}"
-HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/msandbox/autopr_control.py"
+HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/cli/autopr_control.py"
 export AUTOPR_INVOCATION_ID="${AUTOPR_INVOCATION_ID:-local-$$-$(date +%s)}"
 export AUTOPR_CONTINUATION_PID=$$
-REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 REPO="${GITHUB_REPOSITORY:-}"
 WORK_DIR="$(mktemp -d)"
 # checkpoint.sh reads this to tell a genuine step timeout from a crash: only a
@@ -268,7 +279,7 @@ printf '[]' > "$WORK_DIR/production-errors.json"
 printf '[]' > "$WORK_DIR/changes-since-production.json"
 if jq -e '.production' "$CARD_FILE" >/dev/null 2>&1; then
     if [ -n "${SSH_KEY:-}" ]; then
-        if ! "$REPO_ROOT/scripts/error-autofix/collect.sh" \
+        if ! "$REPO_ROOT/apps/msandbox/error-autofix/collect.sh" \
             --hours "${AUTOPR_PROD_ERROR_HOURS:-24}" \
             --limit "${AUTOPR_PROD_ERROR_LIMIT:-25}" \
             > "$WORK_DIR/production-errors.json" 2> "$WORK_DIR/production-errors.stderr"; then
@@ -500,7 +511,7 @@ run_codex() {
     fi
     if [ "$BROWSE_GRANTED" = true ]; then
         # No INSTALL_PLAYWRIGHT_BROWSERS here: it is a Docker BUILD arg
-        # (docker/agent-sandbox/Dockerfile), read by `msandbox build
+        # (apps/msandbox/sandbox/Dockerfile), read by `msandbox build
         # --playwright`, and setting it at run time installs nothing. The image
         # either carries Chromium or it does not; browse-capture.py exits 3 and
         # says so, and the prompt tells the model to fall back to web search

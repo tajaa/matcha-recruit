@@ -3,8 +3,8 @@
 # exposing arbitrary host paths inside the container.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-MSANDBOX="$REPO_ROOT/scripts/agent-sandbox.sh"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+MSANDBOX="$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/matcha-attachments-test.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir -p "$TMP_DIR/bin" "$TMP_DIR/inbox" "$TMP_DIR/source folder"

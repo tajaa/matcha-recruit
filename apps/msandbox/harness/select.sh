@@ -15,7 +15,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
-HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/msandbox/autopr_control.py"
+HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/cli/autopr_control.py"
 [ ! -f "$SCRIPT_DIR/autopr_control.py" ] || HANDOFF_CONTROL="$SCRIPT_DIR/autopr_control.py"
 
 CARDS_FILE="${1:?usage: select.sh cards.json}"

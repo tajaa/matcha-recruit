@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for scripts/error-autofix/*.sh. Source, don't execute.
+# Shared helpers for apps/msandbox/error-autofix/*.sh. Source, don't execute.
 set -uo pipefail
 
 PROD_HOST="${PROD_HOST:-54.177.107.107}"
@@ -20,7 +20,7 @@ _iso_plus_hours() {
 }
 
 # Run a remote bash script (read from stdin) over SSH against the prod host.
-# Stubbed by scripts/tests/test_error_autofix.sh via a fake `ssh` on PATH.
+# Stubbed by apps/msandbox/tests/test_error_autofix.sh via a fake `ssh` on PATH.
 ssh_prod() {
     : "${SSH_KEY:?SSH_KEY must point to the EC2 private key}"
     ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \

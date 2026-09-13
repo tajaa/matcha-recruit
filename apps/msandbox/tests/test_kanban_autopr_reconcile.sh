@@ -3,8 +3,8 @@
 # selection, while unrelated Todo work remains in the candidate stream.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-RECONCILE="$REPO_ROOT/scripts/kanban-autopr/reconcile-merged-cards.sh"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+RECONCILE="$REPO_ROOT/apps/msandbox/harness/reconcile-merged-cards.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir -p "$TMP_DIR/bin" "$TMP_DIR/runner"

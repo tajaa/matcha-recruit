@@ -57,7 +57,7 @@ def default_repo() -> Path:
     )
     if result.returncode == 0:
         return Path(result.stdout.strip()).resolve()
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def _session_table(records: list) -> None:
@@ -177,7 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument(
         "--skip-dispatcher",
         action="store_true",
-        help="do not re-run scripts/kanban-autopr/install-launch-agent.sh after the release swap",
+        help="do not re-run apps/msandbox/harness/install-launch-agent.sh after the release swap",
     )
     commands.add_parser("wizard", help="open the interactive session manager")
     autopr = commands.add_parser("autopr", help="AutoPR queue status and card control")
@@ -215,6 +215,20 @@ def _install_drift_report(repo: Path) -> int:
     copied tree; neither auto-updates, and a merged control that is not
     installed looks exactly like a control that does not exist.
     """
+    # A launcher written before the apps/ layout still probes for
+    # scripts/agent-sandbox.sh and exits before it can dispatch `install`, so
+    # `msandbox install` cannot fix it. The checkout's own entrypoint can.
+    launcher = Path.home() / ".local/bin/msandbox"
+    try:
+        launcher_text = launcher.read_text(encoding="utf-8")
+    except OSError:
+        launcher_text = ""
+    if "scripts/agent-sandbox.sh" in launcher_text:
+        print(
+            "msandbox launcher: PRE-MOVE layout "
+            "(run: ./apps/msandbox/bin/agent-sandbox.sh install)"
+        )
+        return 1
     installed, expected = release_drift(repo_root=repo)
     if installed is None:
         print("msandbox release: not installed (run: msandbox install)")
@@ -229,7 +243,7 @@ def _install_drift_report(repo: Path) -> int:
         print(
             "AutoPR dispatcher: STALE "
             + ", ".join(stale)
-            + " (run: scripts/kanban-autopr/install-launch-agent.sh)"
+            + " (run: apps/msandbox/harness/install-launch-agent.sh)"
         )
     return 1 if stale or installed != expected else 0
 
@@ -456,7 +470,7 @@ def run(argv: list[str] | None = None) -> int:
         except subprocess.CalledProcessError as exc:
             print(
                 "msandbox: release installed, but the AutoPR dispatcher install failed "
-                f"(exit {exc.returncode}); run scripts/kanban-autopr/install-launch-agent.sh",
+                f"(exit {exc.returncode}); run apps/msandbox/harness/install-launch-agent.sh",
                 file=sys.stderr,
             )
             return 1

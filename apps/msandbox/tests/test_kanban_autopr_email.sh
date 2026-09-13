@@ -6,8 +6,8 @@
 # RFC 2606 reserved (example.com / .org / .net / .invalid).
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-AUTOPR_DIR="$REPO_ROOT/scripts/kanban-autopr"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+AUTOPR_DIR="$REPO_ROOT/apps/msandbox/harness"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir -p "$TMP_DIR/bin" "$TMP_DIR/runner" "$TMP_DIR/cache"
@@ -420,8 +420,8 @@ check "a research-kind decision and a raw email decision are both refused before
 # and each branch names its publisher literally for test_ci_guards.sh.
 publish_step="$(awk '/- name: Publish research report/ { on = 1 } on && /- name: Cleanup/ { exit } on { print }' "$workflow")"
 check "the workflow publish step has literal research and email branches and refuses any other mode" \
-    $(printf '%s\n' "$publish_step" | grep -qF '"$AUTOPR_CONTROL_ROOT/kanban-autopr/publish-email.sh"' \
-      && printf '%s\n' "$publish_step" | grep -qF '"$AUTOPR_CONTROL_ROOT/kanban-autopr/publish-research.sh"' \
+    $(printf '%s\n' "$publish_step" | grep -qF '"$AUTOPR_CONTROL_ROOT/harness/publish-email.sh"' \
+      && printf '%s\n' "$publish_step" | grep -qF '"$AUTOPR_CONTROL_ROOT/harness/publish-research.sh"' \
       && printf '%s\n' "$publish_step" | grep -qE '^[[:space:]]+email\)$' \
       && printf '%s\n' "$publish_step" | grep -qE '^[[:space:]]+research\)$' \
       && printf '%s\n' "$publish_step" | grep -qE '^[[:space:]]+\*\)$' \
@@ -433,14 +433,14 @@ check "the workflow publish step has literal research and email branches and ref
 # Run the step's actual script against stub publishers under GitHub's default
 # `bash -e` shell: right script per mode, a failing publisher fails the step
 # through the tee, and an unknown mode runs nothing.
-mkdir -p "$TMP_DIR/control/kanban-autopr"
+mkdir -p "$TMP_DIR/control/harness"
 for publisher in publish-research.sh publish-email.sh; do
-    cat > "$TMP_DIR/control/kanban-autopr/$publisher" <<EOF
+    cat > "$TMP_DIR/control/harness/$publisher" <<EOF
 #!/usr/bin/env bash
 printf '%s %s\n' "$publisher" "\$#" >> "$TMP_DIR/dispatch.log"
 exit "\${STUB_PUBLISHER_RC:-0}"
 EOF
-    chmod +x "$TMP_DIR/control/kanban-autopr/$publisher"
+    chmod +x "$TMP_DIR/control/harness/$publisher"
 done
 run_script="$(printf '%s\n' "$publish_step" | awk '/^        run: \|$/ { on = 1; next } on { sub(/^          /, ""); print }')"
 run_step() {
@@ -466,8 +466,8 @@ check "a failing publisher fails the step through the tee, and an unknown artifa
       && echo 0 || echo 1)
 
 check "ci syntax-checks the email publisher and the self-audit runs this suite" \
-    $(grep -qF 'scripts/kanban-autopr/publish-email.sh' "$ci_workflow" \
-      && grep -qF 'test_kanban_autopr_email.sh' "$REPO_ROOT/scripts/autopr-self-audit/audit.sh" \
+    $(grep -qF 'apps/msandbox/harness/publish-email.sh' "$ci_workflow" \
+      && grep -qF 'test_kanban_autopr_email.sh' "$REPO_ROOT/apps/msandbox/self-audit/audit.sh" \
       && echo 0 || echo 1)
 
 echo
