@@ -15,6 +15,14 @@
 #   codex-backoff.sh active           # exit 0 (and print resume time) while
 #                                     # the backoff is in force, 3 otherwise.
 #   codex-backoff.sh clear
+#   codex-backoff.sh auth-check [FILE] # exit 0 while the host Codex login's
+#                                     # access token is live, 4 when it is
+#                                     # missing or expired (message names the
+#                                     # fix: `codex login` on the runner Mac).
+#                                     # The same lane-wide condition as a
+#                                     # usage limit, except it never clears on
+#                                     # its own: the sandbox copy is read-only
+#                                     # and the refresh token is single-use.
 #
 # The marker is JSON: {"detected_at","resume_at","source"} with resume_at as a
 # Unix epoch. "try again at 5:31 AM" is parsed as the next such local time;
@@ -22,6 +30,10 @@
 # window is capped at 24 h so a bad parse can never silence the lanes forever.
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# One implementation of the token check, shared with `msandbox doctor`; both
+# the dispatcher tree and the workflow's control-root archive carry cli/.
+CODEX_AUTH_CHECK="${AUTOPR_CODEX_AUTH_CHECK:-$(dirname "$SCRIPT_DIR")/cli/codex_auth.py}"
 USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
 STATE_DIR="${AUTOPR_DISPATCH_STATE_DIR:-$USER_HOME/Library/Caches/matcha-autopr-dashboard/dispatch}"
 MARKER="${AUTOPR_CODEX_BACKOFF_FILE:-$STATE_DIR/codex-usage-limit.json}"
@@ -86,9 +98,18 @@ active() {
     printf '%s\n' "$resume_at"
 }
 
+auth_check() {
+    [ -f "$CODEX_AUTH_CHECK" ] || {
+        printf 'codex login: cannot check the token: %s is missing\n' "$CODEX_AUTH_CHECK" >&2
+        exit 4
+    }
+    python3 "$CODEX_AUTH_CHECK" check "$@"
+}
+
 case "${1:-}" in
     record) shift; record "$@" ;;
     active) active ;;
     clear) rm -f "$MARKER" ;;
-    *) echo "usage: codex-backoff.sh record LOGFILE | active | clear" >&2; exit 2 ;;
+    auth-check) shift; auth_check "$@" ;;
+    *) echo "usage: codex-backoff.sh record LOGFILE | active | clear | auth-check [AUTH_JSON]" >&2; exit 2 ;;
 esac

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import time
 import shlex
 import shutil
 import signal
@@ -1468,6 +1469,94 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertEqual(blocked.returncode, 1)
         self.assertIn("legacy control plane is unavailable", blocked.stderr)
         self.assertIn("msandbox doctor", blocked.stderr)
+
+    def _codex_auth_fixture(self, name: str, *, exp: float | None, raw: str | None = None) -> Path:
+        import base64
+
+        path = self.root / name
+        if raw is not None:
+            path.write_text(raw, encoding="utf-8")
+            return path
+
+        def part(obj: dict) -> str:
+            return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
+
+        claims = {} if exp is None else {"exp": exp}
+        token = ".".join((part({"alg": "none"}), part(claims), "sig"))
+        path.write_text(
+            json.dumps({"tokens": {"access_token": token, "refresh_token": "r"}}),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_codex_login_check_reads_the_access_token_expiry(self) -> None:
+        """The preflight every lane runs before spending anything on Codex.
+
+        The sandbox copy of auth.json is read-only and the refresh token is
+        single-use, so an expired access token is fatal, not stale; and a file
+        that cannot be checked has to count as dead, since "readable" is what
+        let the last one through.
+        """
+        from apps.msandbox.cli import codex_auth
+
+        now = time.time()
+        valid = self._codex_auth_fixture("auth-valid.json", exp=now + 86400)
+        ok, line = codex_auth.check(valid, minimum=300)
+        self.assertTrue(ok, line)
+        self.assertIn("codex login: expires", line)
+        self.assertIn("23h left", line)
+
+        expired = self._codex_auth_fixture("auth-expired.json", exp=now - 60)
+        ok, line = codex_auth.check(expired, minimum=300)
+        self.assertFalse(ok)
+        self.assertIn("EXPIRED", line)
+        self.assertIn("codex login", line)
+
+        soon = self._codex_auth_fixture("auth-soon.json", exp=now + 60)
+        ok, line = codex_auth.check(soon, minimum=300)
+        self.assertFalse(ok)
+        self.assertIn("expires in", line)
+
+        for name, kwargs in (
+            ("auth-missing.json", None),
+            ("auth-garbage.json", {"exp": None, "raw": "not json"}),
+            ("auth-no-exp.json", {"exp": None}),
+            ("auth-no-token.json", {"exp": None, "raw": json.dumps({"tokens": {}})}),
+        ):
+            path = self.root / name if kwargs is None else self._codex_auth_fixture(name, **kwargs)
+            ok, line = codex_auth.check(path, minimum=300)
+            self.assertFalse(ok, name)
+            self.assertIn("no usable access token", line)
+
+        # The script face the harness calls: 0 usable, 4 login required, 2 usage.
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(codex_auth.main(["check", str(valid)]), 0)
+        with mock.patch("sys.stderr", new=io.StringIO()):
+            self.assertEqual(codex_auth.main(["check", str(expired)]), codex_auth.AUTH_REQUIRED_EXIT)
+            self.assertEqual(codex_auth.main(["nope"]), 2)
+
+    def test_doctor_reports_the_codex_login_and_fails_when_it_is_dead(self) -> None:
+        from apps.msandbox.cli.cli import _install_drift_report
+
+        now = time.time()
+        valid = self._codex_auth_fixture("doctor-auth-valid.json", exp=now + 86400)
+        expired = self._codex_auth_fixture("doctor-auth-expired.json", exp=now - 60)
+        clean = (
+            mock.patch("apps.msandbox.cli.cli.launcher_is_pre_move", return_value=False),
+            mock.patch("apps.msandbox.cli.cli.release_drift", return_value=("r1", "r1")),
+            mock.patch("apps.msandbox.cli.cli.dispatcher_drift", return_value=[]),
+        )
+        for fixture, expected_status, expected_text in (
+            (valid, 0, "codex login: expires"),
+            (expired, 1, "codex login: EXPIRED"),
+        ):
+            output = io.StringIO()
+            with clean[0], clean[1], clean[2], mock.patch.dict(
+                os.environ, {"AUTOPR_HOST_CODEX_AUTH_FILE": str(fixture)}
+            ), redirect_stdout(output):
+                status = _install_drift_report(self.repo)
+            self.assertEqual(status, expected_status, output.getvalue())
+            self.assertIn(expected_text, output.getvalue())
 
     def test_doctor_sees_release_and_dispatcher_drift(self) -> None:
         # Two installed trees, neither auto-updating: the launcher pins one

@@ -314,7 +314,7 @@ next_section() {
                 printf 'Approve 10 more minutes from the ticket to continue from the saved checkpoint, or add context and press Run.\n'
             fi
             ;;
-        *) printf 'Press Run on the ticket (or `msandbox autopr run-now %s`) to retry from the checkpoint; `msandbox autopr hold %s` parks it; `msandbox autopr log %s` shows this journal from a terminal.\n' "$ID8" "$ID8" "$ID8" ;;
+        *) printf 'The card is back in its lane (Changes Requested when it has a PR, otherwise Todo), so Press Run on the ticket (or `msandbox autopr run-now %s`) retries from the checkpoint; the scheduler also retries after the cooldown. `msandbox autopr hold %s` parks it; `msandbox autopr log %s` shows this journal from a terminal.\n' "$ID8" "$ID8" "$ID8" ;;
     esac
 }
 
@@ -371,12 +371,23 @@ prune_journals
 # live note, and stand down whenever this run already parked the card.
 snapshot_note="$(jq -r '.progress_note // ""' "$CARD_FILE")"
 live_note="$snapshot_note"
+# The live column and PR decide whether this run has to hand the card back to
+# a lane (below). Both default to the selection-time snapshot.
+live_column="$(jq -r '.board_column // ""' "$CARD_FILE")"
+live_pr="$(jq -r '.pr_number // empty' "$CARD_FILE")"
 live_tasks="$( ( mw_api GET "/matcha-work/projects/$PROJECT_ID/tasks" ) 2>/dev/null || true )"
 if [ -n "$live_tasks" ]; then
     live_note="$(printf '%s' "$live_tasks" \
         | jq -r --arg id "$TASK_ID" 'first(.[]? | select(.id == $id) | .progress_note // "") // ""' 2>/dev/null \
         || printf '%s' "$snapshot_note")"
+    live_column="$(printf '%s' "$live_tasks" \
+        | jq -r --arg id "$TASK_ID" 'first(.[]? | select(.id == $id) | .board_column // "") // ""' 2>/dev/null \
+        || printf '%s' "$live_column")"
+    live_pr="$(printf '%s' "$live_tasks" \
+        | jq -r --arg id "$TASK_ID" 'first(.[]? | select(.id == $id) | .pr_number // empty) // empty' 2>/dev/null \
+        || printf '%s' "$live_pr")"
 fi
+[ -n "$live_pr" ] || live_pr="$PR_NUMBER"
 already_parked=false
 if [ "$live_note" != "$snapshot_note" ] \
     && printf '%s' "$live_note" \
@@ -396,8 +407,25 @@ if label="$(stopped_header_label "$REASON")" && [ "$OUTCOME" != success ] \
     # a clean restart.
     resume_line="$(autopr_checkpoint_resume_line "$TASK_ID")"
     [ -z "$resume_line" ] || note="$note"$'\n'"$resume_line"
+    # Hand the card back to a lane in the SAME write as the note. The claim
+    # that moved it to In Progress is settled by any later progress-note or
+    # column event (project_task_service._AUTOPR_ACTIVE_CLAIM_QUERY), so a
+    # STOPPED note alone leaves a card the selector can never see again:
+    # collect.sh admits In Progress only while the claim is live, and the
+    # resume line's "Press Run" needs Todo or Changes Requested to mean
+    # anything. checkpoint.sh's pause already moves in its note write; this is
+    # the failure path's half of that. Same lane rule as card-control.sh
+    # unstick: Changes Requested when a PR exists, else Todo (artifact kinds
+    # own no PR). A card that already left In Progress is someone else's.
+    patch='{progress_note: $note}'
+    return_column=""
+    if [ "$live_column" = in_progress ]; then
+        return_column=todo
+        [ -z "$live_pr" ] || return_column=changes_requested
+        patch='{progress_note: $note, board_column: $column}'
+    fi
     ( mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
-        "$(jq -n --arg note "$note" '{progress_note: $note}')" >/dev/null ) \
+        "$(jq -n --arg note "$note" --arg column "$return_column" "$patch")" >/dev/null ) \
         || warn "could not record the stop reason on task $TASK_ID"
 elif [ "$already_parked" = true ]; then
     # The parker owns the header AND already wrote the same resume line, and

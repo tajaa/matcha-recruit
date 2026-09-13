@@ -90,6 +90,21 @@ run_dispatcher() {
     "$DISPATCHER" "$@" >/dev/null 2>&1
 }
 
+write_codex_auth_fixture() {
+    local file="$1" exp="$2"
+    python3 - "$file" "$exp" <<'PYF'
+import base64, json, sys
+def b64(obj):
+    return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
+token = ".".join((b64({"alg": "none"}), b64({"exp": int(sys.argv[2])}), "sig"))
+json.dump({"tokens": {"access_token": token, "refresh_token": "r"}}, open(sys.argv[1], "w"))
+PYF
+}
+# The dispatcher checks the host Codex login every tick; never let this suite
+# read the developer's real ~/.codex/auth.json.
+write_codex_auth_fixture "$TMP_DIR/auth.json" "$(( $(date +%s) + 86400 ))"
+export AUTOPR_HOST_CODEX_AUTH_FILE="$TMP_DIR/auth.json"
+
 rm "$TMP_DIR/autopr-enabled"
 run_dispatcher
 check "msandbox-off master switch skips before dispatch" \
@@ -526,6 +541,46 @@ check "status segment names the running lane, its age, and the card being worked
   $([ "$(seg)" = "AUTOPR ▶ KANBAN 12m · Auto-map timezone when a" ] && echo 0 || echo 1)
 check "installer ships the status segment next to the dispatcher" \
   $(grep -q 'status-segment.sh' "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" && echo 0 || echo 1)
+
+# ── a dead Codex login holds every lane like a usage limit, but never clears
+#    on its own: the sandbox copy is read-only and the refresh token is
+#    single-use, so only `codex login` on this Mac brings the lanes back ──
+BACKOFF="$REPO_ROOT/apps/msandbox/harness/codex-backoff.sh"
+write_codex_auth_fixture "$TMP_DIR/auth-expired.json" "$(( $(date +%s) - 60 ))"
+# The suite runs with errexit: capture a non-zero status the way the other
+# cases do, on the `||` side of a list.
+auth_expired_msg="$("$BACKOFF" auth-check "$TMP_DIR/auth-expired.json" 2>&1)" && auth_expired_rc=0 || auth_expired_rc=$?
+auth_valid_msg="$("$BACKOFF" auth-check "$TMP_DIR/auth.json" 2>&1)" && auth_valid_rc=0 || auth_valid_rc=$?
+"$BACKOFF" auth-check "$TMP_DIR/no-such-auth.json" >/dev/null 2>&1 && auth_missing_rc=0 || auth_missing_rc=$?
+printf 'not json' > "$TMP_DIR/auth-garbage.json"
+"$BACKOFF" auth-check "$TMP_DIR/auth-garbage.json" >/dev/null 2>&1 && auth_garbage_rc=0 || auth_garbage_rc=$?
+check "auth-check reads the access token's expiry and names the fix" \
+  $([ "$auth_expired_rc" = 4 ] && grep -q 'EXPIRED' <<< "$auth_expired_msg" \
+    && grep -q 'codex login' <<< "$auth_expired_msg" \
+    && [ "$auth_valid_rc" = 0 ] && grep -q 'expires' <<< "$auth_valid_msg" \
+    && [ "$auth_missing_rc" = 4 ] && [ "$auth_garbage_rc" = 4 ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/notify.log" "$TMP_DIR/state/notified-codex-auth" "$TMP_DIR/state/codex-usage-limit.json"
+AUTOPR_HOST_CODEX_AUTH_FILE="$TMP_DIR/auth-expired.json" \
+  AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' notify_tick
+check "an expired Codex login skips every lane and says why" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && grep -q 'codex-auth-required' "$TMP_DIR/log.jsonl" \
+    && grep -q 'Codex login expired' "$TMP_DIR/notify.log" && echo 0 || echo 1)
+AUTOPR_HOST_CODEX_AUTH_FILE="$TMP_DIR/auth-expired.json" \
+  AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' notify_tick --if-requested
+check "a queued card does not override a dead Codex login, and the banner shows once" \
+  $([ ! -e "$TMP_DIR/dispatches" ] \
+    && [ "$(grep -c 'Codex login expired' "$TMP_DIR/notify.log")" = 1 ] && echo 0 || echo 1)
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' notify_tick
+check "a renewed login dispatches again and re-arms the one-time banner" \
+  $([ "$(cat "$TMP_DIR/dispatches" 2>/dev/null)" = "silent-error-autofix.yml" ] \
+    && [ ! -e "$TMP_DIR/state/notified-codex-auth" ] && echo 0 || echo 1)
+
+printf '%s\n' '{"action":"skip","reason":"codex-auth-required","checked_at":999990,"next_check_at":1000050,"eligible_at":0}' > "$TMP_DIR/seg-state/status.json"
+check "status segment names a dead Codex login" \
+  $(grep -q 'CODEX LOGIN' <<< "$(seg)" && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

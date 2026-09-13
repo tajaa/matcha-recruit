@@ -104,6 +104,49 @@ check "a failure nothing else explained gets a STOPPED header that points at the
   $(grep -q "^PATCH /matcha-work/projects/11111111-1111-4111-8111-111111111111/tasks/bbbb0000-0000-4000-8000-000000000002 {\"progress_note\":\"🤖 AUTO SETUP · STOPPED: MODEL PASS FAILED · run #77 · note: see $journal\"}$" "$TMP_DIR/calls" \
     && ! grep -q 'READY FOR REVIEW' "$TMP_DIR/calls" && echo 0 || echo 1)
 
+# Finding: the claim that moved the card to In Progress is settled by any later
+# progress-note write (project_task_service._AUTOPR_ACTIVE_CLAIM_QUERY), and
+# collect.sh admits In Progress only while the claim is live. So a STOPPED
+# note alone left the card somewhere nothing could select it again, with a
+# resume line telling the owner to press a Run button that could not work
+# from that column (card 9a384f39, run 34782997839). The pause path already
+# moves in its note write; the failure path has to do the same, in the SAME
+# PATCH, and follow unstick's lane rule.
+patch_line() { grep '^PATCH ' "$TMP_DIR/calls" | head -1; }
+rm -f "$TMP_DIR/uploads"/*
+cat > "$TMP_DIR/tasks-live.json" <<'TASKS'
+[{"id":"bbbb0000-0000-4000-8000-000000000002","board_column":"in_progress","pr_number":513,"progress_note":"🤖 AUTO SETUP · READY FOR REVIEW · build 14 · note: old"}]
+TASKS
+AUTOPR_TEST_TASKS_JSON="$TMP_DIR/tasks-live.json" \
+  run_journal "$TMP_DIR/card.json" --outcome failure --reason investigate --checkpoint "$TMP_DIR/checkpoint" >/dev/null
+check "a failed run returns a claimed In Progress card with a PR to Changes Requested in the note write" \
+  $(patch_line | grep -q '"board_column":"changes_requested"' \
+    && patch_line | grep -q 'STOPPED: MODEL PASS FAILED' \
+    && [ "$(grep -c '^PATCH ' "$TMP_DIR/calls")" = 1 ] && echo 0 || echo 1)
+check "the journal tells the owner the card is back in its lane" \
+  $(grep -q 'The card is back in its lane' "$TMP_DIR/uploads"/autopr-run-77-*.md && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/uploads"/*
+jq '.[0].pr_number = null' "$TMP_DIR/tasks-live.json" > "$TMP_DIR/tasks-live-nopr.json"
+AUTOPR_TEST_TASKS_JSON="$TMP_DIR/tasks-live-nopr.json" \
+  run_journal "$TMP_DIR/card.json" --outcome failure --reason investigate >/dev/null
+check "a failed run returns a claimed In Progress card without a PR to Todo" \
+  $(patch_line | grep -q '"board_column":"todo"' && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/uploads"/*
+jq '.[0].board_column = "changes_requested"' "$TMP_DIR/tasks-live.json" > "$TMP_DIR/tasks-live-lane.json"
+AUTOPR_TEST_TASKS_JSON="$TMP_DIR/tasks-live-lane.json" \
+  run_journal "$TMP_DIR/card.json" --outcome failure --reason investigate >/dev/null
+check "a card that already left In Progress keeps its lane; only the note is written" \
+  $(patch_line | grep -q 'STOPPED: MODEL PASS FAILED' \
+    && ! patch_line | grep -q 'board_column' && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/uploads"/*
+AUTOPR_TEST_TASKS_JSON="$TMP_DIR/tasks-live.json" \
+  run_journal "$TMP_DIR/card.json" --outcome success --pr 500 --report "$TMP_DIR/report.md" >/dev/null
+check "a success never moves the card from here" \
+  $(! grep -q '^PATCH ' "$TMP_DIR/calls" && echo 0 || echo 1)
+
 rm -f "$TMP_DIR/uploads"/*
 run_journal "$TMP_DIR/card.json" --outcome success --pr 500 --report "$TMP_DIR/report.md" >/dev/null
 body="$(cat "$TMP_DIR/uploads"/autopr-run-77-*.md)"

@@ -19,6 +19,7 @@ from .git_worktrees import (
     prune_stale_worktree_metadata,
     resolve_worktree_owner,
 )
+from . import codex_auth
 from .install import (
     dispatcher_drift,
     install_dispatcher,
@@ -243,7 +244,12 @@ def _install_drift_report(repo: Path, bin_dir: Path | None = None) -> int:
             + ", ".join(stale)
             + " (run: apps/msandbox/harness/install-launch-agent.sh)"
         )
-    return 1 if pre_move_launcher or stale or installed != expected else 0
+    # Every lane shares the host's Codex login, and a lapsed one stops all of
+    # them without any card saying why. Same check the dispatcher and the
+    # workflow preflight run.
+    login_ok, login_line = codex_auth.check()
+    print(login_line)
+    return 1 if pre_move_launcher or stale or installed != expected or not login_ok else 0
 
 
 def _checkout_pr(repo: Path, number: int) -> int:

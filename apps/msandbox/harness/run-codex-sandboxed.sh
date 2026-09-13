@@ -108,6 +108,14 @@ else
     # history, logs, database, and every unrelated credential stay outside.
     [ -r "$HOST_CODEX_AUTH_FILE" ] \
         || die "missing host Codex auth file: $HOST_CODEX_AUTH_FILE"
+    # Readable is not usable. The copy below is bind-mounted read-only and the
+    # refresh token is single-use, so an expired access token cannot be
+    # refreshed into working from inside; refuse here, before the container
+    # is touched, with the fix in the message. The kanban workflow already
+    # checks this before selecting a card; this covers the other lanes.
+    if ! auth_message="$("$CODEX_BACKOFF" auth-check "$HOST_CODEX_AUTH_FILE" 2>&1)"; then
+        die "$auth_message"
+    fi
     mkdir -p "$AUTH_DIR"
     chmod 700 "$AUTH_DIR"
     cp "$HOST_CODEX_AUTH_FILE" "$SANDBOX_CODEX_AUTH_FILE"

@@ -68,6 +68,29 @@ and the `mw_tasks.autopr_*` columns they read.
   `AUTOPR_WORKSPACE_ROOT`. `test_kanban_autopr.sh` and
   `test_kanban_autopr_publish.sh` used to run the real `investigate.sh` and
   `publish.sh` against the live checkout.
+- **A `progress_note` write settles the run claim, so a STOPPED header must
+  return the card's column in the same PATCH.** `claim_autopr_run` moves a
+  picked card to In Progress; `collect.sh` admits In Progress only while that
+  claim is live, and any later note or column event settles it
+  (`project_task_service._AUTOPR_ACTIVE_CLAIM_QUERY`). `run-journal.sh`
+  therefore hands a failed card back to its lane — Changes Requested with a
+  PR, else Todo, the same rule as `card-control.sh unstick` — in the note
+  write itself, exactly as `checkpoint.sh` does for a pause. A note-only
+  write strands the card where nothing can select it (card `9a384f39`, run
+  `34782997839`).
+- **Cleanup writes the run journal before the failure ledger.** The journal's
+  PATCH is a column move; `select.sh` parks a repeat offender only while the
+  ledger marker is newer than the last move. Ledger first would keep an
+  identically failing card eligible every cooldown, forever.
+  `tests/test_kanban_autopr.sh` asserts the order.
+- **The host Codex login is checked before anything is spent on it**:
+  `cli/codex_auth.py` is the one implementation (`codex-backoff.sh auth-check`
+  is its shell face), run by `dispatch-if-idle.sh` every tick, by the kanban
+  workflow before Select, by `run-codex-sandboxed.sh` before it touches the
+  sandbox, and printed by `msandbox doctor`. The sandbox copy of `auth.json`
+  is bind-mounted read-only and the ChatGPT refresh token is single-use, so an
+  expired access token never refreshes into working; only `codex login` on
+  the runner Mac does.
 - **`msandbox install` and `msandbox doctor` dispatch before the launcher's
   legacy-entrypoint probe.** Both run entirely inside the pinned release, and
   putting the probe first is what stranded operators across the `apps/` move:

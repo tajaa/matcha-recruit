@@ -59,6 +59,27 @@ jobs:
             exit 1
           fi
 
+      - name: Require a live Codex login
+        run: |
+          # Before any card is selected or claimed: an expired host login used
+          # to claim a card, pay the whole prelude, die in seconds at
+          # `codex exec`, strand the card in In Progress and strike its
+          # failure ledger for a fault that was never the card's. The sandbox
+          # copy of auth.json is read-only and the refresh token is single-use,
+          # so this cannot be retried into working; only `codex login` on the
+          # runner Mac fixes it. The control root is not snapshotted yet, so
+          # this runs from the checkout like the master switch above.
+          set +e
+          message="$(./apps/msandbox/harness/codex-backoff.sh auth-check 2>&1)"
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            printf '%s\n' "$message" >&2
+            printf '%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          printf '%s\n' "$message"
+
       - name: Refuse a hot re-dispatch
         id: guard
         env:
@@ -524,9 +545,10 @@ jobs:
           CHECKPOINT_PATH: ${{ steps.checkpoint.outputs.path }}
           BRANCH_BASE_SHA: ${{ steps.branch.outputs.sha }}
         run: |
-          # Record how this run ended before anything else: the ledger is what
-          # stops a card that fails the same way every time from being
-          # re-selected every cooldown window forever. A pause is not a
+          # Record how this run ended: the ledger is what stops a card that
+          # fails the same way every time from being re-selected every
+          # cooldown window forever. Only the run journal precedes it (see
+          # the ordering note on the journal call). A pause is not a
           # failure (the card waits for the operator), and a step that never
           # ran does not count against the card.
           # Sourced in a child shell: lib.sh sets -u, and this step's empty
@@ -572,28 +594,16 @@ jobs:
             # coverage, open-PR check): still a failure the ledger must count.
             run_reason=setup
           fi
-          if [ -n "$run_reason" ]; then
-            record_outcome "$task_id" failure "$run_reason"
-          elif [ "$JOB_STATUS" = cancelled ]; then
-            # An operator cancel is neither a success nor a strike; the
-            # cooldown marker stays as it was.
-            :
-          elif [ "$JOB_STATUS" = success ] && [ "$INVESTIGATE_PAUSED" != true ] \
-            && [ "$runtime_limited" != true ]; then
-            record_outcome "$task_id" success
-          fi
-          # The resume pointer is consumed HERE, not at the end of
-          # investigate.sh, so that a publish-stage failure keeps the work it
-          # already produced. Only an actual publication settles the card;
-          # anything else leaves the checkpoint resumable for the next run.
-          if [ "$PUBLISH_OUTCOME" = success ] || [ "$PUBLISH_ARTIFACT_OUTCOME" = success ]; then
-            "$AUTOPR_CONTROL_ROOT/harness/checkpoint.sh" consume "$RUNNER_TEMP/card.json" \
-              || printf 'warning: could not consume the checkpoint for %s\n' "$task_id" >&2
-          fi
           # The journal is the operator's view of this run on the ticket
           # itself: what was done, what is left, why it stopped, and whether
           # a checkpoint will resume it. Runs BEFORE the checkout hand-back so
-          # the branch diff is still readable. Best-effort like the ledger.
+          # the branch diff is still readable, and BEFORE the failure ledger
+          # below: on a failure the journal's PATCH also returns the card from
+          # In Progress to its lane, and that column move must land before
+          # the ledger marker's mtime. select.sh parks a card only while the
+          # marker is newer than the last move; the other order would keep a
+          # card that fails identically forever eligible every cooldown.
+          # Best-effort like the ledger.
           journal_outcome=success
           journal_reason="$run_reason"
           if [ "$runtime_limited" = true ]; then
@@ -613,6 +623,24 @@ jobs:
             --report "$RUNNER_TEMP/report.md" --decision "$RUNNER_TEMP/decision.json" \
             --checkpoint "$CHECKPOINT_PATH" --pr "$PUBLISHED_PR" --base-sha "$BRANCH_BASE_SHA" \
             || printf 'warning: could not attach the run journal for %s\n' "$task_id" >&2
+          if [ -n "$run_reason" ]; then
+            record_outcome "$task_id" failure "$run_reason"
+          elif [ "$JOB_STATUS" = cancelled ]; then
+            # An operator cancel is neither a success nor a strike; the
+            # cooldown marker stays as it was.
+            :
+          elif [ "$JOB_STATUS" = success ] && [ "$INVESTIGATE_PAUSED" != true ] \
+            && [ "$runtime_limited" != true ]; then
+            record_outcome "$task_id" success
+          fi
+          # The resume pointer is consumed HERE, not at the end of
+          # investigate.sh, so that a publish-stage failure keeps the work it
+          # already produced. Only an actual publication settles the card;
+          # anything else leaves the checkpoint resumable for the next run.
+          if [ "$PUBLISH_OUTCOME" = success ] || [ "$PUBLISH_ARTIFACT_OUTCOME" = success ]; then
+            "$AUTOPR_CONTROL_ROOT/harness/checkpoint.sh" consume "$RUNNER_TEMP/card.json" \
+              || printf 'warning: could not consume the checkpoint for %s\n' "$task_id" >&2
+          fi
           # Temporary isolation is allowed while building a PR, but no
           # submitted PR branch may remain checked out on the Mac runner.
           # Dirty state is preserved and reported instead of deleted.

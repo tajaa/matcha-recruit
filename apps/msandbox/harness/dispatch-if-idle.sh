@@ -63,6 +63,7 @@ NOTIFY_FILE="${AUTOPR_NOTIFY_FILE:-$(dirname "$ENABLE_FILE")/autopr-notify}"
 NOTIFY_BIN="${AUTOPR_NOTIFY_BIN:-/usr/bin/osascript}"
 NOTIFIED_RUN_FILE="$STATE_DIR/last-notified-run"
 NOTIFIED_OFF_FILE="$STATE_DIR/notified-off"
+NOTIFIED_AUTH_FILE="$STATE_DIR/notified-codex-auth"
 
 write_status() {
     local action="$1" reason="$2" now temporary
@@ -264,6 +265,17 @@ codex_backoff_active() {
     AUTOPR_DISPATCH_STATE_DIR="$STATE_DIR" "$CODEX_BACKOFF" active >/dev/null 2>&1
 }
 
+# A dead login is the same lane-wide condition with no resume time: the
+# sandbox copy of auth.json is read-only and the refresh token is single-use,
+# so only `codex login` on this Mac brings the lanes back. One local file read
+# per tick, and nothing is launched to find out.
+codex_auth_message=""
+codex_auth_required() {
+    [ -x "$CODEX_BACKOFF" ] || return 1
+    codex_auth_message="$("$CODEX_BACKOFF" auth-check 2>&1)"
+    [ "$?" -eq 4 ]
+}
+
 main() {
     local requested_mode=false
     [ "${1:-}" != "--if-requested" ] || requested_mode=true
@@ -298,6 +310,16 @@ main() {
         log_event skip codex-usage-limit-backoff
         exit 0
     fi
+    if codex_auth_required; then
+        log_event skip codex-auth-required
+        # Once per expiry: the token lapsed while the timer kept ticking.
+        if [ ! -f "$NOTIFIED_AUTH_FILE" ]; then
+            mkdir -p "$STATE_DIR" && : > "$NOTIFIED_AUTH_FILE"
+            notify "Codex login expired" "${codex_auth_message:-run codex login on this Mac}"
+        fi
+        exit 0
+    fi
+    rm -f "$NOTIFIED_AUTH_FILE"
     # The watcher lane asks the board first and gives up before doing anything
     # else, so a minute-by-minute tick costs one bounded query against our own
     # API and nothing else. This runs BEFORE the dispatch lock and before the
