@@ -281,7 +281,11 @@ capture_progress() {
         # Keep the TAIL: the newest steps are the ones that say where it got to.
         tail -c "$MAX_PROGRESS_BYTES" "$source_file" > "$destination.raw"
     fi
-    jq -c 'select(type == "object")
+    # -R + fromjson? parses each LINE on its own and swallows the ones that do
+    # not parse. That is what makes the tail-truncation above safe: the
+    # leading fragment it always creates is one bad line, not a stream error
+    # that stops jq before it emits anything.
+    jq -Rc 'fromjson? | select(type == "object")
            | {at: (.at // ""), phase: (.phase // ""), note: (.note // ""),
               next: (.next // ""), subtask_id: (.subtask_id // null),
               subtask_done: (.subtask_done // false)}
@@ -710,7 +714,10 @@ save_checkpoint() {
     bounded_copy "$report_file" "$checkpoint_dir/report.md" "$MAX_REPORT_BYTES"
     bounded_copy "$decision_file" "$checkpoint_dir/decision.json" "$MAX_DECISION_BYTES"
     write_transcript "$checkpoint_dir/transcript.log" || true
-    if capture_progress "$SANDBOX_WORKSPACE/$PROGRESS_REL" \
+    # Same rule as the patch above: no stamp for THIS task, no harvest. A
+    # workspace left by the previous card would otherwise classify this stall
+    # from its phase log and PATCH its subtask ids.
+    if [ -n "$base_sha" ] && capture_progress "$SANDBOX_WORKSPACE/$PROGRESS_REL" \
         "$checkpoint_dir/progress.jsonl"; then
         progress_saved=true
         progress_phase="$(progress_phase "$checkpoint_dir/progress.jsonl")"
@@ -776,32 +783,51 @@ save_checkpoint() {
         # This is the fix for the card that reaches its third "approve 10 more
         # minutes": rerunning the same model at the same effort is what
         # produced stalls one and two.
+        kind_mode="$(jq -r '.mode // "investigate"' "$card_file")"
+        kind_model="$(autopr_kind_field "$kind_mode" model 2>/dev/null || true)"
+        kind_effort="$(autopr_kind_field "$kind_mode" effort 2>/dev/null || true)"
         stall_attempt="$(record_stall_attempt "$root")"
-        stall_reason="$(autopr_stall_reason "$checkpoint_dir/metadata.json" "$stall_attempt")"
-        suggested="$(autopr_runtime_for_stall "$stall_reason" "$stall_attempt")"
+        stall_reason="$(autopr_stall_reason "$checkpoint_dir/metadata.json" \
+            "$stall_attempt" "$kind_outcome")"
+        suggested="$(autopr_runtime_for_stall "$stall_reason" "$stall_attempt" \
+            "$kind_model" "$kind_outcome")"
         suggested_model="${suggested%% *}"
         suggested_effort="${suggested##* }"
         if [ -z "$suggested" ] || ! autopr_runtime_model_valid "$suggested_model" \
             || ! autopr_runtime_effort_valid "$suggested_effort"; then
             suggested_model='' suggested_effort=''
         fi
-        # Only say "switching to X" on the card when it is actually a change
-        # from what this run used, otherwise the note claims an escalation
-        # that never happens.
-        kind_model="$(autopr_kind_field "$(jq -r '.mode // "investigate"' "$card_file")" model 2>/dev/null || true)"
-        kind_effort="$(autopr_kind_field "$(jq -r '.mode // "investigate"' "$card_file")" effort 2>/dev/null || true)"
-        if [ -n "$suggested_model" ] \
-            && { [ "$suggested_model" != "$kind_model" ] || [ "$suggested_effort" != "$kind_effort" ]; }; then
-            runtime_line="Next run: $suggested_model at $suggested_effort effort (auto, from \"$stall_reason\"). Override it in the card's AutoPR runtime setting."
+        # What the card says next has to match what runtime-policy.sh will
+        # actually do: a pin outranks the suggestion, and "switching to X" is
+        # only true when X differs from what THIS run spent (investigate.sh
+        # exports that; the registry default is the fallback off-CI).
+        ran_model="${AUTOPR_RUN_MODEL:-$kind_model}"
+        ran_effort="${AUTOPR_RUN_EFFORT:-$kind_effort}"
+        pinned_model="$(jq -r '.autopr_model // ""' "$card_file" 2>/dev/null || true)"
+        pinned_effort="$(jq -r '.autopr_effort // ""' "$card_file" 2>/dev/null || true)"
+        if [ -n "$pinned_model$pinned_effort" ]; then
+            runtime_line="Next run: pinned on the card to ${pinned_model:-$ran_model} at ${pinned_effort:-$ran_effort} effort; auto-escalation (would be \"$stall_reason\") is not applied while a pin is set."
+        elif [ -n "$suggested_model" ] \
+            && { [ "$suggested_model" != "$ran_model" ] || [ "$suggested_effort" != "$ran_effort" ]; }; then
+            runtime_line="Next run: $suggested_model at $suggested_effort effort (auto, from \"$stall_reason\"; this run used $ran_model at $ran_effort). Override it in the card's AutoPR runtime setting."
         fi
-        jq --arg stall_reason "$stall_reason" --argjson stall_attempt "$stall_attempt" \
+        stall_json="$(jq -n --arg stall_reason "$stall_reason" --argjson stall_attempt "$stall_attempt" \
             --arg suggested_model "$suggested_model" --arg suggested_effort "$suggested_effort" \
-            '. + {stall_reason:$stall_reason,stall_attempt:$stall_attempt,
-                  suggested_model:(if $suggested_model == "" then null else $suggested_model end),
-                  suggested_effort:(if $suggested_effort == "" then null else $suggested_effort end)}' \
+            --arg run_id "${GITHUB_RUN_ID:-local}" --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{stall_reason:$stall_reason,stall_attempt:$stall_attempt,run_id:$run_id,created_at:$created_at,
+              suggested_model:(if $suggested_model == "" then null else $suggested_model end),
+              suggested_effort:(if $suggested_effort == "" then null else $suggested_effort end)}')"
+        jq --argjson stall "$stall_json" '. + $stall' \
             "$checkpoint_dir/metadata.json" > "$checkpoint_dir/metadata.json.tmp" \
             && mv "$checkpoint_dir/metadata.json.tmp" "$checkpoint_dir/metadata.json"
         chmod 600 "$checkpoint_dir/metadata.json"
+        # ALSO at the task root, where runtime-policy.sh reads it. `active`
+        # may keep pointing at an in-flight snapshot whose metadata predates
+        # this classification; the suggestion must not depend on which
+        # directory that pointer names.
+        printf '%s\n' "$stall_json" > "$root/stall.json.tmp" \
+            && chmod 600 "$root/stall.json.tmp" \
+            && mv "$root/stall.json.tmp" "$root/stall.json"
         if [ "$timeout_minutes" -eq 20 ]; then
             reason="The first 20-minute investigation ended before AutoPR produced a publishable result."
         else
@@ -883,6 +909,12 @@ consume_checkpoint() {
         mv "$active" "$consumed"
         chmod 600 "$consumed"
     fi
+    # The round is over: the stall count, the escalation it produced, and the
+    # ledger of subtasks already ticked all belong to it. Left in place, a
+    # card that stalled twice months ago would start its next round on xhigh
+    # with a note reading "pause #9", and a rolled-forward checklist item
+    # could never be ticked again.
+    rm -f "$root/stalls" "$root/stall.json" "$root/ticked-subtasks"
     # The successful path never reaches `save`, so this is the only place that
     # bounds the snapshot directories a healthy card leaves behind.
     [ ! -d "$root" ] || prune_checkpoints "$root"
@@ -898,6 +930,8 @@ final_tick() {
     project_id="$(jq -r '.project_id // empty' "$card_file" 2>/dev/null || true)"
     [ -n "$task_id" ] && [ -n "$project_id" ] || return 0
     [ -s "$SANDBOX_WORKSPACE/$PROGRESS_REL" ] || return 0
+    # No stamp for this task, no harvest — the workspace is another card's.
+    [ -n "$(sandbox_base_sha "$task_id")" ] || return 0
     root="$(task_root "$card_file")"
     umask 077
     mkdir -p "$root"
@@ -939,7 +973,14 @@ case "${1:-}" in
         [ "$#" -eq 2 ] || die "usage: checkpoint.sh tick CARD"
         final_tick "$2"
         ;;
+    stall)
+        # The latest stall classification for this card, or nothing. Task
+        # root, not checkpoint dir: see save_checkpoint.
+        [ "$#" -eq 2 ] || die "usage: checkpoint.sh stall CARD"
+        stall_file="$(task_root "$2")/stall.json"
+        [ ! -s "$stall_file" ] || cat "$stall_file"
+        ;;
     *)
-        die "usage: checkpoint.sh save|snapshot|snapshot-arm|snapshot-halt|latest|consume|tick ..."
+        die "usage: checkpoint.sh save|snapshot|snapshot-arm|snapshot-halt|latest|consume|tick|stall ..."
         ;;
 esac

@@ -117,6 +117,10 @@ _ALLOWED_ACTIVITY_KINDS = {"call", "email", "note", "meeting"}
 # three places.
 _ALLOWED_AUTOPR_MODELS = {"gpt-5.6-sol", "gpt-5.6-luna", "gpt-6-astra", "gpt-5.5"}
 _ALLOWED_AUTOPR_EFFORTS = {"low", "medium", "high", "xhigh"}
+# Who decided the runtime the last run used. `manual` is derived here from a
+# pin write; the other three are recorded by investigate.sh after it resolves
+# precedence, which is the only place that knows.
+_ALLOWED_AUTOPR_RUNTIME_SOURCES = {"auto", "manual", "default", "handoff"}
 
 # Reason set mirrors scripts/kanban-autopr/decision.sh; migration_required is
 # retired for new decisions but old cards still carry it, so parsers keep it.
@@ -2217,6 +2221,7 @@ async def update_project_task(
         pr_number = patch.get("pr_number")
         autopr_model = patch.get("autopr_model")
         autopr_effort = patch.get("autopr_effort")
+        autopr_runtime_source = patch.get("autopr_runtime_source")
 
         if priority is not None and priority not in _ALLOWED_PRIORITIES:
             raise ValueError(f"Invalid priority: {priority}")
@@ -2231,8 +2236,17 @@ async def update_project_task(
             raise ValueError(f"Invalid autopr_model: {autopr_model}")
         if autopr_effort is not None and autopr_effort not in _ALLOWED_AUTOPR_EFFORTS:
             raise ValueError(f"Invalid autopr_effort: {autopr_effort}")
+        if (
+            autopr_runtime_source is not None
+            and autopr_runtime_source not in _ALLOWED_AUTOPR_RUNTIME_SOURCES
+        ):
+            raise ValueError(f"Invalid autopr_runtime_source: {autopr_runtime_source}")
 
-        has_autopr_runtime_update = "autopr_model" in patch or "autopr_effort" in patch
+        has_autopr_runtime_update = (
+            "autopr_model" in patch
+            or "autopr_effort" in patch
+            or "autopr_runtime_source" in patch
+        )
         if has_autopr_runtime_update:
             autopr_columns_exist = await conn.fetchval(
                 """
@@ -2338,15 +2352,23 @@ async def update_project_task(
         autopr_runtime_update = ""
         if has_autopr_runtime_update:
             base = len(params)
+            # The source column has two writers. An explicit value wins (the
+            # harness recording auto/default/handoff). Otherwise a pin write
+            # derives it from the columns AS THEY WILL BE after this update —
+            # the presence flag plus the new value for a side being written,
+            # the existing column for a side that is not — so clearing one
+            # half while the other stays pinned still reads `manual`. Keying
+            # on the raw parameter values alone made "clear effort" record
+            # `auto` on a card whose model was still pinned.
             autopr_runtime_update = f"""
                 autopr_model = CASE WHEN ${base + 1}::boolean
                     THEN ${base + 2}::text ELSE autopr_model END,
                 autopr_effort = CASE WHEN ${base + 3}::boolean
                     THEN ${base + 4}::text ELSE autopr_effort END,
-                -- A human pinning the runtime overrides whatever the last run
-                -- auto-resolved; clearing both hands the card back to `auto`.
                 autopr_runtime_source = CASE
-                    WHEN ${base + 2}::text IS NULL AND ${base + 4}::text IS NULL
+                    WHEN ${base + 5}::boolean THEN ${base + 6}::text
+                    WHEN (CASE WHEN ${base + 1}::boolean THEN ${base + 2}::text ELSE autopr_model END) IS NULL
+                     AND (CASE WHEN ${base + 3}::boolean THEN ${base + 4}::text ELSE autopr_effort END) IS NULL
                         THEN NULL
                     ELSE 'manual'
                 END,
@@ -2356,6 +2378,8 @@ async def update_project_task(
                 autopr_model,
                 "autopr_effort" in patch,
                 autopr_effort,
+                "autopr_runtime_source" in patch,
+                autopr_runtime_source,
             ])
 
         row = await conn.fetchrow(

@@ -52,18 +52,7 @@ NOW_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 NOW_LOCAL="$(TZ=America/Los_Angeles date +'%Y-%m-%d %H:%M %Z')"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
-# ISO-8601 (any offset) → "2026-09-12 19:34 PDT". Falls back to the input when
-# neither date implementation can parse it: a journal that prints a raw
-# timestamp is fine, one that prints nothing is not.
-to_pacific() {
-    local value="${1:-}" out=""
-    [ -n "$value" ] || return 0
-    out="$(TZ=America/Los_Angeles date -j -f '%Y-%m-%dT%H:%M:%SZ' "$value" \
-        +'%Y-%m-%d %H:%M %Z' 2>/dev/null || true)"
-    [ -n "$out" ] || out="$(TZ=America/Los_Angeles date -d "$value" \
-        +'%Y-%m-%d %H:%M %Z' 2>/dev/null || true)"
-    printf '%s' "${out:-$value}"
-}
+# UTC stamp → Pacific display: autopr_to_pacific in lib.sh.
 STAGE_DIR="$(mktemp -d)"
 trap 'rm -rf "$STAGE_DIR"' EXIT
 JOURNAL_NAME="autopr-run-$RUN_ID-$STAMP.md"
@@ -282,7 +271,7 @@ resume_section() {
         printf 'A checkpoint with %s changed file(s) (%s-byte patch, saved %s) is stored on the runner at `%s`. The next run of this card resumes from it instead of starting over; it expires after the checkpoint retention window.\n' \
             "$(jq -r '.changed_file_count // 0' "$metadata")" \
             "$(jq -r '.patch_bytes // 0' "$metadata")" \
-            "$(to_pacific "$(jq -r '.created_at // ""' "$metadata")")" "$CHECKPOINT_DIR"
+            "$(autopr_to_pacific "$(jq -r '.created_at // ""' "$metadata")")" "$CHECKPOINT_DIR"
     elif [ -n "$CHECKPOINT_DIR" ] && [ -s "$metadata" ]; then
         # No patch is not the same as no resume: checkpoint.sh still points
         # `active` at a checkpoint holding a report or decision, and

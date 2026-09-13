@@ -488,7 +488,10 @@ extension MWProject {
 /// kanban cards / the task viewer. Uses America/Los_Angeles so PST/PDT is
 /// handled automatically.
 enum PacificDateFormatter {
-    private static let pacific = TimeZone(identifier: "America/Los_Angeles") ?? .current
+    /// The one Pacific zone in the app. Every operator-facing time — board,
+    /// ticket viewer, email list, thread list — renders in it, so the other
+    /// formatters read it from here rather than each keeping a copy.
+    static let pacific = TimeZone(identifier: "America/Los_Angeles") ?? .current
 
     // Formatters are expensive to allocate (each builds ICU state, ~10–50µs).
     // The kanban board parses/formats timestamps inside a GeometryReader that
@@ -521,7 +524,7 @@ enum PacificDateFormatter {
     /// Monday-first Pacific calendar, shared by the week-boundary helpers
     /// below. A fresh `Calendar` per call is cheap (unlike DateFormatter,
     /// no ICU pattern compilation) so this isn't cached as a static.
-    private static var pacificCalendar: Calendar {
+    static var pacificCalendar: Calendar {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = pacific
         cal.firstWeekday = 2 // Monday

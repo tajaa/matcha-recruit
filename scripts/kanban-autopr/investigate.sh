@@ -189,6 +189,19 @@ if [ "$RUNTIME_SOURCE" != handoff ] \
 fi
 printf 'kanban-autopr: runtime %s at %s effort (%s)\n' \
     "$KIND_MODEL" "$KIND_EFFORT" "$RUNTIME_SOURCE" >&2
+# Two readers need what this run actually spent. The board, so the ticket's
+# Runtime control can say "last run auto-selected" (the service only ever
+# writes `manual`/NULL itself); and the checkpoint save step, which runs
+# later in the same job and otherwise compares the next suggestion against
+# the registry default rather than the model that just stalled. Neither is
+# fatal: a card write failing here must not abort a claimed run.
+( mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
+    "$(jq -n --arg source "$RUNTIME_SOURCE" '{autopr_runtime_source:$source}')" ) \
+    >/dev/null 2>&1 \
+    || printf 'kanban-autopr: warning: could not record the runtime source on the card\n' >&2
+if [ -n "${GITHUB_ENV:-}" ]; then
+    printf 'AUTOPR_RUN_MODEL=%s\nAUTOPR_RUN_EFFORT=%s\n' "$KIND_MODEL" "$KIND_EFFORT" >> "$GITHUB_ENV"
+fi
 
 # Fetch the same evidence the task detail UI uses. In particular, the history
 # endpoint carries discussion notes, review boundaries, rejected-checklist

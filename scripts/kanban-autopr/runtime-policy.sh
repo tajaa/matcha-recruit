@@ -63,9 +63,16 @@ if [ -n "$card_model" ] || [ -n "$card_effort" ]; then
     runtime_source=manual
     model="$card_model"
     effort="$card_effort"
-elif [ -n "$checkpoint" ] && [ -s "$checkpoint/metadata.json" ]; then
-    model="$(jq -r '.suggested_model // empty' "$checkpoint/metadata.json")"
-    effort="$(jq -r '.suggested_effort // empty' "$checkpoint/metadata.json")"
+elif [ -n "$checkpoint" ]; then
+    # From the task root, not `$checkpoint/metadata.json`: the resume pointer
+    # can name an in-flight snapshot written before the stall was classified.
+    # Only with a resumable checkpoint, though — a suggestion is advice for a
+    # continuation, and a from-scratch run gets the registry default.
+    stall_record="$("$SCRIPT_DIR/checkpoint.sh" stall "$CARD_FILE" 2>/dev/null || true)"
+    if [ -n "$stall_record" ]; then
+        model="$(jq -r '.suggested_model // empty' <<< "$stall_record")"
+        effort="$(jq -r '.suggested_effort // empty' <<< "$stall_record")"
+    fi
 fi
 # A pinned or suggested value that no endpoint knows is a dead run. Drop it and
 # let the registry default stand rather than failing the card here.
@@ -75,9 +82,9 @@ fi
 
 stall_reason=""
 stall_attempt=0
-if [ -n "$checkpoint" ] && [ -s "$checkpoint/metadata.json" ]; then
-    stall_reason="$(jq -r '.stall_reason // empty' "$checkpoint/metadata.json")"
-    stall_attempt="$(jq -r '.stall_attempt // 0' "$checkpoint/metadata.json")"
+if [ -n "${stall_record:-}" ]; then
+    stall_reason="$(jq -r '.stall_reason // empty' <<< "$stall_record")"
+    stall_attempt="$(jq -r '.stall_attempt // 0' <<< "$stall_record")"
     [[ "$stall_attempt" =~ ^[0-9]+$ ]] || stall_attempt=0
 fi
 

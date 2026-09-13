@@ -312,10 +312,9 @@ enum EmailDates {
     // America/Los_Angeles, and an email list that silently switched to
     // whatever timezone the laptop was in would be the one surface that
     // disagreed with the rest.
-    private static let displayZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
     private static func displayFormatter(_ configure: (DateFormatter) -> Void) -> DateFormatter {
         let f = DateFormatter()
-        f.timeZone = displayZone
+        f.timeZone = PacificDateFormatter.pacific
         configure(f)
         return f
     }
@@ -337,7 +336,10 @@ enum EmailDates {
 
     /// Mail-style: a time today, "Yesterday", a weekday this week, else a date.
     static func listLabel(_ date: Date) -> String {
-        let cal = Calendar.current
+        // Bucket in the zone the label is rendered in. With the device
+        // calendar, a message at 22:00 PDT could be "today" per a UTC laptop
+        // and render as a bare time that belongs to the previous Pacific day.
+        let cal = PacificDateFormatter.pacificCalendar
         let now = Date()
         if cal.isDateInToday(date) { return time.string(from: date) }
         if cal.isDateInYesterday(date) { return "Yesterday" }

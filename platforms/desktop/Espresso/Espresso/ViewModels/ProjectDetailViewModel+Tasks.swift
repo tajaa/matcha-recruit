@@ -303,6 +303,15 @@ extension ProjectDetailViewModel {
         if merged.subtaskDone == nil { merged.subtaskDone = previous.subtaskDone }
         if merged.updateCount == nil { merged.updateCount = previous.updateCount }
         if merged.recentEventIds == nil { merged.recentEventIds = previous.recentEventIds }
+        // PR link and runtime pin are list-query only too: the reject and
+        // approve RETURNING clauses omit them, and without this a send-back
+        // blanked the "#1234" chip and snapped the Runtime control to Auto
+        // until the next full reload.
+        if merged.prNumber == nil { merged.prNumber = previous.prNumber }
+        if merged.prUrl == nil { merged.prUrl = previous.prUrl }
+        if merged.autoprModel == nil { merged.autoprModel = previous.autoprModel }
+        if merged.autoprEffort == nil { merged.autoprEffort = previous.autoprEffort }
+        if merged.autoprRuntimeSource == nil { merged.autoprRuntimeSource = previous.autoprRuntimeSource }
         if merged.autoprClaimedAt != nil {
             // A claim consumes both queue shapes immediately. The claim's WS
             // payload carries the active timestamp while list-only queue

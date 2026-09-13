@@ -129,10 +129,20 @@ changes.
    its third "approve 10 more minutes": `checkpoint.sh` classifies the stall
    (`near_publish` / `implementing` / `exploring` / `stuck`) from what the run
    actually saved plus the phase it last logged, and `autopr_runtime_for_stall`
-   in `lib.sh` maps that to a runtime — a run with the patch written and only
-   tests/publish left is DOWNGRADED to `gpt-5.6-luna`, a run that has twice come
-   back empty-handed is raised to `xhigh`. Pin a specific model/effort in the
-   ticket's **Runtime** control to override it; clear both to return to auto.
+   in `lib.sh` maps that to a runtime on the kind's own base model — a PR run
+   with the patch written and only tests/publish left is DOWNGRADED to
+   `gpt-5.6-luna`, a run that has twice come back empty-handed is raised to
+   `xhigh`; an artifact kind (research, email) is classified from its report
+   instead of a patch and never leaves the model its registry row chose. The
+   classification is written to `<checkpoint root>/<task id>/stall.json`
+   (read via `checkpoint.sh stall CARD`), not into the checkpoint directory,
+   because the resume pointer can name an in-flight snapshot written before
+   the stall was classified. `consume` clears it, the stall counter, and the
+   ticked-subtask ledger when a round publishes. Pin a specific model/effort
+   in the ticket's **Runtime** control to override it; clear both to return to
+   auto. investigate.sh records which source won on the card
+   (`autopr_runtime_source`) and exports the spent model/effort to the job env
+   so the pause note compares against what actually ran.
    The roster lives in three places that must agree: `AUTOPR_RUNTIME_MODELS`
    (`lib.sh`), `MODEL_CHOICES` (`scripts/msandbox/autopr_control.py`), and
    `_ALLOWED_AUTOPR_MODELS` (`project_task_service.py`).

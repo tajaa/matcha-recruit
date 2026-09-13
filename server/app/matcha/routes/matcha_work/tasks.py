@@ -217,7 +217,7 @@ async def update_project_task_endpoint(
     # picker that sends "" when the operator chooses Auto clears the column
     # instead of storing an invalid model id. The service validates the value
     # against the same roster the sandbox will hand to `codex --model`.
-    for runtime_key in ("autopr_model", "autopr_effort"):
+    for runtime_key in ("autopr_model", "autopr_effort", "autopr_runtime_source"):
         if runtime_key in body:
             v = body[runtime_key]
             if v is None or v == "":

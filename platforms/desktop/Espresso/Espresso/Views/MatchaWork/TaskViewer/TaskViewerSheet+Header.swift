@@ -258,8 +258,24 @@ extension TaskViewerSheet {
     /// without producing anything and drops one that only has mechanical work
     /// left. Pinning is for when you already know which way it should go —
     /// this is the manual half of the same decision, not a separate mode.
+    /// Whether this ticket is one AutoPR can act on at all. Shared by the run
+    /// controls and the runtime pickers so neither renders on a sales card or
+    /// an unwatched board.
+    var canControlAutoPR: Bool {
+        canRequestAutoPRRun
+            || liveAutoPRTask.autoprClaimedAt != nil
+            || liveAutoPRTask.autoprPaused == true
+    }
+
     @ViewBuilder
     var autoPRRuntimeControl: some View {
+        if canControlAutoPR {
+            autoPRRuntimePickers
+        }
+    }
+
+    @ViewBuilder
+    private var autoPRRuntimePickers: some View {
         let model = liveAutoPRTask.autoprModel
         let effort = liveAutoPRTask.autoprEffort
         let isAuto = (model?.isEmpty ?? true) && (effort?.isEmpty ?? true)
@@ -329,10 +345,7 @@ extension TaskViewerSheet {
     @ViewBuilder
     var autoPRRunNowControl: some View {
         let hasActiveClaim = liveAutoPRTask.autoprClaimedAt != nil
-        let canControlRun = canRequestAutoPRRun
-            || hasActiveClaim
-            || liveAutoPRTask.autoprPaused == true
-        if canControlRun {
+        if canControlAutoPR {
             HStack(spacing: 8) {
                 if liveAutoPRTask.autoprPaused == true {
                     Label("AutoPR paused", systemImage: "pause.circle")

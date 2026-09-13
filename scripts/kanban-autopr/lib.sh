@@ -645,62 +645,102 @@ autopr_runtime_effort_valid() {
     case " $AUTOPR_RUNTIME_EFFORTS " in *" ${1:-} "*) return 0 ;; *) return 1 ;; esac
 }
 
-# autopr_runtime_for_stall STALL_REASON ATTEMPT → "<model> <effort>", or empty
-# when the stall carries no opinion and the kind registry's default should
-# stand. ATTEMPT is how many continuations this card has already burned.
+# autopr_runtime_for_stall STALL_REASON ATTEMPT BASE_MODEL OUTCOME
+#   → "<model> <effort>", or empty when the stall carries no opinion and the
+#     kind registry's default should stand.
+#
+# BASE_MODEL is the kind's own registry model, so a research or email card
+# that stalls is raised on the model its registry row chose rather than moved
+# onto investigate's. OUTCOME (pull_request | artifact) decides whether the
+# near_publish downgrade applies: an artifact kind already runs on the cheap
+# model and has no tests to run, so "finish it on luna" is a no-op there.
+#
+# ATTEMPT is the 1-based count of stalls this card has had this round; it is
+# not consulted here — a second empty-handed pass is already classified
+# `stuck` by autopr_stall_reason, which is where the escalation lives.
 #
 # The ladder is deliberately short. Its only job is to stop the third identical
 # rerun: finish cheap work cheaply, and give a genuinely stuck card more
 # reasoning than the run that just failed had.
 autopr_runtime_for_stall() {
-    local reason="${1:-}" attempt="${2:-0}"
-    [[ "$attempt" =~ ^[0-9]+$ ]] || attempt=0
+    local reason="${1:-}" base="${3:-gpt-5.6-sol}" outcome="${4:-pull_request}"
+    autopr_runtime_model_valid "$base" || base=gpt-5.6-sol
     case "$reason" in
         # The thinking is done and recorded — what is left is running tests,
         # writing the commit, and publishing. A cheaper model finishes that
         # faster, and a 10-minute budget is plenty for it.
-        near_publish) printf 'gpt-5.6-luna medium' ;;
-        # Mid-implementation with real code saved. Same model, more headroom:
+        near_publish)
+            if [ "$outcome" = pull_request ]; then printf 'gpt-5.6-luna medium'
+            else printf '%s medium' "$base"; fi ;;
+        # Mid-implementation with real work saved. Same model, more headroom:
         # the previous pass was making progress, it just ran out of clock.
-        implementing) printf 'gpt-5.6-sol high' ;;
+        implementing) printf '%s high' "$base" ;;
+        # Read the repo (or the corpus), wrote nothing yet. One step up; the
+        # second empty-handed pass arrives here as `stuck`.
+        exploring) printf '%s high' "$base" ;;
         # Nothing to show, or this card has already eaten a continuation and
         # still has nothing. More minutes at the same effort is what produced
         # the last two stalls; raise the reasoning instead.
-        stuck) printf 'gpt-5.6-sol xhigh' ;;
-        # Read the repo, wrote no code yet. One step up on the first retry;
-        # a second empty-handed pass is `stuck` and lands on xhigh above.
-        exploring)
-            if [ "$attempt" -ge 1 ]; then printf 'gpt-5.6-sol xhigh'
-            else printf 'gpt-5.6-sol high'; fi ;;
+        stuck) printf '%s xhigh' "$base" ;;
         *) printf '' ;;
     esac
 }
 
-# autopr_stall_reason METADATA_JSON ATTEMPT → near_publish|implementing|stuck|exploring
+# autopr_stall_reason METADATA_JSON ATTEMPT OUTCOME
+#   → near_publish|implementing|stuck|exploring
 #
 # Reads a checkpoint's metadata.json. The signals are the ones checkpoint.sh
 # already records, plus the phase the model last logged to its progress file:
 # what it saved is a far better account of where it got to than how long it ran.
+#
+# An artifact kind (research, email) runs with REQUIRE_EMPTY_PATCH, so for it
+# the report plays the role the patch plays for a PR kind: report + decision
+# saved is "about to publish", report alone is "mid-write".
 autopr_stall_reason() {
-    local metadata="${1:-}" attempt="${2:-0}" patch_saved decision_saved report_saved phase
+    local metadata="${1:-}" attempt="${2:-0}" outcome="${3:-pull_request}"
+    local patch_saved decision_saved report_saved phase work_saved
     [ -s "$metadata" ] || { printf 'stuck'; return; }
     patch_saved="$(jq -r '.patch_saved // false' "$metadata" 2>/dev/null || echo false)"
     decision_saved="$(jq -r '.decision_saved // false' "$metadata" 2>/dev/null || echo false)"
     report_saved="$(jq -r '.report_saved // false' "$metadata" 2>/dev/null || echo false)"
     phase="$(jq -r '.progress_phase // ""' "$metadata" 2>/dev/null || echo '')"
-    # A saved decision AND a saved patch means the model reached a verdict on
-    # work it had actually written. Trust the logged phase over that pairing
-    # only to ADD near_publish, never to claim it without a patch.
-    if [ "$patch_saved" = true ] \
+    if [ "$outcome" = artifact ]; then work_saved="$report_saved"; else work_saved="$patch_saved"; fi
+    # A saved decision AND saved work means the model reached a verdict on
+    # something it had actually produced. Trust the logged phase over that
+    # pairing only to ADD near_publish, never to claim it without the work.
+    if [ "$work_saved" = true ] \
         && { [ "$decision_saved" = true ] || [ "$phase" = test ] \
              || [ "$phase" = review ] || [ "$phase" = publish ]; }; then
         printf 'near_publish'
-    elif [ "$patch_saved" = true ]; then
+    elif [ "$work_saved" = true ]; then
         printf 'implementing'
     elif [ "$report_saved" = true ] || [ -n "$phase" ]; then
-        # It got far enough to describe what it was doing, but wrote no code.
-        [ "${attempt:-0}" -ge 2 ] && printf 'stuck' || printf 'exploring'
+        # It got far enough to describe what it was doing, but produced
+        # nothing. Once on the first stall; a second one is stuck.
+        if [ "${attempt:-0}" -ge 2 ]; then printf 'stuck'; else printf 'exploring'; fi
     else
         printf 'stuck'
+    fi
+}
+
+# autopr_to_pacific ISO8601_UTC → "2026-09-12 12:34 PDT"
+#
+# The input is always the `date -u ... Z` stamp this harness writes, so parse
+# it AS UTC and only then render in Pacific. BSD `date -j -f` interprets its
+# input in the current TZ, which is why setting TZ on the same command line
+# silently reported every checkpoint seven hours late. Falls back to the raw
+# value when neither date implementation can parse it: a journal that prints a
+# raw timestamp is fine, one that prints nothing is not.
+autopr_to_pacific() {
+    local value="${1:-}" epoch=""
+    [ -n "$value" ] || return 0
+    epoch="$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$value" +%s 2>/dev/null || true)"
+    [ -n "$epoch" ] || epoch="$(date -u -d "$value" +%s 2>/dev/null || true)"
+    if [ -n "$epoch" ]; then
+        TZ=America/Los_Angeles date -r "$epoch" +'%Y-%m-%d %H:%M %Z' 2>/dev/null \
+            || TZ=America/Los_Angeles date -d "@$epoch" +'%Y-%m-%d %H:%M %Z' 2>/dev/null \
+            || printf '%s' "$value"
+    else
+        printf '%s' "$value"
     fi
 }
