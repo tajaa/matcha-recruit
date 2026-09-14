@@ -89,6 +89,7 @@ class ProductDefinition:
     max_headcount: int
     nav: Optional[list[dict[str, Any]]]
     status: str
+    onboarding_kind: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     updated_by: Optional[str] = None
@@ -130,6 +131,7 @@ class ProductDefinition:
             "max_headcount": self.max_headcount,
             "nav": self.nav,
             "status": self.status,
+            "onboarding_kind": self.onboarding_kind,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "updated_by": self.updated_by,
@@ -149,6 +151,7 @@ class ProductDefinition:
             "min_headcount": self.min_headcount,
             "max_headcount": self.max_headcount,
             "nav": self.nav,
+            "onboarding_kind": self.onboarding_kind,
         }
 
 
@@ -188,6 +191,7 @@ def row_to_product(row) -> ProductDefinition:
         max_headcount=row["max_headcount"],
         nav=nav if isinstance(nav, list) else None,
         status=row["status"],
+        onboarding_kind=row["onboarding_kind"],
         created_at=_iso(row, "created_at"),
         updated_at=_iso(row, "updated_at"),
         updated_by=row["updated_by"] if "updated_by" in row.keys() else None,
@@ -197,7 +201,7 @@ def row_to_product(row) -> ProductDefinition:
 SELECT_COLUMNS = """
     id, slug, name, description, features, gate_feature, pricing_model,
     price_cents, block_size, min_headcount, max_headcount, nav, status,
-    created_at, updated_at, updated_by
+    created_at, updated_at, updated_by, onboarding_kind
 """
 
 

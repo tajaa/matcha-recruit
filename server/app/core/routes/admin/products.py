@@ -62,6 +62,7 @@ class ProductUpsert(BaseModel):
     min_headcount: int = 1
     max_headcount: int = 300
     nav: Optional[list[NavEntry]] = None
+    onboarding_kind: Optional[str] = None
 
 
 def _validated(body: ProductUpsert, beta_features: "frozenset[str]") -> dict[str, Any]:
@@ -81,6 +82,16 @@ def _validated(body: ProductUpsert, beta_features: "frozenset[str]") -> dict[str
             [e.model_dump() for e in body.nav] if body.nav is not None else None,
             features,
         )
+        onboarding_kind = body.onboarding_kind or None
+        if onboarding_kind not in (None, "sc"):
+            raise ProductDefinitionError("Unknown onboarding kind")
+        if onboarding_kind == "sc":
+            required = {"employees", "employee_schedule", "credential_templates"}
+            missing = sorted(flag for flag in required if not features.get(flag))
+            if missing:
+                raise ProductDefinitionError(
+                    "Matcha S&C onboarding requires: " + ", ".join(missing)
+                )
     except ProductDefinitionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -96,6 +107,7 @@ def _validated(body: ProductUpsert, beta_features: "frozenset[str]") -> dict[str
         "min_headcount": body.min_headcount,
         "max_headcount": body.max_headcount,
         "nav": json.dumps(nav) if nav is not None else None,
+        "onboarding_kind": onboarding_kind,
     }
 
 
@@ -188,13 +200,14 @@ async def create_product(body: ProductUpsert, current_user=Depends(require_admin
         row = await conn.fetchrow(
             f"""INSERT INTO product_definitions
                     (slug, name, description, features, gate_feature, pricing_model,
-                     price_cents, block_size, min_headcount, max_headcount, nav, updated_by)
-                VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
+                     price_cents, block_size, min_headcount, max_headcount, nav,
+                     onboarding_kind, updated_by)
+                VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13)
                 RETURNING {SELECT_COLUMNS}""",
             payload["slug"], payload["name"], payload["description"], payload["features"],
             payload["gate_feature"], payload["pricing_model"], payload["price_cents"],
             payload["block_size"], payload["min_headcount"], payload["max_headcount"],
-            payload["nav"], current_user.email,
+            payload["nav"], payload["onboarding_kind"], current_user.email,
         )
     logger.info("Admin created product %s by %s", payload["slug"], current_user.email)
     return row_to_product(row).to_dict()
@@ -209,10 +222,21 @@ async def update_product(
         payload = _validated(body, beta_features)
         async with conn.transaction():
             current = await conn.fetchrow(
-                "SELECT slug, status FROM product_definitions WHERE id = $1", product_id
+                "SELECT slug, status, onboarding_kind FROM product_definitions WHERE id = $1",
+                product_id,
             )
             if not current:
                 raise HTTPException(status_code=404, detail="Product not found")
+            if current["onboarding_kind"] != payload["onboarding_kind"]:
+                tenants = await conn.fetchval(
+                    "SELECT COUNT(*) FROM companies WHERE signup_source = $1",
+                    SIGNUP_SOURCE_PREFIX + current["slug"],
+                )
+                if tenants:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="The onboarding kind cannot change after the first signup",
+                    )
             if current["slug"] != payload["slug"]:
                 # The slug is the signup URL and lives in every tenant's
                 # signup_source — renaming would orphan them.
@@ -237,13 +261,14 @@ async def update_product(
                        SET slug = $1, name = $2, description = $3, features = $4::jsonb,
                            gate_feature = $5, pricing_model = $6, price_cents = $7,
                            block_size = $8, min_headcount = $9, max_headcount = $10,
-                           nav = $11::jsonb, updated_at = NOW(), updated_by = $12
-                     WHERE id = $13
+                           nav = $11::jsonb, onboarding_kind = $12,
+                           updated_at = NOW(), updated_by = $13
+                     WHERE id = $14
                  RETURNING {SELECT_COLUMNS}""",
                 payload["slug"], payload["name"], payload["description"], payload["features"],
                 payload["gate_feature"], payload["pricing_model"], payload["price_cents"],
                 payload["block_size"], payload["min_headcount"], payload["max_headcount"],
-                payload["nav"], current_user.email, product_id,
+                payload["nav"], payload["onboarding_kind"], current_user.email, product_id,
             )
     logger.info("Admin updated product %s by %s", payload["slug"], current_user.email)
     return row_to_product(row).to_dict()

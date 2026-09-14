@@ -93,6 +93,7 @@ from .onboarding import (
     invitations_router,
     ir_onboarding_router,
     matcha_x_onboarding_router,
+    sc_onboarding_router,
 )
 from .intake import anonymous_report_router, external_intake_router, symlink_public_router
 
@@ -146,6 +147,18 @@ matcha_router.include_router(matcha_x_onboarding_router, prefix="/matcha-x-onboa
                              # product reuses the same wizard but only holds the
                              # full `compliance` flag — admit either.
                              dependencies=[Depends(require_any_feature("handbook_audit", "compliance"))])
+matcha_router.include_router(
+    sc_onboarding_router,
+    prefix="/sc-onboarding",
+    tags=["sc-onboarding"],
+    # The wizard writes employees, schedule jobs and tenant credential types.
+    # `is_tenant_activated` cannot carry this on its own: a `free`-priced
+    # product has no gate flag and activates at signup, so it would admit a
+    # tenant whose flags an admin later turned off.
+    dependencies=[Depends(require_all_features(
+        "employees", "employee_schedule", "credential_templates",
+    ))],
+)
 matcha_router.include_router(ir_surveys_router, prefix="/ir/surveys", tags=["ir-surveys"],
                              dependencies=[Depends(require_feature("incidents"))])
 # Labor Relations — union / CBA admin (Pro-bundled). CBA store + clause library

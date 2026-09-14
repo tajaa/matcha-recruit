@@ -29,34 +29,33 @@ async def materialize_job_requirements(
     ]
     if not employees:
         return 0
+    # One statement, not one per (employee × required type): a large roster on a
+    # job with several mandatory certificates is otherwise tens of thousands of
+    # sequential round-trips inside the caller's transaction.  The join yields
+    # each (employee, credential_type) at most once — jr is unique per
+    # (job_id, credential_type_id) — so ON CONFLICT cannot hit the same row
+    # twice in one command.  This UPSERT intentionally does not clear
+    # document/verification history.
     rows = await conn.fetch(
-        """SELECT e.id AS employee_id, jr.credential_type_id, jr.is_required,
+        """INSERT INTO employee_credential_requirements
+               (employee_id, credential_type_id, status, is_required, due_date, applies_company_wide)
+           SELECT e.id, jr.credential_type_id, 'pending', jr.is_required,
                   GREATEST(COALESCE(e.start_date, e.created_at::date), jr.effective_from)
-                    + COALESCE(j.credential_grace_days, c.default_credential_grace_days) AS due_date
+                    + COALESCE(j.credential_grace_days, c.default_credential_grace_days),
+                  false
              FROM schedule_job_credential_requirements jr
              JOIN schedule_jobs j ON j.id=jr.job_id AND j.company_id=jr.company_id
              JOIN companies c ON c.id=jr.company_id
              JOIN employees e ON e.id = ANY($3::uuid[]) AND e.org_id=jr.company_id
-            WHERE jr.company_id=$1 AND jr.job_id=$2 AND jr.is_required""",
+            WHERE jr.company_id=$1 AND jr.job_id=$2 AND jr.is_required
+           ON CONFLICT (employee_id, credential_type_id) DO UPDATE
+              SET is_required=true,
+                  due_date=LEAST(COALESCE(employee_credential_requirements.due_date, EXCLUDED.due_date), EXCLUDED.due_date),
+                  updated_at=NOW()
+           RETURNING 1""",
         company_id, job_id, employees,
     )
-    count = 0
-    for row in rows:
-        # The cross join above produces a row for each employee/type.  This
-        # UPSERT intentionally does not clear document/verification history.
-        await conn.execute(
-            """INSERT INTO employee_credential_requirements
-                   (employee_id, credential_type_id, status, is_required, due_date, applies_company_wide)
-               SELECT e.id, $3, 'pending', $4, $5, false
-                 FROM employees e WHERE e.id=$1 AND e.org_id=$2
-               ON CONFLICT (employee_id, credential_type_id) DO UPDATE
-                  SET is_required=true,
-                      due_date=LEAST(COALESCE(employee_credential_requirements.due_date, EXCLUDED.due_date), EXCLUDED.due_date),
-                      updated_at=NOW()""",
-            row["employee_id"], company_id, row["credential_type_id"], row["is_required"], row["due_date"],
-        )
-        count += 1
-    return count
+    return len(rows)
 
 
 async def reconcile_company_job_requirements(conn, *, company_id: UUID) -> int:
