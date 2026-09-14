@@ -93,7 +93,9 @@ build_node() {
     rm -rf "$temporary"
     mkdir -p "$temporary"
     cp "$REPO_ROOT/client/package.json" "$REPO_ROOT/client/package-lock.json" "$temporary/"
-    (cd "$temporary" && "$NPM_BIN" ci --no-audit --no-fund --loglevel=error) || {
+    # --legacy-peer-deps mirrors client/Dockerfile and ci.yml: react 19 vs
+    # react-simple-maps' react<=18 peer range is an ERESOLVE otherwise.
+    (cd "$temporary" && "$NPM_BIN" ci --legacy-peer-deps --no-audit --no-fund --loglevel=error) || {
         rm -rf "$temporary"
         return 1
     }
