@@ -53,3 +53,8 @@ async def complete(body: ScOnboardingComplete, current_user=Depends(require_clie
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ScOnboardingError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        # Shared write helpers (credential rules, scheduling) refuse invalid
+        # submissions with a bare ValueError. Surfacing that as a 500 would turn
+        # an actionable validation refusal into a server_error_reports row.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

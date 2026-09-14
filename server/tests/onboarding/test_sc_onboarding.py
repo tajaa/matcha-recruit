@@ -47,9 +47,18 @@ def test_sc_product_persists_explicit_onboarding_kind():
     assert _validated(sc_product(), frozenset())["onboarding_kind"] == "sc"
 
 
+def test_router_gate_matches_the_features_the_wizard_writes():
+    # The mount-time require_all_features gate and the product-builder
+    # validation must name the same flags, or a product can be composed that
+    # the wizard is then refused access to (or vice versa).
+    assert set(service.SC_REQUIRED_FEATURES) == {
+        "employees", "employee_schedule", "credential_templates",
+    }
+
+
 def submission(*, locations=(), employees=()) -> ScOnboardingComplete:
     return ScOnboardingComplete(
-        company=ScCompanySetup(company_size="11-50", naics_code="722511", industry="Restaurants"),
+        company=ScCompanySetup(company_size="11-50", naics_code="722511"),
         locations=list(locations),
         employees=list(employees),
         jobs=[ScJobSetup(
@@ -61,17 +70,34 @@ def submission(*, locations=(), employees=()) -> ScOnboardingComplete:
 
 
 def test_strings_are_trimmed_before_length_validation():
-    company = ScCompanySetup(company_size="1-10", naics_code="722", industry="  Food service  ")
-    assert company.industry == "Food service"
+    location = ScLocationImport(
+        name="  North  ", address="1 Main", city="Austin", state="TX", zipcode="78701",
+    )
+    assert location.name == "North"
     with pytest.raises(ValidationError):
-        ScJobSetup(name="   ")
+        ScJobSetup(name="   ", certificates=[ScCertificateSetup(name="Card")])
+
+
+def test_company_setup_does_not_accept_an_industry_override():
+    # Signup already stores the controlled INDUSTRY_OPTIONS value; re-asking
+    # here as free text would break industry_tag resolution.
+    company = ScCompanySetup.model_validate(
+        {"company_size": "1-10", "naics_code": "722", "industry": "Dental practice"}
+    )
+    assert not hasattr(company, "industry")
 
 
 def test_company_fields_and_schedule_blocking_are_validated():
     with pytest.raises(ValidationError):
-        ScCompanySetup(company_size="11-50", naics_code="72-2", industry="Restaurants")
+        ScCompanySetup(company_size="11-50", naics_code="72-2")
     with pytest.raises(ValidationError, match="schedule-blocking"):
         ScCertificateSetup(name="Card", is_required=False, schedule_blocking=True)
+
+
+def test_a_job_must_carry_at_least_one_certificate():
+    # The wizard enforces the same rule client-side; the contracts must agree.
+    with pytest.raises(ValidationError):
+        ScJobSetup(name="Cook", certificates=[])
 
 
 def test_optional_imports_can_be_skipped():
@@ -146,6 +172,9 @@ class _Connection:
 
     async def fetch(self, query, *args):
         self.calls.append(("fetch", query, args))
+        if "INSERT INTO employees" in query:
+            assert self.in_transaction
+            return [{"id": self.employee_id, "email": email} for email in args[1]]
         if "SELECT email FROM employees" in query:
             return []
         if "FROM business_locations" in query:
@@ -158,8 +187,6 @@ class _Connection:
         self.calls.append(("fetchval", query, args))
         if "SELECT id FROM scoped_credential_types" in query:
             return None
-        if "INSERT INTO employees" in query:
-            return self.employee_id
         if "INSERT INTO schedule_jobs" in query:
             return self.job_id
         if "UPDATE companies SET sc_onboarding_completed_at" in query:
@@ -171,6 +198,9 @@ class _Connection:
         self.calls.append(("execute", query, args))
         return "OK"
 
+    def queries(self) -> str:
+        return "\n".join(query for _, query, _ in self.calls)
+
 
 def _allow_sc_product(monkeypatch):
     async def product(*args, **kwargs):
@@ -178,6 +208,16 @@ def _allow_sc_product(monkeypatch):
 
     monkeypatch.setattr(service, "get_product_by_signup_source", product)
     monkeypatch.setattr(service, "is_tenant_activated", lambda *args, **kwargs: True)
+
+
+def _capture_location_sync(monkeypatch) -> list[dict]:
+    synced: list[dict] = []
+
+    async def sync(conn, company_id, employee_by_state):
+        synced.append(dict(employee_by_state))
+
+    monkeypatch.setattr(service, "_sync_compliance_locations", sync)
+    return synced
 
 
 @pytest.mark.asyncio
@@ -202,6 +242,7 @@ async def test_status_rejects_non_sc_and_inactive_companies(monkeypatch):
 @pytest.mark.asyncio
 async def test_completion_is_company_scoped_and_materializes_after_rules(monkeypatch):
     _allow_sc_product(monkeypatch)
+    synced = _capture_location_sync(monkeypatch)
     conn = _Connection()
     employee = ScEmployeeImport(
         email="cook@example.com", first_name="Casey", last_name="Cook",
@@ -231,6 +272,117 @@ async def test_completion_is_company_scoped_and_materializes_after_rules(monkeyp
     assert any("INSERT INTO schedule_job_employees" in query for _, query, _ in conn.calls)
     assert any("UPDATE companies SET sc_onboarding_completed_at" in query for _, query, _ in conn.calls)
     assert conn.rolled_back is False
+    # Imported employees must get the same derived jurisdiction coverage the
+    # employees CSV endpoint produces, and the sync runs after the commit.
+    assert synced == [{"TX": conn.employee_id}]
+
+
+@pytest.mark.asyncio
+async def test_roster_and_locations_are_written_in_set_based_statements(monkeypatch):
+    _allow_sc_product(monkeypatch)
+    _capture_location_sync(monkeypatch)
+
+    async def replace(conn_arg, **kwargs):
+        return []
+
+    monkeypatch.setattr(service, "replace_job_credential_requirements", replace)
+    conn = _Connection()
+    employees = [
+        ScEmployeeImport(
+            email=f"cook{index}@example.com", first_name="Casey", last_name=str(index),
+            work_state="TX", job_title="Cook", department="Kitchen",
+        )
+        for index in range(25)
+    ]
+    locations = [
+        ScLocationImport(
+            name=f"Store {index}", address=f"{index} Main", city="Austin",
+            state="TX", zipcode="78701",
+        )
+        for index in range(25)
+    ]
+
+    await service.complete_sc_onboarding(
+        conn, company_id=uuid4(), actor_user_id=uuid4(),
+        body=submission(locations=locations, employees=employees),
+    )
+
+    inserts = [query for _, query, _ in conn.calls if "INSERT INTO employees" in query]
+    location_inserts = [query for _, query, _ in conn.calls if "INSERT INTO business_locations" in query]
+    assert len(inserts) == 1
+    assert len(location_inserts) == 1
+
+
+@pytest.mark.asyncio
+async def test_tenant_certificate_name_never_lands_in_the_shared_catalog(monkeypatch):
+    _allow_sc_product(monkeypatch)
+    _capture_location_sync(monkeypatch)
+
+    async def replace(conn_arg, **kwargs):
+        return []
+
+    monkeypatch.setattr(service, "replace_job_credential_requirements", replace)
+    conn = _Connection()
+
+    await service.complete_sc_onboarding(
+        conn, company_id=uuid4(), actor_user_id=uuid4(), body=submission(),
+    )
+
+    base_insert = next(
+        (query, args) for _, query, args in conn.calls if "INSERT INTO credential_types" in query
+    )
+    # credcustom01: the base row is an opaque FK target. Only the tenant-scoped
+    # company_credential_types row may carry the customer's wording.
+    assert "'Tenant credential'" in base_insert[0]
+    assert "Food Handler Card" not in str(base_insert[1])
+    scoped_insert = next(
+        (query, args) for _, query, args in conn.calls
+        if "INSERT INTO company_credential_types" in query
+    )
+    assert "Food Handler Card" in str(scoped_insert[1])
+    # A configured allowlist must not hide the type the wizard just created.
+    assert any(
+        "company_credential_type_filter_items" in query for _, query, _ in conn.calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_signup_industry_is_not_overwritten(monkeypatch):
+    _allow_sc_product(monkeypatch)
+    _capture_location_sync(monkeypatch)
+
+    async def replace(conn_arg, **kwargs):
+        return []
+
+    monkeypatch.setattr(service, "replace_job_credential_requirements", replace)
+    conn = _Connection()
+
+    await service.complete_sc_onboarding(
+        conn, company_id=uuid4(), actor_user_id=uuid4(), body=submission(),
+    )
+
+    company_update = next(
+        query for _, query, _ in conn.calls if query.startswith("UPDATE companies SET size")
+    )
+    assert "industry" not in company_update
+
+
+@pytest.mark.asyncio
+async def test_unavailable_credential_type_is_a_422_not_a_500(monkeypatch):
+    _allow_sc_product(monkeypatch)
+    _capture_location_sync(monkeypatch)
+    conn = _Connection()
+
+    async def refuse(*args, **kwargs):
+        raise ValueError("One or more credential types are not available to this company")
+
+    monkeypatch.setattr(service, "replace_job_credential_requirements", refuse)
+
+    with pytest.raises(service.ScOnboardingError, match="not available to this company"):
+        await service.complete_sc_onboarding(
+            conn, company_id=uuid4(), actor_user_id=uuid4(), body=submission(),
+        )
+    assert conn.rolled_back is True
 
 
 @pytest.mark.asyncio

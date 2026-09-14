@@ -1,9 +1,9 @@
 export type CompanySize = '1-10' | '11-50' | '51-100' | '101-250' | '251-500' | '501+'
 
+/** Industry is owned by signup (INDUSTRY_OPTIONS) and never re-sent here. */
 export type ScCompanySetup = {
   company_size: CompanySize
   naics_code: string
-  industry: string
 }
 
 export type ScLocationImport = {

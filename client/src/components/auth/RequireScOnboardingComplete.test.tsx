@@ -8,11 +8,12 @@ vi.mock('../../hooks/useMe', () => ({ useMe: useMeMock }))
 
 import RequireScOnboardingComplete from './RequireScOnboardingComplete'
 
-function renderGuard() {
+function renderGuard(entry = '/app') {
   return render(
-    <MemoryRouter initialEntries={['/app']}>
+    <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route path="/app" element={<RequireScOnboardingComplete><div>Product home</div></RequireScOnboardingComplete>} />
+        <Route path="/ops/schedule" element={<RequireScOnboardingComplete><div>Schedule</div></RequireScOnboardingComplete>} />
         <Route path="/sc/onboarding" element={<div>S&amp;C wizard</div>} />
       </Routes>
     </MemoryRouter>,
@@ -43,6 +44,14 @@ describe('RequireScOnboardingComplete', () => {
   it('routes an activated, incomplete S&C company admin into setup', () => {
     useMeMock.mockReturnValue({ me: meProfile(), loading: false })
     renderGuard()
+    expect(screen.getByText('S&C wizard')).toBeInTheDocument()
+  })
+
+  it('also guards the scheduling surface the product actually grants', () => {
+    // /ops/schedule is gated on employee_schedule alone, which an S&C product
+    // hands out — guarding only /app/* left setup trivially bypassable.
+    useMeMock.mockReturnValue({ me: meProfile(), loading: false })
+    renderGuard('/ops/schedule')
     expect(screen.getByText('S&C wizard')).toBeInTheDocument()
   })
 

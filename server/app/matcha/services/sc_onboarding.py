@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from uuid import UUID, uuid4
 
@@ -14,6 +15,12 @@ from app.matcha.services.ir.naics_titles import naics_industry_description
 from app.matcha.services.scheduling.job_credential_requirements import (
     replace_job_credential_requirements,
 )
+
+logger = logging.getLogger(__name__)
+
+# The features this wizard writes into.  The router mounts the same set as a
+# `require_all_features` gate; keeping the list here documents why.
+SC_REQUIRED_FEATURES = ("employees", "employee_schedule", "credential_templates")
 
 
 class ScOnboardingError(ValueError):
@@ -136,28 +143,130 @@ async def _credential_type(conn, company_id: UUID, label: str, actor_user_id: UU
     if existing:
         return existing
     credential_type_id = uuid4()
+    # credcustom01's invariant: the `credential_types` row is only an opaque FK
+    # target, so the tenant's own wording never lands in the shared catalog
+    # (an older app during a blue/green deploy still selects that table whole).
+    # The real label lives in company_credential_types and is read back through
+    # the scoped_credential_types view — same shape as
+    # documents/credential_templates.py:create_credential_type.
     await conn.execute(
         """INSERT INTO credential_types
                (id, key, label, category, description, has_expiration,
                 has_number, has_state, verification_method, is_system)
-           VALUES ($1, $2, $3, 'other', $4, true, false, false,
+           VALUES ($1, $2, 'Tenant credential', 'custom', NULL, true, false, false,
                    'document_upload', false)""",
         credential_type_id,
-        f"sc_{credential_type_id.hex}",
-        label.strip(),
-        "Created during Matcha S&C account setup",
+        f"custom_{credential_type_id.hex}",
     )
     await conn.execute(
         """INSERT INTO company_credential_types
                (credential_type_id, company_id, label, category, description, created_by)
-           VALUES ($1, $2, $3, 'other', $4, $5)""",
+           VALUES ($1, $2, $3, 'custom', $4, $5)""",
         credential_type_id,
         company_id,
         label.strip(),
         "Created during Matcha S&C account setup",
         actor_user_id,
     )
+    # A configured allowlist would otherwise hide the type we just created and
+    # make replace_job_credential_requirements reject it.
+    await conn.execute(
+        """INSERT INTO company_credential_type_filter_items
+               (company_id, credential_type_id)
+           SELECT $1, $2
+            WHERE EXISTS (
+                SELECT 1 FROM company_credential_type_filters WHERE company_id = $1
+            )
+           ON CONFLICT DO NOTHING""",
+        company_id,
+        credential_type_id,
+    )
     return credential_type_id
+
+
+async def _insert_locations(conn, company_id: UUID, locations) -> None:
+    if not locations:
+        return
+    await conn.execute(
+        """INSERT INTO business_locations
+               (company_id, name, address, city, state, zipcode, source)
+           SELECT $1, name, address, city, state, zipcode, 'manual'
+             FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
+                  AS t(name, address, city, state, zipcode)""",
+        company_id,
+        [location.name.strip() for location in locations],
+        [location.address.strip() for location in locations],
+        [location.city.strip() for location in locations],
+        [location.state.upper() for location in locations],
+        [location.zipcode for location in locations],
+    )
+
+
+async def _insert_employees(
+    conn, company_id: UUID, employees
+) -> tuple[dict[str, list[UUID]], dict[str, UUID]]:
+    """Insert the roster in one statement and index the new ids by job title.
+
+    Also returns one representative employee id per work state, which the
+    post-commit compliance-location sync uses.
+    """
+    if not employees:
+        return {}, {}
+    title_by_email = {str(employee.email).lower(): employee.job_title for employee in employees}
+    state_by_email = {str(employee.email).lower(): employee.work_state.upper() for employee in employees}
+    rows = await conn.fetch(
+        """INSERT INTO employees
+               (org_id, email, first_name, last_name, work_state, job_title, department)
+           SELECT $1, email, first_name, last_name, work_state, job_title, department
+             FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[])
+                  AS t(email, first_name, last_name, work_state, job_title, department)
+           RETURNING id, email""",
+        company_id,
+        [str(employee.email).lower() for employee in employees],
+        [employee.first_name.strip() for employee in employees],
+        [employee.last_name.strip() for employee in employees],
+        [employee.work_state.upper() for employee in employees],
+        [employee.job_title.strip() for employee in employees],
+        [employee.department.strip() for employee in employees],
+    )
+    employees_by_job: dict[str, list[UUID]] = {}
+    employee_by_state: dict[str, UUID] = {}
+    for row in rows:
+        # RETURNING order is not contractual, so the job title is recovered from
+        # the row's own email rather than from the input position.
+        email = str(row["email"]).lower()
+        employees_by_job.setdefault(_key(title_by_email[email]), []).append(row["id"])
+        employee_by_state.setdefault(state_by_email[email], row["id"])
+    return employees_by_job, employee_by_state
+
+
+async def _sync_compliance_locations(conn, company_id: UUID, employee_by_state: dict[str, UUID]) -> None:
+    """Derive the compliance/jurisdiction rows every other roster path creates.
+
+    Runs after the setup transaction commits: the helper swallows its own
+    errors, and an aborted statement inside the transaction would otherwise
+    poison writes that already succeeded. One call per distinct work state is
+    enough — the S&C import has no per-employee work city.
+    """
+    from app.matcha.routes.employees._shared import (
+        _sync_employee_location_for_compliance,
+    )
+
+    for state, employee_id in employee_by_state.items():
+        try:
+            await _sync_employee_location_for_compliance(
+                conn,
+                company_id=company_id,
+                employee_id=employee_id,
+                work_state=state,
+                work_city=None,
+            )
+        except Exception:
+            logger.exception(
+                "S&C onboarding could not sync compliance location %s for company %s",
+                state,
+                company_id,
+            )
 
 
 async def complete_sc_onboarding(
@@ -213,43 +322,19 @@ async def complete_sc_onboarding(
         if conflict:
             raise ScOnboardingError(f"Job already exists for this company: {conflict}")
 
+        # `industry` is intentionally not written here — signup owns it and uses
+        # the controlled INDUSTRY_OPTIONS vocabulary.
         await conn.execute(
-            "UPDATE companies SET size = $2, naics = $3, industry = $4 WHERE id = $1",
+            "UPDATE companies SET size = $2, naics = $3 WHERE id = $1",
             company_id,
             body.company.company_size,
             body.company.naics_code,
-            body.company.industry.strip(),
         )
 
-        for location in body.locations:
-            await conn.execute(
-                """INSERT INTO business_locations
-                       (company_id, name, address, city, state, zipcode, source)
-                   VALUES ($1, $2, $3, $4, $5, $6, 'manual')""",
-                company_id,
-                location.name.strip(),
-                location.address.strip(),
-                location.city.strip(),
-                location.state.upper(),
-                location.zipcode,
-            )
-
-        employees_by_job: dict[str, list[UUID]] = {}
-        for employee in body.employees:
-            employee_id = await conn.fetchval(
-                """INSERT INTO employees
-                       (org_id, email, first_name, last_name, work_state, job_title, department)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7)
-                   RETURNING id""",
-                company_id,
-                str(employee.email).lower(),
-                employee.first_name.strip(),
-                employee.last_name.strip(),
-                employee.work_state.upper(),
-                employee.job_title.strip(),
-                employee.department.strip(),
-            )
-            employees_by_job.setdefault(_key(employee.job_title), []).append(employee_id)
+        await _insert_locations(conn, company_id, body.locations)
+        employees_by_job, employee_by_state = await _insert_employees(
+            conn, company_id, body.employees
+        )
 
         credential_types: dict[str, UUID] = {}
         for job in body.jobs:
@@ -262,13 +347,15 @@ async def complete_sc_onboarding(
                 job.credential_grace_days,
                 actor_user_id,
             )
-            for employee_id in employees_by_job.get(_key(job.name), []):
+            job_employee_ids = employees_by_job.get(_key(job.name), [])
+            if job_employee_ids:
                 await conn.execute(
                     """INSERT INTO schedule_job_employees
                            (job_id, employee_id, company_id, created_by)
-                       VALUES ($1, $2, $3, $4)""",
+                       SELECT $1, employee_id, $3, $4
+                         FROM UNNEST($2::uuid[]) AS t(employee_id)""",
                     job_id,
-                    employee_id,
+                    job_employee_ids,
                     company_id,
                     actor_user_id,
                 )
@@ -292,17 +379,25 @@ async def complete_sc_onboarding(
             # then materializes employee upload tasks with the job's grace
             # period. Calling materialization before the rules exist silently
             # leaves imported employees with no credential tasks.
-            await replace_job_credential_requirements(
-                conn,
-                company_id=company_id,
-                job_id=job_id,
-                requirements=requirements,
-                actor_user_id=actor_user_id,
-            )
+            try:
+                await replace_job_credential_requirements(
+                    conn,
+                    company_id=company_id,
+                    job_id=job_id,
+                    requirements=requirements,
+                    actor_user_id=actor_user_id,
+                )
+            except ScOnboardingError:
+                raise
+            except ValueError as exc:
+                # The shared helper refuses hidden/unknown credential types with
+                # a bare ValueError; that is a submission problem, not a bug.
+                raise ScOnboardingError(str(exc)) from exc
 
         completed_at = await conn.fetchval(
             """UPDATE companies SET sc_onboarding_completed_at = NOW()
                  WHERE id = $1 RETURNING sc_onboarding_completed_at""",
             company_id,
         )
+    await _sync_compliance_locations(conn, company_id, employee_by_state)
     return {"already_completed": False, "completed_at": completed_at.isoformat()}

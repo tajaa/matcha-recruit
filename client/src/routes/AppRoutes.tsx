@@ -57,12 +57,11 @@ import SafetyMeetingDetail from '../pages/app/safety-meetings/SafetyMeetingDetai
 import SymLinks from '../pages/app/symlink/SymLinks'
 import SymLinkDetail from '../pages/app/symlink/SymLinkDetail'
 import SymLinkSettings from '../pages/app/symlink/SymLinkSettings'
-import RequireScOnboardingComplete from '../components/auth/RequireScOnboardingComplete'
 
 export default function AppRoutes() {
   return (
     <Routes>
-      <Route element={<RequireScOnboardingComplete><AppLayout sidebar={<TenantSidebar />} /></RequireScOnboardingComplete>}>
+      <Route element={<AppLayout sidebar={<TenantSidebar />} />}>
         <Route index element={<Dashboard />} />
         <Route path="company" element={<CompanySettings />} />
         {/* Broker↔company chat — access is gated by an active broker link, not a

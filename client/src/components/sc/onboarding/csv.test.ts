@@ -20,6 +20,24 @@ describe('S&C onboarding CSV parsing', () => {
     )
   })
 
+  it('counts skipped blank lines when reporting a source line', () => {
+    expect(() => parseLocationsCsv('name,address,city,state,zipcode\n\n\nHQ,1 Main,,TX,78701')).toThrow(
+      'Row 4 must contain all 5 values',
+    )
+    expect(() => parseEmployeesCsv('email,first_name,last_name,work_state,job_title,department\n\nnot-email,A,One,TX,Cook,Kitchen')).toThrow(
+      'Row 3 email is invalid',
+    )
+  })
+
+  it('keeps a newline inside a quoted value and still counts the line', () => {
+    expect(parseLocationsCsv('name,address,city,state,zipcode\nHQ,"1 Main\nSuite 2",Austin,TX,78701')).toEqual([
+      { name: 'HQ', address: '1 Main\nSuite 2', city: 'Austin', state: 'TX', zipcode: '78701' },
+    ])
+    expect(() => parseLocationsCsv('name,address,city,state,zipcode\nHQ,"1 Main\nSuite 2",Austin,TX,78701\nWest,9 Oak,Austin,Texas,78702')).toThrow(
+      'Row 4 state must use a two-letter code',
+    )
+  })
+
   it('does not treat a header-only file as an intentional skip', () => {
     expect(() => parseEmployeesCsv('email,first_name,last_name,work_state,job_title,department\n')).toThrow(
       'CSV must contain at least one data row',

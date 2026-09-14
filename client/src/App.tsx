@@ -7,6 +7,8 @@ import RouteTracker from "./components/shared/RouteTracker";
 
 // Lazy area modules — each /<area>/* prefix is its own chunk, loaded on entry.
 const AdminRoutes = lazy(() => import("./routes/AdminRoutes"));
+import RequireScOnboardingComplete from "./components/auth/RequireScOnboardingComplete";
+
 const AppRoutes = lazy(() => import("./routes/AppRoutes"));
 const BrokerRoutes = lazy(() => import("./routes/BrokerRoutes"));
 const WorkRoutes = lazy(() => import("./work/routes/WorkRoutes"));
@@ -266,14 +268,17 @@ export default function App() {
             /cappe/* links inside the pages still resolve via the mount above,
             so both URL spaces work on this host. */}
         {isCappeHost && <Route path="/*" element={<CappeRoutes />} />}
-        <Route path="/work/*" element={<WorkRoutes />} />
+        {/* S&C first-account setup gates every authenticated tenant surface.
+            Guarding only /app/* left /ops/schedule (the product's own core
+            page, gated on employee_schedule alone) reachable before setup. */}
+        <Route path="/work/*" element={<RequireScOnboardingComplete><WorkRoutes /></RequireScOnboardingComplete>} />
         <Route path="/werk/*" element={<WerkRoutes />} />
         <Route path="/werk-lite/*" element={<WerkLiteRoutes />} />
-        <Route path="/ops/*" element={<OpsRoutes />} />
+        <Route path="/ops/*" element={<RequireScOnboardingComplete><OpsRoutes /></RequireScOnboardingComplete>} />
         <Route path="/admin/*" element={<AdminRoutes />} />
         <Route path="/broker/*" element={<BrokerRoutes />} />
         <Route path="/portal/*" element={<PortalRoutes />} />
-        <Route path="/app/*" element={<AppRoutes />} />
+        <Route path="/app/*" element={<RequireScOnboardingComplete><AppRoutes /></RequireScOnboardingComplete>} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>

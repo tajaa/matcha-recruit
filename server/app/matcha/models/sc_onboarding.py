@@ -13,9 +13,13 @@ class ScOnboardingModel(BaseModel):
 
 
 class ScCompanySetup(ScOnboardingModel):
+    # `industry` is deliberately absent: signup already captures it from the
+    # shared INDUSTRY_OPTIONS vocabulary (values align with
+    # compliance_registry industry_tag sub-keys).  A free-text re-ask here
+    # would overwrite that controlled value and silently break industry-tag
+    # resolution downstream.
     company_size: CompanySize
     naics_code: str = Field(pattern=r"^\d{2,6}$")
-    industry: str = Field(min_length=1, max_length=100)
 
 
 class ScLocationImport(ScOnboardingModel):
@@ -50,7 +54,9 @@ class ScCertificateSetup(ScOnboardingModel):
 class ScJobSetup(ScOnboardingModel):
     name: str = Field(min_length=1, max_length=150)
     credential_grace_days: int = Field(default=7, ge=0, le=365)
-    certificates: list[ScCertificateSetup] = Field(default_factory=list, max_length=50)
+    # The wizard requires at least one certificate per job; keeping the server
+    # contract identical stops the two validators from drifting apart.
+    certificates: list[ScCertificateSetup] = Field(min_length=1, max_length=50)
 
 
 class ScOnboardingComplete(ScOnboardingModel):

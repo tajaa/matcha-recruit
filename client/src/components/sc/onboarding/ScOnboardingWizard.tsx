@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Check, Loader2, Plus, Trash2, Upload } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError } from '../../../api/client'
-import { scOnboardingApi } from '../../../api/sc-onboarding/scOnboarding'
+import { scOnboardingApi } from '../../../api/sc/scOnboarding'
 import { useMe } from '../../../hooks/useMe'
 import type {
   CompanySize,
@@ -30,6 +30,10 @@ const COMPANY_SIZES: { value: CompanySize; label: string }[] = [
 ]
 
 const STEPS = ['Company', 'Locations', 'Employees', 'Jobs & certificates', 'Review']
+
+// ~12s of cover for the Stripe webhook that activates a paid S&C product.
+const ACTIVATION_POLL_ATTEMPTS = 8
+const ACTIVATION_POLL_MS = 1500
 
 function emptyCertificate(): ScCertificateSetup {
   return { name: '', is_required: true, schedule_blocking: true }
@@ -64,36 +68,63 @@ export default function ScOnboardingWizard() {
   const [companyName, setCompanyName] = useState('')
   const [companySize, setCompanySize] = useState<CompanySize | ''>('')
   const [naicsCode, setNaicsCode] = useState('')
-  const [industry, setIndustry] = useState('')
   const [locations, setLocations] = useState<ScLocationImport[]>([])
   const [employees, setEmployees] = useState<ScEmployeeImport[]>([])
   const [jobs, setJobs] = useState<ScJobSetup[]>([emptyJob()])
   const [loading, setLoading] = useState(true)
+  const [activating, setActivating] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    scOnboardingApi.status()
-      .then((status) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    // Stripe returns the browser here as soon as checkout succeeds, which can
+    // beat the checkout.session.completed webhook that flips the product's
+    // gate flag. A 403 inside that window means "not activated yet", not a
+    // dead end, so poll a bounded number of times before giving up.
+    async function load(attempt: number) {
+      try {
+        const status = await scOnboardingApi.status()
         if (cancelled) return
-        if (status.completed) navigate('/app', { replace: true })
-        else setCompanyName(status.company_name)
-      })
-      .catch((caught: unknown) => {
-        if (!cancelled) setError(caught instanceof ApiError ? caught.message : 'Could not load account setup.')
-      })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [navigate])
+        if (status.completed) {
+          // The route guard reads the module-level /auth/me cache; navigating
+          // without refreshing it first bounces the user straight back here.
+          await refresh()
+          if (!cancelled) navigate('/app', { replace: true })
+          return
+        }
+        setCompanyName(status.company_name)
+        setActivating(false)
+        setLoading(false)
+      } catch (caught: unknown) {
+        if (cancelled) return
+        if (caught instanceof ApiError && caught.status === 403 && attempt < ACTIVATION_POLL_ATTEMPTS) {
+          setActivating(true)
+          timer = setTimeout(() => { void load(attempt + 1) }, ACTIVATION_POLL_MS)
+          return
+        }
+        setActivating(false)
+        setError(caught instanceof ApiError ? caught.message : 'Could not load account setup.')
+        setLoading(false)
+      }
+    }
+
+    void load(0)
+    return () => { cancelled = true; if (timer) clearTimeout(timer) }
+  }, [navigate, refresh])
 
   function companyError(): string | null {
     if (!companySize) return 'Choose a company size.'
     if (!/^\d{2,6}$/.test(naicsCode.trim())) return 'NAICS code must contain 2–6 digits.'
-    if (!industry.trim()) return 'Enter an industry.'
     return null
   }
 
+  // Mirrors the server contract (models/sc_onboarding.py +
+  // services/sc_onboarding.validate_sc_submission): at least one certificate
+  // per job, at least one mandatory certificate overall, unique names, and
+  // every employee job title matching a configured job. Change both together.
   function jobsError(): string | null {
     if (!jobs.length) return 'Add at least one job.'
     if (jobs.some((job) => !job.name.trim())) return 'Every job needs a name.'
@@ -161,7 +192,7 @@ export default function ScOnboardingWizard() {
       return
     }
     const submission: ScOnboardingSubmission = {
-      company: { company_size: companySize, naics_code: naicsCode.trim(), industry: industry.trim() },
+      company: { company_size: companySize, naics_code: naicsCode.trim() },
       locations,
       employees,
       jobs,
@@ -180,7 +211,12 @@ export default function ScOnboardingWizard() {
   }
 
   if (loading) {
-    return <div className="flex min-h-screen items-center justify-center bg-zinc-950"><Loader2 className="h-5 w-5 animate-spin text-zinc-500" /></div>
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-950">
+        <Loader2 className="h-5 w-5 animate-spin text-zinc-500" />
+        {activating && <p className="text-sm text-zinc-400">Finishing activation…</p>}
+      </div>
+    )
   }
 
   return (
@@ -206,7 +242,9 @@ export default function ScOnboardingWizard() {
               <h2 className="text-lg font-medium">Company details</h2>
               <Select label="Company size" required options={COMPANY_SIZES} value={companySize} onChange={(event) => setCompanySize(event.target.value as CompanySize)} placeholder="Choose a range" />
               <Input label="NAICS code" required inputMode="numeric" maxLength={6} value={naicsCode} onChange={(event) => setNaicsCode(event.target.value)} placeholder="e.g. 722511" />
-              <Input label="Industry" required maxLength={100} value={industry} onChange={(event) => setIndustry(event.target.value)} placeholder="e.g. Full-service restaurants" />
+              {/* Industry is deliberately not re-asked: signup already stored it
+                  from the shared INDUSTRY_OPTIONS vocabulary, and free text here
+                  would overwrite that controlled value. */}
             </div>
           )}
 
@@ -260,7 +298,7 @@ export default function ScOnboardingWizard() {
           {step === 4 && companySize && (
             <div className="space-y-5">
               <div><h2 className="text-lg font-medium">Review setup</h2><p className="text-sm text-zinc-400">Submission is atomic: if any item fails validation, no company setup records are created.</p></div>
-              <dl className="grid gap-3 text-sm sm:grid-cols-3"><div><dt className="text-zinc-500">Company size</dt><dd>{companySize}</dd></div><div><dt className="text-zinc-500">NAICS</dt><dd>{naicsCode}</dd></div><div><dt className="text-zinc-500">Industry</dt><dd>{industry}</dd></div></dl>
+              <dl className="grid gap-3 text-sm sm:grid-cols-2"><div><dt className="text-zinc-500">Company size</dt><dd>{companySize}</dd></div><div><dt className="text-zinc-500">NAICS</dt><dd>{naicsCode}</dd></div></dl>
               <div className="grid gap-3 sm:grid-cols-2">
                 <ReviewList title={`Locations (${locations.length})`} items={locations.map((location) => `${location.name} — ${location.address}, ${location.city}, ${location.state} ${location.zipcode}`)} empty="Skipped" />
                 <ReviewList title={`Employees (${employees.length})`} items={employees.map((employee) => `${employee.first_name} ${employee.last_name} — ${employee.email}; ${employee.job_title}, ${employee.department}; ${employee.work_state}`)} empty="Skipped" />
