@@ -461,6 +461,32 @@ autopr_attempt_ledger_path() {
     printf '%s/attempts/%s' "${AUTOPR_CACHE_DIR:-$HOME/.cache/matcha-autopr}" "$id8"
 }
 
+# autopr_touch_attempt_ledger TASK_ID SERVER_ISO
+# Move the failure ledger's mtime to the instant the board says the card was
+# last handed back.
+#
+# select.sh parks a card that keeps failing identically only while the ledger
+# marker is at or after the card's last move (`moved_epoch <= attempt_epoch`).
+# run-journal.sh's hand-back IS a move, and it lands roughly a second before
+# Cleanup writes the marker — but the move is stamped by Postgres on the DB
+# host and the marker by `date` on this runner. Any forward skew on the DB
+# clock inverts the comparison and the park silently never fires again. Taking
+# the timestamp from the same clock that recorded the move removes the race;
+# equality is fine, the gate is `<=`. Best-effort: a ledger that keeps the
+# runner's own stamp is the pre-existing behaviour, not a new failure.
+autopr_touch_attempt_ledger() {
+    local task_id="${1:-}" iso="${2:-}" marker normalized
+    [ -n "$task_id" ] && [ -n "$iso" ] || return 0
+    marker="$(autopr_attempt_ledger_path "$task_id")" || return 0
+    [ -f "$marker" ] || return 0
+    # BSD `touch -d` takes ISO 8601 with a literal Z; Postgres hands back
+    # microseconds and a +00:00 offset.
+    normalized="${iso%%.*}"
+    normalized="${normalized%%+*}"
+    normalized="${normalized%Z}Z"
+    touch -d "$normalized" "$marker" 2>/dev/null || true
+}
+
 # autopr_checkpoint_root
 # Where checkpoint.sh keeps its per-task directories, resolved the same way it
 # resolves them. Fails quietly when there is no runner checkout to read.

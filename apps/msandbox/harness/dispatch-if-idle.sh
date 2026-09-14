@@ -64,6 +64,9 @@ NOTIFY_BIN="${AUTOPR_NOTIFY_BIN:-/usr/bin/osascript}"
 NOTIFIED_RUN_FILE="$STATE_DIR/last-notified-run"
 NOTIFIED_OFF_FILE="$STATE_DIR/notified-off"
 NOTIFIED_AUTH_FILE="$STATE_DIR/notified-codex-auth"
+CODEX_AUTH_CACHE="$STATE_DIR/codex-auth-check"
+CODEX_AUTH_CACHE_SECONDS="${AUTOPR_CODEX_AUTH_CACHE_SECONDS:-240}"
+HOST_CODEX_AUTH_FILE="${AUTOPR_HOST_CODEX_AUTH_FILE:-$USER_HOME/.codex/auth.json}"
 
 write_status() {
     local action="$1" reason="$2" now temporary
@@ -205,6 +208,13 @@ autopr_master_ready() {
         --filter 'status=running' 2>/dev/null)" ]
 }
 
+file_mtime() {
+    local path="$1" modified
+    modified="$(stat -f '%m' "$path" 2>/dev/null || true)"
+    [[ "$modified" =~ ^[0-9]+$ ]] || modified="$(stat -c '%Y' "$path" 2>/dev/null || echo 0)"
+    printf '%s' "$modified"
+}
+
 marker_age_seconds() {
     local marker="$1" modified now
     [ -f "$marker" ] || { printf '%s' 999999999; return; }
@@ -273,8 +283,41 @@ codex_auth_message=""
 codex_auth_rc=0
 codex_auth_required() {
     codex_auth_rc=0
-    [ -x "$CODEX_BACKOFF" ] || return 1
+    # Not 0: an absent or non-executable helper is the same install-drift class
+    # this guard exists for, and returning "no expiry" with rc 0 made the
+    # caller's "could not check" branch silent — a dispatcher that looks like
+    # it verifies the login every tick and never does.
+    [ -x "$CODEX_BACKOFF" ] || { codex_auth_rc=2; codex_auth_message="codex login: CANNOT CHECK: $CODEX_BACKOFF is missing or not executable"; return 1; }
+    # Both LaunchAgents fire every 60s, and this sits above the watcher's
+    # "nothing queued, exit" short-circuit — whose whole point is that an idle
+    # tick costs one bounded query and nothing else. A JWT `exp` changes about
+    # once every ten days, so spawning bash + python3 1,440 times a day to
+    # re-read it is pure waste. Reuse the last verdict while it is fresh AND
+    # the auth file has not been rewritten; `codex login` rewrites it, so a
+    # repaired login is picked up on the very next tick rather than after the
+    # TTL.
+    local source_mtime cached_rc="" cached_path="" cached_mtime="" cached_message=""
+    source_mtime="$(file_mtime "$HOST_CODEX_AUTH_FILE")"
+    # Keyed on the exact file AND its mtime, not just the cache's own age:
+    # `codex login` rewrites auth.json, so a repaired login invalidates this on
+    # the very next tick instead of after the TTL.
+    if [ -s "$CODEX_AUTH_CACHE" ] \
+        && [ "$(marker_age_seconds "$CODEX_AUTH_CACHE")" -lt "$CODEX_AUTH_CACHE_SECONDS" ]; then
+        IFS=$'\t' read -r cached_rc cached_path cached_mtime cached_message < "$CODEX_AUTH_CACHE" || true
+        if [[ "$cached_rc" =~ ^[0-9]+$ ]] \
+            && [ "$cached_path" = "$HOST_CODEX_AUTH_FILE" ] \
+            && [ "$cached_mtime" = "$source_mtime" ]; then
+            codex_auth_rc="$cached_rc"
+            codex_auth_message="$cached_message"
+            [ "$codex_auth_rc" -eq 4 ]
+            return
+        fi
+    fi
     codex_auth_message="$("$CODEX_BACKOFF" auth-check 2>&1)" || codex_auth_rc=$?
+    mkdir -p "$STATE_DIR" \
+        && printf '%s\t%s\t%s\t%s\n' "$codex_auth_rc" "$HOST_CODEX_AUTH_FILE" "$source_mtime" \
+            "${codex_auth_message//$'\t'/ }" > "$CODEX_AUTH_CACHE" \
+        || true
     # ONLY 4 is "the credential is dead". A missing checker or a broken
     # interpreter is a harness fault, and holding every lane on one would be a
     # permanent silent stop whose banner tells the operator to run `codex

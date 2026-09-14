@@ -22,6 +22,7 @@ from .git_worktrees import (
 from . import codex_auth
 from .install import (
     dispatcher_drift,
+    dispatcher_install_root,
     install_dispatcher,
     install_release,
     launcher_is_pre_move,
@@ -249,7 +250,13 @@ def _install_drift_report(repo: Path, bin_dir: Path | None = None) -> int:
     # workflow preflight run.
     login_ok, login_line = codex_auth.check()
     print(login_line)
-    return 1 if pre_move_launcher or stale or installed != expected or not login_ok else 0
+    # Only a host that actually runs the lanes is unhealthy without one. The
+    # sandbox also hosts Claude Code and OpenCode sessions, and a developer who
+    # has never run `codex login` should not be told to, for a tool they do not
+    # use, by an otherwise clean report.
+    lanes_installed = dispatcher_install_root().is_dir()
+    login_blocks = lanes_installed and not login_ok
+    return 1 if pre_move_launcher or stale or installed != expected or login_blocks else 0
 
 
 def _checkout_pr(repo: Path, number: int) -> int:

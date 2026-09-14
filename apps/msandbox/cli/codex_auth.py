@@ -74,7 +74,15 @@ def access_token_expiry(path: Path) -> datetime | None:
     expiry = claims.get("exp") if claims else None
     if not isinstance(expiry, (int, float)) or isinstance(expiry, bool):
         return None
-    return datetime.fromtimestamp(expiry, timezone.utc)
+    try:
+        return datetime.fromtimestamp(expiry, timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        # An out-of-range or non-finite exp (json.loads accepts Infinity).
+        # Raising here would abort `msandbox doctor` with a traceback and make
+        # the shell face exit 1, which the dispatcher reads as "could not
+        # check" and fails OPEN on — a credential it has just proved it cannot
+        # verify. Unreadable is unusable, same as every other bad shape.
+        return None
 
 
 def check(

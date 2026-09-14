@@ -78,11 +78,18 @@ and the `mw_tasks.autopr_*` columns they read.
   write itself, exactly as `checkpoint.sh` does for a pause. A note-only
   write strands the card where nothing can select it (card `9a384f39`, run
   `34782997839`).
-- **Cleanup writes the run journal before the failure ledger.** The journal's
-  PATCH is a column move; `select.sh` parks a repeat offender only while the
-  ledger marker is newer than the last move. Ledger first would keep an
-  identically failing card eligible every cooldown, forever.
-  `tests/test_kanban_autopr.sh` asserts the order.
+- **Cleanup books the failure ledger FIRST, then re-stamps it from the
+  server's clock.** Everything after `record_outcome` is a best-effort network
+  round-trip, so a journal that hangs — or a Cleanup cut short by the job
+  timeout — must not cost the card its strike. But the journal's hand-back
+  PATCH is itself a column move, and `select.sh` parks a repeat offender only
+  while the ledger sits at or after the card's last move, so
+  `autopr_touch_attempt_ledger` moves the marker back in front of it using the
+  `updated_at` the server returned for that very move. Never compare a
+  Postgres timestamp with a `date` reading on the runner: the park gate is one
+  comparison and two clocks would decide it. `consume` keeps its place ahead
+  of the journal — `checkpoint.sh`'s tick-ledger comment depends on it.
+  `tests/test_kanban_autopr.sh` asserts the whole order.
 - **The host Codex login is checked before anything is spent on it**:
   `cli/codex_auth.py` is the one implementation (`codex-backoff.sh auth-check`
   is its shell face), run by `dispatch-if-idle.sh` every tick, by the kanban
@@ -97,7 +104,18 @@ and the `mw_tasks.autopr_*` columns they read.
   behind a banner saying `codex login`, which cannot clear it. On anything
   else the dispatcher logs `codex-auth-check-unavailable` and proceeds — this
   is a spend guard, not a safety boundary, the same doctrine as
-  `hot-redispatch-guard.sh`.
+  `hot-redispatch-guard.sh`. The kanban workflow preflight and
+  `run-codex-sandboxed.sh` follow the same rule: refuse on 4, warn and carry on
+  otherwise. `cli/codex_auth.py` returns None for every shape it cannot read,
+  including an `exp` that overflows `datetime` — raising there would make the
+  shell face exit 1, which reads as "could not check" and fails OPEN on a
+  credential just proved unverifiable.
+- **The dispatcher caches the login verdict per `(auth file, mtime)` for
+  `AUTOPR_CODEX_AUTH_CACHE_SECONDS`.** Both LaunchAgents tick every 60s and
+  this guard sits above the watcher's idle short-circuit, so an uncached check
+  would spawn bash + python3 ~1,440 times a day for a claim that changes about
+  once every ten days. `codex login` rewrites `auth.json`, so a repaired login
+  is picked up on the next tick rather than after the TTL.
 - **The installed dispatcher tree is FLAT.** `install-launch-agent.sh` copies
   `harness/` into `~/.local/share/matcha-kanban-autopr` with no `cli/`
   sibling, so a `cli/` helper an installed script resolves must be (a) added
@@ -114,6 +132,12 @@ and the `mw_tasks.autopr_*` columns they read.
   unreadable board is therefore treated as `in_progress` — this run's own
   claim put it there — and a card the run never claimed is unaffected, since
   the server writes no `column_change` when the value does not change.
+  "Unreadable" means *the card was not extracted*, not "the body was empty": a
+  200 carrying a proxy error page or a list the task is absent from has to
+  count too, which is why one `jq` extracts the row and its success is the
+  signal. And the journal body is composed before that PATCH is attempted, so
+  it may not promise a retry — it names `msandbox autopr unstick` for the case
+  where the write did not land.
 - **`msandbox install` and `msandbox doctor` dispatch before the launcher's
   legacy-entrypoint probe.** Both run entirely inside the pinned release, and
   putting the probe first is what stranded operators across the `apps/` move:

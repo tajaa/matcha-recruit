@@ -73,12 +73,16 @@ jobs:
           message="$(./apps/msandbox/harness/codex-backoff.sh auth-check 2>&1)"
           rc=$?
           set -e
-          if [ "$rc" -ne 0 ]; then
-            printf '%s\n' "$message" >&2
-            printf '%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$message"
+          printf '%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
+          # Exit 4 alone is a dead credential. Any other non-zero means the
+          # check could not run (no python3, a checkout missing
+          # cli/codex_auth.py) — a harness fault, and halting the whole board
+          # on one would be the same spend-guard-as-safety-boundary mistake the
+          # step below refuses to make ("API failure proceeds").
+          if [ "$rc" -eq 4 ]; then
             exit 1
           fi
-          printf '%s\n' "$message"
 
       - name: Refuse a hot re-dispatch
         id: guard
@@ -545,10 +549,12 @@ jobs:
           CHECKPOINT_PATH: ${{ steps.checkpoint.outputs.path }}
           BRANCH_BASE_SHA: ${{ steps.branch.outputs.sha }}
         run: |
-          # Record how this run ended: the ledger is what stops a card that
-          # fails the same way every time from being re-selected every
-          # cooldown window forever. Only the run journal precedes it (see
-          # the ordering note on the journal call). A pause is not a
+          # Record how this run ended before anything else: the ledger is
+          # what stops a card that fails the same way every time from being
+          # re-selected every cooldown window forever, and every call after
+          # this point is a best-effort network round-trip that can hang or
+          # be cut short by the job timeout. The journal below re-stamps the
+          # marker once it knows when its hand-back landed. A pause is not a
           # failure (the card waits for the operator), and a step that never
           # ran does not count against the card.
           # Sourced in a child shell: lib.sh sets -u, and this step's empty
@@ -594,15 +600,35 @@ jobs:
             # coverage, open-PR check): still a failure the ledger must count.
             run_reason=setup
           fi
+          if [ -n "$run_reason" ]; then
+            record_outcome "$task_id" failure "$run_reason"
+          elif [ "$JOB_STATUS" = cancelled ]; then
+            # An operator cancel is neither a success nor a strike; the
+            # cooldown marker stays as it was.
+            :
+          elif [ "$JOB_STATUS" = success ] && [ "$INVESTIGATE_PAUSED" != true ] \
+            && [ "$runtime_limited" != true ]; then
+            record_outcome "$task_id" success
+          fi
+          # The resume pointer is consumed HERE, not at the end of
+          # investigate.sh, so that a publish-stage failure keeps the work it
+          # already produced. Only an actual publication settles the card;
+          # anything else leaves the checkpoint resumable for the next run.
+          if [ "$PUBLISH_OUTCOME" = success ] || [ "$PUBLISH_ARTIFACT_OUTCOME" = success ]; then
+            "$AUTOPR_CONTROL_ROOT/harness/checkpoint.sh" consume "$RUNNER_TEMP/card.json" \
+              || printf 'warning: could not consume the checkpoint for %s\n' "$task_id" >&2
+          fi
           # The journal is the operator's view of this run on the ticket
           # itself: what was done, what is left, why it stopped, and whether
           # a checkpoint will resume it. Runs BEFORE the checkout hand-back so
-          # the branch diff is still readable, and BEFORE the failure ledger
-          # below: on a failure the journal's PATCH also returns the card from
-          # In Progress to its lane, and that column move must land before
-          # the ledger marker's mtime. select.sh parks a card only while the
-          # marker is newer than the last move; the other order would keep a
-          # card that fails identically forever eligible every cooldown.
+          # the branch diff is still readable, and AFTER the ledger above: the
+          # journal makes up to five best-effort API calls, so recording the
+          # strike behind it would lose it entirely whenever one hangs or the
+          # job timeout expires mid-Cleanup. The journal's own PATCH is also a
+          # column move, and select.sh parks a repeat offender only while the
+          # ledger marker sits at or after the card's last move — so the
+          # re-stamp below puts the marker back in front of it, using the
+          # server's timestamp rather than racing two machines' clocks.
           # Best-effort like the ledger.
           journal_outcome=success
           journal_reason="$run_reason"
@@ -623,23 +649,17 @@ jobs:
             --report "$RUNNER_TEMP/report.md" --decision "$RUNNER_TEMP/decision.json" \
             --checkpoint "$CHECKPOINT_PATH" --pr "$PUBLISHED_PR" --base-sha "$BRANCH_BASE_SHA" \
             || printf 'warning: could not attach the run journal for %s\n' "$task_id" >&2
-          if [ -n "$run_reason" ]; then
-            record_outcome "$task_id" failure "$run_reason"
-          elif [ "$JOB_STATUS" = cancelled ]; then
-            # An operator cancel is neither a success nor a strike; the
-            # cooldown marker stays as it was.
-            :
-          elif [ "$JOB_STATUS" = success ] && [ "$INVESTIGATE_PAUSED" != true ] \
-            && [ "$runtime_limited" != true ]; then
-            record_outcome "$task_id" success
-          fi
-          # The resume pointer is consumed HERE, not at the end of
-          # investigate.sh, so that a publish-stage failure keeps the work it
-          # already produced. Only an actual publication settles the card;
-          # anything else leaves the checkpoint resumable for the next run.
-          if [ "$PUBLISH_OUTCOME" = success ] || [ "$PUBLISH_ARTIFACT_OUTCOME" = success ]; then
-            "$AUTOPR_CONTROL_ROOT/harness/checkpoint.sh" consume "$RUNNER_TEMP/card.json" \
-              || printf 'warning: could not consume the checkpoint for %s\n' "$task_id" >&2
+          # The hand-back move the journal just made is newer than the ledger
+          # marker written above. Re-stamp it from the timestamp the SERVER
+          # returned for that move, so select.sh's park gate compares two
+          # readings of one clock. A journal that never got that far leaves the
+          # marker as-is: the strike still counted, which is the half that
+          # cannot be recovered later.
+          handback_at_file="$RUNNER_TEMP/autopr-handback-at"
+          if [ -s "$handback_at_file" ]; then
+            bash -c 'source "$1"; shift; autopr_touch_attempt_ledger "$@"' _ \
+              "$AUTOPR_CONTROL_ROOT/harness/lib.sh" "$task_id" "$(cat "$handback_at_file")" \
+              || printf 'warning: could not re-stamp the failure ledger for %s\n' "$task_id" >&2
           fi
           # Temporary isolation is allowed while building a PR, but no
           # submitted PR branch may remain checked out on the Mac runner.

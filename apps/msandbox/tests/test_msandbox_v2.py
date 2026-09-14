@@ -1471,23 +1471,26 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertIn("msandbox doctor", blocked.stderr)
 
     def _codex_auth_fixture(self, name: str, *, exp: float | None, raw: str | None = None) -> Path:
-        import base64
+        """One auth.json, built by the same helper the shell suites call."""
+        from apps.msandbox.tests.codex_auth_fixture import write_auth_fixture
 
         path = self.root / name
         if raw is not None:
             path.write_text(raw, encoding="utf-8")
             return path
+        if exp is None:
+            # A token with no exp claim at all: still a shape the check has to
+            # refuse, and the shared helper always writes one.
+            import base64
 
-        def part(obj: dict) -> str:
-            return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
-
-        claims = {} if exp is None else {"exp": exp}
-        token = ".".join((part({"alg": "none"}), part(claims), "sig"))
-        path.write_text(
-            json.dumps({"tokens": {"access_token": token, "refresh_token": "r"}}),
-            encoding="utf-8",
-        )
-        return path
+            segment = base64.urlsafe_b64encode(b"{}").rstrip(b"=").decode()
+            token = ".".join((segment, segment, "sig"))
+            path.write_text(
+                json.dumps({"tokens": {"access_token": token, "refresh_token": "r"}}),
+                encoding="utf-8",
+            )
+            return path
+        return write_auth_fixture(path, exp)
 
     def test_codex_login_check_reads_the_access_token_expiry(self) -> None:
         """The preflight every lane runs before spending anything on Codex.
@@ -1517,11 +1520,18 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertFalse(ok)
         self.assertIn("expires in", line)
 
+        # An out-of-range or non-finite exp must be a refusal, not a traceback:
+        # raising makes the shell face exit 1, which the dispatcher reads as
+        # "could not check" and fails OPEN on — a credential it just proved it
+        # cannot verify. json.loads accepts Infinity, so this is reachable.
         for name, kwargs in (
             ("auth-missing.json", None),
             ("auth-garbage.json", {"exp": None, "raw": "not json"}),
             ("auth-no-exp.json", {"exp": None}),
             ("auth-no-token.json", {"exp": None, "raw": json.dumps({"tokens": {}})}),
+            ("auth-huge-exp.json", {"exp": 1e30}),
+            ("auth-negative-exp.json", {"exp": -1e30}),
+            ("auth-infinite-exp.json", {"exp": float("inf")}),
         ):
             path = self.root / name if kwargs is None else self._codex_auth_fixture(name, **kwargs)
             ok, line = codex_auth.check(path, minimum=300)
@@ -1541,22 +1551,38 @@ class HostAndInstallTests(MsandboxTestCase):
         now = time.time()
         valid = self._codex_auth_fixture("doctor-auth-valid.json", exp=now + 86400)
         expired = self._codex_auth_fixture("doctor-auth-expired.json", exp=now - 60)
-        clean = (
-            mock.patch("apps.msandbox.cli.cli.launcher_is_pre_move", return_value=False),
-            mock.patch("apps.msandbox.cli.cli.release_drift", return_value=("r1", "r1")),
-            mock.patch("apps.msandbox.cli.cli.dispatcher_drift", return_value=[]),
-        )
-        for fixture, expected_status, expected_text in (
-            (valid, 0, "codex login: expires"),
-            (expired, 1, "codex login: EXPIRED"),
-        ):
+        lanes = self.root / "installed-dispatcher"
+        lanes.mkdir()
+        no_lanes = self.root / "never-installed"
+
+        def report(fixture: Path, install_root: Path) -> tuple[int, str]:
             output = io.StringIO()
-            with clean[0], clean[1], clean[2], mock.patch.dict(
+            with mock.patch(
+                "apps.msandbox.cli.cli.launcher_is_pre_move", return_value=False
+            ), mock.patch(
+                "apps.msandbox.cli.cli.release_drift", return_value=("r1", "r1")
+            ), mock.patch(
+                "apps.msandbox.cli.cli.dispatcher_drift", return_value=[]
+            ), mock.patch(
+                "apps.msandbox.cli.cli.dispatcher_install_root", return_value=install_root
+            ), mock.patch.dict(
                 os.environ, {"AUTOPR_HOST_CODEX_AUTH_FILE": str(fixture)}
             ), redirect_stdout(output):
-                status = _install_drift_report(self.repo)
-            self.assertEqual(status, expected_status, output.getvalue())
-            self.assertIn(expected_text, output.getvalue())
+                return _install_drift_report(self.repo), output.getvalue()
+
+        status, text = report(valid, lanes)
+        self.assertEqual(status, 0, text)
+        self.assertIn("codex login: expires", text)
+
+        status, text = report(expired, lanes)
+        self.assertEqual(status, 1, text)
+        self.assertIn("codex login: EXPIRED", text)
+
+        # Same dead login, but no dispatcher on this host: report it, do not
+        # fail a machine that only ever runs Claude Code or OpenCode sessions.
+        status, text = report(expired, no_lanes)
+        self.assertEqual(status, 0, text)
+        self.assertIn("codex login: EXPIRED", text)
 
     def test_doctor_sees_release_and_dispatcher_drift(self) -> None:
         # Two installed trees, neither auto-updating: the launcher pins one

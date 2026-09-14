@@ -41,6 +41,9 @@ TITLE="$(jq -r '.title // "Untitled"' "$CARD_FILE")"
 PROJECT_TITLE="$(jq -r '.project_title // "?"' "$CARD_FILE")"
 MODE="$(jq -r '.mode // "todo"' "$CARD_FILE")"
 RUN_ID="${GITHUB_RUN_ID:-local}"
+# Where the hand-back move's server timestamp is left for the Cleanup step.
+HANDBACK_AT_FILE="${AUTOPR_HANDBACK_AT_FILE:-${RUNNER_TEMP:+$RUNNER_TEMP/autopr-handback-at}}"
+[ -z "$HANDBACK_AT_FILE" ] || rm -f "$HANDBACK_AT_FILE"
 RUN_URL=""
 if [ -n "${GITHUB_SERVER_URL:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ "$RUN_ID" != local ]; then
     RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
@@ -314,7 +317,12 @@ next_section() {
                 printf 'Approve 10 more minutes from the ticket to continue from the saved checkpoint, or add context and press Run.\n'
             fi
             ;;
-        *) printf 'The card is back in its lane (Changes Requested when it has a PR, otherwise Todo), so Press Run on the ticket (or `msandbox autopr run-now %s`) retries from the checkpoint; the scheduler also retries after the cooldown. `msandbox autopr hold %s` parks it; `msandbox autopr log %s` shows this journal from a terminal.\n' "$ID8" "$ID8" "$ID8" ;;
+        cancelled) printf 'Nothing runs on its own: a cancel leaves the card where the operator put it, and `--hold` also parks it. `msandbox autopr release %s` lifts a hold, then Press Run (or `msandbox autopr run-now %s`) to retry from the checkpoint.\n' "$ID8" "$ID8" ;;
+        # Deliberately not "the scheduler will retry": this text is composed
+        # and uploaded BEFORE the hand-back PATCH below is attempted, and that
+        # PATCH can fail. Say what the run tried to do and give the operator
+        # the command that fixes it if it did not land.
+        *) printf 'Press Run on the ticket (or `msandbox autopr run-now %s`) to retry from the checkpoint. A failed run also hands the card back to its lane (Changes Requested when it has a PR, otherwise Todo) so the scheduler can reach it again — if it is still sitting in In Progress, that write did not land and `msandbox autopr unstick %s` returns it. `msandbox autopr hold %s` parks it; `msandbox autopr log %s` shows this journal from a terminal.\n' "$ID8" "$ID8" "$ID8" "$ID8" ;;
     esac
 }
 
@@ -382,17 +390,20 @@ live_column=""
 live_read_ok=false
 live_pr="$(jq -r '.pr_number // empty' "$CARD_FILE")"
 live_tasks="$( ( mw_api GET "/matcha-work/projects/$PROJECT_ID/tasks" ) 2>/dev/null || true )"
-if [ -n "$live_tasks" ]; then
+# Extract THIS card once, and let that single step answer "did the board tell
+# me anything about it". A non-empty body is not the same as a readable one: a
+# 200 carrying a proxy error page, an error object, or a list this task is
+# simply absent from all left the per-field filters returning "" — which then
+# read as "not In Progress" and silently skipped the hand-back below, the exact
+# stranding this write exists to prevent. jq fails on all three (it cannot
+# index null), so a successful extraction is the signal.
+if live_row="$(printf '%s' "$live_tasks" \
+    | jq -ce --arg id "$TASK_ID" 'first(.[]? | select(.id == $id))' 2>/dev/null)"; then
     live_read_ok=true
-    live_note="$(printf '%s' "$live_tasks" \
-        | jq -r --arg id "$TASK_ID" 'first(.[]? | select(.id == $id) | .progress_note // "") // ""' 2>/dev/null \
-        || printf '%s' "$snapshot_note")"
-    live_column="$(printf '%s' "$live_tasks" \
-        | jq -r --arg id "$TASK_ID" 'first(.[]? | select(.id == $id) | .board_column // "") // ""' 2>/dev/null \
-        || printf '%s' "$live_column")"
-    live_pr="$(printf '%s' "$live_tasks" \
-        | jq -r --arg id "$TASK_ID" 'first(.[]? | select(.id == $id) | .pr_number // empty) // empty' 2>/dev/null \
-        || printf '%s' "$live_pr")"
+    live_note="$(printf '%s' "$live_row" | jq -r '.progress_note // ""')"
+    live_column="$(printf '%s' "$live_row" | jq -r '.board_column // ""')"
+    live_pr_now="$(printf '%s' "$live_row" | jq -r '.pr_number // empty')"
+    [ -z "$live_pr_now" ] || live_pr="$live_pr_now"
 fi
 [ -n "$live_pr" ] || live_pr="$PR_NUMBER"
 already_parked=false
@@ -436,9 +447,20 @@ if label="$(stopped_header_label "$REASON")" && [ "$OUTCOME" != success ] \
         [ -z "$live_pr" ] || return_column=changes_requested
         patch='{progress_note: $note, board_column: $column}'
     fi
-    ( mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
-        "$(jq -n --arg note "$note" --arg column "$return_column" "$patch")" >/dev/null ) \
-        || warn "could not record the stop reason on task $TASK_ID"
+    if handback_response="$( mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
+        "$(jq -n --arg note "$note" --arg column "$return_column" "$patch")" )"; then
+        # select.sh parks a repeat offender only while the failure ledger's
+        # mtime is at or after the card's last move, and this hand-back IS a
+        # move. Those two stamps come from different machines (Postgres on the
+        # DB host, `date` on this runner), so hand the caller the server's own
+        # timestamp to stamp the ledger with instead of racing the clocks.
+        if [ -n "$return_column" ] && [ -n "$HANDBACK_AT_FILE" ]; then
+            printf '%s' "$handback_response" \
+                | jq -r '.updated_at // empty' 2>/dev/null > "$HANDBACK_AT_FILE" || true
+        fi
+    else
+        warn "could not record the stop reason on task $TASK_ID"
+    fi
 elif [ "$already_parked" = true ]; then
     # The parker owns the header AND already wrote the same resume line, and
     # its question form sits below the note; rewriting it here would drop that.

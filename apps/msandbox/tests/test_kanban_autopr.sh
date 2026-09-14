@@ -274,15 +274,46 @@ check "workflow forces Codex through the dedicated AutoPR msandbox" \
       && [ "$(bash -c "source '$AUTOPR_DIR/lib.sh'; autopr_kind_field investigate effort")" = medium ] \
       && echo 0 || echo 1)
 
-# On a failure the journal's PATCH returns the card to its lane (a column
-# move); select.sh parks a repeat offender only while the failure marker is
-# NEWER than the last move. Ledger first would leave every identically failing
-# card eligible forever, so the journal has to come first in Cleanup.
+# Cleanup ordering, and it is not a free choice in either direction. The
+# failure ledger is written FIRST: everything after it is a best-effort network
+# round-trip, and a journal that hangs (or a Cleanup cut short by the job
+# timeout) must not cost the card its strike. But the journal's own PATCH is a
+# column move, and select.sh parks a repeat offender only while the ledger sits
+# at or after the card's last move — so the ledger is re-stamped afterwards,
+# from the timestamp the SERVER returned for that move rather than from this
+# runner's clock. `consume` keeps its original place ahead of the journal;
+# checkpoint.sh's tick-ledger comment depends on that.
 cleanup_block="$(awk '/- name: Cleanup/ { on = 1; next } on && /^      - name: / { exit } on { print }' "$workflow")"
-journal_line="$(printf '%s\n' "$cleanup_block" | grep -n 'harness/run-journal.sh' | head -1 | cut -d: -f1)"
-ledger_line="$(printf '%s\n' "$cleanup_block" | grep -n 'record_outcome "$task_id" failure' | head -1 | cut -d: -f1)"
-check "Cleanup writes the run journal (and its lane move) before the failure ledger" \
-    $([ -n "$journal_line" ] && [ -n "$ledger_line" ] && [ "$journal_line" -lt "$ledger_line" ] && echo 0 || echo 1)
+cleanup_line() { printf '%s\n' "$cleanup_block" | grep -n "$1" | head -1 | cut -d: -f1; }
+ledger_line="$(cleanup_line 'record_outcome "$task_id" failure')"
+consume_line="$(cleanup_line 'checkpoint.sh" consume')"
+journal_line="$(cleanup_line 'harness/run-journal.sh')"
+restamp_line="$(cleanup_line 'autopr_touch_attempt_ledger')"
+check "Cleanup books the strike first, then consumes, journals, and re-stamps the ledger" \
+    $([ -n "$ledger_line" ] && [ -n "$consume_line" ] && [ -n "$journal_line" ] && [ -n "$restamp_line" ] \
+      && [ "$ledger_line" -lt "$consume_line" ] && [ "$consume_line" -lt "$journal_line" ] \
+      && [ "$journal_line" -lt "$restamp_line" ] && echo 0 || echo 1)
+
+# The re-stamp is what keeps the park working across two machines' clocks.
+check "the failure ledger is re-stamped from the server's timestamp, not the runner's" \
+    $(grep -qF 'autopr_touch_attempt_ledger' "$REPO_ROOT/apps/msandbox/harness/lib.sh" \
+      && grep -qF 'touch -d' "$REPO_ROOT/apps/msandbox/harness/lib.sh" \
+      && grep -qF 'AUTOPR_HANDBACK_AT_FILE' "$REPO_ROOT/apps/msandbox/harness/run-journal.sh" \
+      && echo 0 || echo 1)
+
+# lib.sh's stamp has to survive the shape Postgres actually returns
+# (microseconds + a +00:00 offset), which BSD `touch -d` rejects verbatim.
+ledger_probe_dir="$TMP_DIR/ledger-probe"
+rm -rf "$ledger_probe_dir"; mkdir -p "$ledger_probe_dir/attempts"
+printf '2\tinvestigate\tx\n' > "$ledger_probe_dir/attempts/deadbeef"
+touch -t 202601010000 "$ledger_probe_dir/attempts/deadbeef"
+AUTOPR_CACHE_DIR="$ledger_probe_dir" bash -c \
+  'source "$1"; autopr_touch_attempt_ledger deadbeef-0000-4000-8000-00000000000d "2026-09-13T21:11:48.224650+00:00"' \
+  _ "$AUTOPR_DIR/lib.sh"
+ledger_stamp="$(date -r "$(stat -f '%m' "$ledger_probe_dir/attempts/deadbeef")" -u +%Y-%m-%dT%H:%M:%SZ)"
+check "the ledger re-stamp parses a Postgres timestamp and keeps the strike count" \
+    $([ "$ledger_stamp" = "2026-09-13T21:11:48Z" ] \
+      && [ "$(cut -f1 "$ledger_probe_dir/attempts/deadbeef")" = 2 ] && echo 0 || echo 1)
 
 # A dead Codex login must fail before a card is selected or claimed: the
 # sandbox copy is read-only and the refresh token single-use, so the run that
@@ -1516,14 +1547,9 @@ git -C "$SANDBOX_TEST_REPO" checkout -q -- . 2>/dev/null || true
 # An expired host login is refused before the sandbox is touched. Readable is
 # not usable: the copy is mounted read-only and the refresh token single-use.
 write_codex_auth_fixture() {
-    local file="$1" exp="$2"
-    python3 - "$file" "$exp" <<'PYF'
-import base64, json, sys
-def b64(obj):
-    return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
-token = ".".join((b64({"alg": "none"}), b64({"exp": int(sys.argv[2])}), "sig"))
-json.dump({"tokens": {"access_token": token, "refresh_token": "r"}}, open(sys.argv[1], "w"))
-PYF
+    # apps/msandbox/tests/codex_auth_fixture.py is the single definition of
+    # this shape; see its docstring.
+    python3 "$REPO_ROOT/apps/msandbox/tests/codex_auth_fixture.py" "$1" "$2"
 }
 write_codex_auth_fixture "$TMP_DIR/expired-auth.json" "$(( $(date +%s) - 60 ))"
 cat > "$TMP_DIR/msandbox-stub.sh" <<'STUB'
@@ -1547,6 +1573,30 @@ check "an expired host Codex login is refused before the sandbox is touched, nam
     $([ "$sandbox_auth_rc" != 0 ] && grep -q 'codex login' "$TMP_DIR/sandbox-auth.log" \
       && grep -q 'EXPIRED' "$TMP_DIR/sandbox-auth.log" \
       && [ ! -e "$TMP_DIR/msandbox-stub.log" ] && echo 0 || echo 1)
+
+# ...but a checker that could not RUN is a harness fault. Dying on it would
+# block every model pass in the error-autofix and self-audit lanes behind a
+# message telling the operator to run `codex login`, which cannot clear it.
+rm -f "$TMP_DIR/msandbox-stub.log"
+PATH="$TMP_DIR/deny-bin:$PATH" \
+AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox-stub.sh" MSANDBOX_STUB_LOG="$TMP_DIR/msandbox-stub.log" \
+AUTOPR_HOST_CODEX_AUTH_FILE="$TMP_DIR/expired-auth.json" \
+AUTOPR_CODEX_AUTH_CHECK="$TMP_DIR/no-such-checker.py" \
+AUTOPR_CODEX_BACKOFF_FILE="$TMP_DIR/bridge-backoff.json" \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report-nocheck.md" "$TMP_DIR/sandbox-decision-nocheck.json" \
+  -f "$TMP_DIR/sandbox-context.json" > "$TMP_DIR/sandbox-nocheck.log" 2>&1
+check "a Codex check the bridge cannot run warns and proceeds instead of blocking the lane" \
+    $(grep -q 'proceeding without the preflight' "$TMP_DIR/sandbox-nocheck.log" \
+      && [ -s "$TMP_DIR/msandbox-stub.log" ] && echo 0 || echo 1)
+
+# Same rule in the workflow preflight, which runs before any card is selected.
+login_step_body="$(awk '/name: Require a live Codex login/ { on = 1 } on && /- name: Refuse a hot re-dispatch/ { exit } on { print }' "$workflow")"
+check "the workflow preflight halts the board only on a dead credential, not on a broken check" \
+    $(grep -qF 'if [ "$rc" -eq 4 ]; then' <<< "$login_step_body" \
+      && ! grep -qF 'if [ "$rc" -ne 0 ]; then' <<< "$login_step_body" && echo 0 || echo 1)
 
 # A usage-limit exit is a lane-wide condition: the bridge records it for the
 # dispatcher and still returns Codex's own exit status to its caller.
