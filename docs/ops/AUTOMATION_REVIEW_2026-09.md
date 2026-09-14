@@ -308,3 +308,62 @@ least-privilege IAM profile is still not done.
     "AutoPR: <email body>" for a staged row (pbxproj edit, so its own PR).
 15. Research round numbering has three derivations (publisher filename count,
     `investigate.sh` round_started count, server `round_index`); unify on one.
+
+## Batch C — 2026-09-14 audit (one week after batch A)
+
+Second pass, one day after the relocation into `apps/msandbox/` (PR #523). Everything
+below was verified read-only against repo `7432c54`, the Actions history of the three
+lanes (400 runs each), bot PR bodies, `msandbox doctor`, the LaunchAgent plists, the
+dispatch log, the runner's `_diag`, Docker, and the unified log.
+
+### What batch A fixed — confirmed
+
+| Check | Evidence |
+|---|---|
+| F4 hot re-dispatch loop | 0 of 79 kanban run gaps < 5 min since 2026-09-09 (was 93/99 at 1.1 min) |
+| F7 cheap no-op pass | no-op runs median 54 s; SSH / prod-resolve / control-root steps skipped |
+| F5 stale-main gate | no `not an ancestor of main` failure since 09-08 |
+| Error lane | 110 runs, 5 failures (all 09-08/09, pre-fix), median 41 s |
+| GC | 0 dangling images; 56 GB free |
+
+### Measured, 2026-09-08 → 09-14
+
+| Signal | Value |
+|---|---|
+| `kanban-autopr.yml` | 149 runs: 119 success, **29 failure (19%)**; since 09-09: 48 no-op (<2 min) / 32 real (4–52 min) |
+| … failed-step buckets | 13 `Fail incomplete investigation`, 5 publish, 4 scope+cleanup, 3 job-level (runner shutdown), 1 each checkout / prod-resolve / select / gh-config |
+| `autopr-self-audit.yml` | 12 runs, **6 failures** |
+| `needs-work` on merged kanban PRs | **7 of 7** — every bot PR since 2026-09-01 (~45) said "could not run" |
+| `production-verification-needed` on merged kanban PRs | 7 of 7, all `mode: manual`, oldest 5 days |
+| Dispatcher ticks 2026-09-13 | 268: 125 `kanban-not-due` (each a fresh 100-run fetch), 49 active-run skips (30 KB rows), **27 `run-snapshot-failed`** (65 in six days, all transient network) |
+| `msandbox doctor` | release STALE; dispatcher STALE on the five files PR #525 touched (dead-login guard not installed) |
+| Docker | 4 × `matcha-agent-sandbox-workspace` 5.0–5.7 GB, two built one minute apart; 14.5 GB reclaimable |
+
+### Findings and what landed (branch `autopr/batch-c`)
+
+| # | Finding | Fix |
+|---|---|---|
+| L1 (P1) | `self-audit/audit.sh` still ran `$REPO_ROOT/scripts/tests/<suite>` after the move; every audit since 6 min after #523 failed `contract_tests`, was classed repo-repairable (the capsule the model may not touch), and the ledger then blocked retries for a week | C1: suites resolve from `apps/msandbox/tests`; a missing suite is an **operator** finding (check exit 78); the failing suite is named in the JSON, summary and ledger; `AUTOPR_AUDIT_ONLY` lets the suite test one check |
+| L2 (P1) | `verify.sh` found no interpreter on every bot PR since 09-01: its only off-tree source was the dev clone's venv under `~/Documents`, and the launchd runner lost that folder grant when it self-updated to 2.337.0 at 2026-08-31 20:47:59Z (last good run: 08-29 on 2.336.0). `node_modules` had no fallback at all | C2: runner-owned toolchain under `~/.cache/matcha-autofix` (`error-autofix/toolchain.sh` keys, `harness/provision-verify-toolchain.sh` builds; `--legacy-peer-deps` like the Dockerfile); verify.sh reads it and never `~/Documents`; `audit.sh` `verify_toolchain` check; `msandbox doctor` line; `msandbox install --verify-toolchain` |
+| L3 (P1) | Third stale-install incident in a week: #525's dispatcher-side dead-login guard was not on the Mac while the login was in fact dead (21:09–21:11Z on 09-13, two runs burned) | C3: `install-launch-agent.sh --runtime-if-stale`, run by the kanban workflow right after the reset step (tree == `origin/main`); `post-merge` hook prints the doctor banner. The pinned release deliberately still needs `msandbox install` (it rewrites the launcher's `repo_root`) |
+| L4 (P2) | Any failed model pass — a 401, an exhausted quota, a sandbox that never started — was booked as an `investigate` strike toward `[autopr:parked]` | C4: fault classes from the bridge (`$AUTOPR_FAULT_CLASS_FILE`); Cleanup strikes only for `model`; the journal names lane faults |
+| L5 (P2) | The Investigate step timeout was the model's budget, so post-model validation got killed and a finished decision was discarded and re-run from scratch after approval (run 34728683748); a clean pause still ended the job red | C4: `runtime-policy.sh` emits `minutes` + `step_minutes`; the supervisor's `--deadline` stops the model (exit 143); `investigate.sh` passes ≥ 128 through; a runtime-limited pause is a green job |
+| L6 (P2) | Kanban PRs stay `production-verification-needed` forever: every reviewed check is `mode: manual` and nobody runs it | not in batch C — see below |
+| L7 (P3) | Scheduler fetched GitHub on every 60 s tick and failed closed on any blip | C5: decide from `status.json` + the last snapshot before fetching; one retry; slim active-run rows |
+| L8 (P3) | Two image lineages (F25) | open |
+| L9 (P3) | Open bot PRs never age out (#317 18 days) | open |
+
+Operator steps done during the audit: dispatcher tree synced from the checkout (doctor:
+"AutoPR dispatcher: current"), verification toolchain built (venv 680 MB, client deps
+557 MB; `provision-verify-toolchain.sh --check` exits 0). Still owed after merge:
+`msandbox install` (release), `./apps/msandbox/harness/install-hooks.sh` (post-merge hook),
+and a decision on the four open bot PRs (#317, #485, #513, #521).
+
+### Batch B status after batch C
+
+Done: F16 (dead marker), F21 partially (staleness now self-heals for the dispatcher;
+doctor reports the rest). Still open: F14 (clone reuse / decision-JSON copy), F15
+(`autopr-common/` consolidation), F17 (reconcile memo), F18 (error selection N+1), F20
+(lifetime lock), F22 (regression check), F24 (bash shim), F25 (one image lineage), F26
+(IAM), items 12–15. New: L6 (production evidence via `collect-test-tenant-evidence.py`
+post-deploy + a 7-day age-out) and L9 (bot-PR age-out).
