@@ -21,6 +21,11 @@ cat > "$TMP_DIR/gh" <<'EOF'
 [ -z "${AUTOPR_TEST_GH_CALLS:-}" ] || printf '%s\n' "$*" >> "$AUTOPR_TEST_GH_CALLS"
 if [ "$1 $2" = "run list" ]; then
   [ "${AUTOPR_TEST_LIST_FAIL:-0}" = 0 ] || exit 1
+  # Fail exactly once (a transient network error), then answer normally.
+  if [ -n "${AUTOPR_TEST_LIST_FAIL_ONCE:-}" ] && [ ! -e "$AUTOPR_TEST_LIST_FAIL_ONCE" ]; then
+    : > "$AUTOPR_TEST_LIST_FAIL_ONCE"
+    exit 1
+  fi
   jq -cn \
     --argjson errors "${AUTOPR_TEST_ERROR_RUNS:-[]}" \
     --argjson audit "${AUTOPR_TEST_AUDIT_RUNS:-[]}" \
@@ -79,6 +84,11 @@ chmod +x "$TMP_DIR/ensure-dashboard"
 run_dispatcher() {
   # Most cases represent independent clock ticks, not concurrent dispatches.
   [ "${AUTOPR_TEST_KEEP_LEASE:-0}" = 1 ] || rm -f "$TMP_DIR/state/last-dispatch"
+  # The scheduler reads its own last status.json to skip a GitHub call when
+  # nothing can be due. Cases here swap GitHub fixtures instead of letting
+  # time pass, so a previous tick's verdict must not carry over unless the
+  # case is about exactly that.
+  [ "${AUTOPR_TEST_KEEP_STATUS:-0}" = 1 ] || rm -f "$TMP_DIR/state/status.json"
   AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_DISPATCH_LOG="$TMP_DIR/log.jsonl" \
     AUTOPR_DOCKER_BIN="$TMP_DIR/docker" AUTOPR_ENABLE_FILE="$TMP_DIR/autopr-enabled" \
     AUTOPR_DISPATCH_LOCK_DIR="$TMP_DIR/lock" AUTOPR_TEST_DISPATCHES="$TMP_DIR/dispatches" \
@@ -666,6 +676,69 @@ check "the login verdict is cached per tick but re-read the moment auth.json cha
 printf '%s\n' '{"action":"skip","reason":"codex-auth-required","checked_at":999990,"next_check_at":1000050,"eligible_at":0}' > "$TMP_DIR/seg-state/status.json"
 check "status segment names a dead Codex login" \
   $(grep -q 'CODEX LOGIN' <<< "$(seg)" && echo 0 || echo 1)
+
+# A scheduler tick that cannot dispatch anything must not ask GitHub: 125 of
+# 268 ticks on 2026-09-13 fetched a fresh 100-run list to log kanban-not-due,
+# and 65 ticks in six days failed closed on a transient network error doing so.
+idle_now="$(date +%s)"
+mkdir -p "$TMP_DIR/state" "$TMP_DIR/github-cache"
+jq -cn --argjson now "$idle_now" '[
+  {databaseId:6,status:"completed",lane:"errors",updatedAt:(($now - 60) | todate)},
+  {databaseId:8,status:"completed",lane:"self-audit",updatedAt:(($now - 60) | todate)},
+  {databaseId:9,status:"completed",lane:"kanban",updatedAt:(($now - 60) | todate)}]' \
+  > "$TMP_DIR/github-cache/runs.json"
+jq -cn --argjson now "$idle_now" \
+  '{action:"skip",reason:"kanban-not-due",checked_at:$now,next_check_at:($now + 60),eligible_at:($now + 240)}' \
+  > "$TMP_DIR/state/status.json"
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/idle-gh.log"
+AUTOPR_TEST_KEEP_STATUS=1 AUTOPR_TEST_GH_CALLS="$TMP_DIR/idle-gh.log" \
+  AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher
+check "a not-due scheduler tick logs kanban-not-due without asking GitHub" \
+  $(tail -n 1 "$TMP_DIR/log.jsonl" | grep -q 'kanban-not-due' && [ ! -e "$TMP_DIR/dispatches" ] \
+    && ! grep -q 'run list' "$TMP_DIR/idle-gh.log" 2>/dev/null \
+    && jq -e --argjson now "$idle_now" '.eligible_at == $now + 240' "$TMP_DIR/state/status.json" >/dev/null \
+    && echo 0 || echo 1)
+# A lane the LAST snapshot already shows as due still fetches: the stale read
+# can only cause a fetch, never suppress one.
+jq -cn --argjson now "$idle_now" '[
+  {databaseId:6,status:"completed",lane:"errors",updatedAt:(($now - 700) | todate)},
+  {databaseId:9,status:"completed",lane:"kanban",updatedAt:(($now - 60) | todate)}]' \
+  > "$TMP_DIR/github-cache/runs.json"
+rm -f "$TMP_DIR/due-gh.log"
+AUTOPR_TEST_KEEP_STATUS=1 AUTOPR_TEST_GH_CALLS="$TMP_DIR/due-gh.log" AUTOPR_TEST_ERROR_RUNS="$recent_error" \
+  AUTOPR_TEST_AUDIT_RUNS="$recent_audit" AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher
+check "a lane the last snapshot shows as due still fetches a fresh list" \
+  $(grep -q 'run list' "$TMP_DIR/due-gh.log" && echo 0 || echo 1)
+# The watcher lane never takes the shortcut: it has its own board probe.
+rm -rf "$TMP_DIR/state" "$TMP_DIR/watch-idle-gh.log"
+mkdir -p "$TMP_DIR/state"
+jq -cn --argjson now "$idle_now" \
+  '{action:"skip",reason:"kanban-not-due",checked_at:$now,next_check_at:($now + 60),eligible_at:($now + 240)}' \
+  > "$TMP_DIR/state/status.json"
+AUTOPR_TEST_KEEP_STATUS=1 AUTOPR_TEST_GH_CALLS="$TMP_DIR/watch-idle-gh.log" AUTOPR_TEST_PROBE_EXIT=0 \
+  AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher --if-requested
+check "the request watcher still fetches before honoring a queued card" \
+  $(grep -q 'run list' "$TMP_DIR/watch-idle-gh.log" && echo 0 || echo 1)
+
+# One transient GitHub failure is retried before the tick fails closed.
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/retry-gh.log" "$TMP_DIR/fail-once" "$TMP_DIR/state/status.json" "$TMP_DIR/state/last-forced-kanban"
+AUTOPR_TEST_LIST_FAIL_ONCE="$TMP_DIR/fail-once" AUTOPR_GITHUB_SNAPSHOT_RETRY_SECONDS=0 \
+  AUTOPR_TEST_GH_CALLS="$TMP_DIR/retry-gh.log" \
+  AUTOPR_TEST_ERROR_RUNS="$recent_error" AUTOPR_TEST_AUDIT_RUNS="$recent_audit" \
+  AUTOPR_TEST_KANBAN_RUNS="$stale_kanban" run_dispatcher
+check "one transient GitHub failure is retried and the tick still dispatches" \
+  $([ "$(cat "$TMP_DIR/dispatches" 2>/dev/null)" = "kanban-autopr.yml" ] \
+    && [ "$(grep -c 'run list' "$TMP_DIR/retry-gh.log")" = 2 ] \
+    && ! tail -n 1 "$TMP_DIR/log.jsonl" | grep -q 'run-snapshot-failed' && echo 0 || echo 1)
+
+# An active-run skip row names the run; it no longer embeds the snapshot.
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/state/status.json"
+active_run="[{\"databaseId\":77,\"status\":\"in_progress\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$recent\",\"updatedAt\":\"$recent\",\"url\":\"https://example.invalid/a/very/long/run/url/that/used/to/be/logged\",\"displayTitle\":\"Kanban autopr\"}]"
+AUTOPR_TEST_KANBAN_RUNS="$active_run" run_dispatcher
+check "an active-run skip row names the run without embedding the whole snapshot" \
+  $(tail -n 1 "$TMP_DIR/log.jsonl" | jq -e '.reason == "active-autopr-workflow" and (.runs | length) == 1
+      and .runs[0].databaseId == 77 and .runs[0].lane == "kanban" and (.runs[0] | has("url") | not)' >/dev/null \
+    && [ "$(tail -n 1 "$TMP_DIR/log.jsonl" | wc -c | tr -d ' ')" -lt 512 ] && echo 0 || echo 1)
 
 # The installed dispatcher tree never auto-updated; the kanban workflow now
 # syncs it from its main checkout on every pass. Runtime files only, only on

@@ -1350,6 +1350,11 @@ batch A fixed, and the structural backlog (batch B) — lives in
   GitHub-side floor that survives a broken or stale local dispatcher (the installed
   LaunchAgent copy lagged the repo for a week and re-fired a no-op run every 66 s).
   API failure proceeds — it is a spend guard, not a safety boundary.
+- **A scheduler tick asks GitHub only when a lane could be due.** `status.json`'s
+  `eligible_at` and the last snapshot's per-lane completion times decide first
+  (`scheduler_idle_without_fetch`); a stale read can only cause a fetch, never suppress
+  one. `run-snapshot.sh` retries one transient failure after five seconds before the
+  tick fails closed, and an active-run skip row logs only the run's id/lane/status.
 - **The dispatcher remembers the request set it last forced** (`last-forced-request-set`):
   one "Run AutoPR now" press costs at most one forced run per request TTL even when
   the run dies before `select.sh`/`investigate.sh` can claim it.

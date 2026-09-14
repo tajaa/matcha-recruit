@@ -34,6 +34,10 @@ LOCK_DIR="${AUTOPR_DISPATCH_LOCK_DIR:-${TMPDIR:-/tmp}/matcha-kanban-autopr-dispa
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DASHBOARD_ENSURE="${AUTOPR_DASHBOARD_ENSURE:-$SCRIPT_DIR/ensure-dashboard.sh}"
 RUN_SNAPSHOT="${AUTOPR_RUN_SNAPSHOT:-$SCRIPT_DIR/run-snapshot.sh}"
+# The last snapshot run-snapshot.sh wrote, read here only to decide whether a
+# scheduler tick can end without asking GitHub at all (same path expression
+# as in run-snapshot.sh).
+SNAPSHOT_CACHE_FILE="${AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR:-${AUTOPR_DASHBOARD_CACHE_DIR:-$USER_HOME/Library/Caches/matcha-autopr-dashboard}/github}/runs.json"
 RUN_REQUEST_PROBE="${AUTOPR_RUN_REQUEST_PROBE:-$SCRIPT_DIR/has-run-request.sh}"
 STATE_DIR="${AUTOPR_DISPATCH_STATE_DIR:-$USER_HOME/Library/Caches/matcha-autopr-dashboard/dispatch}"
 FORCED_MARKER="$STATE_DIR/last-forced-kanban"
@@ -192,6 +196,31 @@ workflow_pass_due() {
     completed_epoch="$(iso_to_epoch "$last_completed")" || return 0
     now="$(date +%s)"
     [ $((now - completed_epoch)) -ge "$max_age" ]
+}
+
+# A scheduler tick that cannot dispatch anything needs no GitHub call. The
+# Kanban lane's own eligibility is in status.json (`eligible_at`, written from
+# the last snapshot's last completed run), and whether the error or self-audit
+# lane is due is a function of time over the LAST snapshot: a run that
+# completed since only makes a lane look more due, never less, so the stale
+# read is conservative — it can only cause a fetch, never suppress one. Before
+# this, 125 of 268 ticks on 2026-09-13 fetched a fresh 100-run list to log
+# `kanban-not-due`, and 65 ticks in six days failed closed on a transient
+# network error doing so. Never on the watcher lane (it has its own probe and
+# never reaches here idle) and never when a start was requested.
+scheduler_idle_without_fetch() {
+    [ -s "$SNAPSHOT_CACHE_FILE" ] || return 1
+    [ -s "$STATE_DIR/status.json" ] || return 1
+    local now eligible cached
+    now="$(date +%s)"
+    eligible="$(jq -r '.eligible_at // 0' "$STATE_DIR/status.json" 2>/dev/null || true)"
+    [[ "$eligible" =~ ^[0-9]+$ ]] || return 1
+    [ "$eligible" -gt "$now" ] || return 1
+    cached="$(jq -c '[.[] | select(.lane == "errors")]' "$SNAPSHOT_CACHE_FILE" 2>/dev/null)" || return 1
+    ! workflow_pass_due "$cached" "$ERROR_MAX_AGE_SECONDS" || return 1
+    cached="$(jq -c '[.[] | select(.lane == "self-audit")]' "$SNAPSHOT_CACHE_FILE" 2>/dev/null)" || return 1
+    ! workflow_pass_due "$cached" "$AUDIT_MAX_AGE_SECONDS" || return 1
+    NEXT_ELIGIBLE_AT="$eligible"
 }
 
 autopr_master_ready() {
@@ -421,6 +450,10 @@ main() {
         log_event skip recent-dispatch-pending
         exit 0
     fi
+    if [ "$requested_mode" != true ] && scheduler_idle_without_fetch; then
+        log_event skip kanban-not-due
+        exit 0
+    fi
 
     local kanban_runs error_runs audit_runs all_runs workflow reason
     if [ ! -x "$RUN_SNAPSHOT" ] || ! all_runs="$(AUTOPR_REPO="$REPO" AUTOPR_REF="$REF" \
@@ -440,7 +473,11 @@ main() {
         NEXT_ELIGIBLE_AT=$(( $(iso_to_epoch "$last_completed") + KANBAN_MAX_AGE_SECONDS ))
     fi
     if has_active_workflow_run "$all_runs"; then
-        log_event skip active-autopr-workflow "$all_runs"
+        # Name the active run(s) only. Embedding the whole 20-run snapshot
+        # made every such row up to 30 KB (1.3 MB/day, a rotation every four
+        # days) and nothing reads more than the id and lane back out.
+        log_event skip active-autopr-workflow \
+            "$(printf '%s' "$all_runs" | jq -c '[.[] | select(.status != "completed") | {databaseId, lane, status}]')"
         exit 0
     fi
 
