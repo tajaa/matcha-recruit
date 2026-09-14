@@ -970,12 +970,42 @@ job_rates=…) -> WeekCost`. `labor_cost_service.py` is the thin DB half.
 - **As-scheduled, never as-worked.** There is no time-clock data in this
   codebase; `worked_minutes` is planned span minus planned break. `basis.as_scheduled`
   carries this and the UI says "scheduled labor cost". Not payroll.
+- **Every review is costed over the WHOLE week for its location**, not just
+  the rows the change names — overtime depends on everything else the person
+  already works, and two reviews costed over different subsets cannot be
+  compared with each other (`compareReviews` subtracts them). `_apply_ops`
+  therefore models all six `schedule_chat._EDIT_KINDS` against the week's real
+  rows, and an unrecognised kind refuses the whole block rather than report the
+  $0 that `retime` and `swap` originally did. A batch straddling a week
+  boundary is costed one week at a time and summed.
+- **A threshold is unusable without its rate.** `_multiplier` type-guards
+  (catalog-extracted `db_rules` can carry the `NO_CAP` sentinel, and
+  `Decimal(str(NO_CAP))` raises), and a missing multiplier disables its
+  threshold rather than borrowing another — doubletime must never quietly fall
+  back to the 1.5x overtime rate.
+- **Absent is not unpriced, on any axis.** `employee_total(..., absent=0)`
+  distinguishes "not in this scenario" (a saving) from "no rate on file";
+  `by_day` is zero-filled across the week with `unpriced_days` naming the days
+  nobody could be priced on; and the rail shows `$0` for someone with no shifts
+  and a dash only for the server's own unpriced list. Each of these collapsed
+  the two states in an early cut, and each read as "free".
 - **`employees.pay_rate` is a single snapshot** (as `wage_benchmark_service`
   already documents), so costing a PAST week uses today's rate. Fine forward,
   wrong retrospectively — never read this as an audit figure.
 
 **Visibility.** `labor_cost_service.is_labor_cost_visible(company_id, role)` is
-the one gate: the company flag AND a business-admin role (`admin`/`client`).
+the one gate — and it means EVERY surface, including the ones whose own
+dependency looks strict enough. Two that are not, and were caught in review:
+`get_schedule_overview` (Huume) runs behind `assert_manager_location`, which
+`resolve_eligibility_manager_scope` opens to an employee-role user flagged
+`is_manager`/`is_supervisor` — and `roster_load` already carries each person's
+minutes, so a per-person `week_cost` beside it yields every coworker's hourly
+rate by division. And `serialize_job` returns `default_hourly_rate` on four
+jobs endpoints mounted on plain `require_admin_or_client`. Both now take the
+gate (`actor_role` threaded from the agent; `include_cost=` on the serializer,
+defaulting OFF). **A new cost field on an existing response is a new gate, not
+a new key.** The gate is the company flag AND a business-admin role
+(`admin`/`client`).
 `individual` is dropped even though `require_admin_or_client` admits it — a
 personal Espresso account has no business reading a company payroll. **There is
 no shift-manager role today**, so that is the finest gate the role model
@@ -990,7 +1020,7 @@ gate needs a new role, not a new check here.
 | Inputs rail | `SchedulePilot` reads `editor.summary.cost`; `InputsRail` draws per-person money on the same `LoadBar` and a "Labor cost" section (hourly / salaried / unfilled seats / OT premium / what is unpriced) |
 | `ScheduleReview` (Huume-staged change, REST fill scenario, week draft) | `cost_delta_for_rows` / `review_cost_for_ops` attach `proposal["cost"]` before `build_review`; `build_week_draft_review(cost=…)` for the planner. `ReviewPane` renders before→after and `Δ $`; `compareReviews` diffs two scenarios' cost |
 | Huume | `get_schedule_overview` adds `planning.labor_cost` + a `week_cost` per person in `roster_load`, so the model answers from the manager's numbers instead of inventing them |
-| HR Pilot | `schedint:labor-cost.<location>` records — **aggregates only**, in the existing supervisor-only group `redact_for_employee` strips |
+| HR Pilot | `schedint:labor-cost.<location>` records — **aggregates only**, in the existing supervisor-only group `redact_for_employee` strips. Per-location week start (not `align_week_start`'s Sunday default), and the job-rate catalogue is read once for the whole company rather than per location |
 
 **The cost path never raises.** `cost_delta_for_rows` and `review_cost_for_ops`
 swallow and log — cost is additive to a review, and a feature read that fails

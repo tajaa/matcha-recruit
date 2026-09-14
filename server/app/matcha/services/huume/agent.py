@@ -904,6 +904,7 @@ async def run_huume_turn(
                     company_id=company_id,
                     location_id=surface_context.location_id,
                     week_start=surface_context.week_start,
+                    actor_role=user_role,
                 )
                 ok = result.get("status") == "ok"
                 step = recorder.record(

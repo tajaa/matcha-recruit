@@ -427,10 +427,18 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
     }
     _labor_cost_records: list[dict] = []
     for item in grounding.get("labor_cost") or []:
-        unpriced = item["unpriced_employee_count"]
+        missing = []
+        if item["unpriced_employee_count"]:
+            missing.append(
+                f"{item['unpriced_employee_count']} scheduled employee(s) have no pay rate on file"
+            )
+        if item["unpriced_open_seats"]:
+            missing.append(
+                f"{item['unpriced_open_seats']} open seat(s) are on a job with no default rate"
+            )
         caveat = (
-            f" {unpriced} scheduled employee(s) have no pay rate on file and are NOT in this "
-            "figure — the real cost is higher." if unpriced else ""
+            f" {' and '.join(missing)} — NOT in this figure, so the real cost is higher."
+            if missing else ""
         )
         seats = (
             f" Open seats not yet filled add an estimated ${item['open_seat_total']:,.2f}."

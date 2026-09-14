@@ -240,6 +240,10 @@ export interface WeekLaborCost {
   unpriced_employee_ids: string[]
   unpriced_employee_count: number
   unpriced_open_seats: number
+  /** ISO days somebody worked whose pay could not be priced. `by_day` is
+   *  zero-filled across the week, so this is what tells a day nobody could be
+   *  priced on apart from a day nobody worked. */
+  unpriced_days: string[]
   basis: LaborCostBasis
   jurisdiction?: ScheduleJurisdiction
 }

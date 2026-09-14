@@ -2308,17 +2308,20 @@ async def propose_week_draft(
         # Same cost block a staged edit carries, so the review pane renders one
         # shape: the week's bill as it stands vs. as this draft would leave it.
         draft_cost = await cost_delta_for_rows(
-            conn, company_id=company_id, location_id=location_id, week_start=week_start,
-            before_rows=list(snapshot["existing_assignments"]),
-            after_rows=list(snapshot["existing_assignments"]) + [
-                {
-                    "employee_id": str(item["employee_id"]),
-                    "starts_at": shift.get("starts_at"),
-                    "worked_minutes": shift.get("worked_minutes") or 0,
-                }
-                for shift in plan.get("shifts") or []
-                for item in shift.get("proposed_assignments") or []
-            ],
+            conn, company_id=company_id, location_id=location_id,
+            weeks=[(
+                week_start,
+                list(snapshot["existing_assignments"]),
+                list(snapshot["existing_assignments"]) + [
+                    {
+                        "employee_id": str(item["employee_id"]),
+                        "starts_at": shift.get("starts_at"),
+                        "worked_minutes": shift.get("worked_minutes") or 0,
+                    }
+                    for shift in plan.get("shifts") or []
+                    for item in shift.get("proposed_assignments") or []
+                ],
+            )],
         )
         schedule_review = build_week_draft_review(
             plan,

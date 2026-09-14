@@ -414,7 +414,8 @@ async def _fetch_labor_cost(conn, company_id) -> list[dict]:
     corpus, even though this group is supervisor-only: HR Pilot answers get
     quoted, and a wage in a quoted answer is a different kind of disclosure
     from a wage on a page the manager had to open."""
-    from app.matcha.services.scheduling.labor_cost_service import load_week_cost
+    from app.matcha.services.scheduling.labor_cost_service import load_job_rates, load_week_cost
+    from app.matcha.services.scheduling.location_profile import resolve_week_start_weekday
     from app.matcha.services.scheduling.schedule_rules import align_week_start
 
     rows = await conn.fetch(
@@ -422,12 +423,21 @@ async def _fetch_labor_cost(conn, company_id) -> list[dict]:
         "WHERE company_id = $1 AND is_active IS NOT FALSE ORDER BY name LIMIT $2",
         company_id, _MAX_LABOR_COST_LOCATIONS,
     )
-    week_start = align_week_start(date.today())
+    # Company-wide and identical for every location — read once, not per pass.
+    job_rates = await load_job_rates(conn, company_id=company_id)
+    today = date.today()
     out: list[dict] = []
     for row in rows:
         try:
+            # Each location sets its own week start; `align_week_start`'s
+            # default is Sunday, so a Monday-start store would otherwise get a
+            # figure straddling two of its real weeks.
+            week_start = align_week_start(today, await resolve_week_start_weekday(
+                conn, company_id=company_id, location_id=row["id"],
+            ))
             cost = await load_week_cost(
                 conn, company_id=company_id, location_id=row["id"], week_start=week_start,
+                job_rates=job_rates,
             )
         except Exception:  # noqa: BLE001
             logger.warning("hr_pilot_corpus: labor-cost fetch failed for location %s", row["id"])

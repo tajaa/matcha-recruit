@@ -251,6 +251,7 @@ function weekCost(overrides: Partial<WeekLaborCost> = {}): WeekLaborCost {
     ot_premium: 0, ot_minutes: 0, by_day: {},
     employees: [personCost('e1', 800), personCost('e2', 400)],
     unpriced_employee_ids: [], unpriced_employee_count: 0, unpriced_open_seats: 0,
+    unpriced_days: [],
     basis: {
       daily_ot_hours: 8, daily_doubletime_hours: 12, weekly_ot_hours: 40,
       ot_multiplier: 1.5, doubletime_multiplier: 2, as_scheduled: true,
@@ -300,5 +301,29 @@ describe('InputsRail labor cost', () => {
     const ben = screen.getByText('Ben Ortiz').closest('button')!
     expect(within(ben).getByText('\u2014')).toBeInTheDocument()
     expect(within(ben).queryByText('$0')).not.toBeInTheDocument()
+  })
+})
+
+
+describe('InputsRail unpriced vs unscheduled', () => {
+  it('shows $0 for someone with no shifts, not the no-rate dash', () => {
+    // `cost.employees` only carries people who worked. In a normal week the
+    // bench is most of the roster, and marking all of them "no pay rate on
+    // file" both lies and buries the rows that really are missing data.
+    renderRail({ cost: weekCost({ employees: [personCost('e1', 800)] }) })
+    const ben = screen.getByText('Ben Ortiz').closest('button')!
+    expect(within(ben).getByText('$0')).toBeInTheDocument()
+    expect(within(ben).queryByText('\u2014')).not.toBeInTheDocument()
+  })
+
+  it('still dashes someone the server named as unpriced', () => {
+    renderRail({
+      cost: weekCost({
+        employees: [personCost('e1', 800)],
+        unpriced_employee_ids: ['e2'], unpriced_employee_count: 1,
+      }),
+    })
+    const ben = screen.getByText('Ben Ortiz').closest('button')!
+    expect(within(ben).getByText('\u2014')).toBeInTheDocument()
   })
 })

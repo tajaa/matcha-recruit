@@ -15,6 +15,9 @@ interface WeekTimeGridProps {
   /** Scheduled cost per ISO day. Undefined = the viewer has no `labor_cost`
    *  access, and the column header shows no money at all. */
   costByDay?: Record<string, number>
+  /** Days where somebody worked who could not be priced. Those render a dash:
+   *  a "$0" beside a fully-staffed day reads as "this day is free". */
+  unpricedDays?: ReadonlySet<string>
   onCreateAt(date: string, minute: number, employeeId?: string): void
   onOpenShift(shift: Shift): void
   onToggleHuumeSelection(shift: Shift): void
@@ -27,7 +30,7 @@ function TimeSlot({ date, minute, onCreate }: { date: string; minute: number; on
   return <button ref={setNodeRef} onClick={onCreate} className={`absolute left-0 right-0 border-t border-zinc-900/80 text-left ${isOver ? 'bg-emerald-500/10' : 'hover:bg-white/[0.02]'}`} style={{ top: minute, height: 15 }} aria-label={`Create shift on ${date} at ${minute} minutes`} />
 }
 
-export default function WeekTimeGrid({ days, shifts, pendingKeys, editPublished, selectedEmployeeId, huumeSelectedShiftIds, costByDay, onCreateAt, onOpenShift, onToggleHuumeSelection, onAssignSelected, onResizeShift }: WeekTimeGridProps) {
+export default function WeekTimeGrid({ days, shifts, pendingKeys, editPublished, selectedEmployeeId, huumeSelectedShiftIds, costByDay, unpricedDays, onCreateAt, onOpenShift, onToggleHuumeSelection, onAssignSelected, onResizeShift }: WeekTimeGridProps) {
   const hours = Array.from({ length: 24 }, (_, i) => i)
   const layouts = days.map((day) => {
     const dayShifts = shifts.filter((shift) => shift.starts_at.slice(0, 10) === day)
@@ -46,8 +49,13 @@ export default function WeekTimeGrid({ days, shifts, pendingKeys, editPublished,
             <div key={day} style={{ width }} className="flex items-baseline gap-2 border-l border-zinc-900 px-2 pb-2">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{fmtDayLabel(day)}</span>
               {costByDay && (
-                <span className="font-mono text-[10px] tabular-nums text-zinc-600" title="Scheduled labor cost this day">
-                  {costLabel(costByDay[day] ?? 0)}
+                <span
+                  className="font-mono text-[10px] tabular-nums text-zinc-600"
+                  title={unpricedDays?.has(day)
+                    ? 'Someone on this day has no pay rate on file — not priced'
+                    : 'Scheduled labor cost this day'}
+                >
+                  {costLabel(unpricedDays?.has(day) && !costByDay[day] ? null : costByDay[day])}
                 </span>
               )}
             </div>

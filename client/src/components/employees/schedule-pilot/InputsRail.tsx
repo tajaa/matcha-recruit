@@ -156,11 +156,18 @@ function InputsRail({
     const costById = cost
       ? new Map(cost.employees.map((item) => [item.employee_id, item.priced ? item.total : null]))
       : null
+    // `cost.employees` only carries people with shifts this week. Someone with
+    // none costs nothing — that is $0, not missing pay data. Only the server's
+    // own unpriced list means "no rate on file", and in a normal week the
+    // bench is most of the roster, so conflating them buried the real rows.
+    const unpriced = new Set(cost?.unpriced_employee_ids ?? [])
     const merged = roster.map((employee) => ({
       employee,
       planning: planningById.get(employee.id) ?? null,
       flags: rosterFlags?.[employee.id],
-      cost: costById ? (costById.get(employee.id) ?? null) : undefined,
+      cost: costById
+        ? (unpriced.has(employee.id) ? null : (costById.get(employee.id) ?? 0))
+        : undefined,
     }))
     merged.sort((a, b) => (b.planning?.load.minutes ?? 0) - (a.planning?.load.minutes ?? 0) || a.employee.name.localeCompare(b.employee.name))
     const needle = query.trim().toLowerCase()

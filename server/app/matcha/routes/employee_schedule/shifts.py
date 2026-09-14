@@ -379,10 +379,18 @@ async def get_week(
         # day totals need no second round-trip. Absent — not zero — for anyone
         # without `labor_cost` + a business-admin role.
         cost = None
-        if await is_labor_cost_visible(company_id, current_user.role, conn=conn):
-            cost = (await load_week_cost(
-                conn, company_id=company_id, location_id=location, week_start=start,
-            )).payload()
+        try:
+            if await is_labor_cost_visible(company_id, current_user.role, conn=conn):
+                cost = (await load_week_cost(
+                    conn, company_id=company_id, location_id=location, week_start=start,
+                )).payload()
+        except Exception:  # noqa: BLE001
+            # The board is the page; the money is a column on it. A pricing
+            # failure loses the column, never the shifts, roster and credential
+            # flags around it. The dedicated /labor-cost endpoint still raises,
+            # because there a caller must not mistake silence for "free".
+            logger.exception("labor cost unavailable for location %s week %s", location, start)
+            cost = None
     return {
         "week_start": start.isoformat(),
         "location_id": str(location),

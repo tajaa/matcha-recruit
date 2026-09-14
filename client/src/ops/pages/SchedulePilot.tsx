@@ -231,6 +231,7 @@ export default function SchedulePilot() {
   // Rides the week the board already fetched (`GET /week` → `summary.cost`)
   // and so reloads after every applied write, with no second request.
   const weekCost = laborCostEnabled ? (editor.summary?.cost ?? null) : null
+  const unpricedDays = useMemo(() => new Set(weekCost?.unpriced_days ?? []), [weekCost])
 
   const caps = useMemo(() => Object.fromEntries((planning.inputs?.roster ?? []).map((person) => [person.employee_id, {
     max_weekly_minutes: person.caps.max_weekly_minutes, allow_overtime: person.caps.allow_overtime,
@@ -416,6 +417,7 @@ export default function SchedulePilot() {
       jobs={jobs}
       trainingEnabled={trainingEnabled}
       costByDay={weekCost?.by_day}
+      unpricedDays={unpricedDays}
       canMutate={canMutate}
       onOpenNew={openNew}
       onOpenShift={openShift}

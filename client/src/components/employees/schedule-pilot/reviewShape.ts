@@ -85,7 +85,13 @@ export interface ReviewComparison {
   totals: { left: { staged: number; unfilled: number }; right: { staged: number; unfilled: number } }
   /** What each scenario leaves the week costing. `null` when either side was
    *  not priced — comparing a priced scenario against an unpriced one is not a
-   *  comparison, and showing one anyway would invent a saving. */
+   *  comparison, and showing one anyway would invent a saving.
+   *
+   *  Subtracting the two is only meaningful because every review's cost is
+   *  computed over the WHOLE week for its location
+   *  (`labor_cost_service.cost_delta_for_rows` requires it), so an edit
+   *  scenario and a week draft are on the same basis. If that ever stops
+   *  being true, this comparison silently reports a fabricated delta. */
   cost: { left: number; right: number; delta: number } | null
 }
 

@@ -3036,7 +3036,9 @@ async def build_batch_proposal(
         "operation_count": len(edit_ops) + len(create_doc["shifts"] if create_doc else []),
     }
     # Only the edit half moves an existing week's bill; a batch's new shifts
-    # are costed once they exist. Flag-gated inside.
+    # are costed once they exist. `location_id=None` lets the cost path read
+    # the scope off the ops themselves — passing None as a LOCATION would price
+    # a California week on the federal floor and bucket it into a Sunday week.
     batch_cost = await review_cost_for_ops(
         conn, company_id=company_id, location_id=None, ops=edit_ops,
     )

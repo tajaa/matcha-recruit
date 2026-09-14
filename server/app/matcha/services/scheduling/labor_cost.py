@@ -35,7 +35,7 @@ when the week crosses 40.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Mapping, Optional, Sequence
 
@@ -72,13 +72,27 @@ def _threshold_minutes(rules: Mapping[str, Any], key: str) -> Optional[int]:
     return int(Decimal(str(raw)) * _MINUTES_PER_HOUR)
 
 
-def _multiplier(rules: Mapping[str, Any], key: str, fallback: str) -> Decimal:
+def _multiplier(rules: Mapping[str, Any], key: str) -> Optional[Decimal]:
+    """A premium multiplier from the cited table, or None when the table does
+    not state one.
+
+    Same type guard `_threshold_minutes` needs and for the same reason: this
+    table's values are merged with catalog-extracted `db_rules`, which can
+    carry the `NO_CAP` sentinel or any other non-numeric a reviewer approved.
+    `Decimal(str(NO_CAP))` raises `InvalidOperation`, and on the `/week` path
+    that would take down the whole schedule board over a pay figure.
+
+    None is NOT a 1.0 fallback and NOT a borrow from the overtime rate: a
+    threshold whose rate the table does not state is a rate we do not know,
+    and guessing one prices real hours wrong in a number a manager acts on.
+    """
     raw = rules.get(key)
-    if raw is None:
-        raw = rules.get(fallback)
-    if raw is None:
-        return Decimal("1")
-    return Decimal(str(raw))
+    if raw is None or isinstance(raw, bool) or not isinstance(raw, (int, float, Decimal, str)):
+        return None
+    try:
+        return Decimal(str(raw))
+    except (ArithmeticError, ValueError):
+        return None
 
 
 # ── Pay profiles ─────────────────────────────────────────────────────────
@@ -219,17 +233,30 @@ class WeekCost:
     ot_minutes: int = 0
     unpriced_employee_ids: list[str] = field(default_factory=list)
     unpriced_open_seats: int = 0
+    #ISO days on which somebody worked whose pay could not be priced. `by_day`
+    # is zero-filled across the week, so without this a day staffed entirely by
+    # people with no rate on file is indistinguishable from a day off — and
+    # "$0" next to a fully-staffed Tuesday reads as "Tuesday is free".
+    unpriced_days: list[str] = field(default_factory=list)
     basis: dict[str, Any] = field(default_factory=dict)
 
     @property
     def total(self) -> Decimal:
         return self.hourly_total + self.salaried_total + self.open_seat_total
 
-    def employee_total(self, employee_id: str) -> Optional[Decimal]:
+    def employee_total(self, employee_id: str, *, absent: Optional[Decimal] = None) -> Optional[Decimal]:
+        """This person's cost in this scenario.
+
+        `None` means UNPRICED (no pay rate on file). Someone who simply has no
+        shifts here is a different thing — they cost nothing — so the caller
+        passes `absent=Decimal(0)` when it knows the person is priced and just
+        not scheduled. Collapsing the two is how an unassignment rendered as
+        "$620 → —, no pay rate on file" instead of as a $620 saving.
+        """
         for item in self.employees:
             if item.employee_id == employee_id:
                 return item.total if item.priced else None
-        return None
+        return absent
 
     def payload(self) -> dict[str, Any]:
         return {
@@ -245,6 +272,7 @@ class WeekCost:
             "unpriced_employee_ids": list(self.unpriced_employee_ids),
             "unpriced_employee_count": len(self.unpriced_employee_ids),
             "unpriced_open_seats": self.unpriced_open_seats,
+            "unpriced_days": sorted(self.unpriced_days),
             "basis": dict(self.basis),
         }
 
@@ -320,19 +348,36 @@ def cost_week(
     daily_ot = _threshold_minutes(rules, "daily_ot_hours")
     daily_dt = _threshold_minutes(rules, "daily_doubletime_hours")
     weekly_ot = _threshold_minutes(rules, "weekly_ot_hours")
-    ot_multiplier = _multiplier(rules, "ot_multiplier", "ot_multiplier")
-    dt_multiplier = _multiplier(rules, "doubletime_multiplier", "ot_multiplier")
+    ot_multiplier = _multiplier(rules, "ot_multiplier")
+    dt_multiplier = _multiplier(rules, "doubletime_multiplier")
+
+    # A threshold is only usable with the rate that goes with it. A state whose
+    # rules state an overtime hour but not its premium (possible once
+    # catalog-extracted `db_rules` merge in) gets no overtime split at all,
+    # rather than one priced at an invented rate; same for doubletime, which
+    # must never silently borrow the 1.5x overtime multiplier.
+    if ot_multiplier is None:
+        daily_ot = weekly_ot = None
+        ot_multiplier = Decimal("1")
+    if dt_multiplier is None:
+        daily_dt = None
+        dt_multiplier = Decimal("1")
 
     result = WeekCost(week_start=week_start)
     result.basis = {
-        "daily_ot_hours": rules.get("daily_ot_hours"),
-        "daily_doubletime_hours": rules.get("daily_doubletime_hours"),
-        "weekly_ot_hours": rules.get("weekly_ot_hours"),
+        "daily_ot_hours": rules.get("daily_ot_hours") if daily_ot is not None else None,
+        "daily_doubletime_hours": rules.get("daily_doubletime_hours") if daily_dt is not None else None,
+        "weekly_ot_hours": rules.get("weekly_ot_hours") if weekly_ot is not None else None,
         "ot_multiplier": float(ot_multiplier),
         "doubletime_multiplier": float(dt_multiplier),
         "overtime_citation": (rules.get("citations") or {}).get("overtime_rate"),
         "as_scheduled": True,
     }
+    # Zero-filled so a day off and a day nobody could be priced on are not the
+    # same absent key; `unpriced_days` is what tells them apart.
+    for offset in range(7):
+        result.by_day[(week_start + timedelta(days=offset)).isoformat()] = Decimal("0")
+    unpriced_days: set[str] = set()
 
     by_employee: dict[str, dict[date, int]] = {}
     for row in assignments:
@@ -359,6 +404,8 @@ def cost_week(
             _base_rate=profile.rate if profile.classification == HOURLY else None,
         )
 
+        if profile.classification == EXEMPT and not profile.priced:
+            unpriced_days.update(day.isoformat() for day in days)
         if profile.classification == EXEMPT and profile.priced:
             # Salary does not move with hours. Spread the weekly share over the
             # days worked so the board's day columns add up, but keep it out of
@@ -402,6 +449,8 @@ def cost_week(
                 result.by_day[day.isoformat()] = (
                     result.by_day.get(day.isoformat(), Decimal("0")) + cost.total
                 )
+            if not profile.priced:
+                unpriced_days.add(day.isoformat())
             entry.days.append(cost)
             entry.straight_cost += cost.straight_cost
             entry.ot_cost += cost.ot_cost
@@ -435,4 +484,5 @@ def cost_week(
         if day is not None:
             result.by_day[day.isoformat()] = result.by_day.get(day.isoformat(), Decimal("0")) + cost
 
+    result.unpriced_days = sorted(unpriced_days)
     return result

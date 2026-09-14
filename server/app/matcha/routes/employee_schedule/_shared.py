@@ -548,7 +548,15 @@ def serialize_week_template(r, blocks: list[dict]) -> dict:
     }
 
 
-def serialize_job(r, employee_ids: list[str], credential_requirements: list[dict] | None = None) -> dict:
+def serialize_job(
+    r, employee_ids: list[str], credential_requirements: list[dict] | None = None,
+    *, include_cost: bool = False,
+) -> dict:
+    """`include_cost` carries `default_hourly_rate`, which is wage data and so
+    rides the same flag+role gate as every other cost figure
+    (`labor_cost_service.is_labor_cost_visible`). Defaults OFF: a jobs response
+    must not be the one place an open-seat rate leaks to a tenant without
+    `labor_cost`, or to a personal account `require_admin_or_client` admits."""
     return {
         "id": str(r["id"]),
         "name": r["name"],
@@ -557,9 +565,9 @@ def serialize_job(r, employee_ids: list[str], credential_requirements: list[dict
         "notes": r["notes"],
         "employee_ids": employee_ids,
         "credential_grace_days": r.get("credential_grace_days"),
-        "default_hourly_rate": (
+        **({"default_hourly_rate": (
             float(r["default_hourly_rate"]) if r.get("default_hourly_rate") is not None else None
-        ),
+        )} if include_cost else {}),
         "credential_requirements": credential_requirements or [],
     }
 
