@@ -54,6 +54,15 @@ and the `mw_tasks.autopr_*` columns they read.
   `self-audit/` itself. The auditor is a sealed capsule: it must never be able
   to rewrite its own prompt, verifier or publisher, and
   `tests/test_autopr_self_audit.sh` fails if the regex lets it.
+- **`self-audit/audit.sh` runs its contract suites from `AUDIT_TESTS_DIR`
+  (`apps/msandbox/tests/`), never a hardcoded path in the loop.** A suite the
+  list names that is not there is an operator finding — check exit 78, which
+  `run_check` reclassifies as `operator` regardless of the declared class —
+  because the capsule cannot be repaired by the model and a "repo" failure
+  would hand Codex a run it must refuse. `tests/test_autopr_self_audit.sh`
+  asserts every `CONTRACT_SUITES` entry exists and that a missing one
+  dispatches no repair. Moving the tests directory again means updating that
+  default and nothing else.
 - **Every publisher that runs `git reset --hard` calls
   `autopr_require_writable_root` immediately after assigning `REPO_ROOT`**
   (`harness/publish.sh`, `harness/investigate.sh`, `error-autofix/publish.sh`,

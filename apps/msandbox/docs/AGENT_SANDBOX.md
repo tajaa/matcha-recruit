@@ -385,6 +385,17 @@ After verification, a separate writing-only Codex Luna-medium pass supplies the
 validated `fix:` commit subject and PR title; the bridge rejects any code diff from
 that pass.
 
+The contract-test check runs the suites named in `audit.sh`'s `CONTRACT_SUITES`
+from `apps/msandbox/tests/`. A suite that is missing there is reported as an
+**operator** finding (check exit code 78), not a repository failure: the defect
+is in the sealed capsule, which the repair model may not touch, so dispatching
+a Codex run for it only burns quota (the 2026-09-13 relocation did exactly
+that — every audit failed for a day and the ledger then blocked retries for a
+week). A suite that fails names itself in the audit JSON (`failing_items`),
+the step summary, and the repair ledger (`failing_checks_detail`), so the
+dashboard and an operator can see which contract broke without opening the
+run log.
+
 ## Validation checklist
 
 `msandbox doctor` runs all of this automatically. What it checks:
