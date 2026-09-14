@@ -55,6 +55,9 @@ Do not put CloudFront edge IP addresses in DNS A records.
 Create one distribution with these properties:
 
 - Aliases: `gummfit.com`, `*.gummfit.com`
+  (as built, this distribution also carries `hey-matcha.com` and
+  `www.hey-matcha.com`, so this ACL governs Matcha's public token routes
+  as well — see `docs/ops/MATCHA_EDGE.md` before editing a rule)
 - ACM certificate: the validated `us-east-1` certificate for both names
 - Origin: `origin.gummfit.com`
 - Origin protocol: HTTPS only, TLS 1.2
