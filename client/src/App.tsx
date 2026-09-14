@@ -104,6 +104,9 @@ const IrOnboardingWizard = lazy(
 const MatchaXOnboardingWizard = lazy(
   () => import("./components/matcha-x/onboarding/MatchaXOnboardingWizard"),
 );
+const ScOnboardingWizard = lazy(
+  () => import("./components/sc/onboarding/ScOnboardingWizard"),
+);
 const AnonymousReport = lazy(() => import("./pages/shared/AnonymousReport"));
 const OfferSign = lazy(() => import("./pages/shared/OfferSign"));
 const LocationIntake = lazy(() => import("./pages/shared/LocationIntake"));
@@ -233,6 +236,7 @@ export default function App() {
         {/* Generic signup for admin-composed products (/admin/products). */}
         <Route path="/p/:slug/signup" element={<ProductSignup />} />
         <Route path="/ir/onboarding" element={<IrOnboardingWizard />} />
+        <Route path="/sc/onboarding" element={<ScOnboardingWizard />} />
         <Route
           path="/matcha-x/onboarding"
           element={<MatchaXOnboardingWizard />}

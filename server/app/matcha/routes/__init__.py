@@ -93,6 +93,7 @@ from .onboarding import (
     invitations_router,
     ir_onboarding_router,
     matcha_x_onboarding_router,
+    sc_onboarding_router,
 )
 from .intake import anonymous_report_router, external_intake_router, symlink_public_router
 
@@ -146,6 +147,11 @@ matcha_router.include_router(matcha_x_onboarding_router, prefix="/matcha-x-onboa
                              # product reuses the same wizard but only holds the
                              # full `compliance` flag — admit either.
                              dependencies=[Depends(require_any_feature("handbook_audit", "compliance"))])
+matcha_router.include_router(
+    sc_onboarding_router,
+    prefix="/sc-onboarding",
+    tags=["sc-onboarding"],
+)
 matcha_router.include_router(ir_surveys_router, prefix="/ir/surveys", tags=["ir-surveys"],
                              dependencies=[Depends(require_feature("incidents"))])
 # Labor Relations — union / CBA admin (Pro-bundled). CBA store + clause library

@@ -31,6 +31,7 @@ type Product = {
   min_headcount: number
   max_headcount: number
   nav: { feature: string; label?: string }[] | null
+  onboarding_kind: 'sc' | null
   status: 'draft' | 'published' | 'archived'
   updated_at: string | null
   updated_by: string | null
@@ -80,13 +81,14 @@ type Draft = {
   min_headcount: string
   max_headcount: string
   navOrder: string[]
+  onboarding_kind: '' | 'sc'
 }
 
 function emptyDraft(): Draft {
   return {
     slug: '', name: '', description: '', features: {}, gate_feature: '',
     pricing_model: 'per_seat', price_dollars: '', block_size: '10',
-    min_headcount: '1', max_headcount: '300', navOrder: [],
+    min_headcount: '1', max_headcount: '300', navOrder: [], onboarding_kind: '',
   }
 }
 
@@ -106,6 +108,7 @@ function toDraft(p: Product): Draft {
     // A saved ordering wins; otherwise seed from the enabled features so the
     // reorder controls always have something to work with.
     navOrder: p.nav?.length ? p.nav.map((n) => n.feature) : enabled,
+    onboarding_kind: p.onboarding_kind ?? '',
   }
 }
 
@@ -218,6 +221,7 @@ export default function Products() {
       min_headcount: parseInt(draft.min_headcount, 10) || 1,
       max_headcount: parseInt(draft.max_headcount, 10) || 300,
       nav: draft.navOrder.filter((f) => draft.features[f]).map((feature) => ({ feature })),
+      onboarding_kind: draft.onboarding_kind || null,
     }
     try {
       const saved = selected
@@ -400,6 +404,24 @@ export default function Products() {
               rows={2}
             />
 
+            <section className="space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Account setup</h3>
+              <Select
+                label="New-account onboarding"
+                options={[
+                  { value: '', label: 'Standard product entry' },
+                  { value: 'sc', label: 'Matcha S&C setup wizard' },
+                ]}
+                value={draft.onboarding_kind}
+                onChange={(e) => setDraft({ ...draft, onboarding_kind: e.target.value as Draft['onboarding_kind'] })}
+              />
+              {draft.onboarding_kind === 'sc' && (
+                <p className="text-[11px] text-zinc-500">
+                  Requires Employees, Employee Scheduling, and Credential Templates. This setting is locked after the first company signs up.
+                </p>
+              )}
+            </section>
+
             {/* Pricing */}
             <section className="space-y-3">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Pricing</h3>
@@ -547,6 +569,10 @@ function ProductSummary({
         <div className="col-span-2">
           <span className="text-zinc-500">Signup link</span><br />
           <span className="font-mono text-xs text-zinc-400">/p/{product.slug}/signup</span>
+        </div>
+        <div className="col-span-2">
+          <span className="text-zinc-500">New-account setup</span><br />
+          {product.onboarding_kind === 'sc' ? 'Matcha S&C setup wizard' : 'Standard product entry'}
         </div>
       </div>
 

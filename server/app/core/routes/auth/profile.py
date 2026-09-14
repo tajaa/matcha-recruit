@@ -149,6 +149,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                        COALESCE(comp.is_personal, false) as is_personal,
                        comp.signup_source,
                        comp.ir_onboarding_completed_at,
+                       comp.sc_onboarding_completed_at,
                        c.name, c.phone, c.job_title, c.created_at,
                        COALESCE(chp.headcount, 0) as headcount,
                        COALESCE(chp.compliance_jurisdiction_count, 0) as jurisdiction_count,
@@ -272,6 +273,11 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     "ir_onboarding_completed_at": (
                         profile["ir_onboarding_completed_at"].isoformat()
                         if "ir_onboarding_completed_at" in profile.keys() and profile["ir_onboarding_completed_at"]
+                        else None
+                    ),
+                    "sc_onboarding_completed_at": (
+                        profile["sc_onboarding_completed_at"].isoformat()
+                        if profile["sc_onboarding_completed_at"]
                         else None
                     ),
                     "name": profile["name"],

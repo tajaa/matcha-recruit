@@ -114,7 +114,7 @@ export default function ProductSignup() {
           setDone(`Thanks — your account is created. Our team will activate ${product.name} and be in touch.`)
           return
         }
-        window.location.href = '/app'
+        window.location.href = product.onboarding_kind === 'sc' ? '/sc/onboarding' : '/app'
         return
       }
 
@@ -125,7 +125,7 @@ export default function ProductSignup() {
           Authorization: `Bearer ${regData.access_token}`,
         },
         body: JSON.stringify({
-          success_url: `${window.location.origin}/app`,
+          success_url: `${window.location.origin}${product.onboarding_kind === 'sc' ? '/sc/onboarding' : '/app'}`,
           cancel_url: window.location.href,
         }),
       })

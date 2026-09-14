@@ -8,10 +8,12 @@ from .new_hire import router as onboarding_router
 from .ir import router as ir_onboarding_router
 from .matcha_x import router as matcha_x_onboarding_router
 from .invitations import router as invitations_router
+from .sc import router as sc_onboarding_router
 
 __all__ = [
     "onboarding_router",
     "ir_onboarding_router",
     "matcha_x_onboarding_router",
     "invitations_router",
+    "sc_onboarding_router",
 ]

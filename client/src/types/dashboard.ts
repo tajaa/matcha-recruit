@@ -332,6 +332,7 @@ export interface MeClientProfile {
   is_personal: boolean
   signup_source?: string | null
   ir_onboarding_completed_at?: string | null
+  sc_onboarding_completed_at?: string | null
   name: string
   phone: string | null
   job_title: string | null
@@ -374,6 +375,8 @@ export interface ProductDefinition {
   max_headcount: number
   /** Optional nav ordering/labels over `features`; null = catalog order. */
   nav: { feature: string; label?: string }[] | null
+  /** Optional first-account setup flow selected in the product builder. */
+  onboarding_kind?: 'sc' | null
 }
 
 export interface MeResponse {
