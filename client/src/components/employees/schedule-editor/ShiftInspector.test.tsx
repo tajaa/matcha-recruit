@@ -5,7 +5,7 @@ import { NO_ROLES_MESSAGE, ROLE_REQUIRED_MESSAGE } from './roleSelection'
 
 const jobs = [{
   id: 'job-1', name: 'Barista', location_id: 'loc-1', color: null, notes: null,
-  credential_grace_days: null, employee_ids: [], credential_requirements: [],
+  credential_grace_days: null, default_hourly_rate: null, employee_ids: [], credential_requirements: [],
 }]
 
 function renderInspector() {

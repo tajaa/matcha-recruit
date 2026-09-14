@@ -34,6 +34,7 @@ from .schedule_coverage import (
 from .schedule_guidance import resolve_week_break_plans
 from .schedule_profiles import fetch_effective_job_employee_ids
 from .schedule_intelligence import fetch_lapse_items
+from .labor_cost_service import cost_delta_for_rows
 from .schedule_review import build_week_draft_review, compliance_status_for, jurisdiction_message
 from .schedule_rules import align_week_start, availability_violations, template_windows
 from .shift_compliance import check_shift_compliance, jurisdiction_rule_status
@@ -2156,6 +2157,7 @@ async def propose_week_draft(
     exclude_employee_ids: Iterable[str] | None = None,
     employee_hour_caps: Iterable[dict[str, Any]] | None = None,
     origin: str = "manual",
+    actor_role: str | None = None,
 ) -> dict[str, Any]:
     if origin not in {"manual", "automatic"}:
         return {"status": "refused", "message": "Unknown schedule generation origin."}
@@ -2304,6 +2306,34 @@ async def propose_week_draft(
         # The `ScheduleReview` every schedule surface renders (same contract
         # as a staged schedule_change): who goes where, per-person load
         # before/after, statutory advisories verbatim, findings, jurisdiction.
+        # Same cost block a staged edit carries, so the review pane renders one
+        # shape: the week's bill as it stands vs. as this draft would leave it.
+        # `snapshot["existing_assignments"]` is COMPANY-wide on purpose (it
+        # backs cross-store double-booking detection). Cost is location-scoped
+        # everywhere else — the board header, the review, the corpus — so scope
+        # it here too, or a two-store tenant's week draft reports the other
+        # store's payroll and `compareReviews` subtracts two different bases.
+        location_assignments = [
+            item for item in snapshot["existing_assignments"]
+            if item.get("location_id") == str(location_id)
+        ]
+        draft_cost = await cost_delta_for_rows(
+            conn, company_id=company_id, location_id=location_id,
+            actor_role=actor_role,
+            weeks=[(
+                week_start,
+                list(location_assignments),
+                list(location_assignments) + [
+                    {
+                        "employee_id": str(item["employee_id"]),
+                        "starts_at": shift.get("starts_at"),
+                        "worked_minutes": shift.get("worked_minutes") or 0,
+                    }
+                    for shift in plan.get("shifts") or []
+                    for item in shift.get("proposed_assignments") or []
+                ],
+            )],
+        )
         schedule_review = build_week_draft_review(
             plan,
             employee_names={employee["id"]: employee["name"] for employee in snapshot["employees"]},
@@ -2311,6 +2341,7 @@ async def propose_week_draft(
             week_start=week_start, week_end=week_start + timedelta(days=6),
             proposal_id=str(run_id),
             concentration_findings=concentration_findings,
+            cost=draft_cost,
         )
         persisted_plan = {**plan, "review": review, "schedule_review": schedule_review}
         input_hash = _input_hash(snapshot)

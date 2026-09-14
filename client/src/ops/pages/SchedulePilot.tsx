@@ -78,6 +78,10 @@ export default function SchedulePilot() {
   const { toast } = useToast()
   const trainingEnabled = hasFeature('training')
   const credentialTemplatesEnabled = hasFeature('credential_templates')
+  // Wage data. The server omits `summary.cost` entirely unless the tenant has
+  // the flag AND the caller is a business admin, so this check only decides
+  // whether to ASK for the column — it is not the gate.
+  const laborCostEnabled = hasFeature('labor_cost')
   const [editPublished, setEditPublished] = useState(false)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const [inspectorShiftId, setInspectorShiftId] = useState<string | null>(null)
@@ -224,6 +228,11 @@ export default function SchedulePilot() {
     : reviewScenario?.status === 'applied'
       ? reviewScenario.applied_message ?? 'Applied.'
       : 'A simulation — nothing is written until you apply it or stage it in the thread.'
+  // Rides the week the board already fetched (`GET /week` → `summary.cost`)
+  // and so reloads after every applied write, with no second request.
+  const weekCost = laborCostEnabled ? (editor.summary?.cost ?? null) : null
+  const unpricedDays = useMemo(() => new Set(weekCost?.unpriced_days ?? []), [weekCost])
+
   const caps = useMemo(() => Object.fromEntries((planning.inputs?.roster ?? []).map((person) => [person.employee_id, {
     max_weekly_minutes: person.caps.max_weekly_minutes, allow_overtime: person.caps.allow_overtime,
   }])), [planning.inputs])
@@ -407,6 +416,8 @@ export default function SchedulePilot() {
       locationName={currentLocationName}
       jobs={jobs}
       trainingEnabled={trainingEnabled}
+      costByDay={weekCost?.by_day}
+      unpricedDays={unpricedDays}
       canMutate={canMutate}
       onOpenNew={openNew}
       onOpenShift={openShift}
@@ -426,6 +437,7 @@ export default function SchedulePilot() {
       onSelectEmployee={setSelectedEmployeeId}
       requiredJobId={inspectorShift?.job_id}
       requiredJobDate={inspectorShift?.starts_at.slice(0, 10)}
+      cost={weekCost}
       weekRules={weekRules}
       locationName={currentLocationName}
       credentialsEnabled={credentialTemplatesEnabled}
@@ -552,7 +564,7 @@ export default function SchedulePilot() {
                     </div>
                     <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
                       {drawer === 'jobs'
-                        ? <ScheduleJobsTab key={locationId} locationId={locationId} credentialTemplatesEnabled={credentialTemplatesEnabled} onJobsChanged={reloadJobs} />
+                        ? <ScheduleJobsTab key={locationId} locationId={locationId} credentialTemplatesEnabled={credentialTemplatesEnabled} laborCostEnabled={laborCostEnabled} onJobsChanged={reloadJobs} />
                         : <WeekStartPane key={locationId} locationId={locationId} jobs={jobs} onSaved={() => { void reloadLocations(); reloadWeekRules(); planning.reload() }} />}
                     </div>
                   </div>

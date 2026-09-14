@@ -1,4 +1,4 @@
-import { hoursLabel } from './reviewShape'
+import { costLabel, hoursLabel } from './reviewShape'
 
 /** The house weekly cap (POLICY, not law) — mirrors
  *  `assignment_guard.POLICY_DEFAULT_WEEKLY_CAP_MINUTES`; the rail reads the
@@ -16,6 +16,12 @@ interface LoadBarProps {
   allowOvertime?: boolean
   compact?: boolean
   name?: string
+  /** Scheduled cost of `minutes`. `undefined` = the viewer has no `labor_cost`
+   *  access; `null` = they do, but this person has no pay rate on file. The
+   *  two look different on purpose: one hides the column, the other shows a
+   *  dash, and neither shows $0. */
+  cost?: number | null
+  afterCost?: number | null
 }
 
 /** The signature of the workspace: one ruled bar per person, hours as
@@ -24,7 +30,7 @@ interface LoadBarProps {
  *  same drawing appears in the inputs rail (now) and the review pane
  *  (before → after), so "who is carrying the week" reads at a glance
  *  wherever the number shows up. */
-export function LoadBar({ minutes, afterMinutes, capMinutes, policyMinutes = POLICY_WEEKLY_MINUTES, allowOvertime = false, compact = false, name }: LoadBarProps) {
+export function LoadBar({ minutes, afterMinutes, capMinutes, policyMinutes = POLICY_WEEKLY_MINUTES, allowOvertime = false, compact = false, name, cost, afterCost }: LoadBarProps) {
   const after = afterMinutes ?? minutes
   const scale = Math.max(policyMinutes, capMinutes ?? 0, minutes, after) * 1.08 || 1
   const pct = (value: number) => `${Math.min(100, Math.max(0, (value / scale) * 100))}%`
@@ -34,9 +40,14 @@ export function LoadBar({ minutes, afterMinutes, capMinutes, policyMinutes = POL
   const overPolicy = after > policyMinutes && !allowOvertime
   const overCap = capMinutes != null && after > capMinutes
   const changed = afterMinutes != null && afterMinutes !== minutes
+  const showCost = cost !== undefined
+  const costChanged = showCost && afterCost !== undefined && afterCost !== cost
+  const costText = costChanged
+    ? `, ${costLabel(cost)} now, ${costLabel(afterCost)} after`
+    : showCost ? `, ${costLabel(cost)}` : ''
   const label = changed
-    ? `${name ?? 'Load'}: ${hoursLabel(minutes)} now, ${hoursLabel(after)} after this change`
-    : `${name ?? 'Load'}: ${hoursLabel(minutes)} this week`
+    ? `${name ?? 'Load'}: ${hoursLabel(minutes)} now, ${hoursLabel(after)} after this change${costText}`
+    : `${name ?? 'Load'}: ${hoursLabel(minutes)} this week${costText}`
   return (
     <div className="flex items-center gap-2" aria-label={label} role="img">
       <div className={`relative min-w-0 flex-1 overflow-hidden rounded-sm bg-white/[0.05] ${compact ? 'h-1.5' : 'h-2'}`}>
@@ -63,6 +74,14 @@ export function LoadBar({ minutes, afterMinutes, capMinutes, policyMinutes = POL
       <span className={`shrink-0 font-mono tabular-nums ${compact ? 'text-[10px]' : 'text-[11px]'} ${overCap ? 'text-red-300' : overPolicy ? 'text-amber-300' : 'text-zinc-300'}`}>
         {changed ? <><span className="text-zinc-500">{hoursLabel(minutes)}</span> → {hoursLabel(after)}</> : hoursLabel(minutes)}
       </span>
+      {showCost && (
+        <span
+          className={`shrink-0 font-mono tabular-nums ${compact ? 'text-[10px]' : 'text-[11px]'} ${cost == null ? 'text-zinc-600' : 'text-zinc-400'}`}
+          title={cost == null ? 'No pay rate on file — this person is not in the cost total' : 'Scheduled labor cost this week'}
+        >
+          {costChanged ? <><span className="text-zinc-600">{costLabel(cost)}</span> → {costLabel(afterCost)}</> : costLabel(cost)}
+        </span>
+      )}
     </div>
   )
 }

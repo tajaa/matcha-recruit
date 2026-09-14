@@ -108,7 +108,7 @@ async def preview_fill_vacant(
             return {"status": "refused", "message": error, "unfilled": unfilled,
                     "jurisdiction": plan.get("jurisdiction")}
         build = await schedule_chat.build_edit_proposal(
-            conn, company_id=company_id, channel_id=None, source_message_id=None,
+            conn, actor_role=current_user.role, company_id=company_id, channel_id=None, source_message_id=None,
             created_by=current_user.id,
             parsed={
                 "ack": "Got it.", "action": "edit", "shift_requests": [], "edit_requests": edit_requests,

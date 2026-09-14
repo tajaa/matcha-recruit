@@ -6,6 +6,7 @@ requests. Response shapes are assembled as plain dicts in the route layer
 """
 
 from datetime import date, datetime, time, timezone
+from decimal import Decimal
 from typing import List, Literal, Optional
 from uuid import UUID
 
@@ -265,6 +266,9 @@ class JobCreate(BaseModel):
     notes: Optional[str] = Field(None, max_length=2000)
     employee_ids: list[UUID] = Field(default_factory=list, max_length=500)
     credential_grace_days: Optional[int] = Field(None, ge=0, le=365)
+    # What an OPEN seat on this job costs per hour. Nullable on purpose: a job
+    # with no rate is reported as an unpriced open seat, never as a free one.
+    default_hourly_rate: Optional[Decimal] = Field(None, ge=0, le=100000, decimal_places=2)
     credential_requirements: list["JobCredentialRequirementInput"] = Field(default_factory=list, max_length=100)
 
 
@@ -277,6 +281,7 @@ class JobUpdate(BaseModel):
     color: Optional[str] = Field(None, max_length=20)
     notes: Optional[str] = Field(None, max_length=2000)
     credential_grace_days: Optional[int] = Field(None, ge=0, le=365)
+    default_hourly_rate: Optional[Decimal] = Field(None, ge=0, le=100000, decimal_places=2)
 
 
 class JobCredentialRequirementInput(BaseModel):

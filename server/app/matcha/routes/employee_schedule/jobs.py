@@ -17,6 +17,7 @@ from app.matcha.models.scheduling.employee_schedule import (
     JobEmployeesReplace, JobUpdate,
 )
 from ...services.scheduling.location_profile import detach_job_from_leader_rules
+from ...services.scheduling.labor_cost_service import is_labor_cost_visible
 from ...services.scheduling.job_credential_requirements import (
     fetch_job_credential_requirements,
     materialize_job_requirements,
@@ -33,7 +34,8 @@ from ._shared import (
 
 router = APIRouter()
 
-_JOB_COLS = "id, company_id, location_id, name, color, notes, credential_grace_days, created_by, created_at, updated_at"
+_JOB_COLS = ("id, company_id, location_id, name, color, notes, credential_grace_days, "
+             "default_hourly_rate, created_by, created_at, updated_at")
 
 
 async def _fetch_job(conn, company_id: UUID, job_id: UUID):
@@ -53,11 +55,36 @@ async def _fetch_job(conn, company_id: UUID, job_id: UUID):
     return row, [str(r["employee_id"]) for r in employee_rows]
 
 
-async def _serialize_job(conn, company_id: UUID, row, employee_ids: list[str]) -> dict:
+async def _serialize_job(
+    conn, company_id: UUID, row, employee_ids: list[str], *, actor_role: str | None = None,
+) -> dict:
     requirements = await fetch_job_credential_requirements(
         conn, company_id=company_id, job_ids=[row["id"]],
     )
-    return serialize_job(row, employee_ids, requirements)
+    return serialize_job(
+        row, employee_ids, requirements,
+        include_cost=await is_labor_cost_visible(company_id, actor_role, conn=conn),
+    )
+
+
+async def _assert_may_write_rate(
+    conn, company_id: UUID, current_user, value, *, attempted: bool = False,
+) -> None:
+    """`default_hourly_rate` is wage data on the way IN as well as out.
+
+    Gating the read alone left two holes: any `require_admin_or_client` caller
+    at a tenant without `labor_cost` could set or clear the rate, and — because
+    the serializer OMITS the key when it is not visible — a client that then
+    rendered an empty rate box would post `null` back and silently wipe a
+    stored rate it was never allowed to see. Refusing the write closes both.
+    """
+    if value is None and not attempted:
+        return
+    if not await is_labor_cost_visible(company_id, current_user.role, conn=conn):
+        raise HTTPException(
+            status_code=403,
+            detail="Setting a job's open-seat rate requires labor cost access",
+        )
 
 
 async def _validate_employee_ids(conn, company_id: UUID, employee_ids: list[UUID]) -> list[UUID]:
@@ -132,6 +159,7 @@ async def list_jobs(
         requirements = await fetch_job_credential_requirements(
             conn, company_id=company_id, job_ids=[row["id"] for row in rows],
         )
+        include_cost = await is_labor_cost_visible(company_id, current_user.role, conn=conn)
     employees_by_job: dict[str, list[str]] = {}
     for row in employee_rows:
         employees_by_job.setdefault(str(row["job_id"]), []).append(str(row["employee_id"]))
@@ -140,6 +168,7 @@ async def list_jobs(
         requirements_by_job.setdefault(str(requirement["job_id"]), []).append(requirement)
     return {"jobs": [serialize_job(
         row, employees_by_job.get(str(row["id"]), []), requirements_by_job.get(str(row["id"]), []),
+        include_cost=include_cost,
     ) for row in rows]}
 
 
@@ -147,6 +176,7 @@ async def list_jobs(
 async def create_job(body: JobCreate, current_user=Depends(require_admin_or_client)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
+        await _assert_may_write_rate(conn, company_id, current_user, body.default_hourly_rate)
         await assert_location_in_company(conn, company_id, body.location_id)
         employee_ids = await _validate_employee_ids(conn, company_id, body.employee_ids)
         try:
@@ -154,12 +184,13 @@ async def create_job(body: JobCreate, current_user=Depends(require_admin_or_clie
                 row = await conn.fetchrow(
                     f"""
                     INSERT INTO schedule_jobs
-                        (company_id, location_id, name, color, notes, credential_grace_days, created_by)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        (company_id, location_id, name, color, notes, credential_grace_days,
+                         default_hourly_rate, created_by)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                     RETURNING {_JOB_COLS}
                     """,
                     company_id, body.location_id, body.name.strip(), body.color, body.notes,
-                    body.credential_grace_days, current_user.id,
+                    body.credential_grace_days, body.default_hourly_rate, current_user.id,
                 )
                 for employee_id in employee_ids:
                     await conn.execute(
@@ -183,7 +214,7 @@ async def create_job(body: JobCreate, current_user=Depends(require_admin_or_clie
             # Unknown or company-hidden credential type — same 422 the replace
             # endpoint returns, rather than an unhandled 500.
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return await _serialize_job(conn, company_id, row, [str(employee_id) for employee_id in employee_ids])
+        return await _serialize_job(conn, company_id, row, [str(employee_id) for employee_id in employee_ids], actor_role=current_user.role)
 
 
 @router.get("/jobs/{job_id}")
@@ -191,7 +222,7 @@ async def get_job(job_id: UUID, current_user=Depends(require_admin_or_client)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         row, employee_ids = await _fetch_job(conn, company_id, job_id)
-        return await _serialize_job(conn, company_id, row, employee_ids)
+        return await _serialize_job(conn, company_id, row, employee_ids, actor_role=current_user.role)
 
 
 @router.put("/jobs/{job_id}")
@@ -203,11 +234,15 @@ async def update_job(
     if "name" in patch:
         patch["name"] = patch["name"].strip()
     async with get_connection() as conn:
+        if "default_hourly_rate" in patch:
+            await _assert_may_write_rate(
+                conn, company_id, current_user, patch["default_hourly_rate"], attempted=True,
+            )
         if "location_id" in patch:
             await assert_location_in_company(conn, company_id, patch["location_id"])
         if not patch:
             row, employee_ids = await _fetch_job(conn, company_id, job_id)
-            return await _serialize_job(conn, company_id, row, employee_ids)
+            return await _serialize_job(conn, company_id, row, employee_ids, actor_role=current_user.role)
         set_sql, params = build_patch(patch, first_param=3)
         async with conn.transaction():
             row = await conn.fetchrow(
@@ -231,7 +266,7 @@ async def update_job(
                 """,
                 job_id, company_id,
             )
-        return await _serialize_job(conn, company_id, row, [str(r["employee_id"]) for r in employee_rows])
+        return await _serialize_job(conn, company_id, row, [str(r["employee_id"]) for r in employee_rows], actor_role=current_user.role)
 
 
 @router.put("/jobs/{job_id}/employees")

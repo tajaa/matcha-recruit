@@ -925,3 +925,141 @@ transaction, so editor, channel, and thread confirmations cannot apply it twice.
 ## `schedule_intelligence` (default ❌)
 
 **Schedule Intelligence** — analytics over the `employee_schedule` data that no competing scheduler offers, because it cross-joins scheduling against data only Matcha holds. Four read-time, deterministic (no LLM) modules: (1) **incident × schedule correlation** (`services/scheduling/schedule_intelligence.py:build_incident_correlation`) — incident rate on understaffed vs adequately staffed shifts, by location and day/night window, plus fatigue flags (short rest gap or long consecutive-day streak for a named `involved_employee_id`); suppressed to counts-only below 10 incidents / 50 shifts (`schedule_intelligence_stats.small_n_guard`) — directional, never causal. (2) **Fair Workweek / predictive-scheduling $ exposure** (`services/scheduling/fair_workweek.py`) — a curated, individually-cited ordinance table (same idiom as `discipline_compliance`/`schedule_compliance`: partial by design, unmapped jurisdiction ⇒ `applicability: "unmapped"`, never "no exposure") priced against the tenant's OWN `schedule_audit_log` history; **only NYC and Los Angeles are populated** (verified via the `compliance_evals` golden fixtures) — the other ~8 US Fair Workweek cities are real ordinances but unverified here, so they ship absent rather than guessed. Employee-initiated churn (an approved swap/drop/unavailability request) is excluded before any dollar math; a change with no `pay_rate` on file or predating the audit enrichment degrades to a count-only line item, never zero-priced. (3) **Discipline pretext shield** (module 3 of the same service) — attendance discipline records (`discipline_compliance.ATTENDANCE_INFRACTION_TYPES`) flagged when the employee's own schedule shows elevated employer-initiated churn/short-notice changes/hour volatility beforehand — an advisory pattern, not a verdict; **report-only in v1** (no discipline-gate integration — the metric depends on audit history that only accumulates after this feature ships). (4) **Qualified coverage** — per upcoming published shift, qualified-vs-assigned headcount from `employee_credential_requirements` / `employee_credentials` expirations / `training_records`, three-state gated on `credential_templates`/`training` (`None`=module off, `[]`=on-but-clean, matching the `hr_pilot_corpus` idiom). Gates `/schedule-intelligence/*` (mounted on this flag ALONE — each endpoint checks `employee_schedule` itself and returns `{"available": false}` rather than double-gating the mount, so the FE can render "turn on Scheduling first") + the `/app/schedule-intelligence` page. **Grounds three pilots** (the 2026-07-20 pilot-grounding review's own rule: a new analytics engine ships wired into whatever pilots ground on its domain) — HR Pilot corpus `schedint:` group (supervisor-only, stripped by `hr_pilot_corpus.redact_for_employee` since it names understaffed shifts/discipline/lapsed individuals), Broker Pilot `platform:schedule` headline cid (`_tenant_context(..., include_schedule_intel=True)`, gated on the CLIENT's own flag), and the Analysis Pilot `schedule_weekly` platform source (26-week scheduled-hours/understaffing/employer-change series). No new tables — read-time compute only. Default off; admin-toggle; NOT bundled.
+
+
+## Scheduled labor cost (`labor_cost`, 2026-09-13)
+
+The dollars behind the hours every scheduling surface already drew. `LoadBar`
+has shown each person's week against the policy tick since the Schedule Pilot
+landed; what it never said is what that week costs, so the question that
+actually decides a restaurant schedule was being answered in a spreadsheet
+after the fact.
+
+**Engine** — `labor_cost.py` is pure and DB-free (same reason `schedule_review`
+is): `cost_week(assignments, pay, rules, week_start=…, open_seats=…,
+job_rates=…) -> WeekCost`. `labor_cost_service.py` is the thin DB half.
+
+- **Thresholds and multipliers are law and live in the cited table.**
+  `schedule_compliance._SCHEDULING_RULES` already carried `weekly_ot_hours`
+  (FLSA § 207(a)), CA's `daily_ot_hours` / `daily_doubletime_hours`
+  (Cal. Lab. Code § 510) and NY's deliberate `daily_ot_hours: None`. This work
+  added the `ot_multiplier` / `doubletime_multiplier` those same statutes state,
+  plus a `citations["overtime_rate"]` for each. **Nothing in the cost engine
+  hardcodes 40, 1.5 or 2.0.** An unmapped state prices on the federal floor
+  alone — correct, and labelled by the `jurisdiction` block every surface
+  already renders.
+- **No pyramiding.** An hour is paid at the single highest rate that applies.
+  Per day: past `daily_doubletime_hours` ⇒ DT, past `daily_ot_hours` ⇒ daily OT.
+  Then a running **straight-time-only** weekly total; once it crosses
+  `weekly_ot_hours`, further straight minutes reclassify to weekly OT. Six 9-hour
+  CA days = 54h ⇒ 6h daily OT + 8h weekly OT = 14h, never 20h.
+- **Missing data is unpriced, never $0.** An employee with no `pay_rate`, or an
+  open seat whose job has no `default_hourly_rate`, contributes nothing and is
+  counted in `unpriced_*`. Same degradation as
+  `fair_workweek.predictability_pay_estimate`. Every renderer shows a dash; a
+  `0` would read as "free", which it never means. The `cost` key is **ABSENT**
+  (not zeroed) for a caller without access, and `asScheduleReview` resolves an
+  absent block to `null`.
+- **Exempt pay is fixed.** `pay_classification='exempt'` ⇒ no OT, weekly cost is
+  `pay_rate / 52` spread over the days worked (largest-remainder, so the day
+  shares sum exactly), landing in `salaried_total` not `hourly_total` — mixing it
+  in would make the marginal cost of one more shift wrong, and that is the number
+  a scheduler acts on. A NULL `pay_classification` is inferred by the SAME
+  documented magnitude heuristic `insurance/wc_classmap.py` uses (`< 2000` ⇒
+  hourly) and flagged `inferred`.
+- **As-scheduled, never as-worked.** There is no time-clock data in this
+  codebase; `worked_minutes` is planned span minus planned break. `basis.as_scheduled`
+  carries this and the UI says "scheduled labor cost". Not payroll.
+- **Every review is costed on the SAME basis as the board header beside it** —
+  the whole week, for one location, open seats included. Each of those three
+  was broken separately: the week draft used `snapshot["existing_assignments"]`,
+  which is company-wide by design (it backs cross-store double-booking), so a
+  two-store tenant saw the other store's payroll; and the review omitted open
+  seats while `summary.cost.total` included them, so filling a seat read as new
+  spend rather than as demand already projected. `_remaining_seats` takes a
+  filled seat off the "after" side so it is converted, not double-counted.
+  Cross-store overtime is the accepted cost of location scoping: someone
+  working two stores in a week has their OT attributed per location.
+- **Ops apply to every touched week at once**, not per week — a `retime` or
+  `swap` across a week boundary would otherwise be dropped from the source
+  week's "after" and never added to the destination's, reporting a pure saving
+  for a change that costs the same.
+- **Every review is costed over the WHOLE week for its location**, not just
+  the rows the change names — overtime depends on everything else the person
+  already works, and two reviews costed over different subsets cannot be
+  compared with each other (`compareReviews` subtracts them). `_apply_ops`
+  therefore models all six `schedule_chat._EDIT_KINDS` against the week's real
+  rows, and an unrecognised kind refuses the whole block rather than report the
+  $0 that `retime` and `swap` originally did. A batch straddling a week
+  boundary is costed one week at a time and summed.
+- **A threshold is unusable without its rate.** `_multiplier` type-guards
+  (catalog-extracted `db_rules` can carry the `NO_CAP` sentinel, and
+  `Decimal(str(NO_CAP))` raises), and a missing multiplier disables its
+  threshold rather than borrowing another — doubletime must never quietly fall
+  back to the 1.5x overtime rate.
+- **A bounded read is never a complete one.** `load_week_assignment_rows`
+  returns `(rows, truncated)` and `WeekCost.truncated` reaches the rail, which
+  says so — a partial total presented as complete is the one failure this
+  feature exists to prevent (`planning_inputs.roster_truncated` is the
+  precedent). A partly-priced DAY renders as `≥$540`, not `$540`.
+- **Exempt means exempt even with no rate on file.** An exempt profile with a
+  NULL `pay_rate` used to fall through to the hourly loop and accrue overtime
+  minutes, which Huume and the HR Pilot then reported for someone statutorily
+  incapable of them.
+- **Absent is not unpriced, on any axis.** `employee_total(..., absent=0)`
+  distinguishes "not in this scenario" (a saving) from "no rate on file";
+  `by_day` is zero-filled across the week with `unpriced_days` naming the days
+  nobody could be priced on; and the rail shows `$0` for someone with no shifts
+  and a dash only for the server's own unpriced list. Each of these collapsed
+  the two states in an early cut, and each read as "free".
+- **`employees.pay_rate` is a single snapshot** (as `wage_benchmark_service`
+  already documents), so costing a PAST week uses today's rate. Fine forward,
+  wrong retrospectively — never read this as an audit figure.
+
+**Visibility.** `labor_cost_service.is_labor_cost_visible(company_id, role)` is
+the one gate — and it means EVERY surface, including the ones whose own
+dependency looks strict enough. Two that are not, and were caught in review:
+`get_schedule_overview` (Huume) runs behind `assert_manager_location`, which
+`resolve_eligibility_manager_scope` opens to an employee-role user flagged
+`is_manager`/`is_supervisor` — and `roster_load` already carries each person's
+minutes, so a per-person `week_cost` beside it yields every coworker's hourly
+rate by division. And `serialize_job` returns `default_hourly_rate` on four
+jobs endpoints mounted on plain `require_admin_or_client`. Both now take the
+gate (`actor_role` threaded from the agent; `include_cost=` on the serializer,
+defaulting OFF). **A new cost field on an existing response is a new gate, not
+a new key.** The gate is the company flag AND a business-admin role
+(`admin`/`client`).
+`individual` is dropped even though `require_admin_or_client` admits it — a
+personal Espresso account has no business reading a company payroll. **There is
+no shift-manager role today**, so that is the finest gate the role model
+supports; a manager who can build the schedule can see the wages. A narrower
+gate needs a new role, not a new check here.
+
+**Surfaces** — one engine, four readers, so no two can disagree:
+
+| Surface | Where the cost enters |
+|---|---|
+| Board day columns + week total | `GET /week` → `summarize_shifts(shifts, cost=…)` → `summary.cost`; the flag+role check is in the route. Rides the fetch the board already makes, so no second request and it reloads after every write |
+| Inputs rail | `SchedulePilot` reads `editor.summary.cost`; `InputsRail` draws per-person money on the same `LoadBar` and a "Labor cost" section (hourly / salaried / unfilled seats / OT premium / what is unpriced) |
+| `ScheduleReview` (Huume-staged change, REST fill scenario, week draft) | `cost_delta_for_rows` / `review_cost_for_ops` attach `proposal["cost"]` before `build_review`; `build_week_draft_review(cost=…)` for the planner. `ReviewPane` renders before→after and `Δ $`; `compareReviews` diffs two scenarios' cost |
+| Huume | `get_schedule_overview` adds `planning.labor_cost` + a `week_cost` per person in `roster_load`, so the model answers from the manager's numbers instead of inventing them |
+| HR Pilot | `schedint:labor-cost.<location>` records — **aggregates only**, in the existing supervisor-only group `redact_for_employee` strips. Per-location week start (not `align_week_start`'s Sunday default), and the job-rate catalogue is read once for the whole company rather than per location |
+
+**The cost path never raises.** `cost_delta_for_rows` and `review_cost_for_ops`
+swallow and log — cost is additive to a review, and a feature read that fails
+must not stop a manager staging a schedule change (same posture as
+`_review_assign_ops`, which leaves ops un-annotated rather than raising). The
+HTTP endpoint `GET /locations/{id}/labor-cost` does NOT swallow: it 403s when
+access is missing, because a caller must never mistake "no access" for "free".
+
+**Deliberately not wired:**
+- **Analysis Pilot.** Its platform sources gate on `analysis_pilot`, so a labor-cost
+  series there would hand payroll to a tenant who bought analysis and not
+  `labor_cost` — a gate bypass, not a convenience.
+- **Broker Pilot.** Payroll cost is not an EPL/WC underwriting factor; pushing
+  wages across the broker boundary buys nothing.
+- **Employer burden** (taxes, workers' comp, benefits). A per-location burden
+  multiplier is the obvious next step; guessing one now would make the figure
+  wrong in a way nobody could see.
+- **Budgets and labor-%-of-sales.** `sales_intake` + `inventory_forecasting` are
+  the hook when that comes back; dollars only for now.

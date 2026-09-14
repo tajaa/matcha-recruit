@@ -15,9 +15,14 @@ Contract (JSON-safe):
     rejected:    [{shift_id, role, starts_at, ends_at, employee_name, op, reasons}],   # not staged
     unfilled:    [...],                                                                # planner only
     employees:   [{employee_id, name, before, after, warnings}],
+    cost:        {before, after, delta, ot_premium_*, by_employee, basis} | ABSENT,
     advisories:  [{message, statute, employee_name, shift_id}],                         # statutory, verbatim
     findings:    [...],
     jurisdiction:{state, status, message}
+
+`cost` is present only when the tenant has `labor_cost` and the caller
+resolved one (`labor_cost_service.cost_delta_for_rows`). Its ABSENCE means
+"not priced", never "free" — no renderer may substitute a zero.
 
 `compliance_status` is the honesty flag every surface reads before saying a
 word about legality: `unmapped`/`unavailable` mean the statutory check did
@@ -203,6 +208,7 @@ def build_review(proposal: dict[str, Any], *, proposal_id: Optional[str] = None)
         "advisories": advisories,
         "findings": findings,
         "jurisdiction": jurisdiction,
+        **({"cost": proposal["cost"]} if proposal.get("cost") else {}),
     }
 
 
@@ -235,6 +241,7 @@ def build_week_draft_review(
     existing_assignments: list[dict[str, Any]], week_start, week_end,
     proposal_id: Optional[str] = None,
     concentration_findings: Optional[list[dict[str, Any]]] = None,
+    cost: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """The `ScheduleReview` for a week-builder plan (`kind="week_draft"`).
 
@@ -324,6 +331,7 @@ def build_week_draft_review(
         "advisories": advisories,
         "findings": findings,
         "jurisdiction": jurisdiction,
+        **({"cost": cost} if cost else {}),
     }
 
 
@@ -433,6 +441,10 @@ def compact_review(review: dict[str, Any]) -> dict[str, Any]:
         "finding_count": len(review.get("findings") or []),
         "employees": warnings,
         "jurisdiction": dict(review.get("jurisdiction") or {}),
+        **({"cost": {
+            key: value for key, value in (review.get("cost") or {}).items()
+            if key in ("before", "after", "delta", "ot_premium_after", "unpriced_employee_count")
+        }} if review.get("cost") else {}),
     }
 
 

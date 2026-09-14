@@ -27,6 +27,7 @@ from ...services.scheduling.schedule_location_readiness import (
     assert_schedule_location_ready_to_publish,
     get_schedule_location_readiness,
 )
+from ...services.scheduling.labor_cost_service import labor_cost_visible_from, load_week_cost
 from ...services.scheduling.schedule_guidance import refresh_assignment_break_guidance
 from ...services.scheduling.schedule_breaks import minimum_meal_break_minutes
 from ...services.scheduling.schedule_guidance import (
@@ -373,13 +374,32 @@ async def get_week(
                     entry["credential_warnings"] = warnings
                     entry["credential_expirations"] = flags["credential_expirations"]
                     entry["warnings"].extend(warnings)
+
+        # Scheduled labor cost rides the week the board already fetches, so the
+        # day totals need no second round-trip. Absent — not zero — for anyone
+        # without `labor_cost` + a business-admin role.
+        cost = None
+        try:
+            # `features` was already read above — reuse it rather than paying a
+            # second `companies` SELECT on the board's hot path.
+            if labor_cost_visible_from(features, current_user.role):
+                cost = (await load_week_cost(
+                    conn, company_id=company_id, location_id=location, week_start=start,
+                )).payload()
+        except Exception:  # noqa: BLE001
+            # The board is the page; the money is a column on it. A pricing
+            # failure loses the column, never the shifts, roster and credential
+            # flags around it. The dedicated /labor-cost endpoint still raises,
+            # because there a caller must not mistake silence for "free".
+            logger.exception("labor cost unavailable for location %s week %s", location, start)
+            cost = None
     return {
         "week_start": start.isoformat(),
         "location_id": str(location),
         "shifts": shifts,
         "roster": roster,
         "roster_flags": roster_flags,
-        "summary": _summarize(shifts),
+        "summary": _summarize(shifts, cost=cost),
     }
 
 
