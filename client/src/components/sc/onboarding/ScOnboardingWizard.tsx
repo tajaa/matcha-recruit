@@ -10,15 +10,10 @@ import type {
   ScEmployeeImport,
   ScJobSetup,
   ScLocationImport,
+  ScOnboardingStatus,
   ScOnboardingSubmission,
 } from '../../../types/scOnboarding'
 import { Button, FileUpload, Input, Select, Toggle } from '../../ui'
-import {
-  EMPLOYEE_COLUMNS,
-  LOCATION_COLUMNS,
-  parseEmployeesCsv,
-  parseLocationsCsv,
-} from './csv'
 
 const COMPANY_SIZES: { value: CompanySize; label: string }[] = [
   { value: '1-10', label: '1–10 employees' },
@@ -34,6 +29,8 @@ const STEPS = ['Company', 'Locations', 'Employees', 'Jobs & certificates', 'Revi
 // ~12s of cover for the Stripe webhook that activates a paid S&C product.
 const ACTIVATION_POLL_ATTEMPTS = 8
 const ACTIVATION_POLL_MS = 1500
+
+const EMPTY_CSV_COLUMNS = { locations: [], employees: [] }
 
 function emptyCertificate(): ScCertificateSetup {
   return { name: '', is_required: true, schedule_blocking: true }
@@ -52,10 +49,14 @@ function hasDuplicates(values: string[]) {
   return new Set(normalizedValues).size !== normalizedValues.length
 }
 
-function csvSummary(label: string, count: number, columns: readonly string[]) {
+function csvSummary(label: string, count: number, columns: readonly string[], busy: boolean) {
   return (
     <div className="space-y-1">
-      <p className="text-sm text-zinc-300">{count ? `${count} ${label} ready to import` : `No ${label} selected`}</p>
+      <p className="text-sm text-zinc-300">
+        {busy
+          ? `Checking ${label}…`
+          : count ? `${count} ${label} ready to import` : `No ${label} selected`}
+      </p>
       <p className="break-all font-mono text-[11px] text-zinc-500">{columns.join(',')}</p>
     </div>
   )
@@ -71,8 +72,10 @@ export default function ScOnboardingWizard() {
   const [locations, setLocations] = useState<ScLocationImport[]>([])
   const [employees, setEmployees] = useState<ScEmployeeImport[]>([])
   const [jobs, setJobs] = useState<ScJobSetup[]>([emptyJob()])
+  const [csvColumns, setCsvColumns] = useState<NonNullable<ScOnboardingStatus['csv_columns']>>(EMPTY_CSV_COLUMNS)
   const [loading, setLoading] = useState(true)
   const [activating, setActivating] = useState(false)
+  const [parsing, setParsing] = useState<'locations' | 'employees' | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -96,6 +99,7 @@ export default function ScOnboardingWizard() {
           return
         }
         setCompanyName(status.company_name)
+        setCsvColumns(status.csv_columns ?? EMPTY_CSV_COLUMNS)
         setActivating(false)
         setLoading(false)
       } catch (caught: unknown) {
@@ -157,14 +161,22 @@ export default function ScOnboardingWizard() {
     setStep((current) => Math.min(current + 1, STEPS.length - 1))
   }
 
-  async function loadCsv<T>(file: File, parser: (text: string) => T[], apply: (rows: T[]) => void) {
+  async function loadCsv<T>(
+    kind: 'locations' | 'employees',
+    file: File,
+    parser: (file: File) => Promise<T[]>,
+    apply: (rows: T[]) => void,
+  ) {
     setError(null)
+    setParsing(kind)
     try {
       if (!file.name.toLowerCase().endsWith('.csv')) throw new Error('Choose a .csv file.')
-      apply(parser(await file.text()))
+      apply(await parser(file))
     } catch (caught) {
       apply([])
       setError(caught instanceof Error ? caught.message : 'Could not read CSV.')
+    } finally {
+      setParsing(null)
     }
   }
 
@@ -251,10 +263,10 @@ export default function ScOnboardingWizard() {
           {step === 1 && (
             <div className="space-y-4">
               <div><h2 className="text-lg font-medium">Locations</h2><p className="text-sm text-zinc-400">Optional. Exact duplicate location rows are rejected across this file and your company.</p></div>
-              <FileUpload accept=".csv,text/csv" maxSizeMB={5} onFiles={(files) => { if (files[0]) void loadCsv(files[0], parseLocationsCsv, setLocations) }}>
+              <FileUpload accept=".csv,text/csv" maxSizeMB={5} onFiles={(files) => { if (files[0]) void loadCsv('locations', files[0], scOnboardingApi.parseLocationsCsv, setLocations) }}>
                 <Upload className="mx-auto mb-2 h-5 w-5" /><p>Drop a locations CSV or browse</p>
               </FileUpload>
-              {csvSummary('locations', locations.length, LOCATION_COLUMNS)}
+              {csvSummary('locations', locations.length, csvColumns.locations, parsing === 'locations')}
               {locations.length > 0 && <Button variant="ghost" size="sm" onClick={() => setLocations([])}>Skip and clear locations</Button>}
             </div>
           )}
@@ -262,10 +274,10 @@ export default function ScOnboardingWizard() {
           {step === 2 && (
             <div className="space-y-4">
               <div><h2 className="text-lg font-medium">Employees</h2><p className="text-sm text-zinc-400">Optional. Job titles must exactly match a job configured in the next step. No invitations are sent.</p></div>
-              <FileUpload accept=".csv,text/csv" maxSizeMB={5} onFiles={(files) => { if (files[0]) void loadCsv(files[0], parseEmployeesCsv, setEmployees) }}>
+              <FileUpload accept=".csv,text/csv" maxSizeMB={5} onFiles={(files) => { if (files[0]) void loadCsv('employees', files[0], scOnboardingApi.parseEmployeesCsv, setEmployees) }}>
                 <Upload className="mx-auto mb-2 h-5 w-5" /><p>Drop an employees CSV or browse</p>
               </FileUpload>
-              {csvSummary('employees', employees.length, EMPLOYEE_COLUMNS)}
+              {csvSummary('employees', employees.length, csvColumns.employees, parsing === 'employees')}
               {employees.length > 0 && <Button variant="ghost" size="sm" onClick={() => setEmployees([])}>Skip and clear employees</Button>}
             </div>
           )}

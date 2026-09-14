@@ -16,7 +16,6 @@ import csv
 import io
 import json
 import logging
-import re
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
@@ -44,6 +43,7 @@ from ._shared import (
     _sync_employee_location_for_compliance,
     send_single_invitation,
 )
+from app.matcha.services.employees.roster_csv import is_valid_email
 from app.matcha.services.onboarding.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
@@ -267,7 +267,7 @@ async def bulk_upload_employees_csv(
                     continue
 
                 # Basic email validation
-                if not re.match(r'^[\w\.\-\+]+@[\w\.-]+\.\w+$', email):
+                if not is_valid_email(email):
                     errors.append({
                         "row": row_num,
                         "email": email,
@@ -276,7 +276,7 @@ async def bulk_upload_employees_csv(
                     failed += 1
                     continue
 
-                if personal_email and not re.match(r'^[\w\.\-\+]+@[\w\.-]+\.\w+$', personal_email):
+                if personal_email and not is_valid_email(personal_email):
                     errors.append({
                         "row": row_num,
                         "email": email,

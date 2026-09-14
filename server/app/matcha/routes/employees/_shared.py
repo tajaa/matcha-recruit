@@ -40,6 +40,7 @@ from app.matcha.services.employees.invitations import (  # noqa: F401,E402
     _send_invitation_with_conn,
 )
 from app.matcha.services.employees.pto_decisions import decide_pto_request_core  # noqa: F401,E402
+from app.matcha.services.employees.roster_csv import normalize_work_state  # noqa: E402
 from app.matcha.services.employees.us_states import (  # noqa: F401,E402
     STATE_NAME_TO_CODE,
     STATE_NAME_TO_CODE as _STATE_NAME_TO_CODE,  # legacy private alias
@@ -49,26 +50,12 @@ from app.matcha.services.employees.us_states import (  # noqa: F401,E402
 # validated against the canonical US jurisdiction set (case-insensitive; full
 # state names also normalized) so a typo doesn't silently create an ungrounded
 # compliance jurisdiction (Phase D2 stopgap — see COMPLIANCE_REMEDIATION_PLAN.md).
+# The implementation lives in services/employees/roster_csv.py so the bulk-upload
+# route and the Matcha S&C wizard validate a work state identically; this name
+# and `_VALID_WORK_STATE_CODES` stay for the existing callers.
 _VALID_WORK_STATE_CODES = US_STATE_CODES
 
-
-def _normalize_work_state(raw: Optional[str]) -> tuple[Optional[str], bool]:
-    """Normalize a `work_state` value to a 2-letter USPS code.
-
-    Returns `(normalized_code_or_None, is_valid)`. Blank/None input is valid
-    (no work location provided — counted separately by callers, e.g. as
-    `rows_missing_work_location` in bulk upload). A non-blank value that
-    isn't a recognized state/territory abbreviation or full name is invalid.
-    """
-    s = (raw or "").strip()
-    if not s:
-        return None, True
-    if len(s) == 2 and s.isalpha() and s.upper() in _VALID_WORK_STATE_CODES:
-        return s.upper(), True
-    mapped = STATE_NAME_TO_CODE.get(s.lower())
-    if mapped:
-        return mapped, True
-    return None, False
+_normalize_work_state = normalize_work_state
 
 
 def _json_object(value) -> dict:

@@ -10,7 +10,20 @@ from app.core.services.product_definitions import (
     get_product_by_signup_source,
     is_tenant_activated,
 )
-from app.matcha.models.sc_onboarding import ScOnboardingComplete
+from app.matcha.models.sc_onboarding import (
+    ScEmployeeImport,
+    ScLocationImport,
+    ScOnboardingComplete,
+)
+from app.matcha.services.employees.roster_csv import (
+    ZIPCODE_PATTERN,
+    RosterCsvError,
+    is_valid_email,
+    normalize_key,
+    normalize_work_state,
+    parse_table,
+    require_unique,
+)
 from app.matcha.services.ir.naics_titles import naics_industry_description
 from app.matcha.services.scheduling.job_credential_requirements import (
     replace_job_credential_requirements,
@@ -21,6 +34,12 @@ logger = logging.getLogger(__name__)
 # The features this wizard writes into.  The router mounts the same set as a
 # `require_all_features` gate; keeping the list here documents why.
 SC_REQUIRED_FEATURES = ("employees", "employee_schedule", "credential_templates")
+
+# The wizard's two import files. These are the ONLY definition — the client
+# renders them from `GET /sc-onboarding/status` rather than keeping its own copy.
+LOCATION_COLUMNS = ("name", "address", "city", "state", "zipcode")
+EMPLOYEE_COLUMNS = ("email", "first_name", "last_name", "work_state", "job_title", "department")
+CSV_MAX_ROWS = 500
 
 
 class ScOnboardingError(ValueError):
@@ -57,6 +76,57 @@ def _location_key(location) -> tuple[str, str, str, str, str]:
         _key(location.state),
         _key(location.zipcode),
     )
+
+
+def parse_locations_csv(text: str) -> list[ScLocationImport]:
+    """Parse a locations file into validated rows (nothing is written).
+
+    All-or-nothing, and server-side: the wizard holds the parsed rows until the
+    manager approves the review, but the RULES that decide whether a row is
+    acceptable live here with every other roster-import rule, not in a second
+    implementation in the browser.
+    """
+    parsed = parse_table(text, LOCATION_COLUMNS, max_rows=CSV_MAX_ROWS)
+    locations: list[ScLocationImport] = []
+    for row, line in parsed:
+        state, state_valid = normalize_work_state(row["state"])
+        if not state_valid or state is None:
+            raise RosterCsvError(f"Row {line} state must use a two-letter code")
+        if not ZIPCODE_PATTERN.match(row["zipcode"]):
+            raise RosterCsvError(f"Row {line} zipcode must use 12345 or 12345-6789")
+        locations.append(ScLocationImport(**{**row, "state": state}))
+    require_unique(
+        (
+            (
+                "\u0000".join(normalize_key(getattr(location, column)) for column in LOCATION_COLUMNS),
+                line,
+            )
+            for location, (_, line) in zip(locations, parsed)
+        ),
+        "duplicates an earlier location row",
+    )
+    return locations
+
+
+def parse_employees_csv(text: str) -> list[ScEmployeeImport]:
+    """Parse an employee roster file into validated rows (nothing is written)."""
+    parsed = parse_table(text, EMPLOYEE_COLUMNS, max_rows=CSV_MAX_ROWS)
+    employees: list[ScEmployeeImport] = []
+    for row, line in parsed:
+        if not is_valid_email(row["email"]):
+            raise RosterCsvError(f"Row {line} email is invalid")
+        work_state, state_valid = normalize_work_state(row["work_state"])
+        if not state_valid or work_state is None:
+            raise RosterCsvError(f"Row {line} work_state must use a two-letter code")
+        employees.append(ScEmployeeImport(**{**row, "work_state": work_state}))
+    require_unique(
+        (
+            (str(employee.email).lower(), line)
+            for employee, (_, line) in zip(employees, parsed)
+        ),
+        "duplicates an earlier employee email",
+    )
+    return employees
 
 
 def validate_sc_submission(body: ScOnboardingComplete) -> None:
@@ -123,6 +193,10 @@ async def get_sc_onboarding_status(conn, *, company_id: UUID) -> dict:
         "company_name": company["name"],
         "completed": completed_at is not None,
         "completed_at": completed_at.isoformat() if completed_at else None,
+        "csv_columns": {
+            "locations": list(LOCATION_COLUMNS),
+            "employees": list(EMPLOYEE_COLUMNS),
+        },
     }
 
 

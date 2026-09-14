@@ -3,21 +3,30 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../../api/client'
 
-const { statusMock, completeMock, refreshMock, navigateMock } = vi.hoisted(() => ({
+const { statusMock, completeMock, refreshMock, navigateMock, parseLocationsMock, parseEmployeesMock } = vi.hoisted(() => ({
   statusMock: vi.fn(),
   completeMock: vi.fn(),
   refreshMock: vi.fn(),
   navigateMock: vi.fn(),
+  parseLocationsMock: vi.fn(),
+  parseEmployeesMock: vi.fn(),
 }))
 
 vi.mock('../../../api/sc/scOnboarding', () => ({
-  scOnboardingApi: { status: statusMock, complete: completeMock },
+  scOnboardingApi: {
+    status: statusMock,
+    complete: completeMock,
+    parseLocationsCsv: parseLocationsMock,
+    parseEmployeesCsv: parseEmployeesMock,
+  },
 }))
 vi.mock('../../../hooks/useMe', () => ({ useMe: () => ({ refresh: refreshMock }) }))
 vi.mock('react-router-dom', async (importOriginal) => ({
   ...(await importOriginal<typeof import('react-router-dom')>()),
   useNavigate: () => navigateMock,
 }))
+
+import userEvent from '@testing-library/user-event'
 
 import ScOnboardingWizard from './ScOnboardingWizard'
 
@@ -72,5 +81,62 @@ describe('ScOnboardingWizard', () => {
     expect(refreshMock).toHaveBeenCalled()
     expect(refreshMock.mock.invocationCallOrder[0])
       .toBeLessThan(navigateMock.mock.invocationCallOrder[0])
+  })
+
+  async function reachLocationsStep(user: ReturnType<typeof userEvent.setup>) {
+    renderWizard()
+    await waitFor(() => expect(screen.getByText('Set up Safety Co')).toBeInTheDocument())
+    // Select is a button-based dropdown, not a native <select>.
+    await user.click(screen.getByRole('button', { name: /Choose a range/ }))
+    await user.click(screen.getByRole('button', { name: /11.50 employees/ }))
+    await user.type(screen.getByRole('textbox'), '722511')
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+  }
+
+  function fileInput(): HTMLInputElement {
+    const input = document.querySelector('input[type="file"]')
+    if (!input) throw new Error('no file input rendered')
+    return input as HTMLInputElement
+  }
+
+  it('renders the server columns and hands the file to the server to validate', async () => {
+    const user = userEvent.setup()
+    statusMock.mockResolvedValue({
+      company_name: 'Safety Co',
+      completed: false,
+      completed_at: null,
+      csv_columns: { locations: ['name', 'address', 'city', 'state', 'zipcode'], employees: ['email'] },
+    })
+    parseLocationsMock.mockResolvedValue([
+      { name: 'HQ', address: '1 Main', city: 'Austin', state: 'TX', zipcode: '78701' },
+    ])
+
+    await reachLocationsStep(user)
+
+    // The header hint is the parser's own column list, not a second copy.
+    expect(screen.getByText('name,address,city,state,zipcode')).toBeInTheDocument()
+
+    const file = new File(['name,address,city,state,zipcode\nHQ,1 Main,Austin,TX,78701'], 'l.csv', { type: 'text/csv' })
+    await user.upload(fileInput(), file)
+
+    await waitFor(() => expect(screen.getByText('1 locations ready to import')).toBeInTheDocument())
+    expect(parseLocationsMock).toHaveBeenCalledWith(file)
+  })
+
+  it('surfaces the server row error and imports nothing', async () => {
+    const user = userEvent.setup()
+    statusMock.mockResolvedValue({
+      company_name: 'Safety Co', completed: false, completed_at: null,
+      csv_columns: { locations: ['name'], employees: ['email'] },
+    })
+    parseLocationsMock.mockRejectedValue(new ApiError('Row 4 must contain all 5 values', 422, null))
+
+    await reachLocationsStep(user)
+    await user.upload(fileInput(), new File(['x'], 'l.csv', { type: 'text/csv' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('Row 4 must contain all 5 values'),
+    )
+    expect(screen.getByText('No locations selected')).toBeInTheDocument()
   })
 })

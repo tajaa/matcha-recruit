@@ -18,6 +18,7 @@ from app.matcha.models.sc_onboarding import (
     ScOnboardingComplete,
 )
 from app.matcha.services import sc_onboarding as service
+from app.matcha.services.employees.roster_csv import RosterCsvError
 
 
 def sc_product(**overrides) -> ProductUpsert:
@@ -54,6 +55,57 @@ def test_router_gate_matches_the_features_the_wizard_writes():
     assert set(service.SC_REQUIRED_FEATURES) == {
         "employees", "employee_schedule", "credential_templates",
     }
+
+
+def test_csv_parsing_is_server_side_and_shares_the_roster_rules():
+    # One implementation of these rules, in Python, next to bulk upload's — the
+    # wizard uploads the file instead of parsing it in the browser.
+    locations = service.parse_locations_csv(
+        'name,address,city,state,zipcode\r\nHQ,"1 Main, Suite 2",Austin,California,78701'
+    )
+    assert locations[0].address == "1 Main, Suite 2"
+    assert locations[0].state == "CA"  # full state names normalize, as on /employees
+
+    employees = service.parse_employees_csv(
+        "email,first_name,last_name,work_state,job_title,department\n"
+        "cook@example.com,Casey,Cook,texas,Cook,Kitchen"
+    )
+    assert employees[0].work_state == "TX"
+
+
+def test_csv_errors_name_the_real_source_line():
+    with pytest.raises(RosterCsvError, match="Row 4 must contain all 5 values"):
+        service.parse_locations_csv(
+            "name,address,city,state,zipcode\n\n\nHQ,1 Main,,TX,78701"
+        )
+    with pytest.raises(RosterCsvError, match="Row 3 duplicates an earlier employee email"):
+        service.parse_employees_csv(
+            "email,first_name,last_name,work_state,job_title,department\n"
+            "a@example.com,A,One,TX,Cook,Kitchen\n"
+            "A@example.com,A,Two,TX,Cook,Kitchen"
+        )
+    with pytest.raises(RosterCsvError, match="Row 3 duplicates an earlier location row"):
+        service.parse_locations_csv(
+            "name,address,city,state,zipcode\n"
+            "HQ,1 Main,Austin,TX,78701\n"
+            " hq ,1 MAIN,austin,tx,78701"
+        )
+    with pytest.raises(RosterCsvError, match="Row 2 email is invalid"):
+        service.parse_employees_csv(
+            "email,first_name,last_name,work_state,job_title,department\n"
+            "not-email,A,One,TX,Cook,Kitchen"
+        )
+    with pytest.raises(RosterCsvError, match="Row 2 zipcode must use"):
+        service.parse_locations_csv(
+            "name,address,city,state,zipcode\nHQ,1 Main,Austin,TX,7870"
+        )
+
+
+def test_status_publishes_the_columns_the_parser_expects():
+    assert service.LOCATION_COLUMNS == ("name", "address", "city", "state", "zipcode")
+    assert service.EMPLOYEE_COLUMNS == (
+        "email", "first_name", "last_name", "work_state", "job_title", "department",
+    )
 
 
 def submission(*, locations=(), employees=()) -> ScOnboardingComplete:
@@ -237,6 +289,16 @@ async def test_status_rejects_non_sc_and_inactive_companies(monkeypatch):
     monkeypatch.setattr(service, "is_tenant_activated", lambda *args, **kwargs: False)
     with pytest.raises(service.ScOnboardingAccessError, match="Activate this product"):
         await service.get_sc_onboarding_status(conn, company_id=uuid4())
+
+
+@pytest.mark.asyncio
+async def test_status_carries_the_csv_columns(monkeypatch):
+    _allow_sc_product(monkeypatch)
+    status = await service.get_sc_onboarding_status(_Connection(), company_id=uuid4())
+    assert status["csv_columns"] == {
+        "locations": list(service.LOCATION_COLUMNS),
+        "employees": list(service.EMPLOYEE_COLUMNS),
+    }
 
 
 @pytest.mark.asyncio

@@ -46,4 +46,7 @@ export type ScOnboardingStatus = {
   company_name: string
   completed: boolean
   completed_at: string | null
+  /** Expected CSV headers, owned by the server's parser. Optional so a blue/green
+   *  window where the old backend is still serving does not crash the wizard. */
+  csv_columns?: { locations: string[]; employees: string[] }
 }

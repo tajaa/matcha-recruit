@@ -70,6 +70,13 @@ class ScOnboardingStatus(ScOnboardingModel):
     company_name: str
     completed: bool
     completed_at: str | None = None
+    # The expected CSV headers, so the wizard renders the server's own columns
+    # instead of a second copy that can drift out of step with the parser.
+    csv_columns: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class ScOnboardingCsvParse(ScOnboardingModel):
+    rows: list[ScLocationImport] | list[ScEmployeeImport]
 
 
 class ScOnboardingResult(ScOnboardingModel):
