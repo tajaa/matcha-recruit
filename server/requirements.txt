@@ -45,7 +45,7 @@ cachetools>=5.0
 livekit-api>=1.2.1
 markdown>=3.5
 segno>=1.6.0
-openpyxl>=3.1
+openpyxl>=3.1.5
 # Already present transitively (weasyprint); pinned explicitly because Merlin's
 # chat-image path imports it directly to downscale attachments before they go
 # into a prompt. Code degrades to sending the original if it's ever missing.
