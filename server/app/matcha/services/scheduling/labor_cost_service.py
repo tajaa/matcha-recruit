@@ -38,6 +38,12 @@ async def labor_cost_enabled(company_id: UUID, conn=None) -> bool:
     return bool(features.get("labor_cost"))
 
 
+def labor_cost_visible_from(features: Mapping[str, Any], actor_role: Optional[str]) -> bool:
+    """The same verdict as `is_labor_cost_visible`, for a caller that already
+    holds the company's merged features. Keep the two in step."""
+    return (actor_role or "") in COST_ROLES and bool(features.get("labor_cost"))
+
+
 async def is_labor_cost_visible(company_id: UUID, actor_role: Optional[str], conn=None) -> bool:
     """Flag AND role. `individual` is deliberately excluded even though
     `require_admin_or_client` admits it: a personal Espresso account has no
@@ -58,10 +64,16 @@ async def _load_rules(conn, company_id: UUID, location_id: Optional[UUID]) -> di
 
 async def load_week_assignment_rows(
     conn, *, company_id: UUID, location_id: UUID, week_start: date,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], bool]:
     """Every non-cancelled assignment starting in the location's week, as
     cost-engine rows. `shift_id` rides along so the review path can apply a
-    staged change to this same picture."""
+    staged change to this same picture.
+
+    Returns `(rows, truncated)`. The cap is real, and a total computed over a
+    truncated week is a partial figure presented as complete — the one failure
+    this feature exists to prevent. `planning_inputs` surfaces
+    `roster_truncated` for the same reason.
+    """
     lo = datetime.combine(week_start, time.min, tzinfo=timezone.utc)
     hi = lo + timedelta(days=7)
     rows = await conn.fetch(
@@ -87,7 +99,7 @@ async def load_week_assignment_rows(
         "shift_id": str(row["shift_id"]),
         "starts_at": row["starts_at"],
         "worked_minutes": int(row["worked_minutes"] or 0),
-    } for row in rows]
+    } for row in rows], len(rows) >= _MAX_ASSIGNMENTS
 
 
 async def load_week_cost(
@@ -104,7 +116,7 @@ async def load_week_cost(
     Cancelled shifts are excluded (they cost nothing); drafts are included,
     because the whole point is seeing the bill before you publish.
     """
-    assignments = await load_week_assignment_rows(
+    assignments, truncated = await load_week_assignment_rows(
         conn, company_id=company_id, location_id=location_id, week_start=week_start,
     )
 
@@ -123,28 +135,13 @@ async def load_week_cost(
     open_seats: list[dict[str, Any]] = []
     rates: dict[str, Optional[Decimal]] = dict(job_rates or {})
     if include_open_seats:
-        # Imported here rather than at module scope: `week_builder` imports a
-        # good part of the scheduling package, and this module is pulled in by
-        # route modules that must stay cheap to import.
-        from . import week_builder
-
-        demand = await week_builder._load_vacant_demand(
-            conn, company_id=company_id, location_id=location_id,
-            week_start=week_start, week_end=week_start + timedelta(days=6),
+        open_seats = await load_open_seats(
+            conn, company_id=company_id, location_id=location_id, week_start=week_start,
         )
-        open_seats = [{
-            "job_id": shift.get("job_id"),
-            "starts_at": shift.get("starts_at"),
-            "worked_minutes": shift.get("worked_minutes") or 0,
-            "open": max(
-                0,
-                int(shift.get("required_staff") or 1) - len(shift.get("fixed_employee_ids") or []),
-            ),
-        } for shift in demand]
         if job_rates is None:
             rates = await load_job_rates(conn, company_id=company_id)
 
-    return cost_week(
+    result = cost_week(
         assignments,
         pay,
         await _load_rules(conn, company_id, location_id),
@@ -152,6 +149,30 @@ async def load_week_cost(
         open_seats=open_seats,
         job_rates=rates,
     )
+    result.truncated = truncated
+    return result
+
+
+async def load_open_seats(
+    conn, *, company_id: UUID, location_id: UUID, week_start: date,
+) -> list[dict[str, Any]]:
+    """The week's unfilled seats as cost-engine rows."""
+    from . import week_builder
+
+    demand = await week_builder._load_vacant_demand(
+        conn, company_id=company_id, location_id=location_id,
+        week_start=week_start, week_end=week_start + timedelta(days=6),
+    )
+    return [{
+        "shift_id": shift.get("key"),
+        "job_id": shift.get("job_id"),
+        "starts_at": shift.get("starts_at"),
+        "worked_minutes": shift.get("worked_minutes") or 0,
+        "open": max(
+            0,
+            int(shift.get("required_staff") or 1) - len(shift.get("fixed_employee_ids") or []),
+        ),
+    } for shift in demand]
 
 
 async def load_job_rates(conn, *, company_id: UUID) -> dict[str, Optional[Decimal]]:
@@ -224,6 +245,9 @@ async def cost_delta_for_rows(
     company_id: UUID,
     location_id: Optional[UUID],
     weeks: Sequence[tuple[date, list[dict[str, Any]], list[dict[str, Any]]]],
+    actor_role: Optional[str] = None,
+    open_seats_by_week: Optional[Mapping[date, list[dict[str, Any]]]] = None,
+    job_rates: Optional[Mapping[str, Optional[Decimal]]] = None,
 ) -> Optional[dict[str, Any]]:
     """The `cost` block a `ScheduleReview` carries: the bill before and after
     the change, and the same split per person.
@@ -236,13 +260,18 @@ async def cost_delta_for_rows(
     everything else the person is already working, and two reviews costed over
     different subsets cannot be compared with each other.
 
-    Returns None when the company does not have `labor_cost` — the key is then
-    absent from the review, which is what every renderer keys off. A review is
-    built on manager surfaces only, so this is the flag check alone; the role
-    check lives on the HTTP edge.
+    Returns None unless the caller may see wage data. `by_employee` is exactly
+    the per-coworker figure `labor_cost.py`'s docstring says this feature must
+    never hand out, and a review is NOT a manager-only surface: the fill
+    preview (`POST …/fill-vacant/preview`) is mounted on
+    `require_company_member`, which admits `employee` and `individual`, and an
+    employee flagged `is_manager` clears `assert_manager_location`. So the same
+    flag+role gate the HTTP surfaces use runs here too. `actor_role` defaults
+    to None, which fails closed — a caller that forgets to pass it gets no
+    cost rather than an open one.
     """
     try:
-        if not await labor_cost_enabled(company_id, conn=conn):
+        if not await is_labor_cost_visible(company_id, actor_role, conn=conn):
             return None
     except Exception:  # noqa: BLE001
         # Cost is additive to a review. A feature read that fails must not stop
@@ -273,8 +302,19 @@ async def cost_delta_for_rows(
     for week_start, before_rows, after_rows in weeks:
         in_week = [row for row in before_rows if _in_week(row, week_start)]
         out_week = [row for row in after_rows if _in_week(row, week_start)]
-        before = cost_week(in_week, pay, rules, week_start=week_start)
-        after = cost_week(out_week, pay, rules, week_start=week_start)
+        # Open seats ride BOTH sides. The board's `summary.cost.total` includes
+        # them, so leaving them out here would put the review and the header it
+        # sits beside on different bases — and filling a seat would read as new
+        # spend rather than as demand that was already projected.
+        seats = list((open_seats_by_week or {}).get(week_start) or [])
+        before = cost_week(
+            in_week, pay, rules, week_start=week_start,
+            open_seats=seats, job_rates=job_rates or {},
+        )
+        after = cost_week(
+            out_week, pay, rules, week_start=week_start,
+            open_seats=_remaining_seats(seats, in_week, out_week), job_rates=job_rates or {},
+        )
         basis = after.basis
         totals["before"] += before.total
         totals["after"] += after.total
@@ -311,6 +351,31 @@ async def cost_delta_for_rows(
         "unpriced_employee_count": len(unpriced),
         "basis": basis,
     }
+
+
+def _remaining_seats(
+    seats: list[dict[str, Any]],
+    before_rows: list[dict[str, Any]],
+    after_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """The open seats left AFTER the change: filling one converts projected
+    open-seat cost into real assigned cost, and counting it on both sides would
+    double it. Anything the change did not touch stays projected on both."""
+    filled: dict[str, int] = {}
+    before_counts: dict[str, int] = {}
+    for row in before_rows:
+        before_counts[row.get("shift_id") or ""] = before_counts.get(row.get("shift_id") or "", 0) + 1
+    for row in after_rows:
+        shift_id = row.get("shift_id") or ""
+        filled[shift_id] = filled.get(shift_id, 0) + 1
+    out = []
+    for seat in seats:
+        shift_id = str(seat.get("shift_id") or "")
+        added = filled.get(shift_id, 0) - before_counts.get(shift_id, 0)
+        remaining = max(0, int(seat.get("open") or 0) - max(0, added))
+        if remaining:
+            out.append({**seat, "open": remaining})
+    return out
 
 
 def _dt(value):
@@ -402,19 +467,25 @@ async def review_cost_for_ops(
     company_id: UUID,
     location_id: Optional[UUID],
     ops: list[dict[str, Any]],
+    actor_role: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
-    """Cost block for an edit/batch proposal's accepted ops. Never raises."""
+    """Cost block for an edit/batch proposal's accepted ops. Never raises.
+
+    `actor_role` defaults to None and so fails closed: a surface that has not
+    been taught to pass the caller's role gets no cost rather than an
+    ungated one."""
     if not ops:
         return None
     try:
-        if not await labor_cost_enabled(company_id, conn=conn):
+        if not await is_labor_cost_visible(company_id, actor_role, conn=conn):
             return None
     except Exception:  # noqa: BLE001
         logger.warning("labor_cost: feature read failed for company %s", company_id)
         return None
     try:
         return await _review_cost_for_ops(
-            conn, company_id=company_id, location_id=location_id, ops=ops,
+            conn, company_id=company_id, location_id=location_id,
+            ops=ops, actor_role=actor_role,
         )
     except Exception:  # noqa: BLE001
         logger.warning("labor_cost: review cost failed for company %s", company_id)
@@ -427,6 +498,7 @@ async def _review_cost_for_ops(
     company_id: UUID,
     location_id: Optional[UUID],
     ops: list[dict[str, Any]],
+    actor_role: Optional[str],
 ) -> Optional[dict[str, Any]]:
     from .location_profile import resolve_week_start_weekday
     from .schedule_chat import _EDIT_KINDS
@@ -474,17 +546,28 @@ async def _review_cost_for_ops(
     ]
     if not moments:
         return None
-    # A batch may straddle a week boundary; overtime is per-week, so each week
-    # the change touches is costed on its own and the results summed.
     week_starts = sorted({align_week_start(moment.date(), week_start_weekday) for moment in moments})
 
-    weeks = []
+    # Load every touched week FIRST and apply the ops to the combined picture.
+    # Applying per week would lose a `retime`/`swap` that moves a shift ACROSS
+    # a boundary: the source week drops the row and the destination week, whose
+    # `before` never contained it, has nothing to match — a pure saving for a
+    # change that costs the same.
+    combined_before: list[dict[str, Any]] = []
+    seats_by_week: dict[date, list[dict[str, Any]]] = {}
     for week_start in week_starts:
-        before_rows = await load_week_assignment_rows(
+        rows, _truncated = await load_week_assignment_rows(
             conn, company_id=company_id, location_id=scope, week_start=week_start,
         )
-        weeks.append((week_start, before_rows, _apply_ops(before_rows, ops, shifts)))
+        combined_before.extend(rows)
+        seats_by_week[week_start] = await load_open_seats(
+            conn, company_id=company_id, location_id=scope, week_start=week_start,
+        )
+    combined_after = _apply_ops(combined_before, ops, shifts)
+    weeks = [(week_start, combined_before, combined_after) for week_start in week_starts]
 
     return await cost_delta_for_rows(
         conn, company_id=company_id, location_id=scope, weeks=weeks,
+        actor_role=actor_role, open_seats_by_week=seats_by_week,
+        job_rates=await load_job_rates(conn, company_id=company_id),
     )

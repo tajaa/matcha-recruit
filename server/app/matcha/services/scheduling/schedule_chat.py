@@ -1795,6 +1795,7 @@ async def build_edit_proposal(
     editor_week_start: Optional[date] = None,
     editor_week_end: Optional[date] = None,
     unfilled: Optional[list[dict]] = None,
+    actor_role: Optional[str] = None,
 ) -> ProposalBuild:
     """Persists `_resolve_edit_ops`' result to the same `schedule_chat_proposals`
     table `build_proposal` uses — `proposal['kind'] == 'edit'` is what
@@ -1855,6 +1856,7 @@ async def build_edit_proposal(
     # no `cost` key at all) for a tenant without `labor_cost`.
     cost = await review_cost_for_ops(
         conn, company_id=company_id, location_id=editor_location_id, ops=accepted,
+        actor_role=actor_role,
     )
     if cost:
         proposal_doc["cost"] = cost
@@ -2957,6 +2959,7 @@ async def build_batch_proposal(
     editor_location_id: Optional[UUID] = None,
     week_start: Optional[date] = None, week_end: Optional[date] = None,
     auto_assign_unpinned: bool = True,
+    actor_role: Optional[str] = None,
 ) -> ProposalBuild:
     """Resolve edits and creates together, persist ONE `schedule_chat_proposals`
     row with `proposal['kind'] == 'batch'`. Either half's clarify is returned
@@ -3041,6 +3044,7 @@ async def build_batch_proposal(
     # a California week on the federal floor and bucket it into a Sunday week.
     batch_cost = await review_cost_for_ops(
         conn, company_id=company_id, location_id=None, ops=edit_ops,
+        actor_role=actor_role,
     )
     if batch_cost:
         proposal_doc["cost"] = batch_cost

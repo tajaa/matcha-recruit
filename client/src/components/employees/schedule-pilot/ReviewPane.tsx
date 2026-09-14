@@ -85,6 +85,16 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
   const staged = review.assignments.filter((item) => item.verdict !== 'blocked')
   const warned = staged.filter((item) => item.verdict === 'warn' || item.reasons.length > 0)
   const diff = compare ? compareReviews(review, compare.review) : null
+  // `by_employee` covers the week's costed rows. Someone the review touches
+  // who is not in it costs nothing — that is $0, not missing payroll data.
+  // Only the server's own unpriced list means "no rate on file"; conflating
+  // them sends a manager hunting for a data problem that does not exist.
+  const unpricedIds = new Set(review.cost?.unpriced_employee_ids ?? [])
+  const personCost = (employeeId: string, side: 'before' | 'after') => {
+    if (!review.cost) return undefined
+    if (unpricedIds.has(employeeId)) return null
+    return review.cost.by_employee[employeeId]?.[side] ?? 0
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto" aria-label="Review">
@@ -198,8 +208,8 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
                       capMinutes={caps?.[person.employee_id]?.max_weekly_minutes ?? null}
                       allowOvertime={caps?.[person.employee_id]?.allow_overtime ?? false}
                       policyMinutes={policyMinutes}
-                      cost={review.cost ? (review.cost.by_employee[person.employee_id]?.before ?? null) : undefined}
-                      afterCost={review.cost ? (review.cost.by_employee[person.employee_id]?.after ?? null) : undefined}
+                      cost={personCost(person.employee_id, 'before')}
+                      afterCost={personCost(person.employee_id, 'after')}
                     />
                   </div>
                   {person.warnings.length > 0 && (

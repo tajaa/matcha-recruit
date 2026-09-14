@@ -970,6 +970,20 @@ job_rates=…) -> WeekCost`. `labor_cost_service.py` is the thin DB half.
 - **As-scheduled, never as-worked.** There is no time-clock data in this
   codebase; `worked_minutes` is planned span minus planned break. `basis.as_scheduled`
   carries this and the UI says "scheduled labor cost". Not payroll.
+- **Every review is costed on the SAME basis as the board header beside it** —
+  the whole week, for one location, open seats included. Each of those three
+  was broken separately: the week draft used `snapshot["existing_assignments"]`,
+  which is company-wide by design (it backs cross-store double-booking), so a
+  two-store tenant saw the other store's payroll; and the review omitted open
+  seats while `summary.cost.total` included them, so filling a seat read as new
+  spend rather than as demand already projected. `_remaining_seats` takes a
+  filled seat off the "after" side so it is converted, not double-counted.
+  Cross-store overtime is the accepted cost of location scoping: someone
+  working two stores in a week has their OT attributed per location.
+- **Ops apply to every touched week at once**, not per week — a `retime` or
+  `swap` across a week boundary would otherwise be dropped from the source
+  week's "after" and never added to the destination's, reporting a pure saving
+  for a change that costs the same.
 - **Every review is costed over the WHOLE week for its location**, not just
   the rows the change names — overtime depends on everything else the person
   already works, and two reviews costed over different subsets cannot be
@@ -983,6 +997,15 @@ job_rates=…) -> WeekCost`. `labor_cost_service.py` is the thin DB half.
   `Decimal(str(NO_CAP))` raises), and a missing multiplier disables its
   threshold rather than borrowing another — doubletime must never quietly fall
   back to the 1.5x overtime rate.
+- **A bounded read is never a complete one.** `load_week_assignment_rows`
+  returns `(rows, truncated)` and `WeekCost.truncated` reaches the rail, which
+  says so — a partial total presented as complete is the one failure this
+  feature exists to prevent (`planning_inputs.roster_truncated` is the
+  precedent). A partly-priced DAY renders as `≥$540`, not `$540`.
+- **Exempt means exempt even with no rate on file.** An exempt profile with a
+  NULL `pay_rate` used to fall through to the hourly loop and accrue overtime
+  minutes, which Huume and the HR Pilot then reported for someone statutorily
+  incapable of them.
 - **Absent is not unpriced, on any axis.** `employee_total(..., absent=0)`
   distinguishes "not in this scenario" (a saving) from "no rate on file";
   `by_day` is zero-filled across the week with `unpriced_days` naming the days

@@ -32,7 +32,7 @@ describe('WeekTimeGrid day cost', () => {
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument()
   })
 
-  it('dashes a day whose staff could not be priced, rather than calling it free', () => {
+  it('dashes a day whose staff could not be priced at all, rather than calling it free', () => {
     // The failure this guards: `costByDay[day] ?? 0` rendered "$0" beside a
     // fully-staffed day, and a manager reading the columns staffs it harder.
     renderGrid({
@@ -41,6 +41,16 @@ describe('WeekTimeGrid day cost', () => {
     })
     expect(screen.getByText('$720')).toBeInTheDocument()
     expect(screen.getByText('\u2014')).toBeInTheDocument()
+  })
+
+  it('marks a PARTLY priced day as a floor instead of a total', () => {
+    // Three of four people priced: "$540" unmarked reads as the day's total
+    // and makes it look like the cheap day.
+    renderGrid({
+      costByDay: { '2026-09-14': 720, '2026-09-15': 540 },
+      unpricedDays: new Set(['2026-09-15']),
+    })
+    expect(screen.getByText('\u2265$540')).toBeInTheDocument()
   })
 
   it('shows $0 for a genuine day off', () => {

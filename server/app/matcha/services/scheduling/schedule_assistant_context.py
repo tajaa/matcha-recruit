@@ -129,15 +129,26 @@ async def get_schedule_overview(
                     key: week_cost[key] for key in (
                         "total", "hourly_total", "salaried_total", "open_seat_total",
                         "ot_premium", "ot_minutes", "by_day",
-                        "unpriced_employee_count", "unpriced_open_seats", "basis",
+                        "unpriced_employee_count", "unpriced_open_seats",
+                        "unpriced_days", "truncated", "basis",
                     )
                 }
                 totals = {
                     item["employee_id"]: item["total"]
                     for item in week_cost["employees"] if item["priced"]
                 }
+                # Someone with no shifts costs nothing; someone with no rate on
+                # file cannot be costed. Both arriving as `null` would have the
+                # model name the entire bench when asked who is missing a pay
+                # rate — `roster_load` carries the whole roster, and in a normal
+                # week most of it is bench.
+                unpriced = set(week_cost.get("unpriced_employee_ids") or [])
+                planning["labor_cost"]["unpriced_employee_ids"] = sorted(unpriced)
                 for person in planning["roster_load"]:
-                    person["week_cost"] = totals.get(person["employee_id"])
+                    employee_id = person["employee_id"]
+                    person["week_cost"] = (
+                        None if employee_id in unpriced else totals.get(employee_id, 0.0)
+                    )
         except Exception:
             logging.getLogger(__name__).exception(
                 "schedule overview: planning inputs unavailable for location %s", location_id,

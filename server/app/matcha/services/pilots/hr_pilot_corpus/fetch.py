@@ -5,7 +5,7 @@ flag; `None` (module off) and `[]` (on but empty) are kept distinct, because
 silence would otherwise read as "nobody is scheduled".
 """
 import logging
-from datetime import date
+from datetime import datetime, timezone
 
 from ._config import _INCIDENT_LOOKBACK_DAYS, _MAX_BENEFIT_PLANS, _MAX_HR_PILOT_POLICIES, _MAX_HR_PILOT_SECTIONS, _MAX_RECENT_INCIDENTS, _MAX_SCHEDULE_SHIFTS, _MAX_TRAINING_DETAIL, _MAX_TRAINING_PROGRAMS, _SCHEDLAW_RULE_KEY_TO_CHECK, _SCHEDULE_LOOKAHEAD_DAYS
 
@@ -425,7 +425,12 @@ async def _fetch_labor_cost(conn, company_id) -> list[dict]:
     )
     # Company-wide and identical for every location — read once, not per pass.
     job_rates = await load_job_rates(conn, company_id=company_id)
-    today = date.today()
+    # UTC, like every other date in the scheduling stack
+    # (`datetime.combine(..., tzinfo=timezone.utc)` throughout
+    # `labor_cost_service`). A local-TZ `date.today()` disagrees with it for
+    # hours a day, and across a week boundary the corpus would name a different
+    # week than the manager's own board.
+    today = datetime.now(timezone.utc).date()
     out: list[dict] = []
     for row in rows:
         try:

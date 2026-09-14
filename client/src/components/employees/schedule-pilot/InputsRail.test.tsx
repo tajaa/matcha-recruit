@@ -251,7 +251,7 @@ function weekCost(overrides: Partial<WeekLaborCost> = {}): WeekLaborCost {
     ot_premium: 0, ot_minutes: 0, by_day: {},
     employees: [personCost('e1', 800), personCost('e2', 400)],
     unpriced_employee_ids: [], unpriced_employee_count: 0, unpriced_open_seats: 0,
-    unpriced_days: [],
+    unpriced_days: [], truncated: false,
     basis: {
       daily_ot_hours: 8, daily_doubletime_hours: 12, weekly_ot_hours: 40,
       ot_multiplier: 1.5, doubletime_multiplier: 2, as_scheduled: true,

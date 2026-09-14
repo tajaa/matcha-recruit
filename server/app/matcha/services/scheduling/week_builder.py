@@ -2157,6 +2157,7 @@ async def propose_week_draft(
     exclude_employee_ids: Iterable[str] | None = None,
     employee_hour_caps: Iterable[dict[str, Any]] | None = None,
     origin: str = "manual",
+    actor_role: str | None = None,
 ) -> dict[str, Any]:
     if origin not in {"manual", "automatic"}:
         return {"status": "refused", "message": "Unknown schedule generation origin."}
@@ -2307,12 +2308,22 @@ async def propose_week_draft(
         # before/after, statutory advisories verbatim, findings, jurisdiction.
         # Same cost block a staged edit carries, so the review pane renders one
         # shape: the week's bill as it stands vs. as this draft would leave it.
+        # `snapshot["existing_assignments"]` is COMPANY-wide on purpose (it
+        # backs cross-store double-booking detection). Cost is location-scoped
+        # everywhere else — the board header, the review, the corpus — so scope
+        # it here too, or a two-store tenant's week draft reports the other
+        # store's payroll and `compareReviews` subtracts two different bases.
+        location_assignments = [
+            item for item in snapshot["existing_assignments"]
+            if item.get("location_id") == str(location_id)
+        ]
         draft_cost = await cost_delta_for_rows(
             conn, company_id=company_id, location_id=location_id,
+            actor_role=actor_role,
             weeks=[(
                 week_start,
-                list(snapshot["existing_assignments"]),
-                list(snapshot["existing_assignments"]) + [
+                list(location_assignments),
+                list(location_assignments) + [
                     {
                         "employee_id": str(item["employee_id"]),
                         "starts_at": shift.get("starts_at"),

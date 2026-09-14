@@ -67,6 +67,26 @@ async def _serialize_job(
     )
 
 
+async def _assert_may_write_rate(
+    conn, company_id: UUID, current_user, value, *, attempted: bool = False,
+) -> None:
+    """`default_hourly_rate` is wage data on the way IN as well as out.
+
+    Gating the read alone left two holes: any `require_admin_or_client` caller
+    at a tenant without `labor_cost` could set or clear the rate, and — because
+    the serializer OMITS the key when it is not visible — a client that then
+    rendered an empty rate box would post `null` back and silently wipe a
+    stored rate it was never allowed to see. Refusing the write closes both.
+    """
+    if value is None and not attempted:
+        return
+    if not await is_labor_cost_visible(company_id, current_user.role, conn=conn):
+        raise HTTPException(
+            status_code=403,
+            detail="Setting a job's open-seat rate requires labor cost access",
+        )
+
+
 async def _validate_employee_ids(conn, company_id: UUID, employee_ids: list[UUID]) -> list[UUID]:
     unique_ids = list(dict.fromkeys(employee_ids))
     for employee_id in unique_ids:
@@ -156,6 +176,7 @@ async def list_jobs(
 async def create_job(body: JobCreate, current_user=Depends(require_admin_or_client)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
+        await _assert_may_write_rate(conn, company_id, current_user, body.default_hourly_rate)
         await assert_location_in_company(conn, company_id, body.location_id)
         employee_ids = await _validate_employee_ids(conn, company_id, body.employee_ids)
         try:
@@ -213,6 +234,10 @@ async def update_job(
     if "name" in patch:
         patch["name"] = patch["name"].strip()
     async with get_connection() as conn:
+        if "default_hourly_rate" in patch:
+            await _assert_may_write_rate(
+                conn, company_id, current_user, patch["default_hourly_rate"], attempted=True,
+            )
         if "location_id" in patch:
             await assert_location_in_company(conn, company_id, patch["location_id"])
         if not patch:

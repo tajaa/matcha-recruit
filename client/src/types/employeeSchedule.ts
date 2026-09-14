@@ -244,6 +244,9 @@ export interface WeekLaborCost {
    *  zero-filled across the week, so this is what tells a day nobody could be
    *  priced on apart from a day nobody worked. */
   unpriced_days: string[]
+  /** The week hit the assignment read cap, so this total covers only part of
+   *  it. Never render a truncated figure as a complete one. */
+  truncated: boolean
   basis: LaborCostBasis
   jurisdiction?: ScheduleJurisdiction
 }

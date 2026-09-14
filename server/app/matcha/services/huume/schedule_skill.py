@@ -627,7 +627,7 @@ async def find_coverage(
 async def propose(
     conn, *, company_id: UUID, actor_user_id: UUID, args: dict[str, Any],
     location_id: Optional[UUID] = None, week_start: Optional[_date] = None,
-    week_end: Optional[_date] = None,
+    week_end: Optional[_date] = None, actor_role: Optional[str] = None,
 ) -> ScheduleProposalResult:
     """Resolve a STAGE-turn request without executing it.
 
@@ -710,7 +710,7 @@ async def propose(
                     original_content="[huume thread] batched schedule correction",
                     surface=surface, shift_statuses=shift_statuses,
                     editor_location_id=location_id, week_start=week_start, week_end=week_end,
-                    auto_assign_unpinned=False,
+                    auto_assign_unpinned=False, actor_role=actor_role,
                 )
             else:
                 parsed = {"ack": "Got it.", "action": "edit", "shift_requests": [], "edit_requests": edit_requests}
@@ -722,6 +722,7 @@ async def propose(
                     shift_statuses=shift_statuses,
                     editor_location_id=location_id,
                     editor_week_start=week_start, editor_week_end=week_end,
+                    actor_role=actor_role,
                 )
             operation_count = len(edit_requests) + len(shift_requests)
             operation_summary = summarize_operations(edit_requests, shift_requests)

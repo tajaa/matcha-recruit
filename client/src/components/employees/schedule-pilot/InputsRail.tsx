@@ -282,6 +282,12 @@ function InputsRail({
               </div>
             )}
           </dl>
+          {cost.truncated && (
+            <p className="mt-2 rounded-md border border-amber-500/25 bg-amber-500/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-amber-200">
+              This week has more shifts than the cost read covers, so the figures
+              above are a partial total.
+            </p>
+          )}
           {(cost.unpriced_employee_count > 0 || cost.unpriced_open_seats > 0) && (
             <p className="mt-2 rounded-md border border-amber-500/25 bg-amber-500/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-amber-200">
               {[

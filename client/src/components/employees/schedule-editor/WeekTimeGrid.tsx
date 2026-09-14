@@ -55,7 +55,12 @@ export default function WeekTimeGrid({ days, shifts, pendingKeys, editPublished,
                     ? 'Someone on this day has no pay rate on file — not priced'
                     : 'Scheduled labor cost this day'}
                 >
-                  {costLabel(unpricedDays?.has(day) && !costByDay[day] ? null : costByDay[day])}
+                  {unpricedDays?.has(day)
+                    // Partly priced: show what IS known, marked as a floor.
+                    // An unmarked "$540" on a day whose fourth person has no
+                    // rate reads as the day's total and makes it look cheap.
+                    ? (costByDay[day] ? `\u2265${costLabel(costByDay[day])}` : costLabel(null))
+                    : costLabel(costByDay[day])}
                 </span>
               )}
             </div>

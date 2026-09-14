@@ -303,9 +303,10 @@ class TestLaborCostVisibility:
         monkeypatch.setattr(svc, "get_company_features", boom)
         assert await svc.cost_delta_for_rows(
             None, company_id="co", location_id=None, weeks=[(WEEK, [], [])],
+            actor_role="client",
         ) is None
         assert await svc.review_cost_for_ops(
-            None, company_id="co", location_id=None,
+            None, company_id="co", location_id=None, actor_role="client",
             ops=[{"kind": "assign", "shift_id": "s", "to_employee_id": "e",
                   "starts_at": "2026-09-14T09:00:00+00:00", "ends_at": "2026-09-14T17:00:00+00:00"}],
         ) is None
@@ -516,7 +517,7 @@ class TestCostDeltaForRows:
         before = [shift("g", 14, 480)]
         block = await svc.cost_delta_for_rows(
             None, company_id="co", location_id=None,
-            weeks=[(WEEK, before, before + [shift("g", 15, 480)])],
+            weeks=[(WEEK, before, before + [shift("g", 15, 480)])], actor_role="client",
         )
         assert block["before"] == 160.00
         assert block["after"] == 320.00
@@ -528,6 +529,7 @@ class TestCostDeltaForRows:
         svc = self._service(monkeypatch, hourly("g", "20"))
         block = await svc.cost_delta_for_rows(
             None, company_id="co", location_id=None, weeks=[(WEEK, [shift("g", 14, 480)], [])],
+            actor_role="client",
         )
         assert block["delta"] == -160.00
         # 0.00, NOT None — None means "no pay rate on file", and the UI copy
@@ -539,6 +541,7 @@ class TestCostDeltaForRows:
         svc = self._service(monkeypatch, {})
         block = await svc.cost_delta_for_rows(
             None, company_id="co", location_id=None, weeks=[(WEEK, [shift("u", 14, 480)], [])],
+            actor_role="client",
         )
         assert block["by_employee"]["u"] == {"before": None, "after": None}
         assert block["unpriced_employee_ids"] == ["u"]
@@ -549,7 +552,7 @@ class TestCostDeltaForRows:
         before = [shift("g", 14 + i, 480) for i in range(5)]
         block = await svc.cost_delta_for_rows(
             None, company_id="co", location_id=None,
-            weeks=[(WEEK, before, before + [shift("g", 19, 360)])],
+            weeks=[(WEEK, before, before + [shift("g", 19, 360)])], actor_role="client",
         )
         assert block["ot_premium_before"] == 0.0
         assert block["ot_premium_after"] == 60.00
@@ -566,6 +569,7 @@ class TestCostDeltaForRows:
                 (WEEK, [], [shift("g", 14, 480)]),
                 (next_week, [], [shift("g", 21, 480)]),
             ],
+            actor_role="client",
         )
         assert block["after"] == 320.00
         assert block["by_employee"]["g"]["after"] == 320.00
@@ -575,6 +579,203 @@ class TestCostDeltaForRows:
         svc = self._service(monkeypatch, hourly("g", "20"))
         block = await svc.cost_delta_for_rows(
             None, company_id="co", location_id=None,
-            weeks=[(WEEK, [], [shift("g", 14, 480), shift("g", 25, 480)])],
+            weeks=[(WEEK, [], [shift("g", 14, 480), shift("g", 25, 480)])], actor_role="client",
         )
         assert block["after"] == 160.00
+
+
+class TestReviewCostTakesTheSameGate:
+    """`review.cost.by_employee` is a per-coworker wage figure, and a review is
+    NOT a manager-only surface: `POST …/fill-vacant/preview` is mounted on
+    `require_company_member`, which admits `employee` and `individual`, and an
+    employee flagged `is_manager` clears `assert_manager_location`."""
+
+    @staticmethod
+    def _service(monkeypatch):
+        from app.matcha.services.scheduling import labor_cost_service as svc
+
+        async def features(company_id, conn=None):
+            return {"labor_cost": True}
+
+        async def profiles(conn, *, company_id, employee_ids):
+            return hourly("g", "20")
+
+        async def rules(conn, company_id, location_id):
+            return CA
+
+        monkeypatch.setattr(svc, "get_company_features", features)
+        monkeypatch.setattr(svc, "load_pay_profiles", profiles)
+        monkeypatch.setattr(svc, "_load_rules", rules)
+        return svc
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("role", ["employee", "individual", "broker", None])
+    async def test_a_non_business_admin_gets_no_cost_block_at_all(self, monkeypatch, role):
+        svc = self._service(monkeypatch)
+        assert await svc.cost_delta_for_rows(
+            None, company_id="co", location_id=None,
+            weeks=[(WEEK, [], [shift("g", 14, 480)])], actor_role=role,
+        ) is None
+
+    @pytest.mark.asyncio
+    async def test_omitting_the_role_entirely_fails_closed(self, monkeypatch):
+        """A surface that has not been taught to pass the caller's role must
+        get no cost, not an ungated one."""
+        svc = self._service(monkeypatch)
+        assert await svc.cost_delta_for_rows(
+            None, company_id="co", location_id=None,
+            weeks=[(WEEK, [], [shift("g", 14, 480)])],
+        ) is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("role", ["admin", "client"])
+    async def test_a_business_admin_gets_the_block(self, monkeypatch, role):
+        svc = self._service(monkeypatch)
+        block = await svc.cost_delta_for_rows(
+            None, company_id="co", location_id=None,
+            weeks=[(WEEK, [], [shift("g", 14, 480)])], actor_role=role,
+        )
+        assert block["after"] == 160.00
+
+
+class TestOpenSeatsRideBothSides:
+    """The board's `summary.cost.total` includes open seats. A review beside it
+    that omitted them put the two on different bases, and filling a seat read
+    as new spend rather than as demand already projected."""
+
+    @staticmethod
+    def _service(monkeypatch):
+        from app.matcha.services.scheduling import labor_cost_service as svc
+
+        async def features(company_id, conn=None):
+            return {"labor_cost": True}
+
+        async def profiles(conn, *, company_id, employee_ids):
+            return hourly("g", "20")
+
+        async def rules(conn, company_id, location_id):
+            return CA
+
+        monkeypatch.setattr(svc, "get_company_features", features)
+        monkeypatch.setattr(svc, "load_pay_profiles", profiles)
+        monkeypatch.setattr(svc, "_load_rules", rules)
+        return svc
+
+    @pytest.mark.asyncio
+    async def test_an_untouched_open_seat_is_projected_on_both_sides(self, monkeypatch):
+        svc = self._service(monkeypatch)
+        seats = [{"shift_id": "s9", "job_id": "j1", "open": 1, "worked_minutes": 480,
+                  "starts_at": datetime(2026, 9, 16, 9, tzinfo=timezone.utc)}]
+        block = await svc.cost_delta_for_rows(
+            None, company_id="co", location_id=None,
+            weeks=[(WEEK, [], [shift("g", 14, 480)])], actor_role="client",
+            open_seats_by_week={WEEK: seats}, job_rates={"j1": Decimal("19")},
+        )
+        # 1 x 8h x $19 = $152 on both sides; the delta is only the new shift.
+        assert block["before"] == 152.00
+        assert block["after"] == 312.00
+        assert block["delta"] == 160.00
+
+    @pytest.mark.asyncio
+    async def test_filling_a_seat_converts_projection_into_real_cost(self, monkeypatch):
+        svc = self._service(monkeypatch)
+        seats = [{"shift_id": "s1", "job_id": "j1", "open": 1, "worked_minutes": 480,
+                  "starts_at": datetime(2026, 9, 14, 9, tzinfo=timezone.utc)}]
+        filled = dict(shift("g", 14, 480), shift_id="s1")
+        block = await svc.cost_delta_for_rows(
+            None, company_id="co", location_id=None,
+            weeks=[(WEEK, [], [filled])], actor_role="client",
+            open_seats_by_week={WEEK: seats}, job_rates={"j1": Decimal("19")},
+        )
+        # $152 projected -> $160 real. Not $152 + $160.
+        assert block["before"] == 152.00
+        assert block["after"] == 160.00
+
+
+class TestExemptWithNoRate:
+    """An exempt employee cannot accrue overtime, priced or not. Falling
+    through to the hourly loop minted OT minutes for someone statutorily
+    incapable of them — and `ot_minutes` is what Huume and the HR Pilot
+    report."""
+
+    @pytest.mark.asyncio
+    async def test_no_phantom_overtime_for_a_salaried_manager_with_no_rate(self):
+        pay = {"gm": lc.PayProfile("gm", None, lc.EXEMPT, False)}
+        week = lc.cost_week(
+            [shift("gm", 14 + i, 600) for i in range(6)], pay, CA, week_start=WEEK,
+        )
+        payload = week.payload()
+        assert payload["ot_minutes"] == 0
+        assert payload["employees"][0]["ot_minutes"] == 0
+        assert payload["employees"][0]["doubletime_minutes"] == 0
+        assert payload["unpriced_employee_ids"] == ["gm"]
+        assert payload["total"] == 0.0
+        # The hours are still visible — only the money is missing.
+        assert payload["employees"][0]["minutes"] == 3600
+
+
+class TestBooleanThresholds:
+    """`isinstance(True, int)` is True, so a bool from an approved
+    `schedule_rule_extraction` row would otherwise become a one-hour
+    threshold and price the whole week at time-and-a-half."""
+
+    def test_a_boolean_weekly_threshold_is_refused_not_read_as_one_hour(self):
+        rules = {**dict(UNMAPPED), "weekly_ot_hours": True}
+        week = lc.cost_week(
+            [shift("g", 14 + i, 480) for i in range(5)], hourly("g", "20"), rules, week_start=WEEK,
+        )
+        assert week.employees[0].ot_minutes == 0
+        assert week.payload()["total"] == 800.00
+        assert week.payload()["basis"]["weekly_ot_hours"] is None
+
+
+class TestCrossWeekMoves:
+    """`_apply_ops` runs against the COMBINED rows of every touched week. Per
+    week it would drop a retimed shift from the source week and never add it
+    to the destination — a pure saving for a change that costs the same."""
+
+    SHIFTS = {
+        "a": {"starts_at": datetime(2026, 9, 15, 9, tzinfo=timezone.utc),
+              "ends_at": datetime(2026, 9, 15, 17, tzinfo=timezone.utc), "break_minutes": 0},
+    }
+
+    def test_a_retime_into_next_week_keeps_the_row(self):
+        from app.matcha.services.scheduling.labor_cost_service import _apply_ops
+
+        rows = [{"employee_id": "e1", "shift_id": "a",
+                 "starts_at": datetime(2026, 9, 15, 9, tzinfo=timezone.utc), "worked_minutes": 480}]
+        after = _apply_ops(rows, [{
+            "kind": "retime", "shift_id": "a", "break_minutes": 0,
+            "starts_at": "2026-09-15T09:00:00+00:00", "ends_at": "2026-09-15T17:00:00+00:00",
+            "new_starts_at": "2026-09-21T09:00:00+00:00", "new_ends_at": "2026-09-21T17:00:00+00:00",
+        }], self.SHIFTS)
+        assert len(after) == 1
+        assert after[0]["starts_at"].date() == date(2026, 9, 21)
+        assert after[0]["worked_minutes"] == 480
+
+    @pytest.mark.asyncio
+    async def test_the_move_nets_to_zero_across_the_two_weeks(self, monkeypatch):
+        from app.matcha.services.scheduling import labor_cost_service as svc
+
+        async def features(company_id, conn=None):
+            return {"labor_cost": True}
+
+        async def profiles(conn, *, company_id, employee_ids):
+            return hourly("e1", "20")
+
+        async def rules(conn, company_id, location_id):
+            return CA
+
+        monkeypatch.setattr(svc, "get_company_features", features)
+        monkeypatch.setattr(svc, "load_pay_profiles", profiles)
+        monkeypatch.setattr(svc, "_load_rules", rules)
+
+        before = [{"employee_id": "e1", "shift_id": "a",
+                   "starts_at": datetime(2026, 9, 15, 9, tzinfo=timezone.utc), "worked_minutes": 480}]
+        after = [{"employee_id": "e1", "shift_id": "a",
+                  "starts_at": datetime(2026, 9, 21, 9, tzinfo=timezone.utc), "worked_minutes": 480}]
+        block = await svc.cost_delta_for_rows(
+            None, company_id="co", location_id=None, actor_role="client",
+            weeks=[(WEEK, before, after), (date(2026, 9, 20), before, after)],
+        )
+        assert block["delta"] == 0.0

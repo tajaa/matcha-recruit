@@ -27,7 +27,7 @@ from ...services.scheduling.schedule_location_readiness import (
     assert_schedule_location_ready_to_publish,
     get_schedule_location_readiness,
 )
-from ...services.scheduling.labor_cost_service import is_labor_cost_visible, load_week_cost
+from ...services.scheduling.labor_cost_service import labor_cost_visible_from, load_week_cost
 from ...services.scheduling.schedule_guidance import refresh_assignment_break_guidance
 from ...services.scheduling.schedule_breaks import minimum_meal_break_minutes
 from ...services.scheduling.schedule_guidance import (
@@ -380,7 +380,9 @@ async def get_week(
         # without `labor_cost` + a business-admin role.
         cost = None
         try:
-            if await is_labor_cost_visible(company_id, current_user.role, conn=conn):
+            # `features` was already read above — reuse it rather than paying a
+            # second `companies` SELECT on the board's hot path.
+            if labor_cost_visible_from(features, current_user.role):
                 cost = (await load_week_cost(
                     conn, company_id=company_id, location_id=location, week_start=start,
                 )).payload()

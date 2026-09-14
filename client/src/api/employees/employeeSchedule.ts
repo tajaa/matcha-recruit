@@ -9,7 +9,7 @@ import type {
   EmployeeScheduleProfile, EmployeeScheduleProfilePayload,
   ScheduleAutomationRule, ScheduleAutomationPayload, WeekTemplateReplacePayload,
   ScheduleAuditFilters, ScheduleAuditResponse,
-  ShiftBreakStagger, PlannedBreak, WeekLaborCost,
+  ShiftBreakStagger, PlannedBreak,
   PlanningInputs, FillVacantPreviewRequest, FillVacantPreviewResponse, FillVacantApplyResponse,
 } from '../../types/employeeSchedule'
 
@@ -444,15 +444,6 @@ export function submitMyAvailabilityRequest(payload: MyAvailabilityRequestPayloa
 export function fetchPlanningInputs(locationId: string, weekStart: string) {
   return api.get<PlanningInputs>(
     `/employee-schedule/locations/${locationId}/planning-inputs?week_start=${encodeURIComponent(weekStart)}`,
-  )
-}
-
-/** The week's scheduled labor cost. 403s rather than returning zeros when the
- *  tenant lacks `labor_cost` or the caller is not a business admin, so a caller
- *  can never mistake "no access" for "this week is free". */
-export function fetchLaborCost(locationId: string, weekStart: string) {
-  return api.get<WeekLaborCost>(
-    `/employee-schedule/locations/${locationId}/labor-cost?week_start=${encodeURIComponent(weekStart)}`,
   )
 }
 

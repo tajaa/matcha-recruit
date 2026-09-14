@@ -67,9 +67,16 @@ def _threshold_minutes(rules: Mapping[str, Any], key: str) -> Optional[int]:
     — an absent key is "not researched", and inventing a threshold for it is
     exactly what `_SCHEDULING_RULES` forbids."""
     raw = rules.get(key)
-    if raw is None or not isinstance(raw, (int, float)):
+    # `isinstance(True, int)` is True, so the bool guard is load-bearing: an
+    # extracted `{"weekly_ot_hours": true}` would otherwise become a ONE-HOUR
+    # weekly threshold and price the whole week at time-and-a-half. Same guard
+    # `_multiplier` already carries.
+    if raw is None or isinstance(raw, bool) or not isinstance(raw, (int, float, Decimal)):
         return None
-    return int(Decimal(str(raw)) * _MINUTES_PER_HOUR)
+    try:
+        return int(Decimal(str(raw)) * _MINUTES_PER_HOUR)
+    except (ArithmeticError, ValueError):
+        return None
 
 
 def _multiplier(rules: Mapping[str, Any], key: str) -> Optional[Decimal]:
@@ -238,6 +245,9 @@ class WeekCost:
     # people with no rate on file is indistinguishable from a day off — and
     # "$0" next to a fully-staffed Tuesday reads as "Tuesday is free".
     unpriced_days: list[str] = field(default_factory=list)
+    # The week hit the assignment read cap, so this total covers only part of
+    # it. Never let a partial figure render as a complete one.
+    truncated: bool = False
     basis: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -273,6 +283,7 @@ class WeekCost:
             "unpriced_employee_count": len(self.unpriced_employee_ids),
             "unpriced_open_seats": self.unpriced_open_seats,
             "unpriced_days": sorted(self.unpriced_days),
+            "truncated": self.truncated,
             "basis": dict(self.basis),
         }
 
@@ -405,7 +416,18 @@ def cost_week(
         )
 
         if profile.classification == EXEMPT and not profile.priced:
+            # Exempt with no rate on file: unpriced AND still exempt. Falling
+            # through to the hourly loop would mint overtime minutes for
+            # someone statutorily incapable of accruing them, and those land in
+            # `ot_minutes`, which Huume and the HR Pilot both report.
             unpriced_days.update(day.isoformat() for day in days)
+            for day in sorted(days):
+                entry.days.append(DayCost(
+                    day=day, minutes=days[day], straight_minutes=days[day],
+                ))
+            result.unpriced_employee_ids.append(employee_id)
+            result.employees.append(entry)
+            continue
         if profile.classification == EXEMPT and profile.priced:
             # Salary does not move with hours. Spread the weekly share over the
             # days worked so the board's day columns add up, but keep it out of
