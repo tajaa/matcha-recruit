@@ -48,8 +48,18 @@ fi
 [ -z "$payload" ] || payload="$(printf '%s' "$payload" | jq -c . 2>/dev/null || printf '%s' "$payload")"
 printf '%s %s %s\n' "$method" "${url#https://example.invalid/api}" "$payload" >> "$AUTOPR_TEST_CALLS"
 body='{"ok":true}'
+# The real PATCH returns the updated row, and its updated_at is the server
+# clock reading the ledger re-stamp needs.
+[ "$method" != PATCH ] || body='{"ok":true,"updated_at":"2026-09-13T21:11:48.224650+00:00"}'
 case "$url" in
-  */tasks) [ -z "${AUTOPR_TEST_TASKS_JSON:-}" ] || body="$(cat "$AUTOPR_TEST_TASKS_JSON")" ;;
+  */tasks)
+    [ -z "${AUTOPR_TEST_TASKS_JSON:-}" ] || body="$(cat "$AUTOPR_TEST_TASKS_JSON")"
+    # A transient board read failure, so the journal's own fallback is testable.
+    if [ -n "${AUTOPR_TEST_TASKS_HTTP:-}" ]; then
+      [ -z "$output_file" ] || printf '%s' "$body" > "$output_file"
+      printf '%s' "$AUTOPR_TEST_TASKS_HTTP"; exit 0
+    fi
+    ;;
   */files) [ -z "${AUTOPR_TEST_FILES_JSON:-}" ] || body="$(cat "$AUTOPR_TEST_FILES_JSON")" ;;
 esac
 [ -z "$output_file" ] || printf '%s' "$body" > "$output_file"
@@ -101,8 +111,123 @@ check "the checkpoint time is converted to Pacific, not relabelled" \
   $(grep -q '2026-09-11 21:00 PDT' <<< "$body" \
     && ! grep -q '2026-09-12 04:00' <<< "$body" && echo 0 || echo 1)
 check "a failure nothing else explained gets a STOPPED header that points at the journal" \
-  $(grep -q "^PATCH /matcha-work/projects/11111111-1111-4111-8111-111111111111/tasks/bbbb0000-0000-4000-8000-000000000002 {\"progress_note\":\"🤖 AUTO SETUP · STOPPED: MODEL PASS FAILED · run #77 · note: see $journal\"}$" "$TMP_DIR/calls" \
+  $(grep -q "^PATCH /matcha-work/projects/11111111-1111-4111-8111-111111111111/tasks/bbbb0000-0000-4000-8000-000000000002 {\"progress_note\":\"🤖 AUTO SETUP · STOPPED: MODEL PASS FAILED · run #77 · note: see $journal\",\"board_column\":\"todo\"}$" "$TMP_DIR/calls" \
     && ! grep -q 'READY FOR REVIEW' "$TMP_DIR/calls" && echo 0 || echo 1)
+
+# Finding: the claim that moved the card to In Progress is settled by any later
+# progress-note write (project_task_service._AUTOPR_ACTIVE_CLAIM_QUERY), and
+# collect.sh admits In Progress only while the claim is live. So a STOPPED
+# note alone left the card somewhere nothing could select it again, with a
+# resume line telling the owner to press a Run button that could not work
+# from that column (card 9a384f39, run 34782997839). The pause path already
+# moves in its note write; the failure path has to do the same, in the SAME
+# PATCH, and follow unstick's lane rule.
+patch_line() { grep '^PATCH ' "$TMP_DIR/calls" | head -1; }
+rm -f "$TMP_DIR/uploads"/*
+cat > "$TMP_DIR/tasks-live.json" <<'TASKS'
+[{"id":"bbbb0000-0000-4000-8000-000000000002","board_column":"in_progress","pr_number":513,"progress_note":"🤖 AUTO SETUP · READY FOR REVIEW · build 14 · note: old"}]
+TASKS
+AUTOPR_TEST_TASKS_JSON="$TMP_DIR/tasks-live.json" \
+  run_journal "$TMP_DIR/card.json" --outcome failure --reason investigate --checkpoint "$TMP_DIR/checkpoint" >/dev/null
+check "a failed run returns a claimed In Progress card with a PR to Changes Requested in the note write" \
+  $(patch_line | grep -q '"board_column":"changes_requested"' \
+    && patch_line | grep -q 'STOPPED: MODEL PASS FAILED' \
+    && [ "$(grep -c '^PATCH ' "$TMP_DIR/calls")" = 1 ] && echo 0 || echo 1)
+check "the journal tells the owner the card is handed back and how to check" \
+  $(grep -q 'hands the card back to its lane' "$TMP_DIR/uploads"/autopr-run-77-*.md \
+    && grep -q 'msandbox autopr unstick' "$TMP_DIR/uploads"/autopr-run-77-*.md && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/uploads"/*
+jq '.[0].pr_number = null' "$TMP_DIR/tasks-live.json" > "$TMP_DIR/tasks-live-nopr.json"
+AUTOPR_TEST_TASKS_JSON="$TMP_DIR/tasks-live-nopr.json" \
+  run_journal "$TMP_DIR/card.json" --outcome failure --reason investigate >/dev/null
+check "a failed run returns a claimed In Progress card without a PR to Todo" \
+  $(patch_line | grep -q '"board_column":"todo"' && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/uploads"/*
+jq '.[0].board_column = "changes_requested"' "$TMP_DIR/tasks-live.json" > "$TMP_DIR/tasks-live-lane.json"
+AUTOPR_TEST_TASKS_JSON="$TMP_DIR/tasks-live-lane.json" \
+  run_journal "$TMP_DIR/card.json" --outcome failure --reason investigate >/dev/null
+check "a card that already left In Progress keeps its lane; only the note is written" \
+  $(patch_line | grep -q 'STOPPED: MODEL PASS FAILED' \
+    && ! patch_line | grep -q 'board_column' && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/uploads"/*
+AUTOPR_TEST_TASKS_JSON="$TMP_DIR/tasks-live.json" \
+  run_journal "$TMP_DIR/card.json" --outcome success --pr 500 --report "$TMP_DIR/report.md" >/dev/null
+check "a success never moves the card from here" \
+  $(! grep -q '^PATCH ' "$TMP_DIR/calls" && echo 0 || echo 1)
+
+# Finding: $CARD_FILE is the SELECTION-time snapshot, taken by collect.sh
+# BEFORE investigate.sh claims the card, so its board_column is the lane the
+# card came from and is never in_progress. Defaulting the live column to it
+# meant a transient board read failure silently skipped the hand-back — the
+# exact stranding this write exists to prevent — while the journal told the
+# owner the card was back in its lane.
+# With the board unreadable the PR can only come from the card snapshot (which
+# collect.sh does project) or --pr, and the lane follows the same rule as ever.
+rm -f "$TMP_DIR/uploads"/*
+jq '.pr_number = 513 | .board_column = "changes_requested"' "$TMP_DIR/card.json" > "$TMP_DIR/card-rework.json"
+AUTOPR_TEST_TASKS_HTTP=503 run_journal "$TMP_DIR/card-rework.json" --outcome failure --reason investigate >/dev/null
+check "an unreadable board still hands a rework card back to Changes Requested" \
+  $(patch_line | grep -q '"board_column":"changes_requested"' \
+    && patch_line | grep -q 'STOPPED: MODEL PASS FAILED' && echo 0 || echo 1)
+
+# The snapshot's own column must never be the answer: it is the lane the card
+# was selected FROM, so trusting it skips the hand-back exactly when the board
+# read failed. This card says "todo" and still has to be returned.
+rm -f "$TMP_DIR/uploads"/*
+jq '.board_column = "todo"' "$TMP_DIR/card.json" > "$TMP_DIR/card-todo.json"
+AUTOPR_TEST_TASKS_HTTP=503 run_journal "$TMP_DIR/card-todo.json" --outcome failure --reason investigate >/dev/null
+check "an unreadable board with no PR hands the card back to Todo" \
+  $(patch_line | grep -q '"board_column":"todo"' && echo 0 || echo 1)
+
+# Finding: `live_read_ok` was set from "the response body is non-empty", so a
+# 200 carrying a proxy error page, an error object, or a list this task is
+# absent from left every per-field filter returning "" — which read as "not In
+# Progress" and silently skipped the hand-back. Guard on having actually
+# extracted the card.
+for unusable in '<html>502 Bad Gateway</html>' '{"detail":"nope"}' '[{"id":"ffffffff-0000-4000-8000-00000000000f"}]'; do
+  rm -f "$TMP_DIR/uploads"/*
+  printf '%s' "$unusable" > "$TMP_DIR/tasks-unusable.json"
+  AUTOPR_TEST_TASKS_JSON="$TMP_DIR/tasks-unusable.json" \
+    run_journal "$TMP_DIR/card-rework.json" --outcome failure --reason investigate >/dev/null
+  patch_line | grep -q '"board_column":"changes_requested"' || {
+    printf 'FAIL: a 200 carrying %s skipped the hand-back\n' "$unusable" >&2
+    FAIL=$((FAIL + 1)); continue
+  }
+  PASS=$((PASS + 1))
+done
+printf 'PASS: an unusable 200 body is treated as unreadable, not as "not In Progress"\n'
+
+# The hand-back is a column move, and select.sh parks a repeat offender only
+# while the failure ledger sits at or after the card's last move. Those stamps
+# come from two machines, so Cleanup re-stamps the ledger from the server's
+# own timestamp — which this script has to hand it.
+rm -f "$TMP_DIR/uploads"/* "$TMP_DIR/handback-at"
+AUTOPR_HANDBACK_AT_FILE="$TMP_DIR/handback-at" AUTOPR_TEST_TASKS_JSON="$TMP_DIR/tasks-live.json" \
+  run_journal "$TMP_DIR/card-rework.json" --outcome failure --reason investigate >/dev/null
+check "a hand-back publishes the server's own timestamp for the failure ledger" \
+  $([ -s "$TMP_DIR/handback-at" ] \
+    && grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$TMP_DIR/handback-at" && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/uploads"/* "$TMP_DIR/handback-at"
+AUTOPR_HANDBACK_AT_FILE="$TMP_DIR/handback-at" AUTOPR_TEST_TASKS_JSON="$TMP_DIR/tasks-live-lane.json" \
+  run_journal "$TMP_DIR/card.json" --outcome failure --reason investigate >/dev/null
+check "a run that moved nothing publishes no timestamp to re-stamp with" \
+  $([ ! -s "$TMP_DIR/handback-at" ] && echo 0 || echo 1)
+
+# The journal body is composed and uploaded BEFORE the hand-back PATCH is
+# attempted, so it must not assert a retry that may not have been arranged.
+rm -f "$TMP_DIR/uploads"/*
+run_journal "$TMP_DIR/card.json" --outcome cancelled --reason cancelled >/dev/null
+body="$(cat "$TMP_DIR/uploads"/autopr-run-77-*.md)"
+check "a cancelled run does not promise the scheduler will retry it" \
+  $(! grep -q 'scheduler' <<< "$body" && grep -q 'msandbox autopr release' <<< "$body" && echo 0 || echo 1)
+rm -f "$TMP_DIR/uploads"/*
+run_journal "$TMP_DIR/card.json" --outcome failure --reason investigate >/dev/null
+check "a failed run names the command that fixes a hand-back that did not land" \
+  $(grep -q 'msandbox autopr unstick bbbb0000' "$TMP_DIR/uploads"/autopr-run-77-*.md && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/uploads"/*
 run_journal "$TMP_DIR/card.json" --outcome success --pr 500 --report "$TMP_DIR/report.md" >/dev/null

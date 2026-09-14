@@ -58,6 +58,7 @@ fi
 case "$reason" in
     msandbox-off) emit 'fg=red,bold' 'SANDBOX OFF'; exit 0 ;;
     codex-usage-limit-backoff) emit 'fg=yellow,bold' 'codex backoff'; exit 0 ;;
+    codex-auth-required) emit 'fg=red,bold' 'CODEX LOGIN'; exit 0 ;;
 esac
 
 active=''

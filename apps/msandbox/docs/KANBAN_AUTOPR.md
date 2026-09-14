@@ -107,8 +107,13 @@ changes.
    whatever originally installed it. `install_repo_webhook` now PATCHes an existing
    hook's event list up to `["push", "pull_request"]` instead of no-op'ing on a URL match.
 5. Ensure the host Codex CLI is authenticated with the intended ChatGPT account
-   (`codex login status`). Do **not** add an API key for the
-   sandbox: each run securely reuses only the host auth file.
+   (`codex login status`; `msandbox doctor` prints when the access token expires). Do
+   **not** add an API key for the sandbox: each run securely reuses only the host auth
+   file. That file is copied read-only into every run and the ChatGPT refresh token is
+   single-use, so once the access token lapses (about ten days after the last refresh)
+   nothing refreshes it — the dispatcher stops launching runs, the tmux status shows
+   `CODEX LOGIN`, the kanban workflow refuses before selecting a card, and the fix is
+   `codex login` on this Mac again.
 6. Install the local timer: `./apps/msandbox/harness/install-launch-agent.sh`. Installation
    alone leaves autonomous work OFF. Its JSONL log is
    `~/Library/Logs/matcha-kanban-autopr-dispatch.log`.
@@ -261,7 +266,11 @@ including held (`HOLD · <reason>`) and claimed In Progress cards; `msandbox aut
 queueing (`run-defer`), `run-now` records a run request and kicks the dispatcher,
 `unstick` moves a stranded In Progress card back to Todo (Changes Requested when it has
 a PR) and `--hold` parks it there, and `cancel-run [--hold]` cancels the active Kanban
-workflow run and unsticks the card the runner checkout is on. All of these are
+workflow run and unsticks the card the runner checkout is on. A run that fails now
+returns its own card the same way in the STOPPED note write (the claim that moved it to
+In Progress is settled by that note, so a note-only write used to leave the card where
+no pass could select it), which leaves `unstick` for cancels and for cards stranded by
+older runs. All of these are
 `apps/msandbox/harness/card-control.sh` (installed next to the dispatcher), which logs
 in as the bot and refuses ambiguous targets (exit 2). `cancel-run` deliberately leaves
 `autopr_control.py finish` to the workflow's own Cleanup step. The same actions appear as

@@ -108,6 +108,23 @@ else
     # history, logs, database, and every unrelated credential stay outside.
     [ -r "$HOST_CODEX_AUTH_FILE" ] \
         || die "missing host Codex auth file: $HOST_CODEX_AUTH_FILE"
+    # Readable is not usable. The copy below is bind-mounted read-only and the
+    # refresh token is single-use, so an expired access token cannot be
+    # refreshed into working from inside; refuse here, before the container
+    # is touched, with the fix in the message. The kanban workflow already
+    # checks this before selecting a card; this covers the other lanes.
+    auth_rc=0
+    auth_message="$("$CODEX_BACKOFF" auth-check "$HOST_CODEX_AUTH_FILE" 2>&1)" || auth_rc=$?
+    # Only 4 is a dead credential. Anything else means the check could not run
+    # (no python3, a checkout missing cli/codex_auth.py), and dying on that
+    # would block every model pass in the error-autofix and self-audit lanes
+    # behind a message telling the operator to run `codex login`, which cannot
+    # clear it. Warn and let the run proceed to find out for real.
+    if [ "$auth_rc" -eq 4 ]; then
+        die "$auth_message"
+    elif [ "$auth_rc" -ne 0 ]; then
+        printf 'kanban-autopr sandbox: %s; proceeding without the preflight\n' "$auth_message" >&2
+    fi
     mkdir -p "$AUTH_DIR"
     chmod 700 "$AUTH_DIR"
     cp "$HOST_CODEX_AUTH_FILE" "$SANDBOX_CODEX_AUTH_FILE"
