@@ -39,12 +39,16 @@ autofix_ensure_cache_dir() {
 autofix_python_key() {
     local root="$1" file found=false
     for file in "$root/server/requirements.txt" "$root/server/requirements-dev.txt"; do
-        [ -f "$file" ] || continue
-        found=true
+        [ -f "$file" ] && found=true
     done
     [ "$found" = true ] || return 1
+    # The `|| true` is load-bearing under `pipefail`: without it the loop's
+    # status is the last `[ -f ]` test, so an absent requirements-dev.txt
+    # fails the whole pipeline after the key has already been printed — and
+    # every caller that checks the status reads a present toolchain as
+    # unmeasurable.
     for file in "$root/server/requirements.txt" "$root/server/requirements-dev.txt"; do
-        [ -f "$file" ] && cat "$file"
+        { [ -f "$file" ] && cat "$file"; } || true
     done | shasum -a 256 | cut -c1-12
 }
 

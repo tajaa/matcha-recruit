@@ -265,17 +265,15 @@ def _install_drift_report(repo: Path, bin_dir: Path | None = None) -> int:
     login_blocks = lanes_installed and not login_ok
     # verify.sh only reads the runner-owned toolchain; when it is missing every
     # bot PR says needs-work for "could not run", which no one notices because
-    # it is on all of them. Same `--check` audit.sh runs — and, by the same
-    # rule as the login above, only reported on a host that runs the lanes:
-    # its MISSING lines are what the post-merge hook greps for, and on a
-    # developer's machine they would print a stale-automation banner after
-    # every `git pull` for a cache nothing there reads.
-    toolchain_blocks = False
-    if lanes_installed:
-        toolchain_ok, toolchain_lines = verify_toolchain_status(repo_root=repo)
-        for line in toolchain_lines:
-            print(line)
-        toolchain_blocks = not toolchain_ok
+    # it is on all of them. Same `--check` audit.sh runs. Reported on every
+    # host (a developer may want to run verify.sh by hand) but, like the login
+    # above, only unhealthy where the lanes run. `harness/hooks/post-merge`
+    # filters these lines back out: a missing verification cache is not the
+    # installed-tree drift that banner is about.
+    toolchain_ok, toolchain_lines = verify_toolchain_status(repo_root=repo)
+    for line in toolchain_lines:
+        print(line)
+    toolchain_blocks = lanes_installed and not toolchain_ok
     return (
         1
         if pre_move_launcher or stale or installed != expected or login_blocks or toolchain_blocks

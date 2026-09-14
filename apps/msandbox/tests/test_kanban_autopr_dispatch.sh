@@ -709,6 +709,24 @@ AUTOPR_TEST_KEEP_STATUS=1 AUTOPR_TEST_GH_CALLS="$TMP_DIR/due-gh.log" AUTOPR_TEST
   AUTOPR_TEST_AUDIT_RUNS="$recent_audit" AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher
 check "a lane the last snapshot shows as due still fetches a fresh list" \
   $(grep -q 'run list' "$TMP_DIR/due-gh.log" && echo 0 || echo 1)
+# A run still in flight at the last fetch does not take the shortcut either:
+# notify_run_outcomes runs only after a fetch, so the operator's
+# "run finished" banner would otherwise wait out the whole eligibility window.
+# These ticks fetched before the shortcut existed too — they ended at
+# `skip active-autopr-workflow`.
+jq -cn --argjson now "$idle_now" '[
+  {databaseId:6,status:"completed",lane:"errors",updatedAt:(($now - 60) | todate)},
+  {databaseId:8,status:"completed",lane:"self-audit",updatedAt:(($now - 60) | todate)},
+  {databaseId:9,status:"in_progress",lane:"kanban",updatedAt:(($now - 60) | todate)}]' \
+  > "$TMP_DIR/github-cache/runs.json"
+jq -cn --argjson now "$idle_now" \
+  '{action:"skip",reason:"kanban-not-due",checked_at:$now,next_check_at:($now + 60),eligible_at:($now + 240)}' \
+  > "$TMP_DIR/state/status.json"
+rm -f "$TMP_DIR/inflight-gh.log"
+AUTOPR_TEST_KEEP_STATUS=1 AUTOPR_TEST_GH_CALLS="$TMP_DIR/inflight-gh.log" \
+  AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher
+check "a run in flight at the last snapshot still fetches, so its banner is not held" \
+  $(grep -q 'run list' "$TMP_DIR/inflight-gh.log" && echo 0 || echo 1)
 # The watcher lane never takes the shortcut: it has its own board probe.
 rm -rf "$TMP_DIR/state" "$TMP_DIR/watch-idle-gh.log"
 mkdir -p "$TMP_DIR/state"
@@ -776,6 +794,20 @@ check "kanban workflow syncs the installed dispatcher from its main checkout aft
          -lt "$(grep -n 'install-launch-agent.sh --runtime-if-stale' "$workflow_yml" | cut -d: -f1)" ] \
     && [ "$(grep -n 'install-launch-agent.sh --runtime-if-stale' "$workflow_yml" | cut -d: -f1)" \
          -lt "$(grep -n 'Snapshot trusted AutoPR control plane' "$workflow_yml" | cut -d: -f1)" ] \
+    && echo 0 || echo 1)
+# The installer writes into ~/.local/share: it is the one step in that job
+# that puts code on the host, and it runs before the trusted control-plane
+# archive exists. So it has to cut its own archive of main — the reset step
+# above it force-updates the main REF without moving the worktree whenever
+# the checkout is not already on main.
+check "the dispatcher sync runs from a git archive of main, not the working tree" \
+  $(awk '/Keep the installed dispatcher tree on main/,/--runtime-if-stale$/' "$workflow_yml" \
+      | grep -q 'git archive main' && echo 0 || echo 1)
+# A doctor line about the verification cache is not installed-tree drift, and
+# `msandbox install` does not build it — so the banner must not name it, or a
+# developer who runs no lanes gets it after every pull, forever.
+check "the post-merge banner ignores verification-toolchain lines" \
+  $(grep -q "grep -v 'verification toolchain'" "$REPO_ROOT/apps/msandbox/harness/hooks/post-merge" \
     && echo 0 || echo 1)
 check "install-hooks.sh installs the post-merge drift banner beside post-checkout" \
   $(grep -q 'post-merge' "$REPO_ROOT/apps/msandbox/harness/install-hooks.sh" \

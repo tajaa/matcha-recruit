@@ -304,6 +304,15 @@ patch). Cleanup books a ledger strike only for `model`; the other three journal 
 a lane fault (`CODEX LOGIN DEAD`, `CODEX QUOTA`, `SANDBOX FAULT`) and leave the count
 alone. Before this, one evening of expired login struck every card it touched.
 
+A lane fault still calls `autopr_mark_attempt`, which stamps the card's attempt marker
+without writing a strike. The marker's mtime is the only thing `select.sh`'s cooldown
+reads, so skipping it entirely re-selects the same card on the very next pass: `auth` is
+held off lane-wide by the dispatcher's login guard and `usage_limit` by
+`codex-backoff.sh`, but `infrastructure` has no such hold, and a standing sandbox fault
+would burn a run every five minutes forever. An empty marker is a pre-ledger marker to
+`select.sh` — it cools the card down and can never park it — and an existing strike count
+is re-stamped rather than rewritten.
+
 **Model budget vs step budget.** `runtime-policy.sh` emits both `minutes` (the model's
 own budget, 20 or an approved 10) and `step_minutes` (`minutes + AUTOPR_STEP_GRACE_MINUTES`,
 default 3). The supervisor (`autopr_control.py supervise --deadline`) terminates the model's
@@ -1364,10 +1373,14 @@ batch A fixed, and the structural backlog (batch B) — lives in
   finished decision is never discarded by the step timeout ("Model budget vs step
   budget").
 - **The installed dispatcher tree follows `main`**: every kanban pass runs
-  `install-launch-agent.sh --runtime-if-stale` from its reset checkout (see
-  `apps/msandbox/CLAUDE.md`, "Installed copies").
+  `install-launch-agent.sh --runtime-if-stale` from its own `git archive main` extract —
+  not the working tree, since this is the one step that installs code onto the host and it
+  runs before the trusted control-plane archive exists (see `apps/msandbox/CLAUDE.md`,
+  "Installed copies").
 - **The verification toolchain is runner-owned** (`~/.cache/matcha-autofix`, built by
   `provision-verify-toolchain.sh`); `msandbox doctor` and the self-audit report it missing.
+  Its cache keys are the dependency manifests' digest, and a tree without those manifests
+  gets no key at all rather than the empty digest every such tree would share.
 - **The prelude is cheap when nothing is eligible:** labels are created only when
   missing, the production SSH/ECR/bundle resolution runs only after a card is
   selected, and `collect-pr-context.sh`'s snapshot (`AUTOPR_BOT_PRS_FILE`) feeds the

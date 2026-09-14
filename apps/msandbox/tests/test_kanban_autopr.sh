@@ -2740,6 +2740,29 @@ check "the failure ledger counts identical reasons, restarts on a new one, and c
       && [ "$(printf '%s' "$ledger_after_three" | cut -f1,2)" = "$(printf '3\tdisallowed_paths_')" ] \
       && [ "$budget_cleared" = 0 ] && echo 0 || echo 1)
 
+# A lane-wide fault must cool the card down without striking it. `auth` is
+# held off by the dispatcher's login guard and `usage_limit` by
+# codex-backoff.sh, but `infrastructure` has no lane-wide hold at all: with
+# no marker written, select.sh's cooldown gate reads nothing and the same
+# card is re-selected every pass for as long as the fault stands.
+lane_task="eeeeeeee-0000-4000-8000-00000000000e"
+export AUTOPR_CACHE_DIR="$TMP_DIR/lane-fault-cache"
+autopr_mark_attempt "$lane_task"
+lane_marker="$AUTOPR_CACHE_DIR/attempts/eeeeeeee"
+lane_cools_down=$([ -f "$lane_marker" ] && [ ! -s "$lane_marker" ] && echo 0 || echo 1)
+# An existing strike is re-stamped, never rewritten: the cooldown moves, the
+# count does not.
+autopr_record_outcome "$lane_task" failure verify
+autopr_record_outcome "$lane_task" failure verify
+autopr_mark_attempt "$lane_task"
+lane_ledger="$(cut -f1,2 < "$lane_marker")"
+unset AUTOPR_CACHE_DIR
+check "a lane-wide fault cools the card down without inventing or erasing a strike" \
+    $([ "$lane_cools_down" = 0 ] \
+      && [ "$lane_ledger" = "$(printf '2\tverify')" ] \
+      && grep -qF 'mark_attempt "$task_id"' "$workflow" \
+      && echo 0 || echo 1)
+
 # Three identical failures with no human signal since: the pass holds the
 # card, notes why, asks the owner, and picks nothing.
 cat > "$TMP_DIR/budget-card.json" <<'EOF'

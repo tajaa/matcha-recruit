@@ -233,16 +233,9 @@ compileall_check() {
 BASE_TREE="$(mktemp -d "${RUNNER_TEMP:-/tmp}/autofix-baseline-XXXXXX")"
 git -C "$REPO_ROOT" worktree prune >/dev/null 2>&1 || true
 git -C "$REPO_ROOT" worktree add --detach "$BASE_TREE" "$BASE_SHA" >/dev/null 2>&1
-# Set only when this run created the branch tree's node_modules symlink.
-REPO_NODE_MODULES_LINK=""
 cleanup() {
     git -C "$REPO_ROOT" worktree remove --force "$BASE_TREE" >/dev/null 2>&1 || true
     git -C "$REPO_ROOT" worktree prune >/dev/null 2>&1 || true
-    # Only if it is still OUR link: a concurrent lane may have re-pointed it.
-    if [ -n "$REPO_NODE_MODULES_LINK" ] && [ -L "$REPO_NODE_MODULES_LINK" ] \
-        && [ "$(readlink "$REPO_NODE_MODULES_LINK")" = "$CLIENT_NODE_MODULES" ]; then
-        rm -f "$REPO_NODE_MODULES_LINK"
-    fi
 }
 trap cleanup EXIT
 
@@ -260,6 +253,14 @@ CLIENT_NODE_MODULES=""
 CACHED_NODE_MODULES=""
 cached_client_root="$(autofix_node_root "$REPO_ROOT")" \
     && CACHED_NODE_MODULES="$cached_client_root/node_modules"
+# A link this checkout kept from an earlier run dangles as soon as
+# provision-verify-toolchain.sh prunes that key. Drop it before anything
+# reads it: left in place, the `! -L` test below keeps matching, so a real
+# node_modules installed here later would never be preferred — and nothing
+# else ever removes it.
+if [ -L "$REPO_ROOT/client/node_modules" ] && [ ! -e "$REPO_ROOT/client/node_modules" ]; then
+    rm -f "$REPO_ROOT/client/node_modules"
+fi
 if [ ! -L "$REPO_ROOT/client/node_modules" ] \
     && autofix_node_modules_usable "$REPO_ROOT/client/node_modules"; then
     CLIENT_NODE_MODULES="$REPO_ROOT/client/node_modules"
@@ -267,12 +268,6 @@ elif [ -n "$CACHED_NODE_MODULES" ] && autofix_node_modules_usable "$CACHED_NODE_
     CLIENT_NODE_MODULES="$CACHED_NODE_MODULES"
     if [ -L "$REPO_ROOT/client/node_modules" ] || [ ! -e "$REPO_ROOT/client/node_modules" ]; then
         ln -sfn "$CLIENT_NODE_MODULES" "$REPO_ROOT/client/node_modules"
-        # Removed again by cleanup(): this is the persistent runner checkout,
-        # and a link left pointing into the cache dangles the moment
-        # provision-verify-toolchain.sh prunes that key — after which the
-        # `! -L` test above permanently excludes a real node_modules someone
-        # later installs there.
-        REPO_NODE_MODULES_LINK="$REPO_ROOT/client/node_modules"
     fi
 fi
 if [ -n "$CLIENT_NODE_MODULES" ] && [ -d "$BASE_TREE/client" ]; then

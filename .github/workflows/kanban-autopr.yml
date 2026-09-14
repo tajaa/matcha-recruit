@@ -149,17 +149,18 @@ jobs:
         run: |
           # From a `git archive main` extract, never from the working tree.
           # This is the one step in this job that installs code onto the
-          # host, and it runs on every pass — before, and outside of,
-          # `Snapshot trusted AutoPR control plane`, which every other
-          # harness call here goes through but which only exists once a card
-          # has been selected. The reset step above is not a substitute: on
-          # the branch where the checkout is not on main it force-updates the
-          # main REF and leaves the worktree where it found it.
+          # host, and it runs on every pass — before, and outside of, the
+          # trusted control-plane archive every other harness call here goes
+          # through, which is only built once a card has been selected. The
+          # reset step above is not a substitute: on the branch where the
+          # checkout is not on main it force-updates the main REF and leaves
+          # the worktree where it found it.
           staging="$RUNNER_TEMP/autopr-runtime-main"
           rm -rf "$staging"
           mkdir -p "$staging"
           git archive main apps/msandbox/harness apps/msandbox/cli | tar -x -C "$staging"
-          "$staging/apps/msandbox/harness/install-launch-agent.sh" --runtime-if-stale
+          cd "$staging"
+          ./apps/msandbox/harness/install-launch-agent.sh --runtime-if-stale
 
       - name: Configure GitHub CLI
         env:

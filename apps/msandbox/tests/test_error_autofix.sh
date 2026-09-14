@@ -591,6 +591,18 @@ verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$
 check "verify.sh prefers a real node_modules in the tree over the cache and never replaces it" \
   $([ ! -L "$VERIFY_REPO/client/node_modules" ] \
     && grep -q '| TypeScript | 1 diagnostics | 1 diagnostics |' <<< "$verify_out" && echo 0 || echo 1)
+# The link verify.sh leaves in the checkout dangles as soon as
+# provision-verify-toolchain.sh prunes that key. Nothing else removes it, and
+# while it sits there the `! -L` test above keeps matching — so a real
+# node_modules installed here later would never be preferred again.
+rm -rf "$VERIFY_REPO/client/node_modules"
+ln -s "$TOOLCHAIN_CACHE/client-prunedkey/node_modules" "$VERIFY_REPO/client/node_modules"
+verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
+    AUTOFIX_CACHE_DIR="$TMP_DIR/pruned-cache" FAKE_PYTEST_RC=0 \
+    RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" 2>/dev/null)"
+check "a node_modules link left dangling by a pruned key is removed, not kept" \
+  $([ ! -L "$VERIFY_REPO/client/node_modules" ] && [ ! -e "$VERIFY_REPO/client/node_modules" ] \
+    && grep -q 'no client toolchain' <<< "$verify_out" && echo 0 || echo 1)
 
 ################################################################################
 # 10: publish.sh path guard — denylist and allowlist both fatal on bad paths

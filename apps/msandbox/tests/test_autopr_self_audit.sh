@@ -252,3 +252,21 @@ jq -e '(.checks | length) == 1
     and .operator_failures == 1' "$TMP_DIR/audit-toolchain.json" >/dev/null
 grep -qF 'provision-verify-toolchain.sh' "$TMP_DIR/audit-toolchain.md"
 printf 'PASS: a missing verification toolchain is an operator finding\n'
+
+# A provisioner that is not there at all must not SKIP the check: a skip
+# hides it exactly when the capsule is broken, which is the "invisible
+# because it is on everything" failure this check exists to catch.
+capsule="$TMP_DIR/no-provisioner"
+mkdir -p "$capsule/apps/msandbox"
+cp -R "$AUDIT_DIR" "$capsule/apps/msandbox/self-audit"
+mkdir -p "$capsule/apps/msandbox/harness"
+AUTOPR_AUDIT_ONLY=verify_toolchain \
+    "$capsule/apps/msandbox/self-audit/audit.sh" \
+    --json "$TMP_DIR/audit-no-provisioner.json" --summary "$TMP_DIR/audit-no-provisioner.md"
+jq -e '(.checks | length) == 1
+    and .checks[0].status == "fail"
+    and .checks[0].repairability == "operator"
+    and .checks[0].exit_code == 78
+    and .operator_failures == 1' "$TMP_DIR/audit-no-provisioner.json" >/dev/null
+grep -qF 'unmeasurable' "$TMP_DIR/audit-no-provisioner.md"
+printf 'PASS: an unrunnable provisioner is an operator finding, never a skip\n'

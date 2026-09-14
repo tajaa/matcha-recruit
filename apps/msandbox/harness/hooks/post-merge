@@ -15,7 +15,12 @@ branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 [ "$branch" = main ] || exit 0
 
 report="$("$msandbox" doctor 2>/dev/null || true)"
-stale="$(printf '%s\n' "$report" | grep -E 'STALE|MISSING|PRE-MOVE' || true)"
+# Installed-tree drift only. `msandbox doctor` also reports the runner-owned
+# verification cache, which a developer who runs no lanes has no reason to
+# build — and which `msandbox install` would not build anyway, so banging on
+# it after every pull would be advice that cannot clear itself.
+stale="$(printf '%s\n' "$report" | grep -E 'STALE|MISSING|PRE-MOVE' \
+    | grep -v 'verification toolchain' || true)"
 [ -n "$stale" ] || exit 0
 {
     echo

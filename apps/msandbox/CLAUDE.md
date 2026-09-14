@@ -73,7 +73,16 @@ and the `mw_tasks.autopr_*` columns they read.
   instead (layout + keys in `error-autofix/toolchain.sh`, the one writer is
   `harness/provision-verify-toolchain.sh`, reachable as `msandbox install
   --verify-toolchain`); `audit.sh` and `msandbox doctor` both run its
-  `--check`. `tests/test_error_autofix.sh` fails on the string `Documents` in
+  `--check`. The key helpers FAIL rather than return a key for a tree with
+  no manifests — `shasum` over no input is a valid digest, and every such
+  tree would otherwise share one cache entry and be "verified" against a
+  dependency set matching none of them. They also `|| true` the loop feeding
+  that `shasum`: under `pipefail` an absent `requirements-dev.txt` made the
+  pipeline fail *after* printing the key, so a present toolchain read as
+  unmeasurable. `msandbox doctor` prints the `--check` lines on every host
+  but is only unhealthy where the lanes run, and `harness/hooks/post-merge`
+  filters them out of its drift banner: a missing verification cache is not
+  installed-tree drift, and `msandbox install` does not build it. `tests/test_error_autofix.sh` fails on the string `Documents` in
   any non-comment line of verify.sh.
 - **A card is struck only for a `model` fault.** `run-codex-sandboxed.sh`
   classifies a failed pass into `$AUTOPR_FAULT_CLASS_FILE`
@@ -81,7 +90,11 @@ and the `mw_tasks.autopr_*` columns they read.
   `autopr_record_outcome … failure` only for `model` and journals the rest
   as lane faults. New failure modes that are not the card's doing (a new
   daemon error string, a new credential shape) belong in that classifier,
-  never in Cleanup. The model's time budget is the supervisor's
+  never in Cleanup. A lane fault still calls `autopr_mark_attempt`: no
+  strike, but the cooldown marker must exist or `select.sh` has nothing to
+  read and re-picks the same card every pass — `auth` is held off by the
+  dispatcher's login guard and `usage_limit` by `codex-backoff.sh`, but
+  `infrastructure` has no lane-wide hold of its own. The model's time budget is the supervisor's
   `--deadline` (exit 143), and `investigate.sh` passes any status ≥ 128
   through unchanged so `checkpoint.sh` can read it as a kill; `die` flattens
   to 1 and would turn every budget stop into a strike.
@@ -189,9 +202,12 @@ Two trees on the operator's Mac are copies: `~/.local/share/matcha-msandbox/rele
 
 - **The dispatcher tree follows `origin/main` on its own** since 2026-09-14:
   every kanban pass runs `harness/install-launch-agent.sh --runtime-if-stale`
-  from the runner's freshly reset `main` checkout (the step right after
-  "Reset any stray bot branch…"), copying only the runtime files and only on
-  byte drift. Plists and launchctl are never touched there — a changed plist
+  (the step right after "Reset any stray bot branch…") from its own
+  `git archive main` extract, copying only the runtime files and only on
+  byte drift. Not from the working tree: this is the one step in that job
+  that installs code onto the host, it runs before the trusted control-plane
+  archive exists, and the reset step above it force-updates the `main` ref
+  without moving the worktree whenever the checkout is not already on main. Plists and launchctl are never touched there — a changed plist
   template still needs the full installer, and `check_installed_dispatcher`
   / `msandbox doctor` say so. Three merged fixes sat uninstalled for days in
   the week of 2026-09-08 (a dead-login guard among them) before this existed.

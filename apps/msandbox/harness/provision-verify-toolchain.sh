@@ -46,29 +46,31 @@ done
 . "$SCRIPT_DIR/../error-autofix/toolchain.sh"
 
 CACHE_DIR="$(autofix_toolchain_cache_dir)"
-# Both are keyed on manifests in $REPO_ROOT. A tree without them is not a
-# checkout this toolchain can be built for, and guessing a key would alias
-# it onto another tree's cache entry.
-VENV_DIR="$(autofix_venv_dir "$REPO_ROOT")" \
-    || { echo "no server/requirements*.txt under $REPO_ROOT" >&2; exit 2; }
-NODE_ROOT="$(autofix_node_root "$REPO_ROOT")" \
-    || { echo "no client/package-lock.json under $REPO_ROOT" >&2; exit 2; }
+# Both are keyed on the dependency manifests in $REPO_ROOT. A tree without
+# them has no key at all — guessing one (the digest of no input) would alias
+# it onto every other manifest-less tree's cache entry — so the directory is
+# left empty here and every consumer below treats that as MISSING.
+VENV_DIR="$(autofix_venv_dir "$REPO_ROOT")" || VENV_DIR=""
+NODE_ROOT="$(autofix_node_root "$REPO_ROOT")" || NODE_ROOT=""
+PYTHON_WHERE="${VENV_DIR:-no server/requirements*.txt under $REPO_ROOT}"
+NODE_WHERE="${NODE_ROOT:+$NODE_ROOT/node_modules}"
+NODE_WHERE="${NODE_WHERE:-no client/package-lock.json under $REPO_ROOT}"
 
-python_current() { autofix_python_usable "$VENV_DIR/bin/python"; }
-node_current() { autofix_node_modules_usable "$NODE_ROOT/node_modules"; }
+python_current() { [ -n "$VENV_DIR" ] && autofix_python_usable "$VENV_DIR/bin/python"; }
+node_current() { [ -n "$NODE_ROOT" ] && autofix_node_modules_usable "$NODE_ROOT/node_modules"; }
 
 report() {
     local rc=0
     if python_current; then
         echo "verification toolchain python: current ($VENV_DIR)"
     else
-        echo "verification toolchain python: MISSING ($VENV_DIR)"
+        echo "verification toolchain python: MISSING ($PYTHON_WHERE)"
         rc=3
     fi
     if node_current; then
         echo "verification toolchain client: current ($NODE_ROOT/node_modules)"
     else
-        echo "verification toolchain client: MISSING ($NODE_ROOT/node_modules)"
+        echo "verification toolchain client: MISSING ($NODE_WHERE)"
         rc=3
     fi
     [ "$rc" -eq 0 ] || echo "Provision with: ./apps/msandbox/harness/provision-verify-toolchain.sh (or msandbox install --verify-toolchain)"
@@ -123,6 +125,9 @@ build_node() {
 # Old keys are dead weight (a venv is ~1 GB); keep only the current ones.
 prune_stale() {
     local entry
+    # Never prune against an unresolved key: the "keep" patterns would be
+    # empty and every real cache entry would read as stale.
+    [ -n "$VENV_DIR" ] && [ -n "$NODE_ROOT" ] || return 0
     for entry in "$CACHE_DIR"/venv-py312-* "$CACHE_DIR"/client-*; do
         [ -e "$entry" ] || continue
         case "$entry" in
@@ -147,13 +152,19 @@ if [ "$MODE" = check ]; then
 fi
 
 rc=0
-if [ "$FORCE" = true ] || ! python_current; then
+if [ -z "$VENV_DIR" ]; then
+    echo "cannot build the python toolchain: $PYTHON_WHERE" >&2
+    rc=1
+elif [ "$FORCE" = true ] || ! python_current; then
     echo "building python toolchain: $VENV_DIR"
     build_python || rc=1
 else
     echo "python toolchain current: $VENV_DIR"
 fi
-if [ "$FORCE" = true ] || ! node_current; then
+if [ -z "$NODE_ROOT" ]; then
+    echo "cannot build the client toolchain: $NODE_WHERE" >&2
+    rc=1
+elif [ "$FORCE" = true ] || ! node_current; then
     echo "building client toolchain: $NODE_ROOT"
     build_node || rc=1
 else
