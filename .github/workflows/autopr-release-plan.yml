@@ -29,18 +29,18 @@ jobs:
           clean: false
 
       - name: Require AutoPR control plane
-        run: ./scripts/agent-sandbox.sh autopr-ready
+        run: ./apps/msandbox/bin/agent-sandbox.sh autopr-ready
 
       - name: Rebuild authoritative live plan
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          ./scripts/kanban-autopr/collect.sh > "$RUNNER_TEMP/cards.json"
-          ./scripts/kanban-autopr/reconcile-merged-cards.sh "$RUNNER_TEMP/cards.json" \
+          ./apps/msandbox/harness/collect.sh > "$RUNNER_TEMP/cards.json"
+          ./apps/msandbox/harness/reconcile-merged-cards.sh "$RUNNER_TEMP/cards.json" \
             > "$RUNNER_TEMP/reconciled-cards.json"
-          ./scripts/kanban-autopr/collect-pr-context.sh > "$RUNNER_TEMP/bot-prs.json"
-          python3 ./scripts/kanban-autopr/plan.py \
+          ./apps/msandbox/harness/collect-pr-context.sh > "$RUNNER_TEMP/bot-prs.json"
+          python3 ./apps/msandbox/harness/plan.py \
             --cards "$RUNNER_TEMP/reconciled-cards.json" \
             --prs "$RUNNER_TEMP/bot-prs.json" \
             --output "$RUNNER_TEMP/plan.json" \
@@ -56,5 +56,5 @@ jobs:
           EXPECTED_PLAN_ID: ${{ inputs.plan_id }}
         run: |
           [[ "$EXPECTED_PLAN_ID" =~ ^[0-9a-f]{12}$ ]]
-          ./scripts/kanban-autopr/release-plan.sh \
+          ./apps/msandbox/harness/release-plan.sh \
             "$RUNNER_TEMP/plan.json" "$EXPECTED_PLAN_ID"

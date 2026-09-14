@@ -904,6 +904,7 @@ async def run_huume_turn(
                     company_id=company_id,
                     location_id=surface_context.location_id,
                     week_start=surface_context.week_start,
+                    actor_role=user_role,
                 )
                 ok = result.get("status") == "ok"
                 step = recorder.record(
@@ -1607,6 +1608,7 @@ async def run_huume_turn(
                             location_id=surface_context.location_id if surface_context.is_schedule else None,
                             week_start=surface_context.week_start if surface_context.is_schedule else None,
                             week_end=surface_context.week_end if surface_context.is_schedule else None,
+                            actor_role=user_role,
                         )
                     proposal_status = proposed.get("status")
                     if proposal_status != "ready":
@@ -1673,6 +1675,7 @@ async def run_huume_turn(
                         week_template_id=args.get("week_template_id"),
                         exclude_employee_ids=args.get("exclude_employee_ids"),
                         employee_hour_caps=args.get("employee_hour_caps"),
+                        actor_role=user_role,
                     )
                     proposal_status = proposed.get("status")
                     if proposal_status != "ready":

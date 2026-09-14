@@ -27,7 +27,7 @@ Feature: AutoPR general-tasks second-pass review — re-entrant publisher, `run_
 
 | Area | Files | Weight |
 |---|---|---|
-| Bash — autopr scripts | `scripts/kanban-autopr/{publish-research,select,investigate,checkpoint,dashboard,lib,run-codex-sandboxed,watch-pr}.sh`, 2 prompt txt | +305 / −92 |
+| Bash — autopr scripts | `apps/msandbox/harness/{publish-research,select,investigate,checkpoint,dashboard,lib,run-codex-sandboxed,watch-pr}.sh`, 2 prompt txt | +305 / −92 |
 | Python — backend | `project_task_service.py` (+153/−30), `task_history.py` (+54/−9), `admin/platform_settings.py` (+22/−2), `project_agent/tools.py`, `task_summary_service.py` | +240 / −42 |
 | Swift — Espresso | `TaskViewerSheet+Outreach.swift` (+121/−41), `+Header` (+48/−2), `TaskCompose` (+42), `JournalContentView` (+30/−3), `MatchaWorkService+Tasks` (+27), `ProjectTaskModels`, `TaskViewerSheet`, `TaskViewerGraph`, `+Review`, `AppState+Notifications` | +325 / −59 |
 | TS/React — admin + work | `Settings.tsx` (+21/−3), `platformSettings.ts`, `kanbanTemplates.ts`, `TemplateComposeModal.tsx` | +31 / −3 |
@@ -56,7 +56,7 @@ Feature: AutoPR general-tasks second-pass review — re-entrant publisher, `run_
 
 ### Efficiency angle (Sonnet, 2026-09-08) — 2 findings
 
-**E1. `scripts/kanban-autopr/select.sh:148-158` — per-card read-modify-write of the hint file**
+**E1. `apps/msandbox/harness/select.sh:148-158` — per-card read-modify-write of the hint file**
 `note_ungranted_hint` does `cat` + 2 `jq` subprocesses + `date` + `mv` — 5 process spawns and
 2 file I/O ops — and it is called from inside the per-card loop at `select.sh:420`, which
 `continue`s rather than breaking. So every queued card on a board whose capability is not
@@ -91,7 +91,7 @@ and the sequential awaits in `TaskViewerSheet+Outreach.swift`.
 
 ### Efficiency fixes applied (2026-09-08)
 
-**E1 — `scripts/kanban-autopr/select.sh`** — `note_ungranted_hint` now only queues into a
+**E1 — `apps/msandbox/harness/select.sh`** — `note_ungranted_hint` now only queues into a
 newline/tab-delimited string; a new `flush_ungranted_hints` does the single read-modify-write.
 
 Two traps found while implementing, neither in the original finding:
@@ -115,9 +115,9 @@ ahead of the level loop. Behaviour-identical: any string matching `"#"*level + "
 with `#`. A bare `"#"` still returns nil, as before.
 
 **Verification**
-- `scripts/tests/test_kanban_autopr_research.sh` — 66 passed, 0 failed (incl. "an ungranted
+- `apps/msandbox/tests/test_kanban_autopr_research.sh` — 66 passed, 0 failed (incl. "an ungranted
   skip leaves a hint the dashboard can name, even on a read-only pass")
-- `scripts/tests/test_kanban_autopr_dashboard.sh` — 17 passed, 0 failed (incl. "control board
+- `apps/msandbox/tests/test_kanban_autopr_dashboard.sh` — 17 passed, 0 failed (incl. "control board
   … names cards held for a missing grant")
 - Targeted batch test (no existing test covers >1 held card): 3 ungranted cards in one pass →
   3 hints, 1 distinct `ts` (one write); rerun → still 3 entries / 3 distinct `id8` (dedupe

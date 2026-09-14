@@ -1,0 +1,672 @@
+#!/usr/bin/env bash
+# Isolated dispatcher tests: no GitHub, launchd, board, or model access.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+DISPATCHER="$REPO_ROOT/apps/msandbox/harness/dispatch-if-idle.sh"
+TEMPLATE="$REPO_ROOT/apps/msandbox/harness/launchd/com.matcha.kanban-autopr-dispatch.plist.in"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+PASS=0
+FAIL=0
+
+check() {
+    local desc="$1" ok="$2"
+    if [ "$ok" = 0 ]; then echo "PASS: $desc"; PASS=$((PASS + 1));
+    else echo "FAIL: $desc"; FAIL=$((FAIL + 1)); fi
+}
+
+cat > "$TMP_DIR/gh" <<'EOF'
+#!/usr/bin/env bash
+[ -z "${AUTOPR_TEST_GH_CALLS:-}" ] || printf '%s\n' "$*" >> "$AUTOPR_TEST_GH_CALLS"
+if [ "$1 $2" = "run list" ]; then
+  [ "${AUTOPR_TEST_LIST_FAIL:-0}" = 0 ] || exit 1
+  jq -cn \
+    --argjson errors "${AUTOPR_TEST_ERROR_RUNS:-[]}" \
+    --argjson audit "${AUTOPR_TEST_AUDIT_RUNS:-[]}" \
+    --argjson admin "${AUTOPR_TEST_ADMIN_UPDATES_RUNS:-[]}" \
+    --argjson kanban "${AUTOPR_TEST_KANBAN_RUNS:-[]}" '
+      ($errors | map(. + {workflowName:"Silent error autofix"}))
+      + ($audit | map(. + {workflowName:"AutoPR self audit"}))
+      + ($admin | map(. + {workflowName:"Publish production admin updates"}))
+      + ($kanban | map(. + {workflowName:"Kanban autopr"}))
+    '
+  exit 0
+fi
+if [ "$1" = api ] && [[ "$*" == *"/actions/workflows/"*"/dispatches"* ]]; then
+  [ "${AUTOPR_TEST_DISPATCH_FAIL:-0}" = 0 ] || exit 1
+  for arg in "$@"; do
+    case "$arg" in
+      repos/*/actions/workflows/*/dispatches)
+        workflow="${arg%/dispatches}"
+        printf '%s\n' "${workflow##*/}" >> "$AUTOPR_TEST_DISPATCHES"
+        ;;
+    esac
+  done
+  exit 0
+fi
+exit 1
+EOF
+chmod +x "$TMP_DIR/gh"
+
+cat > "$TMP_DIR/docker" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = ps ] || exit 1
+[ "${AUTOPR_TEST_CONTAINER_OFF:-0}" = 0 ] || exit 0
+printf 'primary-container-id\n'
+EOF
+chmod +x "$TMP_DIR/docker"
+touch "$TMP_DIR/autopr-enabled"
+
+# Stand-in for has-run-request.sh: 0 = a card is queued, 3 = nothing, 1 = the
+# board could not be asked.
+cat > "$TMP_DIR/run-request-probe" <<'EOF'
+#!/usr/bin/env bash
+[ -z "${AUTOPR_TEST_PROBE_CALLS:-}" ] || printf 'probe\n' >> "$AUTOPR_TEST_PROBE_CALLS"
+printf '%s\n' '[{"task_id":"11111111-1111-4111-8111-111111111111","requested_at":"2026-09-07T10:00:00Z"}]'
+exit "${AUTOPR_TEST_PROBE_EXIT:-3}"
+EOF
+chmod +x "$TMP_DIR/run-request-probe"
+
+# Stand-in for ensure-dashboard.sh. The observer panes it (re)creates are
+# themselves GitHub readers, so only the five-minute scheduler may call it.
+cat > "$TMP_DIR/ensure-dashboard" <<'EOF'
+#!/usr/bin/env bash
+printf 'ensure\n' >> "$AUTOPR_TEST_DASHBOARD_CALLS"
+EOF
+chmod +x "$TMP_DIR/ensure-dashboard"
+
+run_dispatcher() {
+  # Most cases represent independent clock ticks, not concurrent dispatches.
+  [ "${AUTOPR_TEST_KEEP_LEASE:-0}" = 1 ] || rm -f "$TMP_DIR/state/last-dispatch"
+  AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_DISPATCH_LOG="$TMP_DIR/log.jsonl" \
+    AUTOPR_DOCKER_BIN="$TMP_DIR/docker" AUTOPR_ENABLE_FILE="$TMP_DIR/autopr-enabled" \
+    AUTOPR_DISPATCH_LOCK_DIR="$TMP_DIR/lock" AUTOPR_TEST_DISPATCHES="$TMP_DIR/dispatches" \
+    AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/github-cache" \
+    AUTOPR_GITHUB_SNAPSHOT_TTL_SECONDS=0 \
+    AUTOPR_TMUX_DASHBOARD="${AUTOPR_TMUX_DASHBOARD:-0}" \
+    AUTOPR_RUN_REQUEST_PROBE="$TMP_DIR/run-request-probe" \
+    AUTOPR_DISPATCH_STATE_DIR="$TMP_DIR/state" \
+    "$DISPATCHER" "$@" >/dev/null 2>&1
+}
+
+write_codex_auth_fixture() {
+    # apps/msandbox/tests/codex_auth_fixture.py is the single definition of
+    # this shape; see its docstring.
+    python3 "$REPO_ROOT/apps/msandbox/tests/codex_auth_fixture.py" "$1" "$2"
+}
+# The dispatcher checks the host Codex login every tick; never let this suite
+# read the developer's real ~/.codex/auth.json.
+write_codex_auth_fixture "$TMP_DIR/auth.json" "$(( $(date +%s) + 86400 ))"
+export AUTOPR_HOST_CODEX_AUTH_FILE="$TMP_DIR/auth.json"
+
+rm "$TMP_DIR/autopr-enabled"
+run_dispatcher
+check "msandbox-off master switch skips before dispatch" \
+  $(grep -q 'msandbox-off' "$TMP_DIR/log.jsonl" \
+    && [ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
+touch "$TMP_DIR/autopr-enabled"
+
+AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_TEST_GH_CALLS="$TMP_DIR/snapshot-gh.log" \
+  AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/shared-snapshot" \
+  AUTOPR_GITHUB_SNAPSHOT_TTL_SECONDS=60 \
+  "$REPO_ROOT/apps/msandbox/harness/run-snapshot.sh" >/dev/null
+AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_TEST_GH_CALLS="$TMP_DIR/snapshot-gh.log" \
+  AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/shared-snapshot" \
+  AUTOPR_GITHUB_SNAPSHOT_TTL_SECONDS=60 \
+  "$REPO_ROOT/apps/msandbox/harness/run-snapshot.sh" >/dev/null
+check "dashboard panes share one cached GitHub run-list request" \
+  $([ "$(grep -c '^run list ' "$TMP_DIR/snapshot-gh.log")" = 1 ] && echo 0 || echo 1)
+
+AUTOPR_TEST_CONTAINER_OFF=1 run_dispatcher
+check "stopped primary sandbox skips before dispatch" \
+  $(grep -q 'msandbox-off' "$TMP_DIR/log.jsonl" \
+    && [ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
+
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "stale error lane gets the first idle slot" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "silent-error-autofix.yml" ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+recent="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+AUTOPR_TEST_ERROR_RUNS="[{\"databaseId\":6,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$recent\",\"updatedAt\":\"$recent\",\"url\":\"x\"}]" \
+  AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "recent error pass gives a stale self-audit the next idle slot" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "autopr-self-audit.yml" ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_ERROR_RUNS="[{\"databaseId\":6,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$recent\",\"updatedAt\":\"$recent\",\"url\":\"x\"}]" \
+  AUTOPR_TEST_AUDIT_RUNS="[{\"databaseId\":8,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$recent\",\"updatedAt\":\"$recent\",\"url\":\"x\"}]" \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "recent error and audit passes advance the Kanban lane" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_ERROR_RUNS='[]' \
+  AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[{"databaseId":7,"status":"in_progress","event":"workflow_dispatch","createdAt":"2026-08-27T00:00:00Z","updatedAt":"2026-08-27T00:00:00Z","url":"x"}]' \
+  run_dispatcher
+check "active work in either lane skips dispatch" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && grep -q 'active-autopr-workflow' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_ERROR_RUNS='[]' \
+  AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' \
+  AUTOPR_TEST_ADMIN_UPDATES_RUNS='[{"databaseId":10,"status":"queued","event":"workflow_dispatch","createdAt":"2026-08-31T00:00:00Z","updatedAt":"2026-08-31T00:00:00Z","url":"x"}]' \
+  run_dispatcher
+check "queued admin-update publication blocks a competing AutoPR dispatch" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && grep -q 'active-autopr-workflow' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+
+# ── the Kanban lane is the slow one, and the card button is the way past it ──
+rm -f "$TMP_DIR/dispatches"
+recent_kanban="[{\"databaseId\":9,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$recent\",\"updatedAt\":\"$recent\",\"url\":\"x\"}]"
+stale="$(date -u -v-30M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '30 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
+stale_kanban="[{\"databaseId\":9,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$stale\",\"updatedAt\":\"$stale\",\"url\":\"x\"}]"
+# Ten minutes: past the workflow's five-minute hot-redispatch floor, inside the
+# scheduler's twenty-minute window — exactly the gap a queued card must jump.
+mid="$(date -u -v-10M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
+mid_kanban="[{\"databaseId\":9,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$mid\",\"updatedAt\":\"$mid\",\"url\":\"x\"}]"
+recent_error="[{\"databaseId\":6,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$recent\",\"updatedAt\":\"$recent\",\"url\":\"x\"}]"
+recent_audit="[{\"databaseId\":8,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$recent\",\"updatedAt\":\"$recent\",\"url\":\"x\"}]"
+
+AUTOPR_TEST_ERROR_RUNS="$recent_error" AUTOPR_TEST_AUDIT_RUNS="$recent_audit" \
+  AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher
+check "a Kanban pass inside the five-minute window does not re-dispatch" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && grep -q 'kanban-not-due' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_ERROR_RUNS="$recent_error" AUTOPR_TEST_AUDIT_RUNS="$recent_audit" \
+  AUTOPR_TEST_KANBAN_RUNS="$stale_kanban" run_dispatcher
+check "the Kanban lane runs once its five minutes are up" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/probe.log" "$TMP_DIR/watch-gh.log"
+rm -rf "$TMP_DIR/state"
+AUTOPR_TEST_PROBE_EXIT=3 AUTOPR_TEST_PROBE_CALLS="$TMP_DIR/probe.log" \
+  AUTOPR_TEST_GH_CALLS="$TMP_DIR/watch-gh.log" \
+  AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' \
+  run_dispatcher --if-requested
+check "an idle watch tick asks the board and never touches GitHub" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && [ ! -e "$TMP_DIR/watch-gh.log" ] \
+    && [ -s "$TMP_DIR/probe.log" ] && echo 0 || echo 1)
+
+check "an idle watch tick leaves the shared dispatch log alone" \
+  $(! grep -q 'no-run-request' "$TMP_DIR/log.jsonl" \
+    && [ -f "$TMP_DIR/state/last-watch-tick" ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/dashboard-calls"
+AUTOPR_TEST_DASHBOARD_CALLS="$TMP_DIR/dashboard-calls" \
+  AUTOPR_DASHBOARD_ENSURE="$TMP_DIR/ensure-dashboard" AUTOPR_TMUX_DASHBOARD=1 \
+  AUTOPR_TEST_PROBE_EXIT=3 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
+check "an idle watch tick never re-primes the observer panes" \
+  $([ ! -e "$TMP_DIR/dashboard-calls" ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_DASHBOARD_CALLS="$TMP_DIR/dashboard-calls" \
+  AUTOPR_DASHBOARD_ENSURE="$TMP_DIR/ensure-dashboard" AUTOPR_TMUX_DASHBOARD=1 \
+  AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "the five-minute scheduler still keeps the observer panes alive" \
+  $([ -s "$TMP_DIR/dashboard-calls" ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_PROBE_EXIT=1 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
+check "an unreachable board never forces a run" \
+  $([ ! -e "$TMP_DIR/dispatches" ] \
+    && grep -q 'run-request-probe-failed' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+
+# The workflow itself refuses a run whose predecessor completed inside the
+# last five minutes (hot-redispatch-guard.sh), so dispatching into that window
+# would burn the request set for a run that never touches the card.
+rm -f "$TMP_DIR/dispatches"
+rm -rf "$TMP_DIR/state"
+AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher --if-requested
+check "a verified queued card bypasses the routine workflow floor" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] \
+    && [ -f "$TMP_DIR/state/last-forced-request-set" ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+rm -rf "$TMP_DIR/state"
+AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS="$mid_kanban" run_dispatcher --if-requested
+check "a queued card jumps the routine wait and the other lanes" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] \
+    && grep -q 'kanban-run-request' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS="$mid_kanban" run_dispatcher --if-requested
+check "a card that cannot be picked up cannot spin the runner every minute" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && [ -f "$TMP_DIR/state/last-forced-kanban" ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_LIST_FAIL=1 run_dispatcher || list_rc=$?
+check "run-list failure fails closed" \
+  $([ "${list_rc:-0}" != 0 ] && [ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
+
+AUTOPR_TEST_DISPATCH_FAIL=1 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher || dispatch_rc=$?
+check "dispatch failure is visible and nonzero" \
+  $([ "${dispatch_rc:-0}" != 0 ] && grep -q 'silent-error-autofix.yml-dispatch-failed' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+
+mkdir "$TMP_DIR/lock"
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "local lock produces a harmless skip" \
+  $(grep -q 'local-lock' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+rmdir "$TMP_DIR/lock"
+
+rendered="$TMP_DIR/com.matcha.kanban-autopr-dispatch.plist"
+sed -e "s|__DISPATCHER_PATH__|$DISPATCHER|g" -e "s|__USER_HOME__|$TMP_DIR|g" "$TEMPLATE" > "$rendered"
+if command -v plutil >/dev/null 2>&1; then
+  plutil -lint "$rendered" >/dev/null
+else
+  python3 -c 'import plistlib, sys; plistlib.load(open(sys.argv[1], "rb"))' "$rendered"
+fi
+check "LaunchAgent plist is valid and uses the required timer" \
+  $(grep -q '<integer>60</integer>' "$rendered" && grep -q '<key>RunAtLoad</key>' "$rendered" && echo 0 || echo 1)
+# The tick interval paces the Kanban lane, because one dispatch happens per tick
+# and the errors lane is checked first. Keep the plist and the value the
+# dispatcher reports to the dashboard in step.
+check "dispatcher poll interval matches the LaunchAgent tick" \
+  $(grep -q 'AUTOPR_DISPATCH_POLL_SECONDS:-60' "$REPO_ROOT/apps/msandbox/harness/dispatch-if-idle.sh" && echo 0 || echo 1)
+check "LaunchAgent PATH can reach the Docker Desktop CLI used by msandbox" \
+  $(grep -q '<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>' "$rendered" && echo 0 || echo 1)
+
+watch_template="$REPO_ROOT/apps/msandbox/harness/launchd/com.matcha.kanban-autopr-request-watch.plist.in"
+watch_rendered="$TMP_DIR/com.matcha.kanban-autopr-request-watch.plist"
+sed -e "s|__DISPATCHER_PATH__|$DISPATCHER|g" -e "s|__USER_HOME__|$TMP_DIR|g" \
+  "$watch_template" > "$watch_rendered"
+if command -v plutil >/dev/null 2>&1; then
+  plutil -lint "$watch_rendered" >/dev/null
+else
+  python3 -c 'import plistlib, sys; plistlib.load(open(sys.argv[1], "rb"))' "$watch_rendered"
+fi
+check "request watcher runs the same dispatcher every minute in requested mode" \
+  $(grep -q '<integer>60</integer>' "$watch_rendered" \
+    && grep -q '<string>--if-requested</string>' "$watch_rendered" \
+    && grep -q "$DISPATCHER" "$watch_rendered" && echo 0 || echo 1)
+check "installer ships the probe and both LaunchAgents" \
+  $(grep -q 'has-run-request.sh' "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" \
+    && grep -q 'WATCH_PLIST_DESTINATION' "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" \
+    && grep -q 'kanban-autopr-request-watch' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" && echo 0 || echo 1)
+
+# ── one Codex login for every lane: a usage-limit exit holds all of them ──
+rm -f "$TMP_DIR/dispatches"
+mkdir -p "$TMP_DIR/state"
+printf 'ERROR: You have hit your usage limit. Try again at 5:31 AM.\n' > "$TMP_DIR/codex.log"
+AUTOPR_DISPATCH_STATE_DIR="$TMP_DIR/state" \
+  "$REPO_ROOT/apps/msandbox/harness/codex-backoff.sh" record "$TMP_DIR/codex.log" 2>/dev/null || true
+check "a usage-limit transcript writes the lane-wide backoff marker" \
+  $(jq -e '.resume_at > now' "$TMP_DIR/state/codex-usage-limit.json" >/dev/null && echo 0 || echo 1)
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "an active Codex backoff skips every lane" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && grep -q 'codex-usage-limit-backoff' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
+check "a queued card does not override an active Codex backoff" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
+jq '.resume_at = (now | floor) - 1' "$TMP_DIR/state/codex-usage-limit.json" > "$TMP_DIR/state/expired.json"
+mv "$TMP_DIR/state/expired.json" "$TMP_DIR/state/codex-usage-limit.json"
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "an expired backoff marker no longer blocks dispatch" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "silent-error-autofix.yml" ] && echo 0 || echo 1)
+printf 'plain crash, no quota message\n' > "$TMP_DIR/codex-crash.log"
+rm -f "$TMP_DIR/state/codex-usage-limit.json"
+AUTOPR_DISPATCH_STATE_DIR="$TMP_DIR/state" \
+  "$REPO_ROOT/apps/msandbox/harness/codex-backoff.sh" record "$TMP_DIR/codex-crash.log" 2>/dev/null || true
+check "an ordinary Codex crash writes no backoff marker" \
+  $([ ! -e "$TMP_DIR/state/codex-usage-limit.json" ] && echo 0 || echo 1)
+
+# ── one button press costs at most one forced run, even when the run dies
+#    before it can claim the request ──
+cat > "$TMP_DIR/run-request-probe" <<'EOF'
+#!/usr/bin/env bash
+[ -z "${AUTOPR_TEST_PROBE_CALLS:-}" ] || printf 'probe\n' >> "$AUTOPR_TEST_PROBE_CALLS"
+[ "${AUTOPR_TEST_PROBE_EXIT:-3}" = 0 ] || exit "${AUTOPR_TEST_PROBE_EXIT:-3}"
+requests="${AUTOPR_TEST_PROBE_REQUESTS:-}"
+[ -n "$requests" ] || requests='[{"task_id":"11111111-1111-4111-8111-111111111111","project_id":"p","requested_at":"2026-09-07T10:00:00Z"}]'
+printf '%s\n' "$requests"
+EOF
+chmod +x "$TMP_DIR/run-request-probe"
+rm -f "$TMP_DIR/dispatches"; rm -rf "$TMP_DIR/state"
+AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
+check "a pending request is dispatched once and its request set is remembered" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] \
+    && grep -q '11111111-1111-4111-8111-111111111111@2026-09-07T10:00:00Z' "$TMP_DIR/state/last-forced-request-set" && echo 0 || echo 1)
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_FORCED_MIN_INTERVAL_SECONDS=0 AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' \
+  AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
+check "the same unclaimed request set is not re-dispatched after the five-minute floor" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_PROBE_REQUESTS='[{"task_id":"11111111-1111-4111-8111-111111111111","project_id":"p","requested_at":"2026-09-07T10:00:00Z"},{"task_id":"22222222-2222-4222-8222-222222222222","project_id":"p","requested_at":"2026-09-07T10:05:00Z"}]' \
+  AUTOPR_FORCED_MIN_INTERVAL_SECONDS=0 AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' \
+  AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
+check "a new button press (different request set) dispatches again" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] && echo 0 || echo 1)
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_FORCED_REQUEST_TTL_SECONDS=0 AUTOPR_FORCED_MIN_INTERVAL_SECONDS=0 \
+  AUTOPR_TEST_PROBE_REQUESTS='[{"task_id":"11111111-1111-4111-8111-111111111111","project_id":"p","requested_at":"2026-09-07T10:00:00Z"},{"task_id":"22222222-2222-4222-8222-222222222222","project_id":"p","requested_at":"2026-09-07T10:05:00Z"}]' \
+  AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
+check "once the request TTL passes the same set may be forced again" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] && echo 0 || echo 1)
+
+# ── the dispatch log rotates instead of growing forever ──
+head -c 600 /dev/zero | tr '\0' 'x' > "$TMP_DIR/log.jsonl"
+AUTOPR_DISPATCH_LOG_MAX_BYTES=500 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "an oversized dispatch log is rotated once before the next event" \
+  $([ -s "$TMP_DIR/log.jsonl.1" ] && [ "$(wc -c < "$TMP_DIR/log.jsonl" | tr -d ' ')" -lt 500 ] && echo 0 || echo 1)
+
+# ── GitHub-side floor: the workflow refuses a hot re-dispatch on its own ──
+GUARD="$REPO_ROOT/apps/msandbox/harness/hot-redispatch-guard.sh"
+cat > "$TMP_DIR/gh-guard" <<'EOF'
+#!/usr/bin/env bash
+[ "${AUTOPR_TEST_GUARD_FAIL:-0}" = 0 ] || exit 1
+printf '%s\n' "${AUTOPR_TEST_GUARD_RUNS:-[]}"
+EOF
+chmod +x "$TMP_DIR/gh-guard"
+just_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+AUTOPR_GH_BIN="$TMP_DIR/gh-guard" GITHUB_REPOSITORY=x/x GITHUB_RUN_ID=999 \
+  AUTOPR_TEST_GUARD_RUNS="[{\"databaseId\":1,\"updatedAt\":\"$just_now\",\"createdAt\":\"$just_now\"}]" \
+  "$GUARD" >/dev/null 2>&1 && guard_hot_rc=0 || guard_hot_rc=$?
+check "a Kanban run completed seconds ago makes the guard skip this pass" \
+  $([ "$guard_hot_rc" = 3 ] && echo 0 || echo 1)
+AUTOPR_GH_BIN="$TMP_DIR/gh-guard" GITHUB_REPOSITORY=x/x GITHUB_RUN_ID=1 \
+  AUTOPR_TEST_GUARD_RUNS="[{\"databaseId\":1,\"updatedAt\":\"$just_now\",\"createdAt\":\"$just_now\"}]" \
+  "$GUARD" >/dev/null 2>&1 && guard_self_rc=0 || guard_self_rc=$?
+check "the guard ignores the current run's own row" \
+  $([ "$guard_self_rc" = 0 ] && echo 0 || echo 1)
+AUTOPR_GH_BIN="$TMP_DIR/gh-guard" GITHUB_REPOSITORY=x/x \
+  AUTOPR_TEST_GUARD_RUNS="[{\"databaseId\":1,\"updatedAt\":\"$stale\",\"createdAt\":\"$stale\"}]" \
+  "$GUARD" >/dev/null 2>&1 && guard_cold_rc=0 || guard_cold_rc=$?
+check "a run older than the floor proceeds" $([ "$guard_cold_rc" = 0 ] && echo 0 || echo 1)
+AUTOPR_GH_BIN="$TMP_DIR/gh-guard" GITHUB_REPOSITORY=x/x AUTOPR_TEST_GUARD_FAIL=1 \
+  "$GUARD" >/dev/null 2>&1 && guard_api_rc=0 || guard_api_rc=$?
+check "a GitHub API failure fails open (spend guard, not a safety boundary)" \
+  $([ "$guard_api_rc" = 0 ] && echo 0 || echo 1)
+check "the Kanban workflow runs the guard before any board or production read" \
+  $([ "$(grep -n 'hot-redispatch-guard.sh' "$REPO_ROOT/.github/workflows/kanban-autopr.yml" | head -1 | cut -d: -f1)" -lt \
+      "$(grep -n 'collect.sh > ' "$REPO_ROOT/.github/workflows/kanban-autopr.yml" | head -1 | cut -d: -f1)" ] \
+    && grep -q "if: steps.guard.outputs.proceed == 'true'" "$REPO_ROOT/.github/workflows/kanban-autopr.yml" \
+    && echo 0 || echo 1)
+check "installer ships the backoff helper next to the dispatcher" \
+  $(grep -q 'codex-backoff.sh' "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" && echo 0 || echo 1)
+
+# The installed tree is the one launchd and the dashboard actually run. A helper
+# that an installed script shells out to by $SCRIPT_DIR path, but that the
+# installer never copies, fails quietly there and nowhere else: collect-pr-context.sh
+# and plan.py were both missing for days while the dashboard silently served a
+# stale cached PR pane under a red DEGRADED banner.
+installer_sh="$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh"
+# Strip comments first: this list is what the guard treats as "installed", and
+# a file merely NAMED in a comment satisfied it — which is how a genuinely
+# uninstalled helper could pass.
+installed_names="$(sed -n '/^install_runtime()/,/^}/p' "$installer_sh" \
+  | sed 's/#.*//' \
+  | grep -oE '[A-Za-z0-9_.-]+\.(sh|py)' | sort -u)"
+missing_helpers=""
+for installed in $installed_names; do
+  [ -f "$REPO_ROOT/apps/msandbox/harness/$installed" ] || continue
+  # Both shapes an installed script uses to find a helper: a $SCRIPT_DIR
+  # sibling, and a cli/ module it resolves out of the repository layout. The
+  # installed tree is FLAT, so the second kind has to be copied in beside the
+  # scripts too — codex_auth.py was not, and every dispatcher tick then
+  # reported a dead Codex login that no `codex login` could clear.
+  # Comments are stripped on BOTH sides. On the name side a file merely
+  # mentioned in one used to count as installed; on this side a helper merely
+  # mentioned in one would be demanded of the installer.
+  for referenced in $(sed 's/#.*//' "$REPO_ROOT/apps/msandbox/harness/$installed" 2>/dev/null \
+      | grep -ohE '\$SCRIPT_DIR/[A-Za-z0-9_.-]+\.(sh|py)|/cli/[A-Za-z0-9_.-]+\.py' \
+      | sed 's|.*/||' | sort -u); do
+    printf '%s\n' "$installed_names" | grep -qx "$referenced" \
+      || missing_helpers="$missing_helpers $referenced"
+  done
+done
+check "installer ships every helper the installed scripts shell out to" \
+  $([ -z "$missing_helpers" ] && echo 0 || { echo "uninstalled:$missing_helpers" >&2; echo 1; })
+
+# The static guard above compares names; this runs the installer's own
+# install_runtime against a throwaway root and then uses the result, because
+# what actually broke was resolution, not naming: codex-backoff.sh looked for
+# ../cli/codex_auth.py, which exists in the repo and in the workflow's control
+# root but never in the flat installed tree.
+install_tree="$TMP_DIR/installed-tree"
+rm -rf "$install_tree"
+(
+  eval "$(sed -n '/^install_runtime()/,/^}/p' "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh")"
+  SCRIPT_DIR="$REPO_ROOT/apps/msandbox/harness" INSTALL_ROOT="$install_tree" install_runtime
+) >/dev/null 2>&1
+installed_tree_msg="$("$install_tree/codex-backoff.sh" auth-check "$TMP_DIR/auth.json" 2>&1)" \
+  && installed_tree_rc=0 || installed_tree_rc=$?
+check "the installed dispatcher tree can run the Codex login check it gates every lane on" \
+  $([ "$installed_tree_rc" = 0 ] && grep -q 'expires' <<< "$installed_tree_msg" && echo 0 || echo 1)
+
+# A checker it cannot run is a harness fault, not a credential fault. Exit 4
+# would halt every lane permanently behind a banner saying `codex login`.
+rm -f "$install_tree/codex_auth.py"
+broken_msg="$("$install_tree/codex-backoff.sh" auth-check "$TMP_DIR/auth.json" 2>&1)" \
+  && broken_rc=0 || broken_rc=$?
+check "a checker that cannot run reports a harness fault, not an expired login" \
+  $([ "$broken_rc" = 2 ] && grep -q 'CANNOT CHECK' <<< "$broken_msg" \
+    && ! grep -q 'EXPIRED' <<< "$broken_msg" && echo 0 || echo 1)
+
+# Explicit dashboard starts carry the exact ticket, bypass only the routine
+# spend floor, and remain deduplicated through GitHub's visibility lag.
+rm -rf "$TMP_DIR/state"
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/start-gh.log"
+task=11111111-1111-4111-8111-111111111111
+AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_GH_CALLS="$TMP_DIR/start-gh.log" \
+  AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher --start "$task"
+check "Start now dispatches the exact queued ticket and publishes timing status" \
+  $(grep -q "inputs\[requested_task_id\]=$task" "$TMP_DIR/start-gh.log" \
+    && jq -e --arg task "$task" '.requested_task_id == $task and .next_check_at > .checked_at and .routine_seconds == 300' "$TMP_DIR/state/status.json" >/dev/null \
+    && echo 0 || echo 1)
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_KEEP_LEASE=1 AUTOPR_TEST_ERROR_RUNS='[]' run_dispatcher
+check "the cross-lane dispatch lease closes the GitHub visibility race" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
+AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_KANBAN_RUNS='[{"status":"in_progress","databaseId":7}]' \
+  run_dispatcher --start "$task"
+check "explicit retry still refuses an active workflow" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
+AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher --start "$task"
+check "explicit Start can retry an unclaimed request after its old workflow finished" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] && echo 0 || echo 1)
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_PROBE_EXIT=0 run_dispatcher --start 33333333-3333-4333-8333-333333333333
+check "a missing requested ticket never falls back to a different card" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && grep -q 'requested-ticket-no-longer-pending' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+AUTOPR_GH_BIN="$TMP_DIR/gh-guard" GITHUB_REPOSITORY=x/x \
+  AUTOPR_REQUESTED_TASK_ID="$task" \
+  AUTOPR_TEST_GUARD_RUNS="[{\"databaseId\":1,\"updatedAt\":\"$just_now\"}]" \
+  "$GUARD" >/dev/null 2>&1 && explicit_rc=0 || explicit_rc=$?
+check "the workflow floor admits the exact-ticket operator dispatch" \
+  $([ "$explicit_rc" = 0 ] && echo 0 || echo 1)
+
+# Notification Center banners: silent without the opt-in marker, one banner
+# per dispatch, one per finished run (never a replay of history), and one per
+# sandbox-off period.
+cat > "$TMP_DIR/osascript" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$AUTOPR_TEST_NOTIFY_LOG"
+EOF
+chmod +x "$TMP_DIR/osascript"
+notify_tick() {
+  AUTOPR_NOTIFY_BIN="$TMP_DIR/osascript" AUTOPR_TEST_NOTIFY_LOG="$TMP_DIR/notify.log" \
+    AUTOPR_NOTIFY_FILE="$TMP_DIR/notify-on" run_dispatcher "$@"
+}
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/state/last-notified-run" "$TMP_DIR/state/notified-off" "$TMP_DIR/notify.log"
+old_run="$(jq -cn '[{databaseId:50,status:"completed",conclusion:"success",event:"workflow_dispatch",createdAt:"2026-09-11T00:00:00Z",updatedAt:"2026-09-11T00:20:00Z",url:"x"}]')"
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS="$old_run" notify_tick
+check "banners stay silent without the opt-in marker" \
+  $([ -e "$TMP_DIR/dispatches" ] && [ ! -e "$TMP_DIR/notify.log" ] && echo 0 || echo 1)
+
+: > "$TMP_DIR/notify-on"
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/state/last-notified-run"
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS="$old_run" notify_tick
+check "a dispatch posts one banner and the first tick only records the run baseline" \
+  $([ "$(grep -c 'Run dispatched' "$TMP_DIR/notify.log")" = 1 ] \
+    && ! grep -q 'run #50' "$TMP_DIR/notify.log" \
+    && [ "$(cat "$TMP_DIR/state/last-notified-run")" = 50 ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+newer_runs="$(jq -cn '[{databaseId:50,status:"completed",conclusion:"success",event:"workflow_dispatch",createdAt:"2026-09-11T00:00:00Z",updatedAt:"2026-09-11T00:20:00Z",url:"x"},{databaseId:51,status:"completed",conclusion:"failure",event:"workflow_dispatch",createdAt:"2026-09-11T01:00:00Z",updatedAt:"2026-09-11T01:25:00Z",url:"x"}]')"
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS="$newer_runs" notify_tick
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS="$newer_runs" notify_tick
+check "a finished Kanban run posts exactly one banner with its outcome and duration" \
+  $([ "$(grep -c 'run #51' "$TMP_DIR/notify.log")" = 1 ] \
+    && grep -q 'subtitle "Kanban run failure"' "$TMP_DIR/notify.log" \
+    && grep -q 'run #51 · 25m' "$TMP_DIR/notify.log" \
+    && ! grep -q 'run #50' "$TMP_DIR/notify.log" && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+error_ok="$(jq -cn '[{databaseId:52,status:"completed",conclusion:"success",event:"workflow_dispatch",createdAt:"2026-09-11T02:00:00Z",updatedAt:"2026-09-11T02:01:00Z",url:"x"}]')"
+AUTOPR_TEST_ERROR_RUNS="$error_ok" AUTOPR_TEST_KANBAN_RUNS="$newer_runs" notify_tick
+check "a successful non-Kanban pass posts no banner" \
+  $(! grep -q 'run #52' "$TMP_DIR/notify.log" && [ "$(cat "$TMP_DIR/state/last-notified-run")" = 52 ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/autopr-enabled"
+notify_tick
+notify_tick
+touch "$TMP_DIR/autopr-enabled"
+check "the sandbox going off posts one banner per off period" \
+  $([ "$(grep -c 'AutoPR is off' "$TMP_DIR/notify.log")" = 1 ] && echo 0 || echo 1)
+AUTOPR_TEST_ERROR_RUNS="$error_ok" AUTOPR_TEST_KANBAN_RUNS="$newer_runs" notify_tick
+check "a tick with the sandbox back clears the off marker" \
+  $([ ! -e "$TMP_DIR/state/notified-off" ] && echo 0 || echo 1)
+
+# The status-bar segment every agent session shows: file reads only.
+SEGMENT="$REPO_ROOT/apps/msandbox/harness/status-segment.sh"
+mkdir -p "$TMP_DIR/seg-state" "$TMP_DIR/seg-github" "$TMP_DIR/seg-worktree"
+seg() {
+  AUTOPR_SEGMENT_PLAIN=1 AUTOPR_ENABLE_FILE="$TMP_DIR/seg-enabled" \
+    AUTOPR_DISPATCH_STATE_DIR="$TMP_DIR/seg-state" AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/seg-github" \
+    AUTOPR_CARD_SNAPSHOT="$TMP_DIR/seg-cards.json" AUTOPR_RUNNER_WORKTREE="$TMP_DIR/seg-worktree" \
+    AUTOPR_NOW_EPOCH=1000000 "$SEGMENT"
+}
+check "status segment reports OFF without the master switch" \
+  $([ "$(seg)" = "AUTOPR OFF" ] && echo 0 || echo 1)
+touch "$TMP_DIR/seg-enabled"
+check "status segment reports a missing scheduler signal" \
+  $([ "$(seg)" = "AUTOPR no scheduler signal" ] && echo 0 || echo 1)
+printf '%s\n' '{"action":"skip","reason":"kanban-not-due","checked_at":999990,"next_check_at":1000050,"eligible_at":1000130}' > "$TMP_DIR/seg-state/status.json"
+check "status segment shows the idle countdown from the scheduler status" \
+  $([ "$(seg)" = "AUTOPR idle · next in 3m" ] && echo 0 || echo 1)
+printf '%s\n' '{"action":"skip","reason":"msandbox-off","checked_at":999990,"next_check_at":1000050,"eligible_at":0}' > "$TMP_DIR/seg-state/status.json"
+check "status segment names a sandbox that is off" \
+  $([ "$(seg)" = "AUTOPR SANDBOX OFF" ] && echo 0 || echo 1)
+printf '%s\n' '{"action":"skip","reason":"kanban-not-due","checked_at":999500,"next_check_at":999560,"eligible_at":0}' > "$TMP_DIR/seg-state/status.json"
+check "status segment flags a scheduler that stopped ticking" \
+  $([ "$(seg)" = "AUTOPR scheduler stale 8m" ] && echo 0 || echo 1)
+printf '%s\n' '{"action":"skip","reason":"active-autopr-workflow","checked_at":999990,"next_check_at":1000050,"eligible_at":0}' > "$TMP_DIR/seg-state/status.json"
+jq -cn '[{databaseId:7,status:"in_progress",lane:"kanban",createdAt:(999280 | todate)}]' > "$TMP_DIR/seg-github/runs.json"
+printf '%s\n' '[{"id8":"abcd1234","title":"Auto-map timezone when adding a location"}]' > "$TMP_DIR/seg-cards.json"
+git -C "$TMP_DIR/seg-worktree" init -q && git -C "$TMP_DIR/seg-worktree" checkout -q -b bot/task-abcd1234
+check "status segment names the running lane, its age, and the card being worked" \
+  $([ "$(seg)" = "AUTOPR ▶ KANBAN 12m · Auto-map timezone when a" ] && echo 0 || echo 1)
+check "installer ships the status segment next to the dispatcher" \
+  $(grep -q 'status-segment.sh' "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" && echo 0 || echo 1)
+
+# ── a dead Codex login holds every lane like a usage limit, but never clears
+#    on its own: the sandbox copy is read-only and the refresh token is
+#    single-use, so only `codex login` on this Mac brings the lanes back ──
+BACKOFF="$REPO_ROOT/apps/msandbox/harness/codex-backoff.sh"
+write_codex_auth_fixture "$TMP_DIR/auth-expired.json" "$(( $(date +%s) - 60 ))"
+# The suite runs with errexit: capture a non-zero status the way the other
+# cases do, on the `||` side of a list.
+auth_expired_msg="$("$BACKOFF" auth-check "$TMP_DIR/auth-expired.json" 2>&1)" && auth_expired_rc=0 || auth_expired_rc=$?
+auth_valid_msg="$("$BACKOFF" auth-check "$TMP_DIR/auth.json" 2>&1)" && auth_valid_rc=0 || auth_valid_rc=$?
+"$BACKOFF" auth-check "$TMP_DIR/no-such-auth.json" >/dev/null 2>&1 && auth_missing_rc=0 || auth_missing_rc=$?
+printf 'not json' > "$TMP_DIR/auth-garbage.json"
+"$BACKOFF" auth-check "$TMP_DIR/auth-garbage.json" >/dev/null 2>&1 && auth_garbage_rc=0 || auth_garbage_rc=$?
+check "auth-check reads the access token's expiry and names the fix" \
+  $([ "$auth_expired_rc" = 4 ] && grep -q 'EXPIRED' <<< "$auth_expired_msg" \
+    && grep -q 'codex login' <<< "$auth_expired_msg" \
+    && [ "$auth_valid_rc" = 0 ] && grep -q 'expires' <<< "$auth_valid_msg" \
+    && [ "$auth_missing_rc" = 4 ] && [ "$auth_garbage_rc" = 4 ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/notify.log" "$TMP_DIR/state/notified-codex-auth" "$TMP_DIR/state/codex-usage-limit.json"
+AUTOPR_HOST_CODEX_AUTH_FILE="$TMP_DIR/auth-expired.json" \
+  AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' notify_tick
+check "an expired Codex login skips every lane and says why" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && grep -q 'codex-auth-required' "$TMP_DIR/log.jsonl" \
+    && grep -q 'Codex login expired' "$TMP_DIR/notify.log" && echo 0 || echo 1)
+AUTOPR_HOST_CODEX_AUTH_FILE="$TMP_DIR/auth-expired.json" \
+  AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' notify_tick --if-requested
+check "a queued card does not override a dead Codex login, and the banner shows once" \
+  $([ ! -e "$TMP_DIR/dispatches" ] \
+    && [ "$(grep -c 'Codex login expired' "$TMP_DIR/notify.log")" = 1 ] && echo 0 || echo 1)
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' notify_tick
+check "a renewed login dispatches again and re-arms the one-time banner" \
+  $([ "$(cat "$TMP_DIR/dispatches" 2>/dev/null)" = "silent-error-autofix.yml" ] \
+    && [ ! -e "$TMP_DIR/state/notified-codex-auth" ] && echo 0 || echo 1)
+
+# The auth file has not changed here — only the harness has — so drop the
+# cached verdict to represent a tick past its TTL rather than one inside it.
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/state/notified-codex-auth" "$TMP_DIR/notify.log" "$TMP_DIR/state/codex-auth-check"
+AUTOPR_CODEX_AUTH_CHECK="$TMP_DIR/no-such-checker.py" \
+  AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' notify_tick
+check "a checker the dispatcher cannot run fails open instead of grounding every lane" \
+  $([ "$(cat "$TMP_DIR/dispatches" 2>/dev/null)" = "silent-error-autofix.yml" ] \
+    && [ "$(jq -r 'select(.reason == "codex-auth-check-unavailable") | .reason' "$TMP_DIR/log.jsonl" | wc -l | tr -d ' ')" -ge 1 ] \
+    && ! grep -q 'Codex login expired' "$TMP_DIR/notify.log" && echo 0 || echo 1)
+
+# A helper the installer never copied is the same install-drift class, and it
+# used to return "no expiry" with rc 0 — so nothing was logged and the
+# dispatcher only looked like it was checking the login every tick.
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/state/codex-auth-check" "$TMP_DIR/notify.log"
+# The log is append-only and an earlier case already wrote this reason, so
+# count the new one rather than grepping for any.
+unavailable_before="$(grep -c 'codex-auth-check-unavailable' "$TMP_DIR/log.jsonl" || true)"
+AUTOPR_CODEX_BACKOFF="$TMP_DIR/no-such-backoff.sh" \
+  AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' notify_tick
+check "a missing codex-backoff.sh is reported, not silently skipped" \
+  $([ "$(cat "$TMP_DIR/dispatches" 2>/dev/null)" = "silent-error-autofix.yml" ] \
+    && [ "$(grep -c 'codex-auth-check-unavailable' "$TMP_DIR/log.jsonl" || true)" -gt "$unavailable_before" ] \
+    && echo 0 || echo 1)
+
+# One JWT exp per ten days does not need 1,440 bash+python3 spawns a day, and
+# this guard sits above the watcher short-circuit that exists to keep an idle
+# tick free.
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/state/codex-auth-check" "$TMP_DIR/auth-check-calls"
+cat > "$TMP_DIR/counting-backoff.sh" <<'STUB'
+#!/usr/bin/env bash
+# Only auth-check is counted, and `active` must still answer "no backoff" (3)
+# or the dispatcher stops at the usage-limit gate and never reaches this guard.
+case "${1:-}" in
+  auth-check) printf '%s\n' "$*" >> "$AUTOPR_TEST_AUTH_CALLS"; printf 'codex login: expires later\n' ;;
+  active) exit 3 ;;
+esac
+STUB
+chmod +x "$TMP_DIR/counting-backoff.sh"
+for _ in 1 2 3; do
+  AUTOPR_CODEX_BACKOFF="$TMP_DIR/counting-backoff.sh" AUTOPR_TEST_AUTH_CALLS="$TMP_DIR/auth-check-calls" \
+    AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+done
+cached_calls="$(wc -l < "$TMP_DIR/auth-check-calls" | tr -d ' ')"
+# `codex login` rewrites auth.json, so a repaired login must be seen at once
+# rather than after the TTL.
+touch "$TMP_DIR/auth.json"
+AUTOPR_CODEX_BACKOFF="$TMP_DIR/counting-backoff.sh" AUTOPR_TEST_AUTH_CALLS="$TMP_DIR/auth-check-calls" \
+  AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "the login verdict is cached per tick but re-read the moment auth.json changes" \
+  $([ "$cached_calls" = 1 ] \
+    && [ "$(wc -l < "$TMP_DIR/auth-check-calls" | tr -d ' ')" = 2 ] && echo 0 || echo 1)
+
+printf '%s\n' '{"action":"skip","reason":"codex-auth-required","checked_at":999990,"next_check_at":1000050,"eligible_at":0}' > "$TMP_DIR/seg-state/status.json"
+check "status segment names a dead Codex login" \
+  $(grep -q 'CODEX LOGIN' <<< "$(seg)" && echo 0 || echo 1)
+
+echo
+echo "$PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]

@@ -12,7 +12,17 @@ import httpx
 from fastapi import HTTPException
 
 from app.core.services.scope_registry.codify import codified_sql
+from app.core.services.scope_registry.categories import (
+    ancestry,
+    categories_for_naics,
+    resolve_category,
+)
 from app.core.services.company_contacts import get_company_name_and_contacts
+from app.core.services.location_timezone import (
+    TimezoneResolutionError,
+    timezone_for_create,
+    timezone_for_update,
+)
 from app.core.services.jurisdiction_context import (
     get_known_sources,
     record_source,
@@ -94,6 +104,33 @@ from app.core.services.compliance_service._alerts import (
     _create_check_log,
     _log_policy_change,
 )
+
+
+def _facility_profile_eligible(
+    location_naics: Optional[str],
+    company_naics: Optional[str],
+    company_industry: Optional[str],
+    company_healthcare_specialties: Optional[List[str]],
+) -> bool:
+    """Whether a location should be offered healthcare facility setup.
+
+    The most specific modeled classification wins. Unmodeled NAICS values fall
+    through to the next available company classification rather than suppressing
+    setup. Biotech and any selected healthcare specialty are healthcare signals
+    used only when neither NAICS value resolves through the shared taxonomy.
+    """
+    for naics in (location_naics, company_naics):
+        if naics and str(naics).strip():
+            categories = categories_for_naics(str(naics))
+            if categories:
+                return "healthcare" in categories
+
+    category = resolve_category(company_industry)
+    return bool(
+        company_healthcare_specialties
+        or category == "biotech"
+        or (category and "healthcare" in ancestry(category))
+    )
 
 
 
@@ -707,12 +744,22 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
     from app.database import get_connection
 
     async with get_connection() as conn:
+        try:
+            timezone_write = timezone_for_create(
+                timezone=data.timezone,
+                timezone_source=data.timezone_source,
+                state=data.state,
+                country_code=data.country_code,
+            )
+        except TimezoneResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
         fa_json = json.dumps(data.facility_attributes) if data.facility_attributes else None
         location_id = await conn.fetchval(
             """
             INSERT INTO business_locations (company_id, name, address, city, state, county, zipcode, facility_attributes,
-                                            ein, naics, max_employees, annual_avg_employees, timezone)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                                            ein, naics, max_employees, annual_avg_employees, timezone, timezone_source)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             RETURNING id
             """,
             company_id,
@@ -727,7 +774,8 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
             data.naics,
             data.max_employees,
             data.annual_avg_employees,
-            data.timezone,
+            timezone_write.timezone,
+            timezone_write.source or "manual",
         )
 
         # Resolve county from zip if not provided
@@ -925,6 +973,9 @@ async def get_locations(company_id: UUID) -> list[dict]:
         # reports what the shared catalog holds for this jurisdiction, which is
         # exactly the number an admin needs to see diverge from the tenant's.
         query = """SELECT bl.*, jr.has_local_ordinance,
+                      c.naics AS company_naics,
+                      c.industry AS company_industry,
+                      c.healthcare_specialties AS company_healthcare_specialties,
                       COALESCE(ec.cnt, 0) AS employee_count,
                       COALESCE(en.names, ARRAY[]::text[]) AS employee_names,
                       COALESCE(rc.cnt, 0) AS requirements_count,
@@ -932,6 +983,7 @@ async def get_locations(company_id: UUID) -> list[dict]:
                       COALESCE(ac.cnt, 0) AS unread_alerts_count,
                       COALESCE(jrc.cnt, 0) AS jurisdiction_repo_count
                FROM business_locations bl
+               JOIN companies c ON c.id = bl.company_id
                LEFT JOIN jurisdiction_reference jr
                  ON LOWER(bl.city) = jr.city AND UPPER(bl.state) = jr.state
                LEFT JOIN LATERAL (
@@ -992,6 +1044,17 @@ async def get_locations(company_id: UUID) -> list[dict]:
         result = []
         for row in rows:
             d = dict(row)
+            company_naics = d.pop("company_naics", None)
+            company_industry = d.pop("company_industry", None)
+            company_healthcare_specialties = d.pop(
+                "company_healthcare_specialties", None
+            )
+            d["facility_profile_eligible"] = _facility_profile_eligible(
+                d.get("naics"),
+                company_naics,
+                company_industry,
+                company_healthcare_specialties,
+            )
             # data_status answers "has this location been synced from the
             # catalog?" — a pipeline fact. It must read the UNGATED projection
             # count: a fully-synced location whose rows simply aren't codified
@@ -1119,6 +1182,18 @@ async def update_location(
     from datetime import datetime
 
     async with get_connection() as conn:
+        current = await conn.fetchrow(
+            """
+            SELECT timezone, timezone_source, state, country_code
+            FROM business_locations
+            WHERE id = $1 AND company_id = $2
+            """,
+            location_id,
+            company_id,
+        )
+        if not current:
+            return None
+
         updates = []
         params = []
         param_idx = 3
@@ -1167,9 +1242,30 @@ async def update_location(
             updates.append(f"annual_avg_employees = ${param_idx}")
             params.append(data.annual_avg_employees)
             param_idx += 1
-        if data.timezone is not None:
+        geography_changed = bool(
+            {"address", "city", "state", "county", "zipcode"} & data.model_fields_set
+        )
+        try:
+            timezone_write = timezone_for_update(
+                timezone=data.timezone,
+                timezone_was_supplied="timezone" in data.model_fields_set,
+                timezone_source=data.timezone_source,
+                existing_timezone=current["timezone"],
+                existing_source=current["timezone_source"] or "manual",
+                state=data.state if data.state is not None else current["state"],
+                country_code=current["country_code"] or "US",
+                geography_changed=geography_changed,
+            )
+        except TimezoneResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        if timezone_write.timezone is not None:
             updates.append(f"timezone = ${param_idx}")
-            params.append(data.timezone)
+            params.append(timezone_write.timezone)
+            param_idx += 1
+        if timezone_write.source is not None:
+            updates.append(f"timezone_source = ${param_idx}")
+            params.append(timezone_write.source)
             param_idx += 1
 
         if not updates:

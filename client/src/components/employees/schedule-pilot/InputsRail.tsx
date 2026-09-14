@@ -1,12 +1,12 @@
 import { memo, useMemo, useState } from 'react'
 import { useDraggable, useDroppable } from '@dnd-kit/core'
-import { AlertTriangle, BriefcaseBusiness, CalendarCog, Search, Sparkles, UserRound, X } from 'lucide-react'
+import { AlertTriangle, BriefcaseBusiness, CalendarCog, Search, Sparkles, UserRound, Wallet, X } from 'lucide-react'
 import { LABEL } from '../../ui'
-import type { LocationScheduleProfile, PlanningInputs, PlanningRosterPerson, RosterEmployee, RosterFlags } from '../../../types/employeeSchedule'
+import type { LocationScheduleProfile, PlanningInputs, PlanningRosterPerson, RosterEmployee, RosterFlags, WeekLaborCost } from '../../../types/employeeSchedule'
 import { WEEK_RULE_LABELS, fmtDayLabel, fmtTime } from '../../../types/employeeSchedule'
 import { SETUP_KICKOFF_PROMPT } from '../../../hooks/employees/useScheduleHuumeThread'
 import { LoadBar, POLICY_WEEKLY_MINUTES } from './LoadLedger'
-import { hoursLabel } from './reviewShape'
+import { costLabel, hoursLabel } from './reviewShape'
 
 export interface InputsRailProps {
   inputs: PlanningInputs | null
@@ -17,6 +17,9 @@ export interface InputsRailProps {
   onSelectEmployee(employeeId: string | null): void
   requiredJobId?: string | null
   requiredJobDate?: string | null
+  /** Absent (undefined) when the viewer has no `labor_cost` access — the whole
+   *  cost section and every per-person figure disappear rather than zeroing. */
+  cost?: WeekLaborCost | null
   weekRules: LocationScheduleProfile['week_rules'] | null
   locationName: string
   credentialsEnabled: boolean
@@ -30,6 +33,8 @@ type Person = {
   employee: RosterEmployee
   planning: PlanningRosterPerson | null
   flags?: RosterFlags[string]
+  /** undefined = no cost access; null = priced view but no rate on file. */
+  cost?: number | null
 }
 
 function isUnqualified(employee: RosterEmployee, requiredJobId?: string | null, requiredJobDate?: string | null): boolean {
@@ -103,6 +108,7 @@ function PersonRow({ person, selected, requiredJobId, requiredJobDate, policyMin
           capMinutes={planning?.caps.max_weekly_minutes ?? null}
           allowOvertime={planning?.caps.allow_overtime ?? false}
           policyMinutes={policyMinutes}
+          cost={person.cost}
         />
       </span>
       <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500">
@@ -137,7 +143,7 @@ function Section({ label, count, children, action }: { label: string; count?: nu
  *  now also what Huume reads (`get_schedule_overview.roster_load`). */
 function InputsRail({
   inputs, loading, roster, rosterFlags, selectedEmployeeId, onSelectEmployee, requiredJobId, requiredJobDate,
-  weekRules, locationName, credentialsEnabled, onOpenWeekSetup, onOpenJobs, onAskHuume, onShowShift,
+  cost, weekRules, locationName, credentialsEnabled, onOpenWeekSetup, onOpenJobs, onAskHuume, onShowShift,
 }: InputsRailProps) {
   const [query, setQuery] = useState('')
   const { setNodeRef, isOver } = useDroppable({ id: 'schedule-unassign', data: { kind: 'unassign' } })
@@ -145,13 +151,30 @@ function InputsRail({
 
   const people = useMemo<Person[]>(() => {
     const planningById = new Map((inputs?.roster ?? []).map((person) => [person.employee_id, person]))
-    const merged = roster.map((employee) => ({ employee, planning: planningById.get(employee.id) ?? null, flags: rosterFlags?.[employee.id] }))
+    // undefined throughout when there is no cost block: `LoadBar` then renders
+    // no money column at all, rather than a row of dashes.
+    const costById = cost
+      ? new Map(cost.employees.map((item) => [item.employee_id, item.priced ? item.total : null]))
+      : null
+    // `cost.employees` only carries people with shifts this week. Someone with
+    // none costs nothing — that is $0, not missing pay data. Only the server's
+    // own unpriced list means "no rate on file", and in a normal week the
+    // bench is most of the roster, so conflating them buried the real rows.
+    const unpriced = new Set(cost?.unpriced_employee_ids ?? [])
+    const merged = roster.map((employee) => ({
+      employee,
+      planning: planningById.get(employee.id) ?? null,
+      flags: rosterFlags?.[employee.id],
+      cost: costById
+        ? (unpriced.has(employee.id) ? null : (costById.get(employee.id) ?? 0))
+        : undefined,
+    }))
     merged.sort((a, b) => (b.planning?.load.minutes ?? 0) - (a.planning?.load.minutes ?? 0) || a.employee.name.localeCompare(b.employee.name))
     const needle = query.trim().toLowerCase()
     if (!needle) return merged
     return merged.filter(({ employee, planning }) => [employee.name, employee.job_title, employee.department, ...(planning?.jobs ?? [])]
       .filter(Boolean).join(' ').toLowerCase().includes(needle))
-  }, [inputs, roster, rosterFlags, query])
+  }, [inputs, roster, rosterFlags, cost, query])
 
   const openByDay = useMemo(() => {
     const groups = new Map<string, PlanningInputs['open_slots']>()
@@ -232,6 +255,56 @@ function InputsRail({
           </ul>
         )}
       </Section>
+
+      {cost && (
+        <Section
+          label="Labor cost"
+          count={costLabel(cost.total)}
+          action={cost.ot_premium > 0
+            ? <span className="text-[10px] text-amber-300" title="What the overtime hours cost above their own base rate">{costLabel(cost.ot_premium)} OT</span>
+            : null}
+        >
+          <dl className="space-y-1 text-[11px]">
+            <div className="flex items-baseline justify-between gap-2">
+              <dt className="text-zinc-500">Hourly crew</dt>
+              <dd className="font-mono tabular-nums text-zinc-300">{costLabel(cost.hourly_total)}</dd>
+            </div>
+            {cost.salaried_total > 0 && (
+              <div className="flex items-baseline justify-between gap-2">
+                <dt className="text-zinc-500" title="Salary does not move with hours — shown apart so the hourly figure stays the marginal one">Salaried</dt>
+                <dd className="font-mono tabular-nums text-zinc-300">{costLabel(cost.salaried_total)}</dd>
+              </div>
+            )}
+            {cost.open_seat_total > 0 && (
+              <div className="flex items-baseline justify-between gap-2">
+                <dt className="text-zinc-500" title="What the still-open seats would add at their job's default rate">Unfilled seats</dt>
+                <dd className="font-mono tabular-nums text-zinc-400">{costLabel(cost.open_seat_total)}</dd>
+              </div>
+            )}
+          </dl>
+          {cost.truncated && (
+            <p className="mt-2 rounded-md border border-amber-500/25 bg-amber-500/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-amber-200">
+              This week has more shifts than the cost read covers, so the figures
+              above are a partial total.
+            </p>
+          )}
+          {(cost.unpriced_employee_count > 0 || cost.unpriced_open_seats > 0) && (
+            <p className="mt-2 rounded-md border border-amber-500/25 bg-amber-500/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-amber-200">
+              {[
+                cost.unpriced_employee_count > 0
+                  && `${cost.unpriced_employee_count} ${cost.unpriced_employee_count === 1 ? 'person has' : 'people have'} no pay rate on file`,
+                cost.unpriced_open_seats > 0
+                  && `${cost.unpriced_open_seats} open ${cost.unpriced_open_seats === 1 ? 'seat is' : 'seats are'} on a job with no default rate`,
+              ].filter(Boolean).join(' · ')}
+              {' '}— not counted above, so the real figure is higher.
+            </p>
+          )}
+          <p className="mt-2 text-[10px] leading-relaxed text-zinc-700">
+            <Wallet className="mr-1 inline h-3 w-3" />
+            As scheduled, not as worked{cost.basis.overtime_citation ? ` — overtime per ${cost.basis.overtime_citation}` : ''}.
+          </p>
+        </Section>
+      )}
 
       <Section label="Policy & law">
         <div className={`rounded-lg border px-2.5 py-2 text-[11px] leading-snug ${jurisdictionTone}`}>

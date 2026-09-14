@@ -578,6 +578,7 @@ class StripeService:
         product_name: str,
         product_description: str,
         headcount: int,
+        location_count: Optional[int],
         amount_cents: int,
         success_url: Optional[str] = None,
         cancel_url: Optional[str] = None,
@@ -601,6 +602,7 @@ class StripeService:
             "type": "custom_product",
             "product_slug": product_slug,
             "headcount": str(headcount),
+            "location_count": str(location_count or 0),
             "amount_cents": str(amount_cents),
             "mode": "subscription",
         }

@@ -25,7 +25,14 @@ def week_bounds(start: date) -> tuple[datetime, datetime]:
     return lo, lo + timedelta(days=7)
 
 
-def summarize_shifts(shifts: list[dict]) -> dict:
+def summarize_shifts(shifts: list[dict], *, cost: dict | None = None) -> dict:
+    """Counts for the week header, plus the scheduled labor cost when the
+    caller resolved one.
+
+    `cost` defaults to None and the key is then ABSENT, not zero: every caller
+    that has no `labor_cost` access must be indistinguishable from a week that
+    genuinely costs nothing to no one, and a `0` in the payload is not that.
+    """
     published = sum(1 for s in shifts if s["status"] == "published")
     draft = sum(1 for s in shifts if s["status"] == "draft")
     open_shifts = sum(
@@ -33,13 +40,16 @@ def summarize_shifts(shifts: list[dict]) -> dict:
         if s["status"] != "cancelled" and len(s["assignments"]) < s["required_staff"]
     )
     assigned = sum(len(s["assignments"]) for s in shifts)
-    return {
+    summary = {
         "total_shifts": len(shifts),
         "published": published,
         "draft": draft,
         "open_shifts": open_shifts,
         "assigned": assigned,
     }
+    if cost is not None:
+        summary["cost"] = cost
+    return summary
 
 
 def sunday_indexed_weekday(d: date) -> int:

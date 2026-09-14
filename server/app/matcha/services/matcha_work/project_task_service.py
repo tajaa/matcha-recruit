@@ -109,7 +109,20 @@ _ALLOWED_OUTCOMES = {"open", "won", "lost"}
 # Sales follow-up activity kinds, logged onto the task history timeline.
 _ALLOWED_ACTIVITY_KINDS = {"call", "email", "note", "meeting"}
 
-# Reason set mirrors scripts/kanban-autopr/decision.sh; migration_required is
+# The AutoPR runtime a card may pin. Mirrors MODEL_CHOICES / EFFORTS in
+# apps/msandbox/cli/autopr_control.py and the ladder in
+# apps/msandbox/harness/lib.sh — the value written here is handed straight to
+# `codex --model` / `model_reasoning_effort` inside the sandbox, so a typo
+# here is a dead run, not a bad label. Adding a model means adding it in all
+# three places.
+_ALLOWED_AUTOPR_MODELS = {"gpt-5.6-sol", "gpt-5.6-luna", "gpt-6-astra", "gpt-5.5"}
+_ALLOWED_AUTOPR_EFFORTS = {"low", "medium", "high", "xhigh"}
+# Who decided the runtime the last run used. `manual` is derived here from a
+# pin write; the other three are recorded by investigate.sh after it resolves
+# precedence, which is the only place that knows.
+_ALLOWED_AUTOPR_RUNTIME_SOURCES = {"auto", "manual", "default", "handoff"}
+
+# Reason set mirrors apps/msandbox/harness/decision.sh; migration_required is
 # retired for new decisions but old cards still carry it, so parsers keep it.
 _AUTOPR_NO_SPEC_RE = re.compile(
     r"\[autopr:no-spec [^\]]+\]\s+"
@@ -124,7 +137,7 @@ _AUTOPR_DIRECTIVE_MARKER_RE = re.compile(r"\[autopr:directives ([a-z_,]+)\]")
 # sees text an authorized owner bound to one exact AutoPR decision, so a plain
 # affirmative ("you can work on this", "do it anyway", "draft the migration")
 # is authority. Keep in lock-step with the harness-side copy in
-# scripts/kanban-autopr/resolve-directive-policy.py.
+# apps/msandbox/harness/resolve-directive-policy.py.
 _AUTOPR_LEAD_IN = (
     r"^(?:(?:please|pls|hey|ok|okay|yes|yep|yeah|sure|thanks)\b[\s,]*)*"
     r"(?:(?:anyway|anyways|either\s+way|regardless|still|nonetheless)\b[\s,]*)*"
@@ -184,7 +197,7 @@ _AUTOPR_RUNTIME_APPROVAL_PREFIXES = (
 
 def _is_autopr_waiting_for_runtime_approval_note(note: str) -> bool:
     normalized = (note or "").strip()
-    # Keep in lock-step with scripts/kanban-autopr/select.sh and the Espresso
+    # Keep in lock-step with apps/msandbox/harness/select.sh and the Espresso
     # card/header views.
     return normalized.startswith(_AUTOPR_RUNTIME_APPROVAL_PREFIXES)
 
@@ -433,7 +446,7 @@ async def request_autopr_reconsideration(
 
 
 # The four Espresso boards the kanban-autopr harness actually watches (kept in
-# sync with scripts/seed/autopr_bot.py's PROJECTS list and scripts/kanban-autopr
+# sync with scripts/seed/autopr_bot.py's PROJECTS list and apps/msandbox/harness
 # /lib.sh's KANBAN_AUTOPR_PROJECT_IDS). Anything outside this set has no
 # harness polling it, so a run request there could never be claimed — reject it
 # at the door instead of queueing work nothing will pick up.
@@ -504,11 +517,9 @@ def is_autopr_bookkeeping_row(metadata: object) -> bool:
 # A hold applies to the current work round. Explicit new work or a new review
 # round releases it; publish/claim events do not. The same indexed lookup is
 # used by claims and, once per task, the list query's lateral join.
-_AUTOPR_HOLD_QUERY = """
-    SELECT (
-        h.metadata->>'kind' = 'autopr_run_cancel'
-        AND COALESCE(h.metadata->>'pause', 'true') = 'true'
-    ) AS paused
+# One shared row selection so the "is it held" and "why is it held" lookups
+# can never resolve different history rows.
+_AUTOPR_HOLD_ROW = """
     FROM mw_task_history h
     WHERE h.task_id = t.id AND (
         (h.event_type = 'activity' AND h.metadata->>'kind' IN (
@@ -518,7 +529,30 @@ _AUTOPR_HOLD_QUERY = """
     ORDER BY h.created_at DESC, (h.metadata->>'kind' = 'autopr_run_cancel') DESC NULLS LAST
     LIMIT 1
 """
+_AUTOPR_HOLD_QUERY = f"""
+    SELECT (
+        h.metadata->>'kind' = 'autopr_run_cancel'
+        AND COALESCE(h.metadata->>'pause', 'true') = 'true'
+    ) AS paused
+    {_AUTOPR_HOLD_ROW}
+"""
 _AUTOPR_HOLD_SQL = f"COALESCE(({_AUTOPR_HOLD_QUERY}), FALSE)"
+# Two-column form for the list query's lateral join: the hold flag and the
+# operator's free-text reason from the SAME resolved row, in one history scan
+# per task. Two separate LIMIT 1 laterals could pick different rows on equal
+# timestamps and would double the per-task scan on every board open.
+_AUTOPR_HOLD_STATE_QUERY = f"""
+    SELECT (
+        h.metadata->>'kind' = 'autopr_run_cancel'
+        AND COALESCE(h.metadata->>'pause', 'true') = 'true'
+    ) AS paused,
+    CASE
+        WHEN h.metadata->>'kind' = 'autopr_run_cancel'
+             AND COALESCE(h.metadata->>'pause', 'true') = 'true'
+        THEN h.metadata->>'reason'
+    END AS reason
+    {_AUTOPR_HOLD_ROW}
+"""
 
 # A claim is active until the card records a terminal run-side mutation. The
 # claim itself is the durable recovery marker: if the workflow dies after
@@ -599,13 +633,17 @@ async def defer_autopr_run(
 
 async def cancel_autopr_run(
     *, project_id: UUID, task_id: UUID, actor_user_id: UUID,
+    reason: Optional[str] = None,
 ) -> Optional[dict]:
     """Hold future AutoPR runs without moving the card or discarding answers.
 
     For an active In Progress claim, this settles the recovery lease so the
     harness will not retry it. It does not kill an already-running process. The
     task lock orders this event with requests, reconsiderations, and claims.
+    ``reason`` is the operator's note (why this card is parked); it rides on
+    the hold row and surfaces as ``autopr_hold_reason`` on the task.
     """
+    reason = (reason or "").strip()[:200] or None
     async with get_connection() as conn:
         async with conn.transaction():
             task = await conn.fetchrow(
@@ -640,9 +678,12 @@ async def cancel_autopr_run(
                 VALUES ($1, $2, $3, $4, 'activity', $5::jsonb, clock_timestamp())
                 """,
                 task_id, str(task_id), project_id, actor_user_id,
-                json.dumps({"kind": "autopr_run_cancel"}),
+                json.dumps(
+                    {"kind": "autopr_run_cancel", "reason": reason}
+                    if reason else {"kind": "autopr_run_cancel"}
+                ),
             )
-    return {"ok": True, "autopr_paused": True}
+    return {"ok": True, "autopr_paused": True, "autopr_hold_reason": reason}
 
 
 async def request_autopr_run(
@@ -1680,11 +1721,20 @@ async def list_project_tasks(
                     t.element_id, t.review_note,
                     to_jsonb(t) ->> 'pr_url' AS pr_url,
                     (to_jsonb(t) ->> 'pr_number')::integer AS pr_number,
+                    -- AutoPR runtime override. NULL means "decide the model and
+                    -- effort automatically from why the last run stopped"; a set
+                    -- value pins this card's runtime. Read through to_jsonb so a
+                    -- checkout running ahead of the autoprrt01 migration still
+                    -- serves the board instead of 500ing on an unknown column.
+                    to_jsonb(t) ->> 'autopr_model' AS autopr_model,
+                    to_jsonb(t) ->> 'autopr_effort' AS autopr_effort,
+                    to_jsonb(t) ->> 'autopr_runtime_source' AS autopr_runtime_source,
                    t.deal_value, t.probability, t.contact_name, t.contact_company,
                    t.contact_email, t.contact_phone, t.outcome, t.loss_reason,
                    t.next_action_at, t.expected_close,
                    COALESCE(t.pipeline_column, 'lead') AS pipeline_column,
                    COALESCE(autopr_hold.paused, FALSE) AS autopr_paused,
+                   autopr_hold.reason AS autopr_hold_reason,
                    (autopr_ctx.id IS NOT NULL AND NOT COALESCE(autopr_hold.paused, FALSE)) AS autopr_reconsideration_pending,
                    autopr_ctx.id AS autopr_reconsideration_event_id,
                    autopr_ctx.created_at AS autopr_reconsideration_at,
@@ -1764,7 +1814,7 @@ async def list_project_tasks(
             LEFT JOIN employees e2 ON e2.user_id = t.created_by
             LEFT JOIN admins a2 ON a2.user_id = t.created_by
             LEFT JOIN mw_project_elements el ON el.id = t.element_id
-            LEFT JOIN LATERAL ({_AUTOPR_HOLD_QUERY}) autopr_hold ON TRUE
+            LEFT JOIN LATERAL ({_AUTOPR_HOLD_STATE_QUERY}) autopr_hold ON TRUE
             LEFT JOIN LATERAL (
                 SELECT h5.id, h5.created_at
                 FROM mw_task_history h5
@@ -1876,7 +1926,17 @@ async def create_project_task(
                       progress_note, category, element_id,
                       deal_value, probability, contact_name, contact_company,
                       contact_email, contact_phone, outcome, loss_reason,
-                      next_action_at, expected_close
+                      next_action_at, expected_close,
+                      -- Same list-only columns the board read serves. Without
+                      -- them a review bounce or approval decodes with all five
+                      -- null, and the client cannot tell "omitted" from
+                      -- "cleared" — which is the only thing that makes a
+                      -- cleared runtime pin distinguishable from a stale one.
+                      to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
+                      (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number,
+                      to_jsonb(mw_tasks) ->> 'autopr_model' AS autopr_model,
+                      to_jsonb(mw_tasks) ->> 'autopr_effort' AS autopr_effort,
+                      to_jsonb(mw_tasks) ->> 'autopr_runtime_source' AS autopr_runtime_source
             """,
             company_id, created_by, project_id, title.strip(), description,
             due_date, priority, status, board_column, pipeline_column, assigned_to,
@@ -1967,7 +2027,17 @@ async def reject_project_task(
                       progress_note, category, element_id, review_note,
                       deal_value, probability, contact_name, contact_company,
                       contact_email, contact_phone, outcome, loss_reason,
-                      next_action_at, expected_close
+                      next_action_at, expected_close,
+                      -- Same list-only columns the board read serves. Without
+                      -- them a review bounce or approval decodes with all five
+                      -- null, and the client cannot tell "omitted" from
+                      -- "cleared" — which is the only thing that makes a
+                      -- cleared runtime pin distinguishable from a stale one.
+                      to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
+                      (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number,
+                      to_jsonb(mw_tasks) ->> 'autopr_model' AS autopr_model,
+                      to_jsonb(mw_tasks) ->> 'autopr_effort' AS autopr_effort,
+                      to_jsonb(mw_tasks) ->> 'autopr_runtime_source' AS autopr_runtime_source
             """,
             task_id, project_id, note,
         )
@@ -2079,7 +2149,17 @@ async def approve_project_task(
                       progress_note, category, element_id, review_note,
                       deal_value, probability, contact_name, contact_company,
                       contact_email, contact_phone, outcome, loss_reason,
-                      next_action_at, expected_close
+                      next_action_at, expected_close,
+                      -- Same list-only columns the board read serves. Without
+                      -- them a review bounce or approval decodes with all five
+                      -- null, and the client cannot tell "omitted" from
+                      -- "cleared" — which is the only thing that makes a
+                      -- cleared runtime pin distinguishable from a stale one.
+                      to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
+                      (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number,
+                      to_jsonb(mw_tasks) ->> 'autopr_model' AS autopr_model,
+                      to_jsonb(mw_tasks) ->> 'autopr_effort' AS autopr_effort,
+                      to_jsonb(mw_tasks) ->> 'autopr_runtime_source' AS autopr_runtime_source
             """,
             task_id, project_id,
         )
@@ -2169,6 +2249,9 @@ async def update_project_task(
         pipeline_column = patch.get("pipeline_column")
         pr_url = patch.get("pr_url")
         pr_number = patch.get("pr_number")
+        autopr_model = patch.get("autopr_model")
+        autopr_effort = patch.get("autopr_effort")
+        autopr_runtime_source = patch.get("autopr_runtime_source")
 
         if priority is not None and priority not in _ALLOWED_PRIORITIES:
             raise ValueError(f"Invalid priority: {priority}")
@@ -2176,6 +2259,43 @@ async def update_project_task(
             raise ValueError(f"Invalid outcome: {outcome}")
         if pipeline_column is not None and pipeline_column not in _ALLOWED_PIPELINE_COLUMNS:
             raise ValueError(f"Invalid pipeline_column: {pipeline_column}")
+        # An unknown model id is not a cosmetic error: it reaches `codex
+        # --model` inside the sandbox and kills the run after the card has
+        # already been claimed. Reject it here, at the write.
+        if autopr_model is not None and autopr_model not in _ALLOWED_AUTOPR_MODELS:
+            raise ValueError(f"Invalid autopr_model: {autopr_model}")
+        if autopr_effort is not None and autopr_effort not in _ALLOWED_AUTOPR_EFFORTS:
+            raise ValueError(f"Invalid autopr_effort: {autopr_effort}")
+        if (
+            autopr_runtime_source is not None
+            and autopr_runtime_source not in _ALLOWED_AUTOPR_RUNTIME_SOURCES
+        ):
+            raise ValueError(f"Invalid autopr_runtime_source: {autopr_runtime_source}")
+
+        has_autopr_runtime_update = (
+            "autopr_model" in patch
+            or "autopr_effort" in patch
+            or "autopr_runtime_source" in patch
+        )
+        if has_autopr_runtime_update:
+            # All THREE, because the generated fragment names
+            # autopr_runtime_source directly rather than through to_jsonb: a
+            # partially-applied autoprrt01 would pass a two-column probe and
+            # then raise UndefinedColumn — a 500 where a 400 was intended.
+            autopr_columns_exist = await conn.fetchval(
+                """
+                SELECT COUNT(*) = 3
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'mw_tasks'
+                  AND column_name = ANY($1::text[])
+                """,
+                ["autopr_model", "autopr_effort", "autopr_runtime_source"],
+            )
+            if not autopr_columns_exist:
+                raise ValueError(
+                    "AutoPR runtime overrides are unavailable until the database is updated"
+                )
 
         has_pr_update = "pr_url" in patch or "pr_number" in patch
         if has_pr_update:
@@ -2260,6 +2380,42 @@ async def update_project_task(
                 pr_number,                 # $43
             ])
 
+        # Numbered off the running length rather than hardcoded, because the
+        # pr fragment above is itself conditional: hardcoding $44.. here would
+        # silently shift by four whenever a card is updated without a PR link.
+        autopr_runtime_update = ""
+        if has_autopr_runtime_update:
+            base = len(params)
+            # The source column has two writers. An explicit value wins (the
+            # harness recording auto/default/handoff). Otherwise a pin write
+            # derives it from the columns AS THEY WILL BE after this update —
+            # the presence flag plus the new value for a side being written,
+            # the existing column for a side that is not — so clearing one
+            # half while the other stays pinned still reads `manual`. Keying
+            # on the raw parameter values alone made "clear effort" record
+            # `auto` on a card whose model was still pinned.
+            autopr_runtime_update = f"""
+                autopr_model = CASE WHEN ${base + 1}::boolean
+                    THEN ${base + 2}::text ELSE autopr_model END,
+                autopr_effort = CASE WHEN ${base + 3}::boolean
+                    THEN ${base + 4}::text ELSE autopr_effort END,
+                autopr_runtime_source = CASE
+                    WHEN ${base + 5}::boolean THEN ${base + 6}::text
+                    WHEN (CASE WHEN ${base + 1}::boolean THEN ${base + 2}::text ELSE autopr_model END) IS NULL
+                     AND (CASE WHEN ${base + 3}::boolean THEN ${base + 4}::text ELSE autopr_effort END) IS NULL
+                        THEN NULL
+                    ELSE 'manual'
+                END,
+            """
+            params.extend([
+                "autopr_model" in patch,
+                autopr_model,
+                "autopr_effort" in patch,
+                autopr_effort,
+                "autopr_runtime_source" in patch,
+                autopr_runtime_source,
+            ])
+
         row = await conn.fetchrow(
             f"""
             UPDATE mw_tasks SET
@@ -2288,6 +2444,7 @@ async def update_project_task(
                 expected_close = CASE WHEN $36::boolean THEN $37::date ELSE expected_close END,
                 pipeline_column = CASE WHEN $38::boolean THEN $39::text ELSE COALESCE(pipeline_column, 'lead') END,
                 {pr_update}
+                {autopr_runtime_update}
                 -- Clear the reviewer's "needs work" note once the task is
                 -- re-submitted to review or marked done — the bounce-back
                 -- banner only applies while it sits back in todo/in_progress.
@@ -2303,7 +2460,10 @@ async def update_project_task(
                        contact_email, contact_phone, outcome, loss_reason,
                        next_action_at, expected_close,
                        to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
-                       (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number
+                       (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number,
+                       to_jsonb(mw_tasks) ->> 'autopr_model' AS autopr_model,
+                       to_jsonb(mw_tasks) ->> 'autopr_effort' AS autopr_effort,
+                       to_jsonb(mw_tasks) ->> 'autopr_runtime_source' AS autopr_runtime_source
             """,
             *params,
         )

@@ -307,21 +307,16 @@ enum EmailDates {
         f.dateFormat = format
         return f
     }
-    private static let time: DateFormatter = {
-        let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .short; return f
-    }()
-    private static let weekday: DateFormatter = {
-        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("EEE"); return f
-    }()
-    private static let monthDay: DateFormatter = {
-        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("MMMd"); return f
-    }()
-    private static let numeric: DateFormatter = {
-        let f = DateFormatter(); f.dateStyle = .short; f.timeStyle = .none; return f
-    }()
-    private static let full: DateFormatter = {
-        let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short; return f
-    }()
+    // Every operator-facing time in this app is Pacific, not the device's
+    // zone: the board, the tickets, and the AutoPR journals all read
+    // America/Los_Angeles, and an email list that silently switched to
+    // whatever timezone the laptop was in would be the one surface that
+    // disagreed with the rest.
+    private static let time = PacificDateFormatter.display { $0.dateStyle = .none; $0.timeStyle = .short }
+    private static let weekday = PacificDateFormatter.display { $0.setLocalizedDateFormatFromTemplate("EEE") }
+    private static let monthDay = PacificDateFormatter.display { $0.setLocalizedDateFormatFromTemplate("MMMd") }
+    private static let numeric = PacificDateFormatter.display { $0.dateStyle = .short; $0.timeStyle = .none }
+    private static let full = PacificDateFormatter.display { $0.dateStyle = .medium; $0.timeStyle = .short }
 
     /// RFC 2822 as Gmail passes it through, trailing "(UTC)" comment and all.
     static func parse(_ raw: String) -> Date? {
@@ -335,7 +330,10 @@ enum EmailDates {
 
     /// Mail-style: a time today, "Yesterday", a weekday this week, else a date.
     static func listLabel(_ date: Date) -> String {
-        let cal = Calendar.current
+        // Bucket in the zone the label is rendered in. With the device
+        // calendar, a message at 22:00 PDT could be "today" per a UTC laptop
+        // and render as a bare time that belongs to the previous Pacific day.
+        let cal = PacificDateFormatter.pacificCalendar
         let now = Date()
         if cal.isDateInToday(date) { return time.string(from: date) }
         if cal.isDateInYesterday(date) { return "Yesterday" }

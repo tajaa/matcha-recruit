@@ -11,7 +11,7 @@ set -u  # Exit on undefined variable
 set -o pipefail  # Exit on pipe failure
 
 # The agent sandbox has no Docker daemon/socket by design (see
-# docs/ops/AGENT_SANDBOX.md) — docker buildx needs one. Build on the host.
+# apps/msandbox/docs/AGENT_SANDBOX.md) — docker buildx needs one. Build on the host.
 case "${AGENT_SANDBOX:-${CODEX_SANDBOX:-}}" in
     1|true|TRUE|yes|YES)
         echo "build-and-push.sh needs a local Docker daemon, which the agent sandbox intentionally omits." >&2

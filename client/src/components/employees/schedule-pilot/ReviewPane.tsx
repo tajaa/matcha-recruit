@@ -4,7 +4,7 @@ import { LABEL } from '../../ui'
 import type { ScheduleComplianceStatus, ScheduleReview } from '../../../types/employeeSchedule'
 import { fmtDayLabel, fmtTime } from '../../../types/employeeSchedule'
 import { LoadBar, POLICY_WEEKLY_MINUTES } from './LoadLedger'
-import { askAbout, compareReviews, hoursLabel } from './reviewShape'
+import { askAbout, compareReviews, costDeltaLabel, costLabel, hoursLabel } from './reviewShape'
 
 export interface ReviewPaneProps {
   review: ScheduleReview | null
@@ -85,6 +85,16 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
   const staged = review.assignments.filter((item) => item.verdict !== 'blocked')
   const warned = staged.filter((item) => item.verdict === 'warn' || item.reasons.length > 0)
   const diff = compare ? compareReviews(review, compare.review) : null
+  // `by_employee` covers the week's costed rows. Someone the review touches
+  // who is not in it costs nothing — that is $0, not missing payroll data.
+  // Only the server's own unpriced list means "no rate on file"; conflating
+  // them sends a manager hunting for a data problem that does not exist.
+  const unpricedIds = new Set(review.cost?.unpriced_employee_ids ?? [])
+  const personCost = (employeeId: string, side: 'before' | 'after') => {
+    if (!review.cost) return undefined
+    if (unpricedIds.has(employeeId)) return null
+    return review.cost.by_employee[employeeId]?.[side] ?? 0
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto" aria-label="Review">
@@ -104,6 +114,27 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
           {warned.length > 0 && <span><span className="text-amber-300">{warned.length}</span> with warnings</span>}
           {review.advisories.length > 0 && <span><span className="text-amber-300">{review.advisories.length}</span> advisories</span>}
         </div>
+        {review.cost && (
+          <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[11px]">
+            <span className="font-mono tabular-nums text-zinc-500">
+              {costLabel(review.cost.before)} <ArrowRight className="inline h-3 w-3 text-zinc-600" /> <span className="text-zinc-200">{costLabel(review.cost.after)}</span>
+            </span>
+            <span className={`font-mono tabular-nums font-medium ${review.cost.delta > 0 ? 'text-amber-300' : review.cost.delta < 0 ? 'text-emerald-300' : 'text-zinc-400'}`}>
+              {costDeltaLabel(review.cost.delta)}
+            </span>
+            {review.cost.ot_premium_after > review.cost.ot_premium_before && (
+              <span className="text-amber-300/90" title="What the overtime hours cost above their own base rate">
+                {costDeltaLabel(review.cost.ot_premium_after - review.cost.ot_premium_before)} of it overtime
+              </span>
+            )}
+            {review.cost.unpriced_employee_count > 0 && (
+              <span className="text-zinc-600">
+                {review.cost.unpriced_employee_count} unpriced (no rate on file)
+              </span>
+            )}
+            <span className="text-zinc-700">scheduled, not worked</span>
+          </div>
+        )}
         <div className={`mt-3 rounded-lg border px-3 py-2 text-[11px] leading-snug ${tone.className}`} role="status">
           <span className="font-medium">{tone.label}.</span> {review.jurisdiction.message}
         </div>
@@ -119,6 +150,14 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
                 {diff.totals.left.staged}/{diff.totals.left.unfilled} vs {diff.totals.right.staged}/{diff.totals.right.unfilled} staged/unfilled
               </span>
             </div>
+            {diff.cost && (
+              <p className="mb-2 font-mono text-[11px] tabular-nums text-zinc-400">
+                {costLabel(diff.cost.left)} vs {costLabel(diff.cost.right)}
+                <span className={`ml-2 font-medium ${diff.cost.delta > 0 ? 'text-amber-300' : diff.cost.delta < 0 ? 'text-emerald-300' : 'text-zinc-500'}`}>
+                  {costDeltaLabel(diff.cost.delta)}
+                </span>
+              </p>
+            )}
             {diff.assignments.length === 0 ? (
               <p className="text-xs text-zinc-500">Both scenarios staff every shift the same way.</p>
             ) : (
@@ -169,6 +208,8 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
                       capMinutes={caps?.[person.employee_id]?.max_weekly_minutes ?? null}
                       allowOvertime={caps?.[person.employee_id]?.allow_overtime ?? false}
                       policyMinutes={policyMinutes}
+                      cost={personCost(person.employee_id, 'before')}
+                      afterCost={personCost(person.employee_id, 'after')}
                     />
                   </div>
                   {person.warnings.length > 0 && (

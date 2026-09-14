@@ -143,7 +143,8 @@ async def create_custom_product_checkout(
     The product is resolved from the company's own signup_source
     ('product:<slug>'), never from the request body — a caller can only ever
     buy the product it signed up for. Pricing comes from the product row
-    (per_seat / block / flat); free + contact_sales products have no checkout.
+    (per_seat / per_location / block / flat); free + contact_sales products
+    have no checkout.
     """
     from app.core.services.stripe_service import StripeService, StripeServiceError
     from app.core.services.product_definitions import (
@@ -159,7 +160,9 @@ async def create_custom_product_checkout(
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            SELECT c.signup_source, COALESCE(chp.headcount, 0) AS headcount
+            SELECT c.signup_source,
+                   COALESCE(chp.headcount, 0) AS headcount,
+                   COALESCE(chp.custom_product_location_count, 0) AS location_count
             FROM companies c
             LEFT JOIN company_handbook_profiles chp ON chp.company_id = c.id
             WHERE c.id = $1
@@ -186,11 +189,16 @@ async def create_custom_product_checkout(
         )
 
     headcount = int(row["headcount"])
+    location_count = int(row["location_count"])
     if headcount < 1:
         raise HTTPException(status_code=400, detail="Company headcount not set — please contact support")
+    if product.pricing_model == "per_location" and location_count < 1:
+        raise HTTPException(status_code=400, detail="Company location count not set — please contact support")
 
     try:
-        amount_cents = compute_product_price_cents(product, headcount)
+        amount_cents = compute_product_price_cents(
+            product, headcount, location_count=location_count
+        )
     except ProductDefinitionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -202,6 +210,7 @@ async def create_custom_product_checkout(
             product_name=product.name,
             product_description=product.description,
             headcount=headcount,
+            location_count=location_count if product.pricing_model == "per_location" else None,
             amount_cents=amount_cents or 0,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
@@ -215,8 +224,8 @@ async def create_custom_product_checkout(
         raise HTTPException(status_code=502, detail="Stripe checkout did not return expected fields")
 
     logger.info(
-        "Custom product checkout opened: company=%s product=%s headcount=%d session=%s",
-        company_id, product.slug, headcount, stripe_session_id,
+        "Custom product checkout opened: company=%s product=%s headcount=%d locations=%d session=%s",
+        company_id, product.slug, headcount, location_count, stripe_session_id,
     )
     return UpgradeCheckoutResponse(checkout_url=checkout_url, stripe_session_id=stripe_session_id)
 

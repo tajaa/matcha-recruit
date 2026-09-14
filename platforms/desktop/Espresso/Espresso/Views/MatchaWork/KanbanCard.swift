@@ -310,6 +310,15 @@ struct KanbanCardView: View {
                     .foregroundStyle(.secondary)
             }
 
+            // Which PR this ticket produced. A card whose note says "MERGED"
+            // with no number tells you it landed but not what landed; the
+            // number is the only thing that gets you to the diff.
+            if let pr = task.prNumber, pr > 0 {
+                Label("#\(pr)", systemImage: "arrow.triangle.pull")
+                    .foregroundStyle(.secondary)
+                    .help(task.prUrl.map { "Pull request #\(pr) — \($0)" } ?? "Pull request #\(pr)")
+            }
+
             if let due = task.dueDate, !due.isEmpty {
                 Label(String(due.prefix(10)), systemImage: "calendar")
                     .foregroundStyle(.secondary)

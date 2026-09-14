@@ -477,7 +477,7 @@ def test_workflow_keeps_luna_and_production_credentials_separated():
     writer = (ADMIN_UPDATES_DIR / "write-content.sh").read_text()
     publisher = (ADMIN_UPDATES_DIR / "publish.sh").read_text()
 
-    assert "./scripts/agent-sandbox.sh autopr-ready" in workflow
+    assert "./apps/msandbox/bin/agent-sandbox.sh autopr-ready" in workflow
     assert "AUTOPR_CODEX_MODEL=gpt-5.6-luna" in writer
     assert "AUTOPR_CODEX_REASONING_EFFORT=high" in writer
     assert "AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1" in writer

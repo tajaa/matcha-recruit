@@ -48,6 +48,19 @@ def test_business_register_rejects_non_positive_headcount():
         )
 
 
+def test_business_register_rejects_non_positive_location_count():
+    with pytest.raises(ValidationError):
+        BusinessRegister(
+            company_name="Acme Corp",
+            industry="Technology",
+            headcount=10,
+            location_count=0,
+            email="owner@example.com",
+            password="supersecret",
+            name="Owner User",
+        )
+
+
 def test_upsert_business_headcount_profile_persists_headcount_when_table_exists():
     conn = _FakeConnection(table_exists=True)
 
@@ -66,6 +79,26 @@ def test_upsert_business_headcount_profile_persists_headcount_when_table_exists(
     query, args = conn.executed[0]
     assert "INSERT INTO company_handbook_profiles" in query
     assert args[3] == 42
+
+
+def test_upsert_business_headcount_profile_persists_custom_product_location_count():
+    conn = _FakeConnection(table_exists=True)
+
+    asyncio.run(
+        auth_routes._upsert_business_headcount_profile(
+            conn,
+            company_id=uuid4(),
+            company_name="Acme Corp",
+            owner_name="Jane Founder",
+            headcount=42,
+            location_count=3,
+            updated_by=uuid4(),
+        )
+    )
+
+    query, args = conn.executed[0]
+    assert "custom_product_location_count" in query
+    assert args[5] == 3
 
 
 def test_upsert_business_headcount_profile_skips_when_table_missing():

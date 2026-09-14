@@ -60,6 +60,8 @@ export function asScheduleReview(loose: HuumeScheduleReview | ScheduleReview | n
       employee_name: item.employee_name ?? null, shift_id: item.shift_id ?? null,
     })),
     findings: loose.findings ?? [],
+    // Absent stays null. A 0 here would tell the pane the week is free.
+    cost: (loose as { cost?: ScheduleReview['cost'] }).cost ?? null,
     jurisdiction: {
       state: jurisdiction.state ?? null,
       status: jurisdiction.status ?? 'unmapped',
@@ -81,6 +83,16 @@ export interface ReviewComparison {
   employees: Array<{ employee_id: string; name: string; left: number; right: number }>
   /** Compact totals for the chip line. */
   totals: { left: { staged: number; unfilled: number }; right: { staged: number; unfilled: number } }
+  /** What each scenario leaves the week costing. `null` when either side was
+   *  not priced — comparing a priced scenario against an unpriced one is not a
+   *  comparison, and showing one anyway would invent a saving.
+   *
+   *  Subtracting the two is only meaningful because every review's cost is
+   *  computed over the WHOLE week for its location
+   *  (`labor_cost_service.cost_delta_for_rows` requires it), so an edit
+   *  scenario and a week draft are on the same basis. If that ever stops
+   *  being true, this comparison silently reports a fabricated delta. */
+  cost: { left: number; right: number; delta: number } | null
 }
 
 function namesByShift(review: ScheduleReview): Map<string, { role: string; starts_at: string | null; names: string[] }> {
@@ -146,6 +158,9 @@ export function compareReviews(left: ScheduleReview, right: ScheduleReview): Rev
       left: { staged: left.assignments.length, unfilled: left.unfilled.length },
       right: { staged: right.assignments.length, unfilled: right.unfilled.length },
     },
+    cost: left.cost && right.cost
+      ? { left: left.cost.after, right: right.cost.after, delta: right.cost.after - left.cost.after }
+      : null,
   }
 }
 
@@ -164,6 +179,25 @@ export function askAbout(kind: 'assignment' | 'rejected' | 'unfilled' | 'employe
 export function hoursLabel(minutes: number | undefined | null): string {
   const value = (minutes ?? 0) / 60
   return `${Number.isInteger(value) ? value : value.toFixed(1)}h`
+}
+
+/** Money for the workspace: whole dollars, because a schedule is planned in
+ *  hundreds and the cents are noise at this altitude. `null`/`undefined` is
+ *  "not priced" and renders as a dash — the one thing it must never render as
+ *  is $0, which would read as free. */
+export function costLabel(amount: number | null | undefined): string {
+  if (amount == null) return '—'
+  const rounded = Math.round(amount)
+  return `${rounded < 0 ? '-' : ''}$${Math.abs(rounded).toLocaleString('en-US')}`
+}
+
+/** Same, but signed — for a delta, where "+$412" and "-$90" are the whole
+ *  point and an unsigned number is ambiguous. */
+export function costDeltaLabel(amount: number | null | undefined): string {
+  if (amount == null) return '—'
+  const rounded = Math.round(amount)
+  if (rounded === 0) return '$0'
+  return `${rounded > 0 ? '+' : '-'}$${Math.abs(rounded).toLocaleString('en-US')}`
 }
 
 export type { ScheduleReviewAssignment }

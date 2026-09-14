@@ -147,6 +147,7 @@ export interface LocationCreate {
   max_employees?: number
   annual_avg_employees?: number
   timezone?: string
+  timezone_source?: 'auto' | 'manual'
 }
 
 export interface LocationUpdate {
@@ -162,6 +163,7 @@ export interface LocationUpdate {
   max_employees?: number
   annual_avg_employees?: number
   timezone?: string
+  timezone_source?: 'auto' | 'manual'
 }
 
 export interface BusinessLocation {
@@ -186,12 +188,15 @@ export interface BusinessLocation {
   coverage_status: string
   has_local_ordinance: boolean
   facility_attributes?: FacilityAttributes | null
+  /** Server-resolved from persisted location/company NAICS and industry. */
+  facility_profile_eligible?: boolean
   source?: 'manual' | 'employee_derived'
   ein: string | null
   naics: string | null
   max_employees: number | null
   annual_avg_employees: number | null
   timezone: string | null
+  timezone_source: 'auto' | 'manual'
   created_at: string
 }
 

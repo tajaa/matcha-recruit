@@ -14,6 +14,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import require_company_member
+from app.matcha.models.matcha_work.matcha_work import AutoPRHoldRequest
 from app.matcha.routes.matcha_work._shared import (
     _can_edit_project,
     _parse_task_attachment_ids,
@@ -313,14 +314,22 @@ async def cancel_autopr_run_endpoint(
     project_id: UUID,
     task_id: UUID,
     current_user: CurrentUser = Depends(require_company_member),
+    body: Optional[AutoPRHoldRequest] = Body(default=None),
 ):
-    """Hold future AutoPR work while a member edits the ticket."""
+    """Hold future AutoPR work while a member edits the ticket.
+
+    The body is optional: Espresso's Unqueue sends none, while the CLI and
+    the harness's failure budget pass ``{"reason": …}`` so the board can say
+    why a card is parked.
+    """
     from app.matcha.services.matcha_work import project_task_service as pt_svc
 
     await _verify_project_access(project_id, current_user)
     try:
         result = await pt_svc.cancel_autopr_run(
             project_id=project_id, task_id=task_id, actor_user_id=current_user.id,
+            # Direct (test) calls see the Body default sentinel, not a model.
+            reason=body.reason if isinstance(body, AutoPRHoldRequest) else None,
         )
     except pt_svc.AutoPRReconsiderationConflict as e:
         raise HTTPException(status_code=409, detail=str(e))

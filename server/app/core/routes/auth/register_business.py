@@ -202,6 +202,11 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 )
                 if custom_product is None:
                     raise HTTPException(status_code=404, detail="Product not found or not available")
+                if custom_product.pricing_model == "per_location" and request.location_count is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Location count is required for per-location pricing",
+                    )
 
             # Broker seat invites carry their own allocation, so they bypass the
             # self-serve headcount cap (same as an admin comp invite).
@@ -506,6 +511,11 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 owner_name=request.name,
                 headcount=request.headcount,
                 jurisdiction_count=request.jurisdiction_count,
+                location_count=(
+                    request.location_count
+                    if is_custom_product and custom_product.pricing_model == "per_location"
+                    else None
+                ),
                 updated_by=user["id"],
             )
 
@@ -750,4 +760,3 @@ async def get_client_invite_info(ref: str):
         "tier": row["tier"] or "matcha_lite",
         "broker_name": row["broker_name"],
     }
-

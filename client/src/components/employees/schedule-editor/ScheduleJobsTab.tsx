@@ -11,7 +11,7 @@ import { errorMessage } from '../../../types/employeeSchedule'
 
 const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-500'
 
-export default function ScheduleJobsTab({ locationId, credentialTemplatesEnabled, onJobsChanged }: { locationId: string; credentialTemplatesEnabled: boolean; onJobsChanged?: () => Promise<void> }) {
+export default function ScheduleJobsTab({ locationId, credentialTemplatesEnabled, laborCostEnabled = false, onJobsChanged }: { locationId: string; credentialTemplatesEnabled: boolean; laborCostEnabled?: boolean; onJobsChanged?: () => Promise<void> }) {
   const { toast } = useToast()
   const [jobs, setJobs] = useState<ScheduleJob[]>([])
   const [roster, setRoster] = useState<RosterEmployee[]>([])
@@ -52,21 +52,22 @@ export default function ScheduleJobsTab({ locationId, credentialTemplatesEnabled
         </div>
         <button onClick={() => setCreating((value) => !value)} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:text-zinc-100"><Plus className="h-4 w-4" /> New job</button>
       </div>
-      {creating && <NewJobForm locationId={locationId} credentialTypes={credentialTypes} credentialTemplatesEnabled={credentialTemplatesEnabled} onDone={() => { setCreating(false); void load(); void onJobsChanged?.() }} onCancel={() => setCreating(false)} />}
+      {creating && <NewJobForm locationId={locationId} credentialTypes={credentialTypes} credentialTemplatesEnabled={credentialTemplatesEnabled} laborCostEnabled={laborCostEnabled} onDone={() => { setCreating(false); void load(); void onJobsChanged?.() }} onCancel={() => setCreating(false)} />}
       {jobs.length === 0 && !creating ? <p className="rounded-xl border border-dashed border-zinc-800 px-4 py-8 text-center text-sm text-zinc-600">No jobs yet. Start with an area such as Box Office, Concessions, or Ushers.</p> : (
         <div className="space-y-2">
-          {jobs.map((job) => <JobCard key={job.id} job={job} roster={roster} credentialTypes={credentialTypes} credentialTemplatesEnabled={credentialTemplatesEnabled} onChanged={async () => { await load(); await onJobsChanged?.() }} />)}
+          {jobs.map((job) => <JobCard key={job.id} job={job} roster={roster} credentialTypes={credentialTypes} credentialTemplatesEnabled={credentialTemplatesEnabled} laborCostEnabled={laborCostEnabled} onChanged={async () => { await load(); await onJobsChanged?.() }} />)}
         </div>
       )}
     </div>
   )
 }
 
-function NewJobForm({ locationId, credentialTypes, credentialTemplatesEnabled, onDone, onCancel }: { locationId: string; credentialTypes: CredentialType[]; credentialTemplatesEnabled: boolean; onDone(): void; onCancel(): void }) {
+function NewJobForm({ locationId, credentialTypes, credentialTemplatesEnabled, laborCostEnabled, onDone, onCancel }: { locationId: string; credentialTypes: CredentialType[]; credentialTemplatesEnabled: boolean; laborCostEnabled: boolean; onDone(): void; onCancel(): void }) {
   const { toast } = useToast()
   const [name, setName] = useState('')
   const [notes, setNotes] = useState('')
   const [graceDays, setGraceDays] = useState('')
+  const [rate, setRate] = useState('')
   const [requirementIds, setRequirementIds] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
 
@@ -77,6 +78,7 @@ function NewJobForm({ locationId, credentialTypes, credentialTemplatesEnabled, o
       await createJob({
         name: name.trim(), location_id: locationId, notes: notes.trim() || null, employee_ids: [],
         credential_grace_days: graceDays === '' ? null : Number(graceDays),
+        default_hourly_rate: rate === '' ? null : Number(rate),
         credential_requirements: requirementIds.map((credential_type_id) => ({ credential_type_id, is_required: true, schedule_blocking: true })),
       })
       onDone()
@@ -93,6 +95,7 @@ function NewJobForm({ locationId, credentialTypes, credentialTemplatesEnabled, o
         <label className="text-[10px] uppercase tracking-wide text-zinc-500">Job name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Box Office" className={`${inputCls} mt-1`} /></label>
         <label className="text-[10px] uppercase tracking-wide text-zinc-500">Notes<input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional qualification context" className={`${inputCls} mt-1`} /></label>
         {credentialTemplatesEnabled && <label className="text-[10px] uppercase tracking-wide text-zinc-500">Grace days<input value={graceDays} min="0" max="365" type="number" onChange={(event) => setGraceDays(event.target.value)} placeholder="Company default" className={`${inputCls} mt-1`} /></label>}
+        {laborCostEnabled && <label className="text-[10px] uppercase tracking-wide text-zinc-500" title="What an unfilled seat on this job costs per hour. Leave blank and open seats stay unpriced.">Open-seat rate ($/h)<input value={rate} min="0" step="0.25" type="number" onChange={(event) => setRate(event.target.value)} placeholder="Not set" className={`${inputCls} mt-1`} /></label>}
       </div>
       {credentialTemplatesEnabled && <CredentialRequirementPicker credentialTypes={credentialTypes} selectedIds={requirementIds} onChange={setRequirementIds} />}
       <div className="flex items-center gap-2">
@@ -103,7 +106,7 @@ function NewJobForm({ locationId, credentialTypes, credentialTemplatesEnabled, o
   )
 }
 
-function JobCard({ job, roster, credentialTypes, credentialTemplatesEnabled, onChanged }: { job: ScheduleJob; roster: RosterEmployee[]; credentialTypes: CredentialType[]; credentialTemplatesEnabled: boolean; onChanged(): Promise<void> }) {
+function JobCard({ job, roster, credentialTypes, credentialTemplatesEnabled, laborCostEnabled, onChanged }: { job: ScheduleJob; roster: RosterEmployee[]; credentialTypes: CredentialType[]; credentialTemplatesEnabled: boolean; laborCostEnabled: boolean; onChanged(): Promise<void> }) {
   const { toast } = useToast()
   const [expanded, setExpanded] = useState(false)
   const [selected, setSelected] = useState(() => new Set(job.employee_ids))
@@ -111,9 +114,12 @@ function JobCard({ job, roster, credentialTypes, credentialTemplatesEnabled, onC
   const [deleting, setDeleting] = useState(false)
   const [savingCredentials, setSavingCredentials] = useState(false)
   const [graceDays, setGraceDays] = useState(job.credential_grace_days?.toString() ?? '')
+  const [rate, setRate] = useState(job.default_hourly_rate?.toString() ?? '')
+  const [savingRate, setSavingRate] = useState(false)
   const [requirementIds, setRequirementIds] = useState<string[]>(() => job.credential_requirements.map((item) => item.credential_type_id))
 
   useEffect(() => setSelected(new Set(job.employee_ids)), [job.employee_ids])
+  useEffect(() => setRate(job.default_hourly_rate?.toString() ?? ''), [job.default_hourly_rate])
   useEffect(() => {
     setGraceDays(job.credential_grace_days?.toString() ?? '')
     setRequirementIds(job.credential_requirements.map((item) => item.credential_type_id))
@@ -138,6 +144,19 @@ function JobCard({ job, roster, credentialTypes, credentialTemplatesEnabled, onC
       toast(errorMessage(error), 'error')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function saveRate() {
+    setSavingRate(true)
+    try {
+      await updateJob(job.id, { default_hourly_rate: rate === '' ? null : Number(rate) })
+      toast(`${job.name} open-seat rate saved`, 'success')
+      await onChanged()
+    } catch (error) {
+      toast(errorMessage(error), 'error')
+    } finally {
+      setSavingRate(false)
     }
   }
 
@@ -191,7 +210,7 @@ function JobCard({ job, roster, credentialTypes, credentialTemplatesEnabled, onC
         <BriefcaseBusiness className="h-4 w-4 text-emerald-400" />
         <div className="min-w-0 flex-1">
           <div className="text-sm text-zinc-200">{job.name}</div>
-          <div className="text-[11px] text-zinc-600">{job.employee_ids.length} qualified employee{job.employee_ids.length === 1 ? '' : 's'}{credentialTemplatesEnabled ? ` · ${job.credential_requirements.length} credential rule${job.credential_requirements.length === 1 ? '' : 's'}` : ''}</div>
+          <div className="text-[11px] text-zinc-600">{job.employee_ids.length} qualified employee{job.employee_ids.length === 1 ? '' : 's'}{credentialTemplatesEnabled ? ` · ${job.credential_requirements.length} credential rule${job.credential_requirements.length === 1 ? '' : 's'}` : ''}{laborCostEnabled && job.default_hourly_rate != null ? ` · $${job.default_hourly_rate}/h open seat` : ''}</div>
         </div>
         <button onClick={remove} disabled={deleting} className="p-1 text-zinc-600 hover:text-red-400" aria-label={`Delete ${job.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
       </div>
@@ -205,6 +224,11 @@ function JobCard({ job, roster, credentialTypes, credentialTemplatesEnabled, onC
           </label>)}
         </div>
         <button onClick={saveRoster} disabled={saving} className="mt-3 inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save qualified roster</button>
+        {laborCostEnabled && <div className="mt-4 border-t border-zinc-800/70 pt-3">
+          <p className="mb-2 text-xs text-zinc-500">What an unfilled seat on this job costs per hour, so a half-built week still projects a real total. Leave it blank and those seats are reported unpriced rather than free.</p>
+          <label className="block max-w-48 text-[10px] uppercase tracking-wide text-zinc-500">Open-seat rate ($/h)<input value={rate} min="0" step="0.25" type="number" onChange={(event) => setRate(event.target.value)} placeholder="Not set" className={`${inputCls} mt-1`} /></label>
+          <button onClick={saveRate} disabled={savingRate} className="mt-3 inline-flex items-center gap-1 rounded-lg border border-emerald-700 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-950 disabled:opacity-50">{savingRate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save open-seat rate</button>
+        </div>}
         {credentialTemplatesEnabled && <div className="mt-4 border-t border-zinc-800/70 pt-3">
           <p className="mb-2 text-xs text-zinc-500">Required credentials block this job after the new-hire grace period. They do not affect unrelated jobs.</p>
           <label className="block max-w-48 text-[10px] uppercase tracking-wide text-zinc-500">Grace days<input value={graceDays} min="0" max="365" type="number" onChange={(event) => setGraceDays(event.target.value)} placeholder="Company default" className={`${inputCls} mt-1`} /></label>

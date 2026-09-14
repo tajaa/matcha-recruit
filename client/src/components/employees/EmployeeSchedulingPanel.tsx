@@ -66,7 +66,7 @@ export function EmployeeSchedulingPanel({
         .map((assignment): ScheduleJob => ({
           id: assignment.job_id, name: assignment.job_name,
           location_id: assignment.location_id, color: null, notes: null,
-          credential_grace_days: null, employee_ids: [employeeId],
+          credential_grace_days: null, default_hourly_rate: null, employee_ids: [employeeId],
           credential_requirements: assignment.credential_requirements,
         }))
       setJobs([...availableJobs, ...assignedJobs])

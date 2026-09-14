@@ -100,13 +100,22 @@ export function isCustomProductPending(profile: MeClientProfile | null | undefin
   return false // free — active at signup
 }
 
-/** Monthly price in whole dollars for `headcount`, or null when not billed. */
-export function productPriceDollars(product: ProductDefinition, headcount: number): number | null {
+/** Monthly price in dollars for the configured billing quantity. */
+export function productPriceDollars(
+  product: ProductDefinition,
+  headcount: number,
+  locationCount?: number,
+): number | null {
   if (product.pricing_model === 'free' || product.pricing_model === 'contact_sales') return null
   if (headcount < product.min_headcount || headcount > product.max_headcount) return null
   const cents = product.price_cents ?? 0
   if (product.pricing_model === 'flat') return Math.round(cents / 100)
   if (product.pricing_model === 'per_seat') return Math.round((cents * headcount) / 100)
+  if (product.pricing_model === 'per_location') {
+    return locationCount && locationCount > 0
+      ? (cents * locationCount) / 100
+      : null
+  }
   const blockSize = product.block_size || 1
   return Math.round((Math.ceil(headcount / blockSize) * cents) / 100)
 }

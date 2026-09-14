@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { asScheduleReview, askAbout, compareReviews, hoursLabel } from './reviewShape'
+import { asScheduleReview, askAbout, compareReviews, costDeltaLabel, costLabel, hoursLabel } from './reviewShape'
 import type { ScheduleReview } from '../../../types/employeeSchedule'
 
 function review(overrides: Partial<ScheduleReview> = {}): ScheduleReview {
@@ -14,6 +14,9 @@ function review(overrides: Partial<ScheduleReview> = {}): ScheduleReview {
     advisories: [],
     findings: [],
     jurisdiction: { state: 'CA', status: 'curated', message: 'on file' },
+    // The normalizer resolves an absent cost block to null, so a "fully
+    // formed" review carries the key explicitly.
+    cost: null,
     ...overrides,
   }
 }
@@ -165,5 +168,50 @@ describe('hoursLabel', () => {
     expect(hoursLabel(510)).toBe('8.5h')
     expect(hoursLabel(0)).toBe('0h')
     expect(hoursLabel(null)).toBe('0h')
+  })
+})
+
+
+describe('money labels', () => {
+  it('renders a dash for an unpriced figure, never $0', () => {
+    expect(costLabel(null)).toBe('\u2014')
+    expect(costLabel(undefined)).toBe('\u2014')
+    // A real zero is still a zero — it is only ABSENCE that must not read as free.
+    expect(costLabel(0)).toBe('$0')
+  })
+
+  it('rounds to whole dollars and groups thousands', () => {
+    expect(costLabel(4310.42)).toBe('$4,310')
+    expect(costLabel(719.6)).toBe('$720')
+  })
+
+  it('signs a delta so a saving cannot be mistaken for a cost', () => {
+    expect(costDeltaLabel(412)).toBe('+$412')
+    expect(costDeltaLabel(-90)).toBe('-$90')
+    expect(costDeltaLabel(0)).toBe('$0')
+    expect(costDeltaLabel(null)).toBe('\u2014')
+  })
+})
+
+describe('compareReviews cost', () => {
+  const priced = (after: number) => ({
+    before: 1000, after, delta: after - 1000,
+    ot_premium_before: 0, ot_premium_after: 0,
+    by_employee: {}, unpriced_employee_ids: [], unpriced_employee_count: 0,
+    basis: {
+      daily_ot_hours: null, daily_doubletime_hours: null, weekly_ot_hours: 40,
+      ot_multiplier: 1.5, doubletime_multiplier: 1.5,
+      overtime_citation: 'FLSA, 29 U.S.C. \u00a7 207(a)', as_scheduled: true,
+    },
+  })
+
+  it('compares two priced scenarios', () => {
+    const diff = compareReviews(review({ cost: priced(1200) }), review({ cost: priced(1100) }))
+    expect(diff.cost).toEqual({ left: 1200, right: 1100, delta: -100 })
+  })
+
+  it('refuses to compare when either side was not priced', () => {
+    expect(compareReviews(review({ cost: priced(1200) }), review()).cost).toBeNull()
+    expect(compareReviews(review(), review()).cost).toBeNull()
   })
 })

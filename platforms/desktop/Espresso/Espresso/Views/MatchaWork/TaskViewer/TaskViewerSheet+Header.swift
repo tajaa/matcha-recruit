@@ -245,17 +245,118 @@ extension TaskViewerSheet {
         }
     }
 
+    // MARK: - AutoPR runtime
+
+    /// Kept in sync with AUTOPR_RUNTIME_MODELS in apps/msandbox/harness/lib.sh
+    /// and _ALLOWED_AUTOPR_MODELS server-side. The value is handed to
+    /// `codex --model` inside the sandbox, so these are ids, not labels.
+    static let autoPRModelChoices = ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-6-astra", "gpt-5.5"]
+    static let autoPREffortChoices = ["low", "medium", "high", "xhigh"]
+
+    /// Whether this ticket is one AutoPR can act on at all. Shared by the run
+    /// controls and the runtime pickers so neither renders on a sales card or
+    /// an unwatched board.
+    var canControlAutoPR: Bool {
+        canRequestAutoPRRun
+            || liveAutoPRTask.autoprClaimedAt != nil
+            || liveAutoPRTask.autoprPaused == true
+    }
+
+    @ViewBuilder
+    var autoPRRuntimeControl: some View {
+        if canControlAutoPR {
+            autoPRRuntimePickers
+        }
+    }
+
+    /// Model + effort pickers. "Auto" (both cleared) is the default and the
+    /// recommended setting: the harness then raises a card that keeps stalling
+    /// without producing anything and drops one that only has mechanical work
+    /// left. Pinning is for when you already know which way it should go —
+    /// this is the manual half of the same decision, not a separate mode.
+    @ViewBuilder
+    private var autoPRRuntimePickers: some View {
+        let model = liveAutoPRTask.autoprModel
+        let effort = liveAutoPRTask.autoprEffort
+        let isAuto = (model?.isEmpty ?? true) && (effort?.isEmpty ?? true)
+        HStack(spacing: 8) {
+            Label("Runtime", systemImage: "cpu")
+                .font(.ticket(size: 10))
+                .foregroundColor(.secondary)
+
+            Menu {
+                Button("Auto") { Task { await setAutoPRRuntime(model: "", effort: effort ?? "") } }
+                Divider()
+                ForEach(Self.autoPRModelChoices, id: \.self) { choice in
+                    Button(choice) {
+                        Task { await setAutoPRRuntime(model: choice, effort: effort ?? "") }
+                    }
+                }
+            } label: {
+                Text(model?.isEmpty == false ? model! : "Auto model")
+                    .font(.ticket(size: 10))
+                    .foregroundColor(model?.isEmpty == false ? .mwInkStrong : .secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(settingAutoPRRuntime)
+
+            Menu {
+                Button("Auto") { Task { await setAutoPRRuntime(model: model ?? "", effort: "") } }
+                Divider()
+                ForEach(Self.autoPREffortChoices, id: \.self) { choice in
+                    Button(choice) {
+                        Task { await setAutoPRRuntime(model: model ?? "", effort: choice) }
+                    }
+                }
+            } label: {
+                Text(effort?.isEmpty == false ? effort! : "Auto effort")
+                    .font(.ticket(size: 10))
+                    .foregroundColor(effort?.isEmpty == false ? .mwInkStrong : .secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(settingAutoPRRuntime)
+
+            if !isAuto {
+                Button("Reset") { Task { await setAutoPRRuntime(model: "", effort: "") } }
+                    .buttonStyle(.plain)
+                    .font(.ticket(size: 11))
+                    .disabled(settingAutoPRRuntime)
+                    .help("Go back to letting AutoPR choose from why the last run stopped")
+            }
+
+            if let source = liveAutoPRTask.autoprRuntimeSource, source == "auto", isAuto {
+                Text("last run auto-selected")
+                    .font(.ticket(size: 10))
+                    .foregroundColor(.secondary)
+            }
+
+            if let error = autoPRRuntimeError {
+                Text(Self.stripHTTPPrefix(error))
+                    .font(.ticket(size: 10))
+                    .foregroundColor(.red)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     @ViewBuilder
     var autoPRRunNowControl: some View {
         let hasActiveClaim = liveAutoPRTask.autoprClaimedAt != nil
-        let canControlRun = canRequestAutoPRRun
-            || hasActiveClaim
-            || liveAutoPRTask.autoprPaused == true
-        if canControlRun {
+        if canControlAutoPR {
             HStack(spacing: 8) {
                 if liveAutoPRTask.autoprPaused == true {
                     Label("AutoPR paused", systemImage: "pause.circle")
                         .font(.ticket(size: 10))
+                    if let reason = liveAutoPRTask.autoprHoldReason, !reason.isEmpty {
+                        Text(reason)
+                            .font(.ticket(size: 10))
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                            .help(reason)
+                    }
                     if canRequestAutoPRRun {
                         Button("Run again") { Task { await requestAutoPRRun() } }
                             .buttonStyle(.plain)
@@ -269,7 +370,7 @@ extension TaskViewerSheet {
                     Label("AutoPR working", systemImage: "hammer.circle.fill")
                         .font(.ticket(size: 10))
                         .foregroundColor(.mwInkStrong)
-                    Button(requestingAutoPRRun ? "Pausing…" : "Pause retries") {
+                    Button(autoPRPendingAction == "hold" ? "Pausing…" : "Pause retries") {
                         Task { await cancelAutoPRRun() }
                     }
                     .buttonStyle(.plain)
@@ -294,7 +395,7 @@ extension TaskViewerSheet {
                         Task { await requestAutoPRRun() }
                     } label: {
                         Label(
-                            requestingAutoPRRun ? "Queueing…" : autoPRRunNowLabel,
+                            autoPRPendingAction == "run" ? "Queueing…" : autoPRRunNowLabel,
                             systemImage: "bolt.fill"
                         )
                         .font(.ticket(size: 10))
@@ -303,9 +404,18 @@ extension TaskViewerSheet {
                     .buttonStyle(.plain)
                     .disabled(requestingAutoPRRun || addingNote)
                     .help("Queue this ticket for the next AutoPR tick instead of the twenty-minute sweep")
+                    // A plain Todo / Changes Requested card had no way to be
+                    // parked: Unqueue only appears once a run is requested.
+                    Button(autoPRPendingAction == "hold" ? "Holding…" : "Hold") {
+                        Task { await cancelAutoPRRun() }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.ticket(size: 11))
+                    .disabled(requestingAutoPRRun || addingNote)
+                    .help("Hold this ticket so AutoPR skips it until you press Run again")
                 }
                 if (autoPRRunIsQueued || autoPRReconsiderationIsPending) && liveAutoPRTask.autoprPaused != true {
-                    Button(requestingAutoPRRun ? "Unqueueing…" : "Unqueue") {
+                    Button(autoPRPendingAction == "hold" ? "Unqueueing…" : "Unqueue") {
                         Task { await cancelAutoPRRun() }
                     }
                     .buttonStyle(.plain)

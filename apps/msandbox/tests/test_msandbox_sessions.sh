@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+cd "$REPO_ROOT"
+python3 -m unittest -v apps.msandbox.tests.test_msandbox_v2 apps.msandbox.tests.test_msandbox_manager apps.msandbox.tests.test_msandbox_dashboard apps.msandbox.tests.test_msandbox_autopr

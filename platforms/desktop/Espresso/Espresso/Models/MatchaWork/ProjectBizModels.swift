@@ -536,7 +536,7 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
         case .research:
             // Assigned to the AutoPR bot, this runs the research lane: web
             // search + the repo clone + attached screenshots, and the report
-            // lands under the card's attachments (see docs/ops/KANBAN_AUTOPR.md).
+            // lands under the card's attachments (see apps/msandbox/docs/KANBAN_AUTOPR.md).
             return [
                 .init(key: "subject", label: "Subject", placeholder: "One line: what to research.", kind: .singleLine),
                 .init(key: "questions", label: "Questions to answer", placeholder: "- ", kind: .multiLine),
@@ -548,7 +548,7 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
             // The emails arrive as `email-<id>.md` attachments from the Email
             // viewer's "Send to board"; assigned to the AutoPR bot on a board
             // granted `email`, the run attaches a triage report and stages reply
-            // drafts a person approves one at a time (docs/ops/KANBAN_AUTOPR.md).
+            // drafts a person approves one at a time (apps/msandbox/docs/KANBAN_AUTOPR.md).
             return [
                 .init(key: "goal", label: "What should the agent do with these emails?", placeholder: "e.g. Summarize and draft replies to anything from customers", kind: .singleLine),
                 .init(key: "instructions", label: "Instructions", placeholder: "Which senders matter, what to ignore, what a good reply looks like.", kind: .multiLine),

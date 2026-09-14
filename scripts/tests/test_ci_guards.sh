@@ -254,7 +254,7 @@ KANBAN_WORKFLOW="$REPO_ROOT/.github/workflows/kanban-autopr.yml"
 archived_paths="$(awk '
     /git archive main/ { collect = 1 }
     collect { print; if ($0 !~ /\\[[:space:]]*$/) collect = 0 }
-' "$KANBAN_WORKFLOW" | grep -oE 'scripts/[A-Za-z0-9_./-]+' | sort -u)"
+' "$KANBAN_WORKFLOW" | grep -oE '(apps|scripts)/[A-Za-z0-9_./-]+' | sort -u)"
 
 control_queue=()
 while IFS= read -r rel; do
@@ -274,13 +274,13 @@ while [ "$control_index" -lt "${#control_queue[@]}" ]; do
 
     rel_dir="${rel%/*}"
     [ "$rel_dir" = "$rel" ] && rel_dir=""
-    top="scripts/${rel%%/*}"
+    top="apps/msandbox/${rel%%/*}"
     if ! printf '%s\n' "$archived_paths" | grep -qxF "$top" \
-        && ! printf '%s\n' "$archived_paths" | grep -qxF "scripts/$rel"; then
+        && ! printf '%s\n' "$archived_paths" | grep -qxF "apps/msandbox/$rel"; then
         control_unarchived="$control_unarchived $rel"
     fi
 
-    script="$REPO_ROOT/scripts/$rel"
+    script="$REPO_ROOT/apps/msandbox/$rel"
     if [ ! -f "$script" ]; then
         control_root_offenders="$control_root_offenders $rel(missing)"
         continue

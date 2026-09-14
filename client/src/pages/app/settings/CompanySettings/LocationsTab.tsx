@@ -75,11 +75,13 @@ export function LocationsTab({
             </div>
 
             <FacilityProfileBanner
+              key={selectedId}
               locationId={selectedId}
               facilityAttributes={selectedLoc?.facility_attributes}
               onUpdated={() => loadLocations()}
               allLocations={locations}
               source={selectedLoc?.source}
+              eligible={selectedLoc?.facility_profile_eligible}
               readOnly={readOnly}
             />
 

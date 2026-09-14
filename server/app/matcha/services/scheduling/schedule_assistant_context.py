@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import logging
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Optional
 from uuid import UUID
 
 from app.database import get_connection
 
+from .labor_cost_service import is_labor_cost_visible, load_week_cost
 from .planning_inputs import build_planning_inputs, compact_roster_load
 from .schedule_eligibility import (
     _BLOCKING_AUTHORITY_EXPR,
@@ -23,7 +25,8 @@ def _iso(value):
 
 
 async def get_schedule_overview(
-    *, company_id: UUID, location_id: UUID, week_start: date
+    *, company_id: UUID, location_id: UUID, week_start: date,
+    actor_role: Optional[str] = None,
 ) -> dict:
     """Return a bounded overview for one location and one editor week.
 
@@ -104,6 +107,48 @@ async def get_schedule_overview(
                 "jurisdiction": inputs["jurisdiction"],
                 "week_rules": inputs["week_rules"],
             }
+            # Cost, when the tenant has `labor_cost`: the model should be able
+            # to answer "what does this week cost" and "who is about to push us
+            # into overtime" from the same numbers the manager is looking at,
+            # rather than inventing them. Bounded to the week's totals plus a
+            # per-person figure — never a rate, and never a wage in prose.
+            # Flag AND role, the same gate the HTTP surfaces use. The flag
+            # alone is not enough here: `assert_manager_location` admits an
+            # employee-role user flagged `is_manager`/`is_supervisor`
+            # (`resolve_eligibility_manager_scope`), so they can open a
+            # schedule-assistant thread — and `roster_load` already carries
+            # each person's minutes, so a per-person `week_cost` beside it
+            # hands them every coworker's hourly rate by division. Defaults to
+            # no role, which fails closed.
+            if await is_labor_cost_visible(company_id, actor_role, conn=conn):
+                week_cost = (await load_week_cost(
+                    conn, company_id=company_id, location_id=location_id,
+                    week_start=week_start,
+                )).payload()
+                planning["labor_cost"] = {
+                    key: week_cost[key] for key in (
+                        "total", "hourly_total", "salaried_total", "open_seat_total",
+                        "ot_premium", "ot_minutes", "by_day",
+                        "unpriced_employee_count", "unpriced_open_seats",
+                        "unpriced_days", "truncated", "basis",
+                    )
+                }
+                totals = {
+                    item["employee_id"]: item["total"]
+                    for item in week_cost["employees"] if item["priced"]
+                }
+                # Someone with no shifts costs nothing; someone with no rate on
+                # file cannot be costed. Both arriving as `null` would have the
+                # model name the entire bench when asked who is missing a pay
+                # rate — `roster_load` carries the whole roster, and in a normal
+                # week most of it is bench.
+                unpriced = set(week_cost.get("unpriced_employee_ids") or [])
+                planning["labor_cost"]["unpriced_employee_ids"] = sorted(unpriced)
+                for person in planning["roster_load"]:
+                    employee_id = person["employee_id"]
+                    person["week_cost"] = (
+                        None if employee_id in unpriced else totals.get(employee_id, 0.0)
+                    )
         except Exception:
             logging.getLogger(__name__).exception(
                 "schedule overview: planning inputs unavailable for location %s", location_id,

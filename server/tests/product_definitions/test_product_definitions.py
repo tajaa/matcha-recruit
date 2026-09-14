@@ -6,6 +6,8 @@ paths), a paid product can't ship without a working gate, and the price a
 customer is quoted matches every pricing model exactly.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 
 from app.core.feature_flags import DEFAULT_COMPANY_FEATURES
@@ -17,6 +19,7 @@ from app.core.services.product_definitions import (
     materialize_features,
     pending_features,
     product_for_pack_id,
+    row_to_product,
     validate_features,
     validate_gate_feature,
     validate_nav,
@@ -52,6 +55,37 @@ def make_product(**overrides) -> ProductDefinition:
 def test_per_seat_price_scales_with_headcount():
     product = make_product(pricing_model="per_seat", price_cents=300)
     assert compute_product_price_cents(product, 25) == 7500
+
+
+def test_per_location_price_scales_with_location_count_not_headcount():
+    product = make_product(pricing_model="per_location", price_cents=2500)
+    assert compute_product_price_cents(product, 40, location_count=3) == 7500
+
+
+def test_per_location_price_requires_a_positive_location_count():
+    product = make_product(pricing_model="per_location", price_cents=2500)
+    with pytest.raises(ProductDefinitionError, match="Location count"):
+        compute_product_price_cents(product, 40)
+    with pytest.raises(ProductDefinitionError, match="Location count"):
+        compute_product_price_cents(product, 40, location_count=0)
+
+
+def test_per_location_mode_survives_database_row_round_trip():
+    now = datetime.now(timezone.utc)
+    row = {
+        **make_product(pricing_model="per_location", price_cents=2500).__dict__,
+        "features": '{"incidents": true}',
+        "nav": None,
+        "created_at": now,
+        "updated_at": now,
+        "updated_by": "admin@example.com",
+    }
+
+    restored = row_to_product(row)
+
+    assert restored.pricing_model == "per_location"
+    assert restored.price_cents == 2500
+    assert restored.to_dict()["pricing_model"] == "per_location"
 
 
 def test_block_price_rounds_up_to_the_next_block():
@@ -220,6 +254,13 @@ def test_block_pricing_needs_a_block_size():
     with pytest.raises(ProductDefinitionError):
         validate_pricing("block", 5000, None, 1, 300)
     validate_pricing("block", 5000, 10, 1, 300)
+
+
+def test_per_location_is_a_paid_pricing_model():
+    validate_pricing("per_location", 2500, None, 1, 300)
+    assert validate_gate_feature(
+        "incidents", {"incidents": True}, "per_location"
+    ) == "incidents"
 
 
 def test_nav_can_only_order_features_the_product_grants():

@@ -244,8 +244,9 @@ extension TaskViewerSheet {
     func requestAutoPRRun() async {
         guard let pid = viewModel.project?.id, !requestingAutoPRRun else { return }
         requestingAutoPRRun = true
+        autoPRPendingAction = "run"
         autoPRRunError = nil
-        defer { requestingAutoPRRun = false }
+        defer { requestingAutoPRRun = false; autoPRPendingAction = nil }
         do {
             _ = try await MatchaWorkService.shared.requestAutoPRRun(
                 projectId: pid,
@@ -262,17 +263,49 @@ extension TaskViewerSheet {
         }
     }
 
+    /// Pin (or clear) the model and effort AutoPR runs this card with.
+    /// Empty string clears one side back to automatic; clearing both hands the
+    /// card back to the stall-driven ladder. Optimistic like the run controls
+    /// so the menu label changes on click, then reconciled by the reload.
+    func setAutoPRRuntime(model: String, effort: String) async {
+        guard let pid = viewModel.project?.id, !settingAutoPRRuntime else { return }
+        settingAutoPRRuntime = true
+        autoPRRuntimeError = nil
+        defer { settingAutoPRRuntime = false }
+        do {
+            _ = try await MatchaWorkService.shared.updateProjectTask(
+                projectId: pid,
+                taskId: task.id,
+                patch: MatchaWorkService.ProjectTaskPatch(
+                    autoprModel: model,
+                    autoprEffort: effort
+                )
+            )
+            if let index = viewModel.tasks.firstIndex(where: { $0.id == task.id }) {
+                viewModel.tasks[index].autoprModel = model.isEmpty ? nil : model
+                viewModel.tasks[index].autoprEffort = effort.isEmpty ? nil : effort
+                viewModel.tasks[index].autoprRuntimeSource =
+                    (model.isEmpty && effort.isEmpty) ? nil : "manual"
+            }
+            await viewModel.loadTasks()
+        } catch {
+            autoPRRuntimeError = error.localizedDescription
+        }
+    }
+
     func cancelAutoPRRun() async {
         guard let pid = viewModel.project?.id, !requestingAutoPRRun, !addingNote else { return }
         requestingAutoPRRun = true
+        autoPRPendingAction = "hold"
         autoPRRunError = nil
-        defer { requestingAutoPRRun = false }
+        defer { requestingAutoPRRun = false; autoPRPendingAction = nil }
         do {
             _ = try await MatchaWorkService.shared.cancelAutoPRRun(projectId: pid, taskId: task.id)
             didRequestAutoPRRun = false
             didSubmitAutoPRContext = false
             if let index = viewModel.tasks.firstIndex(where: { $0.id == task.id }) {
                 viewModel.tasks[index].autoprPaused = true
+                viewModel.tasks[index].autoprHoldReason = nil
                 viewModel.tasks[index].autoprRunRequestedAt = nil
                 viewModel.tasks[index].autoprReconsiderationPending = false
                 viewModel.tasks[index].autoprClaimedAt = nil

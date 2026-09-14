@@ -35,7 +35,11 @@ export default function TenantSidebar() {
   // is namespaced ('product:<slug>') so they can never collide with the
   // hardcoded tiers below, and the shell is built from the product row.
   if (isCustomProductPending(me?.profile)) {
-    return <ProductPendingSidebar product={me!.profile!.product!} headcount={me?.profile?.headcount ?? 0} />
+    return <ProductPendingSidebar
+      product={me!.profile!.product!}
+      headcount={me?.profile?.headcount ?? 0}
+      locationCount={me?.profile?.location_count ?? 0}
+    />
   }
   if (isCustomProduct(me?.profile)) return <ProductSidebar product={me!.profile!.product!} />
   if (isMatchaXPending(me?.profile)) return <MatchaXPendingSidebar headcount={me?.profile?.headcount ?? 0} />
@@ -57,13 +61,19 @@ export default function TenantSidebar() {
 // resolves the product from the company's own signup_source (nothing about the
 // purchase is chosen client-side). contact_sales products have no checkout —
 // they wait on an admin running /admin/products/{id}/activate-tenant.
-function ProductPendingSidebar({ product, headcount }: { product: ProductDefinition; headcount: number }) {
+function ProductPendingSidebar({
+  product, headcount, locationCount,
+}: { product: ProductDefinition; headcount: number; locationCount: number }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const isContactSales = product.pricing_model === 'contact_sales'
   const overLimit = headcount > product.max_headcount
-  const price = productPriceDollars(product, headcount)
+  const missingLocationCount = product.pricing_model === 'per_location' && locationCount < 1
+  const price = productPriceDollars(product, headcount, locationCount)
+  const priceDisplay = price !== null && !Number.isInteger(price) ? price.toFixed(2) : price
+  const quantity = product.pricing_model === 'per_location' ? locationCount : headcount
+  const quantityLabel = product.pricing_model === 'per_location' ? 'location' : 'employee'
 
   async function handleSubscribe() {
     setLoading(true)
@@ -98,10 +108,16 @@ function ProductPendingSidebar({ product, headcount }: { product: ProductDefinit
         <div className="space-y-4">
           {price !== null ? (
             <p className="text-xs text-zinc-400">
-              <span className="text-zinc-100 font-medium">${price}/month</span>
+              <span className="text-zinc-100 font-medium">${priceDisplay}/month</span>
               {product.pricing_model !== 'flat' && (
-                <> for {headcount} employee{headcount !== 1 ? 's' : ''}</>
+                <> for {quantity} {quantityLabel}{quantity !== 1 ? 's' : ''}</>
               )}
+            </p>
+          ) : missingLocationCount ? (
+            <p className="text-xs text-red-400">
+              Your location count is missing —{' '}
+              <a href="mailto:hello@matcha.work" className="underline">contact us</a>{' '}
+              to complete your subscription.
             </p>
           ) : overLimit ? (
             <p className="text-xs text-red-400">

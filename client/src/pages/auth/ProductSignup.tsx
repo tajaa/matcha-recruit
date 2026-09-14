@@ -32,6 +32,7 @@ export default function ProductSignup() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [headcount, setHeadcount] = useState('')
+  const [locationCount, setLocationCount] = useState('')
   const [industry, setIndustry] = useState('')
   const [industryOther, setIndustryOther] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -50,11 +51,17 @@ export default function ProductSignup() {
   }, [slug])
 
   const comped = !!inviteToken || !!brokerRef
-  const isPaid = product ? ['per_seat', 'block', 'flat'].includes(product.pricing_model) : false
+  const isPaid = product ? ['per_seat', 'per_location', 'block', 'flat'].includes(product.pricing_model) : false
   const hc = parseInt(headcount, 10)
   const headcountValid = !isNaN(hc) && hc >= 1
   const overLimit = !!product && headcountValid && !comped && isPaid && hc > product.max_headcount
-  const price = product && headcountValid && !overLimit && !comped ? productPriceDollars(product, hc) : null
+  const locations = Number(locationCount)
+  const locationCountValid = product?.pricing_model !== 'per_location'
+    || (Number.isInteger(locations) && locations >= 1)
+  const price = product && headcountValid && locationCountValid && !overLimit && !comped
+    ? productPriceDollars(product, hc, locations)
+    : null
+  const priceDisplay = price !== null && !Number.isInteger(price) ? price.toFixed(2) : price
   const industryValid = industry && (industry !== 'other' || industryOther.trim().length > 0)
   const resolvedIndustry = industry === 'other' ? industryOther.trim() : industry
 
@@ -65,6 +72,7 @@ export default function ProductSignup() {
     email.trim() &&
     password.length >= 8 &&
     headcountValid &&
+    locationCountValid &&
     !overLimit &&
     industryValid
 
@@ -85,6 +93,7 @@ export default function ProductSignup() {
           email: email.trim().toLowerCase(),
           password,
           headcount: hc,
+          ...(product.pricing_model === 'per_location' ? { location_count: locations } : {}),
           industry: resolvedIndustry,
           ...(brokerRef ? { lite_broker_token: brokerRef } : {}),
           ...(inviteToken ? { lite_invite_token: inviteToken } : {}),
@@ -211,12 +220,30 @@ export default function ProductSignup() {
                 Over {product.max_headcount} employees —{' '}
                 <a href="mailto:hello@matcha.work" className="underline">contact us for pricing</a>
               </p>
-            ) : price !== null ? (
+            ) : price !== null && product.pricing_model !== 'per_location' ? (
               <p className="mt-2 text-xs text-zinc-400">
-                <span className="text-zinc-100 font-medium">${price}/month</span> · billed monthly
+                <span className="text-zinc-100 font-medium">${priceDisplay}/month</span> · billed monthly
               </p>
             ) : null}
           </div>
+
+          {product.pricing_model === 'per_location' && (
+            <div>
+              <Field
+                label="Number of locations"
+                type="number"
+                min={1}
+                value={locationCount}
+                onChange={setLocationCount}
+                hint="Used to calculate your monthly subscription"
+              />
+              {price !== null && (
+                <p className="mt-2 text-xs text-zinc-400">
+                  <span className="text-zinc-100 font-medium">${priceDisplay}/month</span> · billed monthly
+                </p>
+              )}
+            </div>
+          )}
 
           <div>
             <Select
@@ -268,19 +295,21 @@ export default function ProductSignup() {
 }
 
 function Field({
-  label, value, onChange, type = 'text', hint,
+  label, value, onChange, type = 'text', hint, min,
 }: {
   label: string
   value: string
   onChange: (v: string) => void
   type?: string
   hint?: string
+  min?: number
 }) {
   return (
     <label className="block">
       <span className="text-xs text-zinc-400 uppercase tracking-wide">{label}</span>
       <input
         type={type}
+        min={min}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
