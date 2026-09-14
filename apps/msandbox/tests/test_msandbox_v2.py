@@ -1565,6 +1565,9 @@ class HostAndInstallTests(MsandboxTestCase):
                 "apps.msandbox.cli.cli.dispatcher_drift", return_value=[]
             ), mock.patch(
                 "apps.msandbox.cli.cli.dispatcher_install_root", return_value=install_root
+            ), mock.patch(
+                "apps.msandbox.cli.cli.verify_toolchain_status",
+                return_value=(True, ["verification toolchain python: current (x)"]),
             ), mock.patch.dict(
                 os.environ, {"AUTOPR_HOST_CODEX_AUTH_FILE": str(fixture)}
             ), redirect_stdout(output):
@@ -1583,6 +1586,77 @@ class HostAndInstallTests(MsandboxTestCase):
         status, text = report(expired, no_lanes)
         self.assertEqual(status, 0, text)
         self.assertIn("codex login: EXPIRED", text)
+
+    def test_doctor_reports_a_missing_verification_toolchain_only_where_lanes_run(self) -> None:
+        # verify.sh only reads the runner-owned toolchain. Missing, every bot
+        # PR says needs-work for "could not run" — on all of them, so nobody
+        # notices. Doctor names it, and fails only on a host that runs lanes.
+        from apps.msandbox.cli.cli import _install_drift_report
+
+        now = time.time()
+        valid = self._codex_auth_fixture("doctor-auth-toolchain.json", exp=now + 86400)
+        lanes = self.root / "installed-dispatcher-toolchain"
+        lanes.mkdir()
+        no_lanes = self.root / "never-installed-toolchain"
+
+        def report(install_root: Path) -> tuple[int, str]:
+            output = io.StringIO()
+            with mock.patch(
+                "apps.msandbox.cli.cli.launcher_is_pre_move", return_value=False
+            ), mock.patch(
+                "apps.msandbox.cli.cli.release_drift", return_value=("r1", "r1")
+            ), mock.patch(
+                "apps.msandbox.cli.cli.dispatcher_drift", return_value=[]
+            ), mock.patch(
+                "apps.msandbox.cli.cli.dispatcher_install_root", return_value=install_root
+            ), mock.patch(
+                "apps.msandbox.cli.cli.verify_toolchain_status",
+                return_value=(False, ["verification toolchain python: MISSING (v)"]),
+            ), mock.patch.dict(
+                os.environ, {"AUTOPR_HOST_CODEX_AUTH_FILE": str(valid)}
+            ), redirect_stdout(output):
+                return _install_drift_report(self.repo), output.getvalue()
+
+        status, text = report(lanes)
+        self.assertEqual(status, 1, text)
+        self.assertIn("verification toolchain python: MISSING", text)
+        status, text = report(no_lanes)
+        self.assertEqual(status, 0, text)
+        self.assertIn("verification toolchain python: MISSING", text)
+
+    def test_verify_toolchain_status_shells_out_to_the_one_provisioner(self) -> None:
+        from apps.msandbox.cli.install import (
+            VERIFY_TOOLCHAIN_PROVISIONER,
+            verify_toolchain_status,
+        )
+
+        repo = self.root / "toolchain-repo"
+        script = repo / VERIFY_TOOLCHAIN_PROVISIONER
+        # No provisioner in the checkout: unmeasurable, never "current".
+        ok, lines = verify_toolchain_status(repo_root=repo)
+        self.assertFalse(ok)
+        self.assertTrue(any("unmeasurable" in line for line in lines), lines)
+        script.parent.mkdir(parents=True)
+        script.write_text(
+            "#!/usr/bin/env bash\n"
+            'printf "args: %s\\n" "$*"\n'
+            'echo "verification toolchain python: MISSING (x)"\n'
+            "exit 3\n",
+            encoding="utf-8",
+        )
+        ok, lines = verify_toolchain_status(repo_root=repo)
+        self.assertFalse(ok)
+        self.assertIn(f"args: --check --repo {repo.resolve()}", lines)
+        self.assertIn("verification toolchain python: MISSING (x)", lines)
+        script.write_text("#!/usr/bin/env bash\necho current\nexit 0\n", encoding="utf-8")
+        ok, lines = verify_toolchain_status(repo_root=repo)
+        self.assertTrue(ok)
+        self.assertEqual(lines, ["current"])
+        # Any exit other than 0/3 is a broken check, not a verdict.
+        script.write_text("#!/usr/bin/env bash\nexit 7\n", encoding="utf-8")
+        ok, lines = verify_toolchain_status(repo_root=repo)
+        self.assertFalse(ok)
+        self.assertIn("verification toolchain: check failed (exit 7)", lines)
 
     def test_doctor_sees_release_and_dispatcher_drift(self) -> None:
         # Two installed trees, neither auto-updating: the launcher pins one

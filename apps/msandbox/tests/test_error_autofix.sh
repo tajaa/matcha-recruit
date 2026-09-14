@@ -518,6 +518,81 @@ check "verify.sh with no interpreter reports unverified (AUTOFIX_NEW_FAILURES=1)
   $(grep -q '^AUTOFIX_NEW_FAILURES=1$' "$verify_env" && echo 0 || echo 1)
 
 ################################################################################
+# verify.sh — the runner-owned toolchain. The runner is a launchd job, and
+# macOS drops a launchd job's ~/Documents grant whenever its binary changes
+# (the 2026-08-31 runner self-update): from then to 09-14 every bot PR said
+# "no usable Python interpreter" while the dev venv worked from a terminal.
+# So: no ~/Documents default, and a cache under ~/.cache that verify.sh
+# reads and provision-verify-toolchain.sh writes, keyed by toolchain.sh.
+################################################################################
+check "verify.sh has no default that reaches into ~/Documents (code lines, comments may explain why)" \
+  $(! grep -vE '^[[:space:]]*#' "$AUTOFIX_DIR/verify.sh" | grep -q 'Documents' && echo 0 || echo 1)
+check "verify.sh and the provisioner share one key helper" \
+  $(grep -q '\. "\$SCRIPT_DIR/toolchain.sh"' "$AUTOFIX_DIR/verify.sh" \
+    && grep -q 'error-autofix/toolchain.sh' "$AUTOFIX_DIR/../harness/provision-verify-toolchain.sh" && echo 0 || echo 1)
+
+source "$AUTOFIX_DIR/toolchain.sh"
+TOOLCHAIN_CACHE="$TMP_DIR/toolchain-cache"
+provisioner="$AUTOFIX_DIR/../harness/provision-verify-toolchain.sh"
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" "$provisioner" --check --repo "$VERIFY_REPO" > "$TMP_DIR/toolchain-check.out" 2>&1
+check "provisioner --check reports a missing toolchain with exit 3" \
+  $([ "$?" -eq 3 ] && grep -q 'python: MISSING' "$TMP_DIR/toolchain-check.out" \
+    && grep -q 'client: MISSING' "$TMP_DIR/toolchain-check.out" && echo 0 || echo 1)
+
+# A cached venv under the keyed path is found with no override set at all.
+cached_venv="$(AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" autofix_venv_dir "$VERIFY_REPO")"
+mkdir -p "$cached_venv/bin"
+cp "$TMP_DIR/fake-python" "$cached_venv/bin/python"
+: > "$verify_env"
+verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
+    AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" FAKE_PYTEST_RC=0 \
+    RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" 2>/dev/null)"
+check "verify.sh uses the cached toolchain venv and renders a real pytest row" \
+  $(grep -q '| pytest server/tests/app | 0 failed | 0 failed |' <<< "$verify_out" \
+    && ! grep -q 'unavailable' <<< "$verify_out" \
+    && grep -q '^AUTOFIX_NEW_FAILURES=0$' "$verify_env" && echo 0 || echo 1)
+
+# A client change with no node_modules in the tree: the cached client
+# toolchain is symlinked into both trees and the TypeScript row renders.
+(
+    cd "$VERIFY_REPO" && mkdir -p client/src \
+    && printf '{"name":"x","version":"0.0.0"}\n' > client/package.json \
+    && printf '{"name":"x","lockfileVersion":3}\n' > client/package-lock.json \
+    && printf 'export const a = 1;\n' > client/src/a.ts \
+    && git add -A && git commit -q -m client-base
+)
+printf 'export const a = 2;\n' > "$VERIFY_REPO/client/src/a.ts"
+cached_node="$(AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" autofix_node_root "$VERIFY_REPO")/node_modules"
+mkdir -p "$cached_node/.bin"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$cached_node/.bin/tsc"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$cached_node/.bin/vitest"
+chmod +x "$cached_node/.bin/tsc" "$cached_node/.bin/vitest"
+: > "$verify_env"
+verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
+    AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" FAKE_PYTEST_RC=0 \
+    RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" 2>/dev/null)"
+check "verify.sh symlinks the cached client toolchain into the branch tree and typechecks" \
+  $(grep -q '| TypeScript | 0 diagnostics | 0 diagnostics |' <<< "$verify_out" \
+    && ! grep -q 'no client toolchain' <<< "$verify_out" \
+    && [ -L "$VERIFY_REPO/client/node_modules" ] \
+    && [ "$(readlink "$VERIFY_REPO/client/node_modules")" = "$cached_node" ] \
+    && grep -q '^AUTOFIX_NEW_FAILURES=0$' "$verify_env" && echo 0 || echo 1)
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" "$provisioner" --check --repo "$VERIFY_REPO" >/dev/null 2>&1
+check "provisioner --check is current once both keyed directories are usable" $([ "$?" -eq 0 ] && echo 0 || echo 1)
+# A real directory in the tree is never replaced by the cache symlink.
+rm -f "$VERIFY_REPO/client/node_modules"
+mkdir -p "$VERIFY_REPO/client/node_modules/.bin"
+printf '#!/usr/bin/env bash\necho "src/a.ts(1,1): error TS1: real tree" >&2\nexit 1\n' > "$VERIFY_REPO/client/node_modules/.bin/tsc"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$VERIFY_REPO/client/node_modules/.bin/vitest"
+chmod +x "$VERIFY_REPO/client/node_modules/.bin/tsc" "$VERIFY_REPO/client/node_modules/.bin/vitest"
+verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
+    AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" FAKE_PYTEST_RC=0 \
+    RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" 2>/dev/null)"
+check "verify.sh prefers a real node_modules in the tree over the cache and never replaces it" \
+  $([ ! -L "$VERIFY_REPO/client/node_modules" ] \
+    && grep -q '| TypeScript | 1 diagnostics | 1 diagnostics |' <<< "$verify_out" && echo 0 || echo 1)
+
+################################################################################
 # 10: publish.sh path guard — denylist and allowlist both fatal on bad paths
 ################################################################################
 FAKE_REPO="$TMP_DIR/fake-repo"

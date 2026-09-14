@@ -79,11 +79,21 @@ Pipeline (`apps/msandbox/error-autofix/`):
    comments directly as its durable ledger. Uncertain comparisons still publish and are
    labeled `possible-duplicate`.
 6. **`verify.sh`** — runs the same backend checks against `main` and the branch and
-   diffs *failing test node IDs* rather than counts. For client changes, it shares the
-   runner's existing `client/node_modules` with the baseline worktree, compares
-   TypeScript diagnostics, and runs changed or colocated Vitest files against both
-   trees. Missing verification dependencies label a draft `needs-work`; they never
-   trigger an unpinned install in the scheduled workflow.
+   diffs *failing test node IDs* rather than counts. For client changes, it shares one
+   `node_modules` with the baseline worktree, compares TypeScript diagnostics, and runs
+   changed or colocated Vitest files against both trees. Its interpreter and client
+   dependencies come from the **runner-owned toolchain** under
+   `~/.cache/matcha-autofix/` (a `venv-py312-<hash>` keyed on the server manifests and
+   a `client-<hash>/node_modules` keyed on `client/package-lock.json` — layout in
+   `error-autofix/toolchain.sh`), built once by
+   `apps/msandbox/harness/provision-verify-toolchain.sh` (or `msandbox install
+   --verify-toolchain`). Nothing in a lane builds it, and nothing reads the operator's
+   dev clone under `~/Documents`: the runner is a launchd job, and macOS drops such a
+   job's Files-and-Folders grant whenever its binary changes (the runner's 2026-08-31
+   self-update), which is how every bot PR from 2026-09-01 to 09-14 carried
+   `needs-work` for "could not run". A missing toolchain still labels a draft
+   `needs-work` with the "checks did not run" banner, and `audit.sh` reports it as an
+   operator action so the outage is visible somewhere other than on every PR.
 7. **`write-commit-subject.sh`** — uses Codex Luna-medium for the bounded commit
    subject after verification. Trusted shell enforces the `fix:` prefix, one-line
    72-character limit, and rejects any repository edit from this writing-only pass.
@@ -116,10 +126,12 @@ It never deploys or auto-merges. A human reads the PR body and decides.
    path's health probes. Empty skips them.
 5. Install/reinstall `apps/msandbox/harness/install-launch-agent.sh`; that one local
    timer owns all three AutoPR lanes. Use `workflow_dispatch` once to verify connectivity.
-6. `server/venv` on this Mac must have `pytest` and `pytest-asyncio` installed
-   alongside the app's own requirements (`verify.sh` reuses this venv rather than
-   building one, so it needs to already work): `server/venv/bin/pip install pytest
-   pytest-asyncio`.
+6. Build the verification toolchain once:
+   `./apps/msandbox/harness/provision-verify-toolchain.sh` (or `msandbox install
+   --verify-toolchain`). It needs `/opt/homebrew/bin/python3.12` and `npm`. Re-run it
+   whenever `server/requirements*.txt` or `client/package-lock.json` change on `main`
+   — `msandbox doctor` and the self-audit both say when it is stale. `verify.sh` never
+   uses `server/venv` from the dev clone (see step 6 of the flow above).
 
 ## Guardrails
 

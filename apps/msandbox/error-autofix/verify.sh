@@ -12,8 +12,9 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-CACHE_DIR="${AUTOFIX_CACHE_DIR:-$HOME/.cache/matcha-autofix}"
-PY312="${PY312:-/opt/homebrew/bin/python3.12}"
+# shellcheck source=toolchain.sh
+. "$SCRIPT_DIR/toolchain.sh"
+CACHE_DIR="$(autofix_toolchain_cache_dir)"
 mkdir -p "$CACHE_DIR"
 
 # `AUTOFIX_BASE_SHA` must be captured by the workflow BEFORE investigate.sh
@@ -127,38 +128,36 @@ done
 CLIENT_TESTS=($(printf '%s\n' "${CLIENT_TESTS[@]+"${CLIENT_TESTS[@]}"}" | sort -u))
 
 # ---- interpreter selection ---------------------------------------------
-# Prefer the repo's own dev venv as an interpreter rather than building a
-# fresh one: requirements.txt pins with `>=`, so hashing it doesn't actually
-# pin anything, and neither pytest nor pytest-asyncio are in it at all. The
-# venv resolves site-packages from its own prefix regardless of cwd, so
-# pointing it at the workspace's server/ tree (rather than this dev clone)
-# picks up the branch's code, not the dev clone's.
-# Candidates, in order: the tree under verification (if it carries a venv,
-# e.g. a developer running this by hand), then the dev clone's venv on the Mac
-# runner (the Actions workspace deliberately has none), then the cached one.
-DEV_VENV_PY="${AUTOFIX_DEV_VENV_PY:-$HOME/Documents/github/matcha/server/venv/bin/python}"
+# Candidates, in order: an explicit AUTOFIX_DEV_VENV_PY override (tests, a
+# developer running this by hand), a venv inside the tree under verification,
+# then the runner-owned cached venv (harness/provision-verify-toolchain.sh,
+# keyed on the server manifests — toolchain.sh). A venv resolves
+# site-packages from its own prefix regardless of cwd, so pointing it at the
+# workspace's server/ tree picks up the branch's code, not the cache's.
+#
+# There is deliberately NO default that reaches into the operator's dev
+# clone under ~/Documents: the runner is a launchd job, and macOS drops such
+# a job's Files-and-Folders grant whenever its binary changes (the runner's
+# 2026-08-31 self-update). That is how every bot PR from 09-01 to 09-14
+# carried needs-work for "could not run" while the dev venv sat there,
+# perfectly usable from a terminal.
+#
+# The cache is NOT built on the fly — a `pip install` that then fails on a
+# native extension (xmlsec, pymupdf) can eat the whole job's timeout for
+# nothing. Missing or stale, verification reports UNAVAILABLE rather than
+# guessing, and audit.sh reports it as an operator action.
+DEV_VENV_PY="${AUTOFIX_DEV_VENV_PY:-}"
+CACHED_VENV="$(autofix_venv_dir "$REPO_ROOT")"
 VENV_PY=""
 BOOTSTRAP_OK=false
 
-for candidate_py in "$REPO_ROOT/server/venv/bin/python" "$DEV_VENV_PY"; do
-    if [ -x "$candidate_py" ] && "$candidate_py" -c "import pytest, pytest_asyncio" >/dev/null 2>&1; then
+for candidate_py in ${DEV_VENV_PY:+"$DEV_VENV_PY"} "$REPO_ROOT/server/venv/bin/python" "$CACHED_VENV/bin/python"; do
+    if autofix_python_usable "$candidate_py"; then
         VENV_PY="$candidate_py"
         BOOTSTRAP_OK=true
         break
     fi
 done
-if [ "$BOOTSTRAP_OK" != true ]; then
-    # Fallback: a cached, manually-provisioned venv. NOT built on the fly —
-    # a `pip install` that then fails on a native extension (xmlsec,
-    # pymupdf) can eat the whole job's timeout for nothing. If it's missing
-    # or stale, verification reports UNAVAILABLE rather than guessing.
-    REQ_HASH="$(shasum -a 256 "$REPO_ROOT/server/requirements.txt" | cut -c1-12)"
-    CACHED_VENV="$CACHE_DIR/venv-py312-$REQ_HASH"
-    if [ -x "$CACHED_VENV/bin/python" ] && "$CACHED_VENV/bin/python" -c "import pytest, pytest_asyncio" >/dev/null 2>&1; then
-        VENV_PY="$CACHED_VENV/bin/python"
-        BOOTSTRAP_OK=true
-    fi
-fi
 
 PYTHON_UNAVAILABLE=false
 if [ "$BOOTSTRAP_OK" != true ]; then
@@ -170,14 +169,13 @@ if [ "$PYTHON_UNAVAILABLE" = true ] && [ "$CLIENT_CHANGED" != true ]; then
 ### Verification
 
 **Checks did not run** — no usable Python interpreter with pytest was found
-(looked for the dev venv at \`$DEV_VENV_PY\` and a cached venv keyed on
-\`server/requirements.txt\`). This PR has not been verified. Review the diff
+(looked for \`server/venv\` in the tree under verification and the cached
+toolchain at \`$CACHED_VENV\`). This PR has not been verified. Review the diff
 manually before merging.
 
-To provision the cached venv once by hand:
+To provision the cached toolchain once on the runner Mac:
 \`\`\`
-/opt/homebrew/bin/python3.12 -m venv $CACHE_DIR/venv-py312-<hash>
-$CACHE_DIR/venv-py312-<hash>/bin/pip install -r server/requirements.txt pytest pytest-asyncio
+./apps/msandbox/harness/provision-verify-toolchain.sh   # or: msandbox install --verify-toolchain
 \`\`\`
 EOF
     # Unverified is not "0 new failures": the publisher labels needs-work
@@ -239,11 +237,27 @@ trap cleanup EXIT
 
 # The baseline worktree is outside the repository, so Node cannot discover the
 # checked-out client's dependency tree by walking parent directories. Sharing
-# the already-installed dependencies is read-only and avoids an unpinned npm
-# install inside the scheduled workflow.
+# an already-installed dependency tree is read-only and avoids an unpinned
+# npm install inside the scheduled workflow. Sources, in order: a real
+# node_modules inside the tree under verification, then the runner-owned
+# cache (keyed on client/package-lock.json — toolchain.sh). The cache is
+# symlinked into BOTH trees; in the branch tree only when nothing real is
+# there (a symlink left by an earlier run is re-pointed, a real directory is
+# never replaced).
 CLIENT_DEPS_READY=false
-if [ -x "$REPO_ROOT/client/node_modules/.bin/tsc" ] && [ -x "$REPO_ROOT/client/node_modules/.bin/vitest" ]; then
-    ln -s "$REPO_ROOT/client/node_modules" "$BASE_TREE/client/node_modules"
+CLIENT_NODE_MODULES=""
+CACHED_NODE_MODULES="$(autofix_node_root "$REPO_ROOT")/node_modules"
+if [ ! -L "$REPO_ROOT/client/node_modules" ] \
+    && autofix_node_modules_usable "$REPO_ROOT/client/node_modules"; then
+    CLIENT_NODE_MODULES="$REPO_ROOT/client/node_modules"
+elif autofix_node_modules_usable "$CACHED_NODE_MODULES"; then
+    CLIENT_NODE_MODULES="$CACHED_NODE_MODULES"
+    if [ -L "$REPO_ROOT/client/node_modules" ] || [ ! -e "$REPO_ROOT/client/node_modules" ]; then
+        ln -sfn "$CLIENT_NODE_MODULES" "$REPO_ROOT/client/node_modules"
+    fi
+fi
+if [ -n "$CLIENT_NODE_MODULES" ] && [ -d "$BASE_TREE/client" ]; then
+    ln -sfn "$CLIENT_NODE_MODULES" "$BASE_TREE/client/node_modules"
     CLIENT_DEPS_READY=true
 fi
 
@@ -323,7 +337,7 @@ else
 fi
 
 if [ "$CLIENT_CHANGED" = true ] && [ "$CLIENT_DEPS_READY" != true ]; then
-    echo "| TypeScript / Vitest | **unavailable** — client/node_modules is missing | **unavailable** |"
+    echo "| TypeScript / Vitest | **unavailable** — no client toolchain (neither client/node_modules nor the cached \`$CACHED_NODE_MODULES\`; run provision-verify-toolchain.sh) | **unavailable** |"
 elif [ "$CLIENT_CHANGED" = true ]; then
     base_types="$(grep -c . "$CLIENT_TYPE_BASE.ids" || true)"
     branch_types="$(grep -c . "$CLIENT_TYPE_BRANCH.ids" || true)"

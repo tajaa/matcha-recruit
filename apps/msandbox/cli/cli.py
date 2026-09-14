@@ -26,8 +26,10 @@ from .install import (
     install_dispatcher,
     install_release,
     launcher_is_pre_move,
+    provision_verify_toolchain,
     release_drift,
     rollback_release,
+    verify_toolchain_status,
 )
 from .models import SessionSpec, port_lines
 from .session_auth import refresh_github_auth
@@ -182,6 +184,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="do not re-run apps/msandbox/harness/install-launch-agent.sh after the release swap",
     )
+    install.add_argument(
+        "--verify-toolchain",
+        action="store_true",
+        help="also build the runner-owned venv + client deps verify.sh reads (~/.cache/matcha-autofix)",
+    )
     commands.add_parser("wizard", help="open the interactive session manager")
     autopr = commands.add_parser("autopr", help="AutoPR queue status and card control")
     autopr_commands = autopr.add_subparsers(dest="autopr_command", required=True)
@@ -250,13 +257,24 @@ def _install_drift_report(repo: Path, bin_dir: Path | None = None) -> int:
     # workflow preflight run.
     login_ok, login_line = codex_auth.check()
     print(login_line)
+    # verify.sh only reads the runner-owned toolchain; when it is missing every
+    # bot PR says needs-work for "could not run", which no one notices because
+    # it is on all of them. Same `--check` audit.sh runs.
+    toolchain_ok, toolchain_lines = verify_toolchain_status(repo_root=repo)
+    for line in toolchain_lines:
+        print(line)
     # Only a host that actually runs the lanes is unhealthy without one. The
     # sandbox also hosts Claude Code and OpenCode sessions, and a developer who
     # has never run `codex login` should not be told to, for a tool they do not
     # use, by an otherwise clean report.
     lanes_installed = dispatcher_install_root().is_dir()
     login_blocks = lanes_installed and not login_ok
-    return 1 if pre_move_launcher or stale or installed != expected or login_blocks else 0
+    toolchain_blocks = lanes_installed and not toolchain_ok
+    return (
+        1
+        if pre_move_launcher or stale or installed != expected or login_blocks or toolchain_blocks
+        else 0
+    )
 
 
 def _checkout_pr(repo: Path, number: int) -> int:
@@ -485,6 +503,16 @@ def run(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
+        if args.verify_toolchain:
+            try:
+                provision_verify_toolchain(repo_root=repo)
+            except subprocess.CalledProcessError as exc:
+                print(
+                    "msandbox: release installed, but the verification toolchain build failed "
+                    f"(exit {exc.returncode}); run apps/msandbox/harness/provision-verify-toolchain.sh",
+                    file=sys.stderr,
+                )
+                return 1
         return 0
     return 2
 

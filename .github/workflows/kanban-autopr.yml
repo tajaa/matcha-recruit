@@ -44,12 +44,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          # This self-hosted runner's client/node_modules is pre-installed
-          # and persists between runs — verify.sh symlinks it into the
-          # baseline worktree read-only rather than running `npm ci` here.
+          # verify.sh reads the runner-owned toolchain under
+          # ~/.cache/matcha-autofix (harness/provision-verify-toolchain.sh)
+          # and symlinks its node_modules into this checkout's client/ and
+          # the baseline worktree; it never runs `npm ci` or `pip` here.
           # The default `clean: true` runs `git clean -ffdx` before checkout,
-          # which wipes that gitignored directory every run and silently
-          # disables client verification (CLIENT_DEPS_READY always false).
+          # which would drop that gitignored symlink every run — harmless
+          # now, but `clean: false` also keeps the persistent clone's other
+          # ignored state (venv-less by design) stable between runs.
           clean: false
 
       - name: Require msandbox master switch

@@ -237,3 +237,18 @@ unset AUTOPR_SELF_AUDIT_LEDGER
 # suite (operator) contributes nothing, a failing one (repo) does.
 [ "$(jq -r .fingerprint "$TMP_DIR/audit-missing.json")" != "$(jq -r .fingerprint "$TMP_DIR/audit-failing.json")" ]
 printf 'PASS: a failing contract suite is named in the audit JSON, summary, and repair ledger\n'
+
+# verify.sh only reads the runner-owned toolchain; a missing one is an
+# operator action the audit must raise, because needs-work on every PR is
+# the same as needs-work on none.
+mkdir -p "$TMP_DIR/empty-toolchain"
+AUTOFIX_CACHE_DIR="$TMP_DIR/empty-toolchain" AUTOPR_AUDIT_ONLY=verify_toolchain \
+    "$AUDIT_DIR/audit.sh" --json "$TMP_DIR/audit-toolchain.json" --summary "$TMP_DIR/audit-toolchain.md"
+jq -e '(.checks | length) == 1
+    and .checks[0].id == "verify_toolchain"
+    and .checks[0].status == "fail"
+    and .checks[0].repairability == "operator"
+    and .repairable_failures == 0
+    and .operator_failures == 1' "$TMP_DIR/audit-toolchain.json" >/dev/null
+grep -qF 'provision-verify-toolchain.sh' "$TMP_DIR/audit-toolchain.md"
+printf 'PASS: a missing verification toolchain is an operator finding\n'

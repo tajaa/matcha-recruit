@@ -751,7 +751,13 @@ budget had already been spent.
 8. **`verify.sh`** — there isn't one; this reuses `apps/msandbox/error-autofix/verify.sh`
    unmodified. It already diffs baseline-vs-branch TypeScript diagnostics via
    `tsc -p tsconfig.app.json --noEmit` (the non-bare form — bare `tsc --noEmit` checks
-   nothing, see root CLAUDE.md), so no separate frontend step was needed.
+   nothing, see root CLAUDE.md), so no separate frontend step was needed. Its pytest
+   interpreter and client dependencies are the runner-owned toolchain under
+   `~/.cache/matcha-autofix/`, built once by
+   `apps/msandbox/harness/provision-verify-toolchain.sh` — never the dev clone under
+   `~/Documents` (a launchd runner loses that grant on every self-update; that is why
+   every kanban PR from 2026-09-01 to 09-14 carried `needs-work` for "could not run").
+   `msandbox doctor` and the self-audit report a missing or stale toolchain.
 9. **`write-publication-copy.sh`** — runs a separate writing-only Codex pass with
    `gpt-5.6-luna` and medium reasoning. It produces only a conventional commit subject
    and a short card note. Trusted shell validates the exact JSON schema, category prefix,

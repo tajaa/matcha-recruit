@@ -63,6 +63,18 @@ and the `mw_tasks.autopr_*` columns they read.
   asserts every `CONTRACT_SUITES` entry exists and that a missing one
   dispatches no repair. Moving the tests directory again means updating that
   default and nothing else.
+- **Nothing a lane runs may read `~/Documents`, `~/Desktop` or `~/Downloads`.**
+  The Actions runner and the dispatcher are launchd jobs, and macOS revokes a
+  launchd job's Files-and-Folders grant whenever its binary changes — the
+  runner's 2026-08-31 self-update did, and `verify.sh`'s default of the dev
+  clone's `server/venv` under `~/Documents` made every bot PR for two weeks
+  say "no usable Python interpreter" while that venv worked from a terminal.
+  verify.sh reads the runner-owned toolchain under `~/.cache/matcha-autofix`
+  instead (layout + keys in `error-autofix/toolchain.sh`, the one writer is
+  `harness/provision-verify-toolchain.sh`, reachable as `msandbox install
+  --verify-toolchain`); `audit.sh` and `msandbox doctor` both run its
+  `--check`. `tests/test_error_autofix.sh` fails on the string `Documents` in
+  any non-comment line of verify.sh.
 - **Every publisher that runs `git reset --hard` calls
   `autopr_require_writable_root` immediately after assigning `REPO_ROOT`**
   (`harness/publish.sh`, `harness/investigate.sh`, `error-autofix/publish.sh`,

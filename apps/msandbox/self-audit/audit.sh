@@ -181,6 +181,19 @@ check_built_toolchain() {
         'node --version && npm --version && npx --version && /opt/bootstrap/server-venv/bin/python -m pytest --version'
 }
 
+# verify.sh only READS the runner-owned toolchain (a venv + client
+# node_modules under ~/.cache/matcha-autofix); nothing in a lane builds it.
+# When it is missing, every bot PR is labelled needs-work for "could not
+# run" — which is on 100% of PRs and therefore invisible — so this is where
+# the outage becomes an operator action instead.
+check_verify_toolchain() {
+    local provisioner="$REPO_ROOT/apps/msandbox/harness/provision-verify-toolchain.sh"
+    [ -x "$provisioner" ] || return 77
+    "$provisioner" --check --repo "$REPO_ROOT" && return 0
+    echo "Operator action: run ./apps/msandbox/harness/provision-verify-toolchain.sh (or msandbox install --verify-toolchain). Until then no bot PR is verified and needs-work means 'could not run', not 'failed'."
+    return 1
+}
+
 check_installed_controller() {
     local installed
     installed="$(command -v msandbox || true)"
@@ -285,6 +298,7 @@ run_check git_patch_hygiene "Patch whitespace and conflict markers" repo git dif
 run_check local_schema "Local dev migration alignment" operator check_local_schema_state
 run_check control_plane "msandbox control-plane readiness" operator check_control_plane_state
 run_check built_toolchain "Built sandbox login-shell test toolchain" operator check_built_toolchain
+run_check verify_toolchain "Runner-owned verification toolchain (pytest + client deps)" operator check_verify_toolchain
 run_check installed_controller "Versioned msandbox installation" operator check_installed_controller
 run_check installed_dispatcher "Installed dispatcher and LaunchAgents match the repo" operator check_installed_dispatcher
 
