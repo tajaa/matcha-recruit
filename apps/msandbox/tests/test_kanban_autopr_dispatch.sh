@@ -667,6 +667,48 @@ printf '%s\n' '{"action":"skip","reason":"codex-auth-required","checked_at":9999
 check "status segment names a dead Codex login" \
   $(grep -q 'CODEX LOGIN' <<< "$(seg)" && echo 0 || echo 1)
 
+# The installed dispatcher tree never auto-updated; the kanban workflow now
+# syncs it from its main checkout on every pass. Runtime files only, only on
+# drift, and never the plists or launchctl.
+sync_root="$TMP_DIR/sync-root"
+sync_agents="$TMP_DIR/sync-agents"
+rm -rf "$sync_root" "$sync_agents"
+mkdir -p "$sync_agents"
+sync_installer() {
+  AUTOPR_DISPATCH_INSTALL_ROOT="$sync_root" AUTOPR_LAUNCH_AGENTS_DIR="$sync_agents" \
+    AUTOPR_LAUNCHCTL_BIN=/usr/bin/false AUTOPR_USER_HOME="$TMP_DIR/sync-home" \
+    "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" --runtime-if-stale 2>&1
+}
+first_sync="$(sync_installer)"
+check "--runtime-if-stale installs a missing dispatcher tree without touching launchd" \
+  $(grep -q 'refreshed' <<< "$first_sync" && grep -q 'lib.sh' <<< "$first_sync" \
+    && cmp -s "$sync_root/lib.sh" "$REPO_ROOT/apps/msandbox/harness/lib.sh" \
+    && [ -f "$sync_root/codex_auth.py" ] \
+    && [ -z "$(ls -A "$sync_agents")" ] && echo 0 || echo 1)
+second_sync="$(sync_installer)"
+check "--runtime-if-stale is a no-op on an identical tree" \
+  $(grep -q 'current' <<< "$second_sync" && ! grep -q 'refreshed' <<< "$second_sync" && echo 0 || echo 1)
+printf '\n# drifted\n' >> "$sync_root/lib.sh"
+rm -f "$sync_root/codex_auth.py"
+third_sync="$(sync_installer)"
+check "--runtime-if-stale names the drifted and missing files and restores them" \
+  $(grep -q 'refreshed' <<< "$third_sync" && grep -q 'lib.sh' <<< "$third_sync" \
+    && grep -q 'codex_auth.py' <<< "$third_sync" \
+    && cmp -s "$sync_root/lib.sh" "$REPO_ROOT/apps/msandbox/harness/lib.sh" \
+    && [ -f "$sync_root/codex_auth.py" ] && echo 0 || echo 1)
+workflow_yml="$REPO_ROOT/.github/workflows/kanban-autopr.yml"
+check "kanban workflow syncs the installed dispatcher from its main checkout after the reset step" \
+  $(grep -q 'install-launch-agent.sh --runtime-if-stale' "$workflow_yml" \
+    && [ "$(grep -n 'Reset any stray bot branch' "$workflow_yml" | cut -d: -f1)" \
+         -lt "$(grep -n 'install-launch-agent.sh --runtime-if-stale' "$workflow_yml" | cut -d: -f1)" ] \
+    && [ "$(grep -n 'install-launch-agent.sh --runtime-if-stale' "$workflow_yml" | cut -d: -f1)" \
+         -lt "$(grep -n 'Snapshot trusted AutoPR control plane' "$workflow_yml" | cut -d: -f1)" ] \
+    && echo 0 || echo 1)
+check "install-hooks.sh installs the post-merge drift banner beside post-checkout" \
+  $(grep -q 'post-merge' "$REPO_ROOT/apps/msandbox/harness/install-hooks.sh" \
+    && [ -x "$REPO_ROOT/apps/msandbox/harness/hooks/post-merge" ] \
+    && bash -n "$REPO_ROOT/apps/msandbox/harness/hooks/post-merge" && echo 0 || echo 1)
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

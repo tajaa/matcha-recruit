@@ -137,6 +137,18 @@ jobs:
             git fetch --quiet --force origin main:main
           fi
 
+      - name: Keep the installed dispatcher tree on main
+        # The LaunchAgents run a COPY of harness/ under ~/.local/share that
+        # never auto-updated: three times in the week of 2026-09-08 a merged
+        # fix (a dead-login guard among them) sat uninstalled for days. This
+        # runner is that same Mac and user, the step above just made this
+        # tree exactly origin/main, and a bot patch can never touch apps/ or
+        # .github/ — so syncing the copy from here installs only reviewed
+        # code. Runtime files only; plists/launchctl stay with the full
+        # installer. Best-effort: a failed sync must not stop the lane.
+        continue-on-error: true
+        run: ./apps/msandbox/harness/install-launch-agent.sh --runtime-if-stale
+
       - name: Configure GitHub CLI
         env:
           GH_TOKEN: ${{ github.token }}

@@ -22,6 +22,20 @@ WATCH_PLIST_DESTINATION="$LAUNCH_AGENTS_DIR/$WATCH_LABEL.plist"
 TMUX_BIN="${AUTOPR_TMUX_BIN:-/opt/homebrew/bin/tmux}"
 ENABLE_FILE="${AUTOPR_ENABLE_FILE:-$USER_HOME/.local/state/matcha-agent-sandbox/autopr-enabled}"
 
+# --runtime-if-stale: refresh only the copied scripts, only when one differs
+# from this checkout; never touches the plists, launchctl, or the dashboard.
+# The kanban workflow runs it from its `main` checkout on every pass, so a
+# merged harness fix reaches the LaunchAgents within one pass instead of
+# waiting for someone to remember `msandbox install` (three times in the
+# week of 2026-09-08 a merged fix sat uninstalled for days — a dead-login
+# guard among them).
+RUNTIME_ONLY=false
+case "${1:-}" in
+    --runtime-if-stale) RUNTIME_ONLY=true ;;
+    '') ;;
+    *) echo "usage: install-launch-agent.sh [--runtime-if-stale]" >&2; exit 2 ;;
+esac
+
 validate_dependencies() {
     [ -x /opt/homebrew/bin/gh ] || { echo "missing /opt/homebrew/bin/gh" >&2; exit 1; }
     command -v jq >/dev/null || { echo "missing jq" >&2; exit 1; }
@@ -56,6 +70,38 @@ install_runtime() {
     for helper in autopr_control.py codex_auth.py; do
         install -m 644 "$(dirname "$SCRIPT_DIR")/cli/$helper" "$INSTALL_ROOT/$helper"
     done
+}
+
+# Names install_runtime would write that are missing from, or differ from,
+# the installed tree. Derived by running install_runtime into a staging
+# directory, so this can never disagree with what the installer copies
+# (cli/install.py and the dispatch suite parse install_runtime for the same
+# reason; keep that function self-contained).
+runtime_stale_names() {
+    local staging path name
+    staging="$(mktemp -d "${TMPDIR:-/tmp}/matcha-autopr-runtime.XXXXXX")"
+    ( INSTALL_ROOT="$staging"; install_runtime ) >/dev/null
+    for path in "$staging"/*; do
+        name="$(basename "$path")"
+        cmp -s "$path" "$INSTALL_ROOT/$name" 2>/dev/null || printf '%s\n' "$name"
+    done
+    rm -rf "$staging"
+}
+
+sync_runtime_if_stale() {
+    local stale
+    stale="$(runtime_stale_names | tr '\n' ' ')"
+    stale="${stale% }"
+    if [ -z "$stale" ]; then
+        echo "AutoPR dispatcher tree current: $INSTALL_ROOT"
+        return 0
+    fi
+    # install(1) unlinks the destination before writing, so a dispatcher tick
+    # already running keeps its old inode; nothing here needs a launchctl
+    # restart. The plists are not re-rendered: a changed template is the
+    # full installer's job, and `msandbox doctor` / the self-audit report it.
+    install_runtime
+    echo "AutoPR dispatcher tree refreshed from $SCRIPT_DIR: $stale"
 }
 
 render_launch_agent() {
@@ -100,6 +146,10 @@ start_launch_agent() {
 }
 
 main() {
+    if [ "$RUNTIME_ONLY" = true ]; then
+        sync_runtime_if_stale
+        return
+    fi
     validate_dependencies
     install_runtime
     render_launch_agent

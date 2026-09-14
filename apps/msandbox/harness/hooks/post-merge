@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# After `git pull` / `git merge` in the real clone: say whether the two
+# installed msandbox trees (the pinned release behind ~/.local/bin/msandbox
+# and the LaunchAgent dispatcher copy) now lag this checkout. Installed via
+# install-hooks.sh; never runs in a CI workspace. A hook must never fail or
+# slow down a merge, so this is best-effort and prints only when something
+# is stale.
+set -uo pipefail
+
+msandbox="${MSANDBOX_BIN:-$HOME/.local/bin/msandbox}"
+[ -x "$msandbox" ] || exit 0
+# Only the merge of a mainline matters; a topic-branch merge changes nothing
+# the automation runs.
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+[ "$branch" = main ] || exit 0
+
+report="$("$msandbox" doctor 2>/dev/null || true)"
+stale="$(printf '%s\n' "$report" | grep -E 'STALE|MISSING|PRE-MOVE' || true)"
+[ -n "$stale" ] || exit 0
+{
+    echo
+    echo "msandbox: installed automation lags this checkout —"
+    printf '  %s\n' "$stale"
+    echo "  (the kanban lane refreshes the dispatcher on its next pass; run \`msandbox install\` for the release)"
+    echo
+} >&2
+exit 0

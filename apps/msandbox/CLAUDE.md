@@ -170,13 +170,31 @@ and the `mw_tasks.autopr_*` columns they read.
   `cli/install.py:dispatcher_installed_files` and by
   `tests/test_kanban_autopr_dispatch.sh`; keep it a flat list of names.
 
-## Installed copies never auto-update
+## Installed copies: one follows `main`, one does not
 
 Two trees on the operator's Mac are copies: `~/.local/share/matcha-msandbox/releases/<sha>/`
 (pinned by `~/.local/bin/msandbox`) and `~/.local/share/matcha-kanban-autopr/`
-(run by the LaunchAgents). `msandbox doctor` reports drift; `msandbox install`
-refreshes both. A launcher written before this directory existed cannot
-upgrade itself — run `./apps/msandbox/bin/agent-sandbox.sh install` once.
+(run by the LaunchAgents). `msandbox doctor` reports drift on both;
+`msandbox install` refreshes both.
+
+- **The dispatcher tree follows `origin/main` on its own** since 2026-09-14:
+  every kanban pass runs `harness/install-launch-agent.sh --runtime-if-stale`
+  from the runner's freshly reset `main` checkout (the step right after
+  "Reset any stray bot branch…"), copying only the runtime files and only on
+  byte drift. Plists and launchctl are never touched there — a changed plist
+  template still needs the full installer, and `check_installed_dispatcher`
+  / `msandbox doctor` say so. Three merged fixes sat uninstalled for days in
+  the week of 2026-09-08 (a dead-login guard among them) before this existed.
+- **The pinned release does not follow `main`**, deliberately: `msandbox
+  install` cuts the release from the checkout it runs against AND rewrites
+  the launcher's `repo_root` to that checkout, so the kanban runner's
+  workspace must never be the source. Run `msandbox install` by hand after a
+  merge under `apps/msandbox/cli` or `sandbox/`; the `post-merge` hook
+  (`harness/install-hooks.sh`) prints the drift banner after every `git pull`
+  on `main`.
+
+A launcher written before this directory existed cannot upgrade itself — run
+`./apps/msandbox/bin/agent-sandbox.sh install` once.
 
 Full mechanics: `docs/MSANDBOX_SESSIONS.md`, `docs/KANBAN_AUTOPR.md`,
 `docs/AGENT_SANDBOX.md`.
