@@ -18,9 +18,31 @@ autofix_toolchain_cache_dir() {
     printf '%s' "${AUTOFIX_CACHE_DIR:-$HOME/.cache/matcha-autofix}"
 }
 
+# autofix_ensure_cache_dir — create the cache root, owner-only. The lanes and
+# the provisioner both reach it, and whichever runs first decides its mode;
+# 0700 in one place keeps a lane from leaving it world-readable.
+autofix_ensure_cache_dir() {
+    local dir
+    dir="$(autofix_toolchain_cache_dir)"
+    mkdir -p "$dir" || return 1
+    chmod 700 "$dir" 2>/dev/null || true
+    printf '%s' "$dir"
+}
+
+# Keys are derived from the dependency manifests, so an absent manifest must
+# be an error and never a key: `shasum` over no input returns the well-known
+# empty digest, and every tree that lacks the manifests would then share one
+# cache entry and be "verified" against a dependency set that matches none of
+# them. Callers report the toolchain as unmeasurable instead.
+
 # autofix_python_key REPO_ROOT — 12 hex chars over the server manifests.
 autofix_python_key() {
-    local root="$1" file
+    local root="$1" file found=false
+    for file in "$root/server/requirements.txt" "$root/server/requirements-dev.txt"; do
+        [ -f "$file" ] || continue
+        found=true
+    done
+    [ "$found" = true ] || return 1
     for file in "$root/server/requirements.txt" "$root/server/requirements-dev.txt"; do
         [ -f "$file" ] && cat "$file"
     done | shasum -a 256 | cut -c1-12
@@ -29,19 +51,25 @@ autofix_python_key() {
 # autofix_node_key REPO_ROOT — 12 hex chars over the client lockfile.
 autofix_node_key() {
     local root="$1"
-    { [ -f "$root/client/package-lock.json" ] && cat "$root/client/package-lock.json"; } \
-        | shasum -a 256 | cut -c1-12
+    [ -f "$root/client/package-lock.json" ] || return 1
+    shasum -a 256 < "$root/client/package-lock.json" | cut -c1-12
 }
 
-# autofix_venv_dir REPO_ROOT — the venv verify.sh looks for.
+# autofix_venv_dir REPO_ROOT — the venv verify.sh looks for. Non-zero (and
+# silent) when the tree carries no server manifests to key on.
 autofix_venv_dir() {
-    printf '%s/venv-py312-%s' "$(autofix_toolchain_cache_dir)" "$(autofix_python_key "$1")"
+    local key
+    key="$(autofix_python_key "$1")" && [ -n "$key" ] || return 1
+    printf '%s/venv-py312-%s' "$(autofix_toolchain_cache_dir)" "$key"
 }
 
 # autofix_node_root REPO_ROOT — holds package.json, package-lock.json and the
-# node_modules verify.sh symlinks into both trees.
+# node_modules verify.sh symlinks into both trees. Non-zero (and silent) when
+# the tree carries no client lockfile to key on.
 autofix_node_root() {
-    printf '%s/client-%s' "$(autofix_toolchain_cache_dir)" "$(autofix_node_key "$1")"
+    local key
+    key="$(autofix_node_key "$1")" && [ -n "$key" ] || return 1
+    printf '%s/client-%s' "$(autofix_toolchain_cache_dir)" "$key"
 }
 
 # autofix_python_usable PYTHON — the exact probe verify.sh runs.

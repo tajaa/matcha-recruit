@@ -29,7 +29,14 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --check) MODE=check; shift ;;
         --force) FORCE=true; shift ;;
-        --repo) REPO_ROOT="$(cd "${2:?--repo requires a path}" && pwd)"; shift 2 ;;
+        # Without -e an unreachable path would leave REPO_ROOT empty and
+        # every key would then be computed from absolute /server/... paths:
+        # a MISSING report for a toolchain that is present, and a prune that
+        # deletes the real one because the current key is a bogus one.
+        --repo)
+            REPO_ROOT="$(cd "${2:?--repo requires a path}" 2>/dev/null && pwd)" \
+                || { echo "--repo: no such directory: $2" >&2; exit 2; }
+            shift 2 ;;
         -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
         *) echo "usage: provision-verify-toolchain.sh [--check] [--force] [--repo ROOT]" >&2; exit 2 ;;
     esac
@@ -39,8 +46,13 @@ done
 . "$SCRIPT_DIR/../error-autofix/toolchain.sh"
 
 CACHE_DIR="$(autofix_toolchain_cache_dir)"
-VENV_DIR="$(autofix_venv_dir "$REPO_ROOT")"
-NODE_ROOT="$(autofix_node_root "$REPO_ROOT")"
+# Both are keyed on manifests in $REPO_ROOT. A tree without them is not a
+# checkout this toolchain can be built for, and guessing a key would alias
+# it onto another tree's cache entry.
+VENV_DIR="$(autofix_venv_dir "$REPO_ROOT")" \
+    || { echo "no server/requirements*.txt under $REPO_ROOT" >&2; exit 2; }
+NODE_ROOT="$(autofix_node_root "$REPO_ROOT")" \
+    || { echo "no client/package-lock.json under $REPO_ROOT" >&2; exit 2; }
 
 python_current() { autofix_python_usable "$VENV_DIR/bin/python"; }
 node_current() { autofix_node_modules_usable "$NODE_ROOT/node_modules"; }
@@ -115,15 +127,19 @@ prune_stale() {
         [ -e "$entry" ] || continue
         case "$entry" in
             "$VENV_DIR"|"$NODE_ROOT") continue ;;
-            *.tmp.*) ;;
+            # A build in flight, possibly another operator's: build_python and
+            # build_node clean up their own staging directory on every exit
+            # path, so anything left here belongs to a live run or to one that
+            # was hard-killed. Deleting it pulls the tree out from under an
+            # `npm ci`; leaving it costs one directory until the next --force.
+            *.tmp.*) continue ;;
         esac
         rm -rf "$entry"
         echo "pruned stale toolchain: $entry"
     done
 }
 
-mkdir -p "$CACHE_DIR"
-chmod 700 "$CACHE_DIR" 2>/dev/null || true
+autofix_ensure_cache_dir >/dev/null || { echo "cannot create $CACHE_DIR" >&2; exit 1; }
 
 if [ "$MODE" = check ]; then
     report

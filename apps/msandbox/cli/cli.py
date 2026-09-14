@@ -257,19 +257,25 @@ def _install_drift_report(repo: Path, bin_dir: Path | None = None) -> int:
     # workflow preflight run.
     login_ok, login_line = codex_auth.check()
     print(login_line)
-    # verify.sh only reads the runner-owned toolchain; when it is missing every
-    # bot PR says needs-work for "could not run", which no one notices because
-    # it is on all of them. Same `--check` audit.sh runs.
-    toolchain_ok, toolchain_lines = verify_toolchain_status(repo_root=repo)
-    for line in toolchain_lines:
-        print(line)
     # Only a host that actually runs the lanes is unhealthy without one. The
     # sandbox also hosts Claude Code and OpenCode sessions, and a developer who
     # has never run `codex login` should not be told to, for a tool they do not
     # use, by an otherwise clean report.
     lanes_installed = dispatcher_install_root().is_dir()
     login_blocks = lanes_installed and not login_ok
-    toolchain_blocks = lanes_installed and not toolchain_ok
+    # verify.sh only reads the runner-owned toolchain; when it is missing every
+    # bot PR says needs-work for "could not run", which no one notices because
+    # it is on all of them. Same `--check` audit.sh runs — and, by the same
+    # rule as the login above, only reported on a host that runs the lanes:
+    # its MISSING lines are what the post-merge hook greps for, and on a
+    # developer's machine they would print a stale-automation banner after
+    # every `git pull` for a cache nothing there reads.
+    toolchain_blocks = False
+    if lanes_installed:
+        toolchain_ok, toolchain_lines = verify_toolchain_status(repo_root=repo)
+        for line in toolchain_lines:
+            print(line)
+        toolchain_blocks = not toolchain_ok
     return (
         1
         if pre_move_launcher or stale or installed != expected or login_blocks or toolchain_blocks

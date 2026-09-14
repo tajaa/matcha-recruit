@@ -448,6 +448,27 @@ autopr_record_outcome() {
     printf '%s\t%s\t%s\n' "$count" "$reason" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
 }
 
+# autopr_mark_attempt TASK_ID
+# Start select.sh's cooldown WITHOUT recording a strike, for a pass that
+# failed for a lane-wide reason. `auth` is held off by the dispatcher's login
+# guard and `usage_limit` by codex-backoff.sh, but `infrastructure` (a docker
+# daemon that is down, a full disk) has no lane-wide hold at all: with no
+# marker written, select.sh's cooldown gate sees nothing and re-selects the
+# same card on the very next pass, forever. An empty marker reads as a
+# pre-ledger marker — it cools the card down and can never park it — and an
+# existing ledger is only re-stamped, so a real strike count survives.
+autopr_mark_attempt() {
+    local task_id="${1:-}" marker
+    [ -n "$task_id" ] || return 0
+    marker="$(autopr_attempt_ledger_path "$task_id")" || return 0
+    mkdir -p "$(dirname "$marker")" || return 1
+    if [ -f "$marker" ]; then
+        touch "$marker"
+    else
+        : > "$marker"
+    fi
+}
+
 # autopr_attempt_ledger_path TASK_ID_OR_ID8
 # The one place that knows where the failure ledger lives and how a task id
 # maps to its file name. Readers that derive either themselves drift from the

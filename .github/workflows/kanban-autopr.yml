@@ -141,13 +141,25 @@ jobs:
         # The LaunchAgents run a COPY of harness/ under ~/.local/share that
         # never auto-updated: three times in the week of 2026-09-08 a merged
         # fix (a dead-login guard among them) sat uninstalled for days. This
-        # runner is that same Mac and user, the step above just made this
-        # tree exactly origin/main, and a bot patch can never touch apps/ or
-        # .github/ — so syncing the copy from here installs only reviewed
-        # code. Runtime files only; plists/launchctl stay with the full
-        # installer. Best-effort: a failed sync must not stop the lane.
+        # runner is that same Mac and user, so syncing the copy from here
+        # installs only reviewed code. Runtime files only; plists/launchctl
+        # stay with the full installer. Best-effort: a failed sync must not
+        # stop the lane.
         continue-on-error: true
-        run: ./apps/msandbox/harness/install-launch-agent.sh --runtime-if-stale
+        run: |
+          # From a `git archive main` extract, never from the working tree.
+          # This is the one step in this job that installs code onto the
+          # host, and it runs on every pass — before, and outside of,
+          # `Snapshot trusted AutoPR control plane`, which every other
+          # harness call here goes through but which only exists once a card
+          # has been selected. The reset step above is not a substitute: on
+          # the branch where the checkout is not on main it force-updates the
+          # main REF and leaves the worktree where it found it.
+          staging="$RUNNER_TEMP/autopr-runtime-main"
+          rm -rf "$staging"
+          mkdir -p "$staging"
+          git archive main apps/msandbox/harness apps/msandbox/cli | tar -x -C "$staging"
+          "$staging/apps/msandbox/harness/install-launch-agent.sh" --runtime-if-stale
 
       - name: Configure GitHub CLI
         env:
@@ -609,6 +621,12 @@ jobs:
               "$AUTOPR_CONTROL_ROOT/harness/lib.sh" "$@" \
               || printf 'warning: could not record the run outcome for %s\n' "$1" >&2
           }
+          # Cooldown only, no strike. Same best-effort contract.
+          mark_attempt() {
+            bash -c 'source "$1"; shift; autopr_mark_attempt "$@"' _ \
+              "$AUTOPR_CONTROL_ROOT/harness/lib.sh" "$@" \
+              || printf 'warning: could not start the cooldown for %s\n' "$1" >&2
+          }
           task_id="$(jq -r '.task_id' "$RUNNER_TEMP/card.json")"
           # The checkpoint is the authority on "this run hit its time budget",
           # and BOTH consumers have to read it. A timeout arrives here as
@@ -657,7 +675,13 @@ jobs:
           if [ -n "$run_reason" ] && [ "$lane_fault" != true ]; then
             record_outcome "$task_id" failure "$run_reason"
           elif [ "$lane_fault" = true ]; then
-            echo "No ledger strike: the pass failed for a lane-wide reason ($run_reason), not the card's." >> "$GITHUB_STEP_SUMMARY"
+            # No strike — but the card still has to cool down. Without a
+            # marker select.sh's cooldown gate has nothing to read, and a
+            # standing fault (a docker daemon that is down, a full disk;
+            # `infrastructure` has no lane-wide hold the way `auth` and
+            # `usage_limit` do) re-selects this same card every pass.
+            mark_attempt "$task_id"
+            echo "No ledger strike: the pass failed for a lane-wide reason ($run_reason), not the card's. The card is cooling down, not parked." >> "$GITHUB_STEP_SUMMARY"
           elif [ "$JOB_STATUS" = cancelled ]; then
             # An operator cancel is neither a success nor a strike; the
             # cooldown marker stays as it was.

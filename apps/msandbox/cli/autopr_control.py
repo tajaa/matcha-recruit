@@ -366,6 +366,47 @@ def command(argv, *, env=None, timeout=60):
 DEADLINE_EXIT = 143
 
 
+def terminate_session(proc: subprocess.Popen) -> None:
+    """Best-effort kill of the whole process group. Never raises.
+
+    Both callers below are on paths whose exit code is load-bearing: the
+    deadline path must return DEADLINE_EXIT and the pause path PAUSED_EXIT.
+    An exception here (the process exiting between poll() and killpg, or a
+    wait() that outlasts its timeout on a process wedged in uninterruptible
+    I/O) would instead fall into supervise()'s `except BaseException`, mark
+    the run `blocked` and exit non-zero — and checkpoint.sh would then read
+    a budget stop as a crash and strike the card's ledger for it.
+    """
+    for sig, grace in ((signal.SIGTERM, 15), (signal.SIGKILL, 5)):
+        if proc.poll() is not None:
+            return
+        try:
+            os.killpg(proc.pid, sig)
+        except OSError:
+            return
+        try:
+            proc.wait(timeout=grace)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def stop_sandbox_container() -> None:
+    """Stop this lane's container. Best-effort: never raises.
+
+    The model runs inside Docker, so terminating the host `docker exec`
+    client alone leaves it writing to the bind-mounted clone. Failing to
+    stop it is worth a line on stderr, never a non-zero supervisor exit.
+    """
+    msandbox_bin = os.environ.get("AUTOPR_MSANDBOX_BIN")
+    if not msandbox_bin:
+        return
+    try:
+        command([msandbox_bin, "stop"], env=os.environ.copy(), timeout=60)
+    except Exception as exc:  # noqa: BLE001 - diagnostic only
+        print(f"\nAutoPR could not stop the sandbox container: {exc}", flush=True)
+
+
 def supervisor(
     card_path: Path,
     workspace: Path,
@@ -442,15 +483,15 @@ def supervisor(
                     and done is None
                     and time.monotonic() >= deadline_at
                 ):
-                    # The whole session: the Docker exec client and anything
-                    # it spawned. The container itself is stopped by the
-                    # caller's cleanup, exactly as after a step timeout.
-                    os.killpg(proc.pid, signal.SIGTERM)
-                    try:
-                        proc.wait(timeout=15)
-                    except subprocess.TimeoutExpired:
-                        os.killpg(proc.pid, signal.SIGKILL)
-                        proc.wait(timeout=5)
+                    # Stop the container BEFORE the host exec client, for
+                    # the same reason the pause branch below does: the model
+                    # lives in Docker, and killing only this side of the exec
+                    # leaves it editing the clone and spending quota until
+                    # the workflow's Checkpoint step gets around to stopping
+                    # it — inside the very window investigate.sh's EXIT trap
+                    # uses to halt in-flight snapshots.
+                    stop_sandbox_container()
+                    terminate_session(proc)
                     with locked():
                         run = load(run.id)
                         if run.status != "pausing":
@@ -483,9 +524,7 @@ def supervisor(
                         env=os.environ.copy(),
                         timeout=60,
                     )
-                    if proc.poll() is None:
-                        os.killpg(proc.pid, signal.SIGTERM)
-                    proc.wait(timeout=15)
+                    terminate_session(proc)
                     destination = run_dir(run.id) / "workspace"
                     transfer_checkout(workspace, destination)
                     with locked():

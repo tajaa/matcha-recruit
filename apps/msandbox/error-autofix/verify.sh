@@ -14,8 +14,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 # shellcheck source=toolchain.sh
 . "$SCRIPT_DIR/toolchain.sh"
-CACHE_DIR="$(autofix_toolchain_cache_dir)"
-mkdir -p "$CACHE_DIR"
+# Owner-only, in one place: a lane can reach the cache root before the
+# provisioner ever has, and the default umask would leave it world-readable.
+autofix_ensure_cache_dir >/dev/null || true
 
 # `AUTOFIX_BASE_SHA` must be captured by the workflow BEFORE investigate.sh
 # runs (right after `git switch -C`), not re-derived here — by the time
@@ -147,11 +148,14 @@ CLIENT_TESTS=($(printf '%s\n' "${CLIENT_TESTS[@]+"${CLIENT_TESTS[@]}"}" | sort -
 # nothing. Missing or stale, verification reports UNAVAILABLE rather than
 # guessing, and audit.sh reports it as an operator action.
 DEV_VENV_PY="${AUTOFIX_DEV_VENV_PY:-}"
-CACHED_VENV="$(autofix_venv_dir "$REPO_ROOT")"
+# Empty when the tree carries no server manifests to key on: there is no
+# cached venv for such a tree, and a key guessed from an empty digest would
+# point at whatever OTHER manifest-less tree built one first.
+CACHED_VENV="$(autofix_venv_dir "$REPO_ROOT")" || CACHED_VENV=""
 VENV_PY=""
 BOOTSTRAP_OK=false
 
-for candidate_py in ${DEV_VENV_PY:+"$DEV_VENV_PY"} "$REPO_ROOT/server/venv/bin/python" "$CACHED_VENV/bin/python"; do
+for candidate_py in ${DEV_VENV_PY:+"$DEV_VENV_PY"} "$REPO_ROOT/server/venv/bin/python" ${CACHED_VENV:+"$CACHED_VENV/bin/python"}; do
     if autofix_python_usable "$candidate_py"; then
         VENV_PY="$candidate_py"
         BOOTSTRAP_OK=true
@@ -170,8 +174,8 @@ if [ "$PYTHON_UNAVAILABLE" = true ] && [ "$CLIENT_CHANGED" != true ]; then
 
 **Checks did not run** — no usable Python interpreter with pytest was found
 (looked for \`server/venv\` in the tree under verification and the cached
-toolchain at \`$CACHED_VENV\`). This PR has not been verified. Review the diff
-manually before merging.
+toolchain at \`${CACHED_VENV:-<no server/requirements.txt in this tree>}\`).
+This PR has not been verified. Review the diff manually before merging.
 
 To provision the cached toolchain once on the runner Mac:
 \`\`\`
@@ -229,9 +233,16 @@ compileall_check() {
 BASE_TREE="$(mktemp -d "${RUNNER_TEMP:-/tmp}/autofix-baseline-XXXXXX")"
 git -C "$REPO_ROOT" worktree prune >/dev/null 2>&1 || true
 git -C "$REPO_ROOT" worktree add --detach "$BASE_TREE" "$BASE_SHA" >/dev/null 2>&1
+# Set only when this run created the branch tree's node_modules symlink.
+REPO_NODE_MODULES_LINK=""
 cleanup() {
     git -C "$REPO_ROOT" worktree remove --force "$BASE_TREE" >/dev/null 2>&1 || true
     git -C "$REPO_ROOT" worktree prune >/dev/null 2>&1 || true
+    # Only if it is still OUR link: a concurrent lane may have re-pointed it.
+    if [ -n "$REPO_NODE_MODULES_LINK" ] && [ -L "$REPO_NODE_MODULES_LINK" ] \
+        && [ "$(readlink "$REPO_NODE_MODULES_LINK")" = "$CLIENT_NODE_MODULES" ]; then
+        rm -f "$REPO_NODE_MODULES_LINK"
+    fi
 }
 trap cleanup EXIT
 
@@ -246,14 +257,22 @@ trap cleanup EXIT
 # never replaced).
 CLIENT_DEPS_READY=false
 CLIENT_NODE_MODULES=""
-CACHED_NODE_MODULES="$(autofix_node_root "$REPO_ROOT")/node_modules"
+CACHED_NODE_MODULES=""
+cached_client_root="$(autofix_node_root "$REPO_ROOT")" \
+    && CACHED_NODE_MODULES="$cached_client_root/node_modules"
 if [ ! -L "$REPO_ROOT/client/node_modules" ] \
     && autofix_node_modules_usable "$REPO_ROOT/client/node_modules"; then
     CLIENT_NODE_MODULES="$REPO_ROOT/client/node_modules"
-elif autofix_node_modules_usable "$CACHED_NODE_MODULES"; then
+elif [ -n "$CACHED_NODE_MODULES" ] && autofix_node_modules_usable "$CACHED_NODE_MODULES"; then
     CLIENT_NODE_MODULES="$CACHED_NODE_MODULES"
     if [ -L "$REPO_ROOT/client/node_modules" ] || [ ! -e "$REPO_ROOT/client/node_modules" ]; then
         ln -sfn "$CLIENT_NODE_MODULES" "$REPO_ROOT/client/node_modules"
+        # Removed again by cleanup(): this is the persistent runner checkout,
+        # and a link left pointing into the cache dangles the moment
+        # provision-verify-toolchain.sh prunes that key — after which the
+        # `! -L` test above permanently excludes a real node_modules someone
+        # later installs there.
+        REPO_NODE_MODULES_LINK="$REPO_ROOT/client/node_modules"
     fi
 fi
 if [ -n "$CLIENT_NODE_MODULES" ] && [ -d "$BASE_TREE/client" ]; then

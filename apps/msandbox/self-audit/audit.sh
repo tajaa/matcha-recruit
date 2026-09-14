@@ -43,7 +43,7 @@ check_core_shell_syntax() {
         "$REPO_ROOT/apps/msandbox/harness" \
         "$REPO_ROOT/apps/msandbox/error-autofix" \
         "$REPO_ROOT/apps/msandbox/scope" \
-        -type f -name '*.sh' -print | sort)
+        -type f \( -name '*.sh' -o -path '*/harness/hooks/*' \) -print | sort)
     bash -n "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh"
     python3 -m compileall -q "$REPO_ROOT/apps/msandbox/cli"
 }
@@ -188,7 +188,15 @@ check_built_toolchain() {
 # the outage becomes an operator action instead.
 check_verify_toolchain() {
     local provisioner="$REPO_ROOT/apps/msandbox/harness/provision-verify-toolchain.sh"
-    [ -x "$provisioner" ] || return 77
+    # Not 77. A skip here would make this check disappear exactly when the
+    # capsule is broken — the same "invisible because it is on everything"
+    # failure it was added to catch. The provisioner ships in this repo, so
+    # its absence is an operator finding (78), never a missing precondition.
+    if [ ! -x "$provisioner" ]; then
+        echo "verification toolchain: unmeasurable ($provisioner is missing or not executable)"
+        echo "Operator action: restore apps/msandbox/harness/provision-verify-toolchain.sh (+x) in this checkout."
+        return 78
+    fi
     "$provisioner" --check --repo "$REPO_ROOT" && return 0
     echo "Operator action: run ./apps/msandbox/harness/provision-verify-toolchain.sh (or msandbox install --verify-toolchain). Until then no bot PR is verified and needs-work means 'could not run', not 'failed'."
     return 1

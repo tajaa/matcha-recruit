@@ -211,6 +211,13 @@ workflow_pass_due() {
 scheduler_idle_without_fetch() {
     [ -s "$SNAPSHOT_CACHE_FILE" ] || return 1
     [ -s "$STATE_DIR/status.json" ] || return 1
+    # A run that was still in flight at the last fetch is about to finish, and
+    # notify_run_outcomes — the operator's "run finished" banner — only runs
+    # after a fetch. Skipping the fetch here would hold that banner for the
+    # rest of the eligibility window. It costs nothing: before this
+    # short-circuit existed these ticks fetched anyway and ended at
+    # `skip active-autopr-workflow`.
+    ! jq -e 'any(.[]; .status != "completed")' "$SNAPSHOT_CACHE_FILE" >/dev/null 2>&1 || return 1
     local now eligible cached
     now="$(date +%s)"
     eligible="$(jq -r '.eligible_at // 0' "$STATE_DIR/status.json" 2>/dev/null || true)"

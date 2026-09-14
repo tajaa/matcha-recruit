@@ -21,7 +21,8 @@ stale="$(printf '%s\n' "$report" | grep -E 'STALE|MISSING|PRE-MOVE' || true)"
     echo
     echo "msandbox: installed automation lags this checkout —"
     printf '  %s\n' "$stale"
-    echo "  (the kanban lane refreshes the dispatcher on its next pass; run \`msandbox install\` for the release)"
+    echo "  (the kanban lane refreshes the dispatcher on its next pass; \`msandbox install\` cuts a new release,"
+    echo "   \`msandbox install --verify-toolchain\` rebuilds the verification cache; \`msandbox doctor\` shows the rest)"
     echo
 } >&2
 exit 0
