@@ -75,6 +75,16 @@ and the `mw_tasks.autopr_*` columns they read.
   --verify-toolchain`); `audit.sh` and `msandbox doctor` both run its
   `--check`. `tests/test_error_autofix.sh` fails on the string `Documents` in
   any non-comment line of verify.sh.
+- **A card is struck only for a `model` fault.** `run-codex-sandboxed.sh`
+  classifies a failed pass into `$AUTOPR_FAULT_CLASS_FILE`
+  (`model|auth|usage_limit|infrastructure`); the workflow's Cleanup books
+  `autopr_record_outcome … failure` only for `model` and journals the rest
+  as lane faults. New failure modes that are not the card's doing (a new
+  daemon error string, a new credential shape) belong in that classifier,
+  never in Cleanup. The model's time budget is the supervisor's
+  `--deadline` (exit 143), and `investigate.sh` passes any status ≥ 128
+  through unchanged so `checkpoint.sh` can read it as a kill; `die` flattens
+  to 1 and would turn every budget stop into a strike.
 - **Every publisher that runs `git reset --hard` calls
   `autopr_require_writable_root` immediately after assigning `REPO_ROOT`**
   (`harness/publish.sh`, `harness/investigate.sh`, `error-autofix/publish.sh`,

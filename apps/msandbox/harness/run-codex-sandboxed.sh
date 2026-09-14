@@ -84,8 +84,25 @@ MAX_DECISION_BYTES="${AUTOPR_SANDBOX_MAX_DECISION_BYTES:-262144}"
 PATH_DENY_RE="${AUTOPR_SANDBOX_PATH_DENY_RE:-^(\.github/|apps/|deploy/|docker/|scripts/|\.claude/|\.codex/|\.githooks/|secrets/|opencode\.jsonc$|(.*/)?docker-compose[^/]*\.ya?ml$|(.*/)?Dockerfile[^/]*$|(.*/)?\.env[^/]*$)}"
 CODEX_BACKOFF="${AUTOPR_CODEX_BACKOFF:-$SCRIPT_DIR/codex-backoff.sh}"
 HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/cli/autopr_control.py"
+# Seconds the model itself may run (0 = only the workflow step timeout).
+# Enforced by the supervisor so the harness keeps a grace window after the
+# model stops; see autopr_control.py's DEADLINE_EXIT.
+MODEL_BUDGET_SECONDS="${AUTOPR_MODEL_BUDGET_SECONDS:-0}"
+[[ "$MODEL_BUDGET_SECONDS" =~ ^[0-9]+$ ]] || MODEL_BUDGET_SECONDS=0
+
+# Why a failed run failed, for the caller's failure ledger. A card is struck
+# only for a `model` fault; `auth` (dead host login), `usage_limit` (shared
+# quota) and `infrastructure` (the sandbox never ran) are lane-wide and say
+# nothing about the card. Written only on a failure path; the caller removes
+# a stale one before this script starts.
+FAULT_CLASS_FILE="${AUTOPR_FAULT_CLASS_FILE:-}"
+CURRENT_FAULT_CLASS=infrastructure
+note_fault() {
+    [ -z "$FAULT_CLASS_FILE" ] || printf '%s\n' "$1" > "$FAULT_CLASS_FILE" 2>/dev/null || true
+}
 
 die() {
+    note_fault "$CURRENT_FAULT_CLASS"
     printf 'kanban-autopr sandbox: %s\n' "$1" >&2
     exit 1
 }
@@ -121,6 +138,7 @@ else
     # behind a message telling the operator to run `codex login`, which cannot
     # clear it. Warn and let the run proceed to find out for real.
     if [ "$auth_rc" -eq 4 ]; then
+        CURRENT_FAULT_CLASS=auth
         die "$auth_message"
     elif [ "$auth_rc" -ne 0 ]; then
         printf 'kanban-autopr sandbox: %s; proceeding without the preflight\n' "$auth_message" >&2
@@ -303,7 +321,8 @@ run_codex_cli() {
         if [ -n "${AUTOPR_HANDOFF_CARD:-}" ]; then
             supervised=(python3 "$HANDOFF_CONTROL" supervise
                 --card "$AUTOPR_HANDOFF_CARD" --workspace "$SANDBOX_WORKSPACE"
-                --repo "$REPO_ROOT" --project "$SANDBOX_PROJECT" --)
+                --repo "$REPO_ROOT" --project "$SANDBOX_PROJECT"
+                --deadline "$MODEL_BUDGET_SECONDS" --)
         fi
         env -u GH_TOKEN -u GITHUB_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
             -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
@@ -330,13 +349,30 @@ if [ "$codex_rc" -eq 75 ]; then
     exit 75
 fi
 if [ "$codex_rc" -ne 0 ]; then
-    if [ -x "$CODEX_BACKOFF" ]; then
-        "$CODEX_BACKOFF" record "$CODEX_TRANSCRIPT" || true
+    # Classify from the transcript, most specific first. `record` writes the
+    # lane-wide backoff marker and exits 0 only for a quota message; a dead
+    # login is what the preflight exists to catch, but a token can expire
+    # mid-run. Daemon-level Docker errors mean the sandbox never ran. Only
+    # what is left is the model's own failure — the one class that counts
+    # against the card. Patterns stay narrow on purpose: this transcript
+    # carries the model's tool output, and a model READING a file that
+    # mentions "compose" or "401" must not reclassify its own failure.
+    fault=model
+    if [ -x "$CODEX_BACKOFF" ] && "$CODEX_BACKOFF" record "$CODEX_TRANSCRIPT"; then
+        fault=usage_limit
+    elif grep -qiE '401 Unauthorized|authentication token is expired|try signing in again' "$CODEX_TRANSCRIPT" 2>/dev/null; then
+        fault=auth
+    elif grep -qE 'Cannot connect to the Docker daemon|Error response from daemon|no space left on device|error during connect' "$CODEX_TRANSCRIPT" 2>/dev/null; then
+        fault=infrastructure
     fi
+    note_fault "$fault"
     # Preserve Codex's own status: the callers log and act on it.
-    printf 'kanban-autopr sandbox: Codex exited %s inside msandbox\n' "$codex_rc" >&2
+    printf 'kanban-autopr sandbox: Codex exited %s inside msandbox (%s)\n' "$codex_rc" "$fault" >&2
     exit "$codex_rc"
 fi
+# From here on a refusal is the model's doing (oversized patch, protected
+# path, no report): a strike is deserved.
+CURRENT_FAULT_CLASS=model
 # A completed Codex call proves the quota is back. Nothing else clears the
 # marker, so without this one usage-limit hit holds every lane until resume_at
 # (up to 24 h) even after the account has recovered.

@@ -28,6 +28,12 @@ WORK_DIR="$(mktemp -d)"
 # model failure must fail loudly and stay selectable instead.
 INVESTIGATION_EXIT_FILE="${AUTOPR_INVESTIGATION_EXIT_FILE:-${RUNNER_TEMP:+$RUNNER_TEMP/investigation-exit-code}}"
 [ -z "$INVESTIGATION_EXIT_FILE" ] || rm -f "$INVESTIGATION_EXIT_FILE"
+# run-codex-sandboxed.sh names why a failed pass failed here
+# (model|auth|usage_limit|infrastructure); Cleanup strikes the card only for
+# `model`. Stale from a previous run it would misclassify this one.
+FAULT_CLASS_FILE="${AUTOPR_FAULT_CLASS_FILE:-${RUNNER_TEMP:+$RUNNER_TEMP/investigation-fault-class}}"
+[ -z "$FAULT_CLASS_FILE" ] || rm -f "$FAULT_CLASS_FILE"
+export AUTOPR_FAULT_CLASS_FILE="$FAULT_CLASS_FILE"
 # checkpoint.sh refuses to harvest a sandbox clone older than this: on a rework
 # the leftover workspace still carries the same task id, so only its age
 # distinguishes the previous round's work from this run's. The workflow writes
@@ -538,6 +544,14 @@ codex_pass() {
     if [ "$codex_rc" -ne 0 ]; then
         [ "$live_log_ready" != true ] || printf '\n[FAILED] Codex exited %s at %s\n' \
             "$codex_rc" "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
+        # >= 128 is a kill: the supervisor's model deadline (143) or a signal.
+        # Keep it — checkpoint.sh reads this script's status from the exit
+        # file to tell a runtime-limited pause from a crash, and `die` would
+        # flatten it to 1 and turn every budget stop into a ledger strike.
+        if [ "$codex_rc" -ge 128 ]; then
+            printf 'kanban-autopr: Codex investigation was terminated (exit %s)\n' "$codex_rc" >&2
+            exit "$codex_rc"
+        fi
         die "Codex investigation exited $codex_rc"
     fi
     [ "$live_log_ready" != true ] || printf '\n[COMPLETE] Codex finished at %s\n' \

@@ -116,6 +116,9 @@ reason_label() {
     case "$1" in
         "") printf 'completed' ;;
         investigate) printf 'the model pass failed or timed out before producing a valid report' ;;
+        auth) printf 'the host Codex login was dead, so the model never ran; nothing about this card failed (fix: `codex login` on the runner Mac, then Run)' ;;
+        usage_limit) printf 'the shared ChatGPT quota was exhausted, so the model never finished; nothing about this card failed and the lanes back off until it returns' ;;
+        infrastructure) printf 'the sandbox could not be started (Docker, disk, or network), so the model never ran; nothing about this card failed' ;;
         verify) printf 'the branch failed verification against the baseline' ;;
         publish|publish_artifact) printf 'publishing the result failed' ;;
         setup) printf 'the run died before the investigation started (claim, checkout, policy, or coverage step)' ;;
@@ -134,6 +137,9 @@ reason_label() {
 stopped_header_label() {
     case "$1" in
         investigate) printf 'MODEL PASS FAILED' ;;
+        auth) printf 'CODEX LOGIN DEAD' ;;
+        usage_limit) printf 'CODEX QUOTA' ;;
+        infrastructure) printf 'SANDBOX FAULT' ;;
         verify) printf 'VERIFY FAILED' ;;
         publish|publish_artifact) printf 'PUBLISH FAILED' ;;
         setup) printf 'DIED IN SETUP' ;;

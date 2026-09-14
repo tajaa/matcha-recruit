@@ -360,8 +360,20 @@ def command(argv, *, env=None, timeout=60):
     return result.stdout
 
 
+# What a SIGTERM'd process reports. It is >= 128, which checkpoint.sh reads as
+# "the investigation was killed" — the one condition that lets a stall pause
+# the card behind an approval instead of striking its failure ledger.
+DEADLINE_EXIT = 143
+
+
 def supervisor(
-    card_path: Path, workspace: Path, repo: Path, project: str, argv: list[str]
+    card_path: Path,
+    workspace: Path,
+    repo: Path,
+    project: str,
+    argv: list[str],
+    *,
+    deadline: int = 0,
 ) -> int:
     card = read_json(card_path)
     task_id, project_id = (
@@ -402,6 +414,12 @@ def supervisor(
     )
     log = run_dir(run.id) / "activity.log"
     proc = None
+    # The model's own time budget, enforced here rather than by the workflow
+    # step timeout so the harness keeps a grace window after the model stops:
+    # a step timeout that lands during post-model validation used to discard
+    # a finished decision (run 34728683748 wrote decision.json at 00:53:33Z
+    # and was killed at 00:54:05Z, then re-ran the model from scratch).
+    deadline_at = time.monotonic() + deadline if deadline > 0 else None
     try:
         with log.open("wb") as stream, log.open("rb") as reader:
             os.chmod(log, 0o600)
@@ -418,6 +436,33 @@ def supervisor(
                 run = load(run.id)
                 stopping = run.status == "pausing"
                 done = proc.poll()
+                if (
+                    deadline_at is not None
+                    and not stopping
+                    and done is None
+                    and time.monotonic() >= deadline_at
+                ):
+                    # The whole session: the Docker exec client and anything
+                    # it spawned. The container itself is stopped by the
+                    # caller's cleanup, exactly as after a step timeout.
+                    os.killpg(proc.pid, signal.SIGTERM)
+                    try:
+                        proc.wait(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                        proc.wait(timeout=5)
+                    with locked():
+                        run = load(run.id)
+                        if run.status != "pausing":
+                            run.status = "failed"
+                            run.error = f"Model deadline reached after {deadline} s"
+                            save(run)
+                    sys.stdout.buffer.write(reader.read())
+                    sys.stdout.buffer.write(
+                        f"\nAutoPR model deadline reached after {deadline} s; terminated.\n".encode()
+                    )
+                    sys.stdout.buffer.flush()
+                    return DEADLINE_EXIT
                 if not stopping and done is not None:
                     with locked():
                         run = load(run.id)
@@ -904,6 +949,12 @@ def main() -> int:
     p.add_argument("--workspace", type=Path, required=True)
     p.add_argument("--repo", type=Path, required=True)
     p.add_argument("--project", required=True)
+    p.add_argument(
+        "--deadline",
+        type=int,
+        default=0,
+        help="seconds the model may run before its session is terminated (0 = no limit)",
+    )
     p.add_argument("argv", nargs=argparse.REMAINDER)
     p = sub.add_parser("held")
     p.add_argument("task")
@@ -921,7 +972,12 @@ def main() -> int:
     args = parser.parse_args()
     if args.action == "supervise":
         return supervisor(
-            args.card, args.workspace, args.repo, args.project, args.argv[1:]
+            args.card,
+            args.workspace,
+            args.repo,
+            args.project,
+            args.argv[1:],
+            deadline=max(0, args.deadline),
         )
     if args.action == "held":
         run = held_task(args.task)

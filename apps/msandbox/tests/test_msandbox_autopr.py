@@ -249,6 +249,64 @@ class AutoPRTests(unittest.TestCase):
         self.assertFalse(workspace.exists())
         self.assertEqual((self.repo / "code.py").read_text(), "original\n")
 
+    def test_supervisor_deadline_terminates_the_model_as_a_killed_run(self):
+        # The model's budget is enforced here so the workflow step can keep a
+        # grace window after the model stops. The exit is >= 128, which
+        # checkpoint.sh reads as "killed" — a pause, not a strike.
+        workspace = self.path / "runtime/workspace"
+        workspace.parent.mkdir()
+        subprocess.run(
+            ["git", "clone", "--quiet", str(self.repo), str(workspace)], check=True
+        )
+        card = self.path / "card.json"
+        card.write_text(
+            json.dumps(
+                {
+                    "task_id": "11111111-1111-4111-8111-111111111111",
+                    "project_id": "22222222-2222-4222-8222-222222222222",
+                    "title": "Slow task",
+                }
+            )
+        )
+        stop = self.path / "stop"
+        stop.write_text("#!/bin/sh\nexit 0\n")
+        stop.chmod(0o755)
+        env = {**os.environ, "AUTOPR_MSANDBOX_BIN": str(stop)}
+        started = time.monotonic()
+        with (self.path / "output").open("wb") as output:
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    control.__file__,
+                    "supervise",
+                    "--card",
+                    str(card),
+                    "--workspace",
+                    str(workspace),
+                    "--repo",
+                    str(self.repo),
+                    "--project",
+                    "test-autopr",
+                    "--deadline",
+                    "1",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(60)",
+                ],
+                cwd=workspace,
+                stdout=output,
+                stderr=output,
+                env=env,
+            )
+            self.addCleanup(lambda: process.poll() is None and process.kill())
+            self.assertEqual(process.wait(timeout=30), control.DEADLINE_EXIT)
+        self.assertLess(time.monotonic() - started, 25)
+        run = control.list_runs()[0]
+        self.assertEqual(run.status, "failed")
+        self.assertIn("deadline", run.error.lower())
+        self.assertIn("deadline reached", (self.path / "output").read_text())
+
     def test_nested_takeovers_archive_superseded_checkouts_on_success(self):
         prior = self.run_record(identifier="b" * 32)
         with mock.patch.object(control, "stop_manual"):

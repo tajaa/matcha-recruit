@@ -12,6 +12,12 @@ CARD_FILE="${1:?usage: runtime-policy.sh CARD OUTPUT}"
 OUTPUT_FILE="${2:?missing output path}"
 NORMAL_MINUTES="${AUTOPR_NORMAL_RUNTIME_MINUTES:-20}"
 EXTENDED_MINUTES="${AUTOPR_EXTENDED_RUNTIME_MINUTES:-10}"
+# The workflow step outlives the model by this much: `minutes` is the
+# model's own budget (the supervisor terminates it there), `step_minutes` is
+# the Investigate step's timeout, so image start-up before the model and
+# validation after it no longer eat into — or get cut off by — the budget.
+STEP_GRACE_MINUTES="${AUTOPR_STEP_GRACE_MINUTES:-3}"
+[[ "$STEP_GRACE_MINUTES" =~ ^[0-9]+$ ]] || die "AUTOPR_STEP_GRACE_MINUTES must be an integer"
 PROJECT_ID="$(jq -r '.project_id // empty' "$CARD_FILE")"
 TASK_ID="$(jq -r '.task_id // empty' "$CARD_FILE")"
 WORK_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/autopr-runtime-policy-XXXXXX")"
@@ -89,10 +95,11 @@ if [ -n "${stall_record:-}" ]; then
 fi
 
 jq --argjson minutes "$minutes" --argjson extended "$extended" \
+    --argjson step_minutes "$((minutes + STEP_GRACE_MINUTES))" \
     --arg checkpoint "$checkpoint" --arg model "$model" --arg effort "$effort" \
     --arg runtime_source "$runtime_source" --arg stall_reason "$stall_reason" \
     --argjson stall_attempt "$stall_attempt" \
-    '. + {minutes:$minutes,extended:$extended,
+    '. + {minutes:$minutes,step_minutes:$step_minutes,extended:$extended,
           checkpoint:(if $checkpoint == "" then null else $checkpoint end),
           model:(if $model == "" then null else $model end),
           effort:(if $effort == "" then null else $effort end),

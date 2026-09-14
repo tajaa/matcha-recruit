@@ -294,6 +294,27 @@ and ahead of plain Todo so the six-row cap cannot hide them (`NO-SPEC` is the bo
 can't-scope ledger); the selector never runs one. Tunables:
 `AUTOPR_MAX_SAME_REASON_FAILURES`, `AUTOPR_ATTEMPT_COOLDOWN_MINUTES`.
 
+**Fault classes.** Not every failed model pass is the card's fault. `run-codex-sandboxed.sh`
+names why it failed in `$RUNNER_TEMP/investigation-fault-class`: `usage_limit` (the
+transcript names an exhausted quota — the same match that writes the lane-wide backoff),
+`auth` (`401 Unauthorized` / an expired token, a login that died mid-run past the
+preflight), `infrastructure` (daemon-level Docker errors, a bridge failure before the
+model ran), or `model` (everything else, including a bridge refusal of the model's own
+patch). Cleanup books a ledger strike only for `model`; the other three journal the run as
+a lane fault (`CODEX LOGIN DEAD`, `CODEX QUOTA`, `SANDBOX FAULT`) and leave the count
+alone. Before this, one evening of expired login struck every card it touched.
+
+**Model budget vs step budget.** `runtime-policy.sh` emits both `minutes` (the model's
+own budget, 20 or an approved 10) and `step_minutes` (`minutes + AUTOPR_STEP_GRACE_MINUTES`,
+default 3). The supervisor (`autopr_control.py supervise --deadline`) terminates the model's
+whole session at `minutes` and reports 143, which `investigate.sh` passes through and
+`checkpoint.sh` reads as "killed" — a pause, not a strike. The Investigate step's own
+timeout is `step_minutes`, so sandbox start-up before the model and validation after it no
+longer eat into the budget or cut a finished decision short (run 34728683748 wrote its
+decision at 00:53:33Z and was killed by the shared timeout at 00:54:05Z). A run the
+checkpoint classifies as runtime-limited ends the job green ("Park a runtime-limited
+investigation"); only a real failure hits "Fail incomplete investigation".
+
 ## Local tmux dashboard
 
 The terminal `msandbox` manager additionally has an **AutoPR** tab (key **7**,
@@ -1333,6 +1354,15 @@ batch A fixed, and the structural backlog (batch B) — lives in
   one "Run AutoPR now" press costs at most one forced run per request TTL even when
   the run dies before `select.sh`/`investigate.sh` can claim it.
 - **`codex-backoff.sh`** holds every lane after a Codex usage-limit exit.
+- **Lane faults never strike a card** (`auth`, `usage_limit`, `infrastructure` — see
+  "Fault classes" above), and the model's budget is enforced by the supervisor so a
+  finished decision is never discarded by the step timeout ("Model budget vs step
+  budget").
+- **The installed dispatcher tree follows `main`**: every kanban pass runs
+  `install-launch-agent.sh --runtime-if-stale` from its reset checkout (see
+  `apps/msandbox/CLAUDE.md`, "Installed copies").
+- **The verification toolchain is runner-owned** (`~/.cache/matcha-autofix`, built by
+  `provision-verify-toolchain.sh`); `msandbox doctor` and the self-audit report it missing.
 - **The prelude is cheap when nothing is eligible:** labels are created only when
   missing, the production SSH/ECR/bundle resolution runs only after a card is
   selected, and `collect-pr-context.sh`'s snapshot (`AUTOPR_BOT_PRS_FILE`) feeds the
