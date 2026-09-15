@@ -1624,6 +1624,30 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertEqual(status, 0, text)
         self.assertIn("verification toolchain python: MISSING", text)
 
+    def test_the_toolchain_check_is_bounded_so_a_hook_cannot_hang_a_merge(self) -> None:
+        # harness/hooks/post-merge runs `msandbox doctor` synchronously on
+        # every pull onto main, and that hook must never slow down or fail a
+        # merge. A wedged shasum (a stalled network mount) would otherwise
+        # hang `git pull` with no output and no way to tell why.
+        from apps.msandbox.cli.install import (
+            VERIFY_TOOLCHAIN_PROVISIONER,
+            verify_toolchain_status,
+        )
+
+        repo = self.root / "timeout-repo"
+        script = repo / VERIFY_TOOLCHAIN_PROVISIONER
+        script.parent.mkdir(parents=True)
+        script.write_text("#!/bin/bash\nexit 0\n")
+
+        with mock.patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="provision", timeout=30),
+        ) as run:
+            current, lines = verify_toolchain_status(repo_root=repo)
+        self.assertFalse(current)
+        self.assertTrue(any("timed out" in line for line in lines), lines)
+        self.assertEqual(run.call_args.kwargs.get("timeout"), 30)
+
     def test_verify_toolchain_status_shells_out_to_the_one_provisioner(self) -> None:
         from apps.msandbox.cli.install import (
             VERIFY_TOOLCHAIN_PROVISIONER,

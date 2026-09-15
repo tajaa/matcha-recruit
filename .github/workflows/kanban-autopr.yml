@@ -509,9 +509,13 @@ jobs:
         # full `tsc -p tsconfig.app.json` passes over the SPA plus vitest.
         timeout-minutes: 20
         run: |
+          rm -f "$AUTOFIX_VERIFY_STARTED_FILE"
           "$AUTOPR_CONTROL_ROOT/error-autofix/verify.sh" > "$RUNNER_TEMP/verification.md"
         env:
           AUTOFIX_BASE_SHA: ${{ steps.branch.outputs.sha }}
+          # Written by verify.sh as its first act. Cleanup reads its presence
+          # to tell a killed run from a harness that never started.
+          AUTOFIX_VERIFY_STARTED_FILE: ${{ runner.temp }}/verify-started
 
       - name: Record verification deferred for questions or no-safe-action
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true' && steps.triage.outputs.safe_changes != 'true' && steps.select.outputs.outcome != 'artifact'
@@ -594,6 +598,7 @@ jobs:
           INVESTIGATE_OUTCOME: ${{ steps.investigate.outcome }}
           INVESTIGATE_PAUSED: ${{ steps.investigate.outputs.paused }}
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+          VERIFY_STARTED_FILE: ${{ runner.temp }}/verify-started
           PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
           PUBLISH_ARTIFACT_OUTCOME: ${{ steps.publish_artifact.outcome }}
           PUBLISH_REFUSAL_REASON: ${{ steps.publish.outputs.refusal_reason }}
@@ -668,12 +673,19 @@ jobs:
             esac
           elif [ "$VERIFY_OUTCOME" = failure ]; then
             # verify.sh always exits 0 — a failing branch is reported IN its
-            # table, never as a status. So a failure here is the step being
-            # killed (its timeout) or refusing to run at all (a prod-shaped
-            # DATABASE_URL), both lane-wide conditions. Striking the card for
-            # a machine-speed timeout parked it after three passes for
-            # something that had nothing to do with it.
-            run_reason=verify
+            # table, never as a status. So a failure here is never the card's:
+            # striking it for a machine-speed timeout parked innocent cards
+            # after three passes. But "not the card's" must not collapse into
+            # "nothing is wrong": a verify.sh that cannot start at all (missing
+            # from the control-plane archive, not executable, a broken source)
+            # would otherwise re-burn a model pass on every card forever behind
+            # a journal line saying nothing failed. The started marker splits
+            # the two, and the journal says which.
+            if [ -s "$VERIFY_STARTED_FILE" ]; then
+              run_reason=verify_timeout
+            else
+              run_reason=verify_broken
+            fi
             lane_fault=true
           elif [ "$PUBLISH_OUTCOME" = failure ]; then
             run_reason=publish

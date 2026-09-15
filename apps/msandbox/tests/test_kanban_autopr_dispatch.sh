@@ -727,6 +727,21 @@ AUTOPR_TEST_KEEP_STATUS=1 AUTOPR_TEST_GH_CALLS="$TMP_DIR/inflight-gh.log" \
   AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher
 check "a run in flight at the last snapshot still fetches, so its banner is not held" \
   $(grep -q 'run list' "$TMP_DIR/inflight-gh.log" && echo 0 || echo 1)
+# NEXT_ELIGIBLE_AT is only computed on the full-pass path, so every early exit
+# used to rewrite status.json with eligible_at: 0 and disable the short-circuit
+# on the NEXT tick. A dispatch is always followed by a recent-dispatch-pending
+# tick, so the saving was reset right after every dispatch.
+jq -cn --argjson now "$idle_now" \
+  '{action:"skip",reason:"kanban-not-due",checked_at:$now,next_check_at:($now + 60),eligible_at:($now + 240)}' \
+  > "$TMP_DIR/state/status.json"
+: > "$TMP_DIR/state/last-dispatch"
+AUTOPR_TEST_KEEP_STATUS=1 AUTOPR_TEST_KEEP_LEASE=1 \
+  AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher
+check "an early-exit tick keeps the last known eligible_at instead of zeroing it" \
+  $(tail -n 1 "$TMP_DIR/log.jsonl" | grep -q 'recent-dispatch-pending' \
+    && jq -e --argjson now "$idle_now" '.eligible_at == $now + 240' "$TMP_DIR/state/status.json" >/dev/null \
+    && echo 0 || echo 1)
+rm -f "$TMP_DIR/state/last-dispatch"
 # The watcher lane never takes the shortcut: it has its own board probe.
 rm -rf "$TMP_DIR/state" "$TMP_DIR/watch-idle-gh.log"
 mkdir -p "$TMP_DIR/state"
@@ -797,6 +812,24 @@ check "--runtime-if-stale names the drifted and missing files and restores them"
     && grep -q 'codex_auth.py' <<< "$third_sync" \
     && cmp -s "$sync_root/lib.sh" "$REPO_ROOT/apps/msandbox/harness/lib.sh" \
     && [ -f "$sync_root/codex_auth.py" ] && echo 0 || echo 1)
+# `runtime_stale_names` stages a full install to derive the name list, and
+# the workflow step is `continue-on-error: true`. Under `set -e` a failed
+# staging install used to abort the script through the `| tr` pipeline before
+# printing anything, so the stale-dispatcher regression this sync exists to
+# catch would come back silently.
+broken_tree="$TMP_DIR/broken-harness"
+mkdir -p "$broken_tree/apps/msandbox/harness" "$broken_tree/apps/msandbox/cli"
+cp "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" "$broken_tree/apps/msandbox/harness/"
+broken_rc=0
+broken_out="$(AUTOPR_DISPATCH_INSTALL_ROOT="$sync_root" AUTOPR_LAUNCH_AGENTS_DIR="$sync_agents" \
+  AUTOPR_LAUNCHCTL_BIN=/usr/bin/false AUTOPR_USER_HOME="$TMP_DIR/sync-home" \
+  "$broken_tree/apps/msandbox/harness/install-launch-agent.sh" --runtime-if-stale 2>&1)" \
+  || broken_rc=$?
+check "a staging install that cannot complete is reported, not swallowed" \
+  $([ "$broken_rc" != 0 ] && grep -q 'dispatcher sync FAILED' <<< "$broken_out" \
+    && grep -q 'still running the OLD copy' <<< "$broken_out" \
+    && echo 0 || echo 1)
+
 # install(1) sets 755 on the scripts; a copy whose mode drifted is still
 # byte-identical, so a content-only comparison reports "current" while the
 # LaunchAgents keep an unexecutable dispatcher.

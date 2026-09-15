@@ -73,9 +73,22 @@ CODEX_AUTH_CACHE_SECONDS="${AUTOPR_CODEX_AUTH_CACHE_SECONDS:-240}"
 HOST_CODEX_AUTH_FILE="${AUTOPR_HOST_CODEX_AUTH_FILE:-$USER_HOME/.codex/auth.json}"
 
 write_status() {
-    local action="$1" reason="$2" now temporary
+    local action="$1" reason="$2" now temporary previous
     now="$(date +%s)"
     mkdir -p "$STATE_DIR"
+    # Preserve the last known eligibility. NEXT_ELIGIBLE_AT is only computed
+    # on the full-pass path, so every early exit (`skip local-lock`,
+    # `skip recent-dispatch-pending`, `error run-snapshot-failed`) used to
+    # overwrite it with 0 — which disables the no-fetch short-circuit on the
+    # NEXT tick. Every dispatch is immediately followed by a
+    # `recent-dispatch-pending` tick, so the saving was reset right after each
+    # dispatch and after each transient snapshot error: the two cases where it
+    # matters most.
+    if [ "$NEXT_ELIGIBLE_AT" -eq 0 ] 2>/dev/null; then
+        previous="$(jq -r '.eligible_at // 0' "$STATE_DIR/status.json" 2>/dev/null || echo 0)"
+        [[ "$previous" =~ ^[0-9]+$ ]] || previous=0
+        [ "$previous" -le "$now" ] || NEXT_ELIGIBLE_AT="$previous"
+    fi
     temporary="$(mktemp "$STATE_DIR/.status.XXXXXX")" || return 1
     jq -cn --arg action "$action" --arg reason "$reason" --arg task "$REQUESTED_TASK" \
         --argjson checked "$now" --argjson poll "$POLL_SECONDS" \

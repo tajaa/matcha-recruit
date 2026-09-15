@@ -101,6 +101,26 @@ note_fault() {
     [ -z "$FAULT_CLASS_FILE" ] || printf '%s\n' "$1" > "$FAULT_CLASS_FILE" 2>/dev/null || true
 }
 
+# Confirmations for the two lane classes a transcript match can only suggest.
+# `auth-check` exits 4 for a dead credential and 2 when the check itself could
+# not run; only 4 confirms. Anything else keeps the failure the model's.
+host_login_is_dead() {
+    local rc=0
+    [ -x "$CODEX_BACKOFF" ] || return 1
+    [ -r "$HOST_CODEX_AUTH_FILE" ] || return 1
+    "$CODEX_BACKOFF" auth-check "$HOST_CODEX_AUTH_FILE" >/dev/null 2>&1 || rc=$?
+    [ "$rc" -eq 4 ]
+}
+
+# The daemon the sandbox needs, probed now. In AUTOPR_SANDBOX_TEST_DIRECT
+# runs there is no container runtime by design, so nothing is confirmable and
+# the failure stays the model's.
+container_runtime_is_down() {
+    [ "${AUTOPR_SANDBOX_TEST_DIRECT:-0}" != 1 ] || return 1
+    command -v docker >/dev/null 2>&1 || return 0
+    ! docker info >/dev/null 2>&1
+}
+
 die() {
     note_fault "$CURRENT_FAULT_CLASS"
     printf 'kanban-autopr sandbox: %s\n' "$1" >&2
@@ -355,20 +375,22 @@ if [ "$codex_rc" -eq 75 ]; then
     exit 75
 fi
 if [ "$codex_rc" -ne 0 ]; then
-    # Classify from the transcript, most specific first. `record` writes the
-    # lane-wide backoff marker and exits 0 only for a quota message; a dead
-    # login is what the preflight exists to catch, but a token can expire
-    # mid-run. Daemon-level Docker errors mean the sandbox never ran. Only
-    # what is left is the model's own failure — the one class that counts
-    # against the card. Patterns stay narrow on purpose: this transcript
-    # carries the model's tool output, and a model READING a file that
-    # mentions "compose" or "401" must not reclassify its own failure.
+    # Classify, most specific first. The transcript is only a TRIGGER: it
+    # carries the model's own tool output (file reads, test output, grep
+    # results), so a card whose work touches auth code, an HTTP error map or
+    # a docker troubleshooting doc could name itself a lane fault, escape the
+    # strike ledger, and be re-selected forever. Every lane class therefore
+    # has to be confirmed against machine state the model does not control;
+    # what is left is the model's own failure, the one class that counts
+    # against the card.
     fault=model
     if [ -x "$CODEX_BACKOFF" ] && "$CODEX_BACKOFF" record "$CODEX_TRANSCRIPT"; then
         fault=usage_limit
-    elif grep -qiE '401 Unauthorized|authentication token is expired|try signing in again' "$CODEX_TRANSCRIPT" 2>/dev/null; then
+    elif grep -qiE '401 Unauthorized|authentication token is expired|try signing in again' "$CODEX_TRANSCRIPT" 2>/dev/null \
+        && host_login_is_dead; then
         fault=auth
-    elif grep -qE 'Cannot connect to the Docker daemon|Error response from daemon|no space left on device|error during connect' "$CODEX_TRANSCRIPT" 2>/dev/null; then
+    elif grep -qE 'Cannot connect to the Docker daemon|Error response from daemon|no space left on device|error during connect' "$CODEX_TRANSCRIPT" 2>/dev/null \
+        && container_runtime_is_down; then
         fault=infrastructure
     fi
     note_fault "$fault"

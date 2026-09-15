@@ -83,8 +83,18 @@ file_mode() {
 
 runtime_stale_names() {
     local staging path name
-    staging="$(mktemp -d "${TMPDIR:-/tmp}/matcha-autopr-runtime.XXXXXX")"
-    ( INSTALL_ROOT="$staging"; install_runtime ) >/dev/null
+    staging="$(mktemp -d "${TMPDIR:-/tmp}/matcha-autopr-runtime.XXXXXX")" || return 1
+    # Under this file's `set -e` a failing `install` (a file install_runtime
+    # names that is missing from the control-plane archive — a rename, a
+    # helper moved out of harness/) used to abort the whole script through
+    # the `| tr` pipeline before anything was printed, and the workflow step
+    # is `continue-on-error: true` — so the stale-dispatcher regression this
+    # sync exists to catch would come back silently. Report it instead, and
+    # never leak the staging directory on the failure path.
+    if ! ( INSTALL_ROOT="$staging"; install_runtime ) >/dev/null 2>&1; then
+        rm -rf "$staging"
+        return 1
+    fi
     for path in "$staging"/*; do
         name="$(basename "$path")"
         # Content AND mode. install(1) sets 755 on the scripts and 644 on the
@@ -111,7 +121,12 @@ sync_runtime_if_stale() {
         echo "No AutoPR dispatcher installed at $INSTALL_ROOT; run \`msandbox install\` (it renders the plists too)."
         return 0
     fi
-    stale="$(runtime_stale_names | tr '\n' ' ')"
+    if ! stale="$(runtime_stale_names)"; then
+        echo "AutoPR dispatcher sync FAILED: could not stage the runtime from $SCRIPT_DIR." >&2
+        echo "The LaunchAgents are still running the OLD copy; run \`msandbox install\` and check install_runtime's file list." >&2
+        return 1
+    fi
+    stale="$(printf '%s' "$stale" | tr '\n' ' ')"
     stale="${stale% }"
     if [ -z "$stale" ]; then
         echo "AutoPR dispatcher tree current: $INSTALL_ROOT"

@@ -2849,10 +2849,16 @@ done
 # strikes the card's ledger only for the model's own failure. One evening of
 # expired login (2026-09-13 21:09Z) struck every card it touched.
 fault_file="$TMP_DIR/fault-class"
+write_codex_auth_fixture "$TMP_DIR/live-auth.json" "$(( $(date +%s) + 86400 ))"
+# Explicit, always: the transcript match is only a trigger now, and the
+# confirmation reads the host auth file. Unset, that is the operator's real
+# ~/.codex/auth.json.
+FAULT_AUTH_FILE="$TMP_DIR/expired-auth.json"
 run_bridge_for_fault() {
   rm -f "$fault_file"
   env "$@" PATH="$TMP_DIR/deny-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 \
     AUTOPR_FAULT_CLASS_FILE="$fault_file" \
+    AUTOPR_HOST_CODEX_AUTH_FILE="$FAULT_AUTH_FILE" \
     AUTOPR_CODEX_BACKOFF_FILE="$TMP_DIR/fault-backoff.json" \
     AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
     AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
@@ -2870,6 +2876,18 @@ check "a usage-limit exit is classified usage_limit and still records the backof
     $([ "$limit_rc" = 1 ] && [ "$(cat "$fault_file" 2>/dev/null)" = usage_limit ] \
       && [ -s "$TMP_DIR/fault-backoff.json" ] && echo 0 || echo 1)
 rm -f "$TMP_DIR/fault-backoff.json"
+# The transcript is the model's own output. With the host login demonstrably
+# ALIVE, the same 401 text is the model printing something it read — its own
+# failure, and a strike. Otherwise a card whose work touches auth code could
+# name itself a lane fault and never be struck.
+rm -f "$TMP_DIR/fault-backoff.json"
+FAULT_AUTH_FILE="$TMP_DIR/live-auth.json"
+run_bridge_for_fault CODEX_STUB_AUTH_EXPIRED=1; unconfirmed_rc=$?
+check "a 401 in the transcript with a live host login stays the model's fault" \
+    $([ "$unconfirmed_rc" = 1 ] && [ "$(cat "$fault_file" 2>/dev/null)" = model ] && echo 0 || echo 1)
+FAULT_AUTH_FILE="$TMP_DIR/expired-auth.json"
+rm -f "$TMP_DIR/fault-backoff.json"
+
 run_bridge_for_fault CODEX_STUB_TOUCH_HARNESS=1; touch_rc=$?
 check "a bridge refusal of the model's own patch is classified model" \
     $([ "$touch_rc" != 0 ] && [ "$(cat "$fault_file" 2>/dev/null)" = model ] && echo 0 || echo 1)
@@ -2907,11 +2925,34 @@ check "each model pass gets what is left of the step's budget, not a fresh one" 
 # as a status — so a Verify step failure is the step being killed by its
 # timeout or refusing to run here, both lane-wide. Striking the card for a
 # machine-speed timeout parked it after three passes.
+# The out-of-budget corrective park truncates report.md and decision.json.
+# Exiting 0 there made the workflow read a SUCCESSFUL investigation: Triage
+# jq'd an empty file (exit 0, empty output), publish.sh ran against an empty
+# report on a card the same branch had just parked, and a green job let
+# Cleanup's success branch delete the card's whole failure ledger.
+check "the out-of-budget corrective park fails the step, like its sibling path" \
+    $(awk '/if refresh_model_budget; then/,/^    fi$/' "$AUTOPR_DIR/investigate.sh" \
+        > "$TMP_DIR/budget-branch.txt" \
+      && grep -q 'die "not enough of the model budget was left' "$TMP_DIR/budget-branch.txt" \
+      && ! grep -qE '^[[:space:]]*exit 0[[:space:]]*$' "$TMP_DIR/budget-branch.txt" \
+      && echo 0 || echo 1)
+
 check "a verify failure is a lane fault and the step's cap fits real work" \
     $(grep -qF 'run_reason=verify' "$workflow" \
       && awk '/run_reason=verify/{found=1} found && /lane_fault=true/{print; exit}' "$workflow" | grep -q 'lane_fault=true' \
       && [ "$(awk '/name: Verify \(baseline vs branch\)/,/^          "/' "$workflow" | grep -c 'timeout-minutes: 20')" = 1 ] \
-      && grep -qF 'VERIFY DID NOT RUN' "$AUTOPR_DIR/run-journal.sh" \
+      && grep -qF 'VERIFY TIMED OUT' "$AUTOPR_DIR/run-journal.sh" \
+      && echo 0 || echo 1)
+
+# "Not the card's fault" must not collapse into "nothing is wrong". A
+# verify.sh that cannot start at all would otherwise re-burn a model pass on
+# every card forever behind a journal line saying nothing failed.
+check "a verify.sh that never started is named as a broken harness, not a timeout" \
+    $(grep -qF 'AUTOFIX_VERIFY_STARTED_FILE' "$REPO_ROOT/apps/msandbox/error-autofix/verify.sh" \
+      && grep -qF 'AUTOFIX_VERIFY_STARTED_FILE: ${{ runner.temp }}/verify-started' "$workflow" \
+      && grep -qF 'run_reason=verify_timeout' "$workflow" \
+      && grep -qF 'run_reason=verify_broken' "$workflow" \
+      && grep -qF 'VERIFY IS BROKEN ON THE RUNNER' "$AUTOPR_DIR/run-journal.sh" \
       && echo 0 || echo 1)
 
 check "the model budget is the supervisor's deadline and the step keeps a grace window" \

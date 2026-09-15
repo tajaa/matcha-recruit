@@ -270,3 +270,26 @@ jq -e '(.checks | length) == 1
     and .operator_failures == 1' "$TMP_DIR/audit-no-provisioner.json" >/dev/null
 grep -qF 'unmeasurable' "$TMP_DIR/audit-no-provisioner.md"
 printf 'PASS: an unrunnable provisioner is an operator finding, never a skip\n'
+
+# failing_items is published in the audit JSON and the repair ledger, and a
+# detail file is the natural place for a check to write absolute paths — so it
+# gets the same $HOME/$REPO_ROOT scrub `output` has always had.
+scrub_tests="$TMP_DIR/scrub-tests"
+mkdir -p "$scrub_tests"
+for suite in $(grep -oE 'test_[a-z_]+\.sh' "$AUDIT_DIR/audit.sh" | sort -u); do
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$scrub_tests/$suite"
+    chmod +x "$scrub_tests/$suite"
+done
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$HOME/leaked/path" > "$CHECK_DETAIL_FILE"\nexit 1\n' \
+    > "$scrub_tests/test_kanban_autopr_dashboard.sh"
+chmod +x "$scrub_tests/test_kanban_autopr_dashboard.sh"
+AUTOPR_AUDIT_TESTS_DIR="$scrub_tests" AUTOPR_AUDIT_ONLY=contract_tests \
+    "$AUDIT_DIR/audit.sh" --json "$TMP_DIR/audit-scrub.json" --summary "$TMP_DIR/audit-scrub.md"
+jq -e '.checks[0].failing_items == ["test_kanban_autopr_dashboard.sh"]' "$TMP_DIR/audit-scrub.json" >/dev/null
+! grep -qF "$HOME/leaked" "$TMP_DIR/audit-scrub.json"
+grep -qF 'failing_items' "$AUDIT_DIR/audit.sh"
+# Recording may not fail quietly: audit.sh runs without `set -e`, so a jq that
+# failed here used to drop the whole check — status, class and all — out of
+# `.checks[]` and out of the repairable/operator counts.
+grep -qF 'could not record check' "$AUDIT_DIR/audit.sh"
+printf 'PASS: failing_items is scrubbed and a check can never vanish from the results\n'

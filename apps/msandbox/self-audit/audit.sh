@@ -283,19 +283,32 @@ run_check() {
         *) status=fail ;;
     esac
     output="$(head -c 16000 "$output_file" | sed "s|$HOME|\$HOME|g; s|$REPO_ROOT|\$REPO_ROOT|g")"
+    # Same scrub as `output`: this file is the natural place for a check to
+    # write absolute paths, and these items are published in the audit JSON
+    # and the repair ledger.
+    failing_items='[]'
     if [ -s "$CHECK_DETAIL_FILE" ]; then
-        failing_items="$(jq -R . "$CHECK_DETAIL_FILE" | jq -sc .)"
-    else
-        failing_items='[]'
+        failing_items="$(sed "s|$HOME|\$HOME|g; s|$REPO_ROOT|\$REPO_ROOT|g" "$CHECK_DETAIL_FILE" \
+            | jq -R . | jq -sc .)" || failing_items='[]'
+        [ -n "$failing_items" ] || failing_items='[]'
     fi
     CHECK_DETAIL_FILE=""
     next="$RESULTS_FILE.next"
-    jq --arg id "$id" --arg title "$title" --arg status "$status" \
+    # This script runs without `set -e`: a jq that failed here left `$next`
+    # unwritten, `mv` failed too, and the check VANISHED from `.checks[]` —
+    # taking its fail status and its contribution to repairable_failures /
+    # operator_failures with it. Recording is the one thing that may not fail
+    # quietly.
+    if jq --arg id "$id" --arg title "$title" --arg status "$status" \
         --arg repairability "$repairability" --arg output "$output" --argjson exit_code "$rc" \
         --argjson failing_items "$failing_items" \
         '. + [{id:$id,title:$title,status:$status,repairability:$repairability,exit_code:$exit_code,failing_items:$failing_items,output:$output}]' \
-        "$RESULTS_FILE" > "$next"
-    mv "$next" "$RESULTS_FILE"
+        "$RESULTS_FILE" > "$next" && mv "$next" "$RESULTS_FILE"; then
+        return 0
+    fi
+    rm -f "$next"
+    echo "audit.sh: could not record check '$id' (status $status, exit $rc)" >&2
+    exit 70
 }
 
 cd "$REPO_ROOT"

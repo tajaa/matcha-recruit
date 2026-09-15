@@ -80,9 +80,20 @@ and the `mw_tasks.autopr_*` columns they read.
   reports unavailable instead. It also unlinks the cache from the tree on
   exit — `AUTOPR_WORKSPACE_ROOT` can name any checkout, and a link left
   pointing into the shared cache turns a later `npm ci` there into an
-  in-place rewrite of the toolchain every lane reads. A reader registers its
-  pid (`autofix_hold_toolchain`) so a concurrent `provision-verify-toolchain.sh`
-  cannot `rm -rf` the venv and node_modules a running lane is symlinked into.
+  in-place rewrite of the toolchain every lane reads. Only a link INTO the
+  cache root is ours to move or delete: a plain `-L` test cannot tell one
+  from the developer's own symlink (a shared or pnpm-style store), and
+  clobbering theirs made a read-only run destructive. And the traps are
+  `EXIT INT TERM HUP`, not EXIT alone — the Verify step has a timeout, and a
+  bash killed by SIGTERM never runs its EXIT trap, in a checkout that is
+  persistent (`clean: false`, and the lane's `git clean -fd` has no `-x`).
+  A reader registers its pid (`autofix_hold_toolchain`) so a concurrent
+  `provision-verify-toolchain.sh` cannot `rm -rf` the venv and node_modules a
+  running lane is symlinked into; the builders re-check that refcount
+  immediately before the swap, because a build takes minutes and a lane can
+  start reading during it. Staging directories are `<entry>.tmp.<pid>` and
+  are reclaimed once that pid is gone — nothing else ever did, and a venv is
+  ~1 GB.
   The key helpers FAIL rather than return a key for a tree with
   no manifests — `shasum` over no input is a valid digest, and every such
   tree would otherwise share one cache entry and be "verified" against a
@@ -104,13 +115,23 @@ and the `mw_tasks.autopr_*` columns they read.
   strike, but the cooldown marker must exist or `select.sh` has nothing to
   read and re-picks the same card every pass — `auth` is held off by the
   dispatcher's login guard and `usage_limit` by `codex-backoff.sh`, but
-  `infrastructure` has no lane-wide hold of its own. `verify` is a lane fault
-  too: verify.sh always exits 0 and reports a failing branch IN its table, so
-  a failed Verify step is the step being killed by its timeout or refusing to
-  run here, never the card. Exit 75 without an acknowledged takeover is the
-  opposite case — `CURRENT_FAULT_CLASS` is promoted to `model` as soon as the
-  model has run, before that branch, or a bad pause write reads as a lane
-  fault the card can never be struck for.
+  `infrastructure` has no lane-wide hold of its own. **A transcript match is
+  only a trigger, never the verdict**: that file carries the model's own tool
+  output, so a card whose work touches auth code or a docker troubleshooting
+  doc could name itself a lane fault and escape the ledger forever. `auth` is
+  confirmed by `auth-check` exit 4 on the host file, `infrastructure` by
+  probing the container runtime now; unconfirmed, the failure stays the
+  model's. Exit 75 without an acknowledged takeover is the same principle
+  from the other side — `CURRENT_FAULT_CLASS` is promoted to `model` as soon
+  as the model has run, before that branch, or a bad pause write reads as a
+  lane fault the card can never be struck for.
+  A Verify-step failure is a lane fault too (verify.sh always exits 0 and
+  reports a failing branch IN its table), but "not the card's fault" must not
+  collapse into "nothing is wrong": verify.sh stamps
+  `AUTOFIX_VERIFY_STARTED_FILE` as its first act, and Cleanup splits
+  `verify_timeout` from `verify_broken` so a verify.sh that cannot start at
+  all is named as a broken runner instead of reassuring the operator while it
+  re-burns a model pass on every card.
   The model's time budget is the supervisor's
   `--deadline` (exit 143), and `investigate.sh` passes any status ≥ 128
   through unchanged so `checkpoint.sh` can read it as a kill; `die` flattens
@@ -119,7 +140,11 @@ and the `mw_tasks.autopr_*` columns they read.
   `codex_pass` what is left of it, because a corrective retry with a fresh
   full deadline cannot fit inside `minutes + AUTOPR_STEP_GRACE_MINUTES` and
   is hard-killed by Actions instead — no container stop, no DEADLINE_EXIT, no
-  validation window. Every `os.killpg` on those paths is guarded, including
+  validation window. Out of budget, the corrective pass is skipped and the
+  card parked — with `die`, never `exit 0`: that branch has already truncated
+  report.md and decision.json, so a green investigation would run Triage's
+  `jq` over an empty file, publish an empty report on a card it just parked,
+  and let Cleanup's success branch delete the card's whole failure ledger. Every `os.killpg` on those paths is guarded, including
   the one in `supervise`'s `finally`: it runs after the return value is fixed
   but can still replace it with a traceback, and it sits outside the
   `except BaseException`.
@@ -222,7 +247,11 @@ and the `mw_tasks.autopr_*` columns they read.
   what `dispatcher_install_root().is_dir()` reads as `lanes_installed`. It
   compares mode as well as bytes — a copy that drifted to 644 is
   byte-identical and would be reported current while the LaunchAgents keep an
-  unexecutable dispatcher.
+  unexecutable dispatcher. A staging install that cannot complete is REPORTED
+  and returns non-zero: under `set -e` it used to abort the script through the
+  `| tr` pipeline before printing anything, and the workflow step is
+  `continue-on-error: true`, so the stale-dispatcher regression this sync
+  exists to catch would come back silently.
 - **`harness/install-hooks.sh` honours `core.hooksPath`.**
   `git rev-parse --git-path hooks` always answers `.git/hooks` and ignores
   it, so on a clone that sets one the script reported "Installed" for hooks

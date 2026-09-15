@@ -102,6 +102,13 @@ build_python() {
         rm -rf "$temporary"
         return 1
     fi
+    # Re-check: a build takes minutes, and a lane that started reading the
+    # old entry in the meantime would have it deleted from under a running
+    # pytest. The staged tree is kept, so the next run finds it current.
+    if autofix_toolchain_in_use "$VENV_DIR"; then
+        echo "not replacing $VENV_DIR: a lane started reading it during the build (staged at $temporary)" >&2
+        return 1
+    fi
     rm -rf "$VENV_DIR"
     mv "$temporary" "$VENV_DIR"
 }
@@ -128,8 +135,22 @@ build_node() {
         rm -rf "$temporary"
         return 1
     fi
+    if autofix_toolchain_in_use "$NODE_ROOT"; then
+        echo "not replacing $NODE_ROOT: a lane started reading it during the build (staged at $temporary)" >&2
+        return 1
+    fi
     rm -rf "$NODE_ROOT"
     mv "$temporary" "$NODE_ROOT"
+}
+
+# staging_pid_alive PATH — true while the process that created `<...>.tmp.<pid>`
+# is still running.
+staging_pid_alive() {
+    local pid="${1##*.tmp.}"
+    case "$pid" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    kill -0 "$pid" 2>/dev/null
 }
 
 # Old keys are dead weight (a venv is ~1 GB); keep only the current ones.
@@ -142,12 +163,21 @@ prune_stale() {
         [ -e "$entry" ] || continue
         case "$entry" in
             "$VENV_DIR"|"$NODE_ROOT") continue ;;
-            # A build in flight, possibly another operator's: build_python and
-            # build_node clean up their own staging directory on every exit
-            # path, so anything left here belongs to a live run or to one that
-            # was hard-killed. Deleting it pulls the tree out from under an
-            # `npm ci`; leaving it costs one directory until the next --force.
-            *.tmp.*) continue ;;
+            # Staging directories are named `<entry>.tmp.<pid>`. A live pid is
+            # a build in flight, possibly another operator's — deleting it
+            # pulls the tree out from under an `npm ci`. A dead pid is the
+            # leftover of a hard-killed run (Ctrl-C, sleep, OOM) that nothing
+            # else reclaims; at ~1 GB a venv, repeated interruptions used to
+            # accumulate silently.
+            *.tmp.*)
+                if staging_pid_alive "$entry"; then
+                    echo "kept (build in flight): $entry"
+                    continue
+                fi
+                rm -rf "$entry"
+                echo "pruned abandoned staging directory: $entry"
+                continue
+                ;;
         esac
         # A lane reading this entry right now. verify.sh registers its pid
         # before it uses a cache entry; without this, an operator provisioning

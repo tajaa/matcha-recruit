@@ -103,9 +103,15 @@ Pipeline (`apps/msandbox/error-autofix/`):
    is reported instead. And **verify.sh leaves the tree exactly as it found it**: the
    cache link it plants is removed on exit, because `AUTOPR_WORKSPACE_ROOT` may name
    any checkout and a link left pointing into the shared cache turns a later `npm ci`
-   there into an in-place rewrite of the toolchain every lane reads. While a lane is
-   reading a cache entry it registers its pid, and `provision-verify-toolchain.sh`
-   refuses to prune or rebuild an entry a live reader still holds.
+   there into an in-place rewrite of the toolchain every lane reads. Only a link INTO the
+   cache root counts as ours; a symlinked `node_modules` the tree already had (a shared
+   or pnpm-style store) is a dependency source, not something to replace. The traps are
+   `EXIT INT TERM HUP`, because a step killed by its timeout never runs an EXIT trap and
+   the runner's checkout is persistent. While a lane is reading a cache entry it registers
+   its pid, and `provision-verify-toolchain.sh` refuses to prune or rebuild an entry a
+   live reader still holds — re-checked immediately before the swap, since a build takes
+   minutes and a lane can start reading during it. Abandoned `<entry>.tmp.<pid>` staging
+   directories are reclaimed once their pid is gone.
 7. **`write-commit-subject.sh`** — uses Codex Luna-medium for the bounded commit
    subject after verification. Trusted shell enforces the `fix:` prefix, one-line
    72-character limit, and rejects any repository edit from this writing-only pass.

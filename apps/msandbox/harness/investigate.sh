@@ -792,9 +792,15 @@ if [ -n "$CORRECTION_KIND" ]; then
         # Out of budget: park it exactly as a rejected correction would be.
         # Spending a model call the step timeout will kill costs the quota
         # and produces nothing reviewable.
-        printf 'kanban-autopr: not enough of the model budget is left for a corrective pass\n' >&2
+        #
+        # `die`, not `exit 0`, for the same reason the sibling path below
+        # does: the report and decision were just truncated, so a green
+        # investigation would take Triage through `jq -r '.outcome'` on an
+        # empty file (exit 0, empty output), run publish.sh against an empty
+        # report on a card this branch just parked, and — with the job green
+        # — let Cleanup's success branch DELETE the card's failure ledger.
         park_rejected_after_correction "ran out of its time budget before the corrective pass"
-        exit 0
+        die "not enough of the model budget was left for a corrective pass; card parked for context"
     fi
 fi
 

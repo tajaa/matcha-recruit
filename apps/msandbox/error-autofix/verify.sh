@@ -49,6 +49,16 @@ case "$ENV" in
     prod|production) echo "refusing to run verify.sh with ENV=$ENV" >&2; exit 1 ;;
 esac
 
+# Proof that verification actually started. The caller distinguishes a step
+# that ran and was killed by its timeout from one that never got off the
+# ground (this script missing from the control-plane archive, not executable,
+# a broken `source`): both are lane faults, but only the second means the
+# harness itself is broken, and a journal that says "nothing about this card
+# failed" for that is a lie the operator has no other signal to correct.
+[ -z "${AUTOFIX_VERIFY_STARTED_FILE:-}" ] \
+    || date +%s > "$AUTOFIX_VERIFY_STARTED_FILE" 2>/dev/null \
+    || true
+
 # ---- test-dir mapping -------------------------------------------------
 # server/tests/<name>/ mirrors both routes/<name>/ and services/<name>/. For
 # each changed file, try its parent directory name and its own stem, plus
@@ -240,6 +250,24 @@ compileall_check() {
 BASE_TREE="$(mktemp -d "${RUNNER_TEMP:-/tmp}/autofix-baseline-XXXXXX")"
 git -C "$REPO_ROOT" worktree prune >/dev/null 2>&1 || true
 git -C "$REPO_ROOT" worktree add --detach "$BASE_TREE" "$BASE_SHA" >/dev/null 2>&1
+# Only a link into OUR cache is ours to move or delete. A plain `-L` test
+# cannot tell one from the developer's own symlink (a shared or pnpm-style
+# store is exactly that), and treating theirs as replaceable both clobbered
+# it with a cache link and then removed it at cleanup — from a run that is
+# supposed to be read-only — while never using the usable tree it already
+# pointed at. Defined above cleanup() because cleanup calls it.
+BRANCH_NODE_MODULES="$REPO_ROOT/client/node_modules"
+TOOLCHAIN_CACHE_ROOT="$(autofix_toolchain_cache_dir)"
+branch_link_is_ours() {
+    local target
+    [ -L "$BRANCH_NODE_MODULES" ] || return 1
+    target="$(readlink "$BRANCH_NODE_MODULES" 2>/dev/null || true)"
+    case "$target" in
+        "$TOOLCHAIN_CACHE_ROOT"/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Set when THIS run planted the branch tree's node_modules symlink.
 PLANTED_BRANCH_LINK=""
 cleanup() {
@@ -251,13 +279,22 @@ cleanup() {
     # later `npm ci` in that clone would follow the link and rewrite the
     # runner-owned toolchain every lane reads, in place, while
     # `autofix_node_modules_usable` kept reporting it current.
-    if [ -n "$PLANTED_BRANCH_LINK" ] && [ -L "$PLANTED_BRANCH_LINK" ]; then
+    if [ -n "$PLANTED_BRANCH_LINK" ] && branch_link_is_ours; then
         rm -f "$PLANTED_BRANCH_LINK"
     fi
     autofix_release_toolchain "${HELD_VENV:-}"
     autofix_release_toolchain "${HELD_CLIENT:-}"
 }
+# EXIT alone is not enough: the Verify step has a timeout, and a bash killed
+# by SIGTERM with the default disposition dies WITHOUT running its EXIT trap.
+# The checkout is persistent (`clean: false`, and the lane's `git clean -fd`
+# carries no `-x`), so the planted link, the baseline worktree and the holder
+# pid files would all survive the kill. cleanup is idempotent, so running it
+# from a signal handler and again on EXIT is safe.
 trap cleanup EXIT
+trap 'cleanup; exit 143' TERM
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 129' HUP
 
 # The baseline worktree is outside the repository, so Node cannot discover the
 # checked-out client's dependency tree by walking parent directories. Sharing
@@ -277,26 +314,31 @@ CLIENT_NODE_MODULES=""
 CACHED_NODE_MODULES=""
 cached_client_root="$(autofix_node_root "$REPO_ROOT")" \
     && CACHED_NODE_MODULES="$cached_client_root/node_modules"
-# A link this checkout kept from an earlier run dangles as soon as
-# provision-verify-toolchain.sh prunes that key. Drop it before anything
-# reads it: left in place, the `! -L` test below keeps matching, so a real
-# node_modules installed here later would never be preferred — and nothing
-# else ever removes it.
-if [ -L "$REPO_ROOT/client/node_modules" ] && [ ! -e "$REPO_ROOT/client/node_modules" ]; then
-    rm -f "$REPO_ROOT/client/node_modules"
+# Only a link into OUR cache is ours to move or delete. A plain `-L` test
+# cannot tell one apart from the developer's own symlink (a shared or
+# pnpm-style store is exactly that), and treating theirs as replaceable both
+# clobbered it with a cache link and then removed it at cleanup — from a run
+# that is supposed to be read-only — while never using the usable tree it
+# already pointed at.
+# Ours and dangling: the key it pointed at has been pruned. Drop it before
+# anything reads it — nothing else ever removes it, and while it sits there
+# a real node_modules installed here later could never be preferred.
+if branch_link_is_ours && [ ! -e "$BRANCH_NODE_MODULES" ]; then
+    rm -f "$BRANCH_NODE_MODULES"
 fi
-if [ ! -L "$REPO_ROOT/client/node_modules" ] \
-    && autofix_node_modules_usable "$REPO_ROOT/client/node_modules"; then
-    CLIENT_NODE_MODULES="$REPO_ROOT/client/node_modules"
+if ! branch_link_is_ours && autofix_node_modules_usable "$BRANCH_NODE_MODULES"; then
+    # A real directory, or someone else's link to a real tree. Either way it
+    # is the tree under verification's own, and it is left untouched.
+    CLIENT_NODE_MODULES="$BRANCH_NODE_MODULES"
 elif [ -n "$CACHED_NODE_MODULES" ] && autofix_node_modules_usable "$CACHED_NODE_MODULES"; then
     CLIENT_NODE_MODULES="$CACHED_NODE_MODULES"
-    if [ -L "$REPO_ROOT/client/node_modules" ] || [ ! -e "$REPO_ROOT/client/node_modules" ]; then
-        ln -sfn "$CLIENT_NODE_MODULES" "$REPO_ROOT/client/node_modules"
-        PLANTED_BRANCH_LINK="$REPO_ROOT/client/node_modules"
+    if branch_link_is_ours || [ ! -e "$BRANCH_NODE_MODULES" ]; then
+        ln -sfn "$CLIENT_NODE_MODULES" "$BRANCH_NODE_MODULES"
+        PLANTED_BRANCH_LINK="$BRANCH_NODE_MODULES"
     fi
 fi
 if [ -n "$CLIENT_NODE_MODULES" ] && [ -d "$BASE_TREE/client" ] \
-    && autofix_node_modules_usable "$REPO_ROOT/client/node_modules"; then
+    && autofix_node_modules_usable "$BRANCH_NODE_MODULES"; then
     ln -sfn "$CLIENT_NODE_MODULES" "$BASE_TREE/client/node_modules"
     CLIENT_DEPS_READY=true
     # Hold the cache for as long as this run reads it: an operator running

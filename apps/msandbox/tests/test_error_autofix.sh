@@ -616,13 +616,42 @@ check "a broken node_modules in the branch tree reports unavailable, never a fal
 # while it sits there the `! -L` test keeps matching — so a real node_modules
 # installed here later would never be preferred again.
 rm -rf "$VERIFY_REPO/client/node_modules"
-ln -s "$TOOLCHAIN_CACHE/client-prunedkey/node_modules" "$VERIFY_REPO/client/node_modules"
+# Ours — it points inside the cache root verify.sh is told to use.
+ln -s "$TMP_DIR/pruned-cache/client-prunedkey/node_modules" "$VERIFY_REPO/client/node_modules"
 verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
     AUTOFIX_CACHE_DIR="$TMP_DIR/pruned-cache" FAKE_PYTEST_RC=0 \
     RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" 2>/dev/null)"
 check "a node_modules link left dangling by a pruned key is removed, not kept" \
   $([ ! -L "$VERIFY_REPO/client/node_modules" ] && [ ! -e "$VERIFY_REPO/client/node_modules" ] \
     && grep -q 'no client toolchain' <<< "$verify_out" && echo 0 || echo 1)
+
+# A symlink the tree already had, pointing at a usable tree OUTSIDE our cache
+# (a shared or pnpm-style store), is not ours: it is the dependency source,
+# and a read-only verification run must neither replace nor delete it.
+rm -rf "$VERIFY_REPO/client/node_modules"
+foreign_modules="$TMP_DIR/foreign-node-modules"
+mkdir -p "$foreign_modules/.bin"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$foreign_modules/.bin/tsc"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$foreign_modules/.bin/vitest"
+chmod +x "$foreign_modules/.bin/tsc" "$foreign_modules/.bin/vitest"
+ln -s "$foreign_modules" "$VERIFY_REPO/client/node_modules"
+: > "$verify_env"
+verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
+    AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" FAKE_PYTEST_RC=0 \
+    RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" 2>/dev/null)"
+check "a symlinked node_modules the tree already had is used, not clobbered or deleted" \
+  $([ -L "$VERIFY_REPO/client/node_modules" ] \
+    && [ "$(readlink "$VERIFY_REPO/client/node_modules")" = "$foreign_modules" ] \
+    && grep -q '| TypeScript | 0 diagnostics | 0 diagnostics |' <<< "$verify_out" \
+    && ! grep -q 'no client toolchain' <<< "$verify_out" && echo 0 || echo 1)
+rm -f "$VERIFY_REPO/client/node_modules"
+
+# The Verify step has a timeout; a bash killed by SIGTERM with the default
+# disposition never runs its EXIT trap, so the planted link would survive in
+# the persistent (`clean: false`) checkout.
+check "verify.sh cleans up on a signal, not only on a normal exit" \
+  $(grep -q "trap 'cleanup; exit 143' TERM" "$AUTOFIX_DIR/verify.sh" \
+    && grep -q "trap 'cleanup; exit 130' INT" "$AUTOFIX_DIR/verify.sh" && echo 0 || echo 1)
 
 # A concurrent lane's cache entry survives a provision from a tree whose
 # manifests differ: without the holder refcount, `prune_stale` rm -rfs the
@@ -644,6 +673,31 @@ AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" PY312=/nonexistent AUTOFIX_NPM_BIN=/nonexis
     "$provisioner" --repo "$OTHER_REPO" > "$TMP_DIR/prune2.out" 2>&1
 check "prune_stale collects it once the holder is gone" \
   $([ ! -d "$held_venv" ] && echo 0 || echo 1)
+
+# Nothing else ever reclaimed another run's staging directory: build_python
+# and build_node only remove their OWN `$$` path, and prune_stale used to
+# `continue` past every `*.tmp.*`. A venv is ~1 GB, so interrupted runs
+# accumulated silently.
+live_tmp="$TOOLCHAIN_CACHE/venv-py312-liveheld.tmp.$$"
+dead_tmp="$TOOLCHAIN_CACHE/venv-py312-orphaned.tmp.999999"
+mkdir -p "$live_tmp" "$dead_tmp"
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" PY312=/nonexistent AUTOFIX_NPM_BIN=/nonexistent \
+    "$provisioner" --repo "$OTHER_REPO" > "$TMP_DIR/prune-tmp.out" 2>&1
+check "an abandoned staging directory is reclaimed, a live one is not" \
+  $([ ! -d "$dead_tmp" ] && [ -d "$live_tmp" ] \
+    && grep -q 'pruned abandoned staging directory' "$TMP_DIR/prune-tmp.out" \
+    && grep -q 'kept (build in flight)' "$TMP_DIR/prune-tmp.out" && echo 0 || echo 1)
+rm -rf "$live_tmp"
+
+# The in-use refcount has to be re-read after the build, not only before it:
+# a venv takes minutes to build and a lane that starts reading the old entry
+# in the meantime would have it deleted from under a running pytest.
+check "the build re-checks the refcount before it replaces a live entry" \
+  $(awk '/^build_python\(\)/,/^}/' "$provisioner" \
+      | grep -A 2 'autofix_python_usable "\$temporary/bin/python"' >/dev/null \
+    && [ "$(awk '/^build_python\(\)/,/^}/' "$provisioner" | grep -c 'autofix_toolchain_in_use') " = "2 " ] \
+    && [ "$(awk '/^build_node\(\)/,/^}/' "$provisioner" | grep -c 'autofix_toolchain_in_use') " = "2 " ] \
+    && echo 0 || echo 1)
 
 # A tree with only requirements-dev.txt has no key: build_python passes
 # requirements.txt to pip unconditionally, so a key there is a path that can

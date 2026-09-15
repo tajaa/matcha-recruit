@@ -304,13 +304,25 @@ patch). Cleanup books a ledger strike only for `model`; the other three journal 
 a lane fault (`CODEX LOGIN DEAD`, `CODEX QUOTA`, `SANDBOX FAULT`) and leave the count
 alone. Before this, one evening of expired login struck every card it touched.
 
-`verify` joins that set. verify.sh always exits 0 and reports a failing branch IN its
-table, never as a status, so a failed Verify step means the step was killed by its
-timeout (20 minutes; a client-touching PR runs pytest in two trees plus two full
-`tsc -p tsconfig.app.json` passes plus vitest) or refused to run here at all — neither
-is the card's doing. `exit 75` without an acknowledged operator takeover is the
-mirror image: the bridge promotes `CURRENT_FAULT_CLASS` to `model` as soon as the
-model has run, so a bad pause write is struck rather than excused.
+A transcript match is only a TRIGGER. `$CODEX_TRANSCRIPT` carries the model's own tool
+output — file reads, test output, grep results — so a card whose work touches auth code
+or a docker troubleshooting doc could otherwise name itself a lane fault, escape the
+ledger, and be re-selected forever. `auth` is confirmed by `codex-backoff.sh auth-check`
+returning 4 for the host credential, `infrastructure` by probing the container runtime at
+the moment of failure. Unconfirmed, the failure stays the model's.
+
+`verify_timeout` and `verify_broken` join the lane-fault set. verify.sh always exits 0 and
+reports a failing branch IN its table, never as a status, so a failed Verify step is never
+the card's doing — but the two cases are not the same thing, and verify.sh stamps
+`AUTOFIX_VERIFY_STARTED_FILE` as its first act so Cleanup can tell them apart: `_timeout`
+is the 20-minute cap (a client-touching PR runs pytest in two trees plus two full
+`tsc -p tsconfig.app.json` passes plus vitest), `_broken` means verification could not
+start at all on this runner. Without that split a permanently broken verify.sh re-burned a
+model pass on every card behind a journal line saying nothing was wrong.
+
+`exit 75` without an acknowledged operator takeover is the mirror image: the bridge
+promotes `CURRENT_FAULT_CLASS` to `model` as soon as the model has run, so a bad pause
+write is struck rather than excused.
 
 A lane fault still calls `autopr_mark_attempt`, which stamps the card's attempt marker
 without writing a strike. The marker's mtime is the only thing `select.sh`'s cooldown
@@ -329,7 +341,10 @@ measured from the step's own start stamp. A corrective second pass with a fresh 
 deadline cannot fit inside `step_minutes`, so Actions hard-kills the step mid-model —
 no container stop, no DEADLINE_EXIT, no post-model validation. Below a two-minute floor
 the corrective pass is skipped and the card is parked for context instead of paying for
-a model call the step timeout will cut off. The supervisor (`autopr_control.py supervise --deadline`) terminates the model's
+a model call the step timeout will cut off — and that path `die`s rather than exiting 0,
+because it has already truncated report.md and decision.json: a green investigation there
+would run Triage's `jq` over an empty file, publish an empty report on the card it just
+parked, and let Cleanup's success branch delete that card's whole failure ledger. The supervisor (`autopr_control.py supervise --deadline`) terminates the model's
 whole session at `minutes` and reports 143, which `investigate.sh` passes through and
 `checkpoint.sh` reads as "killed" — a pause, not a strike. The Investigate step's own
 timeout is `step_minutes`, so sandbox start-up before the model and validation after it no
