@@ -179,3 +179,125 @@ grep -qF "AUTOPR_SANDBOX_PATH_DENY_RE='^(\\.github/|deploy/|secrets/|\\.githooks
 grep -qF 'check_installed_dispatcher' "$AUDIT_DIR/audit.sh"
 grep -qF 'git reset --hard HEAD' "$WORKFLOW"
 printf 'PASS: repair lane keeps CI/deploy/secrets/capsule out of reach and audits the installed dispatcher\n'
+
+# Every suite the audit runs must exist where the audit looks for it. The
+# 2026-09-13 relocation (scripts/tests → apps/msandbox/tests) left audit.sh
+# on the old path: every audit failed, Codex was handed a "repo" failure it
+# is forbidden to touch, and the ledger then blocked retries for a week.
+suites_listed="$(awk '/^CONTRACT_SUITES=\(/{flag=1; next} /^\)/{flag=0} flag' "$AUDIT_DIR/audit.sh" \
+    | tr -d ' ' | grep -E '^test_.*\.sh$')"
+[ "$(printf '%s\n' "$suites_listed" | wc -l | tr -d ' ')" -ge 10 ]
+! grep -qF 'scripts/tests/' "$AUDIT_DIR/audit.sh"
+while IFS= read -r suite; do
+    if [ ! -f "$REPO_ROOT/apps/msandbox/tests/$suite" ]; then
+        printf 'FAIL: audit.sh lists %s but apps/msandbox/tests/%s does not exist\n' "$suite" "$suite" >&2
+        exit 1
+    fi
+done <<< "$suites_listed"
+printf 'PASS: every contract suite audit.sh runs exists under apps/msandbox/tests\n'
+
+# A missing suite is an OPERATOR finding (exit 78), never a repo-repairable
+# one: the failing set stays empty, so no Codex run is dispatched for a
+# defect the model cannot fix.
+mkdir -p "$TMP_DIR/no-suites"
+AUTOPR_AUDIT_TESTS_DIR="$TMP_DIR/no-suites" AUTOPR_AUDIT_ONLY=contract_tests \
+    "$AUDIT_DIR/audit.sh" --json "$TMP_DIR/audit-missing.json" --summary "$TMP_DIR/audit-missing.md"
+jq -e '(.checks | length) == 1
+    and .checks[0].id == "contract_tests"
+    and .checks[0].status == "fail"
+    and .checks[0].repairability == "operator"
+    and .checks[0].exit_code == 78
+    and (.checks[0].failing_items | length) >= 10
+    and .repairable_failures == 0
+    and .operator_failures == 1' "$TMP_DIR/audit-missing.json" >/dev/null
+grep -qF 'Contract suites missing' "$TMP_DIR/audit-missing.md"
+grep -qF 'test_kanban_autopr.sh' "$TMP_DIR/audit-missing.md"
+printf 'PASS: a missing contract suite is an operator finding and dispatches no repair\n'
+
+# A failing suite names itself: in the JSON, the summary, and the ledger.
+mkdir -p "$TMP_DIR/suites"
+while IFS= read -r suite; do
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP_DIR/suites/$suite"
+done <<< "$suites_listed"
+printf '#!/usr/bin/env bash\necho "dashboard contract broke"\nexit 1\n' > "$TMP_DIR/suites/test_kanban_autopr_dashboard.sh"
+AUTOPR_AUDIT_TESTS_DIR="$TMP_DIR/suites" AUTOPR_AUDIT_ONLY=contract_tests \
+    "$AUDIT_DIR/audit.sh" --json "$TMP_DIR/audit-failing.json" --summary "$TMP_DIR/audit-failing.md"
+jq -e '.checks[0].status == "fail"
+    and .checks[0].repairability == "repo"
+    and .checks[0].failing_items == ["test_kanban_autopr_dashboard.sh"]
+    and .repairable_failures == 1' "$TMP_DIR/audit-failing.json" >/dev/null
+grep -qF 'FAILED SUITE: test_kanban_autopr_dashboard.sh' "$TMP_DIR/audit-failing.md"
+export AUTOPR_SELF_AUDIT_LEDGER="$TMP_DIR/ledger-detail.json"
+"$LEDGER_SH" record "$TMP_DIR/audit-failing.json" attempted
+jq -e '.failing_checks == ["contract_tests"]
+    and .failing_checks_detail.contract_tests == ["test_kanban_autopr_dashboard.sh"]' \
+    "$TMP_DIR/ledger-detail.json" >/dev/null
+unset AUTOPR_SELF_AUDIT_LEDGER
+# The two fixture runs must not have fingerprinted identically: a missing
+# suite (operator) contributes nothing, a failing one (repo) does.
+[ "$(jq -r .fingerprint "$TMP_DIR/audit-missing.json")" != "$(jq -r .fingerprint "$TMP_DIR/audit-failing.json")" ]
+printf 'PASS: a failing contract suite is named in the audit JSON, summary, and repair ledger\n'
+
+# verify.sh only reads the runner-owned toolchain; a missing one is an
+# operator action the audit must raise, because needs-work on every PR is
+# the same as needs-work on none.
+mkdir -p "$TMP_DIR/empty-toolchain"
+AUTOFIX_CACHE_DIR="$TMP_DIR/empty-toolchain" AUTOPR_AUDIT_ONLY=verify_toolchain \
+    "$AUDIT_DIR/audit.sh" --json "$TMP_DIR/audit-toolchain.json" --summary "$TMP_DIR/audit-toolchain.md"
+jq -e '(.checks | length) == 1
+    and .checks[0].id == "verify_toolchain"
+    and .checks[0].status == "fail"
+    and .checks[0].repairability == "operator"
+    and .repairable_failures == 0
+    and .operator_failures == 1' "$TMP_DIR/audit-toolchain.json" >/dev/null
+grep -qF 'provision-verify-toolchain.sh' "$TMP_DIR/audit-toolchain.md"
+printf 'PASS: a missing verification toolchain is an operator finding\n'
+
+# A provisioner that is not there at all must not SKIP the check: a skip
+# hides it exactly when the capsule is broken, which is the "invisible
+# because it is on everything" failure this check exists to catch.
+capsule="$TMP_DIR/no-provisioner"
+mkdir -p "$capsule/apps/msandbox"
+cp -R "$AUDIT_DIR" "$capsule/apps/msandbox/self-audit"
+mkdir -p "$capsule/apps/msandbox/harness"
+AUTOPR_AUDIT_ONLY=verify_toolchain \
+    "$capsule/apps/msandbox/self-audit/audit.sh" \
+    --json "$TMP_DIR/audit-no-provisioner.json" --summary "$TMP_DIR/audit-no-provisioner.md"
+jq -e '(.checks | length) == 1
+    and .checks[0].status == "fail"
+    and .checks[0].repairability == "operator"
+    and .checks[0].exit_code == 78
+    and .operator_failures == 1' "$TMP_DIR/audit-no-provisioner.json" >/dev/null
+grep -qF 'unmeasurable' "$TMP_DIR/audit-no-provisioner.md"
+printf 'PASS: an unrunnable provisioner is an operator finding, never a skip\n'
+
+# failing_items is published in the audit JSON and the repair ledger, and a
+# detail file is the natural place for a check to write absolute paths — so it
+# gets the same $HOME/$REPO_ROOT scrub `output` has always had.
+scrub_tests="$TMP_DIR/scrub-tests"
+mkdir -p "$scrub_tests"
+for suite in $(grep -oE 'test_[a-z_]+\.sh' "$AUDIT_DIR/audit.sh" | sort -u); do
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$scrub_tests/$suite"
+    chmod +x "$scrub_tests/$suite"
+done
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$HOME/leaked/path" > "$CHECK_DETAIL_FILE"\nexit 1\n' \
+    > "$scrub_tests/test_kanban_autopr_dashboard.sh"
+chmod +x "$scrub_tests/test_kanban_autopr_dashboard.sh"
+AUTOPR_AUDIT_TESTS_DIR="$scrub_tests" AUTOPR_AUDIT_ONLY=contract_tests \
+    "$AUDIT_DIR/audit.sh" --json "$TMP_DIR/audit-scrub.json" --summary "$TMP_DIR/audit-scrub.md"
+# The fixture suite runs as `bash <file>` — a CHILD process. CHECK_DETAIL_FILE
+# has to be exported for its redirect to resolve at all; unexported, the child
+# saw an empty name, the redirect failed as `ambiguous redirect`, only
+# audit.sh's own in-process append landed, and this scrub assertion passed
+# without the scrub ever running. Both items must be here, the first scrubbed.
+jq -e --arg leaked '$HOME/leaked/path' \
+    '.checks[0].failing_items == [$leaked, "test_kanban_autopr_dashboard.sh"]' \
+    "$TMP_DIR/audit-scrub.json" >/dev/null
+! grep -qF "$HOME/leaked" "$TMP_DIR/audit-scrub.json"
+grep -qF 'failing_items' "$AUDIT_DIR/audit.sh"
+grep -qF 'export CHECK_DETAIL_FILE' "$AUDIT_DIR/audit.sh"
+# Recording may not fail quietly: audit.sh runs without `set -e`, so a jq that
+# failed here used to drop the whole check — status, class and all — out of
+# `.checks[]` and out of the repairable/operator counts.
+grep -qF 'could not record check' "$AUDIT_DIR/audit.sh"
+printf 'PASS: failing_items is scrubbed and a check can never vanish from the results\n'

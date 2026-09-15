@@ -65,9 +65,13 @@ record() {
     fp="$(fingerprint_of "$audit")"
     [ -n "$fp" ] || exit 0
     mkdir -p "$(dirname "$LEDGER")"
+    # `failing_checks_detail` names the item inside each failing check (the
+    # contract suite that failed, for contract_tests) so an operator reading
+    # the ledger or the dashboard knows WHAT failed, not just which check.
     jq -cn --arg fp "$fp" --arg outcome "$outcome" --argjson now "$NOW" \
         --argjson failing "$(jq -c '[.checks[]? | select(.status == "fail" and .repairability == "repo") | .id]' "$audit")" \
-        '{fingerprint:$fp,outcome:$outcome,recorded_at:$now,failing_checks:$failing}' > "$LEDGER.tmp"
+        --argjson detail "$(jq -c '[.checks[]? | select(.status == "fail" and .repairability == "repo") | {key: .id, value: (.failing_items // [])}] | from_entries' "$audit")" \
+        '{fingerprint:$fp,outcome:$outcome,recorded_at:$now,failing_checks:$failing,failing_checks_detail:$detail}' > "$LEDGER.tmp"
     mv "$LEDGER.tmp" "$LEDGER"
 }
 

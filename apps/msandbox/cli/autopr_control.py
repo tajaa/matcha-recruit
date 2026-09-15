@@ -360,8 +360,79 @@ def command(argv, *, env=None, timeout=60):
     return result.stdout
 
 
+# What a SIGTERM'd process reports. It is >= 128, which checkpoint.sh reads as
+# "the investigation was killed" — the one condition that lets a stall pause
+# the card behind an approval instead of striking its failure ledger.
+DEADLINE_EXIT = 143
+
+
+def terminate_session(proc: subprocess.Popen) -> None:
+    """Best-effort kill of the whole process group. Never raises.
+
+    Both callers below are on paths whose exit code is load-bearing: the
+    deadline path must return DEADLINE_EXIT and the pause path PAUSED_EXIT.
+    An exception here (the process exiting between poll() and killpg, or a
+    wait() that outlasts its timeout on a process wedged in uninterruptible
+    I/O) would instead fall into supervise()'s `except BaseException`, mark
+    the run `blocked` and exit non-zero — and checkpoint.sh would then read
+    a budget stop as a crash and strike the card's ledger for it.
+
+    Swallowing the timeout means this can return with the process STILL
+    RUNNING. The pause caller therefore re-checks before it moves the
+    checkout; the deadline caller does not need to, because it only returns
+    an exit code.
+    """
+    for sig, grace in ((signal.SIGTERM, 15), (signal.SIGKILL, 5)):
+        if proc.poll() is not None:
+            return
+        try:
+            os.killpg(proc.pid, sig)
+        except OSError:
+            return
+        try:
+            proc.wait(timeout=grace)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def stop_sandbox_container() -> None:
+    """Stop this lane's container. Best-effort: never raises.
+
+    The model runs inside Docker, so terminating the host `docker exec`
+    client alone leaves it writing to the bind-mounted clone. Failing to
+    stop it is worth a loud line on the activity log, never a non-zero
+    supervisor exit — unlike the pause path, which must not transfer a
+    checkout out from under a live writer and so lets the error propagate.
+
+    An unset AUTOPR_MSANDBOX_BIN is reported rather than silently skipped:
+    the container then outlives the deadline, which is precisely what the
+    caller's ordering exists to prevent, and a silent no-op makes that
+    invisible. run-codex-sandboxed.sh always sets it; anything else is a
+    caller that has to be fixed.
+    """
+    msandbox_bin = os.environ.get("AUTOPR_MSANDBOX_BIN")
+    if not msandbox_bin:
+        print(
+            "\nAutoPR cannot stop the sandbox container: AUTOPR_MSANDBOX_BIN is "
+            "unset, so the model's container may outlive this supervisor.",
+            flush=True,
+        )
+        return
+    try:
+        command([msandbox_bin, "stop"], env=os.environ.copy(), timeout=60)
+    except Exception as exc:  # noqa: BLE001 - diagnostic only
+        print(f"\nAutoPR could not stop the sandbox container: {exc}", flush=True)
+
+
 def supervisor(
-    card_path: Path, workspace: Path, repo: Path, project: str, argv: list[str]
+    card_path: Path,
+    workspace: Path,
+    repo: Path,
+    project: str,
+    argv: list[str],
+    *,
+    deadline: int = 0,
 ) -> int:
     card = read_json(card_path)
     task_id, project_id = (
@@ -402,6 +473,12 @@ def supervisor(
     )
     log = run_dir(run.id) / "activity.log"
     proc = None
+    # The model's own time budget, enforced here rather than by the workflow
+    # step timeout so the harness keeps a grace window after the model stops:
+    # a step timeout that lands during post-model validation used to discard
+    # a finished decision (run 34728683748 wrote decision.json at 00:53:33Z
+    # and was killed at 00:54:05Z, then re-ran the model from scratch).
+    deadline_at = time.monotonic() + deadline if deadline > 0 else None
     try:
         with log.open("wb") as stream, log.open("rb") as reader:
             os.chmod(log, 0o600)
@@ -418,6 +495,33 @@ def supervisor(
                 run = load(run.id)
                 stopping = run.status == "pausing"
                 done = proc.poll()
+                if (
+                    deadline_at is not None
+                    and not stopping
+                    and done is None
+                    and time.monotonic() >= deadline_at
+                ):
+                    # Stop the container BEFORE the host exec client, for
+                    # the same reason the pause branch below does: the model
+                    # lives in Docker, and killing only this side of the exec
+                    # leaves it editing the clone and spending quota until
+                    # the workflow's Checkpoint step gets around to stopping
+                    # it — inside the very window investigate.sh's EXIT trap
+                    # uses to halt in-flight snapshots.
+                    stop_sandbox_container()
+                    terminate_session(proc)
+                    with locked():
+                        run = load(run.id)
+                        if run.status != "pausing":
+                            run.status = "failed"
+                            run.error = f"Model deadline reached after {deadline} s"
+                            save(run)
+                    sys.stdout.buffer.write(reader.read())
+                    sys.stdout.buffer.write(
+                        f"\nAutoPR model deadline reached after {deadline} s; terminated.\n".encode()
+                    )
+                    sys.stdout.buffer.flush()
+                    return DEADLINE_EXIT
                 if not stopping and done is not None:
                     with locked():
                         run = load(run.id)
@@ -438,9 +542,19 @@ def supervisor(
                         env=os.environ.copy(),
                         timeout=60,
                     )
+                    terminate_session(proc)
+                    # terminate_session never raises, so it can return with the
+                    # process still alive (wedged in uninterruptible I/O past
+                    # SIGKILL). Transferring the checkout out from under a live
+                    # writer would hand the operator a torn tree; the earlier
+                    # `proc.wait(timeout=15)` refused that by raising. Keep the
+                    # refusal: `except BaseException` below marks the run
+                    # `blocked` and leaves the workspace where it is.
                     if proc.poll() is None:
-                        os.killpg(proc.pid, signal.SIGTERM)
-                    proc.wait(timeout=15)
+                        raise RuntimeError(
+                            "model process survived SIGKILL; refusing to move the "
+                            "checkout out from under a live writer"
+                        )
                     destination = run_dir(run.id) / "workspace"
                     transfer_checkout(workspace, destination)
                     with locked():
@@ -478,8 +592,17 @@ def supervisor(
             save(run)
         raise
     finally:
+        # Unguarded, this raises PAST an already-executed `return
+        # DEADLINE_EXIT` / `PAUSED_EXIT` — a `finally` runs after the return
+        # value is fixed but can still replace it with an exception, and it
+        # sits outside the `except BaseException` above. The supervisor then
+        # exits 1 with a traceback, investigate.sh sees a status < 128 and
+        # flattens it, and the budget stop becomes an `investigate` strike.
         if proc is not None and proc.poll() is None:
-            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except OSError:
+                pass
 
 
 def manual_environment(
@@ -904,6 +1027,12 @@ def main() -> int:
     p.add_argument("--workspace", type=Path, required=True)
     p.add_argument("--repo", type=Path, required=True)
     p.add_argument("--project", required=True)
+    p.add_argument(
+        "--deadline",
+        type=int,
+        default=0,
+        help="seconds the model may run before its session is terminated (0 = no limit)",
+    )
     p.add_argument("argv", nargs=argparse.REMAINDER)
     p = sub.add_parser("held")
     p.add_argument("task")
@@ -921,7 +1050,12 @@ def main() -> int:
     args = parser.parse_args()
     if args.action == "supervise":
         return supervisor(
-            args.card, args.workspace, args.repo, args.project, args.argv[1:]
+            args.card,
+            args.workspace,
+            args.repo,
+            args.project,
+            args.argv[1:],
+            deadline=max(0, args.deadline),
         )
     if args.action == "held":
         run = held_task(args.task)

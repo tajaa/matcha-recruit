@@ -44,12 +44,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          # This self-hosted runner's client/node_modules is pre-installed
-          # and persists between runs — verify.sh symlinks it into the
-          # baseline worktree read-only rather than running `npm ci` here.
+          # verify.sh reads the runner-owned toolchain under
+          # ~/.cache/matcha-autofix (harness/provision-verify-toolchain.sh)
+          # and symlinks its node_modules into this checkout's client/ and
+          # the baseline worktree; it never runs `npm ci` or `pip` here.
           # The default `clean: true` runs `git clean -ffdx` before checkout,
-          # which wipes that gitignored directory every run and silently
-          # disables client verification (CLIENT_DEPS_READY always false).
+          # which would drop that gitignored symlink every run — harmless
+          # now, but `clean: false` also keeps the persistent clone's other
+          # ignored state (venv-less by design) stable between runs.
           clean: false
 
       - name: Require msandbox master switch
@@ -134,6 +136,31 @@ jobs:
           else
             git fetch --quiet --force origin main:main
           fi
+
+      - name: Keep the installed dispatcher tree on main
+        # The LaunchAgents run a COPY of harness/ under ~/.local/share that
+        # never auto-updated: three times in the week of 2026-09-08 a merged
+        # fix (a dead-login guard among them) sat uninstalled for days. This
+        # runner is that same Mac and user, so syncing the copy from here
+        # installs only reviewed code. Runtime files only; plists/launchctl
+        # stay with the full installer. Best-effort: a failed sync must not
+        # stop the lane.
+        continue-on-error: true
+        run: |
+          # From a `git archive main` extract, never from the working tree.
+          # This is the one step in this job that installs code onto the
+          # host, and it runs on every pass — before, and outside of, the
+          # trusted control-plane archive every other harness call here goes
+          # through, which is only built once a card has been selected. The
+          # reset step above is not a substitute: on the branch where the
+          # checkout is not on main it force-updates the main REF and leaves
+          # the worktree where it found it.
+          staging="$RUNNER_TEMP/autopr-runtime-main"
+          rm -rf "$staging"
+          mkdir -p "$staging"
+          git archive main apps/msandbox/harness apps/msandbox/cli | tar -x -C "$staging"
+          cd "$staging"
+          ./apps/msandbox/harness/install-launch-agent.sh --runtime-if-stale
 
       - name: Configure GitHub CLI
         env:
@@ -310,7 +337,12 @@ jobs:
           "$AUTOPR_CONTROL_ROOT/harness/runtime-policy.sh" \
             "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/runtime-policy.json"
           echo "minutes=$(jq -r '.minutes' "$RUNNER_TEMP/runtime-policy.json")" >> "$GITHUB_OUTPUT"
-          jq '{minutes,extended,checkpoint,approval_event_id:.source_event_id}' \
+          # The model's budget vs the step's: the supervisor terminates the
+          # model at `minutes`; the step allows `step_minutes` so sandbox
+          # start-up and post-model validation never cut a finished decision
+          # short (run 34728683748 lost one to the old shared timeout).
+          echo "step_minutes=$(jq -r '.step_minutes // (.minutes + 3)' "$RUNNER_TEMP/runtime-policy.json")" >> "$GITHUB_OUTPUT"
+          jq '{minutes,step_minutes,extended,checkpoint,approval_event_id:.source_event_id}' \
             "$RUNNER_TEMP/runtime-policy.json" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create or check out task branch
@@ -352,10 +384,16 @@ jobs:
       - name: Investigate
         id: investigate
         if: steps.select.outputs.skip == 'false'
-        timeout-minutes: ${{ fromJSON(steps.runtime.outputs.minutes || '20') }}
+        timeout-minutes: ${{ fromJSON(steps.runtime.outputs.step_minutes || '23') }}
         continue-on-error: true
         env:
           SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+          # The model's own budget (policy minutes); the step above it has a
+          # grace window on top. Digits from runtime-policy.sh, never user text.
+          AUTOPR_MODEL_MINUTES: ${{ steps.runtime.outputs.minutes || '20' }}
+          # Why a failed pass failed (model|auth|usage_limit|infrastructure);
+          # Cleanup strikes the card's ledger only for `model`.
+          AUTOPR_FAULT_CLASS_FILE: ${{ runner.temp }}/investigation-fault-class
           # Fail closed into the dedicated container/volume namespace. The
           # helper also mounts an empty AWS directory and never passes this
           # step's GitHub, Matcha, or production credentials through.
@@ -372,6 +410,8 @@ jobs:
         run: |
           date +%s > "$RUNNER_TEMP/investigation-started-at"
           rm -rf "$RUNNER_TEMP/research-artifacts"
+          [[ "$AUTOPR_MODEL_MINUTES" =~ ^[0-9]+$ ]] || AUTOPR_MODEL_MINUTES=20
+          export AUTOPR_MODEL_BUDGET_SECONDS=$((AUTOPR_MODEL_MINUTES * 60))
           "$AUTOPR_CONTROL_ROOT/harness/investigate.sh" "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json"
 
       - name: Checkpoint interrupted investigation
@@ -392,6 +432,7 @@ jobs:
             "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json" \
             "$started_at" "${{ steps.runtime.outputs.minutes || '20' }}")"
           echo "path=$checkpoint" >> "$GITHUB_OUTPUT"
+          echo "runtime_limited=$(jq -r '.runtime_limited // false' "$checkpoint/metadata.json" 2>/dev/null || echo false)" >> "$GITHUB_OUTPUT"
           {
             echo "## Interrupted investigation checkpoint"
             jq . "$checkpoint/metadata.json"
@@ -400,13 +441,24 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail incomplete investigation
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome != 'success'
+        # A run the checkpoint classified as runtime-limited is a clean pause:
+        # the card already says PAUSED and waits for approval, and Cleanup
+        # journals it as such. Failing the job for it made every pause read
+        # as a broken run in the run list and the dispatcher's notifications.
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome != 'success' && steps.checkpoint.outputs.runtime_limited != 'true'
         run: |
           # Partial work is already safe in the local checkpoint.
           git reset --hard HEAD
           git clean -fd
           echo "Investigation failed before producing a valid report. Any partial output was checkpointed before cleanup." >> "$GITHUB_STEP_SUMMARY"
           exit 1
+
+      - name: Park a runtime-limited investigation
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome != 'success' && steps.checkpoint.outputs.runtime_limited == 'true'
+        run: |
+          git reset --hard HEAD
+          git clean -fd
+          echo "Investigation hit its time budget; the checkpoint is saved and the card is parked for approval. Not a failure." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Read validated triage decision
         id: triage
@@ -451,11 +503,19 @@ jobs:
       - name: Verify (baseline vs branch)
         id: verify
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true' && steps.triage.outputs.safe_changes == 'true' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.outcome != 'artifact'
-        timeout-minutes: 8
+        # Verification was a no-op for two weeks (the runner had no toolchain
+        # to read) and the 8 minutes it kept were never tested against real
+        # work: a client-touching PR now runs pytest in two trees plus two
+        # full `tsc -p tsconfig.app.json` passes over the SPA plus vitest.
+        timeout-minutes: 20
         run: |
+          rm -f "$AUTOFIX_VERIFY_STARTED_FILE"
           "$AUTOPR_CONTROL_ROOT/error-autofix/verify.sh" > "$RUNNER_TEMP/verification.md"
         env:
           AUTOFIX_BASE_SHA: ${{ steps.branch.outputs.sha }}
+          # Written by verify.sh as its first act. Cleanup reads its presence
+          # to tell a killed run from a harness that never started.
+          AUTOFIX_VERIFY_STARTED_FILE: ${{ runner.temp }}/verify-started
 
       - name: Record verification deferred for questions or no-safe-action
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true' && steps.triage.outputs.safe_changes != 'true' && steps.select.outputs.outcome != 'artifact'
@@ -538,6 +598,7 @@ jobs:
           INVESTIGATE_OUTCOME: ${{ steps.investigate.outcome }}
           INVESTIGATE_PAUSED: ${{ steps.investigate.outputs.paused }}
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+          VERIFY_STARTED_FILE: ${{ runner.temp }}/verify-started
           PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
           PUBLISH_ARTIFACT_OUTCOME: ${{ steps.publish_artifact.outcome }}
           PUBLISH_REFUSAL_REASON: ${{ steps.publish.outputs.refusal_reason }}
@@ -548,6 +609,9 @@ jobs:
           # Inputs for the per-run journal attached to the card below.
           CHECKPOINT_PATH: ${{ steps.checkpoint.outputs.path }}
           BRANCH_BASE_SHA: ${{ steps.branch.outputs.sha }}
+          # Why the model pass failed, from the sandbox bridge
+          # (model|auth|usage_limit|infrastructure).
+          FAULT_CLASS_FILE: ${{ runner.temp }}/investigation-fault-class
         run: |
           # Record how this run ended before anything else: the ledger is
           # what stops a card that fails the same way every time from being
@@ -567,6 +631,12 @@ jobs:
               "$AUTOPR_CONTROL_ROOT/harness/lib.sh" "$@" \
               || printf 'warning: could not record the run outcome for %s\n' "$1" >&2
           }
+          # Cooldown only, no strike. Same best-effort contract.
+          mark_attempt() {
+            bash -c 'source "$1"; shift; autopr_mark_attempt "$@"' _ \
+              "$AUTOPR_CONTROL_ROOT/harness/lib.sh" "$@" \
+              || printf 'warning: could not start the cooldown for %s\n' "$1" >&2
+          }
           task_id="$(jq -r '.task_id' "$RUNNER_TEMP/card.json")"
           # The checkpoint is the authority on "this run hit its time budget",
           # and BOTH consumers have to read it. A timeout arrives here as
@@ -582,15 +652,41 @@ jobs:
             && [ "$(jq -r '.runtime_limited // false' "$CHECKPOINT_PATH/metadata.json" 2>/dev/null)" = true ]; then
             runtime_limited=true
           fi
+          # Only `model` is the card's fault. A dead login, an exhausted
+          # quota, or a sandbox that never started is lane-wide, and striking
+          # the card for it walked innocent cards toward [autopr:parked]
+          # (three identical strikes) during one evening of expired login.
+          fault_class=model
+          if [ -s "$FAULT_CLASS_FILE" ]; then
+            fault_class="$(tr -dc 'a-z_' < "$FAULT_CLASS_FILE" | cut -c1-32)"
+          fi
+          lane_fault=false
           run_reason=""
           if [ "$runtime_limited" = true ]; then
             :
           elif [ -n "$PUBLISH_REFUSAL_REASON" ]; then
             run_reason="$PUBLISH_REFUSAL_REASON"
           elif [ "$INVESTIGATE_OUTCOME" = failure ] && [ "$INVESTIGATE_PAUSED" != true ]; then
-            run_reason=investigate
+            case "$fault_class" in
+              auth|usage_limit|infrastructure|budget) run_reason="$fault_class"; lane_fault=true ;;
+              *) run_reason=investigate ;;
+            esac
           elif [ "$VERIFY_OUTCOME" = failure ]; then
-            run_reason=verify
+            # verify.sh always exits 0 — a failing branch is reported IN its
+            # table, never as a status. So a failure here is never the card's:
+            # striking it for a machine-speed timeout parked innocent cards
+            # after three passes. But "not the card's" must not collapse into
+            # "nothing is wrong": a verify.sh that cannot start at all (missing
+            # from the control-plane archive, not executable, a broken source)
+            # would otherwise re-burn a model pass on every card forever behind
+            # a journal line saying nothing failed. The started marker splits
+            # the two, and the journal says which.
+            if [ -s "$VERIFY_STARTED_FILE" ]; then
+              run_reason=verify_timeout
+            else
+              run_reason=verify_broken
+            fi
+            lane_fault=true
           elif [ "$PUBLISH_OUTCOME" = failure ]; then
             run_reason=publish
           elif [ "$PUBLISH_ARTIFACT_OUTCOME" = failure ]; then
@@ -600,8 +696,16 @@ jobs:
             # coverage, open-PR check): still a failure the ledger must count.
             run_reason=setup
           fi
-          if [ -n "$run_reason" ]; then
+          if [ -n "$run_reason" ] && [ "$lane_fault" != true ]; then
             record_outcome "$task_id" failure "$run_reason"
+          elif [ "$lane_fault" = true ]; then
+            # No strike — but the card still has to cool down. Without a
+            # marker select.sh's cooldown gate has nothing to read, and a
+            # standing fault (a docker daemon that is down, a full disk;
+            # `infrastructure` has no lane-wide hold the way `auth` and
+            # `usage_limit` do) re-selects this same card every pass.
+            mark_attempt "$task_id"
+            echo "No ledger strike: the pass failed for a lane-wide reason ($run_reason), not the card's. The card is cooling down, not parked." >> "$GITHUB_STEP_SUMMARY"
           elif [ "$JOB_STATUS" = cancelled ]; then
             # An operator cancel is neither a success nor a strike; the
             # cooldown marker stays as it was.

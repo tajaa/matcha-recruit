@@ -143,6 +143,49 @@ def dispatcher_drift(
     return stale
 
 
+# The verification toolchain verify.sh reads (a venv + client node_modules
+# under ~/.cache/matcha-autofix) has ONE implementation, in shell, shared with
+# audit.sh; Python only shells out so the key and the probe cannot drift.
+VERIFY_TOOLCHAIN_PROVISIONER = "apps/msandbox/harness/provision-verify-toolchain.sh"
+
+
+def verify_toolchain_status(*, repo_root: Path | None = None) -> tuple[bool, list[str]]:
+    """(current?, report lines) for the runner-owned verification toolchain."""
+    root = (repo_root or source_root()).resolve()
+    script = root / VERIFY_TOOLCHAIN_PROVISIONER
+    if not script.is_file():
+        return False, [f"verification toolchain: unmeasurable ({script} missing)"]
+    # A timeout is mandatory here: `harness/hooks/post-merge` runs
+    # `msandbox doctor` synchronously on every pull onto main, and that hook's
+    # own contract is that it must never slow down or fail a merge. A `shasum`
+    # over a lockfile on a stalled network mount, or a `stat` under a
+    # disconnected volume, would otherwise hang `git pull` with no output.
+    try:
+        result = subprocess.run(
+            ["/bin/bash", str(script), "--check", "--repo", str(root)],
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return False, ["verification toolchain: unmeasurable (--check timed out after 30s)"]
+    lines = [line for line in (result.stdout + result.stderr).splitlines() if line.strip()]
+    if result.returncode not in (0, 3):
+        lines.append(f"verification toolchain: check failed (exit {result.returncode})")
+        return False, lines
+    return result.returncode == 0, lines
+
+
+def provision_verify_toolchain(*, repo_root: Path | None = None) -> None:
+    """Build the verification toolchain; raises CalledProcessError on failure."""
+    root = (repo_root or source_root()).resolve()
+    subprocess.run(
+        ["/bin/bash", str(root / VERIFY_TOOLCHAIN_PROVISIONER), "--repo", str(root)],
+        check=True,
+    )
+
+
 def install_dispatcher(*, repo_root: Path | None = None) -> bool:
     """Re-run the LaunchAgent installer when a dispatcher is already installed.
 

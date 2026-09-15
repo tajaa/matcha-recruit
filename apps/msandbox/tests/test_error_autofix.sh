@@ -518,6 +518,235 @@ check "verify.sh with no interpreter reports unverified (AUTOFIX_NEW_FAILURES=1)
   $(grep -q '^AUTOFIX_NEW_FAILURES=1$' "$verify_env" && echo 0 || echo 1)
 
 ################################################################################
+# verify.sh — the runner-owned toolchain. The runner is a launchd job, and
+# macOS drops a launchd job's ~/Documents grant whenever its binary changes
+# (the 2026-08-31 runner self-update): from then to 09-14 every bot PR said
+# "no usable Python interpreter" while the dev venv worked from a terminal.
+# So: no ~/Documents default, and a cache under ~/.cache that verify.sh
+# reads and provision-verify-toolchain.sh writes, keyed by toolchain.sh.
+################################################################################
+check "verify.sh has no default that reaches into ~/Documents (code lines, comments may explain why)" \
+  $(! grep -vE '^[[:space:]]*#' "$AUTOFIX_DIR/verify.sh" | grep -q 'Documents' && echo 0 || echo 1)
+check "verify.sh and the provisioner share one key helper" \
+  $(grep -q '\. "\$SCRIPT_DIR/toolchain.sh"' "$AUTOFIX_DIR/verify.sh" \
+    && grep -q 'error-autofix/toolchain.sh' "$AUTOFIX_DIR/../harness/provision-verify-toolchain.sh" && echo 0 || echo 1)
+
+source "$AUTOFIX_DIR/toolchain.sh"
+TOOLCHAIN_CACHE="$TMP_DIR/toolchain-cache"
+provisioner="$AUTOFIX_DIR/../harness/provision-verify-toolchain.sh"
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" "$provisioner" --check --repo "$VERIFY_REPO" > "$TMP_DIR/toolchain-check.out" 2>&1
+check "provisioner --check reports a missing toolchain with exit 3" \
+  $([ "$?" -eq 3 ] && grep -q 'python: MISSING' "$TMP_DIR/toolchain-check.out" \
+    && grep -q 'client: MISSING' "$TMP_DIR/toolchain-check.out" && echo 0 || echo 1)
+
+# A cached venv under the keyed path is found with no override set at all.
+cached_venv="$(AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" autofix_venv_dir "$VERIFY_REPO")"
+mkdir -p "$cached_venv/bin"
+cp "$TMP_DIR/fake-python" "$cached_venv/bin/python"
+: > "$verify_env"
+verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
+    AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" FAKE_PYTEST_RC=0 \
+    RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" 2>/dev/null)"
+check "verify.sh uses the cached toolchain venv and renders a real pytest row" \
+  $(grep -q '| pytest server/tests/app | 0 failed | 0 failed |' <<< "$verify_out" \
+    && ! grep -q 'unavailable' <<< "$verify_out" \
+    && grep -q '^AUTOFIX_NEW_FAILURES=0$' "$verify_env" && echo 0 || echo 1)
+
+# A client change with no node_modules in the tree: the cached client
+# toolchain is symlinked into both trees and the TypeScript row renders.
+(
+    cd "$VERIFY_REPO" && mkdir -p client/src \
+    && printf '{"name":"x","version":"0.0.0"}\n' > client/package.json \
+    && printf '{"name":"x","lockfileVersion":3}\n' > client/package-lock.json \
+    && printf 'export const a = 1;\n' > client/src/a.ts \
+    && git add -A && git commit -q -m client-base
+)
+printf 'export const a = 2;\n' > "$VERIFY_REPO/client/src/a.ts"
+cached_node="$(AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" autofix_node_root "$VERIFY_REPO")/node_modules"
+mkdir -p "$cached_node/.bin"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$cached_node/.bin/tsc"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$cached_node/.bin/vitest"
+chmod +x "$cached_node/.bin/tsc" "$cached_node/.bin/vitest"
+: > "$verify_env"
+verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
+    AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" FAKE_PYTEST_RC=0 \
+    RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" 2>/dev/null)"
+# The cache is linked into the branch tree for the run and unlinked after it.
+# `AUTOPR_WORKSPACE_ROOT` can name any checkout, and a link left pointing into
+# the shared cache turns a later `npm ci` in that clone into an in-place
+# rewrite of the runner-owned toolchain every lane reads.
+check "verify.sh typechecks against the cached client toolchain and leaves the tree unchanged" \
+  $(grep -q '| TypeScript | 0 diagnostics | 0 diagnostics |' <<< "$verify_out" \
+    && ! grep -q 'no client toolchain' <<< "$verify_out" \
+    && [ ! -e "$VERIFY_REPO/client/node_modules" ] && [ ! -L "$VERIFY_REPO/client/node_modules" ] \
+    && grep -q '^AUTOFIX_NEW_FAILURES=0$' "$verify_env" && echo 0 || echo 1)
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" "$provisioner" --check --repo "$VERIFY_REPO" >/dev/null 2>&1
+check "provisioner --check is current once both keyed directories are usable" $([ "$?" -eq 0 ] && echo 0 || echo 1)
+# A real directory in the tree is never replaced by the cache symlink.
+rm -f "$VERIFY_REPO/client/node_modules"
+mkdir -p "$VERIFY_REPO/client/node_modules/.bin"
+printf '#!/usr/bin/env bash\necho "src/a.ts(1,1): error TS1: real tree" >&2\nexit 1\n' > "$VERIFY_REPO/client/node_modules/.bin/tsc"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$VERIFY_REPO/client/node_modules/.bin/vitest"
+chmod +x "$VERIFY_REPO/client/node_modules/.bin/tsc" "$VERIFY_REPO/client/node_modules/.bin/vitest"
+verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
+    AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" FAKE_PYTEST_RC=0 \
+    RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" 2>/dev/null)"
+check "verify.sh prefers a real node_modules in the tree over the cache and never replaces it" \
+  $([ ! -L "$VERIFY_REPO/client/node_modules" ] \
+    && grep -q '| TypeScript | 1 diagnostics | 1 diagnostics |' <<< "$verify_out" && echo 0 || echo 1)
+# A branch tree carrying a real-but-broken node_modules (an interrupted
+# `npm install`: no .bin/tsc) must report unavailable. Linking only the
+# baseline to the cache and leaving the branch broken is the worst outcome
+# available: the branch's tsc exits 127, prints no `error TS` lines, and
+# `comm -13` reports zero regressions — a PR that ADDS type errors would
+# publish as verified-clean.
+rm -rf "$VERIFY_REPO/client/node_modules"
+mkdir -p "$VERIFY_REPO/client/node_modules/.bin"
+: > "$verify_env"
+verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
+    AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" FAKE_PYTEST_RC=0 \
+    RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" 2>/dev/null)"
+check "a broken node_modules in the branch tree reports unavailable, never a false green" \
+  $(grep -q 'no client toolchain usable from the branch tree' <<< "$verify_out" \
+    && ! grep -q '| TypeScript | ' <<< "$verify_out" \
+    && grep -q '^AUTOFIX_NEW_FAILURES=1$' "$verify_env" && echo 0 || echo 1)
+
+# A link left behind by a hard-killed run dangles as soon as
+# provision-verify-toolchain.sh prunes that key. Nothing else removes it, and
+# while it sits there the `! -L` test keeps matching — so a real node_modules
+# installed here later would never be preferred again.
+rm -rf "$VERIFY_REPO/client/node_modules"
+# Ours — it points inside the cache root verify.sh is told to use.
+ln -s "$TMP_DIR/pruned-cache/client-prunedkey/node_modules" "$VERIFY_REPO/client/node_modules"
+verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
+    AUTOFIX_CACHE_DIR="$TMP_DIR/pruned-cache" FAKE_PYTEST_RC=0 \
+    RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" 2>/dev/null)"
+check "a node_modules link left dangling by a pruned key is removed, not kept" \
+  $([ ! -L "$VERIFY_REPO/client/node_modules" ] && [ ! -e "$VERIFY_REPO/client/node_modules" ] \
+    && grep -q 'no client toolchain' <<< "$verify_out" && echo 0 || echo 1)
+
+# A symlink the tree already had, pointing at a usable tree OUTSIDE our cache
+# (a shared or pnpm-style store), is not ours: it is the dependency source,
+# and a read-only verification run must neither replace nor delete it.
+rm -rf "$VERIFY_REPO/client/node_modules"
+foreign_modules="$TMP_DIR/foreign-node-modules"
+mkdir -p "$foreign_modules/.bin"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$foreign_modules/.bin/tsc"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$foreign_modules/.bin/vitest"
+chmod +x "$foreign_modules/.bin/tsc" "$foreign_modules/.bin/vitest"
+ln -s "$foreign_modules" "$VERIFY_REPO/client/node_modules"
+: > "$verify_env"
+verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
+    AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" FAKE_PYTEST_RC=0 \
+    RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" 2>/dev/null)"
+check "a symlinked node_modules the tree already had is used, not clobbered or deleted" \
+  $([ -L "$VERIFY_REPO/client/node_modules" ] \
+    && [ "$(readlink "$VERIFY_REPO/client/node_modules")" = "$foreign_modules" ] \
+    && grep -q '| TypeScript | 0 diagnostics | 0 diagnostics |' <<< "$verify_out" \
+    && ! grep -q 'no client toolchain' <<< "$verify_out" && echo 0 || echo 1)
+rm -f "$VERIFY_REPO/client/node_modules"
+
+# The Verify step has a timeout; a bash killed by SIGTERM with the default
+# disposition never runs its EXIT trap, so the planted link would survive in
+# the persistent (`clean: false`) checkout.
+check "verify.sh cleans up on a signal, not only on a normal exit" \
+  $(grep -q "trap 'cleanup; exit 143' TERM" "$AUTOFIX_DIR/verify.sh" \
+    && grep -q "trap 'cleanup; exit 130' INT" "$AUTOFIX_DIR/verify.sh" && echo 0 || echo 1)
+
+# A concurrent lane's cache entry survives a provision from a tree whose
+# manifests differ: without the holder refcount, `prune_stale` rm -rfs the
+# venv and node_modules a running verify.sh is symlinked into — pytest dies
+# mid-suite and both tsc calls 127 through dangling links.
+held_venv="$(AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" autofix_venv_dir "$VERIFY_REPO")"
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" autofix_hold_toolchain "$held_venv"
+OTHER_REPO="$TMP_DIR/other-repo"
+mkdir -p "$OTHER_REPO/server" "$OTHER_REPO/client"
+printf 'b\n' > "$OTHER_REPO/server/requirements.txt"
+printf '{"name":"y","lockfileVersion":3}\n' > "$OTHER_REPO/client/package-lock.json"
+printf '{"name":"y","version":"0.0.0"}\n' > "$OTHER_REPO/client/package.json"
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" PY312=/nonexistent AUTOFIX_NPM_BIN=/nonexistent \
+    "$provisioner" --repo "$OTHER_REPO" > "$TMP_DIR/prune.out" 2>&1
+check "prune_stale keeps a cache entry a running lane still holds" \
+  $([ -d "$held_venv" ] && grep -q 'in use by a running lane' "$TMP_DIR/prune.out" && echo 0 || echo 1)
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" autofix_release_toolchain "$held_venv"
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" PY312=/nonexistent AUTOFIX_NPM_BIN=/nonexistent \
+    "$provisioner" --repo "$OTHER_REPO" > "$TMP_DIR/prune2.out" 2>&1
+check "prune_stale collects it once the holder is gone" \
+  $([ ! -d "$held_venv" ] && echo 0 || echo 1)
+
+# Nothing else ever reclaimed another run's staging directory: build_python
+# and build_node only remove their OWN `$$` path, and prune_stale used to
+# `continue` past every `*.tmp.*`. A venv is ~1 GB, so interrupted runs
+# accumulated silently.
+live_tmp="$TOOLCHAIN_CACHE/venv-py312-liveheld.tmp.$$"
+dead_tmp="$TOOLCHAIN_CACHE/venv-py312-orphaned.tmp.999999"
+mkdir -p "$live_tmp" "$dead_tmp"
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" PY312=/nonexistent AUTOFIX_NPM_BIN=/nonexistent \
+    "$provisioner" --repo "$OTHER_REPO" > "$TMP_DIR/prune-tmp.out" 2>&1
+check "an abandoned staging directory is reclaimed, a live one is not" \
+  $([ ! -d "$dead_tmp" ] && [ -d "$live_tmp" ] \
+    && grep -q 'pruned abandoned staging directory' "$TMP_DIR/prune-tmp.out" \
+    && grep -q 'kept (build in flight)' "$TMP_DIR/prune-tmp.out" && echo 0 || echo 1)
+rm -rf "$live_tmp"
+
+# A build that finished but could not be installed (a lane started reading the
+# live entry meanwhile) left its tree at `<entry>.tmp.<pid>` — and NOTHING ever
+# promoted it: python_current/node_current probe only the real path, so the
+# next run rebuilt from scratch, and prune_stale then deleted the ~1 GB staged
+# tree as soon as that pid was dead. Every lane-contended build cost a full
+# rebuild plus a full delete.
+other_node_root="$(AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" autofix_node_root "$OTHER_REPO")"
+stage_node_tree() {
+    mkdir -p "$1/node_modules/.bin"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$1/node_modules/.bin/tsc"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$1/node_modules/.bin/vitest"
+    chmod +x "$1/node_modules/.bin/tsc" "$1/node_modules/.bin/vitest"
+}
+rm -rf "$other_node_root"
+adopt_tmp="$other_node_root.tmp.999998"
+stage_node_tree "$adopt_tmp"
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" PY312=/nonexistent AUTOFIX_NPM_BIN=/nonexistent \
+    "$provisioner" --repo "$OTHER_REPO" > "$TMP_DIR/adopt.out" 2>&1
+check "a staged tree an earlier run could not install is adopted, not rebuilt" \
+  $([ -x "$other_node_root/node_modules/.bin/tsc" ] && [ ! -d "$adopt_tmp" ] \
+    && grep -q 'adopted staged tree from an earlier run' "$TMP_DIR/adopt.out" && echo 0 || echo 1)
+
+# ...and while the real entry is current, prune_stale must leave a finished
+# staged tree for that same key alone: deleting it undoes the reclaim above
+# before it can happen. An INCOMPLETE one is still the leftover of a killed
+# run and is still collected.
+keep_tmp="$other_node_root.tmp.999997"
+junk_tmp="$other_node_root.tmp.999996"
+stage_node_tree "$keep_tmp"
+mkdir -p "$junk_tmp"
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" PY312=/nonexistent AUTOFIX_NPM_BIN=/nonexistent \
+    "$provisioner" --repo "$OTHER_REPO" > "$TMP_DIR/adopt-keep.out" 2>&1
+check "a finished staged tree for the current key is kept, an incomplete one is pruned" \
+  $([ -d "$keep_tmp" ] && [ ! -d "$junk_tmp" ] \
+    && grep -q 'kept (staged for the next build)' "$TMP_DIR/adopt-keep.out" && echo 0 || echo 1)
+rm -rf "$keep_tmp"
+
+# The in-use refcount has to be re-read after the build, not only before it:
+# a venv takes minutes to build and a lane that starts reading the old entry
+# in the meantime would have it deleted from under a running pytest.
+check "the build re-checks the refcount before it replaces a live entry" \
+  $(awk '/^build_python\(\)/,/^}/' "$provisioner" \
+      | grep -A 2 'autofix_python_usable "\$temporary/bin/python"' >/dev/null \
+    && [ "$(awk '/^build_python\(\)/,/^}/' "$provisioner" | grep -c 'autofix_toolchain_in_use') " = "2 " ] \
+    && [ "$(awk '/^build_node\(\)/,/^}/' "$provisioner" | grep -c 'autofix_toolchain_in_use') " = "2 " ] \
+    && echo 0 || echo 1)
+
+# A tree with only requirements-dev.txt has no key: build_python passes
+# requirements.txt to pip unconditionally, so a key there is a path that can
+# never become present.
+DEVONLY_REPO="$TMP_DIR/devonly-repo"
+mkdir -p "$DEVONLY_REPO/server"
+printf 'pytest\n' > "$DEVONLY_REPO/server/requirements-dev.txt"
+devonly_key_rc=0
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" autofix_venv_dir "$DEVONLY_REPO" >/dev/null 2>&1 || devonly_key_rc=$?
+check "a dev-only manifest set yields no python key" $([ "$devonly_key_rc" != 0 ] && echo 0 || echo 1)
+
+################################################################################
 # 10: publish.sh path guard — denylist and allowlist both fatal on bad paths
 ################################################################################
 FAKE_REPO="$TMP_DIR/fake-repo"

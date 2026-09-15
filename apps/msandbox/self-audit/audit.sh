@@ -7,8 +7,24 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+# Where the contract suites live. Overridable so the suite that tests THIS
+# script can point it at a fixture directory instead of running the real
+# suites (which take minutes and `git reset --hard` their fixture repos).
+AUDIT_TESTS_DIR="${AUTOPR_AUDIT_TESTS_DIR:-$REPO_ROOT/apps/msandbox/tests}"
+# Comma-separated check ids to run; empty runs everything. Test-only knob —
+# the workflow never sets it, and a model patch cannot reach the workflow.
+AUDIT_ONLY="${AUTOPR_AUDIT_ONLY:-}"
 JSON_FILE=""
 SUMMARY_FILE=""
+# A check may write one item per line here (run_check names it before each
+# check); the names land in the JSON as `failing_items` and in the ledger.
+CHECK_DETAIL_FILE=""
+# Exported: a check that runs an external process (the contract suites run as
+# `bash <file>`) cannot write to a variable this shell merely sets, and the
+# redirect there fails as `ambiguous redirect`. The header above promises any
+# check may write one item per line, and those are exactly the checks whose
+# items are absolute paths — the ones the scrub below exists for.
+export CHECK_DETAIL_FILE
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -33,7 +49,7 @@ check_core_shell_syntax() {
         "$REPO_ROOT/apps/msandbox/harness" \
         "$REPO_ROOT/apps/msandbox/error-autofix" \
         "$REPO_ROOT/apps/msandbox/scope" \
-        -type f -name '*.sh' -print | sort)
+        -type f \( -name '*.sh' -o -path '*/harness/hooks/*' \) -print | sort)
     bash -n "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh"
     python3 -m compileall -q "$REPO_ROOT/apps/msandbox/cli"
 }
@@ -115,27 +131,52 @@ check_control_plane_state() {
     }
 }
 
+# The suites this lane runs. Names only — the directory is AUDIT_TESTS_DIR.
+# tests/test_autopr_self_audit.sh asserts every name here exists there.
+CONTRACT_SUITES=(
+    test_agent_sandbox_lifecycle.sh
+    test_agent_sandbox_networking.sh
+    test_kanban_autopr.sh
+    test_kanban_autopr_dispatch.sh
+    test_kanban_autopr_dashboard.sh
+    test_kanban_autopr_publish.sh
+    test_kanban_autopr_card_control.sh
+    test_kanban_autopr_run_journal.sh
+    test_kanban_autopr_research.sh
+    test_kanban_autopr_email.sh
+    test_kanban_autopr_checkout_cleanup.sh
+    test_error_autofix.sh
+    test_autopr_scope.sh
+    test_autopr_coverage_lifecycle.sh
+    test_msandbox_attachments.sh
+    test_msandbox_sessions.sh
+    test_msandbox_worktrees.sh
+)
+
 check_contract_tests() {
-    local test_file
-    for test_file in \
-        test_agent_sandbox_lifecycle.sh \
-        test_agent_sandbox_networking.sh \
-        test_kanban_autopr.sh \
-        test_kanban_autopr_dispatch.sh \
-        test_kanban_autopr_dashboard.sh \
-        test_kanban_autopr_publish.sh \
-        test_kanban_autopr_card_control.sh \
-        test_kanban_autopr_run_journal.sh \
-        test_kanban_autopr_research.sh \
-        test_kanban_autopr_email.sh \
-        test_kanban_autopr_checkout_cleanup.sh \
-        test_error_autofix.sh \
-        test_autopr_scope.sh \
-        test_autopr_coverage_lifecycle.sh \
-        test_msandbox_attachments.sh \
-        test_msandbox_sessions.sh \
-        test_msandbox_worktrees.sh; do
-        bash "$REPO_ROOT/scripts/tests/$test_file" || return 1
+    local test_file missing=()
+    # A suite that is not where this script expects it is a defect in THIS
+    # capsule (the 2026-09-13 relocation moved scripts/tests → apps/msandbox/
+    # tests and this loop kept the old path: every audit failed, Codex was
+    # handed a "repo" failure it is forbidden to touch, and the ledger then
+    # blocked retries for a week). The capsule cannot be repaired by the
+    # model, so report it as an operator finding — exit 78 — never as a
+    # repo-repairable one.
+    for test_file in "${CONTRACT_SUITES[@]}"; do
+        [ -f "$AUDIT_TESTS_DIR/$test_file" ] || missing+=("$test_file")
+    done
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo "Contract suites missing from $AUDIT_TESTS_DIR: ${missing[*]}"
+        echo "Operator action: the audit's suite list (self-audit/audit.sh CONTRACT_SUITES) no longer matches the checkout; fix the list or restore the files. The sealed capsule cannot be repaired by the model."
+        [ -z "$CHECK_DETAIL_FILE" ] || printf '%s\n' "${missing[@]}" > "$CHECK_DETAIL_FILE"
+        return 78
+    fi
+    for test_file in "${CONTRACT_SUITES[@]}"; do
+        if ! bash "$AUDIT_TESTS_DIR/$test_file"; then
+            echo "FAILED SUITE: $test_file"
+            [ -z "$CHECK_DETAIL_FILE" ] || printf '%s\n' "$test_file" >> "$CHECK_DETAIL_FILE"
+            return 1
+        fi
     done
 }
 
@@ -144,6 +185,27 @@ check_built_toolchain() {
     docker image inspect matcha-agent-sandbox-workspace:latest >/dev/null 2>&1 || return 77
     docker run --rm --entrypoint bash matcha-agent-sandbox-workspace:latest -lc \
         'node --version && npm --version && npx --version && /opt/bootstrap/server-venv/bin/python -m pytest --version'
+}
+
+# verify.sh only READS the runner-owned toolchain (a venv + client
+# node_modules under ~/.cache/matcha-autofix); nothing in a lane builds it.
+# When it is missing, every bot PR is labelled needs-work for "could not
+# run" — which is on 100% of PRs and therefore invisible — so this is where
+# the outage becomes an operator action instead.
+check_verify_toolchain() {
+    local provisioner="$REPO_ROOT/apps/msandbox/harness/provision-verify-toolchain.sh"
+    # Not 77. A skip here would make this check disappear exactly when the
+    # capsule is broken — the same "invisible because it is on everything"
+    # failure it was added to catch. The provisioner ships in this repo, so
+    # its absence is an operator finding (78), never a missing precondition.
+    if [ ! -x "$provisioner" ]; then
+        echo "verification toolchain: unmeasurable ($provisioner is missing or not executable)"
+        echo "Operator action: restore apps/msandbox/harness/provision-verify-toolchain.sh (+x) in this checkout."
+        return 78
+    fi
+    "$provisioner" --check --repo "$REPO_ROOT" && return 0
+    echo "Operator action: run ./apps/msandbox/harness/provision-verify-toolchain.sh (or msandbox install --verify-toolchain). Until then no bot PR is verified and needs-work means 'could not run', not 'failed'."
+    return 1
 }
 
 check_installed_controller() {
@@ -201,24 +263,59 @@ check_installed_dispatcher() {
     return 1
 }
 
+# Exit-code contract for check functions:
+#   0   pass
+#   77  skip (the check's precondition is absent on this machine)
+#   78  fail, but OPERATOR-repairable regardless of the check's declared
+#       class — the failure is in the audit capsule or the machine, so
+#       handing it to the repair model would burn a run on something it is
+#       forbidden to touch
+#   *   fail in the declared class
 run_check() {
     local id="$1" title="$2" repairability="$3"
     shift 3
-    local output_file="$WORK_DIR/$id.log" rc status output next
+    if [ -n "$AUDIT_ONLY" ] && ! printf ',%s,' "$AUDIT_ONLY" | grep -qF ",$id,"; then
+        return 0
+    fi
+    local output_file="$WORK_DIR/$id.log" rc status output next failing_items
+    CHECK_DETAIL_FILE="$WORK_DIR/$id.failing"
+    export CHECK_DETAIL_FILE
+    rm -f "$CHECK_DETAIL_FILE"
     "$@" > "$output_file" 2>&1
     rc=$?
     case "$rc" in
         0) status=pass ;;
         77) status=skip ;;
+        78) status=fail; repairability=operator ;;
         *) status=fail ;;
     esac
     output="$(head -c 16000 "$output_file" | sed "s|$HOME|\$HOME|g; s|$REPO_ROOT|\$REPO_ROOT|g")"
+    # Same scrub as `output`: this file is the natural place for a check to
+    # write absolute paths, and these items are published in the audit JSON
+    # and the repair ledger.
+    failing_items='[]'
+    if [ -s "$CHECK_DETAIL_FILE" ]; then
+        failing_items="$(sed "s|$HOME|\$HOME|g; s|$REPO_ROOT|\$REPO_ROOT|g" "$CHECK_DETAIL_FILE" \
+            | jq -R . | jq -sc .)" || failing_items='[]'
+        [ -n "$failing_items" ] || failing_items='[]'
+    fi
+    CHECK_DETAIL_FILE=""
     next="$RESULTS_FILE.next"
-    jq --arg id "$id" --arg title "$title" --arg status "$status" \
+    # This script runs without `set -e`: a jq that failed here left `$next`
+    # unwritten, `mv` failed too, and the check VANISHED from `.checks[]` —
+    # taking its fail status and its contribution to repairable_failures /
+    # operator_failures with it. Recording is the one thing that may not fail
+    # quietly.
+    if jq --arg id "$id" --arg title "$title" --arg status "$status" \
         --arg repairability "$repairability" --arg output "$output" --argjson exit_code "$rc" \
-        '. + [{id:$id,title:$title,status:$status,repairability:$repairability,exit_code:$exit_code,output:$output}]' \
-        "$RESULTS_FILE" > "$next"
-    mv "$next" "$RESULTS_FILE"
+        --argjson failing_items "$failing_items" \
+        '. + [{id:$id,title:$title,status:$status,repairability:$repairability,exit_code:$exit_code,failing_items:$failing_items,output:$output}]' \
+        "$RESULTS_FILE" > "$next" && mv "$next" "$RESULTS_FILE"; then
+        return 0
+    fi
+    rm -f "$next"
+    echo "audit.sh: could not record check '$id' (status $status, exit $rc)" >&2
+    exit 70
 }
 
 cd "$REPO_ROOT"
@@ -229,6 +326,7 @@ run_check git_patch_hygiene "Patch whitespace and conflict markers" repo git dif
 run_check local_schema "Local dev migration alignment" operator check_local_schema_state
 run_check control_plane "msandbox control-plane readiness" operator check_control_plane_state
 run_check built_toolchain "Built sandbox login-shell test toolchain" operator check_built_toolchain
+run_check verify_toolchain "Runner-owned verification toolchain (pytest + client deps)" operator check_verify_toolchain
 run_check installed_controller "Versioned msandbox installation" operator check_installed_controller
 run_check installed_dispatcher "Installed dispatcher and LaunchAgents match the repo" operator check_installed_dispatcher
 
@@ -251,7 +349,7 @@ jq -n --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     echo
     printf 'Repairable failures: **%s** · operator actions: **%s** · skipped checks: **%s**\n\n' \
         "$repairable_failures" "$operator_failures" "$skipped_checks"
-    jq -r '.checks[] | "- " + (if .status == "pass" then "✅" elif .status == "skip" then "⏭️" else "❌" end) + " **" + .title + "** — " + .status + (if .status == "fail" then " (" + .repairability + ")" else "" end)' "$JSON_FILE"
+    jq -r '.checks[] | "- " + (if .status == "pass" then "✅" elif .status == "skip" then "⏭️" else "❌" end) + " **" + .title + "** — " + .status + (if .status == "fail" then " (" + .repairability + ")" else "" end) + (if (.failing_items | length) > 0 then " — " + (.failing_items | join(", ")) else "" end)' "$JSON_FILE"
     if [ "$repairable_failures" -gt 0 ] || [ "$operator_failures" -gt 0 ]; then
         echo
         echo "## Failure detail"

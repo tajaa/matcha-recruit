@@ -294,6 +294,89 @@ and ahead of plain Todo so the six-row cap cannot hide them (`NO-SPEC` is the bo
 can't-scope ledger); the selector never runs one. Tunables:
 `AUTOPR_MAX_SAME_REASON_FAILURES`, `AUTOPR_ATTEMPT_COOLDOWN_MINUTES`.
 
+**Fault classes.** Not every failed model pass is the card's fault. `run-codex-sandboxed.sh`
+names why it failed in `$RUNNER_TEMP/investigation-fault-class`: `usage_limit` (the
+transcript names an exhausted quota — the same match that writes the lane-wide backoff),
+`auth` (`401 Unauthorized` / an expired token, a login that died mid-run past the
+preflight), `infrastructure` (daemon-level Docker errors, a bridge failure before the
+model ran), `budget` (written by `investigate.sh`, not the bridge: the step ran out of its
+model-time allowance before a corrective pass could start), or `model` (everything else,
+including a bridge refusal of the model's own patch). Cleanup books a ledger strike only
+for `model`; the rest journal the run as a lane fault (`CODEX LOGIN DEAD`, `CODEX QUOTA`,
+`SANDBOX FAULT`, `OUT OF MODEL TIME`) and leave the count alone. Before this, one evening
+of expired login struck every card it touched.
+
+A transcript match is only a TRIGGER. `$CODEX_TRANSCRIPT` carries the model's own tool
+output — file reads, test output, grep results — so a card whose work touches auth code
+or a docker troubleshooting doc could otherwise name itself a lane fault, escape the
+ledger, and be re-selected forever. `auth` is confirmed by `codex-backoff.sh auth-check`
+returning 4 for the host credential, `infrastructure` by probing the container runtime at
+the moment of failure. Unconfirmed, the failure stays the model's.
+
+`usage_limit` is the one class with no machine state to probe — the evidence is entirely
+server-side — so its confirmation is POSITIONAL: only the tail of the transcript
+(`AUTOPR_USAGE_LIMIT_TAIL_LINES`, 40) is handed to `codex-backoff.sh record`, because the
+CLI prints its rate-limit error as the run dies. Matching anywhere meant a card whose work
+touched rate limiting — a `cat` of the limiter module, a 429 test's output, a grep for
+"quota" — both escaped the strike ledger and made the bridge write the SHARED
+`codex-usage-limit.json` marker, grounding the kanban, error-autofix and self-audit lanes
+for up to an hour.
+
+`verify_timeout` and `verify_broken` join the lane-fault set. verify.sh always exits 0 and
+reports a failing branch IN its table, never as a status, so a failed Verify step is never
+the card's doing — but the two cases are not the same thing, and verify.sh stamps
+`AUTOFIX_VERIFY_STARTED_FILE` as its first act so Cleanup can tell them apart: `_timeout`
+is the 20-minute cap (a client-touching PR runs pytest in two trees plus two full
+`tsc -p tsconfig.app.json` passes plus vitest), `_broken` means verification could not
+start at all on this runner. Without that split a permanently broken verify.sh re-burned a
+model pass on every card behind a journal line saying nothing was wrong.
+
+`exit 75` without an acknowledged operator takeover is the mirror image: the bridge
+promotes `CURRENT_FAULT_CLASS` to `model` as soon as the model has run, so a bad pause
+write is struck rather than excused.
+
+A lane fault still calls `autopr_mark_attempt`, which cools the card down without writing
+a strike. It writes its OWN marker, `attempts/<id8>.lane`, and never touches the failure
+ledger at `attempts/<id8>`. `select.sh` cools down on the newer of the two mtimes and
+parks on the ledger's alone, because the park gate compares the ledger's mtime against the
+card's last human signal: `touch`ing the ledger moved the last attempt past an owner's Run
+press, so a card with three old strikes that a human had just released was re-parked by
+the next docker outage — no new strike, but the reset erased. Skipping the marker
+altogether is not an option either: `auth` is held off lane-wide by the dispatcher's login
+guard and `usage_limit` by `codex-backoff.sh`, but `infrastructure` has no such hold, and
+a standing sandbox fault would burn a run every five minutes forever. A success clears
+both files.
+
+**Model budget vs step budget.** `runtime-policy.sh` emits both `minutes` (the model's
+own budget, 20 or an approved 10) and `step_minutes` (`minutes + AUTOPR_STEP_GRACE_MINUTES`,
+default 3). `minutes` is the budget for the whole step, not for one pass:
+`investigate.sh`'s `refresh_model_budget` hands each `codex_pass` what is left of it,
+measured from the step's own start stamp. A corrective second pass with a fresh full
+deadline cannot fit inside `step_minutes`, so Actions hard-kills the step mid-model —
+no container stop, no DEADLINE_EXIT, no post-model validation. Below a two-minute floor
+the corrective pass is skipped and the card is parked for context instead of paying for
+a model call the step timeout will cut off — and that path `die`s rather than exiting 0,
+because it has already truncated report.md and decision.json: a green investigation there
+would run Triage's `jq` over an empty file, publish an empty report on the card it just
+parked, and let Cleanup's success branch delete that card's whole failure ledger; it also
+writes the `budget` fault class first, because running out of the STEP's clock is a lane
+condition and Cleanup's default class is `model`, a strike. The supervisor
+(`autopr_control.py supervise --deadline`) terminates the model's
+whole session at `minutes` and reports 143, which `investigate.sh` passes through and
+`checkpoint.sh` reads as "killed" — a pause, not a strike. `--deadline` is a RELATIVE
+duration and the supervisor starts counting when it launches, so
+`run-codex-sandboxed.sh` recomputes it immediately before that launch
+(`model_budget_remaining`): otherwise the auth preflight, the sandbox clone, a cold image
+pull and the container start were all charged to the grace window instead of the model,
+and a preflight longer than `AUTOPR_STEP_GRACE_MINUTES` let Actions hard-kill the step
+first. An elapsed budget floors at `AUTOPR_MODEL_BUDGET_MIN_SECONDS` (30) and is never
+passed as 0, which means "no deadline at all". The Investigate step's own
+timeout is `step_minutes`, so sandbox start-up before the model and validation after it no
+longer eat into the budget or cut a finished decision short (run 34728683748 wrote its
+decision at 00:53:33Z and was killed by the shared timeout at 00:54:05Z). A run the
+checkpoint classifies as runtime-limited ends the job green ("Park a runtime-limited
+investigation"); only a real failure hits "Fail incomplete investigation".
+
 ## Local tmux dashboard
 
 The terminal `msandbox` manager additionally has an **AutoPR** tab (key **7**,
@@ -751,7 +834,13 @@ budget had already been spent.
 8. **`verify.sh`** — there isn't one; this reuses `apps/msandbox/error-autofix/verify.sh`
    unmodified. It already diffs baseline-vs-branch TypeScript diagnostics via
    `tsc -p tsconfig.app.json --noEmit` (the non-bare form — bare `tsc --noEmit` checks
-   nothing, see root CLAUDE.md), so no separate frontend step was needed.
+   nothing, see root CLAUDE.md), so no separate frontend step was needed. Its pytest
+   interpreter and client dependencies are the runner-owned toolchain under
+   `~/.cache/matcha-autofix/`, built once by
+   `apps/msandbox/harness/provision-verify-toolchain.sh` — never the dev clone under
+   `~/Documents` (a launchd runner loses that grant on every self-update; that is why
+   every kanban PR from 2026-09-01 to 09-14 carried `needs-work` for "could not run").
+   `msandbox doctor` and the self-audit report a missing or stale toolchain.
 9. **`write-publication-copy.sh`** — runs a separate writing-only Codex pass with
    `gpt-5.6-luna` and medium reasoning. It produces only a conventional commit subject
    and a short card note. Trusted shell validates the exact JSON schema, category prefix,
@@ -1323,10 +1412,28 @@ batch A fixed, and the structural backlog (batch B) — lives in
   GitHub-side floor that survives a broken or stale local dispatcher (the installed
   LaunchAgent copy lagged the repo for a week and re-fired a no-op run every 66 s).
   API failure proceeds — it is a spend guard, not a safety boundary.
+- **A scheduler tick asks GitHub only when a lane could be due.** `status.json`'s
+  `eligible_at` and the last snapshot's per-lane completion times decide first
+  (`scheduler_idle_without_fetch`); a stale read can only cause a fetch, never suppress
+  one. `run-snapshot.sh` retries one transient failure after five seconds before the
+  tick fails closed, and an active-run skip row logs only the run's id/lane/status.
 - **The dispatcher remembers the request set it last forced** (`last-forced-request-set`):
   one "Run AutoPR now" press costs at most one forced run per request TTL even when
   the run dies before `select.sh`/`investigate.sh` can claim it.
 - **`codex-backoff.sh`** holds every lane after a Codex usage-limit exit.
+- **Lane faults never strike a card** (`auth`, `usage_limit`, `infrastructure`, `budget` — see
+  "Fault classes" above), and the model's budget is enforced by the supervisor so a
+  finished decision is never discarded by the step timeout ("Model budget vs step
+  budget").
+- **The installed dispatcher tree follows `main`**: every kanban pass runs
+  `install-launch-agent.sh --runtime-if-stale` from its own `git archive main` extract —
+  not the working tree, since this is the one step that installs code onto the host and it
+  runs before the trusted control-plane archive exists (see `apps/msandbox/CLAUDE.md`,
+  "Installed copies").
+- **The verification toolchain is runner-owned** (`~/.cache/matcha-autofix`, built by
+  `provision-verify-toolchain.sh`); `msandbox doctor` and the self-audit report it missing.
+  Its cache keys are the dependency manifests' digest, and a tree without those manifests
+  gets no key at all rather than the empty digest every such tree would share.
 - **The prelude is cheap when nothing is eligible:** labels are created only when
   missing, the production SSH/ECR/bundle resolution runs only after a card is
   selected, and `collect-pr-context.sh`'s snapshot (`AUTOPR_BOT_PRS_FILE`) feeds the

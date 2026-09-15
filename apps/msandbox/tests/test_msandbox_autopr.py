@@ -4,12 +4,14 @@ import io
 import errno
 import json
 import os
+import signal
 import subprocess
 import sys
 import tarfile
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -248,6 +250,129 @@ class AutoPRTests(unittest.TestCase):
         self.assertEqual((Path(current.workspace) / "new.py").read_text(), "partial")
         self.assertFalse(workspace.exists())
         self.assertEqual((self.repo / "code.py").read_text(), "original\n")
+
+    def test_supervisor_deadline_terminates_the_model_as_a_killed_run(self):
+        # The model's budget is enforced here so the workflow step can keep a
+        # grace window after the model stops. The exit is >= 128, which
+        # checkpoint.sh reads as "killed" — a pause, not a strike.
+        workspace = self.path / "runtime/workspace"
+        workspace.parent.mkdir()
+        subprocess.run(
+            ["git", "clone", "--quiet", str(self.repo), str(workspace)], check=True
+        )
+        card = self.path / "card.json"
+        card.write_text(
+            json.dumps(
+                {
+                    "task_id": "11111111-1111-4111-8111-111111111111",
+                    "project_id": "22222222-2222-4222-8222-222222222222",
+                    "title": "Slow task",
+                }
+            )
+        )
+        stop = self.path / "stop"
+        stop.write_text("#!/bin/sh\nexit 0\n")
+        stop.chmod(0o755)
+        env = {**os.environ, "AUTOPR_MSANDBOX_BIN": str(stop)}
+        started = time.monotonic()
+        with (self.path / "output").open("wb") as output:
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    control.__file__,
+                    "supervise",
+                    "--card",
+                    str(card),
+                    "--workspace",
+                    str(workspace),
+                    "--repo",
+                    str(self.repo),
+                    "--project",
+                    "test-autopr",
+                    "--deadline",
+                    "1",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(60)",
+                ],
+                cwd=workspace,
+                stdout=output,
+                stderr=output,
+                env=env,
+            )
+            self.addCleanup(lambda: process.poll() is None and process.kill())
+            self.assertEqual(process.wait(timeout=30), control.DEADLINE_EXIT)
+        self.assertLess(time.monotonic() - started, 25)
+        run = control.list_runs()[0]
+        self.assertEqual(run.status, "failed")
+        self.assertIn("deadline", run.error.lower())
+        self.assertIn("deadline reached", (self.path / "output").read_text())
+
+    def test_terminating_the_model_never_raises_over_the_exit_code(self):
+        # Both callers are on paths whose exit code is load-bearing
+        # (DEADLINE_EXIT / PAUSED_EXIT). A process that exits between poll()
+        # and killpg, or a wait() that outlasts its timeout, must not turn a
+        # budget stop into a traceback: investigate.sh would flatten the
+        # status below 128, checkpoint.sh would read a crash instead of a
+        # kill, and the card would take an `investigate` strike.
+        class Proc:
+            pid = 4242
+
+            def __init__(self, poll_results, kill_error=None, wait_error=None):
+                self._poll = list(poll_results)
+                self.kill_error = kill_error
+                self.wait_error = wait_error
+                self.signals = []
+
+            def poll(self):
+                return self._poll.pop(0) if self._poll else None
+
+            def wait(self, timeout=None):
+                if self.wait_error:
+                    raise self.wait_error
+                return 0
+
+        gone = Proc([None], kill_error=ProcessLookupError())
+        with mock.patch.object(control.os, "killpg", side_effect=gone.kill_error):
+            control.terminate_session(gone)
+
+        wedged = Proc(
+            [None, None, None],
+            wait_error=subprocess.TimeoutExpired(cmd="x", timeout=15),
+        )
+        with mock.patch.object(
+            control.os, "killpg", side_effect=lambda pid, sig: wedged.signals.append(sig)
+        ):
+            control.terminate_session(wedged)
+        # SIGTERM, then SIGKILL — and no exception escapes either way.
+        self.assertEqual(wedged.signals, [signal.SIGTERM, signal.SIGKILL])
+
+    def test_the_pause_path_refuses_to_move_a_checkout_under_a_live_writer(self):
+        # terminate_session never raises, so it can return with the process
+        # still alive (wedged past SIGKILL). The pause path then moves the
+        # clone to the operator's run directory: before terminate_session
+        # existed, `proc.wait(timeout=15)` raised TimeoutExpired there and the
+        # run was marked `blocked` with the workspace left alone. That refusal
+        # has to survive, or a takeover hands the operator a torn tree.
+        source = Path(control.__file__).read_text()
+        start = source.index("if stopping:")
+        block = source[start : source.index("transfer_checkout(workspace, destination)", start)]
+        self.assertIn("terminate_session(proc)", block)
+        self.assertIn("if proc.poll() is None:", block)
+        self.assertIn("raise RuntimeError(", block)
+        # The container is stopped first: the writer lives in Docker, and
+        # terminating the host exec client alone would leave it running.
+        self.assertLess(block.index('"stop"'), block.index("terminate_session(proc)"))
+
+    def test_an_unset_msandbox_bin_is_reported_not_silently_skipped(self):
+        # The deadline path stops the container before the host exec client so
+        # the model cannot keep writing to the clone. With no binary to call
+        # it cannot, and a silent no-op makes that invisible.
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, {}, clear=True), redirect_stdout(output):
+            control.stop_sandbox_container()
+        self.assertIn("AUTOPR_MSANDBOX_BIN is unset", output.getvalue())
 
     def test_nested_takeovers_archive_superseded_checkouts_on_success(self):
         prior = self.run_record(identifier="b" * 32)

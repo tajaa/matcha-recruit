@@ -394,7 +394,7 @@ check "the PAUSED header survives untouched when the journal writes none" \
 check "ALREADY SCOPED is recognised, so an operator tail after it survives" \
   $(dedupe "🤖 AUTO SETUP · READY FOR REVIEW" "🤖 AUTO SETUP · ALREADY SCOPED · PR #123 · keep this" "🤖 AUTO SETUP · READY FOR REVIEW · keep this")
 check "the resume line is replaced each cycle instead of stacking up" \
-  $(dedupe "🤖 AUTO SETUP · READY FOR REVIEW" $'🤖 AUTO SETUP · STOPPED: VERIFY FAILED · run #5\nResume: 2 file(s) of model work are saved on the runner.' "🤖 AUTO SETUP · READY FOR REVIEW")
+  $(dedupe "🤖 AUTO SETUP · READY FOR REVIEW" $'🤖 AUTO SETUP · STOPPED: VERIFY DID NOT RUN · run #5\nResume: 2 file(s) of model work are saved on the runner.' "🤖 AUTO SETUP · READY FOR REVIEW")
 check "a human-authored note survives every machine header" \
   $(dedupe "🤖 AUTO SETUP · READY FOR REVIEW" $'Human wrote this\nand this' $'🤖 AUTO SETUP · READY FOR REVIEW · Human wrote this\nand this')
 
@@ -470,14 +470,14 @@ AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/cproot" \
   run_journal "$TMP_DIR/card.json" --outcome failure --reason verify >/dev/null 2>&1
 check "a stopped card says its work is saved and that Run continues from it" \
   $(grep -q 'Resume: 2 file(s) of model work are saved on the runner' "$TMP_DIR/calls" \
-    && grep -q 'STOPPED: VERIFY FAILED' "$TMP_DIR/calls" && echo 0 || echo 1)
+    && grep -q 'STOPPED: VERIFY DID NOT RUN' "$TMP_DIR/calls" && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/uploads"/*
 mv "$TMP_DIR/cproot/bbbb0000-0000-4000-8000-000000000002/active" "$TMP_DIR/cproot/consumed-pointer"
 AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/cproot" \
   run_journal "$TMP_DIR/card.json" --outcome failure --reason verify >/dev/null 2>&1
 check "a consumed pointer promises no resume, even with the directory still on disk" \
-  $(! grep -q 'Resume: ' "$TMP_DIR/calls" && grep -q 'STOPPED: VERIFY FAILED' "$TMP_DIR/calls" && echo 0 || echo 1)
+  $(! grep -q 'Resume: ' "$TMP_DIR/calls" && grep -q 'STOPPED: VERIFY DID NOT RUN' "$TMP_DIR/calls" && echo 0 || echo 1)
 mv "$TMP_DIR/cproot/consumed-pointer" "$TMP_DIR/cproot/bbbb0000-0000-4000-8000-000000000002/active"
 
 # Finding: the ledger and the journal must read the SAME timeout verdict. A
@@ -499,11 +499,15 @@ check "the resume pointer is consumed after a publication, not at the end of the
     && grep -qF 'checkpoint.sh" consume "$RUNNER_TEMP/card.json"' "$WORKFLOW" \
     && grep -qF 'if [ "$PUBLISH_OUTCOME" = success ] || [ "$PUBLISH_ARTIFACT_OUTCOME" = success ]; then' "$WORKFLOW" && echo 0 || echo 1)
 
-check "both new suites run in CI, and both scripts are syntax-checked there" \
+# ci.yml no longer names apps/msandbox scripts one by one — the hand list had
+# fallen two dozen files behind, including both files the verification
+# toolchain is built from — so the syntax gate is asserted as discovery over
+# the whole tree instead.
+check "both new suites run in CI, and every harness script is syntax-checked there" \
   $(grep -qF 'test_kanban_autopr_run_journal.sh' "$REPO_ROOT/apps/msandbox/self-audit/audit.sh" \
     && grep -qF 'test_kanban_autopr_card_control.sh' "$REPO_ROOT/apps/msandbox/self-audit/audit.sh" \
-    && grep -qF 'apps/msandbox/harness/run-journal.sh' "$REPO_ROOT/.github/workflows/ci.yml" \
-    && grep -qF 'apps/msandbox/harness/card-control.sh' "$REPO_ROOT/.github/workflows/ci.yml" && echo 0 || echo 1)
+    && grep -qF "find scripts apps/msandbox -type f" "$REPO_ROOT/.github/workflows/ci.yml" \
+    && grep -qF 'xargs -0 -n1 bash -n' "$REPO_ROOT/.github/workflows/ci.yml" && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

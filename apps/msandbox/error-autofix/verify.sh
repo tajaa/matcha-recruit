@@ -12,9 +12,11 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-CACHE_DIR="${AUTOFIX_CACHE_DIR:-$HOME/.cache/matcha-autofix}"
-PY312="${PY312:-/opt/homebrew/bin/python3.12}"
-mkdir -p "$CACHE_DIR"
+# shellcheck source=toolchain.sh
+. "$SCRIPT_DIR/toolchain.sh"
+# Owner-only, in one place: a lane can reach the cache root before the
+# provisioner ever has, and the default umask would leave it world-readable.
+autofix_ensure_cache_dir >/dev/null || true
 
 # `AUTOFIX_BASE_SHA` must be captured by the workflow BEFORE investigate.sh
 # runs (right after `git switch -C`), not re-derived here — by the time
@@ -46,6 +48,16 @@ esac
 case "$ENV" in
     prod|production) echo "refusing to run verify.sh with ENV=$ENV" >&2; exit 1 ;;
 esac
+
+# Proof that verification actually started. The caller distinguishes a step
+# that ran and was killed by its timeout from one that never got off the
+# ground (this script missing from the control-plane archive, not executable,
+# a broken `source`): both are lane faults, but only the second means the
+# harness itself is broken, and a journal that says "nothing about this card
+# failed" for that is a lie the operator has no other signal to correct.
+[ -z "${AUTOFIX_VERIFY_STARTED_FILE:-}" ] \
+    || date +%s > "$AUTOFIX_VERIFY_STARTED_FILE" 2>/dev/null \
+    || true
 
 # ---- test-dir mapping -------------------------------------------------
 # server/tests/<name>/ mirrors both routes/<name>/ and services/<name>/. For
@@ -127,42 +139,50 @@ done
 CLIENT_TESTS=($(printf '%s\n' "${CLIENT_TESTS[@]+"${CLIENT_TESTS[@]}"}" | sort -u))
 
 # ---- interpreter selection ---------------------------------------------
-# Prefer the repo's own dev venv as an interpreter rather than building a
-# fresh one: requirements.txt pins with `>=`, so hashing it doesn't actually
-# pin anything, and neither pytest nor pytest-asyncio are in it at all. The
-# venv resolves site-packages from its own prefix regardless of cwd, so
-# pointing it at the workspace's server/ tree (rather than this dev clone)
-# picks up the branch's code, not the dev clone's.
-# Candidates, in order: the tree under verification (if it carries a venv,
-# e.g. a developer running this by hand), then the dev clone's venv on the Mac
-# runner (the Actions workspace deliberately has none), then the cached one.
-DEV_VENV_PY="${AUTOFIX_DEV_VENV_PY:-$HOME/Documents/github/matcha/server/venv/bin/python}"
+# Candidates, in order: an explicit AUTOFIX_DEV_VENV_PY override (tests, a
+# developer running this by hand), a venv inside the tree under verification,
+# then the runner-owned cached venv (harness/provision-verify-toolchain.sh,
+# keyed on the server manifests — toolchain.sh). A venv resolves
+# site-packages from its own prefix regardless of cwd, so pointing it at the
+# workspace's server/ tree picks up the branch's code, not the cache's.
+#
+# There is deliberately NO default that reaches into the operator's dev
+# clone under ~/Documents: the runner is a launchd job, and macOS drops such
+# a job's Files-and-Folders grant whenever its binary changes (the runner's
+# 2026-08-31 self-update). That is how every bot PR from 09-01 to 09-14
+# carried needs-work for "could not run" while the dev venv sat there,
+# perfectly usable from a terminal.
+#
+# The cache is NOT built on the fly — a `pip install` that then fails on a
+# native extension (xmlsec, pymupdf) can eat the whole job's timeout for
+# nothing. Missing or stale, verification reports UNAVAILABLE rather than
+# guessing, and audit.sh reports it as an operator action.
+DEV_VENV_PY="${AUTOFIX_DEV_VENV_PY:-}"
+# Empty when the tree carries no server manifests to key on: there is no
+# cached venv for such a tree, and a key guessed from an empty digest would
+# point at whatever OTHER manifest-less tree built one first.
+CACHED_VENV="$(autofix_venv_dir "$REPO_ROOT")" || CACHED_VENV=""
 VENV_PY=""
 BOOTSTRAP_OK=false
+# Cache entries this run is reading, released by cleanup(). See
+# autofix_hold_toolchain: a concurrent provision must not delete them.
+HELD_VENV=""
+HELD_CLIENT=""
 
-for candidate_py in "$REPO_ROOT/server/venv/bin/python" "$DEV_VENV_PY"; do
-    if [ -x "$candidate_py" ] && "$candidate_py" -c "import pytest, pytest_asyncio" >/dev/null 2>&1; then
+for candidate_py in ${DEV_VENV_PY:+"$DEV_VENV_PY"} "$REPO_ROOT/server/venv/bin/python" ${CACHED_VENV:+"$CACHED_VENV/bin/python"}; do
+    if autofix_python_usable "$candidate_py"; then
         VENV_PY="$candidate_py"
         BOOTSTRAP_OK=true
         break
     fi
 done
-if [ "$BOOTSTRAP_OK" != true ]; then
-    # Fallback: a cached, manually-provisioned venv. NOT built on the fly —
-    # a `pip install` that then fails on a native extension (xmlsec,
-    # pymupdf) can eat the whole job's timeout for nothing. If it's missing
-    # or stale, verification reports UNAVAILABLE rather than guessing.
-    REQ_HASH="$(shasum -a 256 "$REPO_ROOT/server/requirements.txt" | cut -c1-12)"
-    CACHED_VENV="$CACHE_DIR/venv-py312-$REQ_HASH"
-    if [ -x "$CACHED_VENV/bin/python" ] && "$CACHED_VENV/bin/python" -c "import pytest, pytest_asyncio" >/dev/null 2>&1; then
-        VENV_PY="$CACHED_VENV/bin/python"
-        BOOTSTRAP_OK=true
-    fi
-fi
 
 PYTHON_UNAVAILABLE=false
 if [ "$BOOTSTRAP_OK" != true ]; then
     PYTHON_UNAVAILABLE=true
+elif [ -n "$CACHED_VENV" ] && [ "$VENV_PY" = "$CACHED_VENV/bin/python" ]; then
+    HELD_VENV="$CACHED_VENV"
+    autofix_hold_toolchain "$HELD_VENV"
 fi
 
 if [ "$PYTHON_UNAVAILABLE" = true ] && [ "$CLIENT_CHANGED" != true ]; then
@@ -170,14 +190,13 @@ if [ "$PYTHON_UNAVAILABLE" = true ] && [ "$CLIENT_CHANGED" != true ]; then
 ### Verification
 
 **Checks did not run** — no usable Python interpreter with pytest was found
-(looked for the dev venv at \`$DEV_VENV_PY\` and a cached venv keyed on
-\`server/requirements.txt\`). This PR has not been verified. Review the diff
-manually before merging.
+(looked for \`server/venv\` in the tree under verification and the cached
+toolchain at \`${CACHED_VENV:-<no server/requirements.txt in this tree>}\`).
+This PR has not been verified. Review the diff manually before merging.
 
-To provision the cached venv once by hand:
+To provision the cached toolchain once on the runner Mac:
 \`\`\`
-/opt/homebrew/bin/python3.12 -m venv $CACHE_DIR/venv-py312-<hash>
-$CACHE_DIR/venv-py312-<hash>/bin/pip install -r server/requirements.txt pytest pytest-asyncio
+./apps/msandbox/harness/provision-verify-toolchain.sh   # or: msandbox install --verify-toolchain
 \`\`\`
 EOF
     # Unverified is not "0 new failures": the publisher labels needs-work
@@ -231,20 +250,104 @@ compileall_check() {
 BASE_TREE="$(mktemp -d "${RUNNER_TEMP:-/tmp}/autofix-baseline-XXXXXX")"
 git -C "$REPO_ROOT" worktree prune >/dev/null 2>&1 || true
 git -C "$REPO_ROOT" worktree add --detach "$BASE_TREE" "$BASE_SHA" >/dev/null 2>&1
+# Only a link into OUR cache is ours to move or delete. A plain `-L` test
+# cannot tell one from the developer's own symlink (a shared or pnpm-style
+# store is exactly that), and treating theirs as replaceable both clobbered
+# it with a cache link and then removed it at cleanup — from a run that is
+# supposed to be read-only — while never using the usable tree it already
+# pointed at. Defined above cleanup() because cleanup calls it.
+BRANCH_NODE_MODULES="$REPO_ROOT/client/node_modules"
+TOOLCHAIN_CACHE_ROOT="$(autofix_toolchain_cache_dir)"
+branch_link_is_ours() {
+    local target
+    [ -L "$BRANCH_NODE_MODULES" ] || return 1
+    target="$(readlink "$BRANCH_NODE_MODULES" 2>/dev/null || true)"
+    case "$target" in
+        "$TOOLCHAIN_CACHE_ROOT"/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Set when THIS run planted the branch tree's node_modules symlink.
+PLANTED_BRANCH_LINK=""
 cleanup() {
     git -C "$REPO_ROOT" worktree remove --force "$BASE_TREE" >/dev/null 2>&1 || true
     git -C "$REPO_ROOT" worktree prune >/dev/null 2>&1 || true
+    # Leave the tree under verification exactly as it was found. The link
+    # points into the shared cache, and `AUTOPR_WORKSPACE_ROOT` may name any
+    # checkout (the by-hand path is documented at the top of this script): a
+    # later `npm ci` in that clone would follow the link and rewrite the
+    # runner-owned toolchain every lane reads, in place, while
+    # `autofix_node_modules_usable` kept reporting it current.
+    if [ -n "$PLANTED_BRANCH_LINK" ] && branch_link_is_ours; then
+        rm -f "$PLANTED_BRANCH_LINK"
+    fi
+    autofix_release_toolchain "${HELD_VENV:-}"
+    autofix_release_toolchain "${HELD_CLIENT:-}"
 }
+# EXIT alone is not enough: the Verify step has a timeout, and a bash killed
+# by SIGTERM with the default disposition dies WITHOUT running its EXIT trap.
+# The checkout is persistent (`clean: false`, and the lane's `git clean -fd`
+# carries no `-x`), so the planted link, the baseline worktree and the holder
+# pid files would all survive the kill. cleanup is idempotent, so running it
+# from a signal handler and again on EXIT is safe.
 trap cleanup EXIT
+trap 'cleanup; exit 143' TERM
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 129' HUP
 
 # The baseline worktree is outside the repository, so Node cannot discover the
 # checked-out client's dependency tree by walking parent directories. Sharing
-# the already-installed dependencies is read-only and avoids an unpinned npm
-# install inside the scheduled workflow.
+# an already-installed dependency tree is read-only and avoids an unpinned
+# npm install inside the scheduled workflow. Sources, in order: a real
+# node_modules inside the tree under verification, then the runner-owned
+# cache (keyed on client/package-lock.json — toolchain.sh).
+#
+# BOTH trees must end up able to run the tools, and the check below enforces
+# exactly that. A branch tree left with a real-but-broken node_modules (an
+# interrupted `npm install`, no `.bin/tsc`) while the baseline ran the cache
+# is the worst outcome available: the branch's tsc exits 127, prints no
+# `error TS` lines, `comm -13` sees zero regressions, and a PR that ADDS type
+# errors publishes as verified-clean. Unavailable is the honest answer.
 CLIENT_DEPS_READY=false
-if [ -x "$REPO_ROOT/client/node_modules/.bin/tsc" ] && [ -x "$REPO_ROOT/client/node_modules/.bin/vitest" ]; then
-    ln -s "$REPO_ROOT/client/node_modules" "$BASE_TREE/client/node_modules"
+CLIENT_NODE_MODULES=""
+CACHED_NODE_MODULES=""
+cached_client_root="$(autofix_node_root "$REPO_ROOT")" \
+    && CACHED_NODE_MODULES="$cached_client_root/node_modules"
+# Only a link into OUR cache is ours to move or delete. A plain `-L` test
+# cannot tell one apart from the developer's own symlink (a shared or
+# pnpm-style store is exactly that), and treating theirs as replaceable both
+# clobbered it with a cache link and then removed it at cleanup — from a run
+# that is supposed to be read-only — while never using the usable tree it
+# already pointed at.
+# Ours and dangling: the key it pointed at has been pruned. Drop it before
+# anything reads it — nothing else ever removes it, and while it sits there
+# a real node_modules installed here later could never be preferred.
+if branch_link_is_ours && [ ! -e "$BRANCH_NODE_MODULES" ]; then
+    rm -f "$BRANCH_NODE_MODULES"
+fi
+if ! branch_link_is_ours && autofix_node_modules_usable "$BRANCH_NODE_MODULES"; then
+    # A real directory, or someone else's link to a real tree. Either way it
+    # is the tree under verification's own, and it is left untouched.
+    CLIENT_NODE_MODULES="$BRANCH_NODE_MODULES"
+elif [ -n "$CACHED_NODE_MODULES" ] && autofix_node_modules_usable "$CACHED_NODE_MODULES"; then
+    CLIENT_NODE_MODULES="$CACHED_NODE_MODULES"
+    if branch_link_is_ours || [ ! -e "$BRANCH_NODE_MODULES" ]; then
+        ln -sfn "$CLIENT_NODE_MODULES" "$BRANCH_NODE_MODULES"
+        PLANTED_BRANCH_LINK="$BRANCH_NODE_MODULES"
+    fi
+fi
+if [ -n "$CLIENT_NODE_MODULES" ] && [ -d "$BASE_TREE/client" ] \
+    && autofix_node_modules_usable "$BRANCH_NODE_MODULES"; then
+    ln -sfn "$CLIENT_NODE_MODULES" "$BASE_TREE/client/node_modules"
     CLIENT_DEPS_READY=true
+    # Hold the cache for as long as this run reads it: an operator running
+    # provision-verify-toolchain.sh against a branch whose manifests differ
+    # would otherwise `rm -rf` this entry mid-run, and both trees' tsc would
+    # exit 127 through a dangling symlink.
+    [ "$CLIENT_NODE_MODULES" = "$CACHED_NODE_MODULES" ] \
+        && HELD_CLIENT="$cached_client_root" \
+        && autofix_hold_toolchain "$HELD_CLIENT"
 fi
 
 BASE_FAILS="$(mktemp)"
@@ -323,7 +426,7 @@ else
 fi
 
 if [ "$CLIENT_CHANGED" = true ] && [ "$CLIENT_DEPS_READY" != true ]; then
-    echo "| TypeScript / Vitest | **unavailable** — client/node_modules is missing | **unavailable** |"
+    echo "| TypeScript / Vitest | **unavailable** — no client toolchain usable from the branch tree (client/node_modules is absent or broken and the cached \`${CACHED_NODE_MODULES:-<no client/package-lock.json>}\` is not usable; run provision-verify-toolchain.sh) | **unavailable** |"
 elif [ "$CLIENT_CHANGED" = true ]; then
     base_types="$(grep -c . "$CLIENT_TYPE_BASE.ids" || true)"
     branch_types="$(grep -c . "$CLIENT_TYPE_BRANCH.ids" || true)"

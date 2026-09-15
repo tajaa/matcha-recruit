@@ -432,7 +432,10 @@ autopr_record_outcome() {
     dir="${AUTOPR_CACHE_DIR:-$HOME/.cache/matcha-autopr}/attempts"
     marker="$dir/$id8"
     if [ "$outcome" = success ]; then
-        rm -f "$marker"
+        # The lane-fault cooldown marker goes with it: the card just succeeded,
+        # so nothing about it — its own history or the lane's — should hold the
+        # next pass back.
+        rm -f "$marker" "$marker.lane"
         return 0
     fi
     # One token: the reason lands in a card note and a hold reason verbatim.
@@ -446,6 +449,38 @@ autopr_record_outcome() {
         count=$((previous_count + 1))
     fi
     printf '%s\t%s\t%s\n' "$count" "$reason" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
+}
+
+# autopr_lane_cooldown_path TASK_ID_OR_ID8
+# A SEPARATE file from the failure ledger, deliberately. See below.
+autopr_lane_cooldown_path() {
+    local ledger
+    ledger="$(autopr_attempt_ledger_path "$1")" || return 1
+    printf '%s.lane' "$ledger"
+}
+
+# autopr_mark_attempt TASK_ID
+# Start select.sh's cooldown WITHOUT recording a strike, for a pass that
+# failed for a lane-wide reason. `auth` is held off by the dispatcher's login
+# guard and `usage_limit` by codex-backoff.sh, but `infrastructure` (a docker
+# daemon that is down, a full disk) has no lane-wide hold at all: with no
+# marker written, select.sh's cooldown gate sees nothing and re-selects the
+# same card on the very next pass, forever.
+#
+# This writes its own marker and NEVER touches the failure ledger. The ledger's
+# mtime is `attempt_epoch`, which select.sh compares against the card's last
+# human signal: `touch`ing it moved the last attempt past an owner's Run press,
+# so a card with three old strikes that a human had just released would be
+# parked again by the next docker outage — no new strike, but the human's reset
+# erased, which is the exact outcome this function was written to prevent.
+# select.sh cools down on the NEWER of the two markers and parks on the
+# ledger's own mtime alone.
+autopr_mark_attempt() {
+    local task_id="${1:-}" marker
+    [ -n "$task_id" ] || return 0
+    marker="$(autopr_lane_cooldown_path "$task_id")" || return 0
+    mkdir -p "$(dirname "$marker")" || return 1
+    : > "$marker"
 }
 
 # autopr_attempt_ledger_path TASK_ID_OR_ID8

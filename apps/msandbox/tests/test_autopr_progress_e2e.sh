@@ -159,6 +159,11 @@ run_autopr env AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/history.json" \
 check "a pinned card resolves to its pinned runtime, marked manual" \
   $(jq -e '.model == "gpt-6-astra" and .effort == "xhigh" and .runtime_source == "manual"' \
     "$TMP_DIR/policy-pinned.json" >/dev/null && echo 0 || echo 1)
+# The model's budget and the step's are two numbers: the supervisor stops the
+# model at `minutes`, the Investigate step allows `step_minutes` so validation
+# after the model is never cut short.
+check "runtime policy emits the step budget as minutes plus the grace window" \
+  $(jq -e '.minutes == 20 and .step_minutes == 23' "$TMP_DIR/policy-pinned.json" >/dev/null && echo 0 || echo 1)
 
 # ── 3. A stalled run: real workspace, real stamps, real progress log ───────
 # Same shape run-codex-sandboxed.sh leaves behind: a git clone whose

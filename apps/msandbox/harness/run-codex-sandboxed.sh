@@ -84,8 +84,72 @@ MAX_DECISION_BYTES="${AUTOPR_SANDBOX_MAX_DECISION_BYTES:-262144}"
 PATH_DENY_RE="${AUTOPR_SANDBOX_PATH_DENY_RE:-^(\.github/|apps/|deploy/|docker/|scripts/|\.claude/|\.codex/|\.githooks/|secrets/|opencode\.jsonc$|(.*/)?docker-compose[^/]*\.ya?ml$|(.*/)?Dockerfile[^/]*$|(.*/)?\.env[^/]*$)}"
 CODEX_BACKOFF="${AUTOPR_CODEX_BACKOFF:-$SCRIPT_DIR/codex-backoff.sh}"
 HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/cli/autopr_control.py"
+# Seconds the model itself may run (0 = only the workflow step timeout).
+# Enforced by the supervisor so the harness keeps a grace window after the
+# model stops; see autopr_control.py's DEADLINE_EXIT.
+MODEL_BUDGET_SECONDS="${AUTOPR_MODEL_BUDGET_SECONDS:-0}"
+[[ "$MODEL_BUDGET_SECONDS" =~ ^[0-9]+$ ]] || MODEL_BUDGET_SECONDS=0
+# The budget is a wall-clock allowance that starts HERE, not when the
+# supervisor finally launches. autopr_control.py sets its deadline from its
+# own start, so everything in between — the auth preflight, the sandbox
+# clone, a cold image pull, the container start — was charged to the step's
+# grace window instead of to the model: the model was killed that much later
+# than the caller planned, and a preflight longer than AUTOPR_STEP_GRACE_MINUTES
+# let GitHub hard-kill the whole step first. That is run 34728683748 exactly —
+# no container stop, no DEADLINE_EXIT, no exit >= 128 in the exit file, so
+# checkpoint.sh read a budget stop as a crash and Cleanup struck the card.
+# Recomputed immediately before the supervisor is launched.
+MODEL_BUDGET_START_EPOCH="$(date +%s)"
+# An already-elapsed deadline must never be passed as 0: 0 means "no deadline
+# at all" and would hand the model the whole step. The floor is deliberately
+# short — the pass is out of budget, so let the supervisor stop it cleanly
+# (container stopped, DEADLINE_EXIT) instead of letting the step time out.
+MODEL_BUDGET_MIN_SECONDS="${AUTOPR_MODEL_BUDGET_MIN_SECONDS:-30}"
+model_budget_remaining() {
+    local now remaining
+    if [ "$MODEL_BUDGET_SECONDS" -le 0 ]; then
+        printf '0'
+        return 0
+    fi
+    now="$(date +%s)"
+    remaining=$(( MODEL_BUDGET_START_EPOCH + MODEL_BUDGET_SECONDS - now ))
+    [ "$remaining" -ge "$MODEL_BUDGET_MIN_SECONDS" ] || remaining="$MODEL_BUDGET_MIN_SECONDS"
+    printf '%s' "$remaining"
+}
+
+# Why a failed run failed, for the caller's failure ledger. A card is struck
+# only for a `model` fault; `auth` (dead host login), `usage_limit` (shared
+# quota) and `infrastructure` (the sandbox never ran) are lane-wide and say
+# nothing about the card. Written only on a failure path; the caller removes
+# a stale one before this script starts.
+FAULT_CLASS_FILE="${AUTOPR_FAULT_CLASS_FILE:-}"
+CURRENT_FAULT_CLASS=infrastructure
+note_fault() {
+    [ -z "$FAULT_CLASS_FILE" ] || printf '%s\n' "$1" > "$FAULT_CLASS_FILE" 2>/dev/null || true
+}
+
+# Confirmations for the two lane classes a transcript match can only suggest.
+# `auth-check` exits 4 for a dead credential and 2 when the check itself could
+# not run; only 4 confirms. Anything else keeps the failure the model's.
+host_login_is_dead() {
+    local rc=0
+    [ -x "$CODEX_BACKOFF" ] || return 1
+    [ -r "$HOST_CODEX_AUTH_FILE" ] || return 1
+    "$CODEX_BACKOFF" auth-check "$HOST_CODEX_AUTH_FILE" >/dev/null 2>&1 || rc=$?
+    [ "$rc" -eq 4 ]
+}
+
+# The daemon the sandbox needs, probed now. In AUTOPR_SANDBOX_TEST_DIRECT
+# runs there is no container runtime by design, so nothing is confirmable and
+# the failure stays the model's.
+container_runtime_is_down() {
+    [ "${AUTOPR_SANDBOX_TEST_DIRECT:-0}" != 1 ] || return 1
+    command -v docker >/dev/null 2>&1 || return 0
+    ! docker info >/dev/null 2>&1
+}
 
 die() {
+    note_fault "$CURRENT_FAULT_CLASS"
     printf 'kanban-autopr sandbox: %s\n' "$1" >&2
     exit 1
 }
@@ -121,6 +185,7 @@ else
     # behind a message telling the operator to run `codex login`, which cannot
     # clear it. Warn and let the run proceed to find out for real.
     if [ "$auth_rc" -eq 4 ]; then
+        CURRENT_FAULT_CLASS=auth
         die "$auth_message"
     elif [ "$auth_rc" -ne 0 ]; then
         printf 'kanban-autopr sandbox: %s; proceeding without the preflight\n' "$auth_message" >&2
@@ -303,7 +368,8 @@ run_codex_cli() {
         if [ -n "${AUTOPR_HANDOFF_CARD:-}" ]; then
             supervised=(python3 "$HANDOFF_CONTROL" supervise
                 --card "$AUTOPR_HANDOFF_CARD" --workspace "$SANDBOX_WORKSPACE"
-                --repo "$REPO_ROOT" --project "$SANDBOX_PROJECT" --)
+                --repo "$REPO_ROOT" --project "$SANDBOX_PROJECT"
+                --deadline "$(model_budget_remaining)" --)
         fi
         env -u GH_TOKEN -u GITHUB_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
             -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
@@ -324,17 +390,52 @@ set +e
 run_codex_cli
 codex_rc=$?
 set -e
+# The model has now run: from here a refusal is its own doing. Promote before
+# the exit-75 branch, not after the non-zero one — an exit 75 with no
+# acknowledged takeover `die`s with the INITIAL class, and Cleanup then books
+# it as a lane fault: no strike, so the card is re-selected every cooldown
+# window and can never reach the three-strike park.
+CURRENT_FAULT_CLASS=model
 if [ "$codex_rc" -eq 75 ]; then
     [ -s "$PAUSE_RESULT" ] || die "model exited 75 without an acknowledged operator takeover"
     printf 'Operator takeover acknowledged; checkout preserved outside this workflow.\n'
     exit 75
 fi
 if [ "$codex_rc" -ne 0 ]; then
-    if [ -x "$CODEX_BACKOFF" ]; then
-        "$CODEX_BACKOFF" record "$CODEX_TRANSCRIPT" || true
+    # Classify, most specific first. The transcript is only a TRIGGER: it
+    # carries the model's own tool output (file reads, test output, grep
+    # results), so a card whose work touches auth code, an HTTP error map or
+    # a docker troubleshooting doc could name itself a lane fault, escape the
+    # strike ledger, and be re-selected forever. Every lane class therefore
+    # has to be confirmed against machine state the model does not control;
+    # what is left is the model's own failure, the one class that counts
+    # against the card.
+    #
+    # `usage_limit` is the one class with no machine state to probe — the
+    # evidence is entirely server-side. Its confirmation is positional
+    # instead: the CLI prints its rate-limit error as the run dies, so only
+    # the TAIL of the transcript counts. Matching anywhere meant a card whose
+    # work touched rate limiting — a `cat` of the limiter module, a 429
+    # test's output, a grep for "quota" — both escaped the strike ledger (so
+    # it was re-selected every cooldown window forever) and made
+    # codex-backoff.sh write the SHARED usage-limit marker, grounding the
+    # kanban, error-autofix and self-audit lanes for up to an hour.
+    usage_limit_tail="$RUNTIME_ROOT/codex-usage-limit-tail.log"
+    tail -n "${AUTOPR_USAGE_LIMIT_TAIL_LINES:-40}" "$CODEX_TRANSCRIPT" \
+        > "$usage_limit_tail" 2>/dev/null || : > "$usage_limit_tail"
+    fault=model
+    if [ -x "$CODEX_BACKOFF" ] && "$CODEX_BACKOFF" record "$usage_limit_tail"; then
+        fault=usage_limit
+    elif grep -qiE '401 Unauthorized|authentication token is expired|try signing in again' "$CODEX_TRANSCRIPT" 2>/dev/null \
+        && host_login_is_dead; then
+        fault=auth
+    elif grep -qE 'Cannot connect to the Docker daemon|Error response from daemon|no space left on device|error during connect' "$CODEX_TRANSCRIPT" 2>/dev/null \
+        && container_runtime_is_down; then
+        fault=infrastructure
     fi
+    note_fault "$fault"
     # Preserve Codex's own status: the callers log and act on it.
-    printf 'kanban-autopr sandbox: Codex exited %s inside msandbox\n' "$codex_rc" >&2
+    printf 'kanban-autopr sandbox: Codex exited %s inside msandbox (%s)\n' "$codex_rc" "$fault" >&2
     exit "$codex_rc"
 fi
 # A completed Codex call proves the quota is back. Nothing else clears the

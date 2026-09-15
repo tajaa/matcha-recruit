@@ -21,6 +21,11 @@ cat > "$TMP_DIR/gh" <<'EOF'
 [ -z "${AUTOPR_TEST_GH_CALLS:-}" ] || printf '%s\n' "$*" >> "$AUTOPR_TEST_GH_CALLS"
 if [ "$1 $2" = "run list" ]; then
   [ "${AUTOPR_TEST_LIST_FAIL:-0}" = 0 ] || exit 1
+  # Fail exactly once (a transient network error), then answer normally.
+  if [ -n "${AUTOPR_TEST_LIST_FAIL_ONCE:-}" ] && [ ! -e "$AUTOPR_TEST_LIST_FAIL_ONCE" ]; then
+    : > "$AUTOPR_TEST_LIST_FAIL_ONCE"
+    exit 1
+  fi
   jq -cn \
     --argjson errors "${AUTOPR_TEST_ERROR_RUNS:-[]}" \
     --argjson audit "${AUTOPR_TEST_AUDIT_RUNS:-[]}" \
@@ -79,6 +84,11 @@ chmod +x "$TMP_DIR/ensure-dashboard"
 run_dispatcher() {
   # Most cases represent independent clock ticks, not concurrent dispatches.
   [ "${AUTOPR_TEST_KEEP_LEASE:-0}" = 1 ] || rm -f "$TMP_DIR/state/last-dispatch"
+  # The scheduler reads its own last status.json to skip a GitHub call when
+  # nothing can be due. Cases here swap GitHub fixtures instead of letting
+  # time pass, so a previous tick's verdict must not carry over unless the
+  # case is about exactly that.
+  [ "${AUTOPR_TEST_KEEP_STATUS:-0}" = 1 ] || rm -f "$TMP_DIR/state/status.json"
   AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_DISPATCH_LOG="$TMP_DIR/log.jsonl" \
     AUTOPR_DOCKER_BIN="$TMP_DIR/docker" AUTOPR_ENABLE_FILE="$TMP_DIR/autopr-enabled" \
     AUTOPR_DISPATCH_LOCK_DIR="$TMP_DIR/lock" AUTOPR_TEST_DISPATCHES="$TMP_DIR/dispatches" \
@@ -237,6 +247,24 @@ AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]'
 check "a queued card jumps the routine wait and the other lanes" \
   $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] \
     && grep -q 'kanban-run-request' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+
+# `NEXT_ELIGIBLE_AT=0` on this path is a DELIBERATE override of the routine
+# spend floor — a human is waiting on this specific card. write_status read 0
+# as "never computed" and copied the previous tick's future eligible_at back
+# in, so status.json, the dashboard's "next eligible" line and the no-fetch
+# short-circuit all reported the lane as ineligible immediately after a human
+# forced a run.
+rm -f "$TMP_DIR/dispatches"
+rm -rf "$TMP_DIR/state"
+mkdir -p "$TMP_DIR/state"
+jq -cn --argjson now "$(date +%s)" \
+  '{action:"skip",reason:"kanban-not-due",checked_at:$now,next_check_at:($now + 60),eligible_at:($now + 3600)}' \
+  > "$TMP_DIR/state/status.json"
+AUTOPR_TEST_KEEP_STATUS=1 AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' \
+  AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS="$mid_kanban" run_dispatcher --if-requested
+check "a forced run clears the routine eligible_at instead of resurrecting it" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] \
+    && jq -e '.eligible_at == 0' "$TMP_DIR/state/status.json" >/dev/null && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/dispatches"
 AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
@@ -666,6 +694,226 @@ check "the login verdict is cached per tick but re-read the moment auth.json cha
 printf '%s\n' '{"action":"skip","reason":"codex-auth-required","checked_at":999990,"next_check_at":1000050,"eligible_at":0}' > "$TMP_DIR/seg-state/status.json"
 check "status segment names a dead Codex login" \
   $(grep -q 'CODEX LOGIN' <<< "$(seg)" && echo 0 || echo 1)
+
+# A scheduler tick that cannot dispatch anything must not ask GitHub: 125 of
+# 268 ticks on 2026-09-13 fetched a fresh 100-run list to log kanban-not-due,
+# and 65 ticks in six days failed closed on a transient network error doing so.
+idle_now="$(date +%s)"
+mkdir -p "$TMP_DIR/state" "$TMP_DIR/github-cache"
+jq -cn --argjson now "$idle_now" '[
+  {databaseId:6,status:"completed",lane:"errors",updatedAt:(($now - 60) | todate)},
+  {databaseId:8,status:"completed",lane:"self-audit",updatedAt:(($now - 60) | todate)},
+  {databaseId:9,status:"completed",lane:"kanban",updatedAt:(($now - 60) | todate)}]' \
+  > "$TMP_DIR/github-cache/runs.json"
+jq -cn --argjson now "$idle_now" \
+  '{action:"skip",reason:"kanban-not-due",checked_at:$now,next_check_at:($now + 60),eligible_at:($now + 240)}' \
+  > "$TMP_DIR/state/status.json"
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/idle-gh.log"
+AUTOPR_TEST_KEEP_STATUS=1 AUTOPR_TEST_GH_CALLS="$TMP_DIR/idle-gh.log" \
+  AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher
+check "a not-due scheduler tick logs kanban-not-due without asking GitHub" \
+  $(tail -n 1 "$TMP_DIR/log.jsonl" | grep -q 'kanban-not-due' && [ ! -e "$TMP_DIR/dispatches" ] \
+    && ! grep -q 'run list' "$TMP_DIR/idle-gh.log" 2>/dev/null \
+    && jq -e --argjson now "$idle_now" '.eligible_at == $now + 240' "$TMP_DIR/state/status.json" >/dev/null \
+    && echo 0 || echo 1)
+# A lane the LAST snapshot already shows as due still fetches: the stale read
+# can only cause a fetch, never suppress one.
+jq -cn --argjson now "$idle_now" '[
+  {databaseId:6,status:"completed",lane:"errors",updatedAt:(($now - 700) | todate)},
+  {databaseId:9,status:"completed",lane:"kanban",updatedAt:(($now - 60) | todate)}]' \
+  > "$TMP_DIR/github-cache/runs.json"
+rm -f "$TMP_DIR/due-gh.log"
+AUTOPR_TEST_KEEP_STATUS=1 AUTOPR_TEST_GH_CALLS="$TMP_DIR/due-gh.log" AUTOPR_TEST_ERROR_RUNS="$recent_error" \
+  AUTOPR_TEST_AUDIT_RUNS="$recent_audit" AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher
+check "a lane the last snapshot shows as due still fetches a fresh list" \
+  $(grep -q 'run list' "$TMP_DIR/due-gh.log" && echo 0 || echo 1)
+# A run still in flight at the last fetch does not take the shortcut either:
+# notify_run_outcomes runs only after a fetch, so the operator's
+# "run finished" banner would otherwise wait out the whole eligibility window.
+# These ticks fetched before the shortcut existed too — they ended at
+# `skip active-autopr-workflow`.
+jq -cn --argjson now "$idle_now" '[
+  {databaseId:6,status:"completed",lane:"errors",updatedAt:(($now - 60) | todate)},
+  {databaseId:8,status:"completed",lane:"self-audit",updatedAt:(($now - 60) | todate)},
+  {databaseId:9,status:"in_progress",lane:"kanban",updatedAt:(($now - 60) | todate)}]' \
+  > "$TMP_DIR/github-cache/runs.json"
+jq -cn --argjson now "$idle_now" \
+  '{action:"skip",reason:"kanban-not-due",checked_at:$now,next_check_at:($now + 60),eligible_at:($now + 240)}' \
+  > "$TMP_DIR/state/status.json"
+rm -f "$TMP_DIR/inflight-gh.log"
+AUTOPR_TEST_KEEP_STATUS=1 AUTOPR_TEST_GH_CALLS="$TMP_DIR/inflight-gh.log" \
+  AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher
+check "a run in flight at the last snapshot still fetches, so its banner is not held" \
+  $(grep -q 'run list' "$TMP_DIR/inflight-gh.log" && echo 0 || echo 1)
+# NEXT_ELIGIBLE_AT is only computed on the full-pass path, so every early exit
+# used to rewrite status.json with eligible_at: 0 and disable the short-circuit
+# on the NEXT tick. A dispatch is always followed by a recent-dispatch-pending
+# tick, so the saving was reset right after every dispatch.
+jq -cn --argjson now "$idle_now" \
+  '{action:"skip",reason:"kanban-not-due",checked_at:$now,next_check_at:($now + 60),eligible_at:($now + 240)}' \
+  > "$TMP_DIR/state/status.json"
+: > "$TMP_DIR/state/last-dispatch"
+AUTOPR_TEST_KEEP_STATUS=1 AUTOPR_TEST_KEEP_LEASE=1 \
+  AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher
+check "an early-exit tick keeps the last known eligible_at instead of zeroing it" \
+  $(tail -n 1 "$TMP_DIR/log.jsonl" | grep -q 'recent-dispatch-pending' \
+    && jq -e --argjson now "$idle_now" '.eligible_at == $now + 240' "$TMP_DIR/state/status.json" >/dev/null \
+    && echo 0 || echo 1)
+rm -f "$TMP_DIR/state/last-dispatch"
+# The watcher lane never takes the shortcut: it has its own board probe.
+rm -rf "$TMP_DIR/state" "$TMP_DIR/watch-idle-gh.log"
+mkdir -p "$TMP_DIR/state"
+jq -cn --argjson now "$idle_now" \
+  '{action:"skip",reason:"kanban-not-due",checked_at:$now,next_check_at:($now + 60),eligible_at:($now + 240)}' \
+  > "$TMP_DIR/state/status.json"
+AUTOPR_TEST_KEEP_STATUS=1 AUTOPR_TEST_GH_CALLS="$TMP_DIR/watch-idle-gh.log" AUTOPR_TEST_PROBE_EXIT=0 \
+  AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher --if-requested
+check "the request watcher still fetches before honoring a queued card" \
+  $(grep -q 'run list' "$TMP_DIR/watch-idle-gh.log" && echo 0 || echo 1)
+
+# One transient GitHub failure is retried before the tick fails closed.
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/retry-gh.log" "$TMP_DIR/fail-once" "$TMP_DIR/state/status.json" "$TMP_DIR/state/last-forced-kanban"
+AUTOPR_TEST_LIST_FAIL_ONCE="$TMP_DIR/fail-once" AUTOPR_GITHUB_SNAPSHOT_RETRY_SECONDS=0 \
+  AUTOPR_TEST_GH_CALLS="$TMP_DIR/retry-gh.log" \
+  AUTOPR_TEST_ERROR_RUNS="$recent_error" AUTOPR_TEST_AUDIT_RUNS="$recent_audit" \
+  AUTOPR_TEST_KANBAN_RUNS="$stale_kanban" run_dispatcher
+check "one transient GitHub failure is retried and the tick still dispatches" \
+  $([ "$(cat "$TMP_DIR/dispatches" 2>/dev/null)" = "kanban-autopr.yml" ] \
+    && [ "$(grep -c 'run list' "$TMP_DIR/retry-gh.log")" = 2 ] \
+    && ! tail -n 1 "$TMP_DIR/log.jsonl" | grep -q 'run-snapshot-failed' && echo 0 || echo 1)
+
+# An active-run skip row names the run; it no longer embeds the snapshot.
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/state/status.json"
+active_run="[{\"databaseId\":77,\"status\":\"in_progress\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$recent\",\"updatedAt\":\"$recent\",\"url\":\"https://example.invalid/a/very/long/run/url/that/used/to/be/logged\",\"displayTitle\":\"Kanban autopr\"}]"
+AUTOPR_TEST_KANBAN_RUNS="$active_run" run_dispatcher
+check "an active-run skip row names the run without embedding the whole snapshot" \
+  $(tail -n 1 "$TMP_DIR/log.jsonl" | jq -e '.reason == "active-autopr-workflow" and (.runs | length) == 1
+      and .runs[0].databaseId == 77 and .runs[0].lane == "kanban" and (.runs[0] | has("url") | not)' >/dev/null \
+    && [ "$(tail -n 1 "$TMP_DIR/log.jsonl" | wc -c | tr -d ' ')" -lt 512 ] && echo 0 || echo 1)
+
+# The installed dispatcher tree never auto-updated; the kanban workflow now
+# syncs it from its main checkout on every pass. Runtime files only, only on
+# drift, and never the plists or launchctl.
+sync_root="$TMP_DIR/sync-root"
+sync_agents="$TMP_DIR/sync-agents"
+rm -rf "$sync_root" "$sync_agents"
+mkdir -p "$sync_agents"
+sync_installer() {
+  AUTOPR_DISPATCH_INSTALL_ROOT="$sync_root" AUTOPR_LAUNCH_AGENTS_DIR="$sync_agents" \
+    AUTOPR_LAUNCHCTL_BIN=/usr/bin/false AUTOPR_USER_HOME="$TMP_DIR/sync-home" \
+    "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" --runtime-if-stale 2>&1
+}
+# It refreshes an installed tree; it never creates one. A runtime-only tree
+# has no plists, so nothing runs it — but its mere existence is what
+# `dispatcher_install_root().is_dir()` reads as `lanes_installed`, which would
+# start failing `msandbox doctor` on a developer's machine over a Codex login
+# and a verification cache for lanes that host does not run.
+missing_sync="$(sync_installer)"
+check "--runtime-if-stale refuses to create a dispatcher tree that was never installed" \
+  $(grep -q 'No AutoPR dispatcher installed' <<< "$missing_sync" \
+    && [ ! -d "$sync_root" ] && [ -z "$(ls -A "$sync_agents")" ] && echo 0 || echo 1)
+mkdir -p "$sync_root"
+first_sync="$(sync_installer)"
+check "--runtime-if-stale fills an installed dispatcher tree without touching launchd" \
+  $(grep -q 'refreshed' <<< "$first_sync" && grep -q 'lib.sh' <<< "$first_sync" \
+    && cmp -s "$sync_root/lib.sh" "$REPO_ROOT/apps/msandbox/harness/lib.sh" \
+    && [ -f "$sync_root/codex_auth.py" ] \
+    && [ -z "$(ls -A "$sync_agents")" ] && echo 0 || echo 1)
+second_sync="$(sync_installer)"
+check "--runtime-if-stale is a no-op on an identical tree" \
+  $(grep -q 'current' <<< "$second_sync" && ! grep -q 'refreshed' <<< "$second_sync" && echo 0 || echo 1)
+printf '\n# drifted\n' >> "$sync_root/lib.sh"
+rm -f "$sync_root/codex_auth.py"
+third_sync="$(sync_installer)"
+check "--runtime-if-stale names the drifted and missing files and restores them" \
+  $(grep -q 'refreshed' <<< "$third_sync" && grep -q 'lib.sh' <<< "$third_sync" \
+    && grep -q 'codex_auth.py' <<< "$third_sync" \
+    && cmp -s "$sync_root/lib.sh" "$REPO_ROOT/apps/msandbox/harness/lib.sh" \
+    && [ -f "$sync_root/codex_auth.py" ] && echo 0 || echo 1)
+# `runtime_stale_names` stages a full install to derive the name list, and
+# the workflow step is `continue-on-error: true`. Under `set -e` a failed
+# staging install used to abort the script through the `| tr` pipeline before
+# printing anything, so the stale-dispatcher regression this sync exists to
+# catch would come back silently.
+broken_tree="$TMP_DIR/broken-harness"
+mkdir -p "$broken_tree/apps/msandbox/harness" "$broken_tree/apps/msandbox/cli"
+cp "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" "$broken_tree/apps/msandbox/harness/"
+broken_rc=0
+broken_out="$(AUTOPR_DISPATCH_INSTALL_ROOT="$sync_root" AUTOPR_LAUNCH_AGENTS_DIR="$sync_agents" \
+  AUTOPR_LAUNCHCTL_BIN=/usr/bin/false AUTOPR_USER_HOME="$TMP_DIR/sync-home" \
+  "$broken_tree/apps/msandbox/harness/install-launch-agent.sh" --runtime-if-stale 2>&1)" \
+  || broken_rc=$?
+check "a staging install that cannot complete is reported, not swallowed" \
+  $([ "$broken_rc" != 0 ] && grep -q 'dispatcher sync FAILED' <<< "$broken_out" \
+    && grep -q 'still running the OLD copy' <<< "$broken_out" \
+    && echo 0 || echo 1)
+
+# install(1) sets 755 on the scripts; a copy whose mode drifted is still
+# byte-identical, so a content-only comparison reports "current" while the
+# LaunchAgents keep an unexecutable dispatcher.
+chmod 644 "$sync_root/dispatch-if-idle.sh"
+mode_sync="$(sync_installer)"
+check "--runtime-if-stale notices a mode that drifted under identical bytes" \
+  $(grep -q 'dispatch-if-idle.sh' <<< "$mode_sync" \
+    && [ "$(stat -f '%Lp' "$sync_root/dispatch-if-idle.sh" 2>/dev/null \
+            || stat -c '%a' "$sync_root/dispatch-if-idle.sh")" = 755 ] \
+    && echo 0 || echo 1)
+
+workflow_yml="$REPO_ROOT/.github/workflows/kanban-autopr.yml"
+check "kanban workflow syncs the installed dispatcher from its main checkout after the reset step" \
+  $(grep -q 'install-launch-agent.sh --runtime-if-stale' "$workflow_yml" \
+    && [ "$(grep -n 'Reset any stray bot branch' "$workflow_yml" | cut -d: -f1)" \
+         -lt "$(grep -n 'install-launch-agent.sh --runtime-if-stale' "$workflow_yml" | cut -d: -f1)" ] \
+    && [ "$(grep -n 'install-launch-agent.sh --runtime-if-stale' "$workflow_yml" | cut -d: -f1)" \
+         -lt "$(grep -n 'Snapshot trusted AutoPR control plane' "$workflow_yml" | cut -d: -f1)" ] \
+    && echo 0 || echo 1)
+# The installer writes into ~/.local/share: it is the one step in that job
+# that puts code on the host, and it runs before the trusted control-plane
+# archive exists. So it has to cut its own archive of main — the reset step
+# above it force-updates the main REF without moving the worktree whenever
+# the checkout is not already on main.
+check "the dispatcher sync runs from a git archive of main, not the working tree" \
+  $(awk '/Keep the installed dispatcher tree on main/,/--runtime-if-stale$/' "$workflow_yml" \
+      | grep -q 'git archive main' && echo 0 || echo 1)
+# A doctor line about the verification cache is not installed-tree drift, and
+# `msandbox install` does not build it — so the banner must not name it, or a
+# developer who runs no lanes gets it after every pull, forever.
+check "the post-merge banner ignores verification-toolchain lines" \
+  $(grep -q "grep -v 'verification toolchain'" "$REPO_ROOT/apps/msandbox/harness/hooks/post-merge" \
+    && echo 0 || echo 1)
+# `git rev-parse --git-path hooks` always answers `.git/hooks` and ignores
+# core.hooksPath, so on a clone that sets it the script used to report
+# "Installed" for hooks git would never run — the operator believes the
+# stale-install banner is armed when it is not.
+hooks_repo="$TMP_DIR/hooks-repo"
+mkdir -p "$hooks_repo/apps/msandbox/harness"
+cp -R "$REPO_ROOT/apps/msandbox/harness/hooks" "$hooks_repo/apps/msandbox/harness/hooks"
+cp "$REPO_ROOT/apps/msandbox/harness/install-hooks.sh" "$hooks_repo/apps/msandbox/harness/"
+git -C "$hooks_repo" init -q
+git -C "$hooks_repo" config core.hooksPath .githooks
+"$hooks_repo/apps/msandbox/harness/install-hooks.sh" > "$TMP_DIR/hooks-install.out" 2>&1
+check "install-hooks.sh installs where a repo-local core.hooksPath points" \
+  $([ -L "$hooks_repo/.githooks/post-merge" ] && [ -L "$hooks_repo/.githooks/post-checkout" ] \
+    && [ ! -e "$hooks_repo/.git/hooks/post-merge" ] \
+    && grep -q 'Using core.hooksPath' "$TMP_DIR/hooks-install.out" && echo 0 || echo 1)
+# ...but the effective value includes --global. Honouring a hooks path outside
+# the checkout planted matcha's post-merge in EVERY repository the operator
+# owns: a `git pull` anywhere then ran `msandbox doctor` and printed matcha
+# drift banners for an unrelated project. Refuse, and say how to fix it —
+# installing into .git/hooks instead would be silently inert.
+git -C "$hooks_repo" config core.hooksPath "$TMP_DIR/custom-hooks"
+hooks_outside_rc=0
+"$hooks_repo/apps/msandbox/harness/install-hooks.sh" > "$TMP_DIR/hooks-outside.out" 2>&1 \
+  || hooks_outside_rc=$?
+check "a hooks path outside the checkout is refused, never planted machine-wide" \
+  $([ "$hooks_outside_rc" = 1 ] && [ ! -e "$TMP_DIR/custom-hooks" ] \
+    && grep -q 'outside' "$TMP_DIR/hooks-outside.out" \
+    && grep -q 'unset core.hooksPath' "$TMP_DIR/hooks-outside.out" && echo 0 || echo 1)
+
+check "install-hooks.sh installs the post-merge drift banner beside post-checkout" \
+  $(grep -q 'post-merge' "$REPO_ROOT/apps/msandbox/harness/install-hooks.sh" \
+    && [ -x "$REPO_ROOT/apps/msandbox/harness/hooks/post-merge" ] \
+    && bash -n "$REPO_ROOT/apps/msandbox/harness/hooks/post-merge" && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

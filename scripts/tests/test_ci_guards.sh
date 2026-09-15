@@ -324,6 +324,44 @@ else
     check "every control-root script is inside an archived path" 0
 fi
 
+# `bash -n f1 f2 f3` parses ONLY f1 — bash takes the first non-option argument
+# as the script and the rest become $1, $2 … — so a multi-file invocation is a
+# no-op gate for every file after the first. ci.yml's hand-maintained list
+# syntax-checked exactly one of its fourteen scripts for as long as it existed,
+# ops-health/prod-query.sh (which update-ec2.sh shells out to for its
+# pending-migration gate) included.
+ci_workflow="$REPO_ROOT/.github/workflows/ci.yml"
+multi_file_bash_n="$(grep -nE '^[^#]*(^|[^a-zA-Z0-9_-])bash -n( +[^ |&;#]+){2,}' "$ci_workflow" || true)"
+if [ -n "$multi_file_bash_n" ]; then
+    echo "  bash -n with more than one file (only the first is parsed):"
+    printf '%s\n' "$multi_file_bash_n"
+    check "ci.yml never passes more than one file to bash -n" 1
+else
+    check "ci.yml never passes more than one file to bash -n" 0
+fi
+
+# ...and the gate reaches both operator trees by discovery, with -print0 to
+# match xargs -0. A hand-maintained list rots; this one had fallen two dozen
+# files behind.
+syntax_gate_ok=0
+grep -qF "find scripts apps/msandbox -type f" "$ci_workflow" || syntax_gate_ok=1
+grep -qF -- "-print0" "$ci_workflow" || syntax_gate_ok=1
+grep -qF "xargs -0 -n1 bash -n" "$ci_workflow" || syntax_gate_ok=1
+check "ci.yml syntax-checks scripts/ and apps/msandbox/ by discovery, one file per call" "$syntax_gate_ok"
+
+# The gate must actually be clean on this checkout.
+discovered_bad=""
+while IFS= read -r -d '' shell_file; do
+    bash -n "$shell_file" 2>/dev/null || discovered_bad="$discovered_bad $shell_file"
+done < <(cd "$REPO_ROOT" && find scripts apps/msandbox -type f \( -name '*.sh' -o -path '*/hooks/*' \) \
+    -not -path 'scripts/oldscripts/*' -print0)
+if [ -n "$discovered_bad" ]; then
+    echo "  files failing bash -n:$discovered_bad"
+    check "every discovered shell file parses" 1
+else
+    check "every discovered shell file parses" 0
+fi
+
 echo
 echo "----------------------------------------"
 echo "PASS: $PASS  FAIL: $FAIL"

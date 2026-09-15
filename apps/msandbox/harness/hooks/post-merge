@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# After `git pull` / `git merge` in the real clone: say whether the two
+# installed msandbox trees (the pinned release behind ~/.local/bin/msandbox
+# and the LaunchAgent dispatcher copy) now lag this checkout. Installed via
+# install-hooks.sh; never runs in a CI workspace. A hook must never fail or
+# slow down a merge, so this is best-effort and prints only when something
+# is stale.
+set -uo pipefail
+
+msandbox="${MSANDBOX_BIN:-$HOME/.local/bin/msandbox}"
+[ -x "$msandbox" ] || exit 0
+# Only the merge of a mainline matters; a topic-branch merge changes nothing
+# the automation runs.
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+[ "$branch" = main ] || exit 0
+
+report="$("$msandbox" doctor 2>/dev/null || true)"
+# Installed-tree drift only. `msandbox doctor` also reports the runner-owned
+# verification cache, which a developer who runs no lanes has no reason to
+# build — and which `msandbox install` would not build anyway, so banging on
+# it after every pull would be advice that cannot clear itself.
+stale="$(printf '%s\n' "$report" | grep -E 'STALE|MISSING|PRE-MOVE' \
+    | grep -v 'verification toolchain' || true)"
+[ -n "$stale" ] || exit 0
+{
+    echo
+    echo "msandbox: installed automation lags this checkout —"
+    printf '  %s\n' "$stale"
+    echo "  (the kanban lane refreshes the dispatcher on its next pass; \`msandbox install\` cuts a new release,"
+    echo "   \`msandbox install --verify-toolchain\` rebuilds the verification cache; \`msandbox doctor\` shows the rest)"
+    echo
+} >&2
+exit 0

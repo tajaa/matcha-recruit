@@ -65,12 +65,23 @@ fi
 
 raw_file="$CACHE_ROOT/runs.raw.$$"
 next_file="$CACHE_ROOT/runs.next.$$"
-if ! "$GH_BIN" run list --repo "$REPO" --branch "$REF" --limit 100 \
-    --json databaseId,status,conclusion,event,createdAt,updatedAt,url,displayTitle,workflowName \
-    > "$raw_file"; then
-    [ "$ALLOW_STALE" = true ] || exit 1
-    emit_cache
-    exit $?
+fetch_runs() {
+    "$GH_BIN" run list --repo "$REPO" --branch "$REF" --limit 100 \
+        --json databaseId,status,conclusion,event,createdAt,updatedAt,url,displayTitle,workflowName \
+        > "$raw_file"
+}
+# One retry. The runner Mac roams between networks; 65 dispatcher ticks in six
+# days (2026-09-08 → 09-13) failed closed on a TLS handshake timeout or a reset
+# that a second attempt a few seconds later answers. A rate-limit 403 fails
+# twice and still lands in the fallback below.
+RETRY_SECONDS="${AUTOPR_GITHUB_SNAPSHOT_RETRY_SECONDS:-5}"
+if ! fetch_runs; then
+    sleep "$RETRY_SECONDS"
+    if ! fetch_runs; then
+        [ "$ALLOW_STALE" = true ] || exit 1
+        emit_cache
+        exit $?
+    fi
 fi
 
 jq '
