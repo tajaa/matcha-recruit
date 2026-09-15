@@ -304,6 +304,14 @@ patch). Cleanup books a ledger strike only for `model`; the other three journal 
 a lane fault (`CODEX LOGIN DEAD`, `CODEX QUOTA`, `SANDBOX FAULT`) and leave the count
 alone. Before this, one evening of expired login struck every card it touched.
 
+`verify` joins that set. verify.sh always exits 0 and reports a failing branch IN its
+table, never as a status, so a failed Verify step means the step was killed by its
+timeout (20 minutes; a client-touching PR runs pytest in two trees plus two full
+`tsc -p tsconfig.app.json` passes plus vitest) or refused to run here at all — neither
+is the card's doing. `exit 75` without an acknowledged operator takeover is the
+mirror image: the bridge promotes `CURRENT_FAULT_CLASS` to `model` as soon as the
+model has run, so a bad pause write is struck rather than excused.
+
 A lane fault still calls `autopr_mark_attempt`, which stamps the card's attempt marker
 without writing a strike. The marker's mtime is the only thing `select.sh`'s cooldown
 reads, so skipping it entirely re-selects the same card on the very next pass: `auth` is
@@ -315,7 +323,13 @@ is re-stamped rather than rewritten.
 
 **Model budget vs step budget.** `runtime-policy.sh` emits both `minutes` (the model's
 own budget, 20 or an approved 10) and `step_minutes` (`minutes + AUTOPR_STEP_GRACE_MINUTES`,
-default 3). The supervisor (`autopr_control.py supervise --deadline`) terminates the model's
+default 3). `minutes` is the budget for the whole step, not for one pass:
+`investigate.sh`'s `refresh_model_budget` hands each `codex_pass` what is left of it,
+measured from the step's own start stamp. A corrective second pass with a fresh full
+deadline cannot fit inside `step_minutes`, so Actions hard-kills the step mid-model —
+no container stop, no DEADLINE_EXIT, no post-model validation. Below a two-minute floor
+the corrective pass is skipped and the card is parked for context instead of paying for
+a model call the step timeout will cut off. The supervisor (`autopr_control.py supervise --deadline`) terminates the model's
 whole session at `minutes` and reports 143, which `investigate.sh` passes through and
 `checkpoint.sh` reads as "killed" — a pause, not a strike. The Investigate step's own
 timeout is `step_minutes`, so sandbox start-up before the model and validation after it no

@@ -82,6 +82,12 @@ report() {
 build_python() {
     local temporary="$VENV_DIR.tmp.$$"
     [ -x "$PY312" ] || { echo "missing $PY312 (brew install python@3.12)" >&2; return 1; }
+    # --force replaces this exact directory; a lane reading it would lose its
+    # interpreter mid-suite.
+    if autofix_toolchain_in_use "$VENV_DIR"; then
+        echo "refusing to rebuild $VENV_DIR: a running lane is reading it" >&2
+        return 1
+    fi
     rm -rf "$temporary"
     "$PY312" -m venv "$temporary" || return 1
     local manifests=(-r "$REPO_ROOT/server/requirements.txt")
@@ -103,6 +109,10 @@ build_python() {
 build_node() {
     local temporary="$NODE_ROOT.tmp.$$"
     command -v "$NPM_BIN" >/dev/null 2>&1 || { echo "missing npm ($NPM_BIN)" >&2; return 1; }
+    if autofix_toolchain_in_use "$NODE_ROOT"; then
+        echo "refusing to rebuild $NODE_ROOT: a running lane is reading it" >&2
+        return 1
+    fi
     [ -f "$REPO_ROOT/client/package-lock.json" ] || { echo "missing client/package-lock.json" >&2; return 1; }
     rm -rf "$temporary"
     mkdir -p "$temporary"
@@ -139,6 +149,16 @@ prune_stale() {
             # `npm ci`; leaving it costs one directory until the next --force.
             *.tmp.*) continue ;;
         esac
+        # A lane reading this entry right now. verify.sh registers its pid
+        # before it uses a cache entry; without this, an operator provisioning
+        # from a branch whose manifests differ by one line would `rm -rf` the
+        # venv and node_modules a running lane is symlinked into — pytest dies
+        # mid-suite and both tsc calls 127 through dangling links, so that PR
+        # publishes unverified.
+        if autofix_toolchain_in_use "$entry"; then
+            echo "kept (in use by a running lane): $entry"
+            continue
+        fi
         rm -rf "$entry"
         echo "pruned stale toolchain: $entry"
     done

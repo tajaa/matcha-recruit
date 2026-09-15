@@ -73,7 +73,17 @@ and the `mw_tasks.autopr_*` columns they read.
   instead (layout + keys in `error-autofix/toolchain.sh`, the one writer is
   `harness/provision-verify-toolchain.sh`, reachable as `msandbox install
   --verify-toolchain`); `audit.sh` and `msandbox doctor` both run its
-  `--check`. The key helpers FAIL rather than return a key for a tree with
+  `--check`. Both trees under verification must end up able to RUN the tools:
+  a branch tree left with a real-but-broken `client/node_modules` while the
+  baseline ran the cache is a false green (its `tsc` exits 127, prints no
+  `error TS` lines, and `comm -13` sees zero regressions), so verify.sh
+  reports unavailable instead. It also unlinks the cache from the tree on
+  exit — `AUTOPR_WORKSPACE_ROOT` can name any checkout, and a link left
+  pointing into the shared cache turns a later `npm ci` there into an
+  in-place rewrite of the toolchain every lane reads. A reader registers its
+  pid (`autofix_hold_toolchain`) so a concurrent `provision-verify-toolchain.sh`
+  cannot `rm -rf` the venv and node_modules a running lane is symlinked into.
+  The key helpers FAIL rather than return a key for a tree with
   no manifests — `shasum` over no input is a valid digest, and every such
   tree would otherwise share one cache entry and be "verified" against a
   dependency set matching none of them. They also `|| true` the loop feeding
@@ -94,10 +104,25 @@ and the `mw_tasks.autopr_*` columns they read.
   strike, but the cooldown marker must exist or `select.sh` has nothing to
   read and re-picks the same card every pass — `auth` is held off by the
   dispatcher's login guard and `usage_limit` by `codex-backoff.sh`, but
-  `infrastructure` has no lane-wide hold of its own. The model's time budget is the supervisor's
+  `infrastructure` has no lane-wide hold of its own. `verify` is a lane fault
+  too: verify.sh always exits 0 and reports a failing branch IN its table, so
+  a failed Verify step is the step being killed by its timeout or refusing to
+  run here, never the card. Exit 75 without an acknowledged takeover is the
+  opposite case — `CURRENT_FAULT_CLASS` is promoted to `model` as soon as the
+  model has run, before that branch, or a bad pause write reads as a lane
+  fault the card can never be struck for.
+  The model's time budget is the supervisor's
   `--deadline` (exit 143), and `investigate.sh` passes any status ≥ 128
   through unchanged so `checkpoint.sh` can read it as a kill; `die` flattens
-  to 1 and would turn every budget stop into a strike.
+  to 1 and would turn every budget stop into a strike. That budget is the
+  STEP's total, not a per-pass allowance: `refresh_model_budget` hands each
+  `codex_pass` what is left of it, because a corrective retry with a fresh
+  full deadline cannot fit inside `minutes + AUTOPR_STEP_GRACE_MINUTES` and
+  is hard-killed by Actions instead — no container stop, no DEADLINE_EXIT, no
+  validation window. Every `os.killpg` on those paths is guarded, including
+  the one in `supervise`'s `finally`: it runs after the return value is fixed
+  but can still replace it with a traceback, and it sits outside the
+  `except BaseException`.
 - **Every publisher that runs `git reset --hard` calls
   `autopr_require_writable_root` immediately after assigning `REPO_ROOT`**
   (`harness/publish.sh`, `harness/investigate.sh`, `error-autofix/publish.sh`,
@@ -192,6 +217,22 @@ and the `mw_tasks.autopr_*` columns they read.
 - **`harness/install-launch-agent.sh:install_runtime`** is parsed by
   `cli/install.py:dispatcher_installed_files` and by
   `tests/test_kanban_autopr_dispatch.sh`; keep it a flat list of names.
+  `--runtime-if-stale` REFRESHES an installed tree and never creates one: a
+  runtime-only tree has no plists, so nothing runs it, but its existence is
+  what `dispatcher_install_root().is_dir()` reads as `lanes_installed`. It
+  compares mode as well as bytes — a copy that drifted to 644 is
+  byte-identical and would be reported current while the LaunchAgents keep an
+  unexecutable dispatcher.
+- **`harness/install-hooks.sh` honours `core.hooksPath`.**
+  `git rev-parse --git-path hooks` always answers `.git/hooks` and ignores
+  it, so on a clone that sets one the script reported "Installed" for hooks
+  git would never run.
+- **ci.yml syntax-checks this tree by discovery**, not by name:
+  `find apps/msandbox -type f \( -name '*.sh' -o -path '*/hooks/*' \) | xargs -0 -n1 bash -n`.
+  The hand-maintained list had fallen two dozen files behind — including both
+  files the verification toolchain is built from — leaving the self-hosted
+  audit lane as their only syntax gate, which is the single point of failure
+  that lane exists to remove.
 
 ## Installed copies: one follows `main`, one does not
 

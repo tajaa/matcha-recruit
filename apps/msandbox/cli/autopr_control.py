@@ -396,10 +396,23 @@ def stop_sandbox_container() -> None:
 
     The model runs inside Docker, so terminating the host `docker exec`
     client alone leaves it writing to the bind-mounted clone. Failing to
-    stop it is worth a line on stderr, never a non-zero supervisor exit.
+    stop it is worth a loud line on the activity log, never a non-zero
+    supervisor exit — unlike the pause path, which must not transfer a
+    checkout out from under a live writer and so lets the error propagate.
+
+    An unset AUTOPR_MSANDBOX_BIN is reported rather than silently skipped:
+    the container then outlives the deadline, which is precisely what the
+    caller's ordering exists to prevent, and a silent no-op makes that
+    invisible. run-codex-sandboxed.sh always sets it; anything else is a
+    caller that has to be fixed.
     """
     msandbox_bin = os.environ.get("AUTOPR_MSANDBOX_BIN")
     if not msandbox_bin:
+        print(
+            "\nAutoPR cannot stop the sandbox container: AUTOPR_MSANDBOX_BIN is "
+            "unset, so the model's container may outlive this supervisor.",
+            flush=True,
+        )
         return
     try:
         command([msandbox_bin, "stop"], env=os.environ.copy(), timeout=60)
@@ -562,8 +575,17 @@ def supervisor(
             save(run)
         raise
     finally:
+        # Unguarded, this raises PAST an already-executed `return
+        # DEADLINE_EXIT` / `PAUSED_EXIT` — a `finally` runs after the return
+        # value is fixed but can still replace it with an exception, and it
+        # sits outside the `except BaseException` above. The supervisor then
+        # exits 1 with a traceback, investigate.sh sees a status < 128 and
+        # flattens it, and the budget stop becomes an `investigate` strike.
         if proc is not None and proc.poll() is None:
-            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except OSError:
+                pass
 
 
 def manual_environment(

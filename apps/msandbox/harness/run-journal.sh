@@ -119,7 +119,7 @@ reason_label() {
         auth) printf 'the host Codex login was dead, so the model never ran; nothing about this card failed (fix: `codex login` on the runner Mac, then Run)' ;;
         usage_limit) printf 'the shared ChatGPT quota was exhausted, so the model never finished; nothing about this card failed and the lanes back off until it returns' ;;
         infrastructure) printf 'the sandbox could not be started (Docker, disk, or network), so the model never ran; nothing about this card failed' ;;
-        verify) printf 'the branch failed verification against the baseline' ;;
+        verify) printf 'the verification step did not complete (it was killed by its timeout, or refused to run here); verify.sh reports a failing branch in its table, never as a status, so nothing about this card failed' ;;
         publish|publish_artifact) printf 'publishing the result failed' ;;
         setup) printf 'the run died before the investigation started (claim, checkout, policy, or coverage step)' ;;
         cancelled) printf 'an operator cancelled the run' ;;
@@ -140,7 +140,7 @@ stopped_header_label() {
         auth) printf 'CODEX LOGIN DEAD' ;;
         usage_limit) printf 'CODEX QUOTA' ;;
         infrastructure) printf 'SANDBOX FAULT' ;;
-        verify) printf 'VERIFY FAILED' ;;
+        verify) printf 'VERIFY DID NOT RUN' ;;
         publish|publish_artifact) printf 'PUBLISH FAILED' ;;
         setup) printf 'DIED IN SETUP' ;;
         cancelled) printf 'CANCELLED' ;;

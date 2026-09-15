@@ -154,6 +154,10 @@ DEV_VENV_PY="${AUTOFIX_DEV_VENV_PY:-}"
 CACHED_VENV="$(autofix_venv_dir "$REPO_ROOT")" || CACHED_VENV=""
 VENV_PY=""
 BOOTSTRAP_OK=false
+# Cache entries this run is reading, released by cleanup(). See
+# autofix_hold_toolchain: a concurrent provision must not delete them.
+HELD_VENV=""
+HELD_CLIENT=""
 
 for candidate_py in ${DEV_VENV_PY:+"$DEV_VENV_PY"} "$REPO_ROOT/server/venv/bin/python" ${CACHED_VENV:+"$CACHED_VENV/bin/python"}; do
     if autofix_python_usable "$candidate_py"; then
@@ -166,6 +170,9 @@ done
 PYTHON_UNAVAILABLE=false
 if [ "$BOOTSTRAP_OK" != true ]; then
     PYTHON_UNAVAILABLE=true
+elif [ -n "$CACHED_VENV" ] && [ "$VENV_PY" = "$CACHED_VENV/bin/python" ]; then
+    HELD_VENV="$CACHED_VENV"
+    autofix_hold_toolchain "$HELD_VENV"
 fi
 
 if [ "$PYTHON_UNAVAILABLE" = true ] && [ "$CLIENT_CHANGED" != true ]; then
@@ -233,9 +240,22 @@ compileall_check() {
 BASE_TREE="$(mktemp -d "${RUNNER_TEMP:-/tmp}/autofix-baseline-XXXXXX")"
 git -C "$REPO_ROOT" worktree prune >/dev/null 2>&1 || true
 git -C "$REPO_ROOT" worktree add --detach "$BASE_TREE" "$BASE_SHA" >/dev/null 2>&1
+# Set when THIS run planted the branch tree's node_modules symlink.
+PLANTED_BRANCH_LINK=""
 cleanup() {
     git -C "$REPO_ROOT" worktree remove --force "$BASE_TREE" >/dev/null 2>&1 || true
     git -C "$REPO_ROOT" worktree prune >/dev/null 2>&1 || true
+    # Leave the tree under verification exactly as it was found. The link
+    # points into the shared cache, and `AUTOPR_WORKSPACE_ROOT` may name any
+    # checkout (the by-hand path is documented at the top of this script): a
+    # later `npm ci` in that clone would follow the link and rewrite the
+    # runner-owned toolchain every lane reads, in place, while
+    # `autofix_node_modules_usable` kept reporting it current.
+    if [ -n "$PLANTED_BRANCH_LINK" ] && [ -L "$PLANTED_BRANCH_LINK" ]; then
+        rm -f "$PLANTED_BRANCH_LINK"
+    fi
+    autofix_release_toolchain "${HELD_VENV:-}"
+    autofix_release_toolchain "${HELD_CLIENT:-}"
 }
 trap cleanup EXIT
 
@@ -244,10 +264,14 @@ trap cleanup EXIT
 # an already-installed dependency tree is read-only and avoids an unpinned
 # npm install inside the scheduled workflow. Sources, in order: a real
 # node_modules inside the tree under verification, then the runner-owned
-# cache (keyed on client/package-lock.json — toolchain.sh). The cache is
-# symlinked into BOTH trees; in the branch tree only when nothing real is
-# there (a symlink left by an earlier run is re-pointed, a real directory is
-# never replaced).
+# cache (keyed on client/package-lock.json — toolchain.sh).
+#
+# BOTH trees must end up able to run the tools, and the check below enforces
+# exactly that. A branch tree left with a real-but-broken node_modules (an
+# interrupted `npm install`, no `.bin/tsc`) while the baseline ran the cache
+# is the worst outcome available: the branch's tsc exits 127, prints no
+# `error TS` lines, `comm -13` sees zero regressions, and a PR that ADDS type
+# errors publishes as verified-clean. Unavailable is the honest answer.
 CLIENT_DEPS_READY=false
 CLIENT_NODE_MODULES=""
 CACHED_NODE_MODULES=""
@@ -268,11 +292,20 @@ elif [ -n "$CACHED_NODE_MODULES" ] && autofix_node_modules_usable "$CACHED_NODE_
     CLIENT_NODE_MODULES="$CACHED_NODE_MODULES"
     if [ -L "$REPO_ROOT/client/node_modules" ] || [ ! -e "$REPO_ROOT/client/node_modules" ]; then
         ln -sfn "$CLIENT_NODE_MODULES" "$REPO_ROOT/client/node_modules"
+        PLANTED_BRANCH_LINK="$REPO_ROOT/client/node_modules"
     fi
 fi
-if [ -n "$CLIENT_NODE_MODULES" ] && [ -d "$BASE_TREE/client" ]; then
+if [ -n "$CLIENT_NODE_MODULES" ] && [ -d "$BASE_TREE/client" ] \
+    && autofix_node_modules_usable "$REPO_ROOT/client/node_modules"; then
     ln -sfn "$CLIENT_NODE_MODULES" "$BASE_TREE/client/node_modules"
     CLIENT_DEPS_READY=true
+    # Hold the cache for as long as this run reads it: an operator running
+    # provision-verify-toolchain.sh against a branch whose manifests differ
+    # would otherwise `rm -rf` this entry mid-run, and both trees' tsc would
+    # exit 127 through a dangling symlink.
+    [ "$CLIENT_NODE_MODULES" = "$CACHED_NODE_MODULES" ] \
+        && HELD_CLIENT="$cached_client_root" \
+        && autofix_hold_toolchain "$HELD_CLIENT"
 fi
 
 BASE_FAILS="$(mktemp)"
@@ -351,7 +384,7 @@ else
 fi
 
 if [ "$CLIENT_CHANGED" = true ] && [ "$CLIENT_DEPS_READY" != true ]; then
-    echo "| TypeScript / Vitest | **unavailable** — no client toolchain (neither client/node_modules nor the cached \`$CACHED_NODE_MODULES\`; run provision-verify-toolchain.sh) | **unavailable** |"
+    echo "| TypeScript / Vitest | **unavailable** — no client toolchain usable from the branch tree (client/node_modules is absent or broken and the cached \`${CACHED_NODE_MODULES:-<no client/package-lock.json>}\` is not usable; run provision-verify-toolchain.sh) | **unavailable** |"
 elif [ "$CLIENT_CHANGED" = true ]; then
     base_types="$(grep -c . "$CLIENT_TYPE_BASE.ids" || true)"
     branch_types="$(grep -c . "$CLIENT_TYPE_BRANCH.ids" || true)"

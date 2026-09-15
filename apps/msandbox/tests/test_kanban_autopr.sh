@@ -2875,11 +2875,44 @@ check "a bridge refusal of the model's own patch is classified model" \
     $([ "$touch_rc" != 0 ] && [ "$(cat "$fault_file" 2>/dev/null)" = model ] && echo 0 || echo 1)
 rm -f "$SANDBOX_TEST_REPO/apps/msandbox/bin/agent-sandbox.sh" "$SANDBOX_TEST_REPO/client/src/fine.ts"
 git -C "$SANDBOX_TEST_REPO" checkout -q -- . 2>/dev/null || true
+# Exit 75 is the operator-takeover code; without an acknowledged takeover it
+# is the model's own bad pause write. Classified from the INITIAL class it
+# read as `infrastructure`, so Cleanup booked no strike and the card could be
+# re-selected every cooldown window without ever reaching the three-strike
+# park.
+run_bridge_for_fault CODEX_STUB_EXIT=75; pause75_rc=$?
+check "exit 75 with no acknowledged takeover is the model's fault, not the lane's" \
+    $([ "$pause75_rc" != 0 ] && [ "$(cat "$fault_file" 2>/dev/null)" = model ] && echo 0 || echo 1)
+rm -f "$SANDBOX_TEST_REPO/client/src/fine.ts"
+git -C "$SANDBOX_TEST_REPO" checkout -q -- . 2>/dev/null || true
+
 run_bridge_for_fault; ok_rc=$?
 check "a successful pass leaves no fault class behind" \
     $([ "$ok_rc" = 0 ] && [ ! -e "$fault_file" ] && echo 0 || echo 1)
 rm -f "$SANDBOX_TEST_REPO/client/src/fine.ts"
 git -C "$SANDBOX_TEST_REPO" checkout -q -- . 2>/dev/null || true
+
+# The budget is the STEP's total, not a per-pass allowance: a corrective
+# second pass with a fresh full deadline cannot fit inside minutes+grace, so
+# GitHub hard-kills the step mid-model — no container stop, no DEADLINE_EXIT,
+# no validation window (run 34728683748, the failure the grace was added for).
+check "each model pass gets what is left of the step's budget, not a fresh one" \
+    $(grep -qF 'MODEL_BUDGET_TOTAL_SECONDS="${AUTOPR_MODEL_BUDGET_SECONDS:-0}"' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'refresh_model_budget || true' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'if refresh_model_budget; then' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'remaining=$(( started + MODEL_BUDGET_TOTAL_SECONDS - now ))' "$AUTOPR_DIR/investigate.sh" \
+      && echo 0 || echo 1)
+
+# verify.sh always exits 0 — a failing branch is reported IN its table, never
+# as a status — so a Verify step failure is the step being killed by its
+# timeout or refusing to run here, both lane-wide. Striking the card for a
+# machine-speed timeout parked it after three passes.
+check "a verify failure is a lane fault and the step's cap fits real work" \
+    $(grep -qF 'run_reason=verify' "$workflow" \
+      && awk '/run_reason=verify/{found=1} found && /lane_fault=true/{print; exit}' "$workflow" | grep -q 'lane_fault=true' \
+      && [ "$(awk '/name: Verify \(baseline vs branch\)/,/^          "/' "$workflow" | grep -c 'timeout-minutes: 20')" = 1 ] \
+      && grep -qF 'VERIFY DID NOT RUN' "$AUTOPR_DIR/run-journal.sh" \
+      && echo 0 || echo 1)
 
 check "the model budget is the supervisor's deadline and the step keeps a grace window" \
     $(grep -qF -- '--deadline "$MODEL_BUDGET_SECONDS"' "$AUTOPR_DIR/run-codex-sandboxed.sh" \

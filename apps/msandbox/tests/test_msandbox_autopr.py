@@ -4,12 +4,14 @@ import io
 import errno
 import json
 import os
+import signal
 import subprocess
 import sys
 import tarfile
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -306,6 +308,54 @@ class AutoPRTests(unittest.TestCase):
         self.assertEqual(run.status, "failed")
         self.assertIn("deadline", run.error.lower())
         self.assertIn("deadline reached", (self.path / "output").read_text())
+
+    def test_terminating_the_model_never_raises_over_the_exit_code(self):
+        # Both callers are on paths whose exit code is load-bearing
+        # (DEADLINE_EXIT / PAUSED_EXIT). A process that exits between poll()
+        # and killpg, or a wait() that outlasts its timeout, must not turn a
+        # budget stop into a traceback: investigate.sh would flatten the
+        # status below 128, checkpoint.sh would read a crash instead of a
+        # kill, and the card would take an `investigate` strike.
+        class Proc:
+            pid = 4242
+
+            def __init__(self, poll_results, kill_error=None, wait_error=None):
+                self._poll = list(poll_results)
+                self.kill_error = kill_error
+                self.wait_error = wait_error
+                self.signals = []
+
+            def poll(self):
+                return self._poll.pop(0) if self._poll else None
+
+            def wait(self, timeout=None):
+                if self.wait_error:
+                    raise self.wait_error
+                return 0
+
+        gone = Proc([None], kill_error=ProcessLookupError())
+        with mock.patch.object(control.os, "killpg", side_effect=gone.kill_error):
+            control.terminate_session(gone)
+
+        wedged = Proc(
+            [None, None, None],
+            wait_error=subprocess.TimeoutExpired(cmd="x", timeout=15),
+        )
+        with mock.patch.object(
+            control.os, "killpg", side_effect=lambda pid, sig: wedged.signals.append(sig)
+        ):
+            control.terminate_session(wedged)
+        # SIGTERM, then SIGKILL — and no exception escapes either way.
+        self.assertEqual(wedged.signals, [signal.SIGTERM, signal.SIGKILL])
+
+    def test_an_unset_msandbox_bin_is_reported_not_silently_skipped(self):
+        # The deadline path stops the container before the host exec client so
+        # the model cannot keep writing to the clone. With no binary to call
+        # it cannot, and a silent no-op makes that invisible.
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, {}, clear=True), redirect_stdout(output):
+            control.stop_sandbox_container()
+        self.assertIn("AUTOPR_MSANDBOX_BIN is unset", output.getvalue())
 
     def test_nested_takeovers_archive_superseded_checkouts_on_success(self):
         prior = self.run_record(identifier="b" * 32)

@@ -45,6 +45,31 @@ INVESTIGATION_STARTED_FILE="${AUTOPR_INVESTIGATION_STARTED_FILE:-${RUNNER_TEMP:+
     || date +%s > "$INVESTIGATION_STARTED_FILE" 2>/dev/null \
     || true
 export AUTOPR_INVESTIGATION_STARTED_FILE="$INVESTIGATION_STARTED_FILE"
+# The model budget is this STEP's total, not a per-pass allowance.
+# run-codex-sandboxed.sh re-reads AUTOPR_MODEL_BUDGET_SECONDS on every
+# invocation, so a corrective second pass used to get a fresh full budget
+# while the step timeout (minutes + AUTOPR_STEP_GRACE_MINUTES) had only
+# minutes of it left: GitHub then hard-kills the step mid-model — no
+# container stop, no DEADLINE_EXIT, no post-model validation — which is
+# exactly the failure the grace window was added to prevent (run
+# 34728683748). Each pass gets what is left of the total instead.
+MODEL_BUDGET_TOTAL_SECONDS="${AUTOPR_MODEL_BUDGET_SECONDS:-0}"
+# Below this a pass cannot reach a decision; the caller skips it rather than
+# paying for a model call the step timeout will cut off.
+MODEL_BUDGET_FLOOR_SECONDS="${AUTOPR_MODEL_BUDGET_FLOOR_SECONDS:-120}"
+refresh_model_budget() {
+    local started now remaining
+    [ "$MODEL_BUDGET_TOTAL_SECONDS" -gt 0 ] 2>/dev/null || return 0
+    started="$(cat "$INVESTIGATION_STARTED_FILE" 2>/dev/null || true)"
+    case "$started" in ''|*[!0-9]*) return 0 ;; esac
+    now="$(date +%s)"
+    remaining=$(( started + MODEL_BUDGET_TOTAL_SECONDS - now ))
+    if [ "$remaining" -lt "$MODEL_BUDGET_FLOOR_SECONDS" ]; then
+        export AUTOPR_MODEL_BUDGET_SECONDS="$MODEL_BUDGET_FLOOR_SECONDS"
+        return 1
+    fi
+    export AUTOPR_MODEL_BUDGET_SECONDS="$remaining"
+}
 SNAPSHOT_PID=""
 # Killing the timer only kills the sleeping subshell: a `checkpoint.sh snapshot`
 # it already forked keeps running and would re-point `active` after this run
@@ -599,7 +624,32 @@ start_inflight_snapshots() {
     SNAPSHOT_PID=$!
 }
 
+park_rejected_after_correction() {
+    local failure="$1" existing marker origin_note resume_line
+    stop_inflight_snapshots
+    existing="$(jq -r '.progress_note // ""' "$CARD_FILE")"
+    marker="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] needs_clarification"
+    origin_note="$(progress_note_with_origin \
+        "🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · $marker · note: AutoPR $failure after one correction." \
+        "$existing")"
+    resume_line="$(autopr_checkpoint_resume_line "$TASK_ID")"
+    [ -z "$resume_line" ] || origin_note="$origin_note"$'\n'"$resume_line"
+    mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
+        "$(jq -n --arg note "$origin_note" \
+            '{board_column:"changes_requested",progress_note:$note}')" >/dev/null \
+        || die "could not park the rejected investigation on task $TASK_ID"
+    autopr_post_context_request "$PROJECT_ID" "$TASK_ID" \
+        "AutoPR $failure after one correction. Review the saved checkpoint, then add plain-language context, clarify what it should research, or press Run to resume the repair." \
+        "$origin_note"
+}
+
 start_inflight_snapshots
+# Evidence collection has already spent part of this step. Give the model
+# what is left rather than a fresh full budget, so the step's grace window
+# covers only post-model validation. Below the floor the pass still runs and
+# hits its deadline — DEADLINE_EXIT is the designed "ran out of time" path
+# and pauses the card for an approved continuation.
+refresh_model_budget || true
 codex_pass
 
 # One corrective retry when the pass just returned is one the trusted harness
@@ -736,27 +786,17 @@ if [ -n "$CORRECTION_KIND" ]; then
     fi
     : > "$REPORT_FILE"
     : > "$RAW_DECISION_FILE"
-    codex_pass
+    if refresh_model_budget; then
+        codex_pass
+    else
+        # Out of budget: park it exactly as a rejected correction would be.
+        # Spending a model call the step timeout will kill costs the quota
+        # and produces nothing reviewable.
+        printf 'kanban-autopr: not enough of the model budget is left for a corrective pass\n' >&2
+        park_rejected_after_correction "ran out of its time budget before the corrective pass"
+        exit 0
+    fi
 fi
-
-park_rejected_after_correction() {
-    local failure="$1" existing marker origin_note resume_line
-    stop_inflight_snapshots
-    existing="$(jq -r '.progress_note // ""' "$CARD_FILE")"
-    marker="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] needs_clarification"
-    origin_note="$(progress_note_with_origin \
-        "🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · $marker · note: AutoPR $failure after one correction." \
-        "$existing")"
-    resume_line="$(autopr_checkpoint_resume_line "$TASK_ID")"
-    [ -z "$resume_line" ] || origin_note="$origin_note"$'\n'"$resume_line"
-    mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
-        "$(jq -n --arg note "$origin_note" \
-            '{board_column:"changes_requested",progress_note:$note}')" >/dev/null \
-        || die "could not park the rejected investigation on task $TASK_ID"
-    autopr_post_context_request "$PROJECT_ID" "$TASK_ID" \
-        "AutoPR $failure after one correction. Review the saved checkpoint, then add plain-language context, clarify what it should research, or press Run to resume the repair." \
-        "$origin_note"
-}
 
 POST_CORRECTION_FAILURE=""
 if [ "$KIND_OUTCOME" = artifact ] && [ -n "$CORRECTION_KIND" ]; then

@@ -571,11 +571,14 @@ chmod +x "$cached_node/.bin/tsc" "$cached_node/.bin/vitest"
 verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
     AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" FAKE_PYTEST_RC=0 \
     RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" 2>/dev/null)"
-check "verify.sh symlinks the cached client toolchain into the branch tree and typechecks" \
+# The cache is linked into the branch tree for the run and unlinked after it.
+# `AUTOPR_WORKSPACE_ROOT` can name any checkout, and a link left pointing into
+# the shared cache turns a later `npm ci` in that clone into an in-place
+# rewrite of the runner-owned toolchain every lane reads.
+check "verify.sh typechecks against the cached client toolchain and leaves the tree unchanged" \
   $(grep -q '| TypeScript | 0 diagnostics | 0 diagnostics |' <<< "$verify_out" \
     && ! grep -q 'no client toolchain' <<< "$verify_out" \
-    && [ -L "$VERIFY_REPO/client/node_modules" ] \
-    && [ "$(readlink "$VERIFY_REPO/client/node_modules")" = "$cached_node" ] \
+    && [ ! -e "$VERIFY_REPO/client/node_modules" ] && [ ! -L "$VERIFY_REPO/client/node_modules" ] \
     && grep -q '^AUTOFIX_NEW_FAILURES=0$' "$verify_env" && echo 0 || echo 1)
 AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" "$provisioner" --check --repo "$VERIFY_REPO" >/dev/null 2>&1
 check "provisioner --check is current once both keyed directories are usable" $([ "$?" -eq 0 ] && echo 0 || echo 1)
@@ -591,10 +594,27 @@ verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$
 check "verify.sh prefers a real node_modules in the tree over the cache and never replaces it" \
   $([ ! -L "$VERIFY_REPO/client/node_modules" ] \
     && grep -q '| TypeScript | 1 diagnostics | 1 diagnostics |' <<< "$verify_out" && echo 0 || echo 1)
-# The link verify.sh leaves in the checkout dangles as soon as
+# A branch tree carrying a real-but-broken node_modules (an interrupted
+# `npm install`: no .bin/tsc) must report unavailable. Linking only the
+# baseline to the cache and leaving the branch broken is the worst outcome
+# available: the branch's tsc exits 127, prints no `error TS` lines, and
+# `comm -13` reports zero regressions — a PR that ADDS type errors would
+# publish as verified-clean.
+rm -rf "$VERIFY_REPO/client/node_modules"
+mkdir -p "$VERIFY_REPO/client/node_modules/.bin"
+: > "$verify_env"
+verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
+    AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" FAKE_PYTEST_RC=0 \
+    RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" 2>/dev/null)"
+check "a broken node_modules in the branch tree reports unavailable, never a false green" \
+  $(grep -q 'no client toolchain usable from the branch tree' <<< "$verify_out" \
+    && ! grep -q '| TypeScript | ' <<< "$verify_out" \
+    && grep -q '^AUTOFIX_NEW_FAILURES=1$' "$verify_env" && echo 0 || echo 1)
+
+# A link left behind by a hard-killed run dangles as soon as
 # provision-verify-toolchain.sh prunes that key. Nothing else removes it, and
-# while it sits there the `! -L` test above keeps matching — so a real
-# node_modules installed here later would never be preferred again.
+# while it sits there the `! -L` test keeps matching — so a real node_modules
+# installed here later would never be preferred again.
 rm -rf "$VERIFY_REPO/client/node_modules"
 ln -s "$TOOLCHAIN_CACHE/client-prunedkey/node_modules" "$VERIFY_REPO/client/node_modules"
 verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
@@ -603,6 +623,37 @@ verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$
 check "a node_modules link left dangling by a pruned key is removed, not kept" \
   $([ ! -L "$VERIFY_REPO/client/node_modules" ] && [ ! -e "$VERIFY_REPO/client/node_modules" ] \
     && grep -q 'no client toolchain' <<< "$verify_out" && echo 0 || echo 1)
+
+# A concurrent lane's cache entry survives a provision from a tree whose
+# manifests differ: without the holder refcount, `prune_stale` rm -rfs the
+# venv and node_modules a running verify.sh is symlinked into — pytest dies
+# mid-suite and both tsc calls 127 through dangling links.
+held_venv="$(AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" autofix_venv_dir "$VERIFY_REPO")"
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" autofix_hold_toolchain "$held_venv"
+OTHER_REPO="$TMP_DIR/other-repo"
+mkdir -p "$OTHER_REPO/server" "$OTHER_REPO/client"
+printf 'b\n' > "$OTHER_REPO/server/requirements.txt"
+printf '{"name":"y","lockfileVersion":3}\n' > "$OTHER_REPO/client/package-lock.json"
+printf '{"name":"y","version":"0.0.0"}\n' > "$OTHER_REPO/client/package.json"
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" PY312=/nonexistent AUTOFIX_NPM_BIN=/nonexistent \
+    "$provisioner" --repo "$OTHER_REPO" > "$TMP_DIR/prune.out" 2>&1
+check "prune_stale keeps a cache entry a running lane still holds" \
+  $([ -d "$held_venv" ] && grep -q 'in use by a running lane' "$TMP_DIR/prune.out" && echo 0 || echo 1)
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" autofix_release_toolchain "$held_venv"
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" PY312=/nonexistent AUTOFIX_NPM_BIN=/nonexistent \
+    "$provisioner" --repo "$OTHER_REPO" > "$TMP_DIR/prune2.out" 2>&1
+check "prune_stale collects it once the holder is gone" \
+  $([ ! -d "$held_venv" ] && echo 0 || echo 1)
+
+# A tree with only requirements-dev.txt has no key: build_python passes
+# requirements.txt to pip unconditionally, so a key there is a path that can
+# never become present.
+DEVONLY_REPO="$TMP_DIR/devonly-repo"
+mkdir -p "$DEVONLY_REPO/server"
+printf 'pytest\n' > "$DEVONLY_REPO/server/requirements-dev.txt"
+devonly_key_rc=0
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" autofix_venv_dir "$DEVONLY_REPO" >/dev/null 2>&1 || devonly_key_rc=$?
+check "a dev-only manifest set yields no python key" $([ "$devonly_key_rc" != 0 ] && echo 0 || echo 1)
 
 ################################################################################
 # 10: publish.sh path guard — denylist and allowlist both fatal on bad paths

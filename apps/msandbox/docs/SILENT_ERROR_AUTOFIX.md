@@ -94,6 +94,18 @@ Pipeline (`apps/msandbox/error-autofix/`):
    `needs-work` for "could not run". A missing toolchain still labels a draft
    `needs-work` with the "checks did not run" banner, and `audit.sh` reports it as an
    operator action so the outage is visible somewhere other than on every PR.
+
+   Two rules keep that sharing honest. **Both trees must be able to run the tools**: a
+   branch tree carrying a real-but-broken `client/node_modules` (an interrupted
+   `npm install`) while the baseline runs the cache is the worst outcome available —
+   the branch's `tsc` exits 127, prints no `error TS` lines, `comm -13` sees zero
+   regressions, and a PR that ADDS type errors publishes as verified-clean. Unavailable
+   is reported instead. And **verify.sh leaves the tree exactly as it found it**: the
+   cache link it plants is removed on exit, because `AUTOPR_WORKSPACE_ROOT` may name
+   any checkout and a link left pointing into the shared cache turns a later `npm ci`
+   there into an in-place rewrite of the toolchain every lane reads. While a lane is
+   reading a cache entry it registers its pid, and `provision-verify-toolchain.sh`
+   refuses to prune or rebuild an entry a live reader still holds.
 7. **`write-commit-subject.sh`** — uses Codex Luna-medium for the bounded commit
    subject after verification. Trusted shell enforces the `fix:` prefix, one-line
    72-character limit, and rejects any repository edit from this writing-only pass.

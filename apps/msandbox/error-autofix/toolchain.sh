@@ -36,12 +36,12 @@ autofix_ensure_cache_dir() {
 # them. Callers report the toolchain as unmeasurable instead.
 
 # autofix_python_key REPO_ROOT — 12 hex chars over the server manifests.
+# requirements.txt specifically: build_python passes it to pip unconditionally,
+# so a tree carrying only requirements-dev.txt would key successfully, read as
+# measurable, and then fail the build at a path that can never become present.
 autofix_python_key() {
-    local root="$1" file found=false
-    for file in "$root/server/requirements.txt" "$root/server/requirements-dev.txt"; do
-        [ -f "$file" ] && found=true
-    done
-    [ "$found" = true ] || return 1
+    local root="$1" file
+    [ -f "$root/server/requirements.txt" ] || return 1
     # The `|| true` is load-bearing under `pipefail`: without it the loop's
     # status is the last `[ -f ]` test, so an absent requirements-dev.txt
     # fails the whole pipeline after the key has already been printed — and
@@ -74,6 +74,55 @@ autofix_node_root() {
     local key
     key="$(autofix_node_key "$1")" && [ -n "$key" ] || return 1
     printf '%s/client-%s' "$(autofix_toolchain_cache_dir)" "$key"
+}
+
+# Holders: a cheap refcount so `provision-verify-toolchain.sh --force` (or a
+# branch whose manifests differ by one line) cannot `rm -rf` the venv and
+# node_modules a lane is running out of right now. A reader registers its pid
+# before it uses an entry and drops it on exit; prune_stale skips any entry
+# with a LIVE holder. A pid that no longer exists is reaped on sight, so a
+# hard-killed lane cannot pin a cache entry forever.
+autofix_holders_dir() {
+    printf '%s/holders/%s' "$(autofix_toolchain_cache_dir)" "$(basename "$1")"
+}
+
+# autofix_hold_toolchain DIR — register this process as a reader of DIR.
+autofix_hold_toolchain() {
+    local holders
+    [ -n "${1:-}" ] || return 0
+    holders="$(autofix_holders_dir "$1")"
+    mkdir -p "$holders" 2>/dev/null || return 0
+    : > "$holders/$$" 2>/dev/null || true
+}
+
+# autofix_release_toolchain DIR — drop this process's registration.
+autofix_release_toolchain() {
+    local holders
+    [ -n "${1:-}" ] || return 0
+    holders="$(autofix_holders_dir "$1")"
+    rm -f "$holders/$$" 2>/dev/null || true
+    rmdir "$holders" 2>/dev/null || true
+}
+
+# autofix_toolchain_in_use DIR — 0 when a live process holds DIR.
+autofix_toolchain_in_use() {
+    local holders entry pid in_use=1
+    [ -n "${1:-}" ] || return 1
+    holders="$(autofix_holders_dir "$1")"
+    [ -d "$holders" ] || return 1
+    for entry in "$holders"/*; do
+        [ -e "$entry" ] || continue
+        pid="$(basename "$entry")"
+        case "$pid" in
+            ''|*[!0-9]*) rm -f "$entry" 2>/dev/null || true; continue ;;
+        esac
+        if kill -0 "$pid" 2>/dev/null; then
+            in_use=0
+        else
+            rm -f "$entry" 2>/dev/null || true
+        fi
+    done
+    return "$in_use"
 }
 
 # autofix_python_usable PYTHON — the exact probe verify.sh runs.

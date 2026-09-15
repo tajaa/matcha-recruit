@@ -7,7 +7,17 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-HOOKS_DIR="$(git -C "$REPO_ROOT" rev-parse --git-path hooks)"
+# `git rev-parse --git-path hooks` always answers `.git/hooks`; it does NOT
+# honour core.hooksPath, which is where git actually looks when that is set.
+# Installing into .git/hooks there would print "Installed" for hooks git
+# never runs — the operator believes the stale-install banner is armed when
+# it is not. `--path` expands a leading `~`.
+HOOKS_DIR="$(git -C "$REPO_ROOT" config --path --get core.hooksPath 2>/dev/null || true)"
+if [ -n "$HOOKS_DIR" ]; then
+    echo "Using core.hooksPath: $HOOKS_DIR"
+else
+    HOOKS_DIR="$(git -C "$REPO_ROOT" rev-parse --git-path hooks)"
+fi
 case "$HOOKS_DIR" in
     /*) ;;
     *) HOOKS_DIR="$REPO_ROOT/$HOOKS_DIR" ;;

@@ -466,7 +466,9 @@ check "a failing publisher fails the step through the tee, and an unknown artifa
       && echo 0 || echo 1)
 
 check "ci syntax-checks the email publisher and the self-audit runs this suite" \
-    $(grep -qF 'apps/msandbox/harness/publish-email.sh' "$ci_workflow" \
+    $(grep -qF 'find apps/msandbox -type f' "$ci_workflow" \
+      && grep -qF 'xargs -0 -n1 bash -n' "$ci_workflow" \
+      && [ -f "$REPO_ROOT/apps/msandbox/harness/publish-email.sh" ] \
       && grep -qF 'test_kanban_autopr_email.sh' "$REPO_ROOT/apps/msandbox/self-audit/audit.sh" \
       && echo 0 || echo 1)
 

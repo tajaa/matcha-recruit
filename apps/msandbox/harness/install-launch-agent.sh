@@ -77,19 +77,40 @@ install_runtime() {
 # directory, so this can never disagree with what the installer copies
 # (cli/install.py and the dispatch suite parse install_runtime for the same
 # reason; keep that function self-contained).
+file_mode() {
+    stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null || printf '?'
+}
+
 runtime_stale_names() {
     local staging path name
     staging="$(mktemp -d "${TMPDIR:-/tmp}/matcha-autopr-runtime.XXXXXX")"
     ( INSTALL_ROOT="$staging"; install_runtime ) >/dev/null
     for path in "$staging"/*; do
         name="$(basename "$path")"
-        cmp -s "$path" "$INSTALL_ROOT/$name" 2>/dev/null || printf '%s\n' "$name"
+        # Content AND mode. install(1) sets 755 on the scripts and 644 on the
+        # helpers; a copy whose mode drifted to 644 is byte-identical, so a
+        # content-only comparison reports "current" while the LaunchAgents
+        # keep an unexecutable dispatcher.
+        if ! cmp -s "$path" "$INSTALL_ROOT/$name" 2>/dev/null \
+            || [ "$(file_mode "$path")" != "$(file_mode "$INSTALL_ROOT/$name")" ]; then
+            printf '%s\n' "$name"
+        fi
     done
     rm -rf "$staging"
 }
 
 sync_runtime_if_stale() {
     local stale
+    # Refresh an installed tree; never create one. A runtime-only tree has no
+    # plists and no LaunchAgents, so nothing would run it — but its existence
+    # is what `cli/install.py:dispatcher_install_root().is_dir()` reads as
+    # `lanes_installed`, which would start failing `msandbox doctor` on a
+    # developer's machine over a Codex login and a verification cache for
+    # lanes that host does not run.
+    if [ ! -d "$INSTALL_ROOT" ]; then
+        echo "No AutoPR dispatcher installed at $INSTALL_ROOT; run \`msandbox install\` (it renders the plists too)."
+        return 0
+    fi
     stale="$(runtime_stale_names | tr '\n' ' ')"
     stale="${stale% }"
     if [ -z "$stale" ]; then

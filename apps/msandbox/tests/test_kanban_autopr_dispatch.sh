@@ -770,8 +770,18 @@ sync_installer() {
     AUTOPR_LAUNCHCTL_BIN=/usr/bin/false AUTOPR_USER_HOME="$TMP_DIR/sync-home" \
     "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh" --runtime-if-stale 2>&1
 }
+# It refreshes an installed tree; it never creates one. A runtime-only tree
+# has no plists, so nothing runs it — but its mere existence is what
+# `dispatcher_install_root().is_dir()` reads as `lanes_installed`, which would
+# start failing `msandbox doctor` on a developer's machine over a Codex login
+# and a verification cache for lanes that host does not run.
+missing_sync="$(sync_installer)"
+check "--runtime-if-stale refuses to create a dispatcher tree that was never installed" \
+  $(grep -q 'No AutoPR dispatcher installed' <<< "$missing_sync" \
+    && [ ! -d "$sync_root" ] && [ -z "$(ls -A "$sync_agents")" ] && echo 0 || echo 1)
+mkdir -p "$sync_root"
 first_sync="$(sync_installer)"
-check "--runtime-if-stale installs a missing dispatcher tree without touching launchd" \
+check "--runtime-if-stale fills an installed dispatcher tree without touching launchd" \
   $(grep -q 'refreshed' <<< "$first_sync" && grep -q 'lib.sh' <<< "$first_sync" \
     && cmp -s "$sync_root/lib.sh" "$REPO_ROOT/apps/msandbox/harness/lib.sh" \
     && [ -f "$sync_root/codex_auth.py" ] \
@@ -787,6 +797,17 @@ check "--runtime-if-stale names the drifted and missing files and restores them"
     && grep -q 'codex_auth.py' <<< "$third_sync" \
     && cmp -s "$sync_root/lib.sh" "$REPO_ROOT/apps/msandbox/harness/lib.sh" \
     && [ -f "$sync_root/codex_auth.py" ] && echo 0 || echo 1)
+# install(1) sets 755 on the scripts; a copy whose mode drifted is still
+# byte-identical, so a content-only comparison reports "current" while the
+# LaunchAgents keep an unexecutable dispatcher.
+chmod 644 "$sync_root/dispatch-if-idle.sh"
+mode_sync="$(sync_installer)"
+check "--runtime-if-stale notices a mode that drifted under identical bytes" \
+  $(grep -q 'dispatch-if-idle.sh' <<< "$mode_sync" \
+    && [ "$(stat -f '%Lp' "$sync_root/dispatch-if-idle.sh" 2>/dev/null \
+            || stat -c '%a' "$sync_root/dispatch-if-idle.sh")" = 755 ] \
+    && echo 0 || echo 1)
+
 workflow_yml="$REPO_ROOT/.github/workflows/kanban-autopr.yml"
 check "kanban workflow syncs the installed dispatcher from its main checkout after the reset step" \
   $(grep -q 'install-launch-agent.sh --runtime-if-stale' "$workflow_yml" \
@@ -809,6 +830,22 @@ check "the dispatcher sync runs from a git archive of main, not the working tree
 check "the post-merge banner ignores verification-toolchain lines" \
   $(grep -q "grep -v 'verification toolchain'" "$REPO_ROOT/apps/msandbox/harness/hooks/post-merge" \
     && echo 0 || echo 1)
+# `git rev-parse --git-path hooks` always answers `.git/hooks` and ignores
+# core.hooksPath, so on a clone that sets it the script used to report
+# "Installed" for hooks git would never run — the operator believes the
+# stale-install banner is armed when it is not.
+hooks_repo="$TMP_DIR/hooks-repo"
+mkdir -p "$hooks_repo/apps/msandbox/harness" "$TMP_DIR/custom-hooks"
+cp -R "$REPO_ROOT/apps/msandbox/harness/hooks" "$hooks_repo/apps/msandbox/harness/hooks"
+cp "$REPO_ROOT/apps/msandbox/harness/install-hooks.sh" "$hooks_repo/apps/msandbox/harness/"
+git -C "$hooks_repo" init -q
+git -C "$hooks_repo" config core.hooksPath "$TMP_DIR/custom-hooks"
+"$hooks_repo/apps/msandbox/harness/install-hooks.sh" > "$TMP_DIR/hooks-install.out" 2>&1
+check "install-hooks.sh installs where core.hooksPath actually points" \
+  $([ -L "$TMP_DIR/custom-hooks/post-merge" ] && [ -L "$TMP_DIR/custom-hooks/post-checkout" ] \
+    && [ ! -e "$hooks_repo/.git/hooks/post-merge" ] \
+    && grep -q 'Using core.hooksPath' "$TMP_DIR/hooks-install.out" && echo 0 || echo 1)
+
 check "install-hooks.sh installs the post-merge drift banner beside post-checkout" \
   $(grep -q 'post-merge' "$REPO_ROOT/apps/msandbox/harness/install-hooks.sh" \
     && [ -x "$REPO_ROOT/apps/msandbox/harness/hooks/post-merge" ] \

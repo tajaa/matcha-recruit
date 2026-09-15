@@ -503,7 +503,11 @@ jobs:
       - name: Verify (baseline vs branch)
         id: verify
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true' && steps.triage.outputs.safe_changes == 'true' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.outcome != 'artifact'
-        timeout-minutes: 8
+        # Verification was a no-op for two weeks (the runner had no toolchain
+        # to read) and the 8 minutes it kept were never tested against real
+        # work: a client-touching PR now runs pytest in two trees plus two
+        # full `tsc -p tsconfig.app.json` passes over the SPA plus vitest.
+        timeout-minutes: 20
         run: |
           "$AUTOPR_CONTROL_ROOT/error-autofix/verify.sh" > "$RUNNER_TEMP/verification.md"
         env:
@@ -663,7 +667,14 @@ jobs:
               *) run_reason=investigate ;;
             esac
           elif [ "$VERIFY_OUTCOME" = failure ]; then
+            # verify.sh always exits 0 — a failing branch is reported IN its
+            # table, never as a status. So a failure here is the step being
+            # killed (its timeout) or refusing to run at all (a prod-shaped
+            # DATABASE_URL), both lane-wide conditions. Striking the card for
+            # a machine-speed timeout parked it after three passes for
+            # something that had nothing to do with it.
             run_reason=verify
+            lane_fault=true
           elif [ "$PUBLISH_OUTCOME" = failure ]; then
             run_reason=publish
           elif [ "$PUBLISH_ARTIFACT_OUTCOME" = failure ]; then

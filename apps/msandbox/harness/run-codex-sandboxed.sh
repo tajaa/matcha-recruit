@@ -343,6 +343,12 @@ set +e
 run_codex_cli
 codex_rc=$?
 set -e
+# The model has now run: from here a refusal is its own doing. Promote before
+# the exit-75 branch, not after the non-zero one — an exit 75 with no
+# acknowledged takeover `die`s with the INITIAL class, and Cleanup then books
+# it as a lane fault: no strike, so the card is re-selected every cooldown
+# window and can never reach the three-strike park.
+CURRENT_FAULT_CLASS=model
 if [ "$codex_rc" -eq 75 ]; then
     [ -s "$PAUSE_RESULT" ] || die "model exited 75 without an acknowledged operator takeover"
     printf 'Operator takeover acknowledged; checkout preserved outside this workflow.\n'
@@ -370,9 +376,6 @@ if [ "$codex_rc" -ne 0 ]; then
     printf 'kanban-autopr sandbox: Codex exited %s inside msandbox (%s)\n' "$codex_rc" "$fault" >&2
     exit "$codex_rc"
 fi
-# From here on a refusal is the model's doing (oversized patch, protected
-# path, no report): a strike is deserved.
-CURRENT_FAULT_CLASS=model
 # A completed Codex call proves the quota is back. Nothing else clears the
 # marker, so without this one usage-limit hit holds every lane until resume_at
 # (up to 24 h) even after the account has recovered.
