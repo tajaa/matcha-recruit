@@ -19,6 +19,12 @@ SUMMARY_FILE=""
 # A check may write one item per line here (run_check names it before each
 # check); the names land in the JSON as `failing_items` and in the ledger.
 CHECK_DETAIL_FILE=""
+# Exported: a check that runs an external process (the contract suites run as
+# `bash <file>`) cannot write to a variable this shell merely sets, and the
+# redirect there fails as `ambiguous redirect`. The header above promises any
+# check may write one item per line, and those are exactly the checks whose
+# items are absolute paths — the ones the scrub below exists for.
+export CHECK_DETAIL_FILE
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -273,6 +279,7 @@ run_check() {
     fi
     local output_file="$WORK_DIR/$id.log" rc status output next failing_items
     CHECK_DETAIL_FILE="$WORK_DIR/$id.failing"
+    export CHECK_DETAIL_FILE
     rm -f "$CHECK_DETAIL_FILE"
     "$@" > "$output_file" 2>&1
     rc=$?

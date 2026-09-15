@@ -248,6 +248,24 @@ check "a queued card jumps the routine wait and the other lanes" \
   $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] \
     && grep -q 'kanban-run-request' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
 
+# `NEXT_ELIGIBLE_AT=0` on this path is a DELIBERATE override of the routine
+# spend floor — a human is waiting on this specific card. write_status read 0
+# as "never computed" and copied the previous tick's future eligible_at back
+# in, so status.json, the dashboard's "next eligible" line and the no-fetch
+# short-circuit all reported the lane as ineligible immediately after a human
+# forced a run.
+rm -f "$TMP_DIR/dispatches"
+rm -rf "$TMP_DIR/state"
+mkdir -p "$TMP_DIR/state"
+jq -cn --argjson now "$(date +%s)" \
+  '{action:"skip",reason:"kanban-not-due",checked_at:$now,next_check_at:($now + 60),eligible_at:($now + 3600)}' \
+  > "$TMP_DIR/state/status.json"
+AUTOPR_TEST_KEEP_STATUS=1 AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' \
+  AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS="$mid_kanban" run_dispatcher --if-requested
+check "a forced run clears the routine eligible_at instead of resurrecting it" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] \
+    && jq -e '.eligible_at == 0' "$TMP_DIR/state/status.json" >/dev/null && echo 0 || echo 1)
+
 rm -f "$TMP_DIR/dispatches"
 AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
   AUTOPR_TEST_KANBAN_RUNS="$mid_kanban" run_dispatcher --if-requested
@@ -868,16 +886,29 @@ check "the post-merge banner ignores verification-toolchain lines" \
 # "Installed" for hooks git would never run — the operator believes the
 # stale-install banner is armed when it is not.
 hooks_repo="$TMP_DIR/hooks-repo"
-mkdir -p "$hooks_repo/apps/msandbox/harness" "$TMP_DIR/custom-hooks"
+mkdir -p "$hooks_repo/apps/msandbox/harness"
 cp -R "$REPO_ROOT/apps/msandbox/harness/hooks" "$hooks_repo/apps/msandbox/harness/hooks"
 cp "$REPO_ROOT/apps/msandbox/harness/install-hooks.sh" "$hooks_repo/apps/msandbox/harness/"
 git -C "$hooks_repo" init -q
-git -C "$hooks_repo" config core.hooksPath "$TMP_DIR/custom-hooks"
+git -C "$hooks_repo" config core.hooksPath .githooks
 "$hooks_repo/apps/msandbox/harness/install-hooks.sh" > "$TMP_DIR/hooks-install.out" 2>&1
-check "install-hooks.sh installs where core.hooksPath actually points" \
-  $([ -L "$TMP_DIR/custom-hooks/post-merge" ] && [ -L "$TMP_DIR/custom-hooks/post-checkout" ] \
+check "install-hooks.sh installs where a repo-local core.hooksPath points" \
+  $([ -L "$hooks_repo/.githooks/post-merge" ] && [ -L "$hooks_repo/.githooks/post-checkout" ] \
     && [ ! -e "$hooks_repo/.git/hooks/post-merge" ] \
     && grep -q 'Using core.hooksPath' "$TMP_DIR/hooks-install.out" && echo 0 || echo 1)
+# ...but the effective value includes --global. Honouring a hooks path outside
+# the checkout planted matcha's post-merge in EVERY repository the operator
+# owns: a `git pull` anywhere then ran `msandbox doctor` and printed matcha
+# drift banners for an unrelated project. Refuse, and say how to fix it —
+# installing into .git/hooks instead would be silently inert.
+git -C "$hooks_repo" config core.hooksPath "$TMP_DIR/custom-hooks"
+hooks_outside_rc=0
+"$hooks_repo/apps/msandbox/harness/install-hooks.sh" > "$TMP_DIR/hooks-outside.out" 2>&1 \
+  || hooks_outside_rc=$?
+check "a hooks path outside the checkout is refused, never planted machine-wide" \
+  $([ "$hooks_outside_rc" = 1 ] && [ ! -e "$TMP_DIR/custom-hooks" ] \
+    && grep -q 'outside' "$TMP_DIR/hooks-outside.out" \
+    && grep -q 'unset core.hooksPath' "$TMP_DIR/hooks-outside.out" && echo 0 || echo 1)
 
 check "install-hooks.sh installs the post-merge drift banner beside post-checkout" \
   $(grep -q 'post-merge' "$REPO_ROOT/apps/msandbox/harness/install-hooks.sh" \

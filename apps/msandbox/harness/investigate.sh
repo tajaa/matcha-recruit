@@ -29,11 +29,17 @@ WORK_DIR="$(mktemp -d)"
 INVESTIGATION_EXIT_FILE="${AUTOPR_INVESTIGATION_EXIT_FILE:-${RUNNER_TEMP:+$RUNNER_TEMP/investigation-exit-code}}"
 [ -z "$INVESTIGATION_EXIT_FILE" ] || rm -f "$INVESTIGATION_EXIT_FILE"
 # run-codex-sandboxed.sh names why a failed pass failed here
-# (model|auth|usage_limit|infrastructure); Cleanup strikes the card only for
-# `model`. Stale from a previous run it would misclassify this one.
+# (model|auth|usage_limit|infrastructure|budget); Cleanup strikes the card only
+# for `model`. Stale from a previous run it would misclassify this one.
 FAULT_CLASS_FILE="${AUTOPR_FAULT_CLASS_FILE:-${RUNNER_TEMP:+$RUNNER_TEMP/investigation-fault-class}}"
 [ -z "$FAULT_CLASS_FILE" ] || rm -f "$FAULT_CLASS_FILE"
 export AUTOPR_FAULT_CLASS_FILE="$FAULT_CLASS_FILE"
+# This script's own fault class, for the paths where no model pass failed —
+# only run-codex-sandboxed.sh writes the file otherwise.
+note_fault_class() {
+    [ -n "$FAULT_CLASS_FILE" ] || return 0
+    printf '%s\n' "$1" > "$FAULT_CLASS_FILE" 2>/dev/null || true
+}
 # checkpoint.sh refuses to harvest a sandbox clone older than this: on a rework
 # the leftover workspace still carries the same task id, so only its age
 # distinguishes the previous round's work from this run's. The workflow writes
@@ -799,6 +805,15 @@ if [ -n "$CORRECTION_KIND" ]; then
         # empty file (exit 0, empty output), run publish.sh against an empty
         # report on a card this branch just parked, and — with the job green
         # — let Cleanup's success branch DELETE the card's failure ledger.
+        #
+        # `budget` and not `model`: running out of the STEP's clock is a lane
+        # condition — a cold image, a slow clone, an evidence pass that took
+        # longer than usual — and this PR's own rule is that only a `model`
+        # fault strikes the card. Without it the `die` below lands in Cleanup
+        # with the default class and books an `investigate` strike, so three
+        # slow days would park a card that never failed on its merits, on top
+        # of the [autopr:no-spec] park this branch just wrote.
+        note_fault_class budget
         park_rejected_after_correction "ran out of its time budget before the corrective pass"
         die "not enough of the model budget was left for a corrective pass; card parked for context"
     fi

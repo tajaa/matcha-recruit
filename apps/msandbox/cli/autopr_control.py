@@ -376,6 +376,11 @@ def terminate_session(proc: subprocess.Popen) -> None:
     I/O) would instead fall into supervise()'s `except BaseException`, mark
     the run `blocked` and exit non-zero — and checkpoint.sh would then read
     a budget stop as a crash and strike the card's ledger for it.
+
+    Swallowing the timeout means this can return with the process STILL
+    RUNNING. The pause caller therefore re-checks before it moves the
+    checkout; the deadline caller does not need to, because it only returns
+    an exit code.
     """
     for sig, grace in ((signal.SIGTERM, 15), (signal.SIGKILL, 5)):
         if proc.poll() is not None:
@@ -538,6 +543,18 @@ def supervisor(
                         timeout=60,
                     )
                     terminate_session(proc)
+                    # terminate_session never raises, so it can return with the
+                    # process still alive (wedged in uninterruptible I/O past
+                    # SIGKILL). Transferring the checkout out from under a live
+                    # writer would hand the operator a torn tree; the earlier
+                    # `proc.wait(timeout=15)` refused that by raising. Keep the
+                    # refusal: `except BaseException` below marks the run
+                    # `blocked` and leaves the workspace where it is.
+                    if proc.poll() is None:
+                        raise RuntimeError(
+                            "model process survived SIGKILL; refusing to move the "
+                            "checkout out from under a live writer"
+                        )
                     destination = run_dir(run.id) / "workspace"
                     transfer_checkout(workspace, destination)
                     with locked():

@@ -285,9 +285,17 @@ printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$HOME/leaked/path" > "$CHECK_DETAI
 chmod +x "$scrub_tests/test_kanban_autopr_dashboard.sh"
 AUTOPR_AUDIT_TESTS_DIR="$scrub_tests" AUTOPR_AUDIT_ONLY=contract_tests \
     "$AUDIT_DIR/audit.sh" --json "$TMP_DIR/audit-scrub.json" --summary "$TMP_DIR/audit-scrub.md"
-jq -e '.checks[0].failing_items == ["test_kanban_autopr_dashboard.sh"]' "$TMP_DIR/audit-scrub.json" >/dev/null
+# The fixture suite runs as `bash <file>` — a CHILD process. CHECK_DETAIL_FILE
+# has to be exported for its redirect to resolve at all; unexported, the child
+# saw an empty name, the redirect failed as `ambiguous redirect`, only
+# audit.sh's own in-process append landed, and this scrub assertion passed
+# without the scrub ever running. Both items must be here, the first scrubbed.
+jq -e --arg leaked '$HOME/leaked/path' \
+    '.checks[0].failing_items == [$leaked, "test_kanban_autopr_dashboard.sh"]' \
+    "$TMP_DIR/audit-scrub.json" >/dev/null
 ! grep -qF "$HOME/leaked" "$TMP_DIR/audit-scrub.json"
 grep -qF 'failing_items' "$AUDIT_DIR/audit.sh"
+grep -qF 'export CHECK_DETAIL_FILE' "$AUDIT_DIR/audit.sh"
 # Recording may not fail quietly: audit.sh runs without `set -e`, so a jq that
 # failed here used to drop the whole check — status, class and all — out of
 # `.checks[]` and out of the repairable/operator counts.

@@ -52,6 +52,17 @@ LOG_MAX_BYTES="${AUTOPR_DISPATCH_LOG_MAX_BYTES:-5242880}"
 START_TASK=""
 REQUESTED_TASK=""
 NEXT_ELIGIBLE_AT=0
+# 0 is BOTH "not computed yet" and "a human forced a run, so the routine spend
+# floor does not apply". Conflating them let write_status copy a stale future
+# eligible_at back over the run-request path's deliberate zero: status.json,
+# the dashboard's "next eligible" line and the no-fetch short-circuit all then
+# reported the lane as ineligible while a human was waiting on a card. Every
+# deliberate assignment goes through set_next_eligible_at and sets this flag.
+NEXT_ELIGIBLE_KNOWN=false
+set_next_eligible_at() {
+    NEXT_ELIGIBLE_AT="$1"
+    NEXT_ELIGIBLE_KNOWN=true
+}
 # Must match StartInterval in launchd/com.matcha.kanban-autopr-dispatch.plist.in.
 # Only the dashboard's "next check" line reads it, but a stale value there is how
 # an operator mistimes a manual start. One dispatch happens per tick and the
@@ -84,7 +95,7 @@ write_status() {
     # `recent-dispatch-pending` tick, so the saving was reset right after each
     # dispatch and after each transient snapshot error: the two cases where it
     # matters most.
-    if [ "$NEXT_ELIGIBLE_AT" -eq 0 ] 2>/dev/null; then
+    if [ "$NEXT_ELIGIBLE_KNOWN" != true ]; then
         previous="$(jq -r '.eligible_at // 0' "$STATE_DIR/status.json" 2>/dev/null || echo 0)"
         [[ "$previous" =~ ^[0-9]+$ ]] || previous=0
         [ "$previous" -le "$now" ] || NEXT_ELIGIBLE_AT="$previous"
@@ -240,7 +251,7 @@ scheduler_idle_without_fetch() {
     ! workflow_pass_due "$cached" "$ERROR_MAX_AGE_SECONDS" || return 1
     cached="$(jq -c '[.[] | select(.lane == "self-audit")]' "$SNAPSHOT_CACHE_FILE" 2>/dev/null)" || return 1
     ! workflow_pass_due "$cached" "$AUDIT_MAX_AGE_SECONDS" || return 1
-    NEXT_ELIGIBLE_AT="$eligible"
+    set_next_eligible_at "$eligible"
 }
 
 autopr_master_ready() {
@@ -490,7 +501,7 @@ main() {
     local last_completed
     last_completed="$(printf '%s' "$kanban_runs" | jq -r '[.[] | select(.status == "completed") | (.updatedAt // .createdAt)] | max // empty')"
     if [ -n "$last_completed" ]; then
-        NEXT_ELIGIBLE_AT=$(( $(iso_to_epoch "$last_completed") + KANBAN_MAX_AGE_SECONDS ))
+        set_next_eligible_at "$(( $(iso_to_epoch "$last_completed") + KANBAN_MAX_AGE_SECONDS ))"
     fi
     if has_active_workflow_run "$all_runs"; then
         # Name the active run(s) only. Embedding the whole 20-run snapshot
@@ -504,7 +515,7 @@ main() {
     if [ "$requested_mode" = true ]; then
         # A verified live request is passed as an exact workflow input. It
         # bypasses the routine-only spend floor, never the active-run lock.
-        NEXT_ELIGIBLE_AT=0
+        set_next_eligible_at 0
         # An explicit card request outranks the other lanes' schedules: the
         # human is waiting on this specific ticket. The cooldown marker is
         # burned after the dispatch actually lands, not here — a failed

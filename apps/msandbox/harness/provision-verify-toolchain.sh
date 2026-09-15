@@ -77,10 +77,68 @@ report() {
     return "$rc"
 }
 
+# staging_pid_alive PATH — true while the process that created `<...>.tmp.<pid>`
+# is still running.
+staging_pid_alive() {
+    local pid="${1##*.tmp.}"
+    case "$pid" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    kill -0 "$pid" 2>/dev/null
+}
+
+# staged_usable PATH python|node
+staged_usable() {
+    case "$2" in
+        python) autofix_python_usable "$1/bin/python" ;;
+        node) autofix_node_modules_usable "$1/node_modules" ;;
+        *) return 1 ;;
+    esac
+}
+
+# adopt_staged TARGET python|node
+# Reclaim a complete tree a previous run built but could not install.
+# build_python and build_node refuse the swap when a lane started reading the
+# live entry during the build — a `rm -rf` there pulls the interpreter out
+# from under a running pytest — and the staged tree was then STRANDED:
+# nothing ever promoted `<entry>.tmp.<pid>`, python_current/node_current only
+# probe the real path, and prune_stale deleted it as soon as that pid died.
+# Every lane-contended build therefore cost a full multi-minute rebuild plus a
+# full ~1 GB delete, and the comment there promised a pickup that did not
+# exist. This is that pickup.
+adopt_staged() {
+    local target="$1" kind="$2" staged
+    for staged in "$target".tmp.*; do
+        [ -d "$staged" ] || continue
+        # A live pid is a build in flight, possibly another operator's.
+        staging_pid_alive "$staged" && continue
+        if ! staged_usable "$staged" "$kind"; then
+            rm -rf "$staged"
+            echo "discarded incomplete staged tree: $staged"
+            continue
+        fi
+        if autofix_toolchain_in_use "$target"; then
+            echo "staged tree at $staged is complete but a lane is reading $target; keeping it for the next run" >&2
+            return 1
+        fi
+        rm -rf "$target"
+        mv "$staged" "$target" || return 1
+        echo "adopted staged tree from an earlier run: $staged -> $target"
+        return 0
+    done
+    return 1
+}
+
 # Build into a sibling temp dir and rename, so a half-built toolchain is
 # never mistaken for a current one by a lane that runs concurrently.
 build_python() {
     local temporary="$VENV_DIR.tmp.$$"
+    # A previous run may have left a finished tree it was not allowed to
+    # install; adopting it skips a multi-minute rebuild. --force means the
+    # operator wants a genuinely fresh build, so it never adopts.
+    if [ "$FORCE" != true ] && adopt_staged "$VENV_DIR" python; then
+        return 0
+    fi
     [ -x "$PY312" ] || { echo "missing $PY312 (brew install python@3.12)" >&2; return 1; }
     # --force replaces this exact directory; a lane reading it would lose its
     # interpreter mid-suite.
@@ -104,7 +162,8 @@ build_python() {
     fi
     # Re-check: a build takes minutes, and a lane that started reading the
     # old entry in the meantime would have it deleted from under a running
-    # pytest. The staged tree is kept, so the next run finds it current.
+    # pytest. The staged tree is kept — prune_stale spares it and the next
+    # build adopts it (adopt_staged), so the work is not thrown away.
     if autofix_toolchain_in_use "$VENV_DIR"; then
         echo "not replacing $VENV_DIR: a lane started reading it during the build (staged at $temporary)" >&2
         return 1
@@ -115,6 +174,9 @@ build_python() {
 
 build_node() {
     local temporary="$NODE_ROOT.tmp.$$"
+    if [ "$FORCE" != true ] && adopt_staged "$NODE_ROOT" node; then
+        return 0
+    fi
     command -v "$NPM_BIN" >/dev/null 2>&1 || { echo "missing npm ($NPM_BIN)" >&2; return 1; }
     if autofix_toolchain_in_use "$NODE_ROOT"; then
         echo "refusing to rebuild $NODE_ROOT: a running lane is reading it" >&2
@@ -143,16 +205,6 @@ build_node() {
     mv "$temporary" "$NODE_ROOT"
 }
 
-# staging_pid_alive PATH — true while the process that created `<...>.tmp.<pid>`
-# is still running.
-staging_pid_alive() {
-    local pid="${1##*.tmp.}"
-    case "$pid" in
-        ''|*[!0-9]*) return 1 ;;
-    esac
-    kill -0 "$pid" 2>/dev/null
-}
-
 # Old keys are dead weight (a venv is ~1 GB); keep only the current ones.
 prune_stale() {
     local entry
@@ -174,6 +226,27 @@ prune_stale() {
                     echo "kept (build in flight): $entry"
                     continue
                 fi
+                # A finished tree staged against a CURRENT key is what
+                # adopt_staged picks up on the next build; deleting it here
+                # would undo that reclaim before it ever happened. Anything
+                # else — a half-built tree, or staging for a key that is no
+                # longer current — is the leftover of a hard-killed run
+                # (Ctrl-C, sleep, OOM) that nothing else reclaims; at ~1 GB a
+                # venv, repeated interruptions used to accumulate silently.
+                case "$entry" in
+                    "$VENV_DIR".tmp.*)
+                        if staged_usable "$entry" python; then
+                            echo "kept (staged for the next build): $entry"
+                            continue
+                        fi
+                        ;;
+                    "$NODE_ROOT".tmp.*)
+                        if staged_usable "$entry" node; then
+                            echo "kept (staged for the next build): $entry"
+                            continue
+                        fi
+                        ;;
+                esac
                 rm -rf "$entry"
                 echo "pruned abandoned staging directory: $entry"
                 continue

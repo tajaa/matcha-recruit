@@ -119,6 +119,7 @@ reason_label() {
         auth) printf 'the host Codex login was dead, so the model never ran; nothing about this card failed (fix: `codex login` on the runner Mac, then Run)' ;;
         usage_limit) printf 'the shared ChatGPT quota was exhausted, so the model never finished; nothing about this card failed and the lanes back off until it returns' ;;
         infrastructure) printf 'the sandbox could not be started (Docker, disk, or network), so the model never ran; nothing about this card failed' ;;
+        budget) printf 'the step ran out of its model-time budget before a corrective pass could start, so the card was handed back for context rather than a model call the timeout would have cut off; nothing about this card failed' ;;
         verify_timeout) printf 'the verification step ran out of its time budget and was killed; verify.sh reports a failing branch in its table, never as a status, so nothing about this card failed' ;;
         verify_broken) printf 'verification could not start at all — the harness is broken on this runner (check that error-autofix/verify.sh and toolchain.sh are in the control-plane archive and executable). Nothing about this card failed, and no card can be verified until it is fixed' ;;
         verify) printf 'the verification step did not complete (it was killed by its timeout, or refused to run here); verify.sh reports a failing branch in its table, never as a status, so nothing about this card failed' ;;
@@ -142,6 +143,7 @@ stopped_header_label() {
         auth) printf 'CODEX LOGIN DEAD' ;;
         usage_limit) printf 'CODEX QUOTA' ;;
         infrastructure) printf 'SANDBOX FAULT' ;;
+        budget) printf 'OUT OF MODEL TIME' ;;
         verify_timeout) printf 'VERIFY TIMED OUT' ;;
         verify_broken) printf 'VERIFY IS BROKEN ON THE RUNNER' ;;
         verify) printf 'VERIFY DID NOT RUN' ;;

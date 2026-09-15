@@ -668,7 +668,7 @@ jobs:
             run_reason="$PUBLISH_REFUSAL_REASON"
           elif [ "$INVESTIGATE_OUTCOME" = failure ] && [ "$INVESTIGATE_PAUSED" != true ]; then
             case "$fault_class" in
-              auth|usage_limit|infrastructure) run_reason="$fault_class"; lane_fault=true ;;
+              auth|usage_limit|infrastructure|budget) run_reason="$fault_class"; lane_fault=true ;;
               *) run_reason=investigate ;;
             esac
           elif [ "$VERIFY_OUTCOME" = failure ]; then

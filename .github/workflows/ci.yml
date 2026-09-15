@@ -42,13 +42,15 @@ jobs:
           python -m pip install pytest 'asyncpg>=0.29.0'
           python -m compileall -q server/app server/alembic scripts apps
           python -m pytest -q scripts/tests/test_ops_health.py scripts/tests/test_operational_integrity.py apps/msandbox/tests/test_error_autofix_query.py scripts/tests/test_admin_updates.py
-          bash -n scripts/update-ec2.sh scripts/build-and-push.sh scripts/sync-test-tenants.sh scripts/ops-health/backup-restore-drill.sh scripts/ops-health/prune-merged-bot-branches.sh scripts/admin-updates/collect-prod-state.sh scripts/admin-updates/collect.sh scripts/admin-updates/write-content.sh scripts/admin-updates/publish.sh scripts/ops-health/prod-query.sh scripts/ops-health/publish-issue.sh scripts/ops-health/backup-probe.sh scripts/ops-health/schema-snapshot.sh scripts/tests/test_admin_updates_collect.sh
-          # Every shell file in the operator-tooling tree, by discovery. The
-          # hand-maintained list above had fallen two dozen files behind — including
-          # both files this lane's own verification toolchain is built from — leaving
-          # the self-hosted audit lane as their only syntax gate, which is the single
-          # point of failure that lane exists to remove.
-          find apps/msandbox -type f \( -name '*.sh' -o -path '*/hooks/*' \) -print0 \
+          # `bash -n f1 f2 f3` parses ONLY f1 — the rest become $1, $2 … — so
+          # the hand-maintained list this replaces syntax-checked exactly one
+          # file (update-ec2.sh) and silently waved through everything after
+          # it, ops-health/prod-query.sh included, which update-ec2.sh now
+          # shells out to for its pending-migration gate. One file per call,
+          # by discovery, in both trees. scripts/oldscripts is excluded: it is
+          # retired, and loc-by-folder.sh there is Python under a .sh name.
+          find scripts apps/msandbox -type f \( -name '*.sh' -o -path '*/hooks/*' \) \
+            -not -path 'scripts/oldscripts/*' -print0 \
             | xargs -0 -n1 bash -n
           bash scripts/tests/test_admin_updates_collect.sh
           bash scripts/tests/test_ci_guards.sh

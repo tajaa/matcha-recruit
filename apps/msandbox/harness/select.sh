@@ -267,16 +267,30 @@ already_handled() {
     [ -z "$run_requested_at" ] || run_requested=true
 
     local attempt_marker="$ATTEMPTS_DIR/$id8"
-    if [ -f "$attempt_marker" ]; then
-        local age_s attempt_epoch
-        attempt_epoch="$(date -r "$attempt_marker" +%s 2>/dev/null || echo 0)"
-        age_s=$(( $(date +%s) - attempt_epoch ))
+    # Two markers, on purpose. `<id8>` is the failure ledger: its mtime is when
+    # this card last failed on its own merits, and the park gate below compares
+    # that against the owner's last human signal. `<id8>.lane` is written by
+    # autopr_mark_attempt when a pass died for a LANE-wide reason (docker down,
+    # dead login, exhausted quota) — that has to cool the card down, but it says
+    # nothing about the card, so it must not push the ledger's timestamp past a
+    # Run the owner just pressed. Cool down on the newer of the two; park on the
+    # ledger alone.
+    local lane_marker="$attempt_marker.lane"
+    local attempt_epoch=0 lane_epoch=0 cooldown_epoch age_s
+    [ ! -f "$attempt_marker" ] || attempt_epoch="$(date -r "$attempt_marker" +%s 2>/dev/null || echo 0)"
+    [ ! -f "$lane_marker" ] || lane_epoch="$(date -r "$lane_marker" +%s 2>/dev/null || echo 0)"
+    cooldown_epoch="$attempt_epoch"
+    [ "$lane_epoch" -le "$cooldown_epoch" ] || cooldown_epoch="$lane_epoch"
+    if [ "$cooldown_epoch" -gt 0 ]; then
+        age_s=$(( $(date +%s) - cooldown_epoch ))
         if [ "$age_s" -lt $((ATTEMPT_COOLDOWN_MINUTES * 60)) ] \
-            && [ "$human_signal_epoch" -le "$attempt_epoch" ]; then
+            && [ "$human_signal_epoch" -le "$cooldown_epoch" ]; then
             echo skip
             return
         fi
-        # Past the cooldown, the same file is the failure ledger (see
+    fi
+    if [ -f "$attempt_marker" ]; then
+        # Past the cooldown, this file is the failure ledger (see
         # autopr_record_outcome). Enough identical failures with no human
         # signal since the last one means the next run would end the same
         # way; park the card instead. An empty file is a pre-ledger marker.

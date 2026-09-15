@@ -89,6 +89,33 @@ HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/cli/autopr_control.py"
 # model stops; see autopr_control.py's DEADLINE_EXIT.
 MODEL_BUDGET_SECONDS="${AUTOPR_MODEL_BUDGET_SECONDS:-0}"
 [[ "$MODEL_BUDGET_SECONDS" =~ ^[0-9]+$ ]] || MODEL_BUDGET_SECONDS=0
+# The budget is a wall-clock allowance that starts HERE, not when the
+# supervisor finally launches. autopr_control.py sets its deadline from its
+# own start, so everything in between — the auth preflight, the sandbox
+# clone, a cold image pull, the container start — was charged to the step's
+# grace window instead of to the model: the model was killed that much later
+# than the caller planned, and a preflight longer than AUTOPR_STEP_GRACE_MINUTES
+# let GitHub hard-kill the whole step first. That is run 34728683748 exactly —
+# no container stop, no DEADLINE_EXIT, no exit >= 128 in the exit file, so
+# checkpoint.sh read a budget stop as a crash and Cleanup struck the card.
+# Recomputed immediately before the supervisor is launched.
+MODEL_BUDGET_START_EPOCH="$(date +%s)"
+# An already-elapsed deadline must never be passed as 0: 0 means "no deadline
+# at all" and would hand the model the whole step. The floor is deliberately
+# short — the pass is out of budget, so let the supervisor stop it cleanly
+# (container stopped, DEADLINE_EXIT) instead of letting the step time out.
+MODEL_BUDGET_MIN_SECONDS="${AUTOPR_MODEL_BUDGET_MIN_SECONDS:-30}"
+model_budget_remaining() {
+    local now remaining
+    if [ "$MODEL_BUDGET_SECONDS" -le 0 ]; then
+        printf '0'
+        return 0
+    fi
+    now="$(date +%s)"
+    remaining=$(( MODEL_BUDGET_START_EPOCH + MODEL_BUDGET_SECONDS - now ))
+    [ "$remaining" -ge "$MODEL_BUDGET_MIN_SECONDS" ] || remaining="$MODEL_BUDGET_MIN_SECONDS"
+    printf '%s' "$remaining"
+}
 
 # Why a failed run failed, for the caller's failure ledger. A card is struck
 # only for a `model` fault; `auth` (dead host login), `usage_limit` (shared
@@ -342,7 +369,7 @@ run_codex_cli() {
             supervised=(python3 "$HANDOFF_CONTROL" supervise
                 --card "$AUTOPR_HANDOFF_CARD" --workspace "$SANDBOX_WORKSPACE"
                 --repo "$REPO_ROOT" --project "$SANDBOX_PROJECT"
-                --deadline "$MODEL_BUDGET_SECONDS" --)
+                --deadline "$(model_budget_remaining)" --)
         fi
         env -u GH_TOKEN -u GITHUB_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
             -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
@@ -383,8 +410,21 @@ if [ "$codex_rc" -ne 0 ]; then
     # has to be confirmed against machine state the model does not control;
     # what is left is the model's own failure, the one class that counts
     # against the card.
+    #
+    # `usage_limit` is the one class with no machine state to probe — the
+    # evidence is entirely server-side. Its confirmation is positional
+    # instead: the CLI prints its rate-limit error as the run dies, so only
+    # the TAIL of the transcript counts. Matching anywhere meant a card whose
+    # work touched rate limiting — a `cat` of the limiter module, a 429
+    # test's output, a grep for "quota" — both escaped the strike ledger (so
+    # it was re-selected every cooldown window forever) and made
+    # codex-backoff.sh write the SHARED usage-limit marker, grounding the
+    # kanban, error-autofix and self-audit lanes for up to an hour.
+    usage_limit_tail="$RUNTIME_ROOT/codex-usage-limit-tail.log"
+    tail -n "${AUTOPR_USAGE_LIMIT_TAIL_LINES:-40}" "$CODEX_TRANSCRIPT" \
+        > "$usage_limit_tail" 2>/dev/null || : > "$usage_limit_tail"
     fault=model
-    if [ -x "$CODEX_BACKOFF" ] && "$CODEX_BACKOFF" record "$CODEX_TRANSCRIPT"; then
+    if [ -x "$CODEX_BACKOFF" ] && "$CODEX_BACKOFF" record "$usage_limit_tail"; then
         fault=usage_limit
     elif grep -qiE '401 Unauthorized|authentication token is expired|try signing in again' "$CODEX_TRANSCRIPT" 2>/dev/null \
         && host_login_is_dead; then

@@ -689,6 +689,43 @@ check "an abandoned staging directory is reclaimed, a live one is not" \
     && grep -q 'kept (build in flight)' "$TMP_DIR/prune-tmp.out" && echo 0 || echo 1)
 rm -rf "$live_tmp"
 
+# A build that finished but could not be installed (a lane started reading the
+# live entry meanwhile) left its tree at `<entry>.tmp.<pid>` — and NOTHING ever
+# promoted it: python_current/node_current probe only the real path, so the
+# next run rebuilt from scratch, and prune_stale then deleted the ~1 GB staged
+# tree as soon as that pid was dead. Every lane-contended build cost a full
+# rebuild plus a full delete.
+other_node_root="$(AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" autofix_node_root "$OTHER_REPO")"
+stage_node_tree() {
+    mkdir -p "$1/node_modules/.bin"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$1/node_modules/.bin/tsc"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$1/node_modules/.bin/vitest"
+    chmod +x "$1/node_modules/.bin/tsc" "$1/node_modules/.bin/vitest"
+}
+rm -rf "$other_node_root"
+adopt_tmp="$other_node_root.tmp.999998"
+stage_node_tree "$adopt_tmp"
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" PY312=/nonexistent AUTOFIX_NPM_BIN=/nonexistent \
+    "$provisioner" --repo "$OTHER_REPO" > "$TMP_DIR/adopt.out" 2>&1
+check "a staged tree an earlier run could not install is adopted, not rebuilt" \
+  $([ -x "$other_node_root/node_modules/.bin/tsc" ] && [ ! -d "$adopt_tmp" ] \
+    && grep -q 'adopted staged tree from an earlier run' "$TMP_DIR/adopt.out" && echo 0 || echo 1)
+
+# ...and while the real entry is current, prune_stale must leave a finished
+# staged tree for that same key alone: deleting it undoes the reclaim above
+# before it can happen. An INCOMPLETE one is still the leftover of a killed
+# run and is still collected.
+keep_tmp="$other_node_root.tmp.999997"
+junk_tmp="$other_node_root.tmp.999996"
+stage_node_tree "$keep_tmp"
+mkdir -p "$junk_tmp"
+AUTOFIX_CACHE_DIR="$TOOLCHAIN_CACHE" PY312=/nonexistent AUTOFIX_NPM_BIN=/nonexistent \
+    "$provisioner" --repo "$OTHER_REPO" > "$TMP_DIR/adopt-keep.out" 2>&1
+check "a finished staged tree for the current key is kept, an incomplete one is pruned" \
+  $([ -d "$keep_tmp" ] && [ ! -d "$junk_tmp" ] \
+    && grep -q 'kept (staged for the next build)' "$TMP_DIR/adopt-keep.out" && echo 0 || echo 1)
+rm -rf "$keep_tmp"
+
 # The in-use refcount has to be re-read after the build, not only before it:
 # a venv takes minutes to build and a lane that starts reading the old entry
 # in the meantime would have it deleted from under a running pytest.

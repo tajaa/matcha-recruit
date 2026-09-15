@@ -506,7 +506,7 @@ check "the resume pointer is consumed after a publication, not at the end of the
 check "both new suites run in CI, and every harness script is syntax-checked there" \
   $(grep -qF 'test_kanban_autopr_run_journal.sh' "$REPO_ROOT/apps/msandbox/self-audit/audit.sh" \
     && grep -qF 'test_kanban_autopr_card_control.sh' "$REPO_ROOT/apps/msandbox/self-audit/audit.sh" \
-    && grep -qF "find apps/msandbox -type f" "$REPO_ROOT/.github/workflows/ci.yml" \
+    && grep -qF "find scripts apps/msandbox -type f" "$REPO_ROOT/.github/workflows/ci.yml" \
     && grep -qF 'xargs -0 -n1 bash -n' "$REPO_ROOT/.github/workflows/ci.yml" && echo 0 || echo 1)
 
 echo

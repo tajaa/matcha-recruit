@@ -348,6 +348,23 @@ class AutoPRTests(unittest.TestCase):
         # SIGTERM, then SIGKILL — and no exception escapes either way.
         self.assertEqual(wedged.signals, [signal.SIGTERM, signal.SIGKILL])
 
+    def test_the_pause_path_refuses_to_move_a_checkout_under_a_live_writer(self):
+        # terminate_session never raises, so it can return with the process
+        # still alive (wedged past SIGKILL). The pause path then moves the
+        # clone to the operator's run directory: before terminate_session
+        # existed, `proc.wait(timeout=15)` raised TimeoutExpired there and the
+        # run was marked `blocked` with the workspace left alone. That refusal
+        # has to survive, or a takeover hands the operator a torn tree.
+        source = Path(control.__file__).read_text()
+        start = source.index("if stopping:")
+        block = source[start : source.index("transfer_checkout(workspace, destination)", start)]
+        self.assertIn("terminate_session(proc)", block)
+        self.assertIn("if proc.poll() is None:", block)
+        self.assertIn("raise RuntimeError(", block)
+        # The container is stopped first: the writer lives in Docker, and
+        # terminating the host exec client alone would leave it running.
+        self.assertLess(block.index('"stop"'), block.index("terminate_session(proc)"))
+
     def test_an_unset_msandbox_bin_is_reported_not_silently_skipped(self):
         # The deadline path stops the container before the host exec client so
         # the model cannot keep writing to the clone. With no binary to call

@@ -299,10 +299,12 @@ names why it failed in `$RUNNER_TEMP/investigation-fault-class`: `usage_limit` (
 transcript names an exhausted quota — the same match that writes the lane-wide backoff),
 `auth` (`401 Unauthorized` / an expired token, a login that died mid-run past the
 preflight), `infrastructure` (daemon-level Docker errors, a bridge failure before the
-model ran), or `model` (everything else, including a bridge refusal of the model's own
-patch). Cleanup books a ledger strike only for `model`; the other three journal the run as
-a lane fault (`CODEX LOGIN DEAD`, `CODEX QUOTA`, `SANDBOX FAULT`) and leave the count
-alone. Before this, one evening of expired login struck every card it touched.
+model ran), `budget` (written by `investigate.sh`, not the bridge: the step ran out of its
+model-time allowance before a corrective pass could start), or `model` (everything else,
+including a bridge refusal of the model's own patch). Cleanup books a ledger strike only
+for `model`; the rest journal the run as a lane fault (`CODEX LOGIN DEAD`, `CODEX QUOTA`,
+`SANDBOX FAULT`, `OUT OF MODEL TIME`) and leave the count alone. Before this, one evening
+of expired login struck every card it touched.
 
 A transcript match is only a TRIGGER. `$CODEX_TRANSCRIPT` carries the model's own tool
 output — file reads, test output, grep results — so a card whose work touches auth code
@@ -310,6 +312,15 @@ or a docker troubleshooting doc could otherwise name itself a lane fault, escape
 ledger, and be re-selected forever. `auth` is confirmed by `codex-backoff.sh auth-check`
 returning 4 for the host credential, `infrastructure` by probing the container runtime at
 the moment of failure. Unconfirmed, the failure stays the model's.
+
+`usage_limit` is the one class with no machine state to probe — the evidence is entirely
+server-side — so its confirmation is POSITIONAL: only the tail of the transcript
+(`AUTOPR_USAGE_LIMIT_TAIL_LINES`, 40) is handed to `codex-backoff.sh record`, because the
+CLI prints its rate-limit error as the run dies. Matching anywhere meant a card whose work
+touched rate limiting — a `cat` of the limiter module, a 429 test's output, a grep for
+"quota" — both escaped the strike ledger and made the bridge write the SHARED
+`codex-usage-limit.json` marker, grounding the kanban, error-autofix and self-audit lanes
+for up to an hour.
 
 `verify_timeout` and `verify_broken` join the lane-fault set. verify.sh always exits 0 and
 reports a failing branch IN its table, never as a status, so a failed Verify step is never
@@ -324,14 +335,17 @@ model pass on every card behind a journal line saying nothing was wrong.
 promotes `CURRENT_FAULT_CLASS` to `model` as soon as the model has run, so a bad pause
 write is struck rather than excused.
 
-A lane fault still calls `autopr_mark_attempt`, which stamps the card's attempt marker
-without writing a strike. The marker's mtime is the only thing `select.sh`'s cooldown
-reads, so skipping it entirely re-selects the same card on the very next pass: `auth` is
-held off lane-wide by the dispatcher's login guard and `usage_limit` by
-`codex-backoff.sh`, but `infrastructure` has no such hold, and a standing sandbox fault
-would burn a run every five minutes forever. An empty marker is a pre-ledger marker to
-`select.sh` — it cools the card down and can never park it — and an existing strike count
-is re-stamped rather than rewritten.
+A lane fault still calls `autopr_mark_attempt`, which cools the card down without writing
+a strike. It writes its OWN marker, `attempts/<id8>.lane`, and never touches the failure
+ledger at `attempts/<id8>`. `select.sh` cools down on the newer of the two mtimes and
+parks on the ledger's alone, because the park gate compares the ledger's mtime against the
+card's last human signal: `touch`ing the ledger moved the last attempt past an owner's Run
+press, so a card with three old strikes that a human had just released was re-parked by
+the next docker outage — no new strike, but the reset erased. Skipping the marker
+altogether is not an option either: `auth` is held off lane-wide by the dispatcher's login
+guard and `usage_limit` by `codex-backoff.sh`, but `infrastructure` has no such hold, and
+a standing sandbox fault would burn a run every five minutes forever. A success clears
+both files.
 
 **Model budget vs step budget.** `runtime-policy.sh` emits both `minutes` (the model's
 own budget, 20 or an approved 10) and `step_minutes` (`minutes + AUTOPR_STEP_GRACE_MINUTES`,
@@ -344,9 +358,19 @@ the corrective pass is skipped and the card is parked for context instead of pay
 a model call the step timeout will cut off — and that path `die`s rather than exiting 0,
 because it has already truncated report.md and decision.json: a green investigation there
 would run Triage's `jq` over an empty file, publish an empty report on the card it just
-parked, and let Cleanup's success branch delete that card's whole failure ledger. The supervisor (`autopr_control.py supervise --deadline`) terminates the model's
+parked, and let Cleanup's success branch delete that card's whole failure ledger; it also
+writes the `budget` fault class first, because running out of the STEP's clock is a lane
+condition and Cleanup's default class is `model`, a strike. The supervisor
+(`autopr_control.py supervise --deadline`) terminates the model's
 whole session at `minutes` and reports 143, which `investigate.sh` passes through and
-`checkpoint.sh` reads as "killed" — a pause, not a strike. The Investigate step's own
+`checkpoint.sh` reads as "killed" — a pause, not a strike. `--deadline` is a RELATIVE
+duration and the supervisor starts counting when it launches, so
+`run-codex-sandboxed.sh` recomputes it immediately before that launch
+(`model_budget_remaining`): otherwise the auth preflight, the sandbox clone, a cold image
+pull and the container start were all charged to the grace window instead of the model,
+and a preflight longer than `AUTOPR_STEP_GRACE_MINUTES` let Actions hard-kill the step
+first. An elapsed budget floors at `AUTOPR_MODEL_BUDGET_MIN_SECONDS` (30) and is never
+passed as 0, which means "no deadline at all". The Investigate step's own
 timeout is `step_minutes`, so sandbox start-up before the model and validation after it no
 longer eat into the budget or cut a finished decision short (run 34728683748 wrote its
 decision at 00:53:33Z and was killed by the shared timeout at 00:54:05Z). A run the
@@ -1397,7 +1421,7 @@ batch A fixed, and the structural backlog (batch B) — lives in
   one "Run AutoPR now" press costs at most one forced run per request TTL even when
   the run dies before `select.sh`/`investigate.sh` can claim it.
 - **`codex-backoff.sh`** holds every lane after a Codex usage-limit exit.
-- **Lane faults never strike a card** (`auth`, `usage_limit`, `infrastructure` — see
+- **Lane faults never strike a card** (`auth`, `usage_limit`, `infrastructure`, `budget` — see
   "Fault classes" above), and the model's budget is enforced by the supervisor so a
   finished decision is never discarded by the step timeout ("Model budget vs step
   budget").

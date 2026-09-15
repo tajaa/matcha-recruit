@@ -905,7 +905,7 @@ check "workflow publishes research from the trusted control root without a GitHu
       && ! awk '/name: Publish research report/,/name: Cleanup/' "$workflow" | grep -qE '^[[:space:]]*GH_TOKEN:' \
       && echo 0 || echo 1)
 check "ci syntax-checks the research publisher and the self-audit runs this suite" \
-    $(grep -qF 'find apps/msandbox -type f' "$REPO_ROOT/.github/workflows/ci.yml" \
+    $(grep -qF 'find scripts apps/msandbox -type f' "$REPO_ROOT/.github/workflows/ci.yml" \
       && grep -qF 'xargs -0 -n1 bash -n' "$REPO_ROOT/.github/workflows/ci.yml" \
       && [ -f "$REPO_ROOT/apps/msandbox/harness/publish-research.sh" ] \
       && grep -qF 'test_kanban_autopr_research.sh' "$REPO_ROOT/apps/msandbox/self-audit/audit.sh" \

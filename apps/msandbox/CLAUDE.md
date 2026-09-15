@@ -63,6 +63,11 @@ and the `mw_tasks.autopr_*` columns they read.
   asserts every `CONTRACT_SUITES` entry exists and that a missing one
   dispatches no repair. Moving the tests directory again means updating that
   default and nothing else.
+  `CHECK_DETAIL_FILE` (the per-check `failing_items` sink) is EXPORTED: the
+  contract suites run as `bash <file>`, a child that cannot see a variable
+  this shell merely set — the redirect there failed as "ambiguous redirect",
+  so the `$HOME`/`$REPO_ROOT` scrub those items exist for was never
+  exercised by the checks most likely to write absolute paths.
 - **Nothing a lane runs may read `~/Documents`, `~/Desktop` or `~/Downloads`.**
   The Actions runner and the dispatcher are launchd jobs, and macOS revokes a
   launchd job's Files-and-Folders grant whenever its binary changes — the
@@ -87,6 +92,14 @@ and the `mw_tasks.autopr_*` columns they read.
   `EXIT INT TERM HUP`, not EXIT alone — the Verify step has a timeout, and a
   bash killed by SIGTERM never runs its EXIT trap, in a checkout that is
   persistent (`clean: false`, and the lane's `git clean -fd` has no `-x`).
+  A build that finished but could not be installed (a lane started reading
+  the live entry during it) leaves its tree at `<entry>.tmp.<pid>`, and the
+  NEXT build adopts it (`adopt_staged`) instead of rebuilding: nothing else
+  promotes that path — `python_current`/`node_current` probe only the real
+  one — and `prune_stale` used to delete the ~1 GB staged tree as soon as
+  that pid died, so every lane-contended build cost a full rebuild plus a
+  full delete. `prune_stale` now spares a finished staged tree for a current
+  key and still collects an incomplete one.
   A reader registers its pid (`autofix_hold_toolchain`) so a concurrent
   `provision-verify-toolchain.sh` cannot `rm -rf` the venv and node_modules a
   running lane is symlinked into; the builders re-check that refcount
@@ -107,7 +120,9 @@ and the `mw_tasks.autopr_*` columns they read.
   any non-comment line of verify.sh.
 - **A card is struck only for a `model` fault.** `run-codex-sandboxed.sh`
   classifies a failed pass into `$AUTOPR_FAULT_CLASS_FILE`
-  (`model|auth|usage_limit|infrastructure`); the workflow's Cleanup books
+  (`model|auth|usage_limit|infrastructure`, plus `budget` written by
+  `investigate.sh` when the step's model-time allowance is gone); the
+  workflow's Cleanup books
   `autopr_record_outcome … failure` only for `model` and journals the rest
   as lane faults. New failure modes that are not the card's doing (a new
   daemon error string, a new credential shape) belong in that classifier,
@@ -115,13 +130,25 @@ and the `mw_tasks.autopr_*` columns they read.
   strike, but the cooldown marker must exist or `select.sh` has nothing to
   read and re-picks the same card every pass — `auth` is held off by the
   dispatcher's login guard and `usage_limit` by `codex-backoff.sh`, but
-  `infrastructure` has no lane-wide hold of its own. **A transcript match is
+  `infrastructure` has no lane-wide hold of its own. That marker is its own
+  file (`attempts/<id8>.lane`) and the failure ledger (`attempts/<id8>`) is
+  never touched by it: `select.sh` cools down on the newer of the two and
+  parks on the ledger alone, because advancing the ledger's mtime moved the
+  last attempt past an owner's Run press and re-parked a card a human had
+  just released. **A transcript match is
   only a trigger, never the verdict**: that file carries the model's own tool
   output, so a card whose work touches auth code or a docker troubleshooting
   doc could name itself a lane fault and escape the ledger forever. `auth` is
   confirmed by `auth-check` exit 4 on the host file, `infrastructure` by
   probing the container runtime now; unconfirmed, the failure stays the
-  model's. Exit 75 without an acknowledged takeover is the same principle
+  model's.
+  `usage_limit` has no machine state to probe at all, so its confirmation is
+  positional instead: only the transcript's TAIL
+  (`AUTOPR_USAGE_LIMIT_TAIL_LINES`, 40) is handed to `codex-backoff.sh
+  record`, because the CLI prints its rate-limit error as the run dies. A
+  match anywhere let a card whose work touched rate limiting both escape the
+  ledger and write the SHARED backoff marker, grounding all three lanes for
+  an hour. Exit 75 without an acknowledged takeover is the same principle
   from the other side — `CURRENT_FAULT_CLASS` is promoted to `model` as soon
   as the model has run, before that branch, or a bad pause write reads as a
   lane fault the card can never be struck for.
@@ -140,11 +167,19 @@ and the `mw_tasks.autopr_*` columns they read.
   `codex_pass` what is left of it, because a corrective retry with a fresh
   full deadline cannot fit inside `minutes + AUTOPR_STEP_GRACE_MINUTES` and
   is hard-killed by Actions instead — no container stop, no DEADLINE_EXIT, no
-  validation window. Out of budget, the corrective pass is skipped and the
+  validation window. `--deadline` is relative and the supervisor
+  starts counting when it launches, so `run-codex-sandboxed.sh` recomputes it
+  (`model_budget_remaining`) immediately before that launch — otherwise the
+  auth preflight, the clone, a cold image pull and the container start are
+  charged to the grace window, and a preflight longer than the grace lets
+  Actions hard-kill the step first. An elapsed budget floors at 30s; it is
+  never passed as 0, which means "no deadline". Out of budget, the corrective pass is skipped and the
   card parked — with `die`, never `exit 0`: that branch has already truncated
   report.md and decision.json, so a green investigation would run Triage's
   `jq` over an empty file, publish an empty report on a card it just parked,
-  and let Cleanup's success branch delete the card's whole failure ledger. Every `os.killpg` on those paths is guarded, including
+  and let Cleanup's success branch delete the card's whole failure ledger. It
+  writes the `budget` fault class first: running out of the STEP's clock is a
+  lane condition, and Cleanup's default class is `model` — a strike. Every `os.killpg` on those paths is guarded, including
   the one in `supervise`'s `finally`: it runs after the return value is fixed
   but can still replace it with a traceback, and it sits outside the
   `except BaseException`.
@@ -252,16 +287,35 @@ and the `mw_tasks.autopr_*` columns they read.
   `| tr` pipeline before printing anything, and the workflow step is
   `continue-on-error: true`, so the stale-dispatcher regression this sync
   exists to catch would come back silently.
-- **`harness/install-hooks.sh` honours `core.hooksPath`.**
-  `git rev-parse --git-path hooks` always answers `.git/hooks` and ignores
-  it, so on a clone that sets one the script reported "Installed" for hooks
-  git would never run.
-- **ci.yml syntax-checks this tree by discovery**, not by name:
-  `find apps/msandbox -type f \( -name '*.sh' -o -path '*/hooks/*' \) | xargs -0 -n1 bash -n`.
-  The hand-maintained list had fallen two dozen files behind — including both
-  files the verification toolchain is built from — leaving the self-hosted
-  audit lane as their only syntax gate, which is the single point of failure
-  that lane exists to remove.
+- **`dispatch-if-idle.sh`'s `NEXT_ELIGIBLE_AT` is set through
+  `set_next_eligible_at`, never assigned directly.** 0 is both "not computed
+  on this path" and "a human forced a run, so the routine spend floor does
+  not apply"; conflating them let `write_status` copy a stale future
+  `eligible_at` back over the run-request path's deliberate zero, so
+  status.json, the dashboard's "next eligible" line and the no-fetch
+  short-circuit all reported the lane as ineligible while someone was waiting
+  on a card. The setter raises `NEXT_ELIGIBLE_KNOWN`, which is what
+  `write_status` tests.
+- **`harness/install-hooks.sh` honours a `core.hooksPath` INSIDE the
+  checkout, and refuses one outside it.** `git rev-parse --git-path hooks`
+  always answers `.git/hooks` and ignores the setting, so on a clone that
+  sets one the script reported "Installed" for hooks git would never run. But
+  the effective value includes `--global`: honouring `~/.githooks` planted
+  matcha's `post-merge` in every repository the operator owns, so a `git
+  pull` anywhere ran `msandbox doctor` and printed matcha drift banners for
+  an unrelated project. Installing into `.git/hooks` instead would be
+  silently inert, so the script exits 1 and names both ways out.
+- **ci.yml syntax-checks this tree by discovery**, not by name, and ONE FILE
+  PER CALL:
+  `find scripts apps/msandbox -type f \( -name '*.sh' -o -path '*/hooks/*' \) -not -path 'scripts/oldscripts/*' -print0 | xargs -0 -n1 bash -n`.
+  Two separate defects were in that one line. The hand-maintained list had
+  fallen two dozen files behind — including both files the verification
+  toolchain is built from — leaving the self-hosted audit lane as their only
+  syntax gate, which is the single point of failure that lane exists to
+  remove. And `bash -n f1 f2 f3` parses only `f1`; the rest become `$1`, `$2`
+  …, so the surviving `scripts/` half of the list had never checked anything
+  but `update-ec2.sh`. `-print0` pairs with `xargs -0`: without it `xargs`
+  reads the whole newline-separated listing as one argument.
 
 ## Installed copies: one follows `main`, one does not
 
