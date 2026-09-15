@@ -21,13 +21,13 @@ const roleRoutes: Record<string, string> = {
   individual: '/werk',
 }
 
-const INK = 'var(--color-ivory-ink)'
-const BG = 'var(--color-ivory-bg)'
-const MUTED = 'var(--color-ivory-muted)'
-const LINE = 'var(--color-ivory-line)'
+const INK = '#f5f2ed'
+const BG = '#0c0c0e'
+const MUTED = '#a1a1aa'
+const LINE = 'rgba(255,255,255,0.12)'
 const DISPLAY = 'var(--font-display)'
 
-function IvoryInput({ label, id, ...props }: React.ComponentProps<'input'> & { label: string }) {
+function LoginInput({ label, id, ...props }: React.ComponentProps<'input'> & { label: string }) {
   return (
     <label htmlFor={id} className="block">
       <span
@@ -40,11 +40,11 @@ function IvoryInput({ label, id, ...props }: React.ComponentProps<'input'> & { l
         id={id}
         className="w-full rounded-lg px-4 py-3 text-[15px] outline-none transition-all focus:ring-2"
         style={{
-          backgroundColor: 'rgba(31,29,26,0.02)',
+          backgroundColor: 'rgba(255,255,255,0.04)',
           border: `1px solid ${LINE}`,
           color: INK,
           // @ts-expect-error: custom focus ring color via inline style
-          '--tw-ring-color': 'rgba(31,29,26,0.15)',
+          '--tw-ring-color': 'rgba(245,242,237,0.2)',
         }}
         {...props}
       />
@@ -94,14 +94,14 @@ export default function Login() {
   return (
     <div
       className="relative min-h-screen flex items-center justify-center px-4 overflow-hidden"
-      style={{ backgroundColor: BG, color: INK }}
+      style={{ backgroundColor: BG, color: INK, colorScheme: 'dark' }}
     >
       {/* Soft radial glow */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           background:
-            'radial-gradient(ellipse 60% 50% at 50% 30%, rgba(31,29,26,0.05) 0%, rgba(31,29,26,0) 60%)',
+            'radial-gradient(ellipse 60% 50% at 50% 30%, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 60%)',
         }}
       />
 
@@ -120,9 +120,9 @@ export default function Login() {
         <div
           className="rounded-2xl p-8 sm:p-10"
           style={{
-            backgroundColor: 'rgba(255,255,255,0.5)',
+            backgroundColor: 'rgba(255,255,255,0.035)',
             border: `1px solid ${LINE}`,
-            boxShadow: '0 40px 80px -20px rgba(31,29,26,0.1)',
+            boxShadow: '0 40px 80px -20px rgba(0,0,0,0.65)',
           }}
         >
           <div className="mb-8">
@@ -147,7 +147,7 @@ export default function Login() {
 
           {ssoMode ? (
             <form onSubmit={handleSSOLogin} className="space-y-5">
-              <IvoryInput
+              <LoginInput
                 id="sso-email"
                 label="Work email"
                 type="email"
@@ -176,7 +176,7 @@ export default function Login() {
             </form>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">
-              <IvoryInput
+              <LoginInput
                 id="email"
                 label="Email"
                 type="email"
@@ -185,7 +185,7 @@ export default function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@company.com"
               />
-              <IvoryInput
+              <LoginInput
                 id="password"
                 label="Password"
                 type="password"
@@ -248,9 +248,9 @@ function ErrorText({ text }: { text: string }) {
     <div
       className="text-sm px-3 py-2 rounded-md"
       style={{
-        color: '#8a4a3a',
-        backgroundColor: 'rgba(206,145,120,0.1)',
-        border: '1px solid rgba(206,145,120,0.3)',
+        color: '#fca5a5',
+        backgroundColor: 'rgba(127,29,29,0.2)',
+        border: '1px solid rgba(248,113,113,0.3)',
       }}
     >
       {text}
