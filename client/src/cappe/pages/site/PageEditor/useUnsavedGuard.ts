@@ -12,11 +12,16 @@ import { setDirtyProbe } from '../../../utils/unsavedGuard'
  *    dirty so a clean editor never triggers the browser's own prompt.
  *
  *  `isDirty` is read through a ref so a re-created closure never leaves a
- *  stale probe registered. */
+ *  stale probe registered. The ref is written from an effect rather than
+ *  during render: a render can be discarded or replayed, and a ref written
+ *  then would leave the probe pointing at a closure that never committed. */
 export function useUnsavedGuard(isDirty: () => boolean) {
   const probe = useRef(isDirty)
-  probe.current = isDirty
   const dirty = isDirty()
+
+  useEffect(() => {
+    probe.current = isDirty
+  })
 
   useEffect(() => {
     setDirtyProbe(() => probe.current())

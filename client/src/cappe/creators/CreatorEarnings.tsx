@@ -13,15 +13,17 @@ export default function CreatorEarnings() {
   // A failed load used to `setRows([])`, which renders as "Paid out $0.00 /
   // Upcoming $0.00 / No earnings yet" — a creator who is owed money is told
   // they are owed nothing. Say the load failed and offer a retry instead.
-  const load = useCallback(() => {
-    setError(null)
-    setRows(null)
-    cappeApi.get<EarningsRow[]>('/creators/me/earnings')
-      .then(setRows)
+  // State is only ever set from the request's own callbacks — an effect body
+  // that calls setState synchronously re-renders before the fetch even starts.
+  const fetchEarnings = useCallback(() => {
+    return cappeApi.get<EarningsRow[]>('/creators/me/earnings')
+      .then((r) => { setRows(r); setError(null) })
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not load your earnings'))
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void fetchEarnings() }, [fetchEarnings])
+
+  const retry = () => { setRows(null); setError(null); void fetchEarnings() }
 
   if (error) {
     return (
@@ -29,7 +31,7 @@ export default function CreatorEarnings() {
         <h1 className={ui.heading}>Earnings</h1>
         <div className={`${ui.card} mt-6 p-6 text-center`}>
           <p className="text-sm text-zinc-400">{error}</p>
-          <button onClick={load} className={`${ui.btnGhost} mt-4`}>
+          <button onClick={retry} className={`${ui.btnGhost} mt-4`}>
             <RotateCw className="h-4 w-4" /> Try again
           </button>
         </div>

@@ -2,7 +2,7 @@
 Flagged socials are hidden everywhere public."""
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import HTTPException, Query, Request, status
 
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection

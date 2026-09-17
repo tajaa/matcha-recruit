@@ -2,7 +2,7 @@
 from html import escape
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 
 from ....core.services.redis_cache import check_rate_limit, client_ip

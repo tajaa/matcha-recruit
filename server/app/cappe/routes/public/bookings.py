@@ -2,7 +2,7 @@
 availability, slots, create)."""
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
 
 from ....core.services.redis_cache import check_rate_limit, client_ip

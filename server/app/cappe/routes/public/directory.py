@@ -30,7 +30,7 @@ screen can never be six "Untitled Site" cards.
 import os
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import HTTPException, Query, Request, status
 
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection

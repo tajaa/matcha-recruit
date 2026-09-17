@@ -1,7 +1,7 @@
 """Cappe public surface — form submissions."""
 import json
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from fastapi import BackgroundTasks, HTTPException, Request, status
 
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection

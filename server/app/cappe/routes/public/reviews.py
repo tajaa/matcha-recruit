@@ -1,5 +1,5 @@
 """Cappe public surface — reviews."""
-from fastapi import APIRouter, Request, status
+from fastapi import Request, status
 
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection

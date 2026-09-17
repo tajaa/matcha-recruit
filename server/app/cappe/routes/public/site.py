@@ -1,5 +1,5 @@
 """Cappe public surface — site render data."""
-from fastapi import APIRouter, Request
+from fastapi import Request
 
 from ....database import get_connection
 from ...models.cappe import CappePublicSite

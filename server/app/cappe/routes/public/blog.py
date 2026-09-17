@@ -1,5 +1,5 @@
 """Cappe public surface — blog."""
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import HTTPException, Request, status
 
 from ....database import get_connection
 from ...models.cappe import CappePost
