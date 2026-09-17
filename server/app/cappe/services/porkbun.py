@@ -152,12 +152,20 @@ class Porkbun:
             f"/domain/updateAutoRenew/{domain.lower()}", {"status": "on" if enabled else "off"}
         )
 
-    async def point_at_app(self, domain: str) -> None:
-        """Wire a freshly registered domain at the Cappe app: apex A-record →
-        target IP, and www → apex. Best-effort per record."""
-        ip = self.settings.cappe_domain_target_ip
-        await self.create_dns_record(domain, record_type="A", name="", content=ip)
-        await self.create_dns_record(domain, record_type="CNAME", name="www", content=domain.lower())
+    async def point_at_app(self, domain: str, target: str) -> None:
+        """Wire a freshly registered domain at the Cappe CloudFront edge: ALIAS
+        on the apex and CNAME on www, both → the connection group's routing
+        endpoint (`settings.cappe_cf_routing_endpoint`).
+
+        ALIAS rather than an A record because the edge has no stable IP, and
+        because a CNAME is illegal at an apex — Porkbun's ALIAS is the
+        CNAME-flattening record type that is legal there.
+        """
+        endpoint = (target or "").strip().rstrip(".")
+        if not endpoint:
+            raise PorkbunError("No CloudFront routing endpoint configured")
+        await self.create_dns_record(domain, record_type="ALIAS", name="", content=endpoint)
+        await self.create_dns_record(domain, record_type="CNAME", name="www", content=endpoint)
 
 
 _porkbun: Optional[Porkbun] = None

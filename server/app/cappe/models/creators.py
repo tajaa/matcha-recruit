@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from ._validators import https_url
+
 SocialPlatform = Literal["instagram", "tiktok", "youtube", "x", "twitch", "facebook", "linkedin", "other"]
 DeliverableType = Literal["post", "reel", "story", "video", "short", "stream", "ugc", "blog", "other"]
 
@@ -42,6 +44,8 @@ class CreatorProfileUpdate(BaseModel):
     languages: Optional[list[str]] = Field(default=None, max_length=6)
     open_to_offers: Optional[bool] = None
 
+    _avatar_https = field_validator("avatar_url", "cover_url")(https_url)
+
     @field_validator("niches")
     @classmethod
     def _known_niches(cls, v):
@@ -61,13 +65,7 @@ class CreatorSocialUpsert(BaseModel):
     engagement_rate: Optional[float] = Field(default=None, ge=0, le=100)
     sort_order: int = 0
 
-    @field_validator("url")
-    @classmethod
-    def _https(cls, v: str) -> str:
-        v = v.strip()
-        if not v.startswith("https://"):
-            raise ValueError("Social URL must start with https://")
-        return v
+    _url_https = field_validator("url")(https_url)
 
 
 class CreatorSocial(BaseModel):
@@ -83,7 +81,10 @@ class CreatorSocial(BaseModel):
     sort_order: int
 
 
-class CreatorPortfolioUpsert(BaseModel):
+class _CreatorPortfolioFields(BaseModel):
+    """Shared shape. The https-only rule lives on the WRITE model alone: the
+    read model is built from stored rows, and a legacy `http://` value must
+    render as-is rather than 500 the whole profile."""
     title: str = Field(min_length=1, max_length=200)
     description: Optional[str] = Field(default=None, max_length=2000)
     media_url: Optional[str] = None
@@ -94,7 +95,11 @@ class CreatorPortfolioUpsert(BaseModel):
     sort_order: int = 0
 
 
-class CreatorPortfolioItem(CreatorPortfolioUpsert):
+class CreatorPortfolioUpsert(_CreatorPortfolioFields):
+    _urls_https = field_validator("media_url", "external_url")(https_url)
+
+
+class CreatorPortfolioItem(_CreatorPortfolioFields):
     id: UUID
     created_at: datetime
 

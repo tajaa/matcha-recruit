@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2, Plus } from 'lucide-react'
 import { cappeApi } from '../api'
-import { useCappeMe } from '../hooks/useCappeMe'
 import { ui, badgeFor } from '../components/ui'
 import { fmtCents, type Campaign, type OfferListItem } from '../types'
 import { brandCollabPath, creatorPaths } from './creatorPaths'
@@ -154,11 +153,10 @@ function CampaignsTab() {
   )
 }
 
+// Account-type gating is the route's job (RequireAccountType in routes.tsx) —
+// this used to `return null` after its hooks, rendering a blank page.
 export default function BrandCollabs() {
-  const { account } = useCappeMe()
   const [tab, setTab] = useState<'offers' | 'campaigns'>('offers')
-
-  if (account && account.account_type !== 'business') return null
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">

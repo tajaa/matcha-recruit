@@ -57,6 +57,17 @@ celery_app = Celery(
         "app.workers.tasks.cappe_campaign_send",
         "app.workers.tasks.cappe_collab_auto_approve",
         "app.workers.tasks.cappe_domain_finalize",
+        # Celery builds its strategy table from `include` BEFORE worker_ready
+        # fires, so a task dispatched from _SCHEDULED_TASKS but missing here is
+        # rejected as an unknown task and silently dropped. Every entry in
+        # _SCHEDULED_TASKS must have its module listed in this block —
+        # tests/workers/test_celery_scheduler_dispatch.py asserts it.
+        "app.workers.tasks.cappe_domain_renewals",
+        "app.workers.tasks.cappe_comp_expiry",
+        "app.workers.tasks.cappe_order_reaper",
+        "app.workers.tasks.cappe_edge_sync",
+        "app.workers.tasks.compliance_evals",
+        "app.workers.tasks.property_cat_refresh",
         "app.workers.tasks.cba_clause_extraction",
         "app.workers.tasks.grievance_deadline_alerts",
         "app.workers.tasks.ir_deadline_alerts",
@@ -212,6 +223,8 @@ _SCHEDULED_TASKS = [
     ("cappe_comp_expiry", "app.workers.tasks.cappe_comp_expiry", "run_cappe_comp_expiry"),
     ("cappe_collab_auto_approve", "app.workers.tasks.cappe_collab_auto_approve", "run_cappe_collab_auto_approve"),
     ("cappe_domain_finalize", "app.workers.tasks.cappe_domain_finalize", "run_cappe_domain_finalize"),
+    ("cappe_order_reaper", "app.workers.tasks.cappe_order_reaper", "run_cappe_order_reaper"),
+    ("cappe_edge_sync", "app.workers.tasks.cappe_edge_sync", "run_cappe_edge_sync"),
 ]
 
 

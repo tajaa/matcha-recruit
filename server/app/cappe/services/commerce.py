@@ -11,6 +11,7 @@ and booking-fulfillment order lines); `fetch_site_owner`/
 the public order-creation flow itself.
 """
 import json
+import logging
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Iterable, Optional, Sequence
@@ -20,7 +21,7 @@ from fastapi import HTTPException, status
 
 from ...core.services.redis_cache import check_rate_limit
 from ...database import get_connection
-from .common import loads_list
+from .common import loads_list, site_origins, url_within_origins
 from .discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
 from .email import (
     build_order_items_summary,
@@ -37,6 +38,8 @@ from .entitlements import (
     resolve_entitlements,
 )
 from .stripe_connect import CappeStripeError, get_cappe_stripe
+
+logger = logging.getLogger("cappe.commerce")
 
 
 def order_subtotal(line_items: Iterable[tuple[int, int]]) -> int:
@@ -387,9 +390,11 @@ async def create_booking_in_tx(
 
 
 async def create_public_order(site, body, background) -> dict:
-    """Create a pending order for a mixed cart (physical / digital / service /
+    """Create an order for a mixed cart (physical / digital / service /
     booking). Prices + totals are recomputed server-side from the live product
-    rows; payment is stubbed (order lands `pending`). Inventory is decremented
+    rows. The order lands `pending` and is handed to Stripe Checkout when the
+    business has Connect ready (the paid webhook flips it); without Connect it
+    stays `pending` for the owner to advance by hand. Inventory is decremented
     only for physical lines; booking lines create a scheduled booking; service
     lines validate intake answers. All in one transaction.
 
@@ -597,9 +602,24 @@ async def create_public_order(site, body, background) -> dict:
     # the connected account, 2% platform fee). The receipt waits for the paid
     # webhook (payments.py). Otherwise fall back to the legacy pending flow.
     pay_total = order["subtotal_cents"]
+    # Stripe renders success/cancel URLs on its own hosted checkout page, and
+    # this route is anonymous — so an attacker could point a real, branded
+    # Stripe page at any address they like. The storefront widget only ever
+    # knows its own published origin; anything else falls back to the site's
+    # canonical home rather than 400-ing a buyer mid-purchase.
+    allowed_origins = site_origins(site)
+    site_home = f"{allowed_origins[0]}/" if allowed_origins else None
+    return_urls_requested = bool(body.success_url and body.cancel_url)
+    success_url = url_within_origins(body.success_url, allowed_origins) or site_home
+    cancel_url = url_within_origins(body.cancel_url, allowed_origins) or site_home
+    if return_urls_requested and (success_url != body.success_url or cancel_url != body.cancel_url):
+        logger.warning(
+            "cappe checkout: off-site return URL rejected for site %s", site["id"]
+        )
     can_pay = bool(
         pay_total > 0 and owner and owner["stripe_account_id"]
-        and owner["stripe_charges_enabled"] and body.success_url and body.cancel_url
+        and owner["stripe_charges_enabled"] and return_urls_requested
+        and success_url and cancel_url
     )
     checkout_url = None
     if can_pay:
@@ -617,8 +637,8 @@ async def create_public_order(site, body, background) -> dict:
                 currency=cur,
                 line_items=line_items,
                 application_fee_cents=fee,
-                success_url=body.success_url,
-                cancel_url=body.cancel_url,
+                success_url=success_url,
+                cancel_url=cancel_url,
                 metadata={"order_id": str(order["id"]), "platform_fee_cents": str(fee)},
                 customer_email=email or None,
                 collect_shipping_address=has_physical,

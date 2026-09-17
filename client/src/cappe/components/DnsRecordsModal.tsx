@@ -4,6 +4,10 @@ import { cappeApi } from '../api'
 import type { CappeDnsRecord } from '../types'
 
 const TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'CAA', 'NS', 'ALIAS', 'SRV'] as const
+// Record types whose priority field is required, not optional. SRV was in the
+// list above while the priority input only showed for MX, so every SRV record
+// went out with no priority and Porkbun rejected it.
+const NEEDS_PRIO = ['MX', 'SRV']
 const input =
   'rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500'
 
@@ -38,7 +42,7 @@ export default function DnsRecordsModal({ domainId, domain, onClose }: {
         name: draft.name.trim(),
         content: draft.content.trim(),
         ttl: Math.max(600, parseInt(draft.ttl, 10) || 600),
-        prio: draft.type === 'MX' ? parseInt(draft.prio, 10) || 0 : null,
+        prio: NEEDS_PRIO.includes(draft.type) ? parseInt(draft.prio, 10) || 0 : null,
       })
       setDraft(EMPTY); load()
     } catch (e) {
@@ -88,7 +92,7 @@ export default function DnsRecordsModal({ domainId, domain, onClose }: {
             placeholder="value"
             className={`flex-1 ${input}`}
           />
-          {draft.type === 'MX' && (
+          {NEEDS_PRIO.includes(draft.type) && (
             <input
               value={draft.prio}
               onChange={(e) => setDraft({ ...draft, prio: e.target.value })}

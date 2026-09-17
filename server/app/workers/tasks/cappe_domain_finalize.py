@@ -1,4 +1,11 @@
-"""Scheduled reconciliation for stranded Cappe domain registrations."""
+"""Scheduled reconciliation for stranded Cappe domain registrations.
+
+`finalize_domain_registration` now claims its row with an UPDATE that bumps
+`updated_at`, so the 15-minute predicate below means "no worker has touched this
+registration for 15 minutes" — i.e. the webhook's background task died mid-flight
+— rather than merely "it has been registering a while". Without the claim this
+task could re-enter a registration another process was still running.
+"""
 
 import asyncio
 import logging

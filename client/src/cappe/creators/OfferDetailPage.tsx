@@ -10,6 +10,7 @@ import StripeConnectCard from '../components/StripeConnectCard'
 import TermSheet from './TermSheet'
 import CounterSheet from './CounterSheet'
 import { fmtCents, type CollabTerms, type DealCheckSeverity, type OfferDetail } from '../types'
+import { safeHttpUrl } from '../utils/safeUrl'
 
 function timeAgo(iso: string): string {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000)
@@ -306,9 +307,14 @@ export default function OfferDetailPage() {
                 {d.review_note && d.status === 'revision_requested' && (
                   <p className="mt-1.5 rounded bg-orange-500/10 px-2 py-1 text-xs text-orange-300">{d.review_note}</p>
                 )}
-                {d.submission_url && (
-                  <a href={d.submission_url} target="_blank" rel="noopener noreferrer" className="mt-1.5 block truncate text-xs text-emerald-400 hover:text-emerald-300">{d.submission_url}</a>
-                )}
+                {/* The other side of the deal typed this URL. Render it as a
+                    link only when it is really http(s) — a stored
+                    `javascript:` value would otherwise run on click. */}
+                {safeHttpUrl(d.submission_url) ? (
+                  <a href={safeHttpUrl(d.submission_url)} target="_blank" rel="noopener noreferrer" className="mt-1.5 block truncate text-xs text-emerald-400 hover:text-emerald-300">{d.submission_url}</a>
+                ) : d.submission_url ? (
+                  <p className="mt-1.5 truncate text-xs text-zinc-500">{d.submission_url}</p>
+                ) : null}
 
                 {side === 'creator' && ['pending', 'revision_requested'].includes(d.status) && (
                   <DeliverableSubmitForm onSubmit={(url, note, proofMediaUrl) => submitDeliverable(d.id, url, note, proofMediaUrl)} busy={busy} />

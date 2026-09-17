@@ -3,8 +3,9 @@ from datetime import date, datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
+from ._validators import https_url
 from .creators import DeliverableType, SocialPlatform
 
 PaymentSchedule = Literal["upfront", "split_50_50", "per_deliverable"]
@@ -164,6 +165,10 @@ class DeliverableSubmit(BaseModel):
     submission_url: str = Field(min_length=8, max_length=500)
     submission_note: Optional[str] = Field(default=None, max_length=2000)
     proof_media_url: Optional[str] = None
+
+    # Both land in the brand's review UI as links — an unvalidated scheme here
+    # is a stored redirect/`javascript:` vector aimed at the other party.
+    _urls_https = field_validator("submission_url", "proof_media_url")(https_url)
 
 
 class DeliverableRevision(BaseModel):

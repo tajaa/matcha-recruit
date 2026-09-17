@@ -7,6 +7,7 @@ import { ui, badgeFor } from '../components/ui'
 import { fmtCents, type PublicCreatorProfile } from '../types'
 import SendOfferSheet from './SendOfferSheet'
 import { creatorPaths } from './creatorPaths'
+import { safeCssUrl, safeHttpUrl } from '../utils/safeUrl'
 
 export default function CreatorPublicProfile() {
   const { handle } = useParams<{ handle: string }>()
@@ -34,13 +35,16 @@ export default function CreatorPublicProfile() {
     return <div className={`${ui.page} flex items-center justify-center text-sm text-zinc-500`}>Creator not found.</div>
   }
 
+  // The creator typed these; this page is what a *brand* sees. Both are
+  // scheme-checked before they reach a sink — see utils/safeUrl.ts.
+  const coverUrl = safeCssUrl(profile.cover_url)
   const canOffer = account?.account_type === 'business'
   const isLoggedOut = !getCappeToken()
   const isHiddenCta = account && !canOffer
 
   return (
     <div className={ui.page}>
-      <div className="h-48 bg-zinc-800" style={profile.cover_url ? { backgroundImage: `url(${profile.cover_url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined} />
+      <div className="h-48 bg-zinc-800" style={coverUrl ? { backgroundImage: `url("${coverUrl}")`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined} />
       <div className="mx-auto max-w-4xl px-6">
         <div className="-mt-12 flex items-end justify-between">
           <div className="flex items-end gap-4">
@@ -108,8 +112,8 @@ export default function CreatorPublicProfile() {
                     <video src={p.media_url} controls className="h-36 w-full bg-black object-cover" />
                   ) : p.media_url ? (
                     <img src={p.media_url} alt={p.title} className="h-36 w-full object-cover" />
-                  ) : p.external_url ? (
-                    <a href={p.external_url} target="_blank" rel="noopener noreferrer" className="flex h-36 w-full items-center justify-center bg-zinc-800 text-sm text-zinc-400">
+                  ) : safeHttpUrl(p.external_url) ? (
+                    <a href={safeHttpUrl(p.external_url)} target="_blank" rel="noopener noreferrer" className="flex h-36 w-full items-center justify-center bg-zinc-800 text-sm text-zinc-400">
                       <ExternalLink className="mr-1.5 h-4 w-4" /> View
                     </a>
                   ) : null}

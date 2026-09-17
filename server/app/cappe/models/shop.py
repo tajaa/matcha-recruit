@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
+from ._validators import https_url
+
 # A product is a general "offering"; `fulfillment` decides how it's delivered.
 #   physical - shipped good (uses inventory)
 #   digital  - buyer downloads `digital_file_url`
@@ -226,6 +228,9 @@ class CappeOrderStatusUpdate(BaseModel):
 class CappeDeliverableUpdate(BaseModel):
     """Owner attaches a delivered result (file URL) to a service/digital line."""
     deliverable_url: str = Field(min_length=1)
+
+    # Released to the buyer on the public receipt page as a link.
+    _url_https = field_validator("deliverable_url")(https_url)
 
 
 # Public checkout — client sends product ids + quantities ONLY (price is

@@ -16,7 +16,10 @@ from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...core.services.session_tokens import refresh_session_expired
 from ...database import get_connection
 from ..dependencies import require_cappe_account
-from ..services.email import send_cappe_verification_email
+from ..services.email import (
+    send_cappe_account_exists_email,
+    send_cappe_verification_email,
+)
 from ..models.cappe import (
     CappeAccount,
     CappeLogin,
@@ -70,7 +73,13 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
     Real signups get NO tokens — they must click the link we email. This is the
     anti-spam barrier: a bogus or unreachable address never becomes a usable
     account. Reserved test domains (which the email guard won't deliver to)
-    auto-verify so dev/seed flows aren't stranded."""
+    auto-verify so dev/seed flows aren't stranded.
+
+    An address that already has an account gets the SAME 201
+    `{verification_required: true}` as a fresh one. A 409 here made signup a
+    membership oracle for any address an attacker cared to try — the same
+    enumeration login and resend already refuse to be. The real owner is told
+    by email instead."""
     await check_rate_limit(client_ip(request), "cappe_signup", 5, 3600)
     email = body.email.strip().lower()
     # bcrypt is CPU-blocking (~100ms); run it off the event loop so a burst of
@@ -100,10 +109,13 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
                 token,
             )
         except asyncpg.UniqueViolationError:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="An account with this email already exists",
-            )
+            row = None
+
+    if row is None:
+        # Duplicate address: answer exactly as a fresh signup would, and tell
+        # the real owner out-of-band. Nothing was created or changed.
+        background.add_task(send_cappe_account_exists_email, email, body.name)
+        return CappeSignupResponse(verification_required=True, email=email)
 
     account = CappeAccount(**dict(row))
 

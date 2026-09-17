@@ -118,3 +118,87 @@ def loads_list(value: Any) -> list:
             return []
         return parsed if isinstance(parsed, list) else []
     return value if isinstance(value, list) else []
+
+
+# Serialized blocks+theme ceiling for anything that carries an opaque page
+# snapshot (Merlin turns, page/site writes, editor previews). Generous for a
+# real page — a dense one is tens of KB — but far below nginx's 100MB body cap.
+# Lived in routes/merlin.py until the page-write models needed it too.
+MAX_SNAPSHOT_BYTES = 300_000
+
+
+def _row_field(row: Any, key: str) -> Any:
+    """Read one column from an asyncpg Record or a plain dict, None when absent."""
+    if row is None:
+        return None
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
+def site_origins(site: Any) -> list[str]:
+    """Origins a published Cappe site legitimately serves from.
+
+    The canonical tenant host (`https://<subdomain>.<cappe_base_domain>`) plus a
+    connected custom domain (apex and `www.`, both of which the renderer
+    accepts). Used to bound caller-supplied Stripe return URLs to the tenant's
+    own storefront — a storefront widget knows its own published URL, so
+    anything outside this set is someone else's redirect.
+
+    Settings are read lazily: this module is imported before the app lifespan
+    calls `load_settings()`, and the env var is the same source config reads.
+    """
+    import os
+
+    try:
+        from ...config import get_settings
+
+        base = (get_settings().cappe_base_domain or "").strip()
+    except Exception:
+        base = os.getenv("CAPPE_BASE_DOMAIN", "hey-matcha.com")
+    base = base.strip().lower().strip(".")
+
+    origins: list[str] = []
+    sub = (_row_field(site, "subdomain") or "").strip().lower()
+    if sub and base:
+        origins.append(f"https://{sub}.{base}")
+    custom = (_row_field(site, "custom_domain") or "").strip().lower().strip(".")
+    if custom:
+        origins.append(f"https://{custom}")
+        origins.append(f"https://www.{custom}")
+    return origins
+
+
+def url_within_origins(url: str | None, origins: list[str]) -> str | None:
+    """Return `url` when it sits under one of `origins`, else None.
+
+    Prefix matching alone would accept `https://tenant.example.com.evil.test`,
+    so the character after the origin must be a real boundary.
+    """
+    if not url or not origins:
+        return None
+    u = url.strip()
+    low = u.lower()
+    for origin in origins:
+        o = origin.lower().rstrip("/")
+        if not o:
+            continue
+        if low == o or low.startswith(o + "/") or low.startswith(o + "?") or low.startswith(o + "#"):
+            return u
+    return None
+
+
+_RECEIPT_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def receipt_filename(receipt_number: Any) -> str:
+    """Safe `Content-Disposition` filename for an order receipt PDF.
+
+    `receipt_number` starts with the tenant-set `receipt_prefix`. The model now
+    constrains that to `[A-Za-z0-9-]`, but rows written before it don't, and the
+    value is interpolated into a quoted header — a `"` in it adds header
+    directives. Strip to a filename charset and cap the length.
+    """
+    stem = _RECEIPT_FILENAME_RE.sub("", str(receipt_number or ""))[:64]
+    return f"{stem or 'receipt'}.pdf"

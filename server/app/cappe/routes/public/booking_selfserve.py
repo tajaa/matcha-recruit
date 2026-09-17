@@ -14,7 +14,9 @@ from ...services.email import dashboard_url, format_when, send_cappe_booking_can
 from .._shared import _site_owner
 from ._common import _location_ctx, _published_site, _read_rate_limit
 
-router = APIRouter()
+from ._body_limit import limited_public_router
+
+router = limited_public_router()
 
 
 def _anchor_local(dt, tz_name):

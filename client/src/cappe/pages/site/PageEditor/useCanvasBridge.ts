@@ -301,14 +301,22 @@ export function useCanvasBridge(
           setBlocks((bs) => bs.map((x, j) => (j === d.block ? { ...x, elements: cvEls(x).map((el) => (el.id === d.id ? { ...el, [bp]: pos } : el)) } : x)))
           break
         }
-        case 'cz-reorder':
+        case 'cz-reorder': {
+          // These indices cross the sandboxed-iframe boundary, so they are
+          // untrusted input. `splice` coerces: a NaN or a string collapsed to 0
+          // and moved the wrong section, and an out-of-range `to` appended a
+          // hole. Bounds-check both before touching the block list.
+          const from = d.from
+          const to = d.to
+          if (!Number.isInteger(from) || !Number.isInteger(to)) break
           setBlocks((bs) => {
+            if (from < 0 || from >= bs.length || to < 0 || to >= bs.length) return bs
             const next = [...bs]
-            const [moved] = next.splice(d.from, 1)
-            next.splice(d.to, 0, moved)
+            const [moved] = next.splice(from, 1)
+            next.splice(to, 0, moved)
             return next
           })
-          setSelBlock(d.to)
+          setSelBlock(to)
           setSelElement(null)  // a freeform element selection doesn't survive a section move
           // `selection` is NOT cleared here — it's keyed on the block's stable
           // `_k` (resolved at cz-selection receipt), not the numeric index a
@@ -316,6 +324,7 @@ export function useCanvasBridge(
           // new position. The staleness effect below only drops it once the
           // block itself is actually gone.
           break
+        }
         case 'cz-drop-image': {
           // Only accept https URLs — the dropped value comes from the
           // sandboxed iframe's dataTransfer, sourced from our own draggable

@@ -475,6 +475,13 @@ def _tokens(theme: dict | None) -> dict:
         base["accent"] = theme["primaryColor"]
     colors = theme.get("colors") or {}
     base.update({k: v for k, v in colors.items() if v})
+    # Every one of these is interpolated straight into `:root{--bg:…}` by
+    # page.py, where `_clean_css` only drops `<`, `>` and `}` — so
+    # "red;background-image:url(//evil.test/x)" would open a second CSS
+    # declaration. A theme color is a hex literal or it is the default.
+    defaults = _DARK if mode == "dark" else _LIGHT
+    for key, value in list(base.items()):
+        base[key] = _hexonly(value) or defaults.get(key, "")
     fonts = theme.get("fonts") or {}
     legacy = theme.get("font")
     return {

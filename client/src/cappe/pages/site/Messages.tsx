@@ -42,10 +42,16 @@ export default function Messages() {
   async function openThread(t: CappeThread) {
     setComposing(false)
     setLoadingThread(true)
+    setError(null)
     try {
       const full = await cappeApi.get<CappeThreadDetail>(`/sites/${siteId}/threads/${t.id}`)
       setActive(full)
       setThreads((list) => (list || []).map((x) => (x.id === t.id ? { ...x, owner_unread: 0 } : x)))
+    } catch (e) {
+      // Without this the click just rejected: the previously open conversation
+      // stayed on screen as if it were the one that had been selected.
+      setActive(null)
+      setError(e instanceof Error ? e.message : 'Could not open this conversation')
     } finally {
       setLoadingThread(false)
     }

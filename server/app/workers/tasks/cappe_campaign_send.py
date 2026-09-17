@@ -45,15 +45,22 @@ async def _run(campaign_id: str) -> dict:
             return {"skipped": True, "reason": f"status_{camp['status']}"}
 
         subs = await conn.fetch(
-            "SELECT email, name, unsubscribe_token FROM cappe_subscribers "
+            "SELECT id, email, name, unsubscribe_token FROM cappe_subscribers "
             "WHERE site_id = $1 AND status = 'subscribed'",
             camp["site_id"],
         )
         recipients = deliverable_recipients(subs)
+        # deliverable_recipients() normalizes to {email,name,unsubscribe_token};
+        # keep the subscriber id reachable so a failure can be logged without
+        # writing the address itself into the log stream.
+        subscriber_ids = {
+            (s["email"] or "").strip().lower(): s["id"] for s in subs if s["email"]
+        }
 
         email_service = EmailService()
         subject = camp["subject"] or f"News from {camp['site_name']}"
         sent = 0
+        failed = 0
         for r in recipients:
             unsub = _unsubscribe_url(camp["slug"], r["unsubscribe_token"])
             html = personalize_unsubscribe(camp["body_html"] or "", unsub)
@@ -64,16 +71,29 @@ async def _run(campaign_id: str) -> dict:
                     html_content=html, text_content=text,
                 )
                 sent += 1
-            except Exception:
-                pass  # best-effort per recipient; one bad address shouldn't halt the blast
+            except Exception as exc:
+                # Best-effort per recipient — one bad address must not halt the
+                # blast — but never silently: the failure is counted onto the
+                # campaign row and logged at WARNING (subscriber id, not the
+                # address, so the log line itself carries no PII).
+                failed += 1
+                logger.warning(
+                    "[Cappe Campaign Send] campaign %s: send failed for subscriber %s (%s)",
+                    campaign_id, subscriber_ids.get(r["email"]), type(exc).__name__,
+                )
             await asyncio.sleep(THROTTLE_SECONDS)
 
         await conn.execute(
             "UPDATE cappe_campaigns SET status = 'sent', sent_at = NOW(), "
-            "recipient_count = $1, updated_at = NOW() WHERE id = $2",
-            sent, campaign_id,
+            "recipient_count = $1, failed_count = $2, updated_at = NOW() WHERE id = $3",
+            sent, failed, campaign_id,
         )
-        return {"recipients": len(recipients), "sent": sent}
+        if failed:
+            logger.warning(
+                "[Cappe Campaign Send] campaign %s finished with %d/%d failures",
+                campaign_id, failed, len(recipients),
+            )
+        return {"recipients": len(recipients), "sent": sent, "failed": failed}
     finally:
         await conn.close()
 

@@ -23,6 +23,10 @@ def _safe_href(href: Any) -> str:
     if not href:
         return "#"
     s = str(href).strip()
+    # `//evil.test/x` is a protocol-relative URL, not a site-root path: it reads
+    # as same-origin here but navigates off-site. Check it before the "/" case.
+    if s.startswith("//"):
+        return "#"
     if s.startswith(("/", "#")):
         return s
     if s.lower().startswith(("http://", "https://", "mailto:", "tel:")):

@@ -172,7 +172,8 @@ export default function BrandHome() {
     ? rateCreators.reduce((sum, c) => sum + (c.min_rate_cents ?? 0), 0) / rateCreators.length
     : 0
 
-  if (account && account.account_type !== 'business') return null
+  // Account-type gating is the route's job now (RequireAccountType in
+  // routes.tsx) — a bare `return null` here rendered a blank page.
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-8">

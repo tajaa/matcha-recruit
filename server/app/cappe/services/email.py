@@ -663,3 +663,73 @@ async def send_cappe_collab_payment_nudge_email(
     html = _email_shell(f"Reminder: payment due — {e_title}", body, cta_label="Pay now", cta_url=link, accent="#f59e0b")
     text = f"Reminder: {amount} is still due for {label} on {offer_title}.\n\n{link}"
     await _send(to_email, to_name, f"Reminder: payment due — {offer_title}", html, text, label="collab payment nudge")
+
+
+# ── transactional: account + list hygiene ────────────────────────────────────
+
+def subscribe_confirm_url(token: str) -> str:
+    """Public double-opt-in confirmation link for an imported subscriber."""
+    return f"{_base_url()}/api/cappe/public/subscribe/confirm/{token}"
+
+
+async def send_cappe_account_exists_email(to_email: str, to_name: str | None) -> None:
+    """Told to whoever owns the address when a signup collides with it.
+
+    The signup route answers a duplicate exactly like a fresh signup, so the
+    endpoint stops being an oracle for "does this person have an account?".
+    That only works if the real owner is the one who learns about it — which
+    is what this is.
+    """
+    greeting = f"Hi {to_name}," if to_name else "Hi there,"
+    html = _email_shell(
+        "You already have a Gummfit account",
+        f'<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#a1a1aa;">'
+        f"{escape(greeting)} Someone just tried to sign up with this email address, "
+        "and an account already exists — so we didn't create a second one.</p>"
+        '<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#a1a1aa;">'
+        "If that was you, sign in instead. If it wasn't, you can ignore this "
+        "email — nothing changed on your account.</p>",
+        cta_label="Sign in",
+        cta_url=f"{_base_url()}/cappe/login",
+    )
+    text = (
+        f"{greeting}\n\nSomeone just tried to sign up with this email address, and an "
+        f"account already exists — so we didn't create a second one.\n\n"
+        f"If that was you, sign in instead: {_base_url()}/cappe/login\n\n"
+        "If it wasn't you, ignore this email — nothing changed on your account."
+    )
+    await _send(to_email, to_name, "You already have a Gummfit account", html, text,
+                label="account exists")
+
+
+async def send_cappe_subscribe_confirm_email(
+    to_email: str, to_name: str | None, site_name: str, confirm_url: str
+) -> None:
+    """Double opt-in for a subscriber a business imported rather than one who
+    signed up on the site themselves.
+
+    An imported contact never asked us for email. Until this link is clicked the
+    row stays `pending_confirmation`, and the campaign worker only ever selects
+    `subscribed` — so an uploaded CSV can't be turned into a blast through our
+    shared sender.
+    """
+    greeting = f"Hi {to_name}," if to_name else "Hi there,"
+    e_site = escape(site_name or "this business")
+    html = _email_shell(
+        f"Confirm your subscription to {e_site}",
+        f'<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#a1a1aa;">'
+        f"{escape(greeting)} {e_site} added you to their mailing list. "
+        "We won't send you anything until you confirm.</p>"
+        '<p style="margin:0;font-size:12px;line-height:1.6;color:#71717a;">'
+        "If you didn't expect this, just ignore it — no confirmation, no email.</p>",
+        cta_label="Confirm subscription",
+        cta_url=confirm_url,
+        footer=site_name or "Gummfit",
+    )
+    text = (
+        f"{greeting}\n\n{site_name} added you to their mailing list. We won't send you "
+        f"anything until you confirm:\n{confirm_url}\n\n"
+        "If you didn't expect this, ignore this email — no confirmation, no email."
+    )
+    await _send(to_email, to_name, f"Confirm your subscription to {site_name}", html, text,
+                label="subscribe confirm")

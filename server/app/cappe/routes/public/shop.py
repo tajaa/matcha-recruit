@@ -5,11 +5,14 @@ from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
 from ...models.cappe import CappeCheckoutRequest, CappeOrderReceipt, CappeProduct
 from ...services.commerce import create_public_order
+from ...services.common import receipt_filename as _receipt_filename
 from ...services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
 from .._shared import fetch_option_groups, loads_list
 from ._common import _published_site, _read_rate_limit, _reject_reserved
 
-router = APIRouter()
+from ._body_limit import MAX_PUBLIC_CART_BODY_BYTES, limited_public_router
+
+router = limited_public_router(MAX_PUBLIC_CART_BODY_BYTES)
 
 # Public product listing exposes everything EXCEPT digital_file_url (the gated
 # deliverable — released only via the order receipt once paid/fulfilled).
@@ -49,11 +52,12 @@ async def public_products(slug: str, request: Request):
 
 @router.post("/public/sites/{slug}/orders", status_code=status.HTTP_201_CREATED)
 async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Request, background: BackgroundTasks):
-    """Create a pending order for a mixed cart (physical / digital / service /
+    """Create an order for a mixed cart (physical / digital / service /
     booking). Prices + totals are recomputed server-side from the live product
-    rows; payment is stubbed (order lands `pending`). Inventory is decremented
-    only for physical lines; booking lines create a scheduled booking; service
-    lines validate intake answers. All in one transaction — see
+    rows. The order lands `pending`; when the business has Stripe Connect ready
+    the response carries a Checkout URL and the paid webhook flips it. Inventory
+    is decremented only for physical lines; booking lines create a scheduled
+    booking; service lines validate intake answers. All in one transaction — see
     `services/commerce.py:create_public_order`."""
     ip = client_ip(request)
     await check_rate_limit(ip, "cappe_order", 10, 60)
@@ -87,7 +91,7 @@ async def public_order_receipt_pdf(token: str, request: Request):
     if rendered is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
     order, pdf = rendered
-    fname = (order.get("receipt_number") or "receipt") + ".pdf"
+    fname = _receipt_filename(order.get("receipt_number"))
     return Response(
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{fname}"'},
@@ -97,8 +101,8 @@ async def public_order_receipt_pdf(token: str, request: Request):
 @router.get("/public/orders/{token}", response_model=CappeOrderReceipt)
 async def public_order_receipt(token: str, request: Request):
     """Buyer receipt + deliverables, resolved by the order's unguessable token.
-    Digital downloads / service deliverables are released only once the seller
-    marks the order paid or fulfilled (payment is stubbed)."""
+    Digital downloads / service deliverables are released only once the order is
+    paid (Stripe webhook) or the seller marks it fulfilled."""
     await check_rate_limit(client_ip(request), "cappe_receipt", 30, 60)
     async with get_connection() as conn:
         order = await conn.fetchrow(

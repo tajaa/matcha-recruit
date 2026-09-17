@@ -20,6 +20,8 @@ import { useMerlin, type MerlinSelection } from './useMerlin'
 import { usePagePreview } from './usePagePreview'
 import { useThemeBridge, type ThemeRegion } from './useThemeBridge'
 import { useThemeEditor } from './useThemeEditor'
+import { useUnsavedGuard } from './useUnsavedGuard'
+import { confirmLeave } from '../../../utils/unsavedGuard'
 
 // Stable per-block key so form-mode drag-reorder reconciles correctly (index
 // keys would strand each card's local open/collapse state on reorder). Stripped
@@ -194,6 +196,21 @@ export default function PageEditor() {
   const [meta, setMeta] = useState<Record<string, unknown>>({})
   const [promosDirty, setPromosDirty] = useState(false)
 
+  // What is currently persisted, held by REFERENCE. React keeps a state
+  // reference stable until its setter runs (the same equality useEditorHistory
+  // relies on), so `blocks !== saved.blocks` means "edited since the last
+  // successful save" — and it stays false after a save, which `history.canUndo`
+  // does not (the undo stack survives a save, so it would report every saved
+  // page as unsaved for the rest of the session).
+  type SavedState = {
+    blocks: CappeBlock[]
+    title: string
+    status: 'draft' | 'published'
+    meta: Record<string, unknown>
+    theme: Record<string, unknown>
+  }
+  const savedRef = useRef<SavedState | null>(null)
+
   // Copy/paste a section's design (`_design`). Persisted to localStorage so it
   // survives page/tab switches. `anchor.id` is dropped on paste (ids stay unique).
   const [styleClip, setStyleClip] = useState<Record<string, unknown> | null>(() => {
@@ -209,13 +226,22 @@ export default function PageEditor() {
       .then(([pages, site]) => {
         const p = pages.find((x) => x.id === pageId)
         if (!p) { setError('Page not found'); return }
+        const loadedStatus = p.status === 'published' ? 'published' : 'draft'
+        const bs = (p.content?.blocks as CappeBlock[]) || []
+        const loadedBlocks = withKeys(Array.isArray(bs) ? bs : [])
+        const loadedTheme = themeObj(site?.theme_config)
+        const loadedMeta = themeObj(site?.meta_config)
         setPage(p)
         setTitle(p.title)
-        setStatus(p.status === 'published' ? 'published' : 'draft')
-        const bs = (p.content?.blocks as CappeBlock[]) || []
-        setBlocks(withKeys(Array.isArray(bs) ? bs : []))
-        themeEditor.loadTheme(themeObj(site?.theme_config))
-        setMeta(themeObj(site?.meta_config))
+        setStatus(loadedStatus)
+        setBlocks(loadedBlocks)
+        themeEditor.loadTheme(loadedTheme)
+        setMeta(loadedMeta)
+        // Baseline for the unsaved-work guard: what the server just gave us.
+        savedRef.current = {
+          blocks: loadedBlocks, title: p.title, status: loadedStatus,
+          meta: loadedMeta, theme: loadedTheme,
+        }
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load page'))
       .finally(() => setLoading(false))
@@ -316,11 +342,29 @@ export default function PageEditor() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // Unsaved-work guard. `confirmLeave()` (utils/unsavedGuard.ts) reads this
+  // probe from the sidebar / sign-out / back button; a `beforeunload` listener
+  // covers closing the tab. There is no useBlocker here — Cappe runs under
+  // <BrowserRouter>, not a data router, so that hook would throw.
+  const isDirty = () => {
+    const s = savedRef.current
+    if (!s) return false
+    return blocks !== s.blocks
+      || title !== s.title
+      || status !== s.status
+      || meta !== s.meta
+      || themeEditor.theme !== s.theme
+  }
+  useUnsavedGuard(isDirty)
+
   async function save() {
     if (!siteId || !pageId) return
     setSaving(true)
     setError(null)
     setNotice(null)
+    // Captured before the await: an edit made while the PUT is in flight was
+    // not part of it, so the guard must still consider the page dirty.
+    const sent: SavedState = { blocks, title, status, meta, theme: themeEditor.theme }
     try {
       const updated = await cappeApi.put<CappePage>(`/sites/${siteId}/pages/${pageId}`, {
         title,
@@ -337,6 +381,7 @@ export default function PageEditor() {
         themeEditor.markClean()
         setPromosDirty(false)
       }
+      savedRef.current = sent
       setNotice('Saved.')
       setTimeout(() => setNotice(null), 2000)
     } catch (e) {
@@ -383,7 +428,7 @@ export default function PageEditor() {
           setStatus={setStatus}
           saving={saving}
           onSave={save}
-          onBack={() => navigate(`/cappe/sites/${siteId}`)}
+          onBack={() => { if (confirmLeave()) navigate(`/cappe/sites/${siteId}`) }}
           onUndo={history.undo}
           onRedo={history.redo}
           canUndo={history.canUndo}

@@ -1,7 +1,10 @@
 """Cappe shop — products CRUD + order management (owner side).
 
-Public checkout lives in public.py. Payment capture is stubbed: orders are
-created 'pending' and the owner advances status manually here.
+Public checkout lives in routes/public/shop.py. Card payment is real: a
+storefront order with Stripe Connect ready goes through Checkout and the paid
+webhook (routes/payments.py) flips it to 'paid'. Orders that take no card — a
+site without Connect, an approval-gated cart — are created 'pending' and the
+owner advances status by hand here.
 """
 import json
 from uuid import UUID
@@ -24,6 +27,7 @@ from ..models.cappe import (
     CappeStockAdjust,
 )
 from ._shared import build_patch, fetch_option_groups, get_owned_site, loads, loads_list
+from ..services.common import receipt_filename as _receipt_filename
 from ..services.directory import refresh_site_search
 from ..services.inventory import log_adjustment, restock_order
 from ..services.entitlements import require_fulfillment, resolve_entitlements
@@ -415,7 +419,7 @@ async def owner_order_receipt_pdf(
     if rendered is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
     _order, pdf = rendered
-    fname = (_order.get("receipt_number") or "receipt") + ".pdf"
+    fname = _receipt_filename(_order.get("receipt_number"))
     return Response(
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{fname}"'},
@@ -462,8 +466,8 @@ async def update_order_status(
 async def accept_order(
     site_id: UUID, order_id: UUID, account: CappeAccount = Depends(require_cappe_account)
 ):
-    """Approve an order that was held for review. Stays 'pending' (payment is
-    stubbed) but is stamped approved and leaves the requests queue."""
+    """Approve an order that was held for review. Stays 'pending' — approval is
+    not payment — but is stamped approved and leaves the requests queue."""
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         order = await conn.fetchrow(

@@ -1,8 +1,11 @@
 """Cappe newsletter — subscribers + campaigns (owner side).
 
-Public signup/unsubscribe live in public.py. Sending is STUBBED: send marks the
-campaign 'sent' and records how many deliverable (subscribed, non-reserved-
-domain) recipients it *would* have reached — no email actually goes out.
+Public signup/unsubscribe/confirm live in routes/public/newsletter.py. Sending
+is real: /send stages the campaign as 'sending' and the Celery task
+(cappe_campaign_send) does the throttled per-recipient blast through the shared
+platform sender, then finalizes 'sent' with the real recipient count. Because
+that sender is shared with every other product, /send is rate-limited per
+account and capped on recipients per day.
 """
 
 import asyncpg
@@ -11,6 +14,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ...core.services.email._shared import _is_reserved_test_domain
+from ...core.services.redis_cache import check_rate_limit
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import (
@@ -26,6 +30,14 @@ from ._shared import build_patch, get_owned_site
 router = APIRouter()
 
 _SUB_COLS = "id, site_id, email, name, status, source, created_at, unsubscribed_at"
+
+# Campaigns go out through the platform's shared transactional sender, the same
+# one every other product's mail uses. A compromised or malicious tenant with an
+# uploaded address list is therefore a spam relay on OUR sending reputation, so
+# a send is bounded twice: how often an account may send at all, and how many
+# addresses it may reach in a day across all of its sites.
+_SENDS_PER_DAY = 3
+_RECIPIENTS_PER_DAY = 5000
 _CAMPAIGN_COLS = (
     "id, site_id, subject, body_html, from_name, status, scheduled_at, "
     "sent_at, recipient_count, created_at, updated_at"
@@ -243,7 +255,11 @@ async def send_campaign(
 ):
     """Stage the campaign for sending and dispatch the background blast. The
     Celery task (cappe_campaign_send) does the throttled per-recipient send and
-    flips status 'sending' → 'sent' with the real recipient count."""
+    flips status 'sending' → 'sent' with the real recipient count.
+
+    Both caps are checked before the rate-limit counter is spent, so a tenant
+    who trips the daily recipient ceiling doesn't also burn one of their sends.
+    """
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         campaign = await conn.fetchrow(
@@ -260,6 +276,33 @@ async def send_campaign(
                 status_code=status.HTTP_409_CONFLICT, detail="Campaign already sent"
             )
 
+        # Daily recipient ceiling across every site this account owns. Campaigns
+        # still in flight count 0 until the worker finalizes them — the sends/day
+        # limit below is what bounds that window.
+        already_sent = await conn.fetchval(
+            """SELECT COALESCE(SUM(c.recipient_count), 0)
+                 FROM cappe_campaigns c
+                 JOIN cappe_sites s ON s.id = c.site_id
+                WHERE s.account_id = $1 AND c.sent_at > NOW() - INTERVAL '24 hours'""",
+            account.id,
+        )
+        pending = await conn.fetchval(
+            "SELECT COUNT(*) FROM cappe_subscribers WHERE site_id = $1 AND status = 'subscribed'",
+            site_id,
+        )
+        if int(already_sent or 0) + int(pending or 0) > _RECIPIENTS_PER_DAY:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    f"That would reach more than {_RECIPIENTS_PER_DAY:,} people in 24 hours "
+                    f"(already sent to {int(already_sent or 0):,}). Try again tomorrow, "
+                    "or split the list."
+                ),
+            )
+
+    await check_rate_limit(str(account.id), "cappe_campaign_send", _SENDS_PER_DAY, 86400)
+
+    async with get_connection() as conn:
         row = await conn.fetchrow(
             f"""UPDATE cappe_campaigns SET status = 'sending', updated_at = NOW()
                 WHERE id = $1 AND site_id = $2 AND status NOT IN ('sent', 'sending')

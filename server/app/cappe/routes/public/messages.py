@@ -8,7 +8,9 @@ from ....database import get_connection
 from ...models.cappe import CappeMessageCreate, CappePublicThread
 from ...services.email import dashboard_url, send_cappe_message_email
 
-router = APIRouter()
+from ._body_limit import limited_public_router
+
+router = limited_public_router()
 
 
 @router.get("/public/threads/{token}", response_model=CappePublicThread)

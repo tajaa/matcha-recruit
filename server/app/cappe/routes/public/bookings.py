@@ -40,7 +40,7 @@ from ._body_limit import CappePublicJsonBodyLimitRoute, limited_public_router
 from .._shared import _site_owner, loads_list
 from ._common import _location_ctx, _published_site, _read_rate_limit, _reject_reserved
 
-router = APIRouter()
+router = limited_public_router()
 _SUGGESTION_SEARCH_DAYS = 14
 suggestions_router = limited_public_router()
 # Kept as a module alias for existing body-limit tests and downstream imports.

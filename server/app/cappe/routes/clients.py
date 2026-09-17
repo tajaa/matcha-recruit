@@ -5,17 +5,29 @@ keyed by email, so organic and imported clients merge and never drift. Each
 client can be mapped to a branch (`location_id`): explicit on import, else
 derived from their most recent booking's location.
 """
+import asyncio
 import csv
 import io
 import json
+import logging
 import re
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    status,
+)
 
 from ...core.services.email._shared import _is_reserved_test_domain
 from ...database import get_connection
 from ..dependencies import require_cappe_account
+from ..services.email import send_cappe_subscribe_confirm_email, subscribe_confirm_url
 from ..models.cappe import (
     CappeAccount,
     CappeClient,
@@ -25,7 +37,13 @@ from ..models.cappe import (
 )
 from ._shared import get_owned_site, read_capped
 
+logger = logging.getLogger("cappe.clients")
+
 router = APIRouter()
+
+# Pacing for the confirmation blast an import kicks off — same figure the
+# campaign worker uses, so a 5,000-row CSV can't stampede the shared sender.
+_CONFIRM_THROTTLE_SECONDS = 0.1
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _MAX_IMPORT_ROWS = 5000
@@ -125,25 +143,51 @@ async def list_clients(site_id: UUID, account: CappeAccount = Depends(require_ca
     return [_client_from_row(r) for r in rows]
 
 
-async def _add_to_newsletter(conn, site_id: UUID, email: str, name: str | None) -> bool:
-    """Subscribe an imported client — but never a reserved test domain (those
-    bounce and trigger send-storms; see the global test-data rule)."""
+async def _add_to_newsletter(conn, site_id: UUID, email: str, name: str | None):
+    """Stage an imported client for the newsletter — pending their confirmation.
+
+    An imported contact never asked us for email, so the row lands
+    `pending_confirmation` with a token and only becomes `subscribed` when the
+    person clicks the link (routes/public/newsletter.py). The campaign worker
+    selects `status = 'subscribed'`, so an uploaded list can't be blasted.
+
+    Reserved test domains are never inserted (they bounce and trigger
+    send-storms; see the global test-data rule). Returns the new row's confirm
+    token, or None when nothing was inserted (already on the list).
+    """
     if _is_reserved_test_domain(email):
-        return False
-    added = await conn.fetchval(
-        """INSERT INTO cappe_subscribers (site_id, email, name, source, status)
-           VALUES ($1, $2, $3, 'import', 'subscribed')
+        return None
+    return await conn.fetchval(
+        """INSERT INTO cappe_subscribers (site_id, email, name, source, status, confirm_token)
+           VALUES ($1, $2, $3, 'import', 'pending_confirmation', gen_random_uuid())
            ON CONFLICT (site_id, email) DO NOTHING
-           RETURNING 1""",
+           RETURNING confirm_token""",
         site_id, email, name,
     )
-    return bool(added)
+
+
+async def _send_subscribe_confirmations(site_name: str, pending: list[tuple[str, str | None, str]]) -> None:
+    """Best-effort confirmation blast for a just-imported list.
+
+    One background task rather than one per address: a 5,000-row CSV would
+    otherwise queue 5,000 concurrent sends against the shared platform sender.
+    Paced, and each send already swallows its own failures.
+    """
+    for email, name, token in pending:
+        try:
+            await send_cappe_subscribe_confirm_email(
+                email, name, site_name, subscribe_confirm_url(str(token))
+            )
+        except Exception:  # _send already swallows; this is belt-and-braces
+            logger.exception("cappe: subscribe confirmation failed for %s", email)
+        await asyncio.sleep(_CONFIRM_THROTTLE_SECONDS)
 
 
 @router.post("/sites/{site_id}/clients", response_model=CappeClient, status_code=status.HTTP_201_CREATED)
 async def add_client(
     site_id: UUID,
     body: CappeClientCreate,
+    background: BackgroundTasks,
     account: CappeAccount = Depends(require_cappe_account),
 ):
     """Add or update a single managed client (upsert by email)."""
@@ -151,7 +195,7 @@ async def add_client(
     if not _EMAIL_RE.match(email):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Please enter a valid email address.")
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
+        site = await get_owned_site(conn, site_id, account.id)
         if body.location_id is not None:
             ok = await conn.fetchval(
                 "SELECT 1 FROM cappe_locations WHERE id = $1 AND site_id = $2", body.location_id, site_id
@@ -170,9 +214,14 @@ async def add_client(
                    updated_at = NOW()""",
             site_id, email, body.name, body.phone, body.location_id, body.notes, body.tags,
         )
+        confirm_token = None
         if body.add_to_newsletter:
-            await _add_to_newsletter(conn, site_id, email, body.name)
+            confirm_token = await _add_to_newsletter(conn, site_id, email, body.name)
         row = await conn.fetchrow(_clients_sql(filter_email=True), site_id, email)
+    if confirm_token is not None:
+        background.add_task(
+            _send_subscribe_confirmations, site["name"], [(email, body.name, confirm_token)]
+        )
     if row is not None:
         return _client_from_row(row)
     return CappeClient(email=email, name=body.name, phone=body.phone, is_imported=True, location_id=body.location_id)
@@ -193,6 +242,7 @@ async def delete_client(site_id: UUID, email: str, account: CappeAccount = Depen
 @router.post("/sites/{site_id}/clients/import", response_model=CappeClientImportResult)
 async def import_clients(
     site_id: UUID,
+    background: BackgroundTasks,
     file: UploadFile = File(...),
     add_to_newsletter: bool = Form(False),
     account: CappeAccount = Depends(require_cappe_account),
@@ -204,7 +254,9 @@ async def import_clients(
 
     `add_to_newsletter` defaults False — importing a contact list does NOT email
     anyone unless the business explicitly opts in (and reserved test domains are
-    always skipped from the newsletter)."""
+    always skipped from the newsletter). Even then it is double opt-in: each new
+    subscriber lands `pending_confirmation` and gets one confirmation email; only
+    a click makes them mailable."""
     raw = await read_capped(file, _MAX_IMPORT_BYTES, "File too large (max 5 MB).")
     if not raw:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "The file is empty.")
@@ -234,8 +286,9 @@ async def import_clients(
         )
 
     result = CappeClientImportResult()
+    pending_confirmations: list[tuple[str, str | None, str]] = []
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
+        site = await get_owned_site(conn, site_id, account.id)
         loc_rows = await conn.fetch(
             "SELECT id, lower(name) AS lname FROM cappe_locations WHERE site_id = $1", site_id
         )
@@ -313,18 +366,28 @@ async def import_clients(
                 if add_to_newsletter:
                     deliverable = [b for b in batch if not _is_reserved_test_domain(b["email"])]
                     if deliverable:
+                        # Double opt-in: staged `pending_confirmation`, never
+                        # `subscribed`. The campaign worker only selects
+                        # `subscribed`, so an uploaded CSV is not a mailing list
+                        # until each person says it is.
                         subscribed = await conn.fetch(
-                            """INSERT INTO cappe_subscribers (site_id, email, name, source, status)
-                               SELECT $1, e, n, 'import', 'subscribed'
+                            """INSERT INTO cappe_subscribers
+                                   (site_id, email, name, source, status, confirm_token)
+                               SELECT $1, e, n, 'import', 'pending_confirmation', gen_random_uuid()
                                FROM unnest($2::text[], $3::text[]) AS t(e, n)
                                ON CONFLICT (site_id, email) DO NOTHING
-                               RETURNING email""",
+                               RETURNING email, name, confirm_token""",
                             site_id,
                             [b["email"] for b in deliverable],
                             [b["name"] for b in deliverable],
                         )
                         result.newsletter_added = len(subscribed)
+                        pending_confirmations = [
+                            (r["email"], r["name"], r["confirm_token"]) for r in subscribed
+                        ]
             result.created = sum(1 for r in written if r["inserted"])
             result.updated = len(written) - result.created
 
+    if pending_confirmations:
+        background.add_task(_send_subscribe_confirmations, site["name"], pending_confirmations)
     return result

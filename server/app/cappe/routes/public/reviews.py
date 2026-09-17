@@ -6,7 +6,9 @@ from ....database import get_connection
 from ...models.cappe import CappePublicReview, CappeReviewCreate
 from ._common import _published_site, _read_rate_limit
 
-router = APIRouter()
+from ._body_limit import limited_public_router
+
+router = limited_public_router()
 
 
 @router.get("/public/sites/{slug}/reviews", response_model=list[CappePublicReview])

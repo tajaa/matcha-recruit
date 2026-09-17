@@ -11,7 +11,10 @@
 // on a 401. A stream can't replay — hence `cappeStreamHeaders`, which refreshes
 // the token BEFORE the request opens.
 
-import { cappeApiBase, cappeStreamHeaders } from './api'
+import {
+  CAPPE_NETWORK_ERROR, cappeApiBase, cappeLogout, cappeStreamHeaders,
+  getCappeToken, refreshCappeSession,
+} from './api'
 
 /** Return `true` from a frame handler to stop consuming and cancel the reader. */
 export type CappeFrameHandler = (data: unknown) => boolean | void
@@ -79,20 +82,58 @@ export class CappeSSEHttpError extends Error {
 }
 
 /** POST and stream the SSE response. Throws CappeSSEHttpError on a non-ok
- *  response, using the backend's `detail` as the message where present. */
+ *  response, using the backend's `detail` as the message where present.
+ *
+ *  A 401 here is recoverable exactly once: `cappeStreamHeaders` only refreshes
+ *  a token that is already within 60s of expiry, so a token revoked or aged
+ *  out by a clock skew still opens the stream and comes back 401. Previously
+ *  that surfaced as a bare "Request failed (401)" in the middle of a Merlin
+ *  turn with a live session sitting behind it. Refresh once, reopen, and only
+ *  then treat it as a dead session. */
 export async function postCappeSSE(
   path: string,
   body: unknown,
   onFrame: CappeFrameHandler,
   opts: { signal?: AbortSignal } = {},
 ): Promise<void> {
-  const headers = await cappeStreamHeaders({ 'Content-Type': 'application/json' })
-  const res = await fetch(`${cappeApiBase}${path}`, {
+  const payload = JSON.stringify(body ?? {})
+  const open = (token: string | null) => fetch(`${cappeApiBase}${path}`, {
     method: 'POST',
-    headers,
-    body: JSON.stringify(body ?? {}),
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: payload,
     signal: opts.signal,
   })
+
+  const headers = await cappeStreamHeaders({ 'Content-Type': 'application/json' })
+  let res = await fetch(`${cappeApiBase}${path}`, {
+    method: 'POST',
+    headers,
+    body: payload,
+    signal: opts.signal,
+  })
+
+  if (res.status === 401) {
+    // Release the rejected response's body before opening a second stream.
+    await res.body?.cancel().catch(() => {})
+    const outcome = await refreshCappeSession()
+    if (outcome === 'dead') {
+      cappeLogout()
+      throw new CappeSSEHttpError('Session expired', 401)
+    }
+    if (outcome === 'transport') {
+      // Never end the session on a network blip — this runs mid-edit.
+      throw new CappeSSEHttpError(CAPPE_NETWORK_ERROR, 401)
+    }
+    res = await open(getCappeToken())
+    if (res.status === 401) {
+      await res.body?.cancel().catch(() => {})
+      cappeLogout()
+      throw new CappeSSEHttpError('Session expired', 401)
+    }
+  }
 
   if (!res.ok) {
     let detail = ''

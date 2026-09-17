@@ -44,6 +44,7 @@ from ..models.cappe import (
     CappeMerlinConversationUpdate,
     CappeMerlinResultsUpdate,
 )
+from ..services.common import MAX_SNAPSHOT_BYTES
 from ..services.design_gate import gate_content, gate_theme, is_premium_plan
 from ..services.merlin import store as merlin_store
 from ..services.merlin.agent_stream import stream_agent_turn
@@ -82,9 +83,10 @@ _PAID_HOURLY_LIMIT = 60
 # Agent turns are several Gemini calls + screenshots each, so they get their own
 # tighter counter rather than sharing the single-shot allowance.
 _AGENT_HOURLY_LIMIT = 20
-# Serialized blocks+theme ceiling. Generous for a real page (a dense one is
-# tens of KB) but far below nginx's 100MB body cap.
-_MAX_SNAPSHOT_BYTES = 300_000
+# Serialized blocks+theme ceiling. Lives in services/common.py now so the page
+# and site write models enforce the same number; re-exported here because this
+# is the name existing callers and tests import.
+_MAX_SNAPSHOT_BYTES = MAX_SNAPSHOT_BYTES
 
 
 # ---------------------------------------------------------------------------

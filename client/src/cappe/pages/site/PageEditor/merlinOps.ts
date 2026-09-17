@@ -136,6 +136,48 @@ function deepSet(target: unknown, parts: string[], value: unknown): { ok: boolea
 // would corrupt the block's identity/design bag rather than its content.
 const _RESERVED_PATH_KEYS = new Set(['_k', 'id', 'type', '_design'])
 
+/** A position an op gave us, only when it really is a whole number.
+ *
+ *  Every index op used to go straight into `Math.min`/`Math.max`, which coerce:
+ *  a string "2" silently worked, and a NaN (or a missing field) collapsed to 0,
+ *  so a malformed `move_block` quietly moved the section to the top of the page
+ *  and reported success. These ops come from a model's JSON — refuse the shape
+ *  instead of guessing at it. */
+const isIndex = (v: unknown): v is number => Number.isInteger(v)
+
+/** Drop the structural keys from a bag of content an op wants to write.
+ *
+ *  `add_block.content` is spread straight onto the new block, so a `_design`,
+ *  `type` or `id` key in it would overwrite the block's identity rather than
+ *  its content — the same keys `applyFieldPath` already refuses on `set_field`.
+ *  (`_k` is assigned after the spread, so it was never reachable.) */
+function stripReservedKeys(content: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(content)) {
+    if (!_RESERVED_PATH_KEYS.has(k)) out[k] = v
+  }
+  return out
+}
+
+/** Design groups/keys the server's registry doesn't offer (version skew between
+ *  an old bundle and a newer server, or a hallucinated key). Returns the first
+ *  offender as "group.key", or null when everything checks out. Optional —
+ *  callers with no schema fetched skip the check, same as `set_design`. */
+function unknownDesignKey(
+  design: Record<string, Record<string, unknown>>,
+  schema?: MerlinDesignSchema,
+): string | null {
+  if (!schema?.design) return null
+  for (const [group, keys] of Object.entries(design)) {
+    const known = schema.design[group]
+    if (!known) return `${group}.*`
+    for (const key of Object.keys(keys ?? {})) {
+      if (!(key in known)) return `${group}.${key}`
+    }
+  }
+  return null
+}
+
 export function applyFieldPath(block: CappeBlock, path: string, value: unknown): CappeBlock | null {
   if (!path) return null
   const [head, ...rest] = path.split('.')
@@ -245,6 +287,11 @@ export function applyMerlinOps(
         break
       }
       case 'set_design_bulk': {
+        const badKey = unknownDesignKey(op.design as Record<string, Record<string, unknown>>, schema)
+        if (badKey) {
+          results.push({ ok: false, summary: `Skipped — unknown design setting "${badKey}"` })
+          break
+        }
         const targets = new Set(op.blocks.map(resolveBlock))
         const groupsTouched = new Set<string>()
         let changed = 0
@@ -271,20 +318,32 @@ export function applyMerlinOps(
         break
       }
       case 'add_block': {
-        const schema = BLOCK_SCHEMAS[op.type]
-        if (!schema) { results.push({ ok: false, summary: `Skipped — unknown block type "${op.type}"` }); break }
-        const nb: CappeBlock = { ...schema.make(), ...(op.content || {}), _k: genKey() }
+        // Named `blockSchema`, not `schema`: a local `schema` here shadowed the
+        // design-registry parameter of the same name, which is why this op
+        // never ran the `set_design` registry check that it now does below.
+        const blockSchema = BLOCK_SCHEMAS[op.type]
+        if (!blockSchema) { results.push({ ok: false, summary: `Skipped — unknown block type "${op.type}"` }); break }
+        if (!isIndex(op.at)) { results.push({ ok: false, summary: 'Skipped — invalid insert position' }); break }
+        if (op.design) {
+          const badKey = unknownDesignKey(op.design, schema)
+          if (badKey) { results.push({ ok: false, summary: `Skipped — unknown design setting "${badKey}"` }); break }
+        }
+        const nb: CappeBlock = { ...blockSchema.make(), ...stripReservedKeys(op.content || {}), _k: genKey() }
         if (op.design && Object.keys(op.design).length > 0) nb._design = op.design
         if (op.id) tempIdMap[op.id] = nb._k as string
         const at = Math.max(0, Math.min(op.at, nextBlocks.length))
         nextBlocks = [...nextBlocks.slice(0, at), nb, ...nextBlocks.slice(at)]
-        results.push({ ok: true, summary: op.preset ? `Added ${schema.label} (${op.preset} preset)` : `Added ${schema.label}` })
+        results.push({ ok: true, summary: op.preset ? `Added ${blockSchema.label} (${op.preset} preset)` : `Added ${blockSchema.label}` })
         break
       }
       case 'duplicate_block': {
         const idx = nextBlocks.findIndex((b) => b._k === resolveBlock(op.block))
         if (idx === -1) { results.push({ ok: false, summary: 'Skipped — section no longer exists' }); break }
         const src = nextBlocks[idx]
+        if (op.at !== undefined && !isIndex(op.at)) {
+          results.push({ ok: false, summary: 'Skipped — invalid insert position' })
+          break
+        }
         const clone = cloneBlock(src)
         if (op.id) tempIdMap[op.id] = clone._k as string
         const at = op.at !== undefined ? Math.max(0, Math.min(op.at, nextBlocks.length)) : idx + 1
@@ -301,6 +360,7 @@ export function applyMerlinOps(
         break
       }
       case 'move_block': {
+        if (!isIndex(op.to)) { results.push({ ok: false, summary: 'Skipped — invalid target position' }); break }
         const from = nextBlocks.findIndex((b) => b._k === resolveBlock(op.block))
         if (from === -1) { results.push({ ok: false, summary: 'Skipped — section no longer exists' }); break }
         const to = Math.max(0, Math.min(op.to, nextBlocks.length - 1))
