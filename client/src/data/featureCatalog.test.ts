@@ -30,6 +30,28 @@ describe('sales intake feature', () => {
   })
 })
 
+describe('sym-link feature', () => {
+  it('is togglable in admin and composable into a custom product', () => {
+    // Without a catalog entry the flag is invisible in BOTH admin surfaces —
+    // Features.tsx and Products.tsx render from FEATURE_GROUPS and have no
+    // catch-all bucket — so it can only be enabled by raw SQL. It shipped that
+    // way and this is the guard.
+    const core = FEATURE_GROUPS.find((group) => group.label === 'Core HR')
+
+    expect(core?.features.symlink).toContain('Sym-Link')
+    expect(FEATURE_KEYS).toContain('symlink')
+    expect(FEATURE_LABELS.symlink).toContain('Sym-Link')
+  })
+
+  it('has no prerequisite flag', () => {
+    // Mirrors the backend: `symlink` is absent from FEATURE_REQUIRES. The
+    // credential kind wants a linked employee at apply time, but that is a
+    // per-link condition, not a feature dependency.
+    expect(FEATURE_REQUIRES.symlink).toBeUndefined()
+    expect(applyFeatureToggle({}, 'symlink', true)).toMatchObject({ symlink: true })
+  })
+})
+
 describe('applyFeatureToggle', () => {
   it('enables the complete prerequisite chain', () => {
     expect(applyFeatureToggle({}, 'inventory_voice', true)).toMatchObject({

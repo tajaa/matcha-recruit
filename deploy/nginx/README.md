@@ -59,7 +59,26 @@ cap stays on the document + `/api/` (the real abuse surface). `@maintenance`
 also returns a bare `503` (no HTML body) for `/assets/` so a deploy/restart
 window can't feed HTML to a module loader either.
 
-> Not yet hardened: the `*.gummfit.com` tenant block (`cappe.conf`) still has
-> `limit_conn matcha_conn 30` on its `:8002` upstream. A published Cappe site
-> bursting 30+ assets could hit the same failure — left untouched pending a
-> look at tenant asset paths.
+> Still open: the `*.gummfit.com` tenant block (`cappe.conf`) keeps
+> `limit_conn matcha_conn 30` on everything the renderer serves, assets
+> included. A published Cappe site that opens 30+ concurrent requests from one
+> POP still loses the excess — since 2026-09-11 as a 429 with `Retry-After`,
+> no longer a 503. Left as is pending a look at tenant asset paths.
+
+## Limit rejections are 429; `error_page` stays at server level (2026-09-11)
+
+Both files set `limit_conn_status 429` and `error_page 429 = @rate_limited` in
+every HTTPS server block. Before that nothing set `limit_conn_status`, so a
+tripped `limit_conn` returned 503 and landed in `@maintenance`: a visitor who
+was merely rate limited got the "Server is updating" page (with a **200** on
+gummfit.com, since the maintenance page is served as a file).
+`@rate_limited` answers `/api/` with JSON plus `Retry-After: 30`, and anything
+else with nginx's built-in 429 page. `limit_req_status 429` is host-wide in
+`00-matcha-limits.conf` and repeated in each block so neither depends on it.
+
+**Declare `error_page` in the `server` block only.** nginx gives a location
+the server's `error_page` list only if the location declares none of its own,
+so one local line silently drops every other handler. cappe.conf's booking
+locations each carried `error_page 429 = @rate_limited`, and because of it a
+backend 502 reached the booking widget as nginx's HTML page instead of
+`@maintenance`'s JSON.

@@ -99,13 +99,51 @@ _rl_attempts: dict[str, list[float]] = defaultdict(list)
 _TRUSTED_PROXY_COUNT = int(os.getenv("TRUSTED_PROXY_COUNT", "1"))
 
 
+# One CloudFront distribution fronts both product families (gummfit.com +
+# hey-matcha.com share E2DR5ZV7O32BE), and it injects BOTH origin-verify
+# headers. Either one authenticates the same single edge hop, so matcha's rate
+# limits keep working if the distributions are ever split apart — without this,
+# every matcha per-IP limit would silently start keying on the CloudFront POP
+# address the moment the Cappe header stopped arriving.
+_ORIGIN_VERIFY_HEADERS = (
+    ("x-cappe-origin-verify", "CAPPE_CLOUDFRONT_ORIGIN_SECRET"),
+    ("x-matcha-origin-verify", "MATCHA_CLOUDFRONT_ORIGIN_SECRET"),
+)
+
+
 def _trusted_proxy_count(request: Request) -> int:
-    """Count the nginx hop and an authenticated CloudFront hop when present."""
+    """Count the nginx hop, plus ONE authenticated CloudFront hop when present.
+
+    Both headers name the same hop — presenting both must never add two.
+
+    Compared as BYTES, each recovered the way it was decoded:
+
+    - `provided` came off the wire through Starlette, which decodes header
+      bytes as latin-1 — so `.encode("latin-1")` gives back exactly the bytes
+      CloudFront sent. (Re-encoding as UTF-8 would turn wire byte 0xE9 into
+      b"\\xc3\\xa9", and a secret containing any byte >= 0x80 could then never
+      match — silently dropping every per-IP limit back onto the POP address.)
+    - `expected` came from the environment, which Python decodes with the
+      filesystem encoding (UTF-8) + surrogateescape — so that is how it goes
+      back to bytes.
+
+    And never as two `str`: `hmac.compare_digest` raises TypeError for any
+    codepoint above 127, and this runs inside `client_ip()` on every
+    rate-limited route — an attacker-supplied header must fail the comparison,
+    never 500 the request.
+    """
     count = _TRUSTED_PROXY_COUNT
-    expected = os.getenv("CAPPE_CLOUDFRONT_ORIGIN_SECRET", "")
-    provided = request.headers.get("x-cappe-origin-verify", "")
-    if expected and provided and hmac.compare_digest(expected, provided):
-        count += 1
+    for header, env_var in _ORIGIN_VERIFY_HEADERS:
+        expected = os.getenv(env_var, "")
+        provided = request.headers.get(header, "")
+        if not expected or not provided:
+            continue
+        try:
+            wire = provided.encode("latin-1")
+        except UnicodeEncodeError:
+            continue  # not a value that can have arrived as header bytes
+        if hmac.compare_digest(expected.encode("utf-8", "surrogateescape"), wire):
+            return count + 1
     return count
 
 
