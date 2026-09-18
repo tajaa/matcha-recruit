@@ -10,6 +10,14 @@ ever sent. Here every confirmation is **claimed before it is sent**
 or two overlapping runs never mail the same person twice, and anything a dead
 worker left unclaimed is picked up by the next dispatch for that site.
 
+A send that fails **releases its claim** (`confirm_sent_at` back to NULL), so
+the next dispatch retries it; without that a transient provider outage stranded
+the row `pending_confirmation` for ever, since only unclaimed rows are picked
+up. The sender reports failure by returning False, not by raising, so the
+return value is what is checked. A released row is skipped for the rest of this
+run, and a run of consecutive failures ends it — that is an outage, not a bad
+address, and hammering a dead provider helps nobody.
+
 Failures are logged by subscriber id, never by address.
 """
 import asyncio
@@ -26,6 +34,9 @@ THROTTLE_SECONDS = 0.1
 # One dispatch never sends more than this; the per-account daily cap in the
 # route is what bounds how many rows can be waiting in the first place.
 MAX_PER_RUN = 5000
+# This many failures in a row means the provider is down; stop and let the
+# released rows wait for the next dispatch.
+MAX_CONSECUTIVE_FAILURES = 5
 
 
 async def _run(site_id: str) -> dict:
@@ -36,6 +47,8 @@ async def _run(site_id: str) -> dict:
             return {"skipped": True, "reason": "site_not_found"}
 
         sent = failed = 0
+        consecutive = 0
+        released: list = []  # failed this run — not re-claimed until the next one
         for _ in range(MAX_PER_RUN):
             # Claim exactly one row. SKIP LOCKED keeps two overlapping runs from
             # queueing behind each other on the same subscriber.
@@ -44,25 +57,47 @@ async def _run(site_id: str) -> dict:
                     WHERE id = (SELECT id FROM cappe_subscribers
                                  WHERE site_id = $1 AND status = 'pending_confirmation'
                                    AND confirm_token IS NOT NULL AND confirm_sent_at IS NULL
+                                   AND id <> ALL($2::uuid[])
                                  ORDER BY created_at
                                  LIMIT 1 FOR UPDATE SKIP LOCKED)
                 RETURNING id, email, name, confirm_token""",
-                site_id,
+                site_id, released,
             )
             if row is None:
                 break
             try:
-                await send_cappe_subscribe_confirm_email(
+                ok = await send_cappe_subscribe_confirm_email(
                     row["email"], row["name"], site_name,
                     subscribe_confirm_url(str(row["confirm_token"])),
                 )
-                sent += 1
             except Exception as exc:
-                failed += 1
+                ok = False
                 logger.warning(
-                    "[Cappe Subscribe Confirm] send failed for subscriber %s (%s)",
+                    "[Cappe Subscribe Confirm] send raised for subscriber %s (%s)",
                     row["id"], type(exc).__name__,
                 )
+            if ok:
+                sent += 1
+                consecutive = 0
+            else:
+                failed += 1
+                consecutive += 1
+                released.append(row["id"])
+                await conn.execute(
+                    "UPDATE cappe_subscribers SET confirm_sent_at = NULL "
+                    "WHERE id = $1 AND status = 'pending_confirmation'",
+                    row["id"],
+                )
+                logger.warning(
+                    "[Cappe Subscribe Confirm] send failed for subscriber %s; claim released",
+                    row["id"],
+                )
+                if consecutive >= MAX_CONSECUTIVE_FAILURES:
+                    logger.error(
+                        "[Cappe Subscribe Confirm] %d sends in a row failed for site %s; "
+                        "stopping this run", consecutive, site_id,
+                    )
+                    break
             await asyncio.sleep(THROTTLE_SECONDS)
         return {"sent": sent, "failed": failed}
     finally:

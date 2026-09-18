@@ -173,13 +173,49 @@ def test_missing_txt_record_is_400(monkeypatch, enabled):
 
 # ── transfer-out cancel ──────────────────────────────────────────────────────
 
+def _porkbun(monkeypatch, *, fail=False):
+    calls = []
+
+    class PB:
+        async def set_auto_renew(self, domain, enabled):
+            calls.append((domain, enabled))
+            if fail:
+                raise mod.PorkbunError("porkbun down")
+
+    monkeypatch.setattr(mod, "get_porkbun", lambda: PB())
+    return calls
+
+
+def _active(**over):
+    row = {"id": DOMAIN_ID, "domain": "studio.example", "status": "active",
+           "kind": "register", "auto_renew": True}
+    row.update(over)
+    return row
+
+
 def test_cancel_transfer_returns_the_domain_to_active(monkeypatch):
-    conn = _use(monkeypatch, ScriptedConn(rows=[{"id": DOMAIN_ID, "domain": "studio.example",
-                                                 "status": "active"}]))
+    conn = _use(monkeypatch, ScriptedConn(rows=[_active()]))
+    calls = _porkbun(monkeypatch)
     out = _run(mod.cancel_transfer_request(DOMAIN_ID, account=ACCOUNT))
     assert out["status"] == "active"
+    # The renewals task switched Porkbun auto-renew off while it was leaving.
+    assert calls == [("studio.example", True)]
     sql = conn.calls[0][1]
     assert "status = 'transfer_requested'" in sql and "account_id = $2" in sql
+
+
+@pytest.mark.parametrize("over", [{"auto_renew": False}, {"kind": "connect"}])
+def test_cancel_transfer_leaves_auto_renew_alone_when_it_was_not_ours(monkeypatch, over):
+    _use(monkeypatch, ScriptedConn(rows=[_active(**over)]))
+    calls = _porkbun(monkeypatch)
+    _run(mod.cancel_transfer_request(DOMAIN_ID, account=ACCOUNT))
+    assert calls == []
+
+
+def test_cancel_transfer_survives_a_porkbun_failure(monkeypatch):
+    _use(monkeypatch, ScriptedConn(rows=[_active()]))
+    _porkbun(monkeypatch, fail=True)
+    assert _run(mod.cancel_transfer_request(DOMAIN_ID, account=ACCOUNT))["status"] == "active"
 
 
 def test_cancel_without_an_open_transfer_is_409(monkeypatch):

@@ -28,6 +28,11 @@ _BASE = "https://api.porkbun.com/api/json/v3"
 _TIMEOUT = 30.0
 
 
+# Record types that decide where a hostname resolves. Anything else at the apex
+# or www (MX, TXT, NS, CAA…) is the tenant's and is never touched.
+_ADDRESS_RECORD_TYPES = {"A", "AAAA", "ALIAS", "CNAME"}
+
+
 class PorkbunError(Exception):
     """Porkbun call failed or the client is not configured."""
 
@@ -164,9 +169,34 @@ class Porkbun:
         endpoint = (target or "").strip().rstrip(".")
         if not endpoint:
             raise PorkbunError("No CloudFront routing endpoint configured")
-        await self.create_dns_record(domain, record_type="ALIAS", name="", content=endpoint)
-        await self.create_dns_record(domain, record_type="CNAME", name="www", content=endpoint)
 
+        # Clear whatever already answers at the apex and www first. A domain
+        # registered before the edge existed carries `A → <app IP>` and
+        # `www CNAME → apex`; Porkbun also parks fresh registrations on its own
+        # ALIAS/CNAME. Left in place, the www CNAME create conflicts and the
+        # apex resolves to an A record beside the ALIAS — CloudFront's managed
+        # certificate never validates and the domain sits in `pending_dns` for
+        # ever. Only address-bearing records at those two names are touched:
+        # MX/TXT/NS and every other hostname are the tenant's.
+        apex = domain.lower().rstrip(".")
+        ours = {apex: "", f"www.{apex}": "www"}
+        have: set[tuple[str, str]] = set()
+        for rec in await self.list_dns_records(domain):
+            name = str(rec.get("name") or "").lower().rstrip(".")
+            rtype = str(rec.get("type") or "").upper()
+            if name not in ours or rtype not in _ADDRESS_RECORD_TYPES:
+                continue
+            content = str(rec.get("content") or "").lower().rstrip(".")
+            wanted = "ALIAS" if name == apex else "CNAME"
+            if rtype == wanted and content == endpoint.lower():
+                have.add((ours[name], rtype))  # already right — re-runs are no-ops
+                continue
+            await self.delete_dns_record(domain, str(rec["id"]))
+
+        if ("", "ALIAS") not in have:
+            await self.create_dns_record(domain, record_type="ALIAS", name="", content=endpoint)
+        if ("www", "CNAME") not in have:
+            await self.create_dns_record(domain, record_type="CNAME", name="www", content=endpoint)
 
 _porkbun: Optional[Porkbun] = None
 

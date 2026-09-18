@@ -150,15 +150,29 @@ def _email_shell(
 </html>"""
 
 
-async def _send(to_email: str, to_name: str | None, subject: str, html: str, text: str, *, label: str) -> None:
-    """Best-effort send — logs and swallows so it's safe in a background task."""
+async def _send(
+    to_email: str, to_name: str | None, subject: str, html: str, text: str, *,
+    label: str, log_recipient: bool = True,
+) -> bool:
+    """Best-effort send — logs and swallows so it's safe in a background task.
+
+    Returns whether the message was actually handed to a provider.
+    `send_email_with_fallback` reports failure by returning False (both
+    providers down, or a blocked recipient), not by raising, so a caller that
+    needs to retry or count failures must read this value. `log_recipient=False`
+    keeps the address out of the log for callers that log by row id instead.
+    """
     try:
-        await get_email_service().send_email_with_fallback(
+        ok = await get_email_service().send_email_with_fallback(
             to_email=to_email, to_name=to_name, subject=subject,
             html_content=html, text_content=text,
         )
     except Exception:
-        logger.exception("Cappe %s email failed for %s", label, to_email)
+        logger.exception(
+            "Cappe %s email failed for %s", label, to_email if log_recipient else "<recipient>"
+        )
+        return False
+    return bool(ok)
 
 
 async def send_cappe_verification_email(to_email: str, to_name: str | None, token: str) -> None:
@@ -709,7 +723,7 @@ async def send_cappe_account_exists_email(to_email: str, to_name: str | None) ->
 
 async def send_cappe_subscribe_confirm_email(
     to_email: str, to_name: str | None, site_name: str, confirm_url: str
-) -> None:
+) -> bool:
     """Double opt-in for a subscriber a business imported rather than one who
     signed up on the site themselves.
 
@@ -736,5 +750,7 @@ async def send_cappe_subscribe_confirm_email(
         f"anything until you confirm:\n{confirm_url}\n\n"
         "If you didn't expect this, ignore this email — no confirmation, no email."
     )
-    await _send(to_email, to_name, f"Confirm your subscription to {site_name}", html, text,
-                label="subscribe confirm")
+    # Returns delivery success: the worker releases its claim on a failed send so
+    # the confirmation is retried instead of stranding the row pending forever.
+    return await _send(to_email, to_name, f"Confirm your subscription to {site_name}", html, text,
+                       label="subscribe confirm", log_recipient=False)

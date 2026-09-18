@@ -117,45 +117,116 @@ def test_confirmations_are_not_sent_from_an_in_process_task():
     assert "run_cappe_subscribe_confirm" in src
 
 
-def test_confirmation_worker_claims_each_row_before_sending(monkeypatch):
+class _ConfirmConn:
+    def __init__(self, rows):
+        self.rows, self.claims, self.executed = list(rows), [], []
+
+    async def fetchval(self, sql, *a):
+        return "Shop"
+
+    async def fetchrow(self, sql, *a):
+        self.claims.append((sql, a))
+        return self.rows.pop(0)
+
+    async def execute(self, sql, *a):
+        self.executed.append((sql, a))
+
+    async def close(self):
+        pass
+
+
+def _confirm_worker(monkeypatch, conn, send):
     from app.workers.tasks import cappe_subscribe_confirm as worker
 
-    rows = [
+    async def _conn():
+        return conn
+
+    monkeypatch.setattr(worker, "get_db_connection", _conn)
+    monkeypatch.setattr(worker, "send_cappe_subscribe_confirm_email", send)
+    monkeypatch.setattr(worker, "THROTTLE_SECONDS", 0)
+    return worker
+
+
+def test_confirmation_worker_claims_each_row_before_sending(monkeypatch):
+    conn = _ConfirmConn([
         {"id": "s-1", "email": "a@example.com", "name": "A", "confirm_token": "t1"},
         {"id": "s-2", "email": "b@example.com", "name": None, "confirm_token": "t2"},
         None,
-    ]
-    sql_seen, sent = [], []
-
-    class Conn:
-        async def fetchval(self, sql, *a):
-            return "Shop"
-
-        async def fetchrow(self, sql, *a):
-            sql_seen.append(sql)
-            return rows.pop(0)
-
-        async def close(self):
-            pass
-
-    async def _conn():
-        return Conn()
+    ])
+    sent = []
 
     async def _send(email, name, site_name, url):
-        if email.startswith("b@"):
-            raise RuntimeError("provider down")
         sent.append((email, url))
+        return True
 
-    monkeypatch.setattr(worker, "get_db_connection", _conn)
-    monkeypatch.setattr(worker, "send_cappe_subscribe_confirm_email", _send)
-    monkeypatch.setattr(worker, "THROTTLE_SECONDS", 0)
-
-    assert asyncio.run(worker._run("site-1")) == {"sent": 1, "failed": 1}
-    assert sent and sent[0][0] == "a@example.com" and "t1" in sent[0][1]
-    claim = sql_seen[0]
+    worker = _confirm_worker(monkeypatch, conn, _send)
+    assert asyncio.run(worker._run("site-1")) == {"sent": 2, "failed": 0}
+    assert sent[0][0] == "a@example.com" and "t1" in sent[0][1]
+    claim = conn.claims[0][0]
     assert "SET confirm_sent_at = NOW()" in claim
     assert "confirm_sent_at IS NULL" in claim          # never mailed twice
     assert "FOR UPDATE SKIP LOCKED" in claim           # overlapping runs don't collide
+    assert conn.executed == []                          # nothing released
+
+
+@pytest.mark.parametrize("outcome", ["returns_false", "raises"])
+def test_failed_confirmation_releases_its_claim_for_retry(monkeypatch, outcome):
+    """The sender reports failure by RETURNING False. Counting that as sent left
+    the row claimed and `pending_confirmation` for ever — only unclaimed rows
+    are ever picked up again."""
+    conn = _ConfirmConn([
+        {"id": "s-1", "email": "a@example.com", "name": "A", "confirm_token": "t1"},
+        None,
+    ])
+
+    async def _send(email, name, site_name, url):
+        if outcome == "raises":
+            raise RuntimeError("provider down")
+        return False
+
+    worker = _confirm_worker(monkeypatch, conn, _send)
+    assert asyncio.run(worker._run("site-1")) == {"sent": 0, "failed": 1}
+    sql, args = conn.executed[0]
+    assert "SET confirm_sent_at = NULL" in sql and args == ("s-1",)
+    # ...and the released row is not re-claimed within the same run.
+    assert conn.claims[1][1][1] == ["s-1"]
+    assert "id <> ALL($2::uuid[])" in conn.claims[1][0]
+
+
+def test_confirmation_run_stops_when_the_provider_is_down(monkeypatch):
+    from app.workers.tasks import cappe_subscribe_confirm as worker_mod
+
+    rows = [{"id": f"s-{i}", "email": f"p{i}@example.com", "name": None, "confirm_token": "t"}
+            for i in range(20)]
+    conn = _ConfirmConn(rows)
+
+    async def _send(*a):
+        return False
+
+    worker = _confirm_worker(monkeypatch, conn, _send)
+    out = asyncio.run(worker._run("site-1"))
+    assert out == {"sent": 0, "failed": worker_mod.MAX_CONSECUTIVE_FAILURES}
+    assert len(conn.executed) == worker_mod.MAX_CONSECUTIVE_FAILURES   # all released
+
+
+def test_confirm_email_reports_delivery_and_keeps_the_address_out_of_logs(monkeypatch, caplog):
+    from app.cappe.services import email as email_mod
+
+    class Svc:
+        def __init__(self, result):
+            self.result = result
+
+        async def send_email_with_fallback(self, **kw):
+            if isinstance(self.result, Exception):
+                raise self.result
+            return self.result
+
+    for result, expected in ((True, True), (False, False), (RuntimeError("smtp"), False)):
+        monkeypatch.setattr(email_mod, "get_email_service", lambda r=result: Svc(r))
+        got = asyncio.run(email_mod.send_cappe_subscribe_confirm_email(
+            "pat@example.com", "Pat", "Shop", "https://example.com/c/t"))
+        assert got is expected
+    assert not any("pat@example.com" in r.getMessage() for r in caplog.records)
 
 
 def test_confirmation_worker_is_registered_with_celery():
@@ -264,20 +335,42 @@ def test_site_delete_collects_tenants_before_the_cascade():
     assert src.index("SELECT cf_tenant_id, domain FROM cappe_domains") < src.index("DELETE FROM cappe_sites")
 
 
-def test_orphaned_tenant_is_logged_with_its_id(monkeypatch, caplog):
-    import logging
+class _TombConn:
+    def __init__(self, rows=()):
+        self.rows, self.executed = list(rows), []
 
+    async def fetch(self, sql, *a):
+        return self.rows
+
+    async def execute(self, sql, *a):
+        self.executed.append((sql, a))
+
+
+class _TombCtx:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        return self.conn
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def test_failed_fast_path_cleanup_leaves_the_tombstone(monkeypatch):
+    """CloudFront refuses to delete a tenant still deploying its disable. The
+    tombstone written with the site delete is what survives that."""
     from app.cappe.services import cloudfront_tenants as cf
 
     class Edge:
         async def delete_tenant(self, tenant_id):
-            raise cf.CappeEdgeError("AccessDenied")
+            raise cf.CappeEdgeError("tenant is still deploying")
 
+    conn = _TombConn()
     monkeypatch.setattr(cf, "get_cloudfront_tenants", lambda: Edge())
-    with caplog.at_level(logging.ERROR, logger=sites_mod.logger.name):
-        asyncio.run(sites_mod._delete_edge_tenants([("dt-7", "example.com")]))
-    # The row is gone from the database: this log line is the only handle left.
-    assert any("dt-7" in r.getMessage() and "ORPHANED" in r.getMessage() for r in caplog.records)
+    monkeypatch.setattr(sites_mod, "get_connection", lambda: _TombCtx(conn))
+    asyncio.run(sites_mod._delete_edge_tenants([("dt-7", "example.com")]))
+    assert conn.executed == []            # tombstone NOT cleared
 
 
 def test_tenants_are_deleted_after_a_site_is_removed(monkeypatch):
@@ -289,6 +382,36 @@ def test_tenants_are_deleted_after_a_site_is_removed(monkeypatch):
         async def delete_tenant(self, tenant_id):
             deleted.append(tenant_id)
 
+    conn = _TombConn()
     monkeypatch.setattr(cf, "get_cloudfront_tenants", lambda: Edge())
+    monkeypatch.setattr(sites_mod, "get_connection", lambda: _TombCtx(conn))
     asyncio.run(sites_mod._delete_edge_tenants([("dt-1", "a.example.com"), ("dt-2", "b.example.com")]))
     assert deleted == ["dt-1", "dt-2"]
+    assert [a for _, a in conn.executed] == [("dt-1",), ("dt-2",)]
+    assert all("DELETE FROM cappe_edge_tombstones" in sql for sql, _ in conn.executed)
+
+
+def test_site_delete_records_tombstones_in_the_same_transaction():
+    src = inspect.getsource(sites_mod.delete_site)
+    assert "INSERT INTO cappe_edge_tombstones" in src
+    assert "conn.transaction()" in src
+    assert src.index("INSERT INTO cappe_edge_tombstones") < src.index("DELETE FROM cappe_sites")
+
+
+def test_sweeper_retries_tombstones_until_cloudfront_lets_go():
+    from app.cappe.services import cloudfront_tenants as cf
+    from app.workers.tasks import cappe_edge_sync as sync
+
+    class Edge:
+        async def delete_tenant(self, tenant_id):
+            if tenant_id == "dt-busy":
+                raise cf.CappeEdgeError("still deploying")
+
+    conn = _TombConn([
+        {"cf_tenant_id": "dt-busy", "domain": "a.example.com", "attempts": 2},
+        {"cf_tenant_id": "dt-gone", "domain": "b.example.com", "attempts": 0},
+    ])
+    assert asyncio.run(sync._drain_tombstones(conn, Edge(), 50)) == 1
+    busy, gone = conn.executed
+    assert "attempts = $2" in busy[0] and busy[1][:2] == ("dt-busy", 3)
+    assert "DELETE FROM cappe_edge_tombstones" in gone[0] and gone[1] == ("dt-gone",)

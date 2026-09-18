@@ -30,7 +30,7 @@ registration auto-refunds (`finalize_domain_registration`).
 
 ## Go-live checklist
 
-1. **Migrations** — `zzzzcappe31` applied dev → prod (`migrate-dev.sh`, then
+1. **Migrations** — `zzzzcappe31` + `zzzzcappe32` applied dev → prod (`migrate-dev.sh`, then
    `migrate-prod.sh`).
 
 2. **Porkbun account** — fund a balance, enable **API access**, generate keys:
@@ -76,8 +76,14 @@ connect:   pending → TXT verified ──────────────�
   (`failed` with a tenant); it never touches a healthy or still-validating one.
   The sweeper also adopts any `active` + `none` row (its background task died, or
   it predates the edge).
-- **Teardown** happens on `expired` only, and on site delete (tenant ids are
-  collected before the cascade removes the rows).
+- **Teardown** happens on `expired` only, and on site delete — tenant ids are
+  written to `cappe_edge_tombstones` in the delete's own transaction and drained
+  by the sweeper, because the cascade removes the rows and CloudFront will not
+  delete a tenant that is still deploying its disable.
+- **A transfer-out stops costing us.** The renewals task switches Porkbun
+  auto-renew off for a `transfer_requested` domain as soon as it enters the
+  renewal window (Porkbun renews *before* expiry) and again when it lapses;
+  `/transfer-request/cancel` switches it back on.
 
 ## AI booking edge policy
 

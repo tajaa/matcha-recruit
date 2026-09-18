@@ -32,13 +32,18 @@ from ..services.email import (
     send_cappe_collab_completed_email,
     send_cappe_collab_paid_email,
 )
-from ..services.inventory import release_order_bookings, restock_order
+from ..services.inventory import release_order_bookings, restock_order, retake_order_stock
 from ..services.receipt import issue_receipt_for_paid_order
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 
 logger = logging.getLogger("cappe.payments")
 
 router = APIRouter()
+
+# Statuses an order reaches by being released (stock + slots handed back)
+# without any money having moved. A paid event for one of these means the buyer
+# was charged for an order we had thrown away.
+_RELEASED_STATUSES = ("cancelled", "declined")
 
 
 def extract_shipping_details(obj: dict) -> Optional[dict]:
@@ -386,37 +391,58 @@ async def _mark_order_paid(obj, event, background) -> dict:
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Order not matched; releasing event for retry",
                 )
-            if already == "cancelled":
+            if already in _RELEASED_STATUSES:
                 # Money arrived for an order we had already released (owner
-                # cancelled it while the payment page was still open, or a
-                # release raced a late settlement). The buyer HAS been charged,
-                # so "cancelled" is now false: put the order back to paid and
-                # make the mismatch loud. Its stock and booking slots were
-                # handed back at cancel time, so a human has to confirm the
-                # goods still exist or refund — that cannot be decided here.
+                # cancelled or declined it while the payment page was still
+                # open, or a release raced a late settlement). The buyer HAS
+                # been charged, so the released status is now false: put the
+                # order back to paid and make the mismatch loud.
+                #
+                # `paid` is a decremented state (a later refund restocks it), so
+                # the stock handed back at release time is taken out again in
+                # the same transaction — otherwise a refund credits the shelf
+                # twice. Booking slots are NOT re-taken: the slot may already
+                # belong to someone else, which a human has to sort out.
                 async with get_connection() as conn:
-                    revived = await conn.fetchrow(
-                        """UPDATE cappe_orders o
-                              SET status = 'paid', paid_at = NOW(),
-                                  stripe_payment_intent = $2, payment_ref = $2,
-                                  platform_fee_cents = COALESCE($3, platform_fee_cents),
-                                  updated_at = NOW()
-                             FROM cappe_sites s, cappe_accounts a
-                            WHERE o.id = $1 AND o.status = 'cancelled'
-                              AND s.id = o.site_id AND a.id = s.account_id
-                              AND a.stripe_account_id = $4
-                        RETURNING o.id, o.site_id""",
-                        oid, payment_intent, fee, event_account_id,
-                    )
+                    async with conn.transaction():
+                        revived = await conn.fetchrow(
+                            """UPDATE cappe_orders o
+                                  SET status = 'paid', paid_at = NOW(),
+                                      stripe_payment_intent = $2, payment_ref = $2,
+                                      platform_fee_cents = COALESCE($3, platform_fee_cents),
+                                      shipping_address = COALESCE($5::jsonb, o.shipping_address),
+                                      decline_reason = NULL,
+                                      updated_at = NOW()
+                                 FROM cappe_sites s, cappe_accounts a
+                                WHERE o.id = $1 AND o.status IN ('cancelled', 'declined')
+                                  AND s.id = o.site_id AND a.id = s.account_id
+                                  AND a.stripe_account_id = $4
+                            RETURNING o.id, o.site_id""",
+                            oid, payment_intent, fee, event_account_id,
+                            json.dumps(dict(ship)) if ship else None,
+                        )
+                        if revived is not None:
+                            await retake_order_stock(
+                                conn, site_id=revived["site_id"], order_id=revived["id"]
+                            )
                 logger.error(
-                    "cappe webhook: PAID event for CANCELLED order %s (intent %s) — order restored "
-                    "to paid; its stock/booking slots were already released, verify or refund",
-                    order_id, payment_intent,
+                    "cappe webhook: PAID event for %s order %s (intent %s) — order restored to "
+                    "paid and its stock re-taken; booking slots were released and are NOT "
+                    "re-held, verify fulfilment or refund",
+                    str(already).upper(), order_id, payment_intent,
                 )
                 if revived is not None:
                     background.add_task(
                         issue_receipt_for_paid_order, revived["id"], revived["site_id"]
                     )
+            elif already == "refunded":
+                # Refunded orders stay refunded, but a fresh charge against one
+                # is money nobody is tracking.
+                logger.error(
+                    "cappe webhook: PAID event for REFUNDED order %s (intent %s) — not restored; "
+                    "reconcile the charge in Stripe",
+                    order_id, payment_intent,
+                )
             else:
                 logger.info(
                     "cappe webhook: order %s already %s; idempotent skip",

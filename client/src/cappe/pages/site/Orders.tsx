@@ -82,7 +82,11 @@ export default function Orders() {
     }
   }
   async function declineOrder(order: CappeOrder) {
-    const reason = window.prompt('Reason for declining (optional, shown to the customer):') ?? undefined
+    // prompt() returns null on Cancel and '' on an empty OK. Only Cancel backs
+    // out — `?? undefined` used to fold it into "no reason" and decline anyway.
+    const answer = window.prompt('Reason for declining (optional, shown to the customer):')
+    if (answer === null) return
+    const reason = answer.trim() || undefined
     setError(null)
     try {
       const updated = await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/decline`, { reason })

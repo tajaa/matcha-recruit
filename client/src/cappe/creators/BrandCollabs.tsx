@@ -30,10 +30,13 @@ function OffersTab() {
   useEffect(() => {
     const status = chip === 'all' ? undefined : chip === 'closed' ? CLOSED.join(',') : chip
     const qs = status ? `&status=${encodeURIComponent(status)}` : ''
+    // Out-of-order replies: ignore the one for a chip the user already left.
+    let stale = false
     cappeApi.get<{ offers: OfferListItem[]; total: number }>(`/collab/offers?side=brand${qs}`)
-      .then((res) => setOffers(res.offers))
-      .catch(() => setOffers([]))
-      .finally(() => setSettledChip(chip))
+      .then((res) => { if (!stale) setOffers(res.offers) })
+      .catch(() => { if (!stale) setOffers([]) })
+      .finally(() => { if (!stale) setSettledChip(chip) })
+    return () => { stale = true }
   }, [chip])
 
   return (

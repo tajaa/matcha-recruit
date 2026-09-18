@@ -10,7 +10,11 @@ from ...services.email import dashboard_url, send_cappe_message_email
 
 from ._body_limit import limited_public_router
 
-router = limited_public_router()
+# A reply may be 10,000 characters (CappeMessageCreate.body) and a character is
+# up to 4 bytes of UTF-8, so the default 8 KB pre-parse cap rejected messages the
+# model itself allows — ~8,200 ASCII characters, or ~2,700 CJK/emoji ones, got a
+# 413 before validation ran. 48 KB covers the worst case plus the JSON envelope.
+router = limited_public_router(48 * 1024)
 
 
 @router.get("/public/threads/{token}", response_model=CappePublicThread)

@@ -589,6 +589,14 @@ async def cancel_transfer_request(
             status_code=status.HTTP_409_CONFLICT, detail="No transfer request to cancel"
         )
     logger.warning("cappe TRANSFER-OUT cancelled: domain=%s account=%s", updated["domain"], account.email)
+    # The renewals task switches Porkbun auto-renew off for a domain that is
+    # leaving; put it back the way the tenant had it (best-effort, like the
+    # auto-renew toggle itself).
+    if updated["kind"] == "register" and updated["auto_renew"]:
+        try:
+            await get_porkbun().set_auto_renew(updated["domain"], True)
+        except PorkbunError as exc:
+            logger.warning("cappe domain %s auto-renew re-enable failed: %s", domain_id, exc)
     return dict(updated)
 
 

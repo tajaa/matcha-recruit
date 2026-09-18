@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Loader2, Plus, Trash2, X } from 'lucide-react'
 import { ui } from '../components/ui'
+import { parseMoneyCents } from '../utils/money'
 import {
   DELIVERABLE_TYPES, PAYMENT_SCHEDULES, SOCIAL_PLATFORMS,
   type CollabTerms, type PaymentSchedule, type TermsDeliverable,
@@ -36,7 +37,11 @@ export default function CounterSheet({ initialTerms, onClose, onSubmit }: {
 
   async function submit() {
     setError(null)
-    const totalCents = compDollars ? Math.round(parseFloat(compDollars) * 100) : 0
+    // parseFloat('1,500') is 1 — a $1,500 counter went out as $1.00. Blank is a
+    // deliberate $0; anything unparseable is refused rather than guessed at.
+    const parsed = compDollars.trim() === '' ? 0 : parseMoneyCents(compDollars)
+    if (parsed === null) { setError('Enter compensation as a dollar amount, e.g. 1500 or 1,500.00'); return }
+    const totalCents = parsed
     if (deliverables.length === 0) { setError('Add at least one deliverable'); return }
     if (exclusive && !exclusiveCategory.trim()) { setError('Exclusivity needs a category'); return }
     if (exclusive && totalCents <= 0) { setError('Exclusivity requires compensation > 0'); return }

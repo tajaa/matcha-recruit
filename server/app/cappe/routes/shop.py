@@ -31,6 +31,7 @@ from ..services.common import receipt_filename as _receipt_filename
 from ..services.directory import refresh_site_search
 from ..services.inventory import log_adjustment, release_order_bookings, restock_order
 from ..services.entitlements import require_fulfillment, resolve_entitlements
+from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 
 # Order statuses that reflect a physical decrement having happened, and the
 # statuses that reverse it. A status TRANSITION between these two sets is what
@@ -53,6 +54,55 @@ def should_restock(current_status: str, new_status: str | None) -> bool:
 
 
 router = APIRouter()
+
+
+async def _close_open_checkout(site_id: UUID, order_id: UUID, account_id: UUID) -> None:
+    """Close a pending order's Stripe Checkout Session before it is released.
+
+    A Checkout Session stays payable for 24 hours. Cancelling or declining the
+    order underneath an open one leaves a live payment page pointing at an order
+    we have thrown away: the buyer pays, and the webhook has to resurrect an
+    order whose stock and slots are already gone. So the session is closed
+    FIRST — the same rule the abandoned-order reaper follows — and the release
+    only proceeds once Stripe confirms nobody can pay it.
+
+    Opens and closes its own connection around the lookup so no pooled
+    connection is held across the Stripe round-trip. No-op for orders that never
+    went to Stripe or are no longer pending.
+    """
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT o.status, o.stripe_session_id, a.stripe_account_id
+                 FROM cappe_orders o
+                 JOIN cappe_sites s ON s.id = o.site_id
+                 JOIN cappe_accounts a ON a.id = s.account_id
+                WHERE o.id = $1 AND o.site_id = $2 AND s.account_id = $3""",
+            order_id, site_id, account_id,
+        )
+    if (
+        row is None
+        or row["status"] != "pending"
+        or not row["stripe_session_id"]
+        or not row["stripe_account_id"]
+    ):
+        return
+    try:
+        state = await get_cappe_stripe().expire_checkout_session(
+            row["stripe_account_id"], row["stripe_session_id"]
+        )
+    except CappeStripeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Couldn't close the customer's payment page, so the order was left as is: {exc}",
+        )
+    if state != "expired":
+        # 'complete': the buyer finished checkout. The money is in, or a delayed
+        # method (ACH, SEPA) is still settling; the webhook decides this order.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The customer has already completed checkout and the payment is settling. "
+                   "Wait for it to be marked paid, then refund it.",
+        )
 
 _PRODUCT_COLS = (
     "id, site_id, name, description, price_cents, currency, image_url, sku, "
@@ -431,6 +481,8 @@ async def update_order_status(
     site_id: UUID, order_id: UUID, body: CappeOrderStatusUpdate,
     account: CappeAccount = Depends(require_cappe_account),
 ):
+    if body.status in _RESTOCK_TO_STATUSES:
+        await _close_open_checkout(site_id, order_id, account.id)
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         async with conn.transaction():
@@ -493,7 +545,10 @@ async def decline_order(
     account: CappeAccount = Depends(require_cappe_account),
 ):
     """Decline an order held for review → 'declined' with an optional reason.
-    Restocks any physical inventory the pending order had decremented."""
+    Restocks any physical inventory the pending order had decremented, and
+    frees its booking slots — after closing the buyer's payment page, because an
+    approval-held cart still goes to Stripe Checkout."""
+    await _close_open_checkout(site_id, order_id, account.id)
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         async with conn.transaction():
@@ -507,13 +562,10 @@ async def decline_order(
             if order is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending order to decline")
             await restock_order(conn, site_id=site_id, order_id=order_id, reason="decline_restock")
-            await conn.execute(
-                """UPDATE cappe_bookings SET status = 'declined', updated_at = NOW()
-                   WHERE id IN (SELECT booking_id FROM cappe_order_items
-                                WHERE order_id = $1 AND booking_id IS NOT NULL)
-                     AND status = 'pending'""",
-                order_id,
-            )
+            # Shared release: frees `pending` AND `confirmed` holds. The inline
+            # version this replaced freed only `pending`, so a confirmed booking
+            # in a declined cart kept its slot off the calendar.
+            await release_order_bookings(conn, order_id=order_id)
             items = await conn.fetch(
                 f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
                 order_id,

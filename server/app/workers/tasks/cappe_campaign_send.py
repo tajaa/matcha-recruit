@@ -65,13 +65,21 @@ async def _run(campaign_id: str) -> dict:
             unsub = _unsubscribe_url(camp["slug"], r["unsubscribe_token"])
             html = personalize_unsubscribe(camp["body_html"] or "", unsub)
             text = f"View this message in an HTML email client.\n\nUnsubscribe: {unsub}"
+            # The sender reports failure by RETURNING False (both providers
+            # down, or a blocked recipient) — it only raises on the unexpected.
+            # Reading the return value is what makes failed_count real.
+            why = "not delivered"
             try:
-                await email_service.send_email_with_fallback(
+                ok = await email_service.send_email_with_fallback(
                     to_email=r["email"], to_name=r["name"], subject=subject,
                     html_content=html, text_content=text,
                 )
-                sent += 1
             except Exception as exc:
+                ok = False
+                why = type(exc).__name__
+            if ok:
+                sent += 1
+            else:
                 # Best-effort per recipient — one bad address must not halt the
                 # blast — but never silently: the failure is counted onto the
                 # campaign row and logged at WARNING (subscriber id, not the
@@ -79,7 +87,7 @@ async def _run(campaign_id: str) -> dict:
                 failed += 1
                 logger.warning(
                     "[Cappe Campaign Send] campaign %s: send failed for subscriber %s (%s)",
-                    campaign_id, subscriber_ids.get(r["email"]), type(exc).__name__,
+                    campaign_id, subscriber_ids.get(r["email"]), why,
                 )
             await asyncio.sleep(THROTTLE_SECONDS)
 

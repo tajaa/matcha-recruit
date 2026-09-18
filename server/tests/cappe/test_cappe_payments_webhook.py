@@ -265,15 +265,20 @@ class ScriptedConn:
 
     def __init__(self, rows, vals):
         self.rows, self.vals = list(rows), list(vals)
-        self.sql = []
+        self.sql, self.args = [], []
 
     async def fetchrow(self, sql, *args):
         self.sql.append(sql)
+        self.args.append(args)
         return self.rows.pop(0)
 
     async def fetchval(self, sql, *args):
         self.sql.append(sql)
+        self.args.append(args)
         return self.vals.pop(0)
+
+    def transaction(self):
+        return FakeTx()
 
 
 class FakeBackground:
@@ -284,45 +289,81 @@ class FakeBackground:
         self.tasks.append((getattr(fn, "__name__", str(fn)), args))
 
 
-def test_payment_for_a_cancelled_order_restores_it_and_is_loud(monkeypatch, caplog):
-    """The buyer HAS been charged, so 'cancelled' is now false. Skipping it as an
-    idempotent no-op (the old behaviour) left a charged customer with a cancelled
-    order and nothing in the logs above INFO."""
+def _late_payment(monkeypatch, conn, obj_extra=None):
+    retaken = []
+
+    async def _retake(_conn, *, site_id, order_id):
+        retaken.append((site_id, order_id))
+
+    monkeypatch.setattr(mod, "get_connection", lambda: FakeConnCtx(conn))
+    monkeypatch.setattr(mod, "retake_order_stock", _retake)
+    bg = FakeBackground()
+    obj = {"id": "cs_1", "payment_intent": "pi_1",
+           "metadata": {"order_id": "11111111-1111-4111-8111-111111111111"}}
+    obj.update(obj_extra or {})
+    out = asyncio.run(mod._mark_order_paid(obj, {"account": "acct_1"}, bg))
+    return out, bg, retaken
+
+
+@pytest.mark.parametrize("released_as", ["cancelled", "declined"])
+def test_payment_for_a_released_order_restores_it_and_is_loud(monkeypatch, caplog, released_as):
+    """The buyer HAS been charged, so 'cancelled'/'declined' is now false.
+    Skipping it as an idempotent no-op left a charged customer with a dead order
+    and nothing in the logs above INFO — and `declined` (an approval-held cart
+    the owner turned down while the payment page was open) was missed entirely."""
     import logging
 
     # 1st fetchrow: the pending→paid UPDATE matches nothing.
-    # fetchval:     the order exists and is 'cancelled'.
-    # 2nd fetchrow: the cancelled→paid restore.
-    conn = ScriptedConn(rows=[None, {"id": "o-1", "site_id": "s-1"}], vals=["cancelled"])
-    monkeypatch.setattr(mod, "get_connection", lambda: FakeConnCtx(conn))
-    bg = FakeBackground()
-
+    # fetchval:     the order exists and was released.
+    # 2nd fetchrow: the released→paid restore.
+    conn = ScriptedConn(rows=[None, {"id": "o-1", "site_id": "s-1"}], vals=[released_as])
     with caplog.at_level(logging.ERROR, logger=mod.logger.name):
-        out = asyncio.run(mod._mark_order_paid(
-            {"id": "cs_1", "payment_intent": "pi_1",
-             "metadata": {"order_id": "11111111-1111-4111-8111-111111111111"}},
-            {"account": "acct_1"},
-            bg,
-        ))
+        out, bg, retaken = _late_payment(monkeypatch, conn)
 
     assert out == {"received": True}
     restore = conn.sql[-1]
-    assert "status = 'paid'" in restore and "o.status = 'cancelled'" in restore
+    assert "status = 'paid'" in restore
+    assert "o.status IN ('cancelled', 'declined')" in restore
     assert "a.stripe_account_id = $4" in restore          # still account-scoped
-    assert any("CANCELLED order" in r.getMessage() for r in caplog.records)
+    assert any(f"{released_as.upper()} order" in r.getMessage() for r in caplog.records)
     assert [t[0] for t in bg.tasks] == ["issue_receipt_for_paid_order"]
+
+
+def test_restored_order_takes_its_stock_back_out(monkeypatch):
+    """`paid` is a decremented state: a later refund restocks it. Restoring the
+    status without re-taking the stock credited the shelf twice."""
+    conn = ScriptedConn(rows=[None, {"id": "o-1", "site_id": "s-1"}], vals=["cancelled"])
+    _, _, retaken = _late_payment(monkeypatch, conn)
+    assert retaken == [("s-1", "o-1")]
+
+
+def test_restored_order_keeps_the_shipping_address(monkeypatch):
+    conn = ScriptedConn(rows=[None, {"id": "o-1", "site_id": "s-1"}], vals=["cancelled"])
+    _late_payment(monkeypatch, conn, {"shipping_details": {"name": "Buyer", "address": {"city": "Oakland"}}})
+    assert "shipping_address = COALESCE($5::jsonb" in conn.sql[-1]
+    assert '"city": "Oakland"' in conn.args[-1][4]
+
+
+def test_restore_that_matches_nothing_retakes_no_stock(monkeypatch):
+    conn = ScriptedConn(rows=[None, None], vals=["cancelled"])
+    _, bg, retaken = _late_payment(monkeypatch, conn)
+    assert retaken == [] and bg.tasks == []
+
+
+def test_payment_for_a_refunded_order_is_an_error_not_a_restore(monkeypatch, caplog):
+    import logging
+
+    conn = ScriptedConn(rows=[None], vals=["refunded"])
+    with caplog.at_level(logging.ERROR, logger=mod.logger.name):
+        _, bg, retaken = _late_payment(monkeypatch, conn)
+    assert len(conn.sql) == 2 and retaken == [] and bg.tasks == []
+    assert any("REFUNDED order" in r.getMessage() for r in caplog.records)
 
 
 def test_replayed_paid_event_is_still_an_idempotent_skip(monkeypatch):
     conn = ScriptedConn(rows=[None], vals=["paid"])
-    monkeypatch.setattr(mod, "get_connection", lambda: FakeConnCtx(conn))
-    bg = FakeBackground()
-    out = asyncio.run(mod._mark_order_paid(
-        {"id": "cs_1", "payment_intent": "pi_1",
-         "metadata": {"order_id": "11111111-1111-4111-8111-111111111111"}},
-        {"account": "acct_1"},
-        bg,
-    ))
+    out, bg, retaken = _late_payment(monkeypatch, conn)
     assert out == {"received": True}
     assert bg.tasks == []          # no second receipt
     assert len(conn.sql) == 2      # no restore attempted
+    assert retaken == []

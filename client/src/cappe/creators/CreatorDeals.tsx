@@ -34,13 +34,19 @@ export default function CreatorDeals() {
   useEffect(() => {
     const status = chip === 'all' ? undefined : chip === 'closed' ? CLOSED.join(',') : chip
     const qs = status ? `&status=${encodeURIComponent(status)}` : ''
+    // Responses can land out of order. Without this a slow reply for the chip
+    // the user already left overwrote the newer list AND settled the wrong key,
+    // so the spinner stayed up until another chip was clicked.
+    let stale = false
     cappeApi.get<{ offers: OfferListItem[]; total: number }>(`/collab/offers?side=creator${qs}`)
-      .then((res) => { setOffers(res.offers); setError(null) })
+      .then((res) => { if (!stale) { setOffers(res.offers); setError(null) } })
       .catch((e) => {
+        if (stale) return
         setOffers([])
         setError(e instanceof Error ? e.message : 'Could not load your deals')
       })
-      .finally(() => setSettledKey(requestKey))
+      .finally(() => { if (!stale) setSettledKey(requestKey) })
+    return () => { stale = true }
   }, [chip, reloadTick, requestKey])
 
   return (

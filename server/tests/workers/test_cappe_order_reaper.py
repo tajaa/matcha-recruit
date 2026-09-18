@@ -36,6 +36,8 @@ class FakeConn:
         self._candidates = candidates
         self._claims = list(claims)
         self.fetch_args = None
+        self.fetchrow_sql = []
+        self.executed = []
         self.closed = False
 
     async def fetch(self, sql, *args):
@@ -43,7 +45,11 @@ class FakeConn:
         return self._candidates
 
     async def fetchrow(self, sql, *args):
+        self.fetchrow_sql.append(sql)
         return self._claims.pop(0)
+
+    async def execute(self, sql, *args):
+        self.executed.append((sql, args))
 
     def transaction(self):
         return FakeTx()
@@ -55,9 +61,13 @@ class FakeConn:
 class FakeStripe:
     """session id → resulting state, or an exception to raise."""
 
-    def __init__(self, states=None):
+    def __init__(self, states=None, sessions=None):
         self.states = states or {}
+        self.sessions = sessions or {}
         self.expired = []
+
+    async def retrieve_checkout_session(self, account_id, session_id):
+        return self.sessions.get(session_id, {"payment_status": "unpaid"})
 
     async def expire_checkout_session(self, account_id, session_id):
         self.expired.append((account_id, session_id))
@@ -134,7 +144,7 @@ def test_session_is_expired_before_the_order_is_released(monkeypatch):
     out = asyncio.run(mod._run())
 
     assert stripe.expired == [("acct_1", "cs_1")]
-    assert out == {"candidates": 1, "released": 1, "settling": 0}
+    assert out == {"candidates": 1, "released": 1, "settling": 0, "reconciled": 0}
     assert log == [("restock", "o-1", "restock"), ("bookings", "o-1")]
 
 
@@ -147,9 +157,43 @@ def test_completed_checkout_is_never_cancelled(monkeypatch):
 
     out = asyncio.run(mod._run())
 
-    assert out == {"candidates": 1, "released": 0, "settling": 1}
+    assert out == {"candidates": 1, "released": 0, "settling": 1, "reconciled": 0}
     assert log == []
-    assert conn._claims == []          # the order UPDATE was never attempted
+    assert conn.fetchrow_sql == []     # no order UPDATE was attempted
+    # Sent to the back of the sweep so it cannot starve newer abandoned carts.
+    assert [a for _, a in conn.executed] == [("o-1",)]
+
+
+def test_paid_session_with_a_lost_webhook_is_reconciled(monkeypatch):
+    """The `completed` webhook is the only thing that moves a paid order on. If
+    it was dropped the order sat `pending` for ever — and, being oldest, was
+    re-asked about on every run."""
+    log, receipts = [], []
+    conn = FakeConn([_cand()], [{"id": "o-1", "site_id": "s-1"}])
+    stripe = FakeStripe(
+        {"cs_1": "complete"},
+        {"cs_1": {"payment_status": "paid", "payment_intent": "pi_9",
+                  "shipping_details": {"name": "Buyer"}}},
+    )
+    _patch(monkeypatch, conn, stripe=stripe, log=log)
+
+    async def _receipt(_conn, order_id, site_id):
+        receipts.append((order_id, site_id))
+
+    monkeypatch.setattr(mod, "issue_receipt_on", _receipt)
+    out = asyncio.run(mod._run())
+
+    assert out == {"candidates": 1, "released": 0, "settling": 0, "reconciled": 1}
+    assert "status = 'paid'" in conn.fetchrow_sql[0] and "status = 'pending'" in conn.fetchrow_sql[0]
+    assert receipts == [("o-1", "s-1")]
+    assert log == []                   # paid stock is NOT handed back
+
+
+def test_sweep_rotates_by_last_look_not_age(monkeypatch):
+    conn = FakeConn([], [])
+    _patch(monkeypatch, conn)
+    asyncio.run(mod._run())
+    assert "ORDER BY o.updated_at ASC" in conn.fetch_args[0]
 
 
 def test_stripe_being_unreachable_leaves_the_order_for_next_cycle(monkeypatch):
@@ -160,7 +204,7 @@ def test_stripe_being_unreachable_leaves_the_order_for_next_cycle(monkeypatch):
     out = asyncio.run(mod._run())
 
     # Not knowing whether the page is still payable is a reason NOT to release.
-    assert out == {"candidates": 1, "released": 0, "settling": 0}
+    assert out == {"candidates": 1, "released": 0, "settling": 0, "reconciled": 0}
     assert log == []
 
 
@@ -188,7 +232,7 @@ def test_order_already_released_by_the_webhook_is_skipped(monkeypatch):
     log = []
     conn = FakeConn([_cand()], [None])
     _patch(monkeypatch, conn, log=log)
-    assert asyncio.run(mod._run()) == {"candidates": 1, "released": 0, "settling": 0}
+    assert asyncio.run(mod._run()) == {"candidates": 1, "released": 0, "settling": 0, "reconciled": 0}
     assert log == []
 
 

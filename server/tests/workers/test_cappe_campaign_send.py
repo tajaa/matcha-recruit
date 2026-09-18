@@ -56,7 +56,10 @@ class FakeEmailService:
     async def send_email_with_fallback(self, *, to_email, **kwargs):
         if to_email.startswith("bad@"):
             raise RuntimeError("provider down")
+        if to_email.startswith("bounced@"):
+            return False          # the sender's real failure signal: no raise
         self.sent_to.append(to_email)
+        return True
 
 
 def test_failed_recipient_is_counted_and_logged(monkeypatch, caplog):
@@ -100,6 +103,7 @@ def test_clean_blast_reports_zero_failures(monkeypatch):
 
     async def _all_ok(*, to_email, **kwargs):
         svc.sent_to.append(to_email)
+        return True
 
     svc.send_email_with_fallback = _all_ok
     monkeypatch.setattr(mod, "get_db_connection", _get_conn)
@@ -112,3 +116,32 @@ def test_clean_blast_reports_zero_failures(monkeypatch):
     assert result == {"recipients": 2, "sent": 2, "failed": 0}
     sql, args = [e for e in conn.executed if "SET status = 'sent'" in e[0]][0]
     assert args == (2, 0, "camp-1")
+
+
+def test_a_send_that_returns_false_is_a_failure(monkeypatch):
+    """`send_email_with_fallback` reports failure by RETURNING False — both
+    providers down, or a blocked recipient — and only raises on the unexpected.
+    Ignoring the return value counted every undelivered message as sent, so
+    `failed_count` could never be anything but 0."""
+    conn = FakeConn()
+    svc = FakeEmailService()
+
+    async def _get_conn():
+        return conn
+
+    async def _subs(sql, *args):
+        return [
+            {"id": "sub-ok", "email": "ok@example.com", "name": "A", "unsubscribe_token": "t1"},
+            {"id": "sub-b", "email": "bounced@example.org", "name": "B", "unsubscribe_token": "t2"},
+        ]
+
+    conn.fetch = _subs
+    monkeypatch.setattr(mod, "get_db_connection", _get_conn)
+    monkeypatch.setattr(mod, "THROTTLE_SECONDS", 0)
+    monkeypatch.setattr(campaigns_mod, "_is_reserved_test_domain", lambda _e: False)
+    import app.core.services.email as email_pkg
+    monkeypatch.setattr(email_pkg, "EmailService", lambda: svc)
+
+    assert asyncio.run(mod._run("camp-1")) == {"recipients": 2, "sent": 1, "failed": 1}
+    _, args = [e for e in conn.executed if "SET status = 'sent'" in e[0]][0]
+    assert args == (1, 1, "camp-1")

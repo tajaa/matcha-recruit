@@ -24,9 +24,11 @@ export default function CreatorPublicProfile() {
 
   useEffect(() => {
     if (!handle) return
+    let stale = false
     fetchPublicCreator(handle)
-      .then((p) => setResult({ handle, profile: p }))
-      .catch(() => setResult({ handle, profile: null }))
+      .then((p) => { if (!stale) setResult({ handle, profile: p }) })
+      .catch(() => { if (!stale) setResult({ handle, profile: null }) })
+    return () => { stale = true }
   }, [handle])
 
   if (loading) {

@@ -119,6 +119,9 @@ async def _go_live(conn, row, edge) -> str:
     return edge_status
 
 
+_TOMBSTONE_ALARM_ATTEMPTS = 10
+
+
 async def _tear_down(conn, row, edge) -> bool:
     """Detach a domain that is no longer ours to serve."""
     try:
@@ -158,6 +161,41 @@ async def _isolated(conn, row, label: str, coro) -> object:
         except Exception:
             logger.exception("cappe edge sync: could not bump %s", row["domain"])
         return None
+
+
+async def _drain_tombstones(conn, edge, cap: int) -> int:
+    """Delete CloudFront tenants recorded by a site delete. `delete_tenant`
+    treats a missing tenant as success, so a row only survives a real failure
+    (typically: the disable is still deploying) and is retried next cycle."""
+    rows = await conn.fetch(
+        "SELECT cf_tenant_id, domain, attempts FROM cappe_edge_tombstones "
+        "ORDER BY checked_at NULLS FIRST LIMIT $1",
+        cap,
+    )
+    buried = 0
+    for row in rows:
+        try:
+            await edge.delete_tenant(row["cf_tenant_id"])
+        except Exception as exc:  # noqa: BLE001 — one bad tenant must not stop the rest
+            attempts = row["attempts"] + 1
+            await conn.execute(
+                "UPDATE cappe_edge_tombstones SET attempts = $2, last_error = $3, "
+                "checked_at = NOW() WHERE cf_tenant_id = $1",
+                row["cf_tenant_id"], attempts, str(exc)[:500],
+            )
+            # The disable normally deploys within a few cycles; still failing
+            # after that is an operator problem, not a wait.
+            log = logger.error if attempts >= _TOMBSTONE_ALARM_ATTEMPTS else logger.warning
+            log(
+                "cappe edge sync: orphaned tenant %s (%s) not deleted, attempt %d: %s",
+                row["cf_tenant_id"], row["domain"], attempts, exc,
+            )
+            continue
+        await conn.execute(
+            "DELETE FROM cappe_edge_tombstones WHERE cf_tenant_id = $1", row["cf_tenant_id"]
+        )
+        buried += 1
+    return buried
 
 
 async def _run() -> dict:
@@ -213,7 +251,15 @@ async def _run() -> dict:
             if await _isolated(conn, row, "teardown", _tear_down(conn, row, edge)):
                 detached += 1
 
-        return {"checked": len(pending), "adopted": adopted, "detached": detached, **counts}
+        # Tenants whose domain row is gone (site deleted). These have no
+        # `cappe_domains` row to hang state on, so they live in their own table
+        # and are retried until CloudFront confirms the tenant no longer exists.
+        buried = await _drain_tombstones(conn, edge, cap)
+
+        return {
+            "checked": len(pending), "adopted": adopted, "detached": detached,
+            "buried": buried, **counts,
+        }
     finally:
         await conn.close()
 

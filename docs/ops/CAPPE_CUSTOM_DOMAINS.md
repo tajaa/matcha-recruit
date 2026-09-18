@@ -117,8 +117,10 @@ sudo nginx -T 2>/dev/null | grep -n "default_server"
 
 ## 6. Migration + scheduler
 
-`zzzzcappe31` adds the edge columns and seeds `cappe_edge_sync` (off). Apply dev →
-prod through the normal scripts.
+`zzzzcappe31` adds the edge columns and seeds `cappe_edge_sync` (off);
+`zzzzcappe32` adds `cappe_edge_tombstones` (site delete writes to it, so it must be
+applied before the backend that ships with it). Apply dev → prod through the
+normal scripts.
 
 ## 7. Turn it on — in this order
 
@@ -167,10 +169,20 @@ Row state (read-only):
 - **Every name on a managed certificate must resolve to the edge** or it stays
   `pending-validation` until it times out. That is why a connected domain gets
   exactly one hostname and only a domain we registered gets `www` as well.
-- **Deleting a site deletes its tenants** in a background task after the response.
-  If that fails, the tenant id is logged at ERROR (`ORPHANED CloudFront tenant`) —
-  it is no longer in the database, so that log line is the only handle; delete it
-  by hand or it keeps billing and blocks reconnecting the domain.
+- **Deleting a site deletes its tenants**, durably. The tenant ids are copied into
+  `cappe_edge_tombstones` in the same transaction as the delete (the cascade
+  removes `cappe_domains`, the only other record of them). A fast-path attempt runs
+  after the response, but CloudFront refuses to delete a tenant that is still
+  deploying its disable, so that usually fails; the `cappe_edge_sync` sweeper
+  drains the table and retries every cycle. A row still there after 10 attempts is
+  logged at ERROR — `SELECT * FROM cappe_edge_tombstones` shows what is stuck and
+  why (`last_error`). Until it drains, reconnecting that domain fails with
+  "already exists".
+- **Re-pointing a registered domain clears the old records first.** `point_at_app`
+  deletes any A/AAAA/ALIAS/CNAME at the apex and `www` that is not already the
+  edge endpoint before creating its own — a pre-edge domain carries
+  `A → app IP` + `www CNAME → apex`, and either one beside the ALIAS keeps the
+  certificate from validating. MX/TXT and other hostnames are never touched.
 - **A transfer-out does not take the site down.** Teardown happens at `expired`.
 - **Pricing/quotas**: check current CloudFront multi-tenant pricing and the
   distribution-tenant quota before onboarding in volume.
