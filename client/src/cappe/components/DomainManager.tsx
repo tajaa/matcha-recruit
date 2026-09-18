@@ -183,25 +183,41 @@ export default function DomainManager({ siteId }: { siteId: string }) {
     }
   }
 
-  if (config && !config.enabled) {
-    return (
-      <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
-        <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
-          <Globe className="h-4 w-4 text-zinc-500" /> Custom domains are coming soon
-        </div>
-        <p className="mt-1 text-xs text-zinc-500">
-          Your site is live at its <span className="text-zinc-300">.gummfit.com</span> address in the
-          meantime. We'll turn on buying and connecting your own domain — with the certificate handled
-          for you — shortly.
-        </p>
-      </div>
-    )
+  async function cancelTransfer(d: CappeDomain) {
+    setActing(d.id)
+    try {
+      await cappeApi.post<CappeDomain>(`/domains/${d.id}/transfer-request/cancel`)
+      loadDomains()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not cancel the transfer')
+    } finally {
+      setActing(null)
+    }
   }
+
+  // While custom domains are switched off only the CREATE surface goes dark.
+  // Domains a tenant already owns must stay manageable: hiding the whole panel
+  // also hid the auto-renew toggle, so renewals kept charging a saved card with
+  // no way to stop them.
+  const createDisabled = !!config && !config.enabled
 
   const endpoint = config?.routing_endpoint
 
   return (
     <div className="space-y-5">
+      {createDisabled && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
+            <Globe className="h-4 w-4 text-zinc-500" /> Custom domains are coming soon
+          </div>
+          <p className="mt-1 text-xs text-zinc-500">
+            Your site is live at its <span className="text-zinc-300">.gummfit.com</span> address in the
+            meantime. We'll turn on buying and connecting your own domain — with the certificate handled
+            for you — shortly.
+          </p>
+        </div>
+      )}
+      {!createDisabled && (<>
       <div>
         <label className="mb-1 block text-sm font-medium text-zinc-300">Find a domain to buy</label>
         <div className="flex gap-2">
@@ -256,7 +272,7 @@ export default function DomainManager({ siteId }: { siteId: string }) {
           <input
             value={connect}
             onChange={(e) => setConnect(e.target.value)}
-            placeholder="www.yourdomain.com"
+            placeholder="yourdomain.com  or  shop.yourdomain.com"
             className={`flex-1 ${input}`}
           />
           <button
@@ -270,7 +286,7 @@ export default function DomainManager({ siteId }: { siteId: string }) {
         <p className="mt-1 text-xs text-zinc-500">
           Connect it here first — we'll verify you own it, then show the record to add. You'll point an{' '}
           <span className="text-zinc-300">ALIAS</span>/<span className="text-zinc-300">ANAME</span> record on
-          the apex (or a <span className="text-zinc-300">CNAME</span> on www) at{' '}
+          a root domain (or a <span className="text-zinc-300">CNAME</span> on a subdomain) at{' '}
           {endpoint ? (
             <span className="break-all font-mono text-zinc-300">{endpoint}</span>
           ) : (
@@ -285,6 +301,8 @@ export default function DomainManager({ siteId }: { siteId: string }) {
           <CircleAlert className="h-4 w-4" /> {error}
         </p>
       )}
+
+      </>)}
 
       {domains && domains.length > 0 && (
         <div className="border-t border-zinc-800 pt-4">
@@ -347,14 +365,24 @@ export default function DomainManager({ siteId }: { siteId: string }) {
                         </button>
                       </>
                     )}
-                    {d.edge_status === 'failed' && (
+                    {d.kind === 'register' && d.status === 'transfer_requested' && (
+                      <button
+                        onClick={() => cancelTransfer(d)}
+                        disabled={acting === d.id}
+                        title="Keep this domain here — it goes back to renewing normally"
+                        className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+                      >
+                        <LogOut className="h-3 w-3" /> Cancel transfer
+                      </button>
+                    )}
+                    {!createDisabled && d.status === 'active' && (d.edge_status === 'failed' || d.edge_status === 'none') && (
                       <button
                         onClick={() => retryEdge(d)}
                         disabled={acting === d.id}
-                        title="Retry certificate setup"
+                        title={d.edge_status === 'none' ? 'Set up the certificate for this domain' : 'Retry certificate setup'}
                         className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
                       >
-                        <RefreshCw className="h-3 w-3" /> Retry setup
+                        <RefreshCw className="h-3 w-3" /> {d.edge_status === 'none' ? 'Set up HTTPS' : 'Retry setup'}
                       </button>
                     )}
                     {d.edge_status !== 'none' && (
@@ -378,11 +406,30 @@ export default function DomainManager({ siteId }: { siteId: string }) {
                   <div className="mt-2 rounded-md bg-zinc-900 p-2 text-xs text-zinc-400">
                     Point the domain at us, then this turns green on its own (it can take up to an hour):
                     <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono text-[11px] text-zinc-300">
-                      <span className="text-zinc-500">ALIAS / ANAME</span>
-                      <span className="break-all">{d.domain} → {d.cf_routing_endpoint || endpoint}</span>
-                      <span className="text-zinc-500">CNAME</span>
-                      <span className="break-all">www.{d.domain} → {d.cf_routing_endpoint || endpoint}</span>
+                      {d.kind === 'register' ? (
+                        <>
+                          <span className="text-zinc-500">ALIAS / ANAME</span>
+                          <span className="break-all">{d.domain} → {d.cf_routing_endpoint || endpoint}</span>
+                          <span className="text-zinc-500">CNAME</span>
+                          <span className="break-all">www.{d.domain} → {d.cf_routing_endpoint || endpoint}</span>
+                        </>
+                      ) : (
+                        <>
+                          {/* A connected domain's certificate covers exactly this
+                              host. Every name on it must resolve to us before it
+                              is issued, so a www sibling nobody pointed would
+                              hold the whole certificate up forever. */}
+                          <span className="text-zinc-500">ALIAS or CNAME</span>
+                          <span className="break-all">{d.domain} → {d.cf_routing_endpoint || endpoint}</span>
+                        </>
+                      )}
                     </div>
+                    {d.kind === 'connect' && (
+                      <p className="mt-1 text-[11px] text-zinc-500">
+                        Use ALIAS/ANAME if this is your root domain, CNAME if it's a subdomain like
+                        shop.example.com. Only this exact address is covered.
+                      </p>
+                    )}
                   </div>
                 )}
                 {d.edge_status === 'failed' && d.edge_error && (

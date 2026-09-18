@@ -30,6 +30,17 @@ async def _dispatch_cappe_domain_renewals() -> dict:
             print("[Cappe Renewals] Scheduler disabled, skipping.")
             return {"renewed": 0, "skipped": True}
 
+        # A domain with a transfer-out request is deliberately NOT renewed (the
+        # tenant said they are leaving, and charging them another year would be
+        # wrong), but it also keeps serving until the registration really ends.
+        # Once it is past expiry it is gone either way — transferred or lapsed —
+        # so it becomes `expired`, which is what tells the edge sweeper to tear
+        # the CloudFront tenant down.
+        await conn.execute(
+            "UPDATE cappe_domains SET status = 'expired', updated_at = NOW() "
+            "WHERE status = 'transfer_requested' AND expires_at IS NOT NULL AND expires_at < NOW()"
+        )
+
         rows = await conn.fetch(
             """SELECT id, domain, retail_cents, stripe_customer_id, expires_at,
                       (expires_at < NOW()) AS past_due,

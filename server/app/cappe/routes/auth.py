@@ -16,6 +16,7 @@ from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...core.services.session_tokens import refresh_session_expired
 from ...database import get_connection
 from ..dependencies import require_cappe_account
+from ..services.commerce import check_recipient_send_ok
 from ..services.email import (
     send_cappe_account_exists_email,
     send_cappe_verification_email,
@@ -114,7 +115,16 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
     if row is None:
         # Duplicate address: answer exactly as a fresh signup would, and tell
         # the real owner out-of-band. Nothing was created or changed.
-        background.add_task(send_cappe_account_exists_email, email, body.name)
+        # Throttled per RECIPIENT (the per-IP signup limit does nothing against
+        # rotating addresses) and greeted with the name ON FILE: the name in the
+        # request is attacker-typed text, and mailing it to a victim from our
+        # domain is a phishing primitive.
+        if await check_recipient_send_ok(email):
+            async with get_connection() as conn:
+                stored_name = await conn.fetchval(
+                    "SELECT name FROM cappe_accounts WHERE email = $1", email
+                )
+            background.add_task(send_cappe_account_exists_email, email, stored_name)
         return CappeSignupResponse(verification_required=True, email=email)
 
     account = CappeAccount(**dict(row))

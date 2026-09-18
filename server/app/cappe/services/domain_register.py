@@ -20,6 +20,11 @@ from .stripe_connect import CappeStripeError, get_cappe_stripe
 logger = logging.getLogger("cappe.domain_register")
 
 
+# A 'provisioning' claim with no tenant older than this is a process that died
+# between the claim and the AWS call; it may be re-claimed.
+_STALE_CLAIM = "10 minutes"
+
+
 async def provision_domain_edge(domain_id: UUID, domain: str) -> tuple[str, str | None]:
     """Create the CloudFront tenant for `domain` and persist the result.
 
@@ -27,17 +32,48 @@ async def provision_domain_edge(domain_id: UUID, domain: str) -> tuple[str, str 
     raised: the domain is registered and paid for, so the row must not be lost.
     An operator (or the tenant, via POST /domains/{id}/edge/retry) re-runs it.
 
+    **Claimed.** Verify, retry, the registration webhook and the edge sweeper
+    can all reach this for the same row (a double-click is enough). Without a
+    claim the second caller's `create_distribution_tenant` fails with "already
+    exists" and then stamps `edge_status='failed'` over the first caller's
+    healthy tenant. The conditional UPDATE lets exactly one caller through;
+    everyone else reads back what the winner wrote.
+
     The AWS round-trip happens OUTSIDE any held connection — the same rule the
     Stripe paths follow, so a slow edge call never pins one from the pool.
     """
+    async with connection_or_direct() as conn:
+        claim = await conn.fetchrow(
+            f"""UPDATE cappe_domains
+                   SET edge_status = 'provisioning', edge_error = NULL,
+                       edge_checked_at = NOW(), updated_at = NOW()
+                 WHERE id = $1 AND cf_tenant_id IS NULL
+                   AND (edge_status IN ('none', 'failed')
+                        OR (edge_status = 'provisioning'
+                            AND edge_checked_at < NOW() - INTERVAL '{_STALE_CLAIM}'))
+             RETURNING kind""",
+            domain_id,
+        )
+        if claim is None:
+            current = await conn.fetchrow(
+                "SELECT edge_status, cf_routing_endpoint FROM cappe_domains WHERE id = $1",
+                domain_id,
+            )
+            if current is None:
+                return "none", None
+            return current["edge_status"], current["cf_routing_endpoint"]
+
     try:
-        tenant = await get_cloudfront_tenants().create_tenant(domain)
+        tenant = await get_cloudfront_tenants().create_tenant(
+            domain, include_www=(claim["kind"] == "register")
+        )
     except CappeEdgeError as exc:
         logger.error("cappe domain %s edge provisioning failed: %s", domain_id, exc)
         async with connection_or_direct() as conn:
             await conn.execute(
                 "UPDATE cappe_domains SET edge_status = 'failed', edge_error = $2, "
-                "edge_checked_at = NOW(), updated_at = NOW() WHERE id = $1",
+                "edge_checked_at = NOW(), updated_at = NOW() "
+                "WHERE id = $1 AND cf_tenant_id IS NULL",
                 domain_id,
                 str(exc)[:500],
             )
@@ -110,19 +146,43 @@ async def finalize_domain_registration(domain_id: UUID) -> None:
 
 
 async def retry_domain_edge(domain_id: UUID) -> str:
-    """Re-run edge provisioning for a domain whose tenant creation failed.
+    """Re-run edge provisioning for an active domain that is not serving.
 
-    Only touches an ACTIVE row with no tenant yet, so a retry can never detach a
-    live domain from the edge. Returns the resulting edge_status.
+    Two recoverable shapes:
+      * no tenant yet (`edge_status` 'none' or 'failed') — creation never
+        happened or errored; just provision.
+      * a tenant whose certificate is dead (`edge_status='failed'` WITH a
+        tenant: validation timed out, revoked…). CloudFront will not re-issue
+        on a failed managed certificate, so the tenant is deleted and a fresh
+        one created. Before this the retry was a no-op for that row and the
+        domain had no way forward.
+
+    A `pending_dns`/`provisioning`/`live` tenant is never touched, so a retry
+    can not detach a domain that is working or still validating. Returns the
+    resulting edge_status.
     """
     async with connection_or_direct() as conn:
         row = await conn.fetchrow(
-            "SELECT id, kind, domain FROM cappe_domains "
-            "WHERE id = $1 AND status = 'active' AND cf_tenant_id IS NULL",
+            "SELECT id, kind, domain, cf_tenant_id, edge_status FROM cappe_domains "
+            "WHERE id = $1 AND status = 'active'",
             domain_id,
         )
     if row is None:
         return "none"
+    if row["cf_tenant_id"]:
+        if row["edge_status"] != "failed":
+            return row["edge_status"]
+        try:
+            await get_cloudfront_tenants().delete_tenant(row["cf_tenant_id"])
+        except CappeEdgeError as exc:
+            logger.warning("cappe domain %s dead-tenant cleanup failed: %s", domain_id, exc)
+            return "failed"
+        async with connection_or_direct() as conn:
+            await conn.execute(
+                "UPDATE cappe_domains SET cf_tenant_id = NULL, updated_at = NOW() "
+                "WHERE id = $1 AND cf_tenant_id = $2 AND edge_status = 'failed'",
+                domain_id, row["cf_tenant_id"],
+            )
     edge_status, routing_endpoint = await provision_domain_edge(domain_id, row["domain"])
 
     # A bought domain lives in our Porkbun account, so we can point it ourselves;

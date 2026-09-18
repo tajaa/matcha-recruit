@@ -15,7 +15,6 @@ os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
-import pytest  # noqa: E402
 
 from app.cappe.services.cloudfront_tenants import CappeEdgeError, CappeEdgeNotFound  # noqa: E402
 from app.workers.tasks import cappe_edge_sync as mod  # noqa: E402
@@ -32,15 +31,21 @@ class FakeTx:
 
 
 class FakeConn:
-    def __init__(self, pending=(), stale=()):
-        self._queues = [list(pending), list(stale)]
+    def __init__(self, pending=(), stale=(), orphans=(), raise_on=None):
+        self._queues = [list(pending), list(orphans), list(stale)]
         self.executed = []
         self.closed = False
+        # substring of SQL → exception to raise the first time it is executed
+        self._raise_on = dict(raise_on or {})
 
     async def fetch(self, sql, *args):
         return self._queues.pop(0) if self._queues else []
 
     async def execute(self, sql, *args):
+        for needle, exc in list(self._raise_on.items()):
+            if needle in sql:
+                del self._raise_on[needle]
+                raise exc
         self.executed.append((sql, args))
 
     def transaction(self):
@@ -70,7 +75,7 @@ class FakeEdge:
         self.deleted.append(tenant_id)
 
 
-def _patch(monkeypatch, conn, edge, *, enabled=True, cap=50):
+def _patch(monkeypatch, conn, edge, *, enabled=True, cap=50, feature_on=True):
     async def _get_conn():
         return conn
 
@@ -83,8 +88,20 @@ def _patch(monkeypatch, conn, edge, *, enabled=True, cap=50):
 
     monkeypatch.setattr(mod, "get_db_connection", _get_conn)
     monkeypatch.setattr(mod, "scheduler_settings_row", _setting)
+    class _Settings:
+        cappe_custom_domains_enabled = feature_on
+
+    adopted = []
+
+    async def _retry(domain_id):
+        adopted.append(domain_id)
+        return "pending_dns"
+
     monkeypatch.setattr(mod, "get_cloudfront_tenants", lambda: edge)
     monkeypatch.setattr(mod, "invalidate_site_render_cache", _invalidate)
+    monkeypatch.setattr(mod, "get_settings", lambda: _Settings)
+    monkeypatch.setattr(mod, "retry_domain_edge", _retry)
+    return adopted
 
 
 # ── scheduler gate ───────────────────────────────────────────────────────────
@@ -185,3 +202,79 @@ def test_unpublish_only_clears_this_domain(monkeypatch):
     asyncio.run(mod._run())
     sql, _ = conn.sql_matching("UPDATE cappe_sites SET custom_domain = NULL")[0]
     assert "custom_domain = $2" in sql
+
+
+def test_a_requested_transfer_does_not_take_the_site_offline(monkeypatch):
+    """Transfers take days and may never complete. Tearing down on the click
+    left the site dark for the whole window with no way to cancel."""
+    conn = FakeConn()
+    _patch(monkeypatch, conn, FakeEdge())
+    seen = []
+    orig = conn.fetch
+
+    async def _fetch(sql, *args):
+        seen.append(sql)
+        return await orig(sql, *args)
+
+    conn.fetch = _fetch
+    asyncio.run(mod._run())
+    teardown_sql = [q for q in seen if "status = 'expired'" in q]
+    assert len(teardown_sql) == 1
+    assert "transfer_requested" not in teardown_sql[0]
+
+
+# ── one bad row must not starve the rest ─────────────────────────────────────
+
+def test_custom_domain_collision_is_recorded_not_raised(monkeypatch):
+    """cappe_sites.custom_domain is UNIQUE. The violation used to escape the
+    sweep; with `edge_checked_at NULLS FIRST` that row sorted first again next
+    run and blocked every other domain for good."""
+    import asyncpg
+
+    other = dict(ROW, id="d-2", site_id="s-2", domain="other.example.com")
+    conn = FakeConn(
+        pending=[ROW, other],
+        raise_on={"UPDATE cappe_sites SET custom_domain = $1": asyncpg.UniqueViolationError("dup")},
+    )
+    _patch(monkeypatch, conn, FakeEdge(status=("live", "")))
+    out = asyncio.run(mod._run())
+
+    assert out["checked"] == 2
+    assert out["failed"] == 1 and out["live"] == 1      # the second domain still went live
+    failed = conn.sql_matching("Another site is already published")
+    assert failed and failed[0][1] == ("d-1",)
+
+
+def test_unexpected_exception_bumps_the_timestamp_and_continues(monkeypatch):
+    other = dict(ROW, id="d-2", domain="other.example.com")
+    conn = FakeConn(
+        pending=[ROW, other],
+        raise_on={"SET edge_status = 'live'": RuntimeError("connection reset")},
+    )
+    _patch(monkeypatch, conn, FakeEdge(status=("live", "")))
+    out = asyncio.run(mod._run())
+
+    assert out["error"] == 1 and out["live"] == 1
+    bumped = [e for e in conn.executed if e[0].startswith("UPDATE cappe_domains SET edge_checked_at = NOW()")]
+    assert bumped and bumped[0][1] == ("d-1",)          # so it cannot sort first forever
+
+
+# ── adoption ─────────────────────────────────────────────────────────────────
+
+def test_active_domain_with_no_tenant_is_adopted(monkeypatch):
+    conn = FakeConn(orphans=[{"id": "d-9", "site_id": "s-9", "domain": "legacy.example.com"}])
+    adopted = _patch(monkeypatch, conn, FakeEdge())
+    out = asyncio.run(mod._run())
+    assert out["adopted"] == 1
+    assert adopted == ["d-9"]
+
+
+def test_nothing_is_adopted_while_the_feature_is_off(monkeypatch):
+    """With the feature off there is no tenant distribution to attach to."""
+    conn = FakeConn(stale=[])
+    adopted = _patch(monkeypatch, conn, FakeEdge(), feature_on=False)
+    # only two fetches happen (pending, stale): drop the orphan queue slot
+    conn._queues = [[], []]
+    out = asyncio.run(mod._run())
+    assert out["adopted"] == 0 and adopted == []
+

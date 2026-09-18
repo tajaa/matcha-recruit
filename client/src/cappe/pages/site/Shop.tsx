@@ -8,7 +8,7 @@ import ShippingSettingsCard from '../../components/ShippingSettingsCard'
 import StockAdjustModal from '../../components/StockAdjustModal'
 import ImageUpload from '../../components/ImageUpload'
 import type { CappeBookingType, CappeFulfillment, CappeProduct } from '../../types'
-import { parseMoneyCents } from '../../utils/money'
+import { parseMoneyCents, parseSignedMoneyCents } from '../../utils/money'
 
 const STATUSES = ['active', 'draft', 'archived'] as const
 const FIELD_TYPES = ['text', 'email', 'textarea', 'number', 'tel', 'date', 'select']
@@ -123,9 +123,9 @@ export default function Shop() {
     }
     const badOption = optionGroups
       .flatMap((g) => g.options)
-      .find((o) => o.name.trim() && o.price.trim() !== '' && parseMoneyCents(o.price) === null)
+      .find((o) => o.name.trim() && o.price.trim() !== '' && parseSignedMoneyCents(o.price) === null)
     if (badOption) {
-      setError(`Option "${badOption.name.trim()}" — enter the extra cost as a plain amount, e.g. 2.50`)
+      setError(`Option "${badOption.name.trim()}" — enter the price change as a plain amount, e.g. 2.50 or -0.50`)
       setAdding(false)
       return
     }
@@ -153,7 +153,7 @@ export default function Shop() {
           .map((g) => ({
             name: g.name.trim(), select_type: g.select_type, required: g.required,
             options: g.options.filter((o) => o.name.trim()).map((o) => ({
-              name: o.name.trim(), price_delta_cents: o.price.trim() === '' ? 0 : (parseMoneyCents(o.price) ?? 0),
+              name: o.name.trim(), price_delta_cents: o.price.trim() === '' ? 0 : (parseSignedMoneyCents(o.price) ?? 0),
               inventory: fulfillment === 'physical' && o.stock !== '' ? parseInt(o.stock, 10) : null,
             })),
           })),

@@ -25,6 +25,9 @@ from app.cappe.routes import payments as mod  # noqa: E402
 @pytest.mark.parametrize("obj", [
     {"payment_status": "paid"},
     {"payment_status": "paid", "mode": "payment"},
+    # A 100%-discount order has nothing to collect. Treating it as unpaid left it
+    # pending until the reaper cancelled an order the buyer legitimately finished.
+    {"payment_status": "no_payment_required", "mode": "payment"},
 ])
 def test_paid_session_is_paid(obj):
     assert mod.session_is_paid(obj) is True
@@ -32,8 +35,8 @@ def test_paid_session_is_paid(obj):
 
 @pytest.mark.parametrize("obj", [
     {"payment_status": "unpaid"},                      # ACH/SEPA/Klarna, pre-settlement
-    {"payment_status": "no_payment_required"},         # not money for a storefront order
     {"payment_status": "unpaid", "mode": "payment"},
+    {"payment_status": "something_new"},               # unknown ≠ money
 ])
 def test_unsettled_session_is_not_paid(obj):
     assert mod.session_is_paid(obj) is False
@@ -152,13 +155,19 @@ class FakeConnCtx:
         return False
 
 
-def _patch_conn(monkeypatch, conn, restocks):
+def _patch_conn(monkeypatch, conn, restocks, bookings=None):
     monkeypatch.setattr(mod, "get_connection", lambda: FakeConnCtx(conn))
 
     async def _restock(_conn, *, site_id, order_id, reason):
         restocks.append((site_id, order_id, reason))
 
+    async def _release(_conn, *, order_id):
+        if bookings is not None:
+            bookings.append(order_id)
+        return 1
+
     monkeypatch.setattr(mod, "restock_order", _restock)
+    monkeypatch.setattr(mod, "release_order_bookings", _release)
 
 
 def test_expired_session_cancels_and_restocks_its_own_order(monkeypatch):
@@ -181,6 +190,20 @@ def test_expired_session_cancels_and_restocks_its_own_order(monkeypatch):
     assert "o.status = 'pending'" in sql
     assert "a.stripe_account_id = $2" in sql
     assert args[1] == "acct_1"
+
+
+def test_expired_session_also_frees_the_booking_slots(monkeypatch):
+    """A booking line holds its appointment slot from order creation; handing
+    back stock alone left the calendar blocked for nobody."""
+    conn = FakeConn({"id": "o-1", "site_id": "s-1"})
+    restocks, bookings = [], []
+    _patch_conn(monkeypatch, conn, restocks, bookings)
+    asyncio.run(mod._cancel_unpaid_session(
+        "checkout.session.expired",
+        {"metadata": {"order_id": "11111111-1111-4111-8111-111111111111"}},
+        {"account": "acct_1"},
+    ))
+    assert bookings == ["o-1"]
 
 
 def test_already_settled_order_is_not_restocked(monkeypatch):
@@ -232,3 +255,74 @@ def test_collab_installment_is_left_for_manual_retry(monkeypatch):
     assert out == {"received": True}
     assert conn.fetchrow_args is None
     assert restocks == []
+
+
+
+# ── money for an order we already released ───────────────────────────────────
+
+class ScriptedConn:
+    """fetchrow/fetchval answer from queues, recording the SQL they were given."""
+
+    def __init__(self, rows, vals):
+        self.rows, self.vals = list(rows), list(vals)
+        self.sql = []
+
+    async def fetchrow(self, sql, *args):
+        self.sql.append(sql)
+        return self.rows.pop(0)
+
+    async def fetchval(self, sql, *args):
+        self.sql.append(sql)
+        return self.vals.pop(0)
+
+
+class FakeBackground:
+    def __init__(self):
+        self.tasks = []
+
+    def add_task(self, fn, *args):
+        self.tasks.append((getattr(fn, "__name__", str(fn)), args))
+
+
+def test_payment_for_a_cancelled_order_restores_it_and_is_loud(monkeypatch, caplog):
+    """The buyer HAS been charged, so 'cancelled' is now false. Skipping it as an
+    idempotent no-op (the old behaviour) left a charged customer with a cancelled
+    order and nothing in the logs above INFO."""
+    import logging
+
+    # 1st fetchrow: the pending→paid UPDATE matches nothing.
+    # fetchval:     the order exists and is 'cancelled'.
+    # 2nd fetchrow: the cancelled→paid restore.
+    conn = ScriptedConn(rows=[None, {"id": "o-1", "site_id": "s-1"}], vals=["cancelled"])
+    monkeypatch.setattr(mod, "get_connection", lambda: FakeConnCtx(conn))
+    bg = FakeBackground()
+
+    with caplog.at_level(logging.ERROR, logger=mod.logger.name):
+        out = asyncio.run(mod._mark_order_paid(
+            {"id": "cs_1", "payment_intent": "pi_1",
+             "metadata": {"order_id": "11111111-1111-4111-8111-111111111111"}},
+            {"account": "acct_1"},
+            bg,
+        ))
+
+    assert out == {"received": True}
+    restore = conn.sql[-1]
+    assert "status = 'paid'" in restore and "o.status = 'cancelled'" in restore
+    assert "a.stripe_account_id = $4" in restore          # still account-scoped
+    assert any("CANCELLED order" in r.getMessage() for r in caplog.records)
+    assert [t[0] for t in bg.tasks] == ["issue_receipt_for_paid_order"]
+
+
+def test_replayed_paid_event_is_still_an_idempotent_skip(monkeypatch):
+    conn = ScriptedConn(rows=[None], vals=["paid"])
+    monkeypatch.setattr(mod, "get_connection", lambda: FakeConnCtx(conn))
+    bg = FakeBackground()
+    out = asyncio.run(mod._mark_order_paid(
+        {"id": "cs_1", "payment_intent": "pi_1",
+         "metadata": {"order_id": "11111111-1111-4111-8111-111111111111"}},
+        {"account": "acct_1"},
+        bg,
+    ))
+    assert out == {"received": True}
+    assert bg.tasks == []          # no second receipt
+    assert len(conn.sql) == 2      # no restore attempted

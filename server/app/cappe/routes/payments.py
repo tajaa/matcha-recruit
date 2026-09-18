@@ -27,11 +27,12 @@ from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount
 from ..services.common import url_within_origins
 from ..services.email import (
+    app_origin,
     dashboard_url,
     send_cappe_collab_completed_email,
     send_cappe_collab_paid_email,
 )
-from ..services.inventory import restock_order
+from ..services.inventory import release_order_bookings, restock_order
 from ..services.receipt import issue_receipt_for_paid_order
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 
@@ -50,14 +51,19 @@ def extract_shipping_details(obj: dict) -> Optional[dict]:
 
 
 def _own_dashboard_url(url: Optional[str]) -> Optional[str]:
-    """Return `url` only if it points at our own creator dashboard.
+    """Return `url` only if it points at our own app origin.
 
     Stripe renders `return_url` / `refresh_url` as links on its hosted, Stripe-
     branded onboarding page. Forwarding a client-supplied URL there turns
     Stripe into a phishing springboard for any address the caller chooses, so
-    anything outside the dashboard origin is dropped for the safe default.
+    anything off our origin is dropped for the safe default.
+
+    The ORIGIN is the boundary, not the `/cappe` path: the same SPA serves the
+    creator marketplace under `/gummfit/creators/...` and the whole tree at the
+    apex on the Cappe host, and pinning `/cappe` bounced every creator coming
+    back from Stripe onboarding onto the business dashboard.
     """
-    return url_within_origins(url, [dashboard_url("")])
+    return url_within_origins(url, [app_origin()])
 
 
 def session_is_paid(obj: dict) -> bool:
@@ -76,7 +82,10 @@ def session_is_paid(obj: dict) -> bool:
     ps = obj.get("payment_status")
     if ps is None:
         return obj.get("mode") != "payment"
-    return ps == "paid"
+    # `no_payment_required` is a settled session too: a 100%-discount order has
+    # nothing to collect, and treating it as unpaid strands it pending until the
+    # reaper cancels an order the buyer legitimately completed.
+    return ps in ("paid", "no_payment_required")
 
 
 class ConnectLinkRequest(BaseModel):
@@ -290,6 +299,9 @@ async def _cancel_unpaid_session(etype, obj, event) -> dict:
                 await restock_order(
                     conn, site_id=row["site_id"], order_id=row["id"], reason="restock"
                 )
+                # Booking lines hold their appointment slot from order creation;
+                # stock alone coming back leaves the calendar blocked for nobody.
+                await release_order_bookings(conn, order_id=row["id"])
     if row is None:
         logger.info("cappe webhook: order %s not pending on %s; nothing to release", order_id, etype)
     else:
@@ -374,11 +386,43 @@ async def _mark_order_paid(obj, event, background) -> dict:
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Order not matched; releasing event for retry",
                 )
-            logger.info(
-                "cappe webhook: order %s already %s; idempotent skip",
-                order_id,
-                already,
-            )
+            if already == "cancelled":
+                # Money arrived for an order we had already released (owner
+                # cancelled it while the payment page was still open, or a
+                # release raced a late settlement). The buyer HAS been charged,
+                # so "cancelled" is now false: put the order back to paid and
+                # make the mismatch loud. Its stock and booking slots were
+                # handed back at cancel time, so a human has to confirm the
+                # goods still exist or refund — that cannot be decided here.
+                async with get_connection() as conn:
+                    revived = await conn.fetchrow(
+                        """UPDATE cappe_orders o
+                              SET status = 'paid', paid_at = NOW(),
+                                  stripe_payment_intent = $2, payment_ref = $2,
+                                  platform_fee_cents = COALESCE($3, platform_fee_cents),
+                                  updated_at = NOW()
+                             FROM cappe_sites s, cappe_accounts a
+                            WHERE o.id = $1 AND o.status = 'cancelled'
+                              AND s.id = o.site_id AND a.id = s.account_id
+                              AND a.stripe_account_id = $4
+                        RETURNING o.id, o.site_id""",
+                        oid, payment_intent, fee, event_account_id,
+                    )
+                logger.error(
+                    "cappe webhook: PAID event for CANCELLED order %s (intent %s) — order restored "
+                    "to paid; its stock/booking slots were already released, verify or refund",
+                    order_id, payment_intent,
+                )
+                if revived is not None:
+                    background.add_task(
+                        issue_receipt_for_paid_order, revived["id"], revived["site_id"]
+                    )
+            else:
+                logger.info(
+                    "cappe webhook: order %s already %s; idempotent skip",
+                    order_id,
+                    already,
+                )
     elif oid is not None:
         logger.warning("cappe webhook: order %s has no event account", order_id)
 

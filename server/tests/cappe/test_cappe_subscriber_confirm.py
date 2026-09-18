@@ -36,9 +36,12 @@ class FakeConn:
 
 
 @pytest.mark.anyio
-async def test_imported_contact_is_staged_pending_confirmation():
+async def test_imported_contact_is_staged_pending_confirmation(monkeypatch):
+    # Reserved domain (repo rule); the reserved-domain drop is the NEXT test's
+    # subject, so it is switched off here rather than dodged with a real domain.
+    monkeypatch.setattr(clients_mod, "_is_reserved_test_domain", lambda _e: False)
     conn = FakeConn("tok-1")
-    token = await clients_mod._add_to_newsletter(conn, "site-1", "person@realcontact.com", "Pat")
+    token = await clients_mod._add_to_newsletter(conn, "site-1", "person@example.com", "Pat")
     assert token == "tok-1"
     sql, _ = conn.args
     assert "'pending_confirmation'" in sql

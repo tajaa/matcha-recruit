@@ -37,12 +37,16 @@ export function safeHttpUrl(u?: string | null): string | undefined {
  *  validator on the same fields: these are background images on an https page,
  *  where an http URL is blocked as mixed content anyway.
  *
- *  `encodeURI` leaves `'`, `(` and `)` untouched, and any one of them closes
- *  the `url()` token early — hence the second pass. */
+ *  Serialised with `URL.href`, not `encodeURI`: `href` percent-encodes what
+ *  needs it and leaves existing escapes alone, whereas `encodeURI` re-encodes
+ *  the `%` of an already-encoded URL (`a%20b` → `a%2520b`) and breaks every
+ *  image whose path had a space in it. `href` still leaves `'`, `(` and `)`
+ *  untouched, and any one of them closes the `url()` token early — hence the
+ *  second pass. */
 export function safeCssUrl(u?: string | null): string | undefined {
   const safe = safeHttpUrl(u)
   if (!safe || !safe.toLowerCase().startsWith('https:')) return undefined
-  return encodeURI(safe).replace(
+  return new URL(safe).href.replace(
     /["'()\\]/g,
     (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
   )

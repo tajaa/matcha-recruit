@@ -148,9 +148,19 @@ class CloudFrontTenants:
             raise CappeEdgeError(f"{operation} failed: {code or exc}") from exc
 
     # ── Create ────────────────────────────────────────────────────────────
-    async def create_tenant(self, domain: str) -> CfTenant:
-        """Attach `domain` (apex + www) to the tenant distribution and ask
-        CloudFront to issue a managed certificate for it."""
+    async def create_tenant(self, domain: str, *, include_www: bool = False) -> CfTenant:
+        """Attach `domain` to the tenant distribution and ask CloudFront to issue
+        a managed certificate for it.
+
+        `include_www` adds `www.<domain>` to the same certificate. CloudFront
+        validates EVERY name on a managed certificate over HTTP, so a name whose
+        DNS never points at the edge keeps the whole certificate
+        `pending-validation` forever. It is therefore only safe when we control
+        the zone and set both records ourselves (a Porkbun-registered domain).
+        A connected (BYO) domain gets exactly the host the tenant connected —
+        which may itself be a subdomain like `shop.example.com`, where a `www.`
+        sibling makes no sense at all.
+        """
         settings = get_settings()
         distribution_id = settings.cappe_cf_tenant_distribution_id
         if not distribution_id:
@@ -162,7 +172,7 @@ class CloudFrontTenants:
         params: dict[str, Any] = {
             "DistributionId": distribution_id,
             "Name": _tenant_name(apex),
-            "Domains": [{"Domain": apex}, {"Domain": f"www.{apex}"}],
+            "Domains": [{"Domain": apex}] + ([{"Domain": f"www.{apex}"}] if include_www else []),
             "Enabled": True,
             "ManagedCertificateRequest": {
                 "ValidationTokenHost": "cloudfront",

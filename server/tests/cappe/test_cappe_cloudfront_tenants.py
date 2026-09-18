@@ -95,7 +95,9 @@ def test_tenant_name_is_a_safe_slug():
 
 def test_create_attaches_apex_and_www_and_requests_a_managed_cert(settings):
     client = FakeClient(create_distribution_tenant={"DistributionTenant": {"Id": "dt-1"}})
-    tenant = asyncio.run(CloudFrontTenants(client).create_tenant("www.Example.com"))
+    tenant = asyncio.run(
+        CloudFrontTenants(client).create_tenant("www.Example.com", include_www=True)
+    )
 
     assert tenant.tenant_id == "dt-1"
     assert tenant.routing_endpoint == "d123.cloudfront.net"
@@ -109,6 +111,14 @@ def test_create_attaches_apex_and_www_and_requests_a_managed_cert(settings):
     cert = kwargs["ManagedCertificateRequest"]
     assert cert["PrimaryDomainName"] == "example.com"
     assert cert["ValidationTokenHost"] == "cloudfront"
+
+
+def test_www_is_opt_in_so_a_byo_certificate_carries_one_name(settings):
+    """Every name on a managed certificate must validate; an unpointed `www.`
+    (or `www.shop.example.com`) would block issuance forever."""
+    client = FakeClient(create_distribution_tenant={"DistributionTenant": {"Id": "dt-1"}})
+    asyncio.run(CloudFrontTenants(client).create_tenant("shop.example.com"))
+    assert client.calls[0][1]["Domains"] == [{"Domain": "shop.example.com"}]
 
 
 def test_create_without_a_configured_distribution_is_refused(settings, monkeypatch):

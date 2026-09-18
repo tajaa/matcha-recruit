@@ -350,13 +350,50 @@ async def update_site(
     return site_row_to_dict(row)
 
 
+async def _delete_edge_tenants(tenants: list[tuple[str, str]]) -> None:
+    """Best-effort CloudFront cleanup after a site is gone. The `cappe_domains`
+    rows cascaded away with the site, so these ids exist nowhere else: a failure
+    is logged at ERROR with the tenant id, which is the only handle an operator
+    has left to remove it by hand."""
+    from ..services.cloudfront_tenants import CappeEdgeError, get_cloudfront_tenants
+
+    edge = get_cloudfront_tenants()
+    for tenant_id, domain in tenants:
+        try:
+            await edge.delete_tenant(tenant_id)
+        except CappeEdgeError as exc:
+            logger.error(
+                "cappe site delete: ORPHANED CloudFront tenant %s (%s) — delete by hand: %s",
+                tenant_id, domain, exc,
+            )
+
+
 @router.delete("/sites/{site_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_site(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
-    """Delete an owned site (cascades to its pages)."""
+async def delete_site(
+    site_id: UUID,
+    background: BackgroundTasks,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Delete an owned site (cascades to its pages and its domain rows).
+
+    The cascade removes `cappe_domains`, and with it the only record of each
+    domain's CloudFront tenant — which would keep billing, keep answering on our
+    certificate, and make reconnecting the same domain to a new site fail with
+    "already exists". Collect the tenant ids BEFORE the delete; remove them
+    after the response."""
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        tenants = await conn.fetch(
+            "SELECT cf_tenant_id, domain FROM cappe_domains "
+            "WHERE site_id = $1 AND cf_tenant_id IS NOT NULL",
+            site_id,
+        )
         await conn.execute(
             "DELETE FROM cappe_sites WHERE id = $1 AND account_id = $2", site_id, account.id
+        )
+    if tenants:
+        background.add_task(
+            _delete_edge_tenants, [(t["cf_tenant_id"], t["domain"]) for t in tenants]
         )
     await invalidate_render_cache(site_id)
 

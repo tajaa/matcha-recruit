@@ -22,6 +22,9 @@ from app.cappe.services import domain_register as mod  # noqa: E402
 from app.cappe.services.cloudfront_tenants import CappeEdgeError, CfTenant  # noqa: E402
 from app.cappe.services.porkbun import PorkbunError  # noqa: E402
 
+# `provision_domain_edge` claims the row too (RETURNING kind).
+EDGE_CLAIM = {"kind": "register"}
+
 CLAIM = {
     "id": "d-1",
     "site_id": "s-1",
@@ -81,13 +84,20 @@ class FakeEdge:
     def __init__(self, tenant=None, exc=None):
         self.tenant = tenant or CfTenant(tenant_id="dt-1", routing_endpoint="d123.cloudfront.net")
         self.exc = exc
+        self.delete_exc = None
         self.created = []
+        self.deleted = []
 
-    async def create_tenant(self, domain):
+    async def create_tenant(self, domain, *, include_www=False):
         if self.exc:
             raise self.exc
-        self.created.append(domain)
+        self.created.append((domain, include_www))
         return self.tenant
+
+    async def delete_tenant(self, tenant_id):
+        if self.delete_exc:
+            raise self.delete_exc
+        self.deleted.append(tenant_id)
 
 
 def _patch(monkeypatch, conn, pb, edge, refunds=None):
@@ -106,7 +116,7 @@ def _patch(monkeypatch, conn, pb, edge, refunds=None):
 # ── the claim ────────────────────────────────────────────────────────────────
 
 def test_finalize_claims_the_row_before_spending_money(monkeypatch):
-    conn = FakeConn([CLAIM])
+    conn = FakeConn([CLAIM, EDGE_CLAIM])
     pb, edge = FakePorkbun(), FakeEdge()
     _patch(monkeypatch, conn, pb, edge)
 
@@ -136,7 +146,7 @@ def test_unclaimable_row_never_reaches_porkbun(monkeypatch):
 
 
 def test_registration_is_idempotency_keyed_on_the_domain_row(monkeypatch):
-    conn = FakeConn([CLAIM])
+    conn = FakeConn([CLAIM, EDGE_CLAIM])
     pb, edge = FakePorkbun(), FakeEdge()
     _patch(monkeypatch, conn, pb, edge)
     asyncio.run(mod.finalize_domain_registration("d-1"))
@@ -146,7 +156,7 @@ def test_registration_is_idempotency_keyed_on_the_domain_row(monkeypatch):
 # ── the happy path ───────────────────────────────────────────────────────────
 
 def test_success_activates_the_domain_but_does_not_publish_it(monkeypatch):
-    conn = FakeConn([CLAIM])
+    conn = FakeConn([CLAIM, EDGE_CLAIM])
     pb, edge = FakePorkbun(), FakeEdge()
     _patch(monkeypatch, conn, pb, edge)
 
@@ -161,7 +171,7 @@ def test_success_activates_the_domain_but_does_not_publish_it(monkeypatch):
 def test_dns_points_at_the_routing_endpoint_not_an_ip(monkeypatch):
     """The edge has no stable IP; an A record to the EC2 bypasses CloudFront
     (and its certificate) entirely."""
-    conn = FakeConn([CLAIM])
+    conn = FakeConn([CLAIM, EDGE_CLAIM])
     pb, edge = FakePorkbun(), FakeEdge()
     _patch(monkeypatch, conn, pb, edge)
 
@@ -172,7 +182,7 @@ def test_dns_points_at_the_routing_endpoint_not_an_ip(monkeypatch):
 # ── failure paths ────────────────────────────────────────────────────────────
 
 def test_porkbun_failure_refunds_and_marks_the_row_failed(monkeypatch):
-    conn = FakeConn([CLAIM])
+    conn = FakeConn([CLAIM, EDGE_CLAIM])
     refunds = []
     pb, edge = FakePorkbun(register_exc=PorkbunError("domain taken")), FakeEdge()
     _patch(monkeypatch, conn, pb, edge, refunds=refunds)
@@ -187,7 +197,7 @@ def test_porkbun_failure_refunds_and_marks_the_row_failed(monkeypatch):
 def test_edge_failure_keeps_the_paid_registration(monkeypatch):
     """The domain is registered and paid for. Losing the row because CloudFront
     was unavailable would strand a real purchase; it is recorded for retry."""
-    conn = FakeConn([CLAIM])
+    conn = FakeConn([CLAIM, EDGE_CLAIM])
     pb = FakePorkbun()
     edge = FakeEdge(exc=CappeEdgeError("AccessDenied"))
     _patch(monkeypatch, conn, pb, edge)
@@ -201,7 +211,7 @@ def test_edge_failure_keeps_the_paid_registration(monkeypatch):
 
 
 def test_dns_pointing_failure_does_not_undo_the_registration(monkeypatch):
-    conn = FakeConn([CLAIM])
+    conn = FakeConn([CLAIM, EDGE_CLAIM])
     pb = FakePorkbun(point_exc=PorkbunError("dns api down"))
     _patch(monkeypatch, conn, pb, FakeEdge())
 
@@ -210,35 +220,133 @@ def test_dns_pointing_failure_does_not_undo_the_registration(monkeypatch):
     assert conn.sql_matching("status = 'failed'") == []
 
 
+# ── the edge claim (double-click / verify+retry / webhook+sweeper) ──────────
+
+def test_provisioning_claims_the_row_before_calling_aws(monkeypatch):
+    conn = FakeConn([EDGE_CLAIM])
+    pb, edge = FakePorkbun(), FakeEdge()
+    _patch(monkeypatch, conn, pb, edge)
+
+    assert asyncio.run(mod.provision_domain_edge("d-1", "example.com")) == (
+        "pending_dns", "d123.cloudfront.net",
+    )
+    sql, _ = conn.fetchrow_sql[0]
+    assert sql.strip().upper().startswith("UPDATE")
+    assert "cf_tenant_id IS NULL" in sql
+    assert "edge_status IN ('none', 'failed')" in sql
+    # A claim whose process died between the UPDATE and the AWS call must not
+    # be a permanent dead end.
+    assert "edge_status = 'provisioning'" in sql and mod._STALE_CLAIM in sql
+
+
+def test_losing_caller_never_creates_a_second_tenant_or_marks_the_winner_failed(monkeypatch):
+    """The race this closes: the second create fails with "already exists" and
+    then stamps edge_status='failed' over the first caller's healthy tenant."""
+    conn = FakeConn([None, {"edge_status": "pending_dns", "cf_routing_endpoint": "d123.cloudfront.net"}])
+    pb, edge = FakePorkbun(), FakeEdge()
+    _patch(monkeypatch, conn, pb, edge)
+
+    assert asyncio.run(mod.provision_domain_edge("d-1", "example.com")) == (
+        "pending_dns", "d123.cloudfront.net",
+    )
+    assert edge.created == []
+    assert conn.sql_matching("edge_status = 'failed'") == []
+
+
+def test_failure_write_cannot_clobber_a_tenant_that_appeared(monkeypatch):
+    conn = FakeConn([EDGE_CLAIM])
+    _patch(monkeypatch, conn, FakePorkbun(), FakeEdge(exc=CappeEdgeError("boom")))
+    asyncio.run(mod.provision_domain_edge("d-1", "example.com"))
+    sql, _ = conn.sql_matching("edge_status = 'failed'")[0]
+    assert "cf_tenant_id IS NULL" in sql
+
+
+# ── which hostnames go on the certificate ────────────────────────────────────
+
+def test_registered_domain_gets_www_because_we_set_both_records(monkeypatch):
+    conn = FakeConn([{"kind": "register"}])
+    edge = FakeEdge()
+    _patch(monkeypatch, conn, FakePorkbun(), edge)
+    asyncio.run(mod.provision_domain_edge("d-1", "example.com"))
+    assert edge.created == [("example.com", True)]
+
+
+def test_connected_domain_gets_exactly_the_host_the_tenant_connected(monkeypatch):
+    """CloudFront validates EVERY name on a managed certificate. `www.` of a BYO
+    host (which may itself be `shop.example.com`) is a name nobody pointed, and
+    it holds the whole certificate at pending-validation forever."""
+    conn = FakeConn([{"kind": "connect"}])
+    edge = FakeEdge()
+    _patch(monkeypatch, conn, FakePorkbun(), edge)
+    asyncio.run(mod.provision_domain_edge("d-1", "shop.example.com"))
+    assert edge.created == [("shop.example.com", False)]
+
+
 # ── retry ────────────────────────────────────────────────────────────────────
 
-def test_retry_only_touches_an_active_row_with_no_tenant(monkeypatch):
+def _retry_row(**over):
+    row = {"id": "d-1", "kind": "register", "domain": "example.com",
+           "cf_tenant_id": None, "edge_status": "failed"}
+    row.update(over)
+    return row
+
+
+def test_retry_ignores_a_domain_that_is_not_active(monkeypatch):
     conn = FakeConn([None])
     pb, edge = FakePorkbun(), FakeEdge()
     _patch(monkeypatch, conn, pb, edge)
-
     assert asyncio.run(mod.retry_domain_edge("d-1")) == "none"
-    sql, _ = conn.fetchrow_sql[0]
-    # Guarded so a retry can never detach a domain that is already live.
-    assert "status = 'active'" in sql and "cf_tenant_id IS NULL" in sql
+    assert "status = 'active'" in conn.fetchrow_sql[0][0]
     assert edge.created == []
 
 
-def test_retry_repoints_dns_for_a_bought_domain(monkeypatch):
-    conn = FakeConn([{"id": "d-1", "kind": "register", "domain": "example.com"}])
+def test_retry_provisions_a_domain_that_never_got_a_tenant(monkeypatch):
+    """`active` + `none`: the background task died, or the domain predates the
+    edge. Previously the sweeper ignored it and the UI offered no button."""
+    conn = FakeConn([_retry_row(edge_status="none"), EDGE_CLAIM])
     pb, edge = FakePorkbun(), FakeEdge()
     _patch(monkeypatch, conn, pb, edge)
-
     assert asyncio.run(mod.retry_domain_edge("d-1")) == "pending_dns"
     assert pb.pointed == [("example.com", "d123.cloudfront.net")]
 
 
-def test_retry_never_edits_dns_for_a_byo_domain(monkeypatch):
-    """A connected domain's DNS lives at the tenant's own registrar — we have no
-    business writing records there even if we could."""
-    conn = FakeConn([{"id": "d-1", "kind": "connect", "domain": "example.com"}])
+def test_retry_replaces_a_tenant_whose_certificate_died(monkeypatch):
+    """The old retry only acted when cf_tenant_id IS NULL, so a failed
+    certificate — the commonest failure — could never be retried."""
+    conn = FakeConn([_retry_row(cf_tenant_id="dt-dead"), EDGE_CLAIM])
     pb, edge = FakePorkbun(), FakeEdge()
     _patch(monkeypatch, conn, pb, edge)
 
+    assert asyncio.run(mod.retry_domain_edge("d-1")) == "pending_dns"
+    assert edge.deleted == ["dt-dead"]
+    cleared = conn.sql_matching("SET cf_tenant_id = NULL")
+    assert cleared and "edge_status = 'failed'" in cleared[0][0]
+    assert edge.created == [("example.com", True)]
+
+
+@pytest.mark.parametrize("state", ["pending_dns", "provisioning", "live"])
+def test_retry_never_touches_a_healthy_or_validating_tenant(monkeypatch, state):
+    conn = FakeConn([_retry_row(cf_tenant_id="dt-1", edge_status=state)])
+    pb, edge = FakePorkbun(), FakeEdge()
+    _patch(monkeypatch, conn, pb, edge)
+    assert asyncio.run(mod.retry_domain_edge("d-1")) == state
+    assert edge.deleted == [] and edge.created == []
+
+
+def test_retry_keeps_the_pointer_when_the_dead_tenant_cannot_be_deleted(monkeypatch):
+    conn = FakeConn([_retry_row(cf_tenant_id="dt-dead")])
+    edge = FakeEdge()
+    edge.delete_exc = CappeEdgeError("AccessDenied")
+    _patch(monkeypatch, conn, FakePorkbun(), edge)
+    assert asyncio.run(mod.retry_domain_edge("d-1")) == "failed"
+    assert conn.sql_matching("SET cf_tenant_id = NULL") == []
+    assert edge.created == []
+
+
+def test_retry_never_edits_dns_for_a_byo_domain(monkeypatch):
+    """A connected domain's DNS lives at the tenant's own registrar."""
+    conn = FakeConn([_retry_row(kind="connect", edge_status="none"), {"kind": "connect"}])
+    pb, edge = FakePorkbun(), FakeEdge()
+    _patch(monkeypatch, conn, pb, edge)
     assert asyncio.run(mod.retry_domain_edge("d-1")) == "pending_dns"
     assert pb.pointed == []

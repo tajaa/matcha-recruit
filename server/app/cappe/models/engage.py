@@ -207,6 +207,9 @@ class CappeClientImportResult(BaseModel):
     updated: int = 0
     skipped: int = 0
     newsletter_added: int = 0
+    # Rows that were imported as clients but NOT staged for the newsletter because
+    # the account's daily confirmation-email budget was spent.
+    newsletter_capped: int = 0
     branches_matched: int = 0           # rows that resolved a branch by name
     errors: list[CappeClientImportError] = Field(default_factory=list)
 

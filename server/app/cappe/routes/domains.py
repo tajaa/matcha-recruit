@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+
+import asyncpg
 import secrets
 from datetime import datetime, timezone
 from typing import Optional
@@ -347,12 +349,15 @@ async def verify_domain(domain_id: UUID, account: CappeAccount = Depends(require
                     "UPDATE cappe_domains SET status = 'active', updated_at = NOW() WHERE id = $1",
                     domain_id,
                 )
-        except Exception as exc:  # concurrent claim landed on the same domain first
-            if "uq_cappe_domains_lower_active" in str(exc) or "cappe_domains_domain_key" in str(exc):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT, detail="That domain is already connected"
-                )
-            raise
+        except asyncpg.UniqueViolationError:
+            # A concurrent claim activated the same domain between the SELECT
+            # and the UPDATE. Caught by type, not by index name: two partial
+            # unique indexes guard this (cappe_domains_active_domain_uniq and
+            # uq_cappe_domains_lower_active) and string-matching the wrong one
+            # turned this race into a 500.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="That domain is already connected"
+            )
 
     # Attach it to the edge. A failure is recorded on the row (edge_status
     # 'failed') rather than raised: ownership IS verified at this point, and the
@@ -545,9 +550,10 @@ async def request_transfer(domain_id: UUID, account: CappeAccount = Depends(requ
                 detail=f"Domains can't be transferred within {_TRANSFER_LOCK_DAYS} days of registration",
             )
         # 'transfer_requested' is a real status, not just a timestamp: it takes
-        # the domain out of the renewal sweep, freezes in-app DNS edits, and
-        # tells the edge sweeper to tear the CloudFront tenant down. A row left
-        # 'active' kept all three running on a domain on its way out the door.
+        # the domain out of the renewal sweep and freezes in-app DNS edits. It
+        # does NOT take the site offline — a transfer takes days and may never
+        # complete, so the edge keeps serving until the registration actually
+        # lapses (`expired`). Reversible via /transfer-request/cancel.
         updated = await conn.fetchrow(
             f"UPDATE cappe_domains SET transfer_requested_at = NOW(), "
             f"status = 'transfer_requested', updated_at = NOW() "
@@ -563,12 +569,36 @@ async def request_transfer(domain_id: UUID, account: CappeAccount = Depends(requ
     return dict(updated)
 
 
+@router.post("/domains/{domain_id}/transfer-request/cancel", response_model=CappeDomain)
+async def cancel_transfer_request(
+    domain_id: UUID, account: CappeAccount = Depends(require_cappe_account)
+):
+    """Withdraw a transfer-out request: the domain goes back to `active`, which
+    puts it back in the renewal sweep and unfreezes DNS. Without this a tenant
+    who clicked "Transfer out" by mistake sat outside renewals until the
+    registration lapsed."""
+    async with get_connection() as conn:
+        updated = await conn.fetchrow(
+            f"UPDATE cappe_domains SET status = 'active', transfer_requested_at = NULL, "
+            f"updated_at = NOW() WHERE id = $1 AND account_id = $2 "
+            f"AND status = 'transfer_requested' RETURNING {_DOMAIN_COLS}",
+            domain_id, account.id,
+        )
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="No transfer request to cancel"
+        )
+    logger.warning("cappe TRANSFER-OUT cancelled: domain=%s account=%s", updated["domain"], account.email)
+    return dict(updated)
+
+
 # ── Edge (CloudFront tenant) retry ─────────────────────────────────────────
 @router.post("/domains/{domain_id}/edge/retry", response_model=CappeDomain)
 async def retry_edge(domain_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
-    """Re-attempt CloudFront tenant creation for an active domain whose edge
-    provisioning failed (a transient AWS error, or a quota that has since been
-    raised). No-op on a domain that already has a tenant."""
+    """Re-attempt edge provisioning for an active domain that is not serving:
+    never provisioned (`none`), creation failed, or its certificate died
+    (`failed` with a tenant — replaced). A healthy or still-validating tenant is
+    left alone; `retry_domain_edge` owns those rules."""
     _require_custom_domains_enabled()
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -579,8 +609,7 @@ async def retry_edge(domain_id: UUID, account: CappeAccount = Depends(require_ca
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Domain not found")
     if row["status"] != "active":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Domain is not active")
-    if not row["cf_tenant_id"]:
-        await retry_domain_edge(domain_id)
+    await retry_domain_edge(domain_id)
     async with get_connection() as conn:
         updated = await conn.fetchrow(
             f"SELECT {_DOMAIN_COLS} FROM cappe_domains WHERE id = $1", domain_id

@@ -2,7 +2,7 @@
 // saved as a $1.00 price. These cases pin the refusals.
 // Run:  npx vitest run src/cappe/utils/money
 import { describe, expect, it } from 'vitest'
-import { parseMoney, parseMoneyCents } from './money'
+import { parseMoney, parseMoneyCents, parsePercentBps, parseSignedMoneyCents } from './money'
 
 describe('parseMoney', () => {
   it('parses whole and decimal amounts', () => {
@@ -54,3 +54,33 @@ describe('parseMoneyCents', () => {
     expect(parseMoneyCents('abc')).toBeNull()
   })
 })
+
+describe('signed option deltas', () => {
+  it('accepts a negative delta — a smaller size can cost less', () => {
+    expect(parseSignedMoneyCents('-0.50')).toBe(-50)
+    expect(parseSignedMoneyCents('2.50')).toBe(250)
+    expect(parseSignedMoneyCents('-1,25')).toBe(-125)
+  })
+  it('still refuses junk', () => {
+    expect(parseSignedMoneyCents('--1')).toBeNull()
+    expect(parseSignedMoneyCents('-')).toBeNull()
+    expect(parseSignedMoneyCents('1-')).toBeNull()
+  })
+  it('a plain price stays unsigned', () => {
+    expect(parseMoneyCents('-5')).toBeNull()
+  })
+})
+
+describe('percentage rates', () => {
+  it('accepts three decimals and rounds to whole basis points', () => {
+    expect(parsePercentBps('8.875')).toBe(888)
+    expect(parsePercentBps('8.75')).toBe(875)
+    expect(parsePercentBps('0')).toBe(0)
+  })
+  it('refuses a fourth decimal, a sign, or a percent mark', () => {
+    expect(parsePercentBps('8.8755')).toBeNull()
+    expect(parsePercentBps('-1')).toBeNull()
+    expect(parsePercentBps('8.75%')).toBeNull()
+  })
+})
+

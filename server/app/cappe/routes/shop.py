@@ -29,7 +29,7 @@ from ..models.cappe import (
 from ._shared import build_patch, fetch_option_groups, get_owned_site, loads, loads_list
 from ..services.common import receipt_filename as _receipt_filename
 from ..services.directory import refresh_site_search
-from ..services.inventory import log_adjustment, restock_order
+from ..services.inventory import log_adjustment, release_order_bookings, restock_order
 from ..services.entitlements import require_fulfillment, resolve_entitlements
 
 # Order statuses that reflect a physical decrement having happened, and the
@@ -455,6 +455,7 @@ async def update_order_status(
             )
             if should_restock(current["status"], body.status):
                 await restock_order(conn, site_id=site_id, order_id=order_id, reason="restock")
+                await release_order_bookings(conn, order_id=order_id)
             items = await conn.fetch(
                 f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
                 order_id,

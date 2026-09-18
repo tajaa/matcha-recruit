@@ -8,7 +8,7 @@ Set-based DDL/DML only; every statement is idempotent so a re-run is a no-op.
   UI, which has no INSERT path), `cappe_order_reaper` (abandoned pending
   orders → cancel + restock) and `cappe_edge_sync` (custom-domain CloudFront
   tenant / certificate polling). All default OFF like every scheduled task.
-- cappe_subscribers: `confirm_token` + `pending_confirmation` status so
+- cappe_subscribers: `confirm_token` + `confirm_sent_at` + `pending_confirmation` status so
   owner-imported contacts are not mailed until they confirm.
 - cappe_campaigns: `failed_count` so a partially failed blast is visible.
 - cappe_domains: `transfer_requested` status; CloudFront tenant columns
@@ -64,6 +64,10 @@ def upgrade() -> None:
 
     # ── subscribers: double opt-in for imported contacts ───────────────────
     op.execute("ALTER TABLE cappe_subscribers ADD COLUMN IF NOT EXISTS confirm_token UUID")
+    # Claim-before-send marker for the confirmation worker: a confirmation is
+    # mailed at most once, and one the worker died before sending is picked up
+    # again instead of being lost with an in-process task.
+    op.execute("ALTER TABLE cappe_subscribers ADD COLUMN IF NOT EXISTS confirm_sent_at TIMESTAMPTZ")
     op.execute(_DROP_STATUS_CHECK.format(table="cappe_subscribers"))
     op.execute("""
         ALTER TABLE cappe_subscribers ADD CONSTRAINT cappe_subscribers_status_check
@@ -148,6 +152,7 @@ def downgrade() -> None:
         ALTER TABLE cappe_subscribers ADD CONSTRAINT cappe_subscribers_status_check
         CHECK (status IN ('subscribed', 'unsubscribed', 'bounced', 'pending'))
     """)
+    op.execute("ALTER TABLE cappe_subscribers DROP COLUMN IF EXISTS confirm_sent_at")
     op.execute("ALTER TABLE cappe_subscribers DROP COLUMN IF EXISTS confirm_token")
 
     op.execute(

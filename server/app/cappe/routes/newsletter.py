@@ -276,14 +276,21 @@ async def send_campaign(
                 status_code=status.HTTP_409_CONFLICT, detail="Campaign already sent"
             )
 
-        # Daily recipient ceiling across every site this account owns. Campaigns
-        # still in flight count 0 until the worker finalizes them — the sends/day
-        # limit below is what bounds that window.
+        # Daily recipient ceiling across every site this account owns. A campaign
+        # still `sending` has recipient_count 0 until the worker finalizes it, so
+        # counting finished ones alone let three back-to-back sends (3 × 5k) all
+        # clear a 5k cap. An in-flight campaign is charged its site's current
+        # subscriber count — the audience the worker is about to mail.
         already_sent = await conn.fetchval(
-            """SELECT COALESCE(SUM(c.recipient_count), 0)
+            """SELECT COALESCE(SUM(
+                        CASE WHEN c.status = 'sending'
+                             THEN (SELECT COUNT(*) FROM cappe_subscribers sub
+                                    WHERE sub.site_id = c.site_id AND sub.status = 'subscribed')
+                             ELSE c.recipient_count END), 0)
                  FROM cappe_campaigns c
                  JOIN cappe_sites s ON s.id = c.site_id
-                WHERE s.account_id = $1 AND c.sent_at > NOW() - INTERVAL '24 hours'""",
+                WHERE s.account_id = $1
+                  AND (c.status = 'sending' OR c.sent_at > NOW() - INTERVAL '24 hours')""",
             account.id,
         )
         pending = await conn.fetchval(

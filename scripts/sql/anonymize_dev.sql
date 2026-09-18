@@ -235,6 +235,17 @@ UPDATE cappe_subscribers SET
     email             = 'sub_' || replace(id::text,'-','') || '@example.com',
     name              = CASE WHEN name IS NOT NULL THEN 'Subscriber ' || left(replace(id::text,'-',''), 6) END,
     unsubscribe_token = replace(gen_random_uuid()::text, '-', '');
+-- A live confirm link subscribes a real address to a real tenant's list. The
+-- column arrives with zzzzcappe31; this file aborts on an unknown column, and a
+-- dump taken before prod ran that migration does not have it — hence the guard.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'cappe_subscribers' AND column_name = 'confirm_token') THEN
+        UPDATE cappe_subscribers SET confirm_token = gen_random_uuid()
+         WHERE confirm_token IS NOT NULL;
+    END IF;
+END $$;
 UPDATE cappe_orders SET
     customer_email        = CASE WHEN customer_email IS NOT NULL THEN 'order_' || replace(id::text,'-','') || '@example.com' END,
     customer_name         = CASE WHEN customer_name IS NOT NULL THEN 'Customer ' || left(replace(id::text,'-',''), 6) END,

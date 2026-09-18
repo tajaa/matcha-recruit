@@ -72,3 +72,24 @@ async def restock_order(conn, *, site_id: UUID, order_id: UUID, reason: str) -> 
                     conn, site_id=site_id, product_id=pid, option_id=oid, delta=q,
                     balance_after=obal, reason=reason,
                 )
+
+
+async def release_order_bookings(conn, *, order_id: UUID) -> int:
+    """Free the appointment slots an order's booking lines were holding.
+
+    A booking line reserves its slot when the order is created (the
+    double-book index covers `pending` and `confirmed`), so an order that is
+    released without this keeps the slot off the calendar for nobody. Only
+    still-live bookings are touched — a completed or already-declined one is
+    history, not a hold. Run in the caller's transaction beside the status
+    write and `restock_order`. Returns the number of slots freed.
+    """
+    rows = await conn.fetch(
+        """UPDATE cappe_bookings SET status = 'cancelled', updated_at = NOW()
+            WHERE id IN (SELECT booking_id FROM cappe_order_items
+                          WHERE order_id = $1 AND booking_id IS NOT NULL)
+              AND status IN ('pending', 'confirmed')
+        RETURNING id""",
+        order_id,
+    )
+    return len(rows)

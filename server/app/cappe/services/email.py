@@ -22,6 +22,11 @@ def _base_url() -> str:
 _DASHBOARD_URL = f"{_base_url()}/cappe"
 
 
+def app_origin() -> str:
+    """Scheme + host the Cappe SPA is served from (no path)."""
+    return _base_url()
+
+
 def dashboard_url(path: str = "") -> str:
     """Absolute creator-dashboard URL, e.g. dashboard_url(f"/sites/{id}/orders")."""
     return f"{_DASHBOARD_URL}{path}"

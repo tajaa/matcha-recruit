@@ -55,7 +55,9 @@ async def public_unsubscribe(slug: str, token: str, request: Request):
     return {"ok": True}
 
 
-def _confirm_page(heading: str, message: str, status_code: int = 200) -> HTMLResponse:
+def _confirm_page(
+    heading: str, message: str, status_code: int = 200, *, confirm_action: str | None = None
+) -> HTMLResponse:
     """Minimal standalone page for a link clicked out of an email client.
 
     Deliberately self-contained (no site theme, no JS): the person may not have
@@ -68,27 +70,70 @@ def _confirm_page(heading: str, message: str, status_code: int = 200) -> HTMLRes
         "<body style=\"margin:0;min-height:100vh;display:grid;place-items:center;"
         "background:#0b0b0d;color:#e4e4e7;font:16px system-ui,sans-serif\">"
         f"<main style=\"max-width:32rem;padding:2rem;text-align:center\"><h1>{escape(heading)}</h1>"
-        f"<p style=\"color:#a1a1aa;line-height:1.6\">{escape(message)}</p></main></body></html>",
+        f"<p style=\"color:#a1a1aa;line-height:1.6\">{escape(message)}</p>"
+        + (
+            f"<form method=\"post\" action=\"{escape(confirm_action)}\">"
+            "<button type=\"submit\" style=\"margin-top:1rem;padding:.75rem 1.5rem;border:0;"
+            "border-radius:.5rem;background:#c6f16b;color:#0b0b0d;font:600 16px system-ui,"
+            "sans-serif;cursor:pointer\">Confirm subscription</button></form>"
+            if confirm_action else ""
+        )
+        + "</main></body></html>",
         status_code=status_code,
         headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
     )
 
 
-@router.get("/public/subscribe/confirm/{token}", response_class=HTMLResponse)
-async def public_confirm_subscription(token: str, request: Request):
-    """Double opt-in landing for a subscriber a business imported.
-
-    Imported contacts are staged `pending_confirmation` (routes/clients.py); the
-    campaign worker only ever selects `subscribed`, so this click is what makes
-    an imported address mailable. Idempotent — a second click on the same link
-    is a success, not an error — and unknown tokens 404 without saying anything
-    about which addresses exist.
-    """
-    await _read_rate_limit(request)
+def _parse_confirm_token(token: str) -> UUID:
     try:
-        confirm_token = UUID(token)
+        return UUID(token)
     except (ValueError, TypeError):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown confirmation link")
+
+
+@router.get("/public/subscribe/confirm/{token}", response_class=HTMLResponse)
+async def public_confirm_subscription_page(token: str, request: Request):
+    """Landing page for the double-opt-in link. **Changes nothing.**
+
+    Mail security scanners and link-preview bots fetch every URL in a message
+    with a plain GET. If the GET itself subscribed the address, every imported
+    contact behind such a scanner would "consent" without a human ever seeing
+    the email — which is the opposite of double opt-in. The GET only renders a
+    button; the POST below is the consent.
+    """
+    await _read_rate_limit(request)
+    confirm_token = _parse_confirm_token(token)
+    async with get_connection() as conn:
+        state = await conn.fetchval(
+            "SELECT status FROM cappe_subscribers WHERE confirm_token = $1", confirm_token
+        )
+    if state is None:
+        return _confirm_page(
+            "Link not found",
+            "This confirmation link is no longer valid.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    if state == "subscribed":
+        return _confirm_page("You're subscribed", "This address is already confirmed.")
+    return _confirm_page(
+        "Confirm your subscription",
+        "A business added this address to its mailing list. Nothing is sent to you "
+        "unless you confirm.",
+        confirm_action=request.url.path,
+    )
+
+
+@router.post("/public/subscribe/confirm/{token}", response_class=HTMLResponse)
+async def public_confirm_subscription(token: str, request: Request):
+    """The consent itself — reached only by pressing the button on the page above.
+
+    Imported contacts are staged `pending_confirmation` (routes/clients.py); the
+    campaign worker only ever selects `subscribed`, so this is what makes an
+    imported address mailable. Idempotent — confirming twice is a success — and
+    unknown tokens 404 without saying anything about which addresses exist.
+    """
+    await _read_rate_limit(request)
+    confirm_token = _parse_confirm_token(token)
 
     async with get_connection() as conn:
         confirmed = await conn.fetchval(

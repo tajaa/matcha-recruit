@@ -55,6 +55,7 @@ celery_app = Celery(
         "app.workers.tasks.benefit_enrollment_notifications",
         "app.workers.tasks.cappe_booking_reminders",
         "app.workers.tasks.cappe_campaign_send",
+        "app.workers.tasks.cappe_subscribe_confirm",
         "app.workers.tasks.cappe_collab_auto_approve",
         "app.workers.tasks.cappe_domain_finalize",
         # Celery builds its strategy table from `include` BEFORE worker_ready
