@@ -21,16 +21,19 @@ function timeAgo(iso: string): string {
 function OffersTab() {
   const [chip, setChip] = useState<StatusChip>('all')
   const [offers, setOffers] = useState<OfferListItem[]>([])
-  const [loading, setLoading] = useState(true)
+  // `loading` is DERIVED (the request for the current key has not settled yet)
+  // rather than set at the top of the effect: a synchronous setState in an
+  // effect body re-renders before the fetch has even started.
+  const [settledChip, setSettledChip] = useState<StatusChip | null>(null)
+  const loading = settledChip !== chip
 
   useEffect(() => {
-    setLoading(true)
     const status = chip === 'all' ? undefined : chip === 'closed' ? CLOSED.join(',') : chip
     const qs = status ? `&status=${encodeURIComponent(status)}` : ''
     cappeApi.get<{ offers: OfferListItem[]; total: number }>(`/collab/offers?side=brand${qs}`)
       .then((res) => setOffers(res.offers))
       .catch(() => setOffers([]))
-      .finally(() => setLoading(false))
+      .finally(() => setSettledChip(chip))
   }, [chip])
 
   return (
@@ -97,11 +100,15 @@ function CampaignsTab() {
   const [title, setTitle] = useState('')
   const [creating, setCreating] = useState(false)
 
+  // State is set only from the request's callbacks; `loading` starts true, so
+  // the mount fetch needs no synchronous setState in the effect body.
+  const fetchCampaigns = () =>
+    cappeApi.get<Campaign[]>('/collab/campaigns').then(setCampaigns).catch(() => setCampaigns([])).finally(() => setLoading(false))
   function load() {
     setLoading(true)
-    cappeApi.get<Campaign[]>('/collab/campaigns').then(setCampaigns).catch(() => setCampaigns([])).finally(() => setLoading(false))
+    void fetchCampaigns()
   }
-  useEffect(load, [])
+  useEffect(() => { void fetchCampaigns() }, [])
 
   async function create() {
     if (!title.trim()) return

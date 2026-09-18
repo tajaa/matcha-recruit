@@ -108,7 +108,12 @@ export default function BrandHome() {
   const [verifiedOnly, setVerifiedOnly] = useState(false)
   const [creators, setCreators] = useState<PublicCreatorCard[]>([])
   const [total, setTotal] = useState(0)
-  const [loadingCreators, setLoadingCreators] = useState(true)
+  // `loading` is DERIVED (the request for the current key has not settled yet)
+  // rather than set at the top of the effect: a synchronous setState in an
+  // effect body re-renders before the fetch has even started.
+  const searchKey = [q, niche, platform, minFollowers, maxRateCents, verifiedOnly].join('\u0000')
+  const [settledSearchKey, setSettledSearchKey] = useState<string | null>(null)
+  const loadingCreators = settledSearchKey !== searchKey
   const [creatorError, setCreatorError] = useState<string | null>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [offers, setOffers] = useState<OfferListItem[]>([])
@@ -123,8 +128,6 @@ export default function BrandHome() {
   const requestSeq = useRef(0)
   useEffect(() => {
     const seq = ++requestSeq.current
-    setLoadingCreators(true)
-    setCreatorError(null)
     fetchPublicCreators({
       q: q || undefined,
       niche: niche || undefined,
@@ -139,6 +142,7 @@ export default function BrandHome() {
         if (seq !== requestSeq.current) return
         setCreators(res.creators)
         setTotal(res.total)
+        setCreatorError(null)
       })
       .catch((err: Error) => {
         if (seq !== requestSeq.current) return
@@ -146,8 +150,8 @@ export default function BrandHome() {
         setCreators([])
         setTotal(0)
       })
-      .finally(() => { if (seq === requestSeq.current) setLoadingCreators(false) })
-  }, [q, niche, platform, minFollowers, maxRateCents, verifiedOnly])
+      .finally(() => { if (seq === requestSeq.current) setSettledSearchKey(searchKey) })
+  }, [q, niche, platform, minFollowers, maxRateCents, verifiedOnly, searchKey])
 
   useEffect(() => {
     cappeApi.get<Campaign[]>('/collab/campaigns').then(setCampaigns).catch(() => setCampaigns([]))

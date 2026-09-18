@@ -110,7 +110,7 @@ export default function DomainManager({ siteId }: { siteId: string }) {
         domain,
       })
       // Hand off to Stripe Checkout; registration finishes via the webhook.
-      window.location.href = res.checkout_url
+      window.location.assign(res.checkout_url)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start checkout')
       setBuying(null)

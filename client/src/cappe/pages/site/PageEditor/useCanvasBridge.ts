@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import type { CappeBlock, CappeCanvasElement } from '../../../types'
 import { CV_MAX_ELEMENTS, cvEls, cvNextY, cvNewElement, isCanvasBlock } from './canvasHelpers'
 import { applyFieldPath } from './merlinOps'
@@ -74,8 +74,7 @@ export function useCanvasBridge(
   // Once the user drags the floating inspector, keep it where they put it (don't
   // re-anchor to the next clicked element); reset when the panel closes.
   const panelDragged = useRef(false)
-  const reservedRightRef = useRef(0)
-  reservedRightRef.current = reservedRight
+  const reservedRightRef = useRef(reservedRight)
   const maxLeft = () => window.innerWidth - 372 - reservedRightRef.current
   function startPanelDrag(e: ReactPointerEvent) {
     e.preventDefault()
@@ -108,17 +107,24 @@ export function useCanvasBridge(
   const canvasBpRef = useRef<'d' | 'm'>('d')
   const stickyRef = useRef(stickySelection)
   const pendingSelRef = useRef<PendingSelection | null>(null)
-  selBlockRef.current = selBlock
-  blocksRef.current = blocks
-  selElementRef.current = selElement
-  canvasBpRef.current = canvasBp
-  stickyRef.current = stickySelection
-  pendingSelRef.current = pendingSel
   const postToCanvas = (msg: unknown) => iframeRef.current?.contentWindow?.postMessage(msg, '*')
   const editModeRef = useRef(editMode)
-  editModeRef.current = editMode
   const onDropImageRef = useRef(onDropImage)
-  onDropImageRef.current = onDropImage
+  // Mirrors are synced in a layout effect, not during render: a render can be
+  // thrown away or replayed, and a ref written then would expose state that
+  // never committed. useLayoutEffect runs after commit and before any event,
+  // message or passive effect can read them, so handlers still see the latest.
+  useLayoutEffect(() => {
+    reservedRightRef.current = reservedRight
+    selBlockRef.current = selBlock
+    blocksRef.current = blocks
+    selElementRef.current = selElement
+    canvasBpRef.current = canvasBp
+    stickyRef.current = stickySelection
+    pendingSelRef.current = pendingSel
+    editModeRef.current = editMode
+    onDropImageRef.current = onDropImage
+  })
   // Re-assert the interaction mode whenever it changes, and once more when a
   // fresh runtime signals ready (the iframe fully reloads on most edits, which
   // would otherwise silently reset restrictMode to its 'canvas' default).
@@ -145,6 +151,11 @@ export function useCanvasBridge(
   // entirely. Drop it the moment that happens, rather than letting a later
   // Merlin turn address a block that no longer exists.
   useEffect(() => {
+    // Functional updates that return the SAME object when nothing needs pruning,
+    // so this bails out without a re-render in the common case. Deriving it at
+    // render instead would mean every consumer (and the mount-once message
+    // handler's refs) reads a filtered copy rather than the state itself.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- prune selection when its block is deleted/undone
     setSelection((s) => (s && !blocks.some((b) => b._k === s.block) ? null : s))
     setPendingSel((p) => (p && !blocks.some((b) => b._k === p.blockKey) ? null : p))
   }, [blocks])
@@ -152,6 +163,7 @@ export function useCanvasBridge(
   // Sticky mode just turned off (Merlin closed) — a staged switch has no UI
   // left to confirm/dismiss it, so drop it rather than leave it dangling.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- drop a staged switch when its confirm UI closes
     if (!stickySelection) setPendingSel(null)
   }, [stickySelection])
 

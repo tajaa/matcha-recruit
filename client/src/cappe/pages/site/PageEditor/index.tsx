@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { cappeApi } from '../../../api'
@@ -72,6 +72,10 @@ export default function PageEditor() {
     selectedBlock?: string | null
     selection?: MerlinSelection | null
   }>({ blocks, theme: themeEditor.theme })
+  // Declared up here (history itself is created further down, after the state it
+  // records) so the Merlin callback below closes over an existing ref; it is
+  // filled by a layout effect once `history` exists.
+  const historyRef = useRef<ReturnType<typeof useEditorHistory> | null>(null)
   const merlin = useMerlin(
     siteId, pageId,
     () => liveStateRef.current,
@@ -79,7 +83,7 @@ export default function PageEditor() {
       // Close the history entry for anything the user typed before this turn,
       // and force the turn itself to record as its own entry instead of
       // merging with whatever they type in the next 500ms.
-      historyRef.current.checkpoint()
+      historyRef.current?.checkpoint()
       if (blocksChanged) setBlocks(nextBlocks)
       if (themeChanged) { themeEditor.loadTheme(nextTheme); themeEditor.markDirty() }
     },
@@ -130,12 +134,18 @@ export default function PageEditor() {
   // one used to exist here and silently dropped any field added to one type
   // but not the other.
   const merlinSelection: MerlinSelection | null = canvas.selection
-  liveStateRef.current = {
-    blocks,
-    theme: themeEditor.theme,
-    selectedBlock: canvas.selBlock != null ? (blocks[canvas.selBlock]?._k as string | undefined) ?? null : null,
-    selection: merlinSelection,
-  }
+  // Mirrors are synced in a layout effect, not during render: a render can be
+  // thrown away or replayed, and a ref written then would expose state that
+  // never committed. useLayoutEffect runs after commit and before any event,
+  // message or passive effect can read them, so handlers still see the latest.
+  useLayoutEffect(() => {
+    liveStateRef.current = {
+      blocks,
+      theme: themeEditor.theme,
+      selectedBlock: canvas.selBlock != null ? (blocks[canvas.selBlock]?._k as string | undefined) ?? null : null,
+      selection: merlinSelection,
+    }
+  })
   // Merlin's own acknowledgment of the current selection ("Working on Hero —
   // what should we do here?") — a display label, not the `_k` used above.
   const selectedBlockType = canvas.selBlock != null ? blocks[canvas.selBlock]?.type : undefined
@@ -255,7 +265,9 @@ export default function PageEditor() {
   // same block must still re-open + re-scroll its card), so FormModeView can
   // force-open the matching card even if the user had collapsed it.
   const [selectTick, setSelectTick] = useState(0)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // A tick is an EVENT counter (re-open the card even for a repeat click on the
+  // same block), which has no derived form — it has to be bumped in response.
+  // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
   useEffect(() => { if (editMode === 'form' && canvas.selBlock != null) setSelectTick((t) => t + 1) }, [editMode, canvas.selectSeq])
   // The block just added should open expanded once, instead of the new
   // collapsed-by-default state.
@@ -321,12 +333,11 @@ export default function PageEditor() {
     { blocks, title, meta, theme: themeEditor.theme },
     (s) => { setBlocks(s.blocks); setTitle(s.title); setMeta(s.meta); themeEditor.loadTheme(s.theme); themeEditor.markDirty() },
   )
-  const historyRef = useRef(history)
-  historyRef.current = history
+  useLayoutEffect(() => { historyRef.current = history })
   // Reset history baseline once the page has loaded so the first undo doesn't
   // rewind into the empty pre-load state.
   useEffect(() => {
-    if (page) historyRef.current.reset({ blocks, title, meta, theme: themeEditor.theme })
+    if (page) historyRef.current?.reset({ blocks, title, meta, theme: themeEditor.theme })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page?.id])
   useEffect(() => {
@@ -336,7 +347,7 @@ export default function PageEditor() {
       const el = document.activeElement
       if (el && (el as HTMLElement).isContentEditable) return
       e.preventDefault()
-      if (e.shiftKey) historyRef.current.redo(); else historyRef.current.undo()
+      if (e.shiftKey) historyRef.current?.redo(); else historyRef.current?.undo()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

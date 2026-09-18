@@ -20,25 +20,28 @@ function timeAgo(iso: string): string {
 export default function CreatorDeals() {
   const [chip, setChip] = useState<StatusChip>('all')
   const [offers, setOffers] = useState<OfferListItem[]>([])
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reloadTick, setReloadTick] = useState(0)
+  // `loading` is DERIVED (the request for the current key has not settled yet)
+  // rather than set at the top of the effect: a synchronous setState in an
+  // effect body re-renders before the fetch has even started.
+  const requestKey = `${chip}:${reloadTick}`
+  const [settledKey, setSettledKey] = useState<string | null>(null)
+  const loading = settledKey !== requestKey
 
   // Swallowing the error and showing an empty list told a creator with live
   // offers that no brand had ever contacted them. Say so, and let them retry.
   useEffect(() => {
-    setLoading(true)
-    setError(null)
     const status = chip === 'all' ? undefined : chip === 'closed' ? CLOSED.join(',') : chip
     const qs = status ? `&status=${encodeURIComponent(status)}` : ''
     cappeApi.get<{ offers: OfferListItem[]; total: number }>(`/collab/offers?side=creator${qs}`)
-      .then((res) => setOffers(res.offers))
+      .then((res) => { setOffers(res.offers); setError(null) })
       .catch((e) => {
         setOffers([])
         setError(e instanceof Error ? e.message : 'Could not load your deals')
       })
-      .finally(() => setLoading(false))
-  }, [chip, reloadTick])
+      .finally(() => setSettledKey(requestKey))
+  }, [chip, reloadTick, requestKey])
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">

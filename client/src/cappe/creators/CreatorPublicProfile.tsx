@@ -13,19 +13,20 @@ export default function CreatorPublicProfile() {
   const { handle } = useParams<{ handle: string }>()
   const navigate = useNavigate()
   const { account } = useCappeMe()
-  const [profile, setProfile] = useState<PublicCreatorProfile | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [notFound, setNotFound] = useState(false)
+  // The result is keyed to the handle it was fetched for; `loading` is "no result
+  // for the current handle yet", so a handle change needs no synchronous reset.
+  const [result, setResult] = useState<{ handle: string; profile: PublicCreatorProfile | null } | null>(null)
+  const settled = !!handle && result?.handle === handle
+  const loading = !!handle && !settled
+  const profile = settled ? result!.profile : null
+  const notFound = settled && !result!.profile
   const [showOffer, setShowOffer] = useState(false)
 
   useEffect(() => {
     if (!handle) return
-    setLoading(true)
-    setNotFound(false)
     fetchPublicCreator(handle)
-      .then(setProfile)
-      .catch(() => setNotFound(true))
-      .finally(() => setLoading(false))
+      .then((p) => setResult({ handle, profile: p }))
+      .catch(() => setResult({ handle, profile: null }))
   }, [handle])
 
   if (loading) {

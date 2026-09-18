@@ -17,25 +17,21 @@ export default function Messages() {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [composing, setComposing] = useState(false)
-  const [newThread, setNewThread] = useState({ client_email: '', client_name: '', subject: '', body: '' })
-  const bottomRef = useRef<HTMLDivElement>(null)
-
-  // Deep-link: ?to=email&name= prefills a new conversation (from Clients).
+  // Deep-link: ?to=email&name= prefills a new conversation (from Clients). It is
+  // INITIAL state — Clients links here across routes, so this page always mounts
+  // fresh with the params already in the URL.
   const presetTo = params.get('to')
+  const [composing, setComposing] = useState(!!presetTo)
+  const [newThread, setNewThread] = useState({
+    client_email: presetTo || '', client_name: presetTo ? params.get('name') || '' : '', subject: '', body: '',
+  })
+  const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     cappeApi.get<CappeThread[]>(`/sites/${siteId}/threads`)
       .then(setThreads)
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
   }, [siteId])
-
-  useEffect(() => {
-    if (presetTo) {
-      setComposing(true)
-      setNewThread((n) => ({ ...n, client_email: presetTo, client_name: params.get('name') || '' }))
-    }
-  }, [presetTo]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { bottomRef.current?.scrollIntoView() }, [active?.messages.length])
 
