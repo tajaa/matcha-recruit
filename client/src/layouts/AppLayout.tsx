@@ -92,7 +92,7 @@ export default function AppLayout({ sidebar, variant }: { sidebar: ReactNode; lo
         </div>
 
         {/* Main content — pt-16 on mobile clears the floating menu trigger. */}
-        <main className={`p-4 pt-16 transition-[margin] duration-200 ease-in-out md:p-8 md:pt-8 ${
+        <main className={`p-4 pt-16 transition-[margin] duration-200 ease-in-out md:p-5 md:pt-6 ${
           sidebarCollapsed ? 'md:ml-14' : 'md:ml-60'
         }`}>
           <Outlet />

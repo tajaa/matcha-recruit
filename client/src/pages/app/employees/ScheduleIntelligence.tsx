@@ -51,7 +51,7 @@ export default function ScheduleIntelligence() {
 
   if (overview && overview.available === false) {
     return (
-      <Card className="p-6">
+      <Card className="p-5">
         <h2 className="text-lg font-semibold text-zinc-100 mb-2">Schedule Intelligence</h2>
         <p className="text-sm text-zinc-400 max-w-xl">
           Turn on Employee Scheduling to unlock these insights — Schedule Intelligence reads its

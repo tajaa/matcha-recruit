@@ -164,7 +164,7 @@ export default function RiskAssessment() {
           )}
 
           {/* Score Bands Legend */}
-          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6">
+          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5">
             <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-4">Score Bands</div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px bg-white/10 rounded-lg overflow-hidden">
               {(['low', 'moderate', 'high', 'critical'] as Band[]).map(band => (
@@ -206,7 +206,7 @@ function QuantitativeTab({ qs, isAdmin }: { qs: string; isAdmin: boolean }) {
   return (
     <div className="space-y-6">
       {loading && (
-        <div className="text-xs text-zinc-500 animate-pulse py-8 text-center">Loading quantitative analytics...</div>
+        <div className="text-xs text-zinc-500 animate-pulse py-6 text-center">Loading quantitative analytics...</div>
       )}
       {!loading && mc && (
         <>
@@ -215,7 +215,7 @@ function QuantitativeTab({ qs, isAdmin }: { qs: string; isAdmin: boolean }) {
         </>
       )}
       {!loading && error && (
-        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 text-sm text-zinc-500 text-center">
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 text-sm text-zinc-500 text-center">
           {error}
           {isAdmin && (
             <button onClick={reload} className="ml-2 text-zinc-400 hover:text-zinc-200 transition-colors underline">

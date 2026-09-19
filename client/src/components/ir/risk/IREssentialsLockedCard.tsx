@@ -64,7 +64,7 @@ export function IREssentialsLockedCard() {
   }
 
   return (
-    <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+    <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
       <div className="flex items-center gap-2 mb-1">
         <Lock className="w-3.5 h-3.5 text-zinc-500" strokeWidth={1.6} />
         <h2 className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">

@@ -67,7 +67,7 @@ export default function AdminOnboarding({ embedded = false }: { embedded?: boole
   }
 
   return (
-    <div className={embedded ? '' : 'p-6'}>
+    <div className={embedded ? '' : 'p-5'}>
       <div className="flex items-center justify-between mb-3">
         {embedded ? (
           <p className="text-xs text-zinc-500 max-w-xl">
@@ -133,7 +133,7 @@ export default function AdminOnboarding({ embedded = false }: { embedded?: boole
           <Loader2 className="w-4 h-4 animate-spin" /> Loading sessions…
         </div>
       ) : sessions.length === 0 ? (
-        <div className="rounded-md border border-vsc-border bg-vsc-panel p-8 text-center text-sm text-zinc-400">
+        <div className="rounded-md border border-vsc-border bg-vsc-panel p-6 text-center text-sm text-zinc-400">
           No gap analyses yet. Start one for a <span className="text-zinc-100">New company</span> or
           an <span className="text-zinc-100">Existing company</span>.
         </div>

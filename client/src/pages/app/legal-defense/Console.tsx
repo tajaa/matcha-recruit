@@ -65,7 +65,7 @@ export function Console({ messages, status, sending, evidence, onSend, matterTyp
       <div className="flex-1 overflow-y-auto">
         <div className="flex min-h-full flex-col justify-end">
           {messages.length === 0 && !status && (
-            <div className="px-5 py-8">
+            <div className="px-5 py-6">
               <div className={LABEL}>Analyst console</div>
               <p className="mt-2 max-w-[60ch] text-sm leading-relaxed text-zinc-400">
                 {evidence && evidence.total > 0

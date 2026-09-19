@@ -164,7 +164,7 @@ export default function RequirementAuditTable({ onEditRequirement }: Requirement
 
   if (error || !data) {
     return (
-      <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
+      <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
         <p className="text-sm text-zinc-600">{error ?? 'No data available'}</p>
       </div>
     )
@@ -248,7 +248,7 @@ export default function RequirementAuditTable({ onEditRequirement }: Requirement
       {/* Table */}
       <div className="border border-zinc-800 rounded-lg overflow-hidden">
         {sorted.length === 0 ? (
-          <div className="px-4 py-8 text-center">
+          <div className="px-4 py-6 text-center">
             <p className="text-sm text-zinc-600">No requirements match these filters.</p>
           </div>
         ) : (

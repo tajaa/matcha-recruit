@@ -45,8 +45,8 @@ export default function PenaltyOverviewTab() {
 
   useEffect(() => { fetch() }, [fetch])
 
-  if (loading) return <div className="flex justify-center py-12"><Loader2 className="animate-spin text-zinc-500" size={20} /></div>
-  if (!data) return <div className="text-center py-12 text-zinc-500 text-sm">Failed to load penalty data</div>
+  if (loading) return <div className="flex justify-center py-8"><Loader2 className="animate-spin text-zinc-500" size={20} /></div>
+  if (!data) return <div className="text-center py-8 text-zinc-500 text-sm">Failed to load penalty data</div>
 
   const totalReqs = data.coverage.reduce((s, c) => s + c.total, 0)
   const totalWithPenalty = data.coverage.reduce((s, c) => s + c.has_penalty, 0)

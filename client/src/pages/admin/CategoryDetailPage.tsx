@@ -93,8 +93,8 @@ export default function CategoryDetailPage() {
     )
   }, [data, search])
 
-  if (loading) return <div className="text-zinc-500 py-12 text-center">Loading category...</div>
-  if (!data) return <div className="text-zinc-500 py-12 text-center">Category not found.</div>
+  if (loading) return <div className="text-zinc-500 py-8 text-center">Loading category...</div>
+  if (!data) return <div className="text-zinc-500 py-8 text-center">Category not found.</div>
 
   return (
     <div className="space-y-5">
@@ -191,7 +191,7 @@ export default function CategoryDetailPage() {
           </tbody>
         </table>
         {filtered.length === 0 && (
-          <p className="text-sm text-zinc-600 text-center py-6">
+          <p className="text-sm text-zinc-600 text-center py-5">
             {search ? `No policies match "${search}"` : 'No policies in this category.'}
           </p>
         )}

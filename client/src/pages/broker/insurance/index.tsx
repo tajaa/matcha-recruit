@@ -71,7 +71,7 @@ function BookTab() {
             <th className="py-2.5 px-4">Client</th><th>Line</th><th>Premium</th><th>Commission</th><th>Expires</th>
           </tr></thead>
           <tbody>
-            {data.policies.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-zinc-600">No policies placed yet.</td></tr>}
+            {data.policies.length === 0 && <tr><td colSpan={5} className="px-4 py-5 text-zinc-600">No policies placed yet.</td></tr>}
             {data.policies.map((p) => (
               <tr key={p.id} className="border-b border-zinc-900">
                 <td className="px-4 py-2.5 text-zinc-200">
@@ -118,7 +118,7 @@ function RenewalsTab() {
               <th className="py-2.5 px-4">Client</th><th>Line</th><th>Premium</th><th>Expires</th>
             </tr></thead>
             <tbody>
-              {rows.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-zinc-600">No renewals in this window.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={4} className="px-4 py-5 text-zinc-600">No renewals in this window.</td></tr>}
               {rows.map((r) => (
                 <tr key={r.id} className="border-b border-zinc-900">
                   <td className="px-4 py-2.5 text-zinc-200">

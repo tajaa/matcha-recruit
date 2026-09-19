@@ -57,7 +57,7 @@ function StatCard({ label, value, hint }: { label: string; value: number; hint?:
  *  codebase has no chart library and doesn't want one. */
 function DailyChart({ data }: { data: DailyPoint[] }) {
   if (data.length === 0) {
-    return <div className="p-6 text-sm text-zinc-500">No activity in this window yet.</div>
+    return <div className="p-5 text-sm text-zinc-500">No activity in this window yet.</div>
   }
 
   const W = 720
@@ -241,9 +241,9 @@ export default function Usage() {
       </div>
 
       {error ? (
-        <div className="rounded-lg border border-zinc-200 p-6 text-sm text-zinc-600">{error}</div>
+        <div className="rounded-lg border border-zinc-200 p-5 text-sm text-zinc-600">{error}</div>
       ) : !data ? (
-        <div className="p-6 text-sm text-zinc-500">Loading…</div>
+        <div className="p-5 text-sm text-zinc-500">Loading…</div>
       ) : (
         <div className="space-y-6">
           <div className="grid grid-cols-2 gap-3 md:grid-cols-5">

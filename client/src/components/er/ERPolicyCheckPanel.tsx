@@ -126,12 +126,12 @@ export function ERPolicyCheckPanel({ caseId }: Props) {
   }
 
   if (loading) {
-    return <p className="text-sm text-zinc-500 py-8 text-center">Running policy check against company handbook...</p>
+    return <p className="text-sm text-zinc-500 py-6 text-center">Running policy check against company handbook...</p>
   }
 
   if (!generatedAt) {
     return (
-      <div className="text-center py-8">
+      <div className="text-center py-6">
         <p className="text-sm text-zinc-500 mb-4">
           Compare uploaded evidence against all active company policies and handbook to identify violations.
         </p>
@@ -156,7 +156,7 @@ export function ERPolicyCheckPanel({ caseId }: Props) {
 
       {/* No violations */}
       {violations.length === 0 && (
-        <div className="text-center py-6">
+        <div className="text-center py-5">
           <p className="text-sm text-zinc-400">No policy violations identified.</p>
           <p className="text-xs text-zinc-600 mt-1">
             Evidence was reviewed against all active company policies. No clear violations were found.

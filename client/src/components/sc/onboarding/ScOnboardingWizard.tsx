@@ -232,7 +232,7 @@ export default function ScOnboardingWizard() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 px-4 py-10 text-zinc-100">
+    <div className="min-h-screen bg-zinc-950 px-4 py-6 text-zinc-100">
       <div className="mx-auto max-w-3xl space-y-6">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.18em] text-emerald-400">Matcha S&amp;C</p>
@@ -248,7 +248,7 @@ export default function ScOnboardingWizard() {
           ))}
         </ol>
 
-        <div className="rounded-xl border border-white/[0.08] bg-zinc-900/60 p-6">
+        <div className="rounded-xl border border-white/[0.08] bg-zinc-900/60 p-5">
           {step === 0 && (
             <div className="space-y-4">
               <h2 className="text-lg font-medium">Company details</h2>

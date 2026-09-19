@@ -222,9 +222,9 @@ export default function CodifiedTab({ initialState, goto, gotoUncodified }: Prop
           <div className="overflow-hidden rounded-lg border border-zinc-800">
             <div className="max-h-[60vh] divide-y divide-zinc-800/60 overflow-y-auto text-sm">
               {breakdown === null ? (
-                <p className="px-3 py-6 text-sm text-zinc-500">Loading...</p>
+                <p className="px-3 py-5 text-sm text-zinc-500">Loading...</p>
               ) : schema.length === 0 ? (
-                <p className="px-3 py-8 text-center text-sm text-zinc-600">Catalog is empty.</p>
+                <p className="px-3 py-6 text-center text-sm text-zinc-600">Catalog is empty.</p>
               ) : schema.map((section) => {
                 const open = openSections.has(section.code)
                 return (
@@ -319,9 +319,9 @@ export default function CodifiedTab({ initialState, goto, gotoUncodified }: Prop
 
           <div className="overflow-hidden rounded-lg border border-zinc-800">
             {loading ? (
-              <p className="px-3 py-6 text-sm text-zinc-500">Loading...</p>
+              <p className="px-3 py-5 text-sm text-zinc-500">Loading...</p>
             ) : rows.length === 0 ? (
-              <p className="px-3 py-8 text-center text-sm text-zinc-600">
+              <p className="px-3 py-6 text-center text-sm text-zinc-600">
                 {stage === 'codified' ? 'Nothing codified here yet.' : 'Everything here is codified.'}
               </p>
             ) : (

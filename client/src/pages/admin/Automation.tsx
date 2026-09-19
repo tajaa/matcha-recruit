@@ -108,7 +108,7 @@ export default function Automation() {
             {loadingJobs ? (
               <p className="text-sm text-zinc-500">Loading...</p>
             ) : schedulers.length === 0 ? (
-              <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
+              <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
                 <p className="text-sm text-zinc-600">No scheduled jobs configured.</p>
               </div>
             ) : (
@@ -157,7 +157,7 @@ export default function Automation() {
             {loadingActivity ? (
               <p className="text-sm text-zinc-500">Loading...</p>
             ) : activity.length === 0 ? (
-              <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
+              <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
                 <p className="text-sm text-zinc-600">No recent activity</p>
               </div>
             ) : (

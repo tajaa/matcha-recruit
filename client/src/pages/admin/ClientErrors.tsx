@@ -200,9 +200,9 @@ export default function ClientErrors() {
       {/* List */}
       <div className="rounded-xl border border-zinc-800 overflow-hidden">
         {loading && items.length === 0 ? (
-          <p className="p-8 text-center text-sm text-zinc-500">Loading...</p>
+          <p className="p-6 text-center text-sm text-zinc-500">Loading...</p>
         ) : items.length === 0 ? (
-          <p className="p-8 text-center text-sm text-zinc-500">
+          <p className="p-6 text-center text-sm text-zinc-500">
             No errors in the selected window. 🎉
           </p>
         ) : (

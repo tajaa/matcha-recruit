@@ -156,14 +156,14 @@ export function ComplianceAuditTab({ targetCatalogId, onTargetConsumed, readOnly
 
   if (loading) {
     return (
-      <div className="px-4 py-8 flex items-center gap-2 text-sm text-zinc-500">
+      <div className="px-4 py-6 flex items-center gap-2 text-sm text-zinc-500">
         <Loader2 className="w-4 h-4 animate-spin" /> Loading audit overview...
       </div>
     )
   }
   if (error) {
     return (
-      <div className="px-4 py-8 text-sm text-red-400">
+      <div className="px-4 py-6 text-sm text-red-400">
         {error}{' '}
         <button type="button" onClick={refetch} className="underline hover:text-red-300">Retry</button>
       </div>
@@ -171,7 +171,7 @@ export function ComplianceAuditTab({ targetCatalogId, onTargetConsumed, readOnly
   }
   if (!data || data.statutes.length === 0) {
     return (
-      <div className="px-4 py-8 text-sm text-zinc-500 max-w-lg">
+      <div className="px-4 py-6 text-sm text-zinc-500 max-w-lg">
         No statute in your jurisdictions has a per-clause audit yet. Requirements are
         still tracked at the obligation level on the Requirements tab.
       </div>

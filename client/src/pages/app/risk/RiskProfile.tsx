@@ -45,7 +45,7 @@ export default function RiskProfile() {
   }
   if (profileError) {
     return (
-      <div className={`${PANEL} p-6 text-center`}>
+      <div className={`${PANEL} p-5 text-center`}>
         <p className="text-sm text-red-400">Couldn't load your risk profile.</p>
         <button onClick={loadRiskProfile} className="mt-2 text-xs text-emerald-400 hover:text-emerald-300 underline">Try again</button>
       </div>
@@ -65,7 +65,7 @@ export default function RiskProfile() {
       </div>
 
       {/* Index hero */}
-      <div className={`${PANEL} p-6 flex items-center gap-8`}>
+      <div className={`${PANEL} p-5 flex items-center gap-8`}>
         <div className="text-center">
           <div className={`text-6xl font-light font-mono ${tone}`}>{data.index ?? '—'}</div>
           <div className={`text-xs uppercase tracking-widest font-bold mt-1 ${tone}`}>{data.band ?? 'no data'}</div>

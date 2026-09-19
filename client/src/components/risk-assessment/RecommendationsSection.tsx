@@ -16,7 +16,7 @@ export function RecommendationsSection({ recommendations, report }: Props) {
       </h2>
 
       {report && (
-        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 mb-4">
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 mb-4">
           <div className="text-sm text-zinc-300 leading-relaxed whitespace-pre-line">{report}</div>
         </div>
       )}
@@ -24,7 +24,7 @@ export function RecommendationsSection({ recommendations, report }: Props) {
       {recommendations.length > 0 && (
         <div className="bg-zinc-900 border border-white/10 rounded-2xl divide-y divide-white/10 overflow-hidden">
           {recommendations.map((rec, i) => (
-            <div key={i} className="px-6 py-5 flex items-start gap-4">
+            <div key={i} className="px-5 py-5 flex items-start gap-4">
               <span className={`shrink-0 inline-flex items-center px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${PRIORITY_COLOR[rec.priority]?.badge ?? ''}`}>
                 {rec.priority}
               </span>

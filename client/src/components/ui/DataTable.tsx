@@ -61,12 +61,12 @@ export function DataTable<T>({
   if (rows.length === 0) return <p className="text-sm text-zinc-500">{emptyText}</p>
 
   return (
-    <div className="overflow-hidden rounded-xl border border-zinc-800">
+    <div className="overflow-hidden rounded-xl">
       {/* Wide tables scroll inside their own container rather than pushing the
           page into a horizontal scroll. */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm text-left">
-          <thead className="bg-zinc-900/50 text-zinc-400">
+          <thead className="text-zinc-500">
             <tr>
               {columns.map((c) => (
                 <th

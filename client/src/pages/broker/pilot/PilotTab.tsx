@@ -33,7 +33,7 @@ export function PilotTab({ subjectKind, subjectId }: {
 
   if (!isPro) {
     return (
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-6 text-center">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5 text-center">
         <Sparkles className="h-6 w-6 text-emerald-500 mx-auto mb-2" />
         <p className="text-sm text-zinc-300 font-medium">Broker Pilot is a Broker Pro feature</p>
         <p className="text-xs text-zinc-500 mt-1 max-w-md mx-auto">

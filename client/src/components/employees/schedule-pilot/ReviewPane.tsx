@@ -72,7 +72,7 @@ function RowActions({ shiftId, ask, onShowShift, onAskHuume }: { shiftId?: strin
 export default function ReviewPane({ review, title, subtitle, caps, policyMinutes = POLICY_WEEKLY_MINUTES, compare, actions, emptyHint, onShowShift, onAskHuume }: ReviewPaneProps) {
   if (!review) {
     return (
-      <div className="flex h-full min-h-0 flex-col items-center justify-center gap-2 px-8 text-center">
+      <div className="flex h-full min-h-0 flex-col items-center justify-center gap-2 px-6 text-center">
         <div className={LABEL}>Review</div>
         <p className="max-w-[46ch] text-sm leading-relaxed text-zinc-500">
           {emptyHint ?? 'Nothing is staged. Ask Huume for a change, or run a scenario from the strip above, and what it would do appears here before anything is written.'}

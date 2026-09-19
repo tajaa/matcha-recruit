@@ -10,7 +10,7 @@ export function AnalyticsDrawer({
 }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setAnalyticsOpen(null)}>
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-zinc-100">Issue analytics</h3>
           <button onClick={() => setAnalyticsOpen(null)} className="text-zinc-500 hover:text-zinc-300"><X size={16} /></button>

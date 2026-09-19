@@ -105,7 +105,7 @@ export default function BrokerRiskCurve() {
       </div>
 
       {clients.length === 0 ? (
-        <Card className="p-8 text-center">
+        <Card className="p-6 text-center">
           <p className="text-sm text-zinc-400">No scored clients in your book yet.</p>
           <p className="text-xs text-zinc-600 mt-1">Clients gain a risk index once they have WC, EPL, or compliance data on file.</p>
         </Card>
