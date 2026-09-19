@@ -168,7 +168,7 @@ def test_only_a_releasing_transition_closes_checkout(monkeypatch, new_status, cl
     log = _route(monkeypatch, conn)
     monkeypatch.setattr(shop_mod, "build_patch", lambda *a, **k: (["status = $1"], [new_status]))
     asyncio.run(shop_mod.update_order_status(
-        SITE, ORDER, SimpleNamespace(status=new_status), account=SimpleNamespace(id=ACCOUNT_ID),
+        SITE, ORDER, SimpleNamespace(status=new_status, tracking_number=None), account=SimpleNamespace(id=ACCOUNT_ID),
     ))
     assert ("close" in log) is closes
     assert ("bookings" in log) is closes

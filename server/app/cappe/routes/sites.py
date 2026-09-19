@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _SITE_COLS = (
+    "app_url_scheme, app_bundle_id, "
     "id, account_id, name, slug, subdomain, custom_domain, source_type, "
     "template_id, status, theme_config, meta_config, timezone, is_multi_location, "
     "tax_rate_bps, tax_label, "
@@ -272,6 +273,9 @@ async def update_site(
 
         if body.name is not None:
             add("name", body.name)
+        for field in ("app_url_scheme", "app_bundle_id"):
+            if field in body.model_fields_set:
+                add(field, getattr(body, field))
         if body.subdomain is not None:
             # Slugify + keep off reserved labels, then ensure it's free across
             # OTHER sites. slug doubles as the tenant subdomain — set both.

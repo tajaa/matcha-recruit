@@ -1,4 +1,14 @@
 // Cappe (website builder) — shared API response types.
+export type CappeShopperSubscription = {
+  id: string
+  status: string
+  interval: 'week' | 'month'
+  items: { title: string; quantity: number }[]
+  total_cents: number
+  currency: string
+  cancel_at_period_end: boolean
+  current_period_end: string | null
+}
 // Cappe is a separate product from matcha; these types are independent of the
 // matcha MeResponse / dashboard types.
 
@@ -49,6 +59,8 @@ export type CappeReadiness = {
 export type CappeSiteStatus = 'draft' | 'published' | 'archived'
 
 export type CappeSite = {
+  app_url_scheme?: string | null
+  app_bundle_id?: string | null
   id: string
   account_id: string
   name: string
@@ -307,6 +319,8 @@ export type CappeProductOptionGroupInput = {
 }
 
 export type CappeProduct = {
+  subscription_intervals?: ('week' | 'month')[]
+  subscription_discount_bps?: number
   id: string
   site_id: string
   name: string
@@ -377,6 +391,7 @@ export type CappeShippingAddress = {
 }
 
 export type CappeOrder = {
+  subscription_id?: string | null
   id: string
   site_id: string
   customer_email: string | null

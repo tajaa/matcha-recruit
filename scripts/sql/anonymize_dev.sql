@@ -290,6 +290,25 @@ UPDATE cappe_collab_payments SET
     stripe_checkout_session_id = CASE WHEN stripe_checkout_session_id IS NOT NULL THEN 'cs_dev_' || replace(id::text,'-','') END,
     stripe_payment_intent      = CASE WHEN stripe_payment_intent IS NOT NULL THEN 'pi_dev_' || replace(id::text,'-','') END;
 
+DO $$
+BEGIN
+    IF to_regclass('public.cappe_shoppers') IS NOT NULL THEN
+        UPDATE cappe_shoppers SET email='shopper_' || replace(id::text,'-','') || '@example.com',
+            name='Shopper', phone=NULL, stripe_customer_id=NULL, tokens_valid_after=NOW();
+        DELETE FROM cappe_shopper_login_codes;
+        DELETE FROM cappe_shopper_sessions;
+        DELETE FROM cappe_shopper_devices;
+        DELETE FROM cappe_shopper_addresses;
+    END IF;
+    IF to_regclass('public.cappe_shopper_subscriptions') IS NOT NULL THEN
+        UPDATE cappe_shopper_subscriptions SET
+            stripe_account_id='acct_dev_' || replace(id::text,'-',''),
+            stripe_checkout_session_id=NULL, stripe_subscription_id=NULL,
+            checkout_token=replace(gen_random_uuid()::text,'-',''),status='canceled';
+        UPDATE cappe_orders SET stripe_invoice_id=NULL;
+    END IF;
+END $$;
+
 COMMIT;
 
 -- Sanity (outside the txn): must return 0. Preserved (allowlisted) emails and

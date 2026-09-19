@@ -228,6 +228,11 @@ async def payments_webhook(request: Request, background: BackgroundTasks):
 
 
 async def _handle_connect_event(etype, obj, event, background) -> dict:
+    if (etype in ("invoice.paid", "invoice.payment_failed", "customer.subscription.updated", "customer.subscription.deleted")
+        or (etype in ("checkout.session.completed", "checkout.session.expired", "checkout.session.async_payment_succeeded", "checkout.session.async_payment_failed")
+            and obj.get("mode") == "subscription")):
+        from ..services.recurring import handle_event
+        return await handle_event(etype, obj, event, background)
     if etype in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
         if not session_is_paid(obj):
             # Not a failure: the async methods settle later on their own event.
@@ -358,7 +363,7 @@ async def _mark_order_paid(obj, event, background) -> dict:
                     WHERE o.id = $1 AND o.status = 'pending'
                       AND s.id = o.site_id AND a.id = s.account_id
                       AND a.stripe_account_id = $4
-                    RETURNING o.id, o.site_id, o.customer_email, o.customer_name""",
+                    RETURNING o.id, o.site_id, o.customer_email, o.customer_name, o.shopper_id""",
                 oid,
                 payment_intent,
                 fee,
@@ -366,6 +371,9 @@ async def _mark_order_paid(obj, event, background) -> dict:
                 json.dumps(dict(ship)) if ship else None,
             )
         if row is not None:
+            from ..services.push import notify_order_event
+            if row.get("shopper_id"):
+                background.add_task(notify_order_event, row["id"], "paid")
             # Issue the receipt (assign number → render PDF → email) after
             # the 200 so Stripe isn't kept waiting on render/SMTP.
             background.add_task(

@@ -163,6 +163,7 @@ export default function Orders() {
               </div>
               {openId === o.id && (
                 <div className="space-y-2 bg-zinc-950 px-12 py-3">
+                  {o.subscription_id && <span className="rounded bg-emerald-500/15 px-2 py-1 text-xs text-emerald-400">Subscription</span>}
                   {o.shipping_address && (
                     <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-xs text-zinc-300">
                       <div className="mb-1 flex items-center gap-1.5 font-medium text-zinc-400"><Truck className="h-3.5 w-3.5" /> Ship to</div>

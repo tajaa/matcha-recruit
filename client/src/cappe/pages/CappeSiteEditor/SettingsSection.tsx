@@ -1,6 +1,7 @@
 import { Loader2, Save } from 'lucide-react'
 import ImageUpload from '../../components/ImageUpload'
 import DomainManager from '../../components/DomainManager'
+import MobileAppSettingsCard from '../../components/MobileAppSettingsCard'
 import { CAPPE_HOST } from '../../host'
 import { CAPPE_TIMEZONES } from '../../data/timezones'
 import { inputCls } from './styles'
@@ -62,6 +63,7 @@ export function SettingsSection({
           <label className="mb-2 block text-sm font-medium text-zinc-300">Custom domain</label>
           <DomainManager siteId={siteId || ''} />
         </div>
+        <MobileAppSettingsCard siteId={siteId || ''} />
         <button
           onClick={onSave}
           disabled={saving}

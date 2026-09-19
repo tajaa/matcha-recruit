@@ -38,6 +38,7 @@ from .entitlements import (
     resolve_entitlements,
 )
 from .stripe_connect import CappeStripeError, get_cappe_stripe
+from .cart import cart_totals
 
 logger = logging.getLogger("cappe.commerce")
 
@@ -389,7 +390,7 @@ async def create_booking_in_tx(
         raise
 
 
-async def create_public_order(site, body, background) -> dict:
+async def create_public_order(site, body, background, *, shopper=None) -> dict:
     """Create an order for a mixed cart (physical / digital / service /
     booking). Prices + totals are recomputed server-side from the live product
     rows. The order lands `pending` and is handed to Stripe Checkout when the
@@ -403,7 +404,7 @@ async def create_public_order(site, body, background) -> dict:
     call to Stripe never holds a pooled connection) — mirrors the original
     route's own two-connection shape.
     """
-    email = str(body.customer_email).strip().lower()
+    email = shopper["email"] if shopper else str(body.customer_email).strip().lower()
 
     async with get_connection() as conn:
         discounts = await fetch_active_discounts(conn, site["id"])
@@ -569,6 +570,11 @@ async def create_public_order(site, body, background) -> dict:
             )
             shipping_label = (tax_cfg["shipping_label"] if tax_cfg else None) or "Shipping"
             total_cents = subtotal + tax_cents + shipping_cents
+            totals = cart_totals([
+                {"unit_price_cents": unit, "quantity": qty, "fulfillment": fulfillment}
+                for (_pid, _title, unit, qty, fulfillment, *_rest) in line_rows
+            ], dict(tax_cfg) if tax_cfg else {})
+            tax_cents, shipping_cents, total_cents = totals["tax_cents"], totals["shipping_cents"], totals["total_cents"]
             order = await conn.fetchrow(
                 """INSERT INTO cappe_orders
                        (site_id, customer_email, customer_name, status, subtotal_cents, tax_cents,
@@ -579,6 +585,9 @@ async def create_public_order(site, body, background) -> dict:
                 site["id"], email, body.customer_name, subtotal, tax_cents, shipping_cents,
                 total_cents, order_currency or "USD", body.note, order_requires_approval,
             )
+            if shopper:
+                await conn.execute("UPDATE cappe_orders SET shopper_id=$1 WHERE id=$2 AND site_id=$3",
+                                   shopper["id"], order["id"], site["id"])
             for product_id, title, unit_price, qty, f, intake, booking_id, opt_snapshot, sel_ids in line_rows:
                 await conn.execute(
                     """INSERT INTO cappe_order_items
@@ -612,6 +621,18 @@ async def create_public_order(site, body, background) -> dict:
     return_urls_requested = bool(body.success_url and body.cancel_url)
     success_url = url_within_origins(body.success_url, allowed_origins) or site_home
     cancel_url = url_within_origins(body.cancel_url, allowed_origins) or site_home
+    # The order token doesn't exist when the app asks for checkout. Bind its
+    # callback on the server, after the same origin validation as web checkout.
+    if shopper:
+        from urllib.parse import urlsplit
+        for field, value in (("success", success_url), ("cancel", cancel_url)):
+            if value and urlsplit(value).path == "/__cappe/app-return":
+                parsed = urlsplit(value)
+                callback = f"{parsed.scheme}://{parsed.netloc}/__cappe/app-return?o={order['access_token']}&r={field}"
+                if field == "success":
+                    success_url = callback
+                else:
+                    cancel_url = callback
     if return_urls_requested and (success_url != body.success_url or cancel_url != body.cancel_url):
         logger.warning(
             "cappe checkout: off-site return URL rejected for site %s", site["id"]
@@ -632,6 +653,10 @@ async def create_public_order(site, body, background) -> dict:
         # The 2% platform fee stays on the goods subtotal (amount_cents below).
         line_items = build_stripe_line_items(line_rows, cur, order["tax_cents"], tax_label)
         try:
+            customer_id = None
+            if shopper:
+                from .shopper_customers import connected_customer
+                customer_id = await connected_customer(shopper, owner["stripe_account_id"])
             sess = await get_cappe_stripe().create_checkout_session(
                 account_id=owner["stripe_account_id"],
                 currency=cur,
@@ -641,6 +666,7 @@ async def create_public_order(site, body, background) -> dict:
                 cancel_url=cancel_url,
                 metadata={"order_id": str(order["id"]), "platform_fee_cents": str(fee)},
                 customer_email=email or None,
+                **({"customer_id": customer_id} if customer_id else {}),
                 collect_shipping_address=has_physical,
                 shipping_option=(
                     {

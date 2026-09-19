@@ -105,11 +105,13 @@ async def _close_open_checkout(site_id: UUID, order_id: UUID, account_id: UUID) 
         )
 
 _PRODUCT_COLS = (
+    "subscription_intervals, subscription_discount_bps, "
     "id, site_id, name, description, price_cents, currency, image_url, sku, "
     "inventory, low_stock_threshold, status, sort_order, fulfillment, digital_file_url, "
     "booking_type_id, requires_approval, intake_fields, category, created_at, updated_at"
 )
 _ORDER_COLS = (
+    "subscription_id, "
     "id, site_id, customer_email, customer_name, status, subtotal_cents, "
     "tax_cents, shipping_cents, total_cents, receipt_number, "
     "shipping_address, carrier, tracking_number, "
@@ -235,18 +237,21 @@ async def create_product(
             await resolve_entitlements(account.plan, conn=conn), body.fulfillment
         )
         await _validate_booking_type(conn, site_id, body.booking_type_id)
+        from ..services.recurring import validate_product_subscription
+        await validate_product_subscription(conn, account.plan, body.model_dump())
         async with conn.transaction():
             row = await conn.fetchrow(
                 f"""INSERT INTO cappe_products
                         (site_id, name, description, price_cents, currency, image_url, sku, inventory,
                          low_stock_threshold, status, sort_order, fulfillment, digital_file_url,
-                         booking_type_id, requires_approval, intake_fields, category)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                         booking_type_id, requires_approval, intake_fields, category, subscription_intervals, subscription_discount_bps)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
                     RETURNING {_PRODUCT_COLS}""",
                 site_id, body.name, body.description, body.price_cents, body.currency,
                 body.image_url, body.sku, body.inventory, body.low_stock_threshold, body.status,
                 body.sort_order, body.fulfillment, body.digital_file_url, body.booking_type_id,
                 body.requires_approval, json.dumps(body.intake_fields), body.category,
+                body.subscription_intervals, body.subscription_discount_bps,
             )
             await _replace_option_groups(conn, site_id, row["id"], body.option_groups)
         groups = await fetch_option_groups(conn, [row["id"]])
@@ -279,6 +284,12 @@ async def update_product(
 ):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        existing = await conn.fetchrow("SELECT * FROM cappe_products WHERE id=$1 AND site_id=$2", product_id, site_id)
+        if not existing:
+            raise HTTPException(404, "Product not found")
+        from ..services.recurring import validate_product_subscription
+        await validate_product_subscription(conn, account.plan, {**dict(existing), **body.model_dump(exclude_unset=True)},
+                                            changed=bool({"subscription_intervals", "subscription_discount_bps"} & body.model_fields_set))
         # Only when the caller is actually changing fulfillment — an unrelated
         # edit (a price tweak, a rename) to a product that predates the gate
         # must not start 403-ing.
@@ -293,6 +304,7 @@ async def update_product(
                 "sku", "inventory", "low_stock_threshold", "status", "sort_order",
                 "fulfillment", "digital_file_url", "booking_type_id", "requires_approval",
                 "category",
+                "subscription_intervals", "subscription_discount_bps",
             ), nullable={"description", "image_url", "sku", "inventory", "low_stock_threshold",
                          "digital_file_url", "booking_type_id", "category"})
             # intake_fields is JSONB NOT NULL DEFAULT '[]' — a `null` PATCH value
@@ -512,6 +524,11 @@ async def update_order_status(
                 f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
                 order_id,
             )
+    from ..services.push import schedule_push
+    if body.status == "fulfilled" and current["status"] != "fulfilled":
+        schedule_push(order_id, "fulfilled")
+    elif body.tracking_number:
+        schedule_push(order_id, "shipped")
     return _order_row(order, [_item_row(i) for i in items])
 
 
@@ -570,6 +587,8 @@ async def decline_order(
                 f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
                 order_id,
             )
+    from ..services.push import schedule_push
+    schedule_push(order_id, "declined")
     return _order_row(order, [_item_row(i) for i in items])
 
 

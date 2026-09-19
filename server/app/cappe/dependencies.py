@@ -93,3 +93,28 @@ async def require_cappe_platform_admin(
             detail="Platform administrator access required",
         )
     return account
+
+
+shopper_security = HTTPBearer(auto_error=False)
+
+
+async def optional_shopper(slug: str, credentials: HTTPAuthorizationCredentials = Depends(shopper_security)):
+    if credentials is None:
+        return None
+    from .services.shopper_auth import published_shopper_site, resolve_shopper
+
+    async with get_connection() as conn:
+        site = await published_shopper_site(conn, slug)
+        shopper, _ = await resolve_shopper(conn, site, credentials.credentials)
+    return dict(shopper)
+
+
+async def require_shopper(slug: str, credentials: HTTPAuthorizationCredentials = Depends(shopper_security)):
+    if credentials is None:
+        raise HTTPException(401, "Shopper sign-in required")
+    from .services.shopper_auth import published_shopper_site, resolve_shopper
+
+    async with get_connection() as conn:
+        site = await published_shopper_site(conn, slug)
+        shopper, _ = await resolve_shopper(conn, site, credentials.credentials)
+    return dict(site), dict(shopper)

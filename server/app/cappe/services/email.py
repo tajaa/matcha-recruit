@@ -15,6 +15,17 @@ from ...core.services.email.client import get_email_service
 logger = logging.getLogger(__name__)
 
 
+async def send_cappe_shopper_code_email(to_email: str, site_name: str, code: str):
+    html = _email_shell(
+        f"Sign in to {escape(site_name)}",
+        f"<p>Your sign-in code is <strong>{escape(code)}</strong>.</p>"
+        "<p>It expires in 10 minutes. If you did not request this code, ignore this email.</p>",
+        footer=site_name,
+    )
+    await _send(to_email, None, f"Your sign-in code — {site_name}", html,
+                f"Your code: {code}. Expires in 10 minutes.", label="shopper sign-in")
+
+
 def _base_url() -> str:
     return f"https://{os.getenv('CAPPE_BASE_DOMAIN', 'hey-matcha.com')}"
 

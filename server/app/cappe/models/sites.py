@@ -94,6 +94,8 @@ class CappeSiteFromTemplate(BaseModel):
 
 
 class CappeSiteUpdate(_SnapshotSizeLimit):
+    app_url_scheme: Optional[str] = Field(default=None, pattern=r"^[a-z][a-z0-9+.-]{1,30}$")
+    app_bundle_id: Optional[str] = Field(default=None, max_length=155, pattern=r"^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$")
     name: Optional[str] = Field(default=None, max_length=255)
     # The tenant subdomain (<sub>.gummfit.com). Editable after creation; the
     # route slugifies + checks reserved/uniqueness before applying.
@@ -136,6 +138,8 @@ class CappeReadiness(BaseModel):
 
 
 class CappeSite(BaseModel):
+    app_url_scheme: Optional[str] = None
+    app_bundle_id: Optional[str] = None
     id: UUID
     account_id: UUID
     name: str

@@ -47,6 +47,8 @@ export default function Shop() {
   const [adding, setAdding] = useState(false)
   const [fulfillment, setFulfillment] = useState<CappeFulfillment>('physical')
   const [requireApproval, setRequireApproval] = useState(false)
+  const [intervals, setIntervals] = useState<('week' | 'month')[]>([])
+  const [subscriptionDiscount, setSubscriptionDiscount] = useState('0')
   const [form, setForm] = useState(EMPTY)
   const [intake, setIntake] = useState<IntakeRow[]>([])
   const [optionGroups, setOptionGroups] = useState<OptGroupRow[]>([])
@@ -76,6 +78,8 @@ export default function Shop() {
     setOptionGroups([])
     setFulfillment('physical')
     setRequireApproval(false)
+    setIntervals([])
+    setSubscriptionDiscount('0')
     setEditing(null)
   }
 
@@ -94,6 +98,8 @@ export default function Shop() {
     })
     setFulfillment(product.fulfillment)
     setRequireApproval(product.requires_approval)
+    setIntervals(product.subscription_intervals || [])
+    setSubscriptionDiscount(String((product.subscription_discount_bps || 0) / 100))
     setIntake(product.intake_fields.map((field) => ({ label: field.label, type: field.type, required: field.required })))
     setOptionGroups(product.option_groups.map((group) => ({
       name: group.name,
@@ -130,7 +136,13 @@ export default function Shop() {
       return
     }
     try {
+      const discount = Number(subscriptionDiscount)
+      if (!Number.isFinite(discount) || discount < 0 || discount > 50) throw new Error('Subscription discount must be between 0 and 50%')
       const payload = {
+        subscription_intervals: ['physical', 'digital'].includes(fulfillment) ? intervals : [],
+        subscription_discount_bps: ['physical', 'digital'].includes(fulfillment) && intervals.length
+          ? Math.round(discount * 100)
+          : 0,
         name: form.name.trim(),
         description: form.description.trim() || null,
         price_cents: priceCents,
@@ -223,7 +235,13 @@ export default function Shop() {
               <button
                 key={f.value}
                 type="button"
-                onClick={() => setFulfillment(f.value)}
+                onClick={() => {
+                  setFulfillment(f.value)
+                  if (!['physical', 'digital'].includes(f.value)) {
+                    setIntervals([])
+                    setSubscriptionDiscount('0')
+                  }
+                }}
                 className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
                   fulfillment === f.value
                     ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300'
@@ -243,6 +261,42 @@ export default function Shop() {
             <input value={form.inventory} onChange={(e) => setForm({ ...form, inventory: e.target.value })} placeholder="Stock (blank = unlimited)" type="number" min="0" className={input} />
             <input value={form.low_stock_threshold} onChange={(e) => setForm({ ...form, low_stock_threshold: e.target.value })} placeholder="Low-stock alert at… (optional)" type="number" min="0" className={input} />
           </div>
+        )}
+
+        {['physical', 'digital'].includes(fulfillment) && (
+          <fieldset className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3 text-sm text-zinc-300">
+            <legend className="px-1 text-xs font-medium text-zinc-400">Subscribe &amp; save</legend>
+            <div className="flex flex-wrap items-center gap-4">
+              {(['week', 'month'] as const).map((value) => (
+                <label key={value} className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={intervals.includes(value)}
+                    disabled={requireApproval}
+                    onChange={(event) => setIntervals((old) => event.target.checked
+                      ? [...old, value]
+                      : old.filter((interval) => interval !== value))}
+                    className="h-4 w-4 rounded border-zinc-600 bg-zinc-900 text-emerald-500"
+                  />
+                  Every {value}
+                </label>
+              ))}
+              <label className="flex items-center gap-2">
+                Discount (%)
+                <input
+                  className="w-24 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100 disabled:opacity-50"
+                  type="number"
+                  min="0"
+                  max="50"
+                  step="0.01"
+                  disabled={!intervals.length || requireApproval}
+                  value={subscriptionDiscount}
+                  onChange={(event) => setSubscriptionDiscount(event.target.value)}
+                />
+              </label>
+            </div>
+            {requireApproval && <p className="mt-2 text-xs text-zinc-500">Subscriptions are unavailable for products that require approval.</p>}
+          </fieldset>
         )}
         {fulfillment === 'digital' && (
           <div>
@@ -325,7 +379,18 @@ export default function Shop() {
         <ImageUpload siteId={siteId || ''} value={form.image_url} onChange={(url) => setForm({ ...form, image_url: url })} placeholder="Cover image URL (optional)" />
 
         <label className="flex items-center gap-2 text-sm text-zinc-300">
-          <input type="checkbox" checked={requireApproval} onChange={(e) => setRequireApproval(e.target.checked)} className="h-4 w-4 rounded border-zinc-600 bg-zinc-950 text-emerald-500" />
+          <input
+            type="checkbox"
+            checked={requireApproval}
+            onChange={(event) => {
+              setRequireApproval(event.target.checked)
+              if (event.target.checked) {
+                setIntervals([])
+                setSubscriptionDiscount('0')
+              }
+            }}
+            className="h-4 w-4 rounded border-zinc-600 bg-zinc-950 text-emerald-500"
+          />
           Review &amp; approve each order before it's confirmed
         </label>
 
