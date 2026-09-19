@@ -502,7 +502,7 @@ async def update_order_status(
             # reverses a stock decrement depends on what it's transitioning
             # FROM, and locking makes a concurrent double-click restock once.
             current = await conn.fetchrow(
-                "SELECT status FROM cappe_orders WHERE id = $1 AND site_id = $2 FOR UPDATE",
+                "SELECT status,tracking_number FROM cappe_orders WHERE id = $1 AND site_id = $2 FOR UPDATE",
                 order_id, site_id,
             )
             if current is None:
@@ -525,9 +525,12 @@ async def update_order_status(
                 order_id,
             )
     from ..services.push import schedule_push
+    body_fields = getattr(body, "model_fields_set", set())
     if body.status == "fulfilled" and current["status"] != "fulfilled":
         schedule_push(order_id, "fulfilled")
-    elif body.tracking_number:
+    elif ("tracking_number" in body_fields and body.tracking_number
+          and body.tracking_number != current["tracking_number"]
+          and (body.status or current["status"]) not in _RESTOCK_TO_STATUSES):
         schedule_push(order_id, "shipped")
     return _order_row(order, [_item_row(i) for i in items])
 

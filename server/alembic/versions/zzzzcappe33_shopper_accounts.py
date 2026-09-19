@@ -48,12 +48,16 @@ def upgrade():
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_cappe_shopper_default_address
             ON cappe_shopper_addresses(shopper_id) WHERE is_default;
+        CREATE INDEX IF NOT EXISTS idx_cappe_shopper_addresses_list
+            ON cappe_shopper_addresses(shopper_id, site_id, created_at, id);
         CREATE TABLE IF NOT EXISTS cappe_shopper_favorites (
             shopper_id UUID NOT NULL REFERENCES cappe_shoppers(id) ON DELETE CASCADE,
             product_id UUID NOT NULL REFERENCES cappe_products(id) ON DELETE CASCADE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (shopper_id, product_id)
         );
+        CREATE INDEX IF NOT EXISTS idx_cappe_shopper_favorites_product
+            ON cappe_shopper_favorites(product_id);
         CREATE TABLE IF NOT EXISTS cappe_shopper_devices (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             shopper_id UUID NOT NULL, site_id UUID NOT NULL,
@@ -71,6 +75,8 @@ def upgrade():
             shopper_id UUID NOT NULL REFERENCES cappe_shoppers(id) ON DELETE CASCADE,
             refresh_hash CHAR(64) NOT NULL, expires_at TIMESTAMPTZ NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS idx_cappe_shopper_sessions_shopper
+            ON cappe_shopper_sessions(shopper_id);
         ALTER TABLE cappe_orders ADD COLUMN IF NOT EXISTS shopper_id UUID
             REFERENCES cappe_shoppers(id) ON DELETE SET NULL;
         CREATE INDEX IF NOT EXISTS idx_cappe_orders_shopper

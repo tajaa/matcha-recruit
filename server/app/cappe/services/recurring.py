@@ -56,6 +56,8 @@ def build_subscription_lines(products, items, interval, site):
     for label, key in (("Tax", "tax_cents"), ("Shipping", "shipping_cents")):
         if totals[key]:
             lines.append(stripe_line(label, totals[key], 1))
+    if len(lines) > 20:
+        raise HTTPException(422, "Subscriptions support at most 20 billed line items")
     return lines, snapshot, {**totals, "currency": currency}
 
 
@@ -196,10 +198,12 @@ async def handle_event(etype, obj, event, background):
     local_id = metadata.get("cappe_shopper_subscription_id")
     if not sid and not local_id:
         return {"received": True}
-    # Subscription events already contain the authoritative state. Invoice and
-    # Checkout events carry only an id, so retrieve there (without holding a DB
-    # connection) and recover our local metadata from the subscription.
-    subscription = obj if etype.startswith("customer.subscription.") else (
+    # Event creation timestamps have only second precision, so two updates in
+    # the same second cannot be ordered reliably from their payloads. Fetch the
+    # current Stripe state outside the DB transaction. Deleted events retain an
+    # authoritative terminal payload and may no longer be retrievable.
+    subscription = (
+        obj if etype == "customer.subscription.deleted" else
         await get_cappe_stripe().retrieve_connected_subscription(account_id, sid) if sid else None
     )
     local_id = local_id or ((subscription or {}).get("metadata") or {}).get("cappe_shopper_subscription_id")
@@ -251,7 +255,8 @@ async def handle_event(etype, obj, event, background):
                     [(item["name"], item["balance"]) for item in shortages],
                     dashboard_url(f"/sites/{row['site_id']}/shop"),
                 )
-    elif etype == "invoice.payment_failed" and row["shopper_id"]:
+    elif (etype == "invoice.payment_failed" and row["shopper_id"] and subscription
+          and subscription.get("status") in ("incomplete", "past_due", "unpaid")):
         from .push import send_to_shopper
         background.add_task(send_to_shopper, row["shopper_id"], row["site_id"], "Subscription payment failed",
                             "Please update your payment method with the store.", {"type": "subscription", "subscription_id": str(row["id"])})
@@ -263,7 +268,17 @@ async def change_subscription(row, cancel):
         if not cancel:
             raise HTTPException(409, "Checkout has not completed")
         if not row["stripe_checkout_session_id"]:
-            raise HTTPException(409, "Checkout is still being prepared; retry shortly")
+            # Stripe never returned a session URL, so the shopper could not have
+            # opened or completed this Checkout Session. Make the local attempt
+            # terminal so failed preparation cannot block account deletion or
+            # consume the pending-checkout allowance forever.
+            async with get_connection() as conn:
+                await conn.execute(
+                    "UPDATE cappe_shopper_subscriptions SET status='incomplete_expired',updated_at=NOW() "
+                    "WHERE id=$1 AND stripe_subscription_id IS NULL AND stripe_checkout_session_id IS NULL",
+                    row["id"],
+                )
+            return {"status": "incomplete_expired"}
         state = await get_cappe_stripe().expire_checkout_session(row["stripe_account_id"], row["stripe_checkout_session_id"])
         if state == "complete":
             raise HTTPException(409, "Payment is settling; retry after it completes")

@@ -73,10 +73,14 @@ def refresh_session_expired(
     except (TypeError, ValueError):
         return True
 
-    settings = get_settings()
     now_epoch = int((now or datetime.now(timezone.utc)).timestamp())
-    idle = lifetimes.refresh_idle_minutes if lifetimes else settings.jwt_refresh_idle_expire_minutes
-    absolute = lifetimes.refresh_absolute_minutes if lifetimes else settings.jwt_session_absolute_expire_hours * 60
+    if lifetimes:
+        idle = lifetimes.refresh_idle_minutes
+        absolute = lifetimes.refresh_absolute_minutes
+    else:
+        settings = get_settings()
+        idle = settings.jwt_refresh_idle_expire_minutes
+        absolute = settings.jwt_session_absolute_expire_hours * 60
     if now_epoch - issued > idle * 60:
         return True
     return now_epoch - started > absolute * 60

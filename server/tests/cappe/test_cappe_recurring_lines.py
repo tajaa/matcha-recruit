@@ -76,6 +76,24 @@ def test_subscription_free_shipping_threshold_uses_discounted_goods_total():
     assert totals["shipping_cents"] == 0
 
 
+def test_subscription_rejects_more_than_twenty_generated_stripe_lines():
+    products, seed = _fixture(quantity=1)
+    product = next(iter(products.values()))
+    product["inventory"] = 100
+    product["option_groups"][0]["options"][0]["inventory"] = 100
+    item = seed[0]
+    items = [CappeCartItem(
+        product_id=item.product_id, quantity=1, selected_option_ids=item.selected_option_ids,
+    ) for _ in range(19)]
+    with pytest.raises(Exception) as caught:
+        build_subscription_lines(
+            products, items, "month",
+            {"tax_rate_bps": 1000, "shipping_flat_cents": 500,
+             "shipping_free_threshold_cents": None},
+        )
+    assert getattr(caught.value, "status_code", None) == 422
+
+
 def test_product_model_rejects_duplicate_subscription_intervals():
     with pytest.raises(ValueError):
         CappeProductCreate(

@@ -60,6 +60,7 @@ class ShopperDevice(BaseModel):
 
 class CartQuoteRequest(BaseModel):
     items: list[CappeCartItem] = Field(min_length=1, max_length=100)
+    interval: Literal["week", "month"] | None = None
 
 
 class SubscriptionCheckout(CartQuoteRequest):

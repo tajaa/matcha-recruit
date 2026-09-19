@@ -308,7 +308,11 @@ def _image_candidate(product: CatalogProduct, image_root: Path | None) -> str | 
         local = image_root / product.image_key
         if local.is_file():
             return local
-    return product.source_image
+    if product.source_image:
+        return product.source_image
+    if product.image_key:
+        raise ImportFailure(f"declared source image is unavailable: {product.image_key}")
+    return None
 
 
 def read_image(source: str | Path) -> tuple[str, str, bytes]:
@@ -357,7 +361,12 @@ def run_import(
             continue
         payload = dict(product.payload)
         try:
-            source = _image_candidate(product, image_root)
+            try:
+                source = _image_candidate(product, image_root)
+            except ImportFailure:
+                if not allow_missing_images:
+                    raise
+                source = None
             uploaded_url: str | None = None
             if source is not None:
                 try:

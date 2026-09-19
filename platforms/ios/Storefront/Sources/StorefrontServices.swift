@@ -9,15 +9,21 @@ final class CheckoutService: NSObject, ASWebAuthenticationPresentationContextPro
     private var webSession: ASWebAuthenticationSession?
 
     func quote(lines: [CartLine]) async throws -> Quote {
-        try await StorefrontAPI.shared.request(
+        let intervals = Set(lines.compactMap(\.interval))
+        if !intervals.isEmpty && (intervals.count != 1 || !lines.allSatisfy({ $0.interval != nil })) {
+            throw APIError(status: 422, message: "Check out recurring and one-time items separately.")
+        }
+        var body: [String: Any] = ["items": lines.map(\.requestObject)]
+        if let interval = intervals.first { body["interval"] = interval }
+        return try await StorefrontAPI.shared.request(
             Config.current.sitePath + "/quote",
             method: "POST",
-            body: ["items": lines.map(\.requestObject)],
+            body: body,
             authenticated: false
         )
     }
 
-    func checkout(lines: [CartLine], shopper: Shopper?) async throws -> Checkout {
+    func checkout(lines: [CartLine], shopper: Shopper?, guestEmail: String? = nil, guestName: String? = nil) async throws -> Checkout {
         let intervals = Set(lines.compactMap(\.interval))
         if !intervals.isEmpty {
             guard shopper != nil else { throw APIError(status: 401, message: "Sign in to start a subscription.") }
@@ -40,8 +46,8 @@ final class CheckoutService: NSObject, ASWebAuthenticationPresentationContextPro
             Config.current.sitePath + "/orders",
             method: "POST",
             body: [
-                "customer_email": shopper?.email ?? "",
-                "customer_name": shopper?.name ?? NSNull(),
+                "customer_email": shopper?.email ?? guestEmail ?? "",
+                "customer_name": shopper?.name ?? guestName ?? NSNull(),
                 "items": lines.map(\.requestObject),
                 "success_url": Config.current.returnURL,
                 "cancel_url": Config.current.returnURL,
@@ -50,7 +56,18 @@ final class CheckoutService: NSObject, ASWebAuthenticationPresentationContextPro
         )
     }
 
-    func openHostedCheckout(_ value: Checkout) async throws -> URL? {
+    enum HostedResult: Equatable { case success, cancel }
+
+    static func hostedResult(from callback: URL?) -> HostedResult? {
+        guard let callback,
+              let result = URLComponents(url: callback, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "r" })?.value else { return nil }
+        if result == "success" { return .success }
+        if result == "cancel" { return .cancel }
+        return nil
+    }
+
+    func openHostedCheckout(_ value: Checkout) async throws -> HostedResult? {
         guard let raw = value.checkoutUrl, let url = URL(string: raw) else { return nil }
         return try await withCheckedThrowingContinuation { continuation in
             let session = ASWebAuthenticationSession(url: url, callbackURLScheme: Config.current.scheme) {
@@ -61,7 +78,12 @@ final class CheckoutService: NSObject, ASWebAuthenticationPresentationContextPro
                 } else if let error {
                     continuation.resume(throwing: error)
                 } else {
-                    continuation.resume(returning: callback)
+                    guard let result = Self.hostedResult(from: callback) else {
+                        continuation.resume(throwing: APIError(status: 0, message: "Checkout returned an invalid result."))
+                        self.webSession = nil
+                        return
+                    }
+                    continuation.resume(returning: result)
                 }
                 self.webSession = nil
             }

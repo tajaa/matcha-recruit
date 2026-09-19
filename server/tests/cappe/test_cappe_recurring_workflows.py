@@ -237,7 +237,7 @@ async def test_subscription_webhooks_are_account_scoped_ordered_and_schedule_sid
     synced = []
 
     async def sync(_conn, local, stripe_sub, event_at):
-        synced.append((local["id"], stripe_sub["id"], event_at))
+        synced.append((local["id"], stripe_sub["id"], stripe_sub["status"], event_at))
 
     async def record(_conn, local, invoice):
         return uuid4(), True
@@ -259,7 +259,23 @@ async def test_subscription_webhooks_are_account_scoped_ordered_and_schedule_sid
     assert await recurring.handle_event("invoice.paid", invoice, event, background) == {"received": True}
     names = [name for name, _ in background.tasks]
     assert "issue_receipt_for_paid_order" in names and "notify_order_event" in names
-    assert synced and synced[0][2].tzinfo is not None
+    assert synced and synced[0][3].tzinfo is not None
+
+    # Subscription update payloads can arrive out of order within the same
+    # second. The handler must retrieve current Stripe state instead of applying
+    # the stale event object.
+    stale = {"id": "sub_1", "status": "past_due", "metadata": {
+        "cappe_shopper_subscription_id": str(row["id"]),
+    }}
+    background.tasks.clear()
+    await recurring.handle_event("customer.subscription.updated", stale, event, background)
+    assert synced[-1][2] == "active"
+
+    # A delayed failed invoice must not notify after Stripe has recovered.
+    await recurring.handle_event(
+        "invoice.payment_failed", {"id": "in_old", "subscription": "sub_1"}, event, background,
+    )
+    assert background.tasks == []
 
     conn.row = None
     background.tasks.clear()
@@ -298,12 +314,10 @@ async def test_sync_cancel_resume_and_delete_paths(monkeypatch):
     pending = {**row, "stripe_subscription_id": None}
     assert await recurring.change_subscription(pending, True) == {"status": "incomplete_expired"}
     pending["stripe_checkout_session_id"] = None
-    with pytest.raises(HTTPException) as caught:
-        await recurring.change_subscription(pending, True)
-    assert caught.value.status_code == 409
+    assert await recurring.change_subscription(pending, True) == {"status": "incomplete_expired"}
+    assert any("stripe_checkout_session_id IS NULL" in query for query, _ in conn.calls)
 
     await recurring.delete_shopper_subscriptions(
         {"id": row["site_id"]}, {"id": row["shopper_id"]},
     )
     assert any("deleting=TRUE" in query for query, _ in conn.calls)
-

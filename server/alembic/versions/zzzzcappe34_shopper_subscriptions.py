@@ -41,6 +41,8 @@ def upgrade():
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_cappe_shopper_subscriptions_shopper ON cappe_shopper_subscriptions(shopper_id,site_id);
+        CREATE INDEX IF NOT EXISTS idx_cappe_shopper_subscriptions_site_created
+            ON cappe_shopper_subscriptions(site_id,created_at DESC,id DESC);
         ALTER TABLE cappe_orders ADD COLUMN IF NOT EXISTS subscription_id UUID REFERENCES cappe_shopper_subscriptions(id) ON DELETE SET NULL,
             ADD COLUMN IF NOT EXISTS stripe_invoice_id VARCHAR(255);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_cappe_orders_invoice ON cappe_orders(stripe_invoice_id) WHERE stripe_invoice_id IS NOT NULL;

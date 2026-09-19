@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from starlette.requests import Request
 
-from app.cappe.models.shop import CappeCartItem, CappeCheckoutRequest
+from app.cappe.models.shop import CappeCartItem, CappeCheckoutRequest, CappeProduct
 from app.cappe.routes.public import shop as routes
 from app.cappe.services import shopper_customers, stripe_connect
 
@@ -76,6 +76,15 @@ async def test_public_quote_and_signed_order_use_authoritative_shopper(monkeypat
     assert quote["subtotal_cents"] == 2000
     assert quote["tax_cents"] == 200 and quote["shipping_cents"] == 500
 
+    product.update(subscription_intervals=["month"], subscription_discount_bps=1000,
+                   requires_approval=False)
+    recurring_quote = await routes.quote(
+        "ahnimal", routes.CartQuoteRequest(
+            items=[CappeCartItem(product_id=product_id, quantity=2)], interval="month",
+        ), _request(),
+    )
+    assert recurring_quote["subtotal_cents"] == 1800
+
     rates = []
     captured = []
     monkeypatch.setattr(routes, "check_rate_limit", lambda *args: _record(rates, args))
@@ -92,6 +101,17 @@ async def test_public_quote_and_signed_order_use_authoritative_shopper(monkeypat
     assert await routes.public_create_order("ahnimal", body, _request(), SimpleNamespace(), shopper) == {"order_id": "order"}
     assert captured[0][2] == shopper
     assert rates[0][0] == f"shopper:{shopper['id']}"
+
+
+def test_public_product_response_keeps_active_discount_fields():
+    product = CappeProduct(
+        id=uuid4(), site_id=uuid4(), name="Sale soap", price_cents=1000,
+        currency="USD", status="active", sort_order=0,
+        discount_percent=20, discounted_price_cents=800,
+    )
+    payload = product.model_dump()
+    assert payload["discount_percent"] == 20
+    assert payload["discounted_price_cents"] == 800
 
 
 async def _async(value):

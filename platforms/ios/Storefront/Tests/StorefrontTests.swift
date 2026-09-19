@@ -88,9 +88,35 @@ final class StorefrontTests: XCTestCase {
             "CappeSiteSlug": "shop",
             "CappeSiteOrigin": "https://shop.example.test",
             "AppURLScheme": "shopapp",
+            "CappeDisplayName": "Shop Name",
+            "CappeTagline": "Shop tagline",
         ], environment: [:])
         XCTAssertEqual(value.apiBase.absoluteString, "https://api.example.test/api/cappe")
         XCTAssertEqual(value.sitePath, "/public/sites/shop")
         XCTAssertEqual(value.scheme, "shopapp")
+        XCTAssertEqual(value.displayName, "Shop Name")
+        XCTAssertEqual(value.tagline, "Shop tagline")
+    }
+
+    func testHostedCheckoutCallbackDistinguishesSuccessAndCancel() {
+        XCTAssertEqual(
+            CheckoutService.hostedResult(from: URL(string: "ahnimal://order/token?r=success")),
+            .success
+        )
+        XCTAssertEqual(
+            CheckoutService.hostedResult(from: URL(string: "ahnimal://order/token?r=cancel")),
+            .cancel
+        )
+        XCTAssertNil(CheckoutService.hostedResult(from: URL(string: "ahnimal://order/token")))
+    }
+
+    @MainActor
+    func testOrderLinkSelectsAccountAndBuildsDirectRoute() {
+        let router = AppRouter()
+        router.openOrder("0123456789abcdef0123456789abcdef")
+        XCTAssertEqual(router.selectedTab, .account)
+        XCTAssertEqual(router.accountPath, [
+            .order("0123456789abcdef0123456789abcdef")
+        ])
     }
 }

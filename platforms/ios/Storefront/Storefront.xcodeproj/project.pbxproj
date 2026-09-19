@@ -15,6 +15,8 @@
 		AE77CC2567D4BD688FE23E41 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFC9E6B3DD49C4849CD3F6F /* Models.swift */; };
 		AF64EC58AB9CC9B29A78FF84 /* StorefrontServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = E812709FD55A1BB8BF99B699 /* StorefrontServices.swift */; };
 		B509E50BEBE5D87129A9428C /* AppStores.swift in Sources */ = {isa = PBXBuildFile; fileRef = 314202B628A711DEE14EEE49 /* AppStores.swift */; };
+		D12A5E61F07B4CAFB4D40001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D12A5E61F07B4CAFB4D40002 /* Assets.xcassets */; };
+		D12A5E61F07B4CAFB4D40003 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D12A5E61F07B4CAFB4D40004 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -38,6 +40,8 @@
 		AB233EE07D34BA069A293F2A /* StorefrontAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorefrontAPI.swift; sourceTree = "<group>"; };
 		AC12CC559F1B6F6819B5654D /* StorefrontTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = StorefrontTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E812709FD55A1BB8BF99B699 /* StorefrontServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorefrontServices.swift; sourceTree = "<group>"; };
+		D12A5E61F07B4CAFB4D40002 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		D12A5E61F07B4CAFB4D40004 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -45,6 +49,7 @@
 			isa = PBXGroup;
 			children = (
 				C05378145CB609A27E66184B /* Sources */,
+				D12A5E61F07B4CAFB4D40005 /* Resources */,
 				C4A839CA202DC035FC568AEB /* Tests */,
 				CF3D405D9ADD5872AAF5B7B1 /* Products */,
 			);
@@ -70,6 +75,15 @@
 				A647B3A1EFEFF7B9163D8AC8 /* StorefrontTests.swift */,
 			);
 			path = Tests;
+			sourceTree = "<group>";
+		};
+		D12A5E61F07B4CAFB4D40005 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				D12A5E61F07B4CAFB4D40002 /* Assets.xcassets */,
+				D12A5E61F07B4CAFB4D40004 /* PrivacyInfo.xcprivacy */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		CF3D405D9ADD5872AAF5B7B1 /* Products */ = {
@@ -107,6 +121,7 @@
 			buildConfigurationList = F8BD491B3F8C63C23EC1987D /* Build configuration list for PBXNativeTarget "Ahnimal" */;
 			buildPhases = (
 				40AC9D6A88276C3288513A6B /* Sources */,
+				D12A5E61F07B4CAFB4D40006 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -157,6 +172,18 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D12A5E61F07B4CAFB4D40006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D12A5E61F07B4CAFB4D40001 /* Assets.xcassets in Resources */,
+				D12A5E61F07B4CAFB4D40003 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		3C99DDD65FB7CCF00311F892 /* Sources */ = {

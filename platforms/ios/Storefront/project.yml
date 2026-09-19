@@ -38,6 +38,8 @@ targets:
         CappeSiteSlug: ahnimal
         CappeSiteOrigin: https://ahnimal.gummfit.com
         AppURLScheme: ahnimal
+        CappeDisplayName: Ahnimal
+        CappeTagline: Better choices for people, animals, and the planet.
         CFBundleURLTypes:
           - CFBundleURLSchemes: [ahnimal]
             CFBundleURLName: com.ahnimal.app

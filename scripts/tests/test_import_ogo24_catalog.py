@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from scripts.cappe.import_ogo24_catalog import load_catalog, read_products_copy
+from scripts.cappe.import_ogo24_catalog import (
+    CatalogProduct,
+    load_catalog,
+    read_products_copy,
+    run_import,
+)
 
 
 COLUMNS = (
@@ -85,3 +90,33 @@ def test_catalog_mapping_filters_domain_and_maps_fields(tmp_path: Path):
         "subscription_intervals": ["month"],
         "subscription_discount_bps": 0,
     }
+
+
+def test_import_requires_declared_archive_image_unless_explicitly_allowed():
+    product = CatalogProduct(
+        source_id=42,
+        source_status="active",
+        source_image=None,
+        image_key="only-in-archive.webp",
+        payload={"name": "Soap", "sku": "ogo24:42"},
+    )
+
+    class API:
+        created = []
+
+        def existing_skus(self):
+            return {}
+
+        def create_product(self, payload):
+            self.created.append(payload)
+            return "product-id"
+
+    api = API()
+    result = run_import([product], api=api, image_root=None, allow_missing_images=False)
+    assert result[0].action == "failed"
+    assert "unavailable" in result[0].error
+    assert api.created == []
+
+    allowed = run_import([product], api=api, image_root=None, allow_missing_images=True)
+    assert allowed[0].action == "created"
+    assert api.created[0]["image_url"] is None

@@ -3,7 +3,8 @@
 The `Ahnimal` target is the first white-label Cappe storefront app. Tenant and
 API values live in `project.yml`; a new storefront can be added as another
 target using the same `Sources` and `Resources` with its own bundle ID, URL
-scheme, display name, and plist keys.
+scheme, display name, tagline, and plist keys (`CappeDisplayName` and
+`CappeTagline` provide the in-app branding).
 
 ```sh
 make build
