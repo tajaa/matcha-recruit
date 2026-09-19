@@ -28,6 +28,7 @@ export default function ClientThread() {
   async function send() {
     if (!draft.trim() || !thread) return
     setSending(true)
+    setError(null)
     const body = draft.trim()
     try {
       await cappePublicPost(`/public/threads/${token}/messages`, { body })
@@ -45,7 +46,10 @@ export default function ClientThread() {
 
   const input = 'w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-lime-500'
 
-  if (error) {
+  // Only a load failure is fatal — a failed SEND used to replace the whole
+  // conversation with an error page, throwing away the message the client had
+  // just typed. That one shows as a banner over the thread instead (below).
+  if (error && !thread) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-950 px-4">
         <p className="text-sm text-zinc-400">{error}</p>
@@ -66,6 +70,9 @@ export default function ClientThread() {
         <div className="text-xs uppercase tracking-wide text-lime-400">{thread.site_name}</div>
         <h1 className="text-lg font-semibold text-zinc-50">{thread.subject || 'Conversation'}</h1>
       </header>
+      {error && (
+        <p className="border-b border-red-500/20 bg-red-500/10 px-6 py-2 text-sm text-red-300">{error}</p>
+      )}
       <div className="flex-1 space-y-3 overflow-y-auto px-6 py-5">
         {thread.messages.map((m) => (
           <div key={m.id} className={`flex ${m.sender === 'client' ? 'justify-end' : 'justify-start'}`}>

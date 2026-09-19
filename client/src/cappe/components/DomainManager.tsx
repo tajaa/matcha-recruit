@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Search, Loader2, Globe, Check, CircleAlert, ExternalLink, Server, RefreshCw, LogOut } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Search, Loader2, Globe, Check, CircleAlert, ExternalLink, Server, RefreshCw, LogOut, ShieldCheck } from 'lucide-react'
 import { cappeApi } from '../api'
 import DnsRecordsModal from './DnsRecordsModal'
-import type { CappeDomain, CappeDomainSearchResult } from '../types'
+import type {
+  CappeDomain,
+  CappeDomainConfig,
+  CappeDomainEdgeStatus,
+  CappeDomainSearchResult,
+} from '../types'
 
 const input =
   'rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
@@ -13,7 +18,29 @@ const STATUS_STYLE: Record<CappeDomain['status'], string> = {
   pending: 'bg-zinc-700/40 text-zinc-300',
   failed: 'bg-red-500/15 text-red-300',
   expired: 'bg-zinc-700/40 text-zinc-400',
+  transfer_requested: 'bg-zinc-700/40 text-zinc-300',
 }
+
+/** Certificate/edge progress, shown next to the registration status: a domain
+ *  is paid for and 'active' well before its certificate exists. */
+const EDGE_LABEL: Record<CappeDomainEdgeStatus, string> = {
+  none: '',
+  provisioning: 'securing…',
+  pending_dns: 'waiting for DNS',
+  live: 'secured',
+  failed: 'setup failed',
+}
+const EDGE_STYLE: Record<CappeDomainEdgeStatus, string> = {
+  none: '',
+  provisioning: 'bg-amber-500/15 text-amber-300',
+  pending_dns: 'bg-sky-500/15 text-sky-300',
+  live: 'bg-emerald-500/15 text-emerald-300',
+  failed: 'bg-red-500/15 text-red-300',
+}
+
+/** Anything still moving on its own — poll while one of these is on screen. */
+const settling = (d: CappeDomain) =>
+  d.status === 'registering' || d.edge_status === 'provisioning' || d.edge_status === 'pending_dns'
 
 const money = (cents: number | null) => (cents == null ? '' : `$${(cents / 100).toFixed(2)}/yr`)
 
@@ -31,18 +58,36 @@ export default function DomainManager({ siteId }: { siteId: string }) {
   const [dnsFor, setDnsFor] = useState<CappeDomain | null>(null)
   const [acting, setActing] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [config, setConfig] = useState<CappeDomainConfig | null>(null)
 
   const loadDomains = useCallback(() => {
     cappeApi.get<CappeDomain[]>(`/domains?site_id=${siteId}`).then(setDomains).catch(() => setDomains([]))
   }, [siteId])
   useEffect(loadDomains, [loadDomains])
 
-  // Poll while any domain is still registering (the webhook + finalizer run async).
   useEffect(() => {
-    if (!domains?.some((d) => d.status === 'registering')) return
-    const t = setInterval(loadDomains, 5000)
+    cappeApi
+      .get<CappeDomainConfig>('/domains/config')
+      .then(setConfig)
+      .catch(() => setConfig({ enabled: false, routing_endpoint: null }))
+  }, [])
+
+  // Poll while anything is still settling — the Stripe webhook, the registrar
+  // call and the CloudFront certificate all land asynchronously.
+  //
+  // The interval is keyed on the SITE, never on `domains`: depending on the list
+  // tore the timer down and rebuilt it on every refresh, so the 5s tick restarted
+  // from zero each time instead of firing. The current list is read through a ref.
+  const domainsRef = useRef<CappeDomain[] | null>(null)
+  useEffect(() => {
+    domainsRef.current = domains
+  }, [domains])
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (domainsRef.current?.some(settling)) loadDomains()
+    }, 5000)
     return () => clearInterval(t)
-  }, [domains, loadDomains])
+  }, [loadDomains])
 
   async function search() {
     const q = query.trim()
@@ -65,7 +110,7 @@ export default function DomainManager({ siteId }: { siteId: string }) {
         domain,
       })
       // Hand off to Stripe Checkout; registration finishes via the webhook.
-      window.location.href = res.checkout_url
+      window.location.assign(res.checkout_url)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start checkout')
       setBuying(null)
@@ -113,6 +158,18 @@ export default function DomainManager({ siteId }: { siteId: string }) {
     }
   }
 
+  async function retryEdge(d: CappeDomain) {
+    setActing(d.id); setError(null)
+    try {
+      await cappeApi.post<CappeDomain>(`/domains/${d.id}/edge/retry`)
+      loadDomains()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not retry setup')
+    } finally {
+      setActing(null)
+    }
+  }
+
   async function requestTransfer(d: CappeDomain) {
     if (!confirm(`Request to transfer ${d.domain} to another registrar? We'll email you the authorization code.`)) return
     setActing(d.id); setError(null)
@@ -126,8 +183,41 @@ export default function DomainManager({ siteId }: { siteId: string }) {
     }
   }
 
+  async function cancelTransfer(d: CappeDomain) {
+    setActing(d.id)
+    try {
+      await cappeApi.post<CappeDomain>(`/domains/${d.id}/transfer-request/cancel`)
+      loadDomains()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not cancel the transfer')
+    } finally {
+      setActing(null)
+    }
+  }
+
+  // While custom domains are switched off only the CREATE surface goes dark.
+  // Domains a tenant already owns must stay manageable: hiding the whole panel
+  // also hid the auto-renew toggle, so renewals kept charging a saved card with
+  // no way to stop them.
+  const createDisabled = !!config && !config.enabled
+
+  const endpoint = config?.routing_endpoint
+
   return (
     <div className="space-y-5">
+      {createDisabled && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
+            <Globe className="h-4 w-4 text-zinc-500" /> Custom domains are coming soon
+          </div>
+          <p className="mt-1 text-xs text-zinc-500">
+            Your site is live at its <span className="text-zinc-300">.gummfit.com</span> address in the
+            meantime. We'll turn on buying and connecting your own domain — with the certificate handled
+            for you — shortly.
+          </p>
+        </div>
+      )}
+      {!createDisabled && (<>
       <div>
         <label className="mb-1 block text-sm font-medium text-zinc-300">Find a domain to buy</label>
         <div className="flex gap-2">
@@ -182,7 +272,7 @@ export default function DomainManager({ siteId }: { siteId: string }) {
           <input
             value={connect}
             onChange={(e) => setConnect(e.target.value)}
-            placeholder="www.yourdomain.com"
+            placeholder="yourdomain.com  or  shop.yourdomain.com"
             className={`flex-1 ${input}`}
           />
           <button
@@ -194,8 +284,15 @@ export default function DomainManager({ siteId }: { siteId: string }) {
           </button>
         </div>
         <p className="mt-1 text-xs text-zinc-500">
-          Point your domain's A record to our server, then connect it here — we handle the SSL certificate
-          automatically.
+          Connect it here first — we'll verify you own it, then show the record to add. You'll point an{' '}
+          <span className="text-zinc-300">ALIAS</span>/<span className="text-zinc-300">ANAME</span> record on
+          a root domain (or a <span className="text-zinc-300">CNAME</span> on a subdomain) at{' '}
+          {endpoint ? (
+            <span className="break-all font-mono text-zinc-300">{endpoint}</span>
+          ) : (
+            'the address we give you'
+          )}
+          . The SSL certificate is issued and renewed for you.
         </p>
       </div>
 
@@ -204,6 +301,8 @@ export default function DomainManager({ siteId }: { siteId: string }) {
           <CircleAlert className="h-4 w-4" /> {error}
         </p>
       )}
+
+      </>)}
 
       {domains && domains.length > 0 && (
         <div className="border-t border-zinc-800 pt-4">
@@ -266,11 +365,76 @@ export default function DomainManager({ siteId }: { siteId: string }) {
                         </button>
                       </>
                     )}
+                    {d.kind === 'register' && d.status === 'transfer_requested' && (
+                      <button
+                        onClick={() => cancelTransfer(d)}
+                        disabled={acting === d.id}
+                        title="Keep this domain here — it goes back to renewing normally"
+                        className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+                      >
+                        <LogOut className="h-3 w-3" /> Cancel transfer
+                      </button>
+                    )}
+                    {!createDisabled && d.status === 'active' && (d.edge_status === 'failed' || d.edge_status === 'none') && (
+                      <button
+                        onClick={() => retryEdge(d)}
+                        disabled={acting === d.id}
+                        title={d.edge_status === 'none' ? 'Set up the certificate for this domain' : 'Retry certificate setup'}
+                        className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+                      >
+                        <RefreshCw className="h-3 w-3" /> {d.edge_status === 'none' ? 'Set up HTTPS' : 'Retry setup'}
+                      </button>
+                    )}
+                    {d.edge_status !== 'none' && (
+                      <span
+                        title={d.edge_error || undefined}
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${EDGE_STYLE[d.edge_status]}`}
+                      >
+                        <ShieldCheck className="h-3 w-3" /> {EDGE_LABEL[d.edge_status]}
+                      </span>
+                    )}
                     <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_STYLE[d.status]}`}>
-                      {d.status === 'registering' ? 'setting up…' : d.status}
+                      {d.status === 'registering'
+                        ? 'setting up…'
+                        : d.status === 'transfer_requested'
+                          ? 'transferring out'
+                          : d.status}
                     </span>
                   </div>
                 </div>
+                {d.edge_status === 'pending_dns' && (d.cf_routing_endpoint || endpoint) && (
+                  <div className="mt-2 rounded-md bg-zinc-900 p-2 text-xs text-zinc-400">
+                    Point the domain at us, then this turns green on its own (it can take up to an hour):
+                    <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono text-[11px] text-zinc-300">
+                      {d.kind === 'register' ? (
+                        <>
+                          <span className="text-zinc-500">ALIAS / ANAME</span>
+                          <span className="break-all">{d.domain} → {d.cf_routing_endpoint || endpoint}</span>
+                          <span className="text-zinc-500">CNAME</span>
+                          <span className="break-all">www.{d.domain} → {d.cf_routing_endpoint || endpoint}</span>
+                        </>
+                      ) : (
+                        <>
+                          {/* A connected domain's certificate covers exactly this
+                              host. Every name on it must resolve to us before it
+                              is issued, so a www sibling nobody pointed would
+                              hold the whole certificate up forever. */}
+                          <span className="text-zinc-500">ALIAS or CNAME</span>
+                          <span className="break-all">{d.domain} → {d.cf_routing_endpoint || endpoint}</span>
+                        </>
+                      )}
+                    </div>
+                    {d.kind === 'connect' && (
+                      <p className="mt-1 text-[11px] text-zinc-500">
+                        Use ALIAS/ANAME if this is your root domain, CNAME if it's a subdomain like
+                        shop.example.com. Only this exact address is covered.
+                      </p>
+                    )}
+                  </div>
+                )}
+                {d.edge_status === 'failed' && d.edge_error && (
+                  <p className="mt-2 text-xs text-red-400">{d.edge_error}</p>
+                )}
                 {d.kind === 'connect' && d.status === 'pending' && d.verification_token && (
                   <div className="mt-2 rounded-md bg-zinc-900 p-2 text-xs text-zinc-400">
                     Add this DNS <span className="font-medium text-zinc-300">TXT</span> record at your registrar,

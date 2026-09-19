@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { Loader2, RotateCw } from 'lucide-react'
 import { cappeApi } from '../api'
 import { ui, badgeFor } from '../components/ui'
 import { fmtCents, type EarningsRow } from '../types'
@@ -8,11 +8,36 @@ const UPCOMING_STATUSES = ['due', 'scheduled', 'processing']
 
 export default function CreatorEarnings() {
   const [rows, setRows] = useState<EarningsRow[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    cappeApi.get<EarningsRow[]>('/creators/me/earnings').then(setRows).catch(() => setRows([]))
+  // A failed load used to `setRows([])`, which renders as "Paid out $0.00 /
+  // Upcoming $0.00 / No earnings yet" — a creator who is owed money is told
+  // they are owed nothing. Say the load failed and offer a retry instead.
+  // State is only ever set from the request's own callbacks — an effect body
+  // that calls setState synchronously re-renders before the fetch even starts.
+  const fetchEarnings = useCallback(() => {
+    return cappeApi.get<EarningsRow[]>('/creators/me/earnings')
+      .then((r) => { setRows(r); setError(null) })
+      .catch((e) => setError(e instanceof Error ? e.message : 'Could not load your earnings'))
   }, [])
 
+  useEffect(() => { void fetchEarnings() }, [fetchEarnings])
+
+  const retry = () => { setRows(null); setError(null); void fetchEarnings() }
+
+  if (error) {
+    return (
+      <div className="mx-auto max-w-5xl px-6 py-8">
+        <h1 className={ui.heading}>Earnings</h1>
+        <div className={`${ui.card} mt-6 p-6 text-center`}>
+          <p className="text-sm text-zinc-400">{error}</p>
+          <button onClick={retry} className={`${ui.btnGhost} mt-4`}>
+            <RotateCw className="h-4 w-4" /> Try again
+          </button>
+        </div>
+      </div>
+    )
+  }
   if (rows === null) {
     return <div className="flex items-center justify-center py-24"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>
   }

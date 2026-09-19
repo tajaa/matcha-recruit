@@ -10,6 +10,7 @@ import type {
   PublicCreatorPage,
   PublicCreatorProfile,
 } from './types'
+import { creatorPaths } from './creators/creatorPaths'
 
 const BASE = `${import.meta.env.VITE_API_URL ?? '/api'}/cappe`
 
@@ -66,31 +67,75 @@ export function clearCappeTokens() {
   } catch { /* storage may be blocked */ }
 }
 
-let _refreshing: Promise<boolean> | null = null
+/** Why a refresh attempt ended.
+ *
+ *  The distinction is the whole point: `'dead'` means the server told us this
+ *  session is over, and only that justifies throwing the user out. `'transport'`
+ *  means we never got an answer — offline, a dropped connection, a 502 from the
+ *  edge — and logging out there discards unsaved work (a half-written page in
+ *  the editor) over a blip that would have healed on retry. */
+export type CappeRefreshOutcome = 'ok' | 'dead' | 'transport'
 
-async function _tryRefresh(): Promise<boolean> {
+let _refreshing: Promise<CappeRefreshOutcome> | null = null
+
+async function _tryRefresh(): Promise<CappeRefreshOutcome> {
   const refreshToken = getCappeRefreshToken()
-  if (!refreshToken) return false
+  if (!refreshToken) return 'dead'
   try {
     const res = await fetch(`${BASE}/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refreshToken }),
     })
-    if (!res.ok) return false
+    // Only the server rejecting the refresh token itself ends the session.
+    // A 429 (the endpoint is rate-limited 60/hr/IP) or a 5xx is transient.
+    if (!res.ok) return res.status === 401 || res.status === 403 ? 'dead' : 'transport'
     const data = await res.json()
+    if (!data?.access_token || !data?.refresh_token) return 'transport'
     setCappeTokens(data.access_token, data.refresh_token)
-    return true
+    return 'ok'
   } catch {
-    return false
+    return 'transport'
   }
 }
 
+/** Single-flight refresh. Concurrent callers (several requests 401ing at once,
+ *  or a request and an SSE stream) share one in-flight attempt. */
+export function refreshCappeSession(): Promise<CappeRefreshOutcome> {
+  if (!_refreshing) {
+    _refreshing = _tryRefresh().finally(() => { _refreshing = null })
+  }
+  return _refreshing
+}
+
+export const CAPPE_NETWORK_ERROR = 'Network error — your changes are still here. Check your connection and try again.'
+
+/** Thrown instead of logging out when a refresh could not reach the server. */
+function _networkError(): CappeApiError {
+  return new CappeApiError(CAPPE_NETWORK_ERROR, 'network')
+}
+
+// Creator/brand sessions live under /gummfit/creators/* (and the legacy
+// /cappe/creator/* aliases). Bouncing one of those to the business login is a
+// dead end — that form does not accept a creator or brand account.
+const CREATOR_AREA = /(^|\/)(gummfit\/)?creators?(\/|$)/
+const BRAND_AREA = /\/creators\/brands(\/|$)/
+const BUSINESS_LOGIN = '/cappe/login'
+
+function _loginPathFor(pathname: string): string {
+  if (BRAND_AREA.test(pathname)) return creatorPaths.brandLogin
+  if (CREATOR_AREA.test(pathname)) return creatorPaths.login
+  return BUSINESS_LOGIN
+}
+
+const _LOGIN_PATHS = new Set<string>([BUSINESS_LOGIN, creatorPaths.login, creatorPaths.brandLogin])
+
 function _logout() {
   clearCappeTokens()
-  if (window.location.pathname !== '/cappe/login') {
-    window.location.href = '/cappe/login'
-  }
+  const path = window.location.pathname
+  // Already sitting on a login screen — redirecting would loop.
+  if (_LOGIN_PATHS.has(path)) return
+  window.location.href = _loginPathFor(path)
 }
 
 /** Refresh proactively if the token expires within 60s.
@@ -102,19 +147,22 @@ function _logout() {
 export async function ensureFreshCappeToken(): Promise<string | null> {
   const token = getCappeToken()
   if (!token) return null
+  // Decode inside its own try: a malformed token just falls through to the
+  // request, which will 401 and take the normal path. The refresh below must
+  // stay OUTSIDE it — its network error is a real error to propagate, not
+  // something to swallow as "unparseable token".
+  let expiresIn: number | null = null
   try {
     const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
-    const expiresIn = payload.exp - Date.now() / 1000
-    if (expiresIn < 60) {
-      if (!_refreshing) {
-        _refreshing = _tryRefresh().finally(() => { _refreshing = null })
-      }
-      const ok = await _refreshing
-      if (!ok) { _logout(); return null }
-      return getCappeToken()
-    }
+    expiresIn = payload.exp - Date.now() / 1000
   } catch { /* malformed token — let the request fail normally */ }
-  return token
+  if (expiresIn === null || expiresIn >= 60) return token
+
+  const outcome = await refreshCappeSession()
+  if (outcome === 'dead') { _logout(); return null }
+  // Couldn't reach the server: surface it instead of ending the session.
+  if (outcome === 'transport') throw _networkError()
+  return getCappeToken()
 }
 
 /** Auth headers for a stream, with the token refreshed first. */
@@ -141,11 +189,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { ...init, headers: _buildHeaders(init, token) })
 
   if (res.status === 401 && token) {
-    if (!_refreshing) {
-      _refreshing = _tryRefresh().finally(() => { _refreshing = null })
-    }
-    const ok = await _refreshing
-    if (ok) {
+    const outcome = await refreshCappeSession()
+    if (outcome === 'ok') {
       const newToken = getCappeToken()
       const retry = await fetch(`${BASE}${path}`, { ...init, headers: _buildHeaders(init, newToken) })
       if (!retry.ok) {
@@ -158,8 +203,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       if (retry.status === 204) return null as T
       return retry.json()
     }
-    _logout()
-    throw new Error('Session expired')
+    // Only a server-side rejection of the refresh token ends the session.
+    if (outcome === 'dead') { _logout(); throw new Error('Session expired') }
+    throw _networkError()
   }
 
   if (!res.ok) {
@@ -233,8 +279,12 @@ export const cappeApi = {
     if (!res.ok) throw new Error(`${res.status} ${res.statusText || 'Preview failed'}`)
     return res.text()
   },
-  // Authed GET of a binary (e.g. a receipt PDF) → opens it in a new tab.
-  openBlob: async (path: string): Promise<void> => {
+  // Authed GET of a binary (e.g. a receipt PDF) → saves it via a synthetic
+  // download link. `window.open` on a blob: URL is what a pop-up blocker
+  // stops by default (the open happens after an await, so it no longer counts
+  // as user-initiated) — the user clicked "Receipt" and nothing happened,
+  // with no error to show. An anchor click is not pop-up-blocked.
+  openBlob: async (path: string, filename = 'download'): Promise<void> => {
     const token = getCappeToken()
     const res = await fetch(`${BASE}${path}`, { headers: _buildHeaders(undefined, token) })
     if (!res.ok) {
@@ -242,7 +292,15 @@ export const cappeApi = {
       throw new Error(body?.detail || `${res.status} ${res.statusText || 'Download failed'}`)
     }
     const url = URL.createObjectURL(await res.blob())
-    window.open(url, '_blank', 'noopener')
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    // Revoked on the next tick, not immediately: Safari reads the blob after
+    // the click handler returns.
     setTimeout(() => URL.revokeObjectURL(url), 60_000)
   },
 }

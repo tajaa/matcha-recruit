@@ -5,18 +5,27 @@ charged on OUR platform Stripe account (not a Connect storefront sale). Flow:
 
   search → purchase (creates a 'pending' row + platform Checkout Session)
          → [Stripe paid] webhook marks it 'registering' + kicks off finalize
-         → finalize: Porkbun register + point DNS at the app → 'active'
-                     (sets cappe_sites.custom_domain so the renderer resolves it)
+         → finalize: Porkbun register + CloudFront tenant + point DNS at the
+                     tenant's routing endpoint → 'active' / edge 'pending_dns'
+         → edge sync sees the certificate issued → edge 'live', and only THEN
+                     sets cappe_sites.custom_domain so the renderer resolves it
          → on failure: 'failed' + refund the customer's charge
 
 Charge-then-register ordering means a failed card never leaves us holding a
-registration; a failed registration after payment is auto-refunded. TLS for the
-live domain is issued on-demand by Caddy, gated by GET /tls/authorize.
+registration; a failed registration after payment is auto-refunded.
+
+TLS: each custom domain is a CloudFront **distribution tenant** of one
+tenant-only distribution, and CloudFront issues + renews its certificate itself
+(`services/cloudfront_tenants.py`). There is no Caddy and no ask-endpoint. The
+whole surface is gated on `settings.cappe_custom_domains_enabled` until the
+AWS-side setup in `docs/ops/CAPPE_CUSTOM_DOMAINS.md` is done.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+
+import asyncpg
 import secrets
 from datetime import datetime, timezone
 from typing import Optional
@@ -26,7 +35,7 @@ import dns.asyncresolver
 import dns.exception
 import dns.resolver
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Query, Request, status
 
 from app.core.services.stripe_events import (
     CONSUMER_CAPPE_PLATFORM,
@@ -45,6 +54,7 @@ from ..models.cappe import (
     CappeDomain,
     CappeDomainAutoRenewUpdate,
     CappeDomainCheckoutResponse,
+    CappeDomainConfig,
     CappeDomainConnectRequest,
     CappeDomainPurchaseRequest,
     CappeDomainSearchResult,
@@ -52,8 +62,11 @@ from ..models.cappe import (
 from ..services.email import dashboard_url
 from ..services.porkbun import PorkbunError, get_porkbun
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
-from ..services.domain_register import finalize_domain_registration
-from .render import invalidate_render_cache
+from ..services.domain_register import (
+    finalize_domain_registration,
+    provision_domain_edge,
+    retry_domain_edge,
+)
 
 logger = logging.getLogger("cappe.domains")
 
@@ -64,12 +77,20 @@ router = APIRouter()
 _SEARCH_TLDS = ["com", "co", "shop", "store", "io", "site"]
 _DOMAIN_COLS = (
     "id, site_id, domain, kind, status, retail_cents AS price_cents, "
-    "auto_renew, expires_at, failure_reason, verification_token, transfer_requested_at, created_at"
+    "auto_renew, expires_at, failure_reason, verification_token, transfer_requested_at, "
+    "edge_status, edge_error, cf_routing_endpoint, created_at"
 )
 # ICANN locks a freshly registered domain from transferring out for 60 days.
 _TRANSFER_LOCK_DAYS = 60
 # Host prefix where a connect domain must publish its ownership TXT record.
 _VERIFY_PREFIX = "_cappe-verify"
+# Checkout events that can move a domain purchase forward. `completed` alone is
+# not enough — a delayed-notification method fires it before the money settles.
+_DOMAIN_CHECKOUT_EVENTS = {
+    "checkout.session.completed",
+    "checkout.session.async_payment_succeeded",
+    "checkout.session.async_payment_failed",
+}
 
 
 async def _require_owned_site(conn, account_id: UUID, site_id: UUID) -> None:
@@ -80,6 +101,30 @@ async def _require_owned_site(conn, account_id: UUID, site_id: UUID) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
 
 
+def _require_custom_domains_enabled() -> None:
+    """Every path that can create a new custom domain is dark until the edge is
+    configured. Without it a tenant can buy or connect a domain that resolves to
+    a certificate error — the state this gate exists to prevent."""
+    if not get_settings().cappe_custom_domains_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Custom domains are not available yet",
+        )
+
+
+# ── Config (does the UI show the panel, and where does DNS point?) ─────────
+# Declared BEFORE /domains/{domain_id}: that route parses a UUID, so a later
+# declaration would make this path a 422 instead of a match.
+@router.get("/domains/config", response_model=CappeDomainConfig)
+async def domains_config(account: CappeAccount = Depends(require_cappe_account)):
+    settings = get_settings()
+    enabled = settings.cappe_custom_domains_enabled
+    return {
+        "enabled": enabled,
+        "routing_endpoint": settings.cappe_cf_routing_endpoint if enabled else None,
+    }
+
+
 # ── Search ────────────────────────────────────────────────────────────────
 @router.get("/domains/search", response_model=list[CappeDomainSearchResult])
 async def search_domains(
@@ -88,6 +133,7 @@ async def search_domains(
 ):
     """Availability + resale price for the query. A bare name fans out to a few
     common TLDs; a full domain (has a dot) is checked exactly."""
+    _require_custom_domains_enabled()
     q = q.strip().lower().rstrip(".")
     if "." in q:
         candidates = [q]
@@ -129,6 +175,7 @@ async def purchase_domain(
 ):
     """Re-check availability + price, create a pending domain row, and return a
     platform Checkout Session. Registration happens in the webhook after payment."""
+    _require_custom_domains_enabled()
     pb = get_porkbun()
     try:
         check = await pb.check_domain(body.domain)
@@ -202,6 +249,7 @@ async def connect_domain(
     `_cappe-verify.<domain>` and call /verify before it activates. We never write
     custom_domain (or authorize TLS) for an unverified claim, so a domain can't be
     hijacked/squatted by someone who doesn't control it."""
+    _require_custom_domains_enabled()
     if not body.domain:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enter a domain")
     token = secrets.token_urlsafe(24)
@@ -253,7 +301,12 @@ async def connect_domain(
 @router.post("/domains/{domain_id}/verify", response_model=CappeDomain)
 async def verify_domain(domain_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
     """Resolve the ownership TXT record for a pending connect domain; on a match,
-    activate it and set it as the site's custom_domain."""
+    activate it and attach it to the CloudFront tenant distribution.
+
+    `cappe_sites.custom_domain` is NOT written here — the edge sweeper writes it
+    once the certificate is issued, so a verified domain never goes live ahead of
+    its TLS."""
+    _require_custom_domains_enabled()
     async with get_connection() as conn:
         row = await conn.fetchrow(
             f"SELECT {_DOMAIN_COLS} FROM cappe_domains "
@@ -292,22 +345,29 @@ async def verify_domain(domain_id: UUID, account: CappeAccount = Depends(require
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT, detail="That domain is already connected"
                     )
-                updated = await conn.fetchrow(
-                    f"UPDATE cappe_domains SET status = 'active', updated_at = NOW() "
-                    f"WHERE id = $1 RETURNING {_DOMAIN_COLS}",
+                await conn.execute(
+                    "UPDATE cappe_domains SET status = 'active', updated_at = NOW() WHERE id = $1",
                     domain_id,
                 )
-                await conn.execute(
-                    "UPDATE cappe_sites SET custom_domain = $1, updated_at = NOW() WHERE id = $2",
-                    row["domain"], row["site_id"],
-                )
-        except Exception as exc:  # concurrent claim landed on cappe_sites first
-            if "cappe_sites_custom_domain_key" in str(exc):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT, detail="That domain is already connected"
-                )
-            raise
-    await invalidate_render_cache(row["site_id"])
+        except asyncpg.UniqueViolationError:
+            # A concurrent claim activated the same domain between the SELECT
+            # and the UPDATE. Caught by type, not by index name: two partial
+            # unique indexes guard this (cappe_domains_active_domain_uniq and
+            # uq_cappe_domains_lower_active) and string-matching the wrong one
+            # turned this race into a 500.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="That domain is already connected"
+            )
+
+    # Attach it to the edge. A failure is recorded on the row (edge_status
+    # 'failed') rather than raised: ownership IS verified at this point, and the
+    # tenant can retry provisioning without redoing the TXT dance.
+    await provision_domain_edge(domain_id, row["domain"])
+
+    async with get_connection() as conn:
+        updated = await conn.fetchrow(
+            f"SELECT {_DOMAIN_COLS} FROM cappe_domains WHERE id = $1", domain_id
+        )
     return dict(updated)
 
 
@@ -356,6 +416,19 @@ async def _owned_register_domain(conn, account_id: UUID, domain_id: UUID):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="DNS for a connected domain is managed at your own registrar",
         )
+    if row["status"] == "transfer_requested":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This domain is being transferred out; DNS is frozen",
+        )
+    # Only a domain that is actually registered in our Porkbun account has DNS
+    # to manage. A 'pending'/'registering'/'failed'/'expired' row would send
+    # writes to Porkbun for a name we do not hold.
+    if row["status"] != "active":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This domain is not active yet",
+        )
     return row
 
 
@@ -394,9 +467,13 @@ async def create_dns(
 
 @router.put("/domains/{domain_id}/dns/{record_id}")
 async def edit_dns(
-    domain_id: UUID, record_id: str, body: CappeDnsRecordInput,
+    domain_id: UUID,
+    body: CappeDnsRecordInput,
+    record_id: str = Path(..., pattern=r"^[0-9]{1,20}$"),
     account: CappeAccount = Depends(require_cappe_account),
 ):
+    """`record_id` is interpolated into the outbound Porkbun URL, so it is
+    constrained to the digits Porkbun actually issues — not free text."""
     async with get_connection() as conn:
         row = await _owned_register_domain(conn, account.id, domain_id)
     try:
@@ -411,7 +488,9 @@ async def edit_dns(
 
 @router.delete("/domains/{domain_id}/dns/{record_id}")
 async def delete_dns(
-    domain_id: UUID, record_id: str, account: CappeAccount = Depends(require_cappe_account)
+    domain_id: UUID,
+    record_id: str = Path(..., pattern=r"^[0-9]{1,20}$"),
+    account: CappeAccount = Depends(require_cappe_account),
 ):
     async with get_connection() as conn:
         row = await _owned_register_domain(conn, account.id, domain_id)
@@ -470,8 +549,14 @@ async def request_transfer(domain_id: UUID, account: CappeAccount = Depends(requ
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Domains can't be transferred within {_TRANSFER_LOCK_DAYS} days of registration",
             )
+        # 'transfer_requested' is a real status, not just a timestamp: it takes
+        # the domain out of the renewal sweep and freezes in-app DNS edits. It
+        # does NOT take the site offline — a transfer takes days and may never
+        # complete, so the edge keeps serving until the registration actually
+        # lapses (`expired`). Reversible via /transfer-request/cancel.
         updated = await conn.fetchrow(
-            f"UPDATE cappe_domains SET transfer_requested_at = NOW(), updated_at = NOW() "
+            f"UPDATE cappe_domains SET transfer_requested_at = NOW(), "
+            f"status = 'transfer_requested', updated_at = NOW() "
             f"WHERE id = $1 RETURNING {_DOMAIN_COLS}",
             domain_id,
         )
@@ -484,29 +569,60 @@ async def request_transfer(domain_id: UUID, account: CappeAccount = Depends(requ
     return dict(updated)
 
 
-# ── Caddy on-demand TLS ask-endpoint (public) ──────────────────────────────
-@router.get("/tls/authorize")
-async def tls_authorize(domain: str = Query(..., max_length=255)):
-    """Caddy on-demand TLS gate: 200 → issue a cert for this host, 404 → refuse.
-    Only hosts we serve (an active custom domain) are authorized, so Let's Encrypt
-    issuance can't be triggered for arbitrary hostnames."""
-    host = domain.strip().lower().rstrip(".")
-    if host.startswith("www."):
-        host = host[4:]
+@router.post("/domains/{domain_id}/transfer-request/cancel", response_model=CappeDomain)
+async def cancel_transfer_request(
+    domain_id: UUID, account: CappeAccount = Depends(require_cappe_account)
+):
+    """Withdraw a transfer-out request: the domain goes back to `active`, which
+    puts it back in the renewal sweep and unfreezes DNS. Without this a tenant
+    who clicked "Transfer out" by mistake sat outside renewals until the
+    registration lapsed."""
     async with get_connection() as conn:
-        # Only a domain with an ACTIVE row in cappe_domains (i.e. verified
-        # ownership via /domains/connect + /verify, or a completed platform
-        # purchase) is authorized. cappe_sites.custom_domain is set as a
-        # side effect of that same activation, so checking cappe_domains
-        # alone is sufficient — and it's what keeps an unverified claim from
-        # ever triggering Let's Encrypt issuance.
-        ok = await conn.fetchval(
-            "SELECT 1 FROM cappe_domains WHERE domain = $1 AND status = 'active'",
-            host,
+        updated = await conn.fetchrow(
+            f"UPDATE cappe_domains SET status = 'active', transfer_requested_at = NULL, "
+            f"updated_at = NOW() WHERE id = $1 AND account_id = $2 "
+            f"AND status = 'transfer_requested' RETURNING {_DOMAIN_COLS}",
+            domain_id, account.id,
         )
-    if not ok:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown host")
-    return Response(status_code=status.HTTP_200_OK)
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="No transfer request to cancel"
+        )
+    logger.warning("cappe TRANSFER-OUT cancelled: domain=%s account=%s", updated["domain"], account.email)
+    # The renewals task switches Porkbun auto-renew off for a domain that is
+    # leaving; put it back the way the tenant had it (best-effort, like the
+    # auto-renew toggle itself).
+    if updated["kind"] == "register" and updated["auto_renew"]:
+        try:
+            await get_porkbun().set_auto_renew(updated["domain"], True)
+        except PorkbunError as exc:
+            logger.warning("cappe domain %s auto-renew re-enable failed: %s", domain_id, exc)
+    return dict(updated)
+
+
+# ── Edge (CloudFront tenant) retry ─────────────────────────────────────────
+@router.post("/domains/{domain_id}/edge/retry", response_model=CappeDomain)
+async def retry_edge(domain_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    """Re-attempt edge provisioning for an active domain that is not serving:
+    never provisioned (`none`), creation failed, or its certificate died
+    (`failed` with a tenant — replaced). A healthy or still-validating tenant is
+    left alone; `retry_domain_edge` owns those rules."""
+    _require_custom_domains_enabled()
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, status, cf_tenant_id FROM cappe_domains WHERE id = $1 AND account_id = $2",
+            domain_id, account.id,
+        )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Domain not found")
+    if row["status"] != "active":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Domain is not active")
+    await retry_domain_edge(domain_id)
+    async with get_connection() as conn:
+        updated = await conn.fetchrow(
+            f"SELECT {_DOMAIN_COLS} FROM cappe_domains WHERE id = $1", domain_id
+        )
+    return dict(updated)
 
 
 # ── Platform webhook (domain purchases; OUR account, no event.account) ─────
@@ -551,26 +667,52 @@ async def domains_webhook(request: Request, background: BackgroundTasks):
         return {"received": True, "status": "duplicate"}
 
     try:
-        if event_type == "checkout.session.completed" and meta.get("type") == "cappe_domain":
+        if meta.get("type") == "cappe_domain" and event_type in _DOMAIN_CHECKOUT_EVENTS:
             try:
                 did = UUID(str(meta.get("domain_id")))
             except (ValueError, TypeError):
                 did = None
-            if did is not None:
-                payment_intent = obj.get("payment_intent")
-                customer_id = obj.get("customer")  # saved-card Customer (renewals)
+            if did is None:
+                return {"received": True, "status": "ignored"}
+
+            if event_type == "checkout.session.async_payment_failed":
+                # A delayed method (ACH/SEPA/Klarna) that ultimately bounced.
+                # Nothing was registered — the row never left 'pending'.
                 async with get_connection() as conn:
-                    row = await conn.fetchrow(
+                    await conn.execute(
                         """UPDATE cappe_domains
-                              SET status = 'registering', stripe_payment_intent = $2,
-                                  stripe_customer_id = $3, updated_at = NOW()
-                            WHERE id = $1 AND status = 'pending'
-                            RETURNING id""",
-                        did, payment_intent, customer_id,
+                              SET status = 'failed', failure_reason = $2, updated_at = NOW()
+                            WHERE id = $1 AND status IN ('pending', 'registering')""",
+                        did, "Payment failed",
                     )
-                if row is not None:
-                    background.add_task(finalize_domain_registration, did)
-                    logger.info("cappe domain %s paid; registering", did)
+                logger.info("cappe domain %s payment failed", did)
+                return {"received": True, "status": "payment_failed"}
+
+            # `checkout.session.completed` fires for delayed-notification payment
+            # methods with payment_status 'unpaid'; the money lands (or doesn't)
+            # later via async_payment_succeeded/failed. Registering on that event
+            # would debit our Porkbun balance for a payment that may never clear.
+            if obj.get("payment_status") != "paid":
+                logger.info(
+                    "cappe domain %s checkout completed but unpaid (%s); waiting",
+                    did, obj.get("payment_status"),
+                )
+                return {"received": True, "status": "unpaid"}
+
+            payment_intent = obj.get("payment_intent")
+            customer_id = obj.get("customer")  # saved-card Customer (renewals)
+            async with get_connection() as conn:
+                row = await conn.fetchrow(
+                    """UPDATE cappe_domains
+                          SET status = 'registering', stripe_payment_intent = $2,
+                              stripe_customer_id = $3, updated_at = NOW()
+                        WHERE id = $1 AND status = 'pending'
+                        RETURNING id""",
+                    did, payment_intent, customer_id,
+                )
+            if row is not None:
+                background.add_task(finalize_domain_registration, did)
+                logger.info("cappe domain %s paid; registering", did)
             return {"received": True}
 
         # Everything else that could be ours: subscription billing. The handler

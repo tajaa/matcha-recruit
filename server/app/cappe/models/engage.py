@@ -33,16 +33,21 @@ class CappeSubscribeRequest(BaseModel):
     name: Optional[str] = Field(default=None, max_length=255)
 
 
+# A campaign body is fanned out to every subscriber through the shared
+# transactional sender, so it is bounded like any other outbound payload.
+MAX_CAMPAIGN_BODY_BYTES = 200_000
+
+
 class CappeCampaignCreate(BaseModel):
     subject: str = Field(min_length=1, max_length=500)
-    body_html: Optional[str] = None
+    body_html: Optional[str] = Field(default=None, max_length=MAX_CAMPAIGN_BODY_BYTES)
     from_name: Optional[str] = Field(default=None, max_length=255)
     scheduled_at: Optional[datetime] = None
 
 
 class CappeCampaignUpdate(BaseModel):
     subject: Optional[str] = Field(default=None, max_length=500)
-    body_html: Optional[str] = None
+    body_html: Optional[str] = Field(default=None, max_length=MAX_CAMPAIGN_BODY_BYTES)
     from_name: Optional[str] = Field(default=None, max_length=255)
     scheduled_at: Optional[datetime] = None
     status: Optional[Literal["draft", "scheduled", "cancelled"]] = None
@@ -202,6 +207,9 @@ class CappeClientImportResult(BaseModel):
     updated: int = 0
     skipped: int = 0
     newsletter_added: int = 0
+    # Rows that were imported as clients but NOT staged for the newsletter because
+    # the account's daily confirmation-email budget was spent.
+    newsletter_capped: int = 0
     branches_matched: int = 0           # rows that resolved a branch by name
     errors: list[CappeClientImportError] = Field(default_factory=list)
 

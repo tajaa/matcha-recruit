@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Check, Percent } from 'lucide-react'
 import { cappeApi } from '../api'
+import { parsePercentBps } from '../utils/money'
 import type { CappeSite } from '../types'
 
 // Compact tax + receipt-numbering settings for the storefront. Rate is stored in
@@ -26,9 +27,15 @@ export default function TaxSettingsCard({ siteId }: { siteId: string }) {
   }, [siteId])
 
   async function save() {
-    setSaving(true); setError(null); setSaved(false)
-    const pct = parseFloat(rate)
-    const bps = Number.isFinite(pct) ? Math.max(0, Math.min(10000, Math.round(pct * 100))) : 0
+    setError(null); setSaved(false)
+    // parseFloat truncated at the first junk character, so "8.75%" saved as
+    // 8.75 but "1,5" saved as 1 — a tax rate quietly off by a factor of ten.
+    // Refuse the value and say so instead (utils/money.ts).
+    // Up to three decimals: real rates have them (NYC is 8.875%).
+    const parsed = rate.trim() === '' ? 0 : parsePercentBps(rate)
+    if (parsed === null) { setError('Enter the rate as a plain number, e.g. 8.875'); return }
+    const bps = Math.max(0, Math.min(10000, parsed))
+    setSaving(true)
     try {
       await cappeApi.put(`/sites/${siteId}`, {
         tax_rate_bps: bps,

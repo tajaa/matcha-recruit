@@ -8,17 +8,25 @@ import {
 import { cappeApi, clearCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import { creatorPaths } from '../creators/creatorPaths'
+import { confirmLeave } from '../utils/unsavedGuard'
 import type { CappeAccount, CappeThread } from '../types'
 
 const linkBase = 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors'
 const linkIdle = 'text-zinc-400 hover:bg-zinc-800/70 hover:text-zinc-100'
 const linkActive = 'bg-lime-400/10 text-lime-300 ring-1 ring-inset ring-lime-400/20'
 
+// Every nav control in this sidebar can leave the page editor, so each one
+// asks the unsaved-work guard first and cancels its own navigation when the
+// user backs out. `confirmLeave()` is a no-op (returns true) anywhere else.
+const guardNav = (e: { preventDefault: () => void }) => {
+  if (!confirmLeave()) e.preventDefault()
+}
+
 function Item({ to, icon: Icon, label, end, badge }: {
   to: string; icon: typeof Globe; label: string; end?: boolean; badge?: number
 }) {
   return (
-    <NavLink to={to} end={end} className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
+    <NavLink to={to} end={end} onClick={guardNav} className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
       <Icon className="h-4 w-4" />
       <span className="flex-1">{label}</span>
       {badge ? (
@@ -50,22 +58,30 @@ const SITE_NAV: { to: string; label: string; icon: typeof Globe; end?: boolean }
 export default function CappeSidebar({ account }: { account: CappeAccount | null }) {
   const navigate = useNavigate()
   const location = useLocation()
-  const [unread, setUnread] = useState(0)
+  // Keyed to the site it was fetched for, so leaving a site reads as 0 without a
+  // synchronous reset inside the effect.
+  const [unreadFor, setUnreadFor] = useState<{ siteId: string; count: number } | null>(null)
 
-  // Parse the active site id from /cappe/sites/:id/...
-  const m = location.pathname.match(/\/cappe\/sites\/([0-9a-f-]+)/i)
+  // Parse the active site id from the site-workspace path. The tree is mounted
+  // three ways — /cappe/sites/:id, the gummfit.com host mount (/gummfit/... and
+  // the bare apex /sites/:id) — and a /cappe-only regex left the whole site nav
+  // missing on the apex mount.
+  const m = location.pathname.match(/(?:\/cappe|\/gummfit)?\/sites\/([0-9a-f-]+)/i)
   const siteId = m?.[1] ?? null
 
   useEffect(() => {
-    if (!siteId) { setUnread(0); return }
+    if (!siteId) return
     let cancelled = false
     cappeApi.get<CappeThread[]>(`/sites/${siteId}/threads`)
-      .then((ts) => { if (!cancelled) setUnread(ts.reduce((n, t) => n + (t.owner_unread || 0), 0)) })
+      .then((ts) => { if (!cancelled) setUnreadFor({ siteId, count: ts.reduce((n, t) => n + (t.owner_unread || 0), 0) }) })
       .catch(() => {})
     return () => { cancelled = true }
   }, [siteId, location.pathname])
 
+  const unread = siteId && unreadFor?.siteId === siteId ? unreadFor.count : 0
+
   async function signOut() {
+    if (!confirmLeave()) return
     await cappeApi.post('/auth/logout').catch(() => {})
     clearCappeTokens()
     invalidateCappeMeCache()
@@ -86,7 +102,7 @@ export default function CappeSidebar({ account }: { account: CappeAccount | null
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3">
         {siteId ? (
           <>
-            <NavLink to="/cappe/sites" className={`${linkBase} ${linkIdle} mb-1`}>
+            <NavLink to="/cappe/sites" onClick={guardNav} className={`${linkBase} ${linkIdle} mb-1`}>
               <ArrowLeft className="h-4 w-4" /> All sites
             </NavLink>
             {SITE_NAV.map((n) => (

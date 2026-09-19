@@ -23,7 +23,16 @@ def _safe_href(href: Any) -> str:
     if not href:
         return "#"
     s = str(href).strip()
-    if s.startswith(("/", "#")):
+    # Browsers strip ASCII tab/CR/LF from a URL before parsing it and treat `\`
+    # as `/`, so `/\evil.test`, `/<tab>/evil.test` and `//evil.test` are all the
+    # same protocol-relative URL: they read as a site-root path here and navigate
+    # off-site there. Judge the value the way the browser will see it; control
+    # characters have no business in an href at all.
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in s):
+        return "#"
+    if s.startswith("/"):
+        return "#" if s.replace("\\", "/").startswith("//") else s
+    if s.startswith("#"):
         return s
     if s.lower().startswith(("http://", "https://", "mailto:", "tel:")):
         return s

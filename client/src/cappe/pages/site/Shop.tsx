@@ -8,6 +8,7 @@ import ShippingSettingsCard from '../../components/ShippingSettingsCard'
 import StockAdjustModal from '../../components/StockAdjustModal'
 import ImageUpload from '../../components/ImageUpload'
 import type { CappeBookingType, CappeFulfillment, CappeProduct } from '../../types'
+import { parseMoneyCents, parseSignedMoneyCents } from '../../utils/money'
 
 const STATUSES = ['active', 'draft', 'archived'] as const
 const FIELD_TYPES = ['text', 'email', 'textarea', 'number', 'tel', 'date', 'select']
@@ -112,11 +113,27 @@ export default function Shop() {
     if (!form.name.trim()) return
     setAdding(true)
     setError(null)
+    // Refuse an unreadable price instead of saving a truncated one:
+    // parseFloat('1,299') is 1, so a $1,299 product used to save as $1.00.
+    const priceCents = form.price.trim() === '' ? 0 : parseMoneyCents(form.price)
+    if (priceCents === null) {
+      setError('Enter the price as a plain amount, e.g. 29 or 29.99')
+      setAdding(false)
+      return
+    }
+    const badOption = optionGroups
+      .flatMap((g) => g.options)
+      .find((o) => o.name.trim() && o.price.trim() !== '' && parseSignedMoneyCents(o.price) === null)
+    if (badOption) {
+      setError(`Option "${badOption.name.trim()}" — enter the price change as a plain amount, e.g. 2.50 or -0.50`)
+      setAdding(false)
+      return
+    }
     try {
       const payload = {
         name: form.name.trim(),
         description: form.description.trim() || null,
-        price_cents: Math.round(parseFloat(form.price || '0') * 100),
+        price_cents: priceCents,
         status: 'active',
         fulfillment,
         inventory: fulfillment === 'physical' && form.inventory !== '' ? parseInt(form.inventory, 10) : null,
@@ -136,7 +153,7 @@ export default function Shop() {
           .map((g) => ({
             name: g.name.trim(), select_type: g.select_type, required: g.required,
             options: g.options.filter((o) => o.name.trim()).map((o) => ({
-              name: o.name.trim(), price_delta_cents: Math.round(parseFloat(o.price || '0') * 100),
+              name: o.name.trim(), price_delta_cents: o.price.trim() === '' ? 0 : (parseSignedMoneyCents(o.price) ?? 0),
               inventory: fulfillment === 'physical' && o.stock !== '' ? parseInt(o.stock, 10) : null,
             })),
           })),

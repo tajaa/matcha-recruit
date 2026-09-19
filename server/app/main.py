@@ -109,6 +109,17 @@ async def lifespan(app: FastAPI):
     )
     print(f"[Matcha] Gemini client: {_gemini_mode}")
 
+    # Fail closed on a missing CAPPE_BASE_DOMAIN in production. The default is
+    # the Matcha apex, so an unset env var silently makes every gummfit.com
+    # request a 400 (host allowlist) and bakes hey-matcha.com links into Cappe
+    # emails. Booting "healthy" into that state is worse than not booting.
+    if settings.is_production and settings.cappe_base_domain == "hey-matcha.com":
+        logging.getLogger(__name__).critical(
+            "CAPPE_BASE_DOMAIN is unset in production — Cappe would serve and link "
+            "hey-matcha.com. Set CAPPE_BASE_DOMAIN (gummfit.com) and restart."
+        )
+        raise RuntimeError("CAPPE_BASE_DOMAIN must be set in production")
+
     # Initialize database
     await init_pool(settings.database_url, ssl_mode=settings.database_ssl)
     await init_db()

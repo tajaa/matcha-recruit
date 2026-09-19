@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import type { CappeBlock, CappeCanvasElement } from '../../../types'
 import { CV_MAX_ELEMENTS, cvEls, cvNextY, cvNewElement, isCanvasBlock } from './canvasHelpers'
 import { applyFieldPath } from './merlinOps'
@@ -74,8 +74,7 @@ export function useCanvasBridge(
   // Once the user drags the floating inspector, keep it where they put it (don't
   // re-anchor to the next clicked element); reset when the panel closes.
   const panelDragged = useRef(false)
-  const reservedRightRef = useRef(0)
-  reservedRightRef.current = reservedRight
+  const reservedRightRef = useRef(reservedRight)
   const maxLeft = () => window.innerWidth - 372 - reservedRightRef.current
   function startPanelDrag(e: ReactPointerEvent) {
     e.preventDefault()
@@ -108,17 +107,24 @@ export function useCanvasBridge(
   const canvasBpRef = useRef<'d' | 'm'>('d')
   const stickyRef = useRef(stickySelection)
   const pendingSelRef = useRef<PendingSelection | null>(null)
-  selBlockRef.current = selBlock
-  blocksRef.current = blocks
-  selElementRef.current = selElement
-  canvasBpRef.current = canvasBp
-  stickyRef.current = stickySelection
-  pendingSelRef.current = pendingSel
   const postToCanvas = (msg: unknown) => iframeRef.current?.contentWindow?.postMessage(msg, '*')
   const editModeRef = useRef(editMode)
-  editModeRef.current = editMode
   const onDropImageRef = useRef(onDropImage)
-  onDropImageRef.current = onDropImage
+  // Mirrors are synced in a layout effect, not during render: a render can be
+  // thrown away or replayed, and a ref written then would expose state that
+  // never committed. useLayoutEffect runs after commit and before any event,
+  // message or passive effect can read them, so handlers still see the latest.
+  useLayoutEffect(() => {
+    reservedRightRef.current = reservedRight
+    selBlockRef.current = selBlock
+    blocksRef.current = blocks
+    selElementRef.current = selElement
+    canvasBpRef.current = canvasBp
+    stickyRef.current = stickySelection
+    pendingSelRef.current = pendingSel
+    editModeRef.current = editMode
+    onDropImageRef.current = onDropImage
+  })
   // Re-assert the interaction mode whenever it changes, and once more when a
   // fresh runtime signals ready (the iframe fully reloads on most edits, which
   // would otherwise silently reset restrictMode to its 'canvas' default).
@@ -145,6 +151,11 @@ export function useCanvasBridge(
   // entirely. Drop it the moment that happens, rather than letting a later
   // Merlin turn address a block that no longer exists.
   useEffect(() => {
+    // Functional updates that return the SAME object when nothing needs pruning,
+    // so this bails out without a re-render in the common case. Deriving it at
+    // render instead would mean every consumer (and the mount-once message
+    // handler's refs) reads a filtered copy rather than the state itself.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- prune selection when its block is deleted/undone
     setSelection((s) => (s && !blocks.some((b) => b._k === s.block) ? null : s))
     setPendingSel((p) => (p && !blocks.some((b) => b._k === p.blockKey) ? null : p))
   }, [blocks])
@@ -152,6 +163,7 @@ export function useCanvasBridge(
   // Sticky mode just turned off (Merlin closed) — a staged switch has no UI
   // left to confirm/dismiss it, so drop it rather than leave it dangling.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- drop a staged switch when its confirm UI closes
     if (!stickySelection) setPendingSel(null)
   }, [stickySelection])
 
@@ -301,14 +313,22 @@ export function useCanvasBridge(
           setBlocks((bs) => bs.map((x, j) => (j === d.block ? { ...x, elements: cvEls(x).map((el) => (el.id === d.id ? { ...el, [bp]: pos } : el)) } : x)))
           break
         }
-        case 'cz-reorder':
+        case 'cz-reorder': {
+          // These indices cross the sandboxed-iframe boundary, so they are
+          // untrusted input. `splice` coerces: a NaN or a string collapsed to 0
+          // and moved the wrong section, and an out-of-range `to` appended a
+          // hole. Bounds-check both before touching the block list.
+          const from = d.from
+          const to = d.to
+          if (!Number.isInteger(from) || !Number.isInteger(to)) break
           setBlocks((bs) => {
+            if (from < 0 || from >= bs.length || to < 0 || to >= bs.length) return bs
             const next = [...bs]
-            const [moved] = next.splice(d.from, 1)
-            next.splice(d.to, 0, moved)
+            const [moved] = next.splice(from, 1)
+            next.splice(to, 0, moved)
             return next
           })
-          setSelBlock(d.to)
+          setSelBlock(to)
           setSelElement(null)  // a freeform element selection doesn't survive a section move
           // `selection` is NOT cleared here — it's keyed on the block's stable
           // `_k` (resolved at cz-selection receipt), not the numeric index a
@@ -316,6 +336,7 @@ export function useCanvasBridge(
           // new position. The staleness effect below only drops it once the
           // block itself is actually gone.
           break
+        }
         case 'cz-drop-image': {
           // Only accept https URLs — the dropped value comes from the
           // sandboxed iframe's dataTransfer, sourced from our own draggable

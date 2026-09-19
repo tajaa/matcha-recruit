@@ -272,9 +272,24 @@ class Settings:
     # account (no Connect), so they need a separate endpoint + secret from the
     # storefront Connect webhook above.
     cappe_platform_webhook_secret: Optional[str] = None
-    # Public IP the registered/connected custom domains' apex A-record points at
-    # (the app EC2 elastic IP). www is CNAMEd to the apex.
-    cappe_domain_target_ip: str = "54.177.107.107"
+
+    # Cappe custom domains at the CloudFront edge. Every custom domain becomes a
+    # *distribution tenant* of one tenant-only distribution, so CloudFront issues
+    # and renews its certificate itself. Off until the AWS-side setup in
+    # docs/ops/CAPPE_CUSTOM_DOMAINS.md is done — search/purchase/connect 503
+    # while this is false.
+    cappe_custom_domains_enabled: bool = False
+    # Tenant-only distribution that carries the shared origin/WAF/secret config.
+    cappe_cf_tenant_distribution_id: Optional[str] = None
+    # Connection group the tenants route through.
+    cappe_cf_connection_group_id: Optional[str] = None
+    # That connection group's RoutingEndpoint (*.cloudfront.net). This is what a
+    # custom domain's apex ALIAS/ANAME and www CNAME point at.
+    cappe_cf_routing_endpoint: Optional[str] = None
+    # Scoped IAM key for the CloudFront tenant calls only (NOT the admin key).
+    # Unset → boto3's default credential chain.
+    cappe_cloudfront_access_key_id: Optional[str] = None
+    cappe_cloudfront_secret_access_key: Optional[str] = None
     # Monthly price (USD cents) for the Matcha IR upgrade offered to
     # resources_free tenants. Override with MATCHA_IR_PRICE_CENTS.
     matcha_ir_price_cents: int = 4900
@@ -293,6 +308,12 @@ class Settings:
     # NEWSLETTER_MAILING_ADDRESS env var. Newlines (`\n`) become <br> in the
     # rendered footer.
     newsletter_mailing_address: str = "Matcha · 2261 Market Street #4419 · San Francisco, CA 94114"
+
+    # True when secrets come from AWS Secrets Manager or ENV says prod — the
+    # same predicate load_settings() already uses to fail closed on a missing
+    # JWT secret. Exposed so boot-time checks (app/main.py lifespan) don't have
+    # to re-derive it from os.environ.
+    is_production: bool = False
 
 
 # Global settings instance
@@ -444,7 +465,13 @@ def load_settings() -> Settings:
         porkbun_secret_key=os.getenv("PORKBUN_SECRET_KEY"),
         cappe_domain_markup_cents=int(os.getenv("CAPPE_DOMAIN_MARKUP_CENTS", "800")),
         cappe_platform_webhook_secret=os.getenv("CAPPE_PLATFORM_WEBHOOK_SECRET"),
-        cappe_domain_target_ip=os.getenv("CAPPE_DOMAIN_TARGET_IP", "54.177.107.107"),
+        cappe_custom_domains_enabled=os.getenv("CAPPE_CUSTOM_DOMAINS_ENABLED", "").strip().lower()
+        in ("1", "true", "yes"),
+        cappe_cf_tenant_distribution_id=os.getenv("CAPPE_CF_TENANT_DISTRIBUTION_ID"),
+        cappe_cf_connection_group_id=os.getenv("CAPPE_CF_CONNECTION_GROUP_ID"),
+        cappe_cf_routing_endpoint=os.getenv("CAPPE_CF_ROUTING_ENDPOINT"),
+        cappe_cloudfront_access_key_id=os.getenv("CAPPE_CLOUDFRONT_ACCESS_KEY_ID"),
+        cappe_cloudfront_secret_access_key=os.getenv("CAPPE_CLOUDFRONT_SECRET_ACCESS_KEY"),
         livekit_url=os.getenv("LIVEKIT_URL"),
         livekit_api_key=os.getenv("LIVEKIT_API_KEY"),
         livekit_api_secret=os.getenv("LIVEKIT_API_SECRET"),
@@ -453,6 +480,7 @@ def load_settings() -> Settings:
             "NEWSLETTER_MAILING_ADDRESS",
             "Matcha · 2261 Market Street #4419 · San Francisco, CA 94114",
         ),
+        is_production=is_production,
     )
     return _settings
 

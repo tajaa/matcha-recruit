@@ -36,7 +36,13 @@ router = APIRouter()
 _RESERVED_SUBS = RESERVED_SUBDOMAINS
 
 # Hosts that always belong to the main app — never looked up as custom domains.
-_APP_HOSTS = {"hey-matcha.com", "www.hey-matcha.com", "localhost", "127.0.0.1", "matcha-backend"}
+# The configured base domain is folded in at call time (`_app_hosts`): with
+# CAPPE_BASE_DOMAIN=gummfit.com the apex is not covered by the `.gummfit.com`
+# suffix test below, so without this the brand apex itself resolves as a tenant
+# custom domain — and `gummfit.com` becomes claimable through /domains/connect.
+_STATIC_APP_HOSTS = frozenset(
+    {"hey-matcha.com", "www.hey-matcha.com", "localhost", "127.0.0.1", "matcha-backend"}
+)
 
 _RENDER_TTL = 300  # seconds; owner mutations invalidate explicitly
 
@@ -52,6 +58,10 @@ TENANT_CSP = (
     "img-src 'self' data: https:; "
     "media-src 'self' https:; "
     "connect-src 'self'; "
+    # The map block embeds an OpenStreetMap iframe; without an explicit
+    # frame-src it falls back to default-src 'self' and every published map
+    # renders blank.
+    "frame-src 'self' https://www.openstreetmap.org; "
     "frame-ancestors 'self'"
 )
 
@@ -65,13 +75,31 @@ def tenant_security_headers() -> dict[str, str]:
     }
 
 
-# Read from env directly (mirrors settings.cappe_base_domain): this module is
-# imported before load_settings() runs in the app lifespan.
-_PROD_SUFFIX = "." + os.getenv("CAPPE_BASE_DOMAIN", "hey-matcha.com")
+def _base_domain() -> str:
+    """Configured Cappe base domain, bare and lowercased.
+
+    Resolved at call time: this module is imported before load_settings() runs
+    in the app lifespan, so settings are preferred but the env var (the same
+    source config reads) is the fallback.
+    """
+    try:
+        from ...config import get_settings
+
+        base = get_settings().cappe_base_domain or ""
+    except Exception:
+        base = os.getenv("CAPPE_BASE_DOMAIN", "hey-matcha.com")
+    return base.strip().lower().strip(".")
 
 
 def _prod_suffix() -> str:
-    return _PROD_SUFFIX
+    return "." + _base_domain()
+
+
+def _app_hosts() -> frozenset[str]:
+    base = _base_domain()
+    if not base:
+        return _STATIC_APP_HOSTS
+    return _STATIC_APP_HOSTS | {base, f"www.{base}"}
 
 
 def _norm_host(host: str | None) -> str | None:
@@ -106,7 +134,7 @@ def _custom_domain_candidates(host: str | None) -> list[str]:
     if (
         not host
         or "." not in host
-        or host in _APP_HOSTS
+        or host in _app_hosts()
         or host.endswith(".localhost")
         or host.endswith(_prod_suffix())
     ):

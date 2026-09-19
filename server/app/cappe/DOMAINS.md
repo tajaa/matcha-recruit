@@ -2,13 +2,24 @@
 
 Lets a Cappe tenant **search → buy** a domain (registered via Porkbun under our
 account, resold at wholesale + a flat markup) or **connect** one they already own
-(after DNS-TXT ownership verification). Code:
+(after DNS-TXT ownership verification). Either way the domain is then served
+through a **CloudFront distribution tenant** with a CloudFront-managed
+certificate — see "How a custom domain goes live". Code:
 
 - `services/porkbun.py` — Porkbun v3 client (check / register / DNS).
 - `services/stripe_connect.py` — `create_platform_checkout_session`, `refund`,
   `verify_platform_webhook` (domain charges hit OUR platform account, not Connect).
-- `routes/domains.py` — search / purchase / connect / verify / list / webhook / `tls/authorize`.
-- `cappe_domains` table — migration `zzzzcappe19` (**UNAPPLIED**).
+- `services/cloudfront_tenants.py` — distribution-tenant create / status / delete.
+- `services/domain_register.py` — `finalize_domain_registration`,
+  `provision_domain_edge` (claimed), `retry_domain_edge`.
+- `routes/domains.py` — config / search / purchase / connect / verify / list /
+  DNS / auto-renew / transfer-request (+cancel) / edge retry / webhook.
+- `workers/tasks/cappe_edge_sync.py` — the only writer of `cappe_sites.custom_domain`.
+- `cappe_domains` table — `zzzzcappe19`/`20`; edge columns + `transfer_requested`
+  in `zzzzcappe31`.
+
+The whole create surface is dark behind `CAPPE_CUSTOM_DOMAINS_ENABLED` until the
+AWS side exists. Runbook: `docs/ops/CAPPE_CUSTOM_DOMAINS.md`.
 
 ## Money model
 We are the **reseller / merchant of record**. The tenant pays us via Stripe; we
@@ -19,50 +30,60 @@ registration auto-refunds (`finalize_domain_registration`).
 
 ## Go-live checklist
 
-1. **Migration** — apply `zzzzcappe19` dev → prod (`migrate-dev.sh`, then
-   `migrate-prod.sh` + `--legacy`). Backend 500s on `cappe_domains` until then.
+1. **Migrations** — `zzzzcappe31` + `zzzzcappe32` applied dev → prod (`migrate-dev.sh`, then
+   `migrate-prod.sh`).
 
-2. **Porkbun account** — fund a balance, enable **API access** in account
-   settings, generate API + secret keys. Set:
+2. **Porkbun account** — fund a balance, enable **API access**, generate keys:
    ```
    PORKBUN_API_KEY=pk1_...
    PORKBUN_SECRET_KEY=sk1_...
    CAPPE_DOMAIN_MARKUP_CENTS=800        # flat +$8/yr over wholesale (default)
-   CAPPE_DOMAIN_TARGET_IP=54.177.107.107  # app EIP the apex A-record points at
    ```
-   `checkDomain` is rate-limited — the search fans out to a few TLDs, tolerant of
-   per-TLD failures.
 
 3. **Stripe — PLATFORM webhook** (separate from the storefront Connect webhook):
-   add an endpoint → `https://<app>/api/cappe/domains/webhook`, event
-   `checkout.session.completed`. Copy its signing secret to:
-   ```
-   CAPPE_PLATFORM_WEBHOOK_SECRET=whsec_...
-   ```
+   endpoint `https://<app>/api/cappe/domains/webhook`, events
+   `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   `checkout.session.async_payment_failed`. Signing secret →
+   `CAPPE_PLATFORM_WEBHOOK_SECRET`. A domain is only registered once
+   `payment_status` says the money cleared.
 
-4. **TLS — Caddy on-demand** (custom domains can't use the `*.gummfit.com`
-   wildcard; each needs its own cert). Put Caddy on :443 for non-app hosts; it
-   issues Let's Encrypt certs on first request, gated by our ask-endpoint so only
-   domains we serve get certs:
-   ```caddyfile
-   {
-     on_demand_tls {
-       ask https://127.0.0.1:8002/api/cappe/tls/authorize
-     }
-   }
-   :443 {
-     tls { on_demand }
-     reverse_proxy 127.0.0.1:<frontend-or-backend>
-   }
-   ```
-   `GET /api/cappe/tls/authorize?domain=<host>` returns 200 only for an active
-   custom domain (registered or verified-connect), 404 otherwise — this is the
-   abuse gate against LE issuance for arbitrary hostnames.
+4. **Edge** — build the tenant distribution + connection group and set the
+   `CAPPE_CF_*` env vars per `docs/ops/CAPPE_CUSTOM_DOMAINS.md`, ship
+   `deploy/nginx/cappe-custom-domains.conf`, then flip
+   `CAPPE_CUSTOM_DOMAINS_ENABLED=true` and enable the `cappe_edge_sync` scheduler row.
 
-5. **DNS** — registered domains: `point_at_app` sets apex A → `CAPPE_DOMAIN_TARGET_IP`
-and `www` CNAME → apex automatically. Connected domains: the tenant points
-their own A record at us (shown in the connect UI), then completes the TXT
-verification.
+## How a custom domain goes live
+
+```
+register:  paid → registering → Porkbun register → active ─┐
+connect:   pending → TXT verified ───────────────→ active ─┤
+                                                            ▼
+                     provision_domain_edge (claimed)  edge_status: none → provisioning
+                     create_distribution_tenant       → pending_dns
+                     DNS points at CAPPE_CF_ROUTING_ENDPOINT, certificate issues
+                     cappe_edge_sync sees `live`      → live  + cappe_sites.custom_domain SET
+```
+
+- **`custom_domain` is written only by the sweeper, only at `live`.** Setting it at
+  activation is what used to publish a host with no certificate.
+- **Hostnames on the certificate.** CloudFront validates *every* name on a managed
+  certificate, so one unpointed name blocks it forever. A registered domain gets
+  apex + `www` (we set both records: `ALIAS` apex and `CNAME www` → the routing
+  endpoint). A connected domain gets **exactly the host the tenant connected**
+  (which may be a subdomain such as `shop.example.com`).
+- **No dead ends.** `POST /domains/{id}/edge/retry` re-provisions a domain with no
+  tenant (`none`/`failed`) and *replaces* a tenant whose certificate died
+  (`failed` with a tenant); it never touches a healthy or still-validating one.
+  The sweeper also adopts any `active` + `none` row (its background task died, or
+  it predates the edge).
+- **Teardown** happens on `expired` only, and on site delete — tenant ids are
+  written to `cappe_edge_tombstones` in the delete's own transaction and drained
+  by the sweeper, because the cascade removes the rows and CloudFront will not
+  delete a tenant that is still deploying its disable.
+- **A transfer-out stops costing us.** The renewals task switches Porkbun
+  auto-renew off for a `transfer_requested` domain as soon as it enters the
+  renewal window (Porkbun renews *before* expiry) and again when it lapses;
+  `/transfer-request/cancel` switches it back on.
 
 ## AI booking edge policy
 
@@ -73,15 +94,17 @@ are generated from the stored subdomain, never from request forwarding headers.
 
 Before exposing the flow publicly, put `gummfit.com` and
 `*.gummfit.com` behind the CloudFront/WAF setup documented in
-`docs/ops/CAPPE_EDGE.md`. Keep custom domains on their existing renderer path
-until per-domain CloudFront aliases and certificates are implemented.
+`docs/ops/CAPPE_EDGE.md`. Custom domains ride the tenant distribution described above, behind the same
+WAF and origin gate.
 
 ## Connect (BYO) verification
 `POST /domains/connect` creates a **pending** claim + a token; the tenant adds a
 `TXT` record at `_cappe-verify.<domain>` and calls `POST /domains/{id}/verify`,
-which resolves the TXT and only then activates + writes `cappe_sites.custom_domain`.
-Uniqueness is a partial index over `status='active'` rows, so an unverified claim
-can't block the real owner.
+which resolves the TXT, activates the row and starts edge provisioning. The UI
+then shows the record to add (`ALIAS`/`ANAME` on a root domain, `CNAME` on a
+subdomain → the routing endpoint). Uniqueness is a partial index over
+`status='active'` rows, so an unverified claim can't block the real owner; a
+concurrent activation is a 409.
 
 ## DNS management (registered domains)
 `/domains/{id}/dns` (GET/POST/PUT/DELETE) proxies Porkbun's DNS API so tenants
@@ -96,15 +119,20 @@ days of expiry, bumps `expires_at +1yr`, and lapses non-payers (→ `expired` +
 Porkbun auto-renew off). Idempotent: the +1yr bump exits the window; a Stripe
 idempotency key (`cappe-renew-<id>-<expiry>`) dedupes retries within 24h.
 
-**To turn on:** insert/enable a `scheduler_settings` row with
-`task_key='cappe_domain_renewals'` (defaults off, like every scheduled task).
+**To turn on:** enable the `cappe_domain_renewals` row in Admin → Settings
+(seeded off by `zzzzcappe31`, like every scheduled task).
 Note: Porkbun's own account-level auto-renew keeps the registration alive (bills
 us); this task recoups from the tenant and flips Porkbun auto-renew off when they
 stop paying. `/domains/{id}/auto-renew` (PATCH) toggles it per domain.
 
 ## Transfer-out (built — manual auth-code step)
-`/domains/{id}/transfer-request` enforces the 60-day ICANN lock, records the
-request, and logs it for an operator. **Porkbun exposes no auth-code/EPP API**, so
-fulfillment is manual: retrieve the auth code + unlock in the Porkbun dashboard
-and email it to the tenant. (If this volume grows, wire an admin email/queue off
-the `transfer_requested_at` flag.)
+`/domains/{id}/transfer-request` enforces the 60-day ICANN lock, sets
+`status='transfer_requested'` and logs it for an operator. **Porkbun exposes no
+auth-code/EPP API**, so fulfillment is manual: retrieve the auth code + unlock in
+the Porkbun dashboard and email it to the tenant.
+
+While requested: DNS edits are frozen and the domain is **not renewed** (the
+tenant said they are leaving), but the **site keeps serving** — a transfer takes
+days and may never complete. `/transfer-request/cancel` puts the row back to
+`active`. A request still open at `expires_at` lapses to `expired` in the
+renewals task, which is what finally tears the edge tenant down.

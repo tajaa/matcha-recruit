@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Check, Truck } from 'lucide-react'
 import { cappeApi } from '../api'
+import { parseMoneyCents } from '../utils/money'
 import type { CappeSite } from '../types'
 
 // Flat per-order shipping for storefronts selling physical goods. Applied at
@@ -25,14 +26,21 @@ export default function ShippingSettingsCard({ siteId }: { siteId: string }) {
   }, [siteId])
 
   async function save() {
-    setSaving(true); setError(null); setSaved(false)
-    const flatN = parseFloat(flat)
-    const freeN = parseFloat(freeOver)
+    setError(null); setSaved(false)
+    // Refuse an amount we can't read rather than silently charging $0 shipping
+    // (parseFloat('1,299') is 1) — see utils/money.ts.
+    const flatCents = flat.trim() === '' ? 0 : parseMoneyCents(flat)
+    if (flatCents === null) { setError('Enter the flat rate as a plain amount, e.g. 6 or 6.50'); return }
+    const freeCents = freeOver.trim() === '' ? null : parseMoneyCents(freeOver)
+    if (freeOver.trim() !== '' && freeCents === null) {
+      setError('Enter the free-shipping threshold as a plain amount, e.g. 50')
+      return
+    }
+    setSaving(true)
     try {
       await cappeApi.put(`/sites/${siteId}`, {
-        shipping_flat_cents: Number.isFinite(flatN) ? Math.max(0, Math.round(flatN * 100)) : 0,
-        shipping_free_threshold_cents:
-          freeOver.trim() !== '' && Number.isFinite(freeN) ? Math.max(0, Math.round(freeN * 100)) : null,
+        shipping_flat_cents: Math.max(0, flatCents),
+        shipping_free_threshold_cents: freeCents === null ? null : Math.max(0, freeCents),
         shipping_label: label.trim() || 'Shipping',
       })
       setSaved(true)

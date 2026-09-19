@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader2 } from 'lucide-react'
+import { Loader2, RotateCw } from 'lucide-react'
 import { cappeApi } from '../api'
 import { ui, badgeFor } from '../components/ui'
 import { fmtCents, type OfferListItem } from '../types'
@@ -20,17 +20,34 @@ function timeAgo(iso: string): string {
 export default function CreatorDeals() {
   const [chip, setChip] = useState<StatusChip>('all')
   const [offers, setOffers] = useState<OfferListItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [reloadTick, setReloadTick] = useState(0)
+  // `loading` is DERIVED (the request for the current key has not settled yet)
+  // rather than set at the top of the effect: a synchronous setState in an
+  // effect body re-renders before the fetch has even started.
+  const requestKey = `${chip}:${reloadTick}`
+  const [settledKey, setSettledKey] = useState<string | null>(null)
+  const loading = settledKey !== requestKey
 
+  // Swallowing the error and showing an empty list told a creator with live
+  // offers that no brand had ever contacted them. Say so, and let them retry.
   useEffect(() => {
-    setLoading(true)
     const status = chip === 'all' ? undefined : chip === 'closed' ? CLOSED.join(',') : chip
     const qs = status ? `&status=${encodeURIComponent(status)}` : ''
+    // Responses can land out of order. Without this a slow reply for the chip
+    // the user already left overwrote the newer list AND settled the wrong key,
+    // so the spinner stayed up until another chip was clicked.
+    let stale = false
     cappeApi.get<{ offers: OfferListItem[]; total: number }>(`/collab/offers?side=creator${qs}`)
-      .then((res) => setOffers(res.offers))
-      .catch(() => setOffers([]))
-      .finally(() => setLoading(false))
-  }, [chip])
+      .then((res) => { if (!stale) { setOffers(res.offers); setError(null) } })
+      .catch((e) => {
+        if (stale) return
+        setOffers([])
+        setError(e instanceof Error ? e.message : 'Could not load your deals')
+      })
+      .finally(() => { if (!stale) setSettledKey(requestKey) })
+    return () => { stale = true }
+  }, [chip, reloadTick, requestKey])
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
@@ -51,6 +68,13 @@ export default function CreatorDeals() {
 
       {loading ? (
         <div className="flex items-center gap-2 py-12 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
+      ) : error ? (
+        <div className={`${ui.card} p-6 text-center`}>
+          <p className="text-sm text-zinc-400">{error}</p>
+          <button onClick={() => setReloadTick((n) => n + 1)} className={`${ui.btnGhost} mt-4`}>
+            <RotateCw className="h-4 w-4" /> Try again
+          </button>
+        </div>
       ) : offers.length === 0 ? (
         <div className="py-12 text-center">
           <p className="text-sm text-zinc-500">No deals yet.</p>

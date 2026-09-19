@@ -39,37 +39,75 @@ export default function Orders() {
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load orders'))
   }, [siteId])
 
+  // Every mutation below moves real money or a customer's order. An unhandled
+  // rejection here left the row showing its old status with nothing on screen
+  // to say the change never reached the server — the owner walks away believing
+  // they accepted an order they did not. Failures land in the banner at the top
+  // of the page (same `error` state the initial load uses).
+  function fail(e: unknown, fallback: string) {
+    setError(e instanceof Error ? e.message : fallback)
+  }
+
   async function toggle(order: CappeOrder) {
     if (openId === order.id) { setOpenId(null); return }
     setOpenId(order.id)
     if (order.items.length === 0) {
-      const full = await cappeApi.get<CappeOrder>(`/sites/${siteId}/orders/${order.id}`)
-      setOrders((o) => (o || []).map((x) => (x.id === order.id ? full : x)))
+      try {
+        const full = await cappeApi.get<CappeOrder>(`/sites/${siteId}/orders/${order.id}`)
+        setOrders((o) => (o || []).map((x) => (x.id === order.id ? full : x)))
+      } catch (e) {
+        setOpenId(null)  // otherwise the row stays open on a permanent spinner
+        fail(e, 'Could not load this order')
+      }
     }
   }
 
   async function setStatus(order: CappeOrder, status: string) {
-    const updated = await cappeApi.patch<CappeOrder>(`/sites/${siteId}/orders/${order.id}`, { status })
-    setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
+    setError(null)
+    try {
+      const updated = await cappeApi.patch<CappeOrder>(`/sites/${siteId}/orders/${order.id}`, { status })
+      setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
+    } catch (e) {
+      fail(e, 'Could not change the order status')
+    }
   }
 
   async function acceptOrder(order: CappeOrder) {
-    const updated = await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/accept`)
-    setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
+    setError(null)
+    try {
+      const updated = await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/accept`)
+      setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
+    } catch (e) {
+      fail(e, 'Could not accept this order')
+    }
   }
   async function declineOrder(order: CappeOrder) {
-    const reason = window.prompt('Reason for declining (optional, shown to the customer):') ?? undefined
-    const updated = await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/decline`, { reason })
-    setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
+    // prompt() returns null on Cancel and '' on an empty OK. Only Cancel backs
+    // out — `?? undefined` used to fold it into "no reason" and decline anyway.
+    const answer = window.prompt('Reason for declining (optional, shown to the customer):')
+    if (answer === null) return
+    const reason = answer.trim() || undefined
+    setError(null)
+    try {
+      const updated = await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/decline`, { reason })
+      setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
+    } catch (e) {
+      fail(e, 'Could not decline this order')
+    }
   }
 
   async function attachDeliverable(order: CappeOrder, item: CappeOrderItem, url: string) {
-    const updated = await cappeApi.patch<CappeOrderItem>(
-      `/sites/${siteId}/orders/${order.id}/items/${item.id}`, { deliverable_url: url },
-    )
-    setOrders((o) => (o || []).map((x) =>
-      x.id === order.id ? { ...x, items: x.items.map((i) => (i.id === item.id ? updated : i)) } : x,
-    ))
+    setError(null)
+    try {
+      const updated = await cappeApi.patch<CappeOrderItem>(
+        `/sites/${siteId}/orders/${order.id}/items/${item.id}`, { deliverable_url: url },
+      )
+      setOrders((o) => (o || []).map((x) =>
+        x.id === order.id ? { ...x, items: x.items.map((i) => (i.id === item.id ? updated : i)) } : x,
+      ))
+    } catch (e) {
+      fail(e, 'Could not attach the deliverable')
+    }
   }
 
   return (
@@ -101,7 +139,7 @@ export default function Orders() {
                 <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${statusStyle[o.status]}`}>{o.status}</span>
                 {(o.status === 'paid' || o.status === 'fulfilled') && (
                   <button
-                    onClick={() => cappeApi.openBlob(`/sites/${siteId}/orders/${o.id}/receipt.pdf`).catch((e) => setError(e instanceof Error ? e.message : 'Could not open receipt'))}
+                    onClick={() => cappeApi.openBlob(`/sites/${siteId}/orders/${o.id}/receipt.pdf`, `${o.receipt_number || `receipt-${o.id}`}.pdf`).catch((e) => setError(e instanceof Error ? e.message : 'Could not open receipt'))}
                     title="View / print receipt"
                     className="flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
                   >

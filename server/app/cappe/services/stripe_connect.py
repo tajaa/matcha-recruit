@@ -195,6 +195,32 @@ class CappeStripe:
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to retrieve checkout session: {exc}") from exc
 
+    async def expire_checkout_session(self, account_id: str, session_id: str) -> str:
+        """Close a Checkout Session so it can no longer be paid, and report where
+        it ended up: 'expired' (we closed it, or it already was), or 'complete'
+        (the buyer finished checkout — the money is either in or settling, and
+        the order must NOT be released).
+
+        A Checkout Session stays payable for 24h by default. Cancelling the
+        order underneath an open session is how a buyer gets charged for an
+        order we already threw away, so the session is closed FIRST and the
+        order only released once Stripe confirms nobody can pay it.
+        """
+        self._ensure_key()
+
+        def _expire():
+            sess = stripe.checkout.Session.retrieve(session_id, stripe_account=account_id)
+            state = str(sess.get("status") or "")
+            if state == "open":
+                sess = stripe.checkout.Session.expire(session_id, stripe_account=account_id)
+                state = str(sess.get("status") or "")
+            return state
+
+        try:
+            return await asyncio.to_thread(_expire)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to expire checkout session: {exc}") from exc
+
     # ── Platform checkout (our own revenue — domains, plans; NO Connect) ───
     async def create_platform_checkout_session(
         self,

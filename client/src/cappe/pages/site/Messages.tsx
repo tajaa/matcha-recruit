@@ -17,12 +17,15 @@ export default function Messages() {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [composing, setComposing] = useState(false)
-  const [newThread, setNewThread] = useState({ client_email: '', client_name: '', subject: '', body: '' })
-  const bottomRef = useRef<HTMLDivElement>(null)
-
-  // Deep-link: ?to=email&name= prefills a new conversation (from Clients).
+  // Deep-link: ?to=email&name= prefills a new conversation (from Clients). It is
+  // INITIAL state — Clients links here across routes, so this page always mounts
+  // fresh with the params already in the URL.
   const presetTo = params.get('to')
+  const [composing, setComposing] = useState(!!presetTo)
+  const [newThread, setNewThread] = useState({
+    client_email: presetTo || '', client_name: presetTo ? params.get('name') || '' : '', subject: '', body: '',
+  })
+  const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     cappeApi.get<CappeThread[]>(`/sites/${siteId}/threads`)
@@ -30,22 +33,21 @@ export default function Messages() {
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
   }, [siteId])
 
-  useEffect(() => {
-    if (presetTo) {
-      setComposing(true)
-      setNewThread((n) => ({ ...n, client_email: presetTo, client_name: params.get('name') || '' }))
-    }
-  }, [presetTo]) // eslint-disable-line react-hooks/exhaustive-deps
-
   useEffect(() => { bottomRef.current?.scrollIntoView() }, [active?.messages.length])
 
   async function openThread(t: CappeThread) {
     setComposing(false)
     setLoadingThread(true)
+    setError(null)
     try {
       const full = await cappeApi.get<CappeThreadDetail>(`/sites/${siteId}/threads/${t.id}`)
       setActive(full)
       setThreads((list) => (list || []).map((x) => (x.id === t.id ? { ...x, owner_unread: 0 } : x)))
+    } catch (e) {
+      // Without this the click just rejected: the previously open conversation
+      // stayed on screen as if it were the one that had been selected.
+      setActive(null)
+      setError(e instanceof Error ? e.message : 'Could not open this conversation')
     } finally {
       setLoadingThread(false)
     }

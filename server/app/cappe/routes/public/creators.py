@@ -2,14 +2,16 @@
 Flagged socials are hidden everywhere public."""
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import HTTPException, Query, Request, status
 
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
 from ...models.creators import PublicCreatorCard, PublicCreatorPage, PublicCreatorProfile
 from ...services.common import loads
 
-router = APIRouter()
+from ._body_limit import limited_public_router
+
+router = limited_public_router()
 _MAX_LIMIT = 24
 
 

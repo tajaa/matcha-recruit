@@ -8,6 +8,7 @@ import type {
   CappeStaff, CappeLocation, CappeSite,
   CappePricingMode,
 } from '../../../types'
+import { parseMoneyCents } from '../../../utils/money'
 import { hhmm } from './constants'
 import type { TypeForm, StaffForm, LocForm } from './types'
 
@@ -87,19 +88,32 @@ export function useBookings() {
       .finally(() => setLoading(false))
   }, [siteId])
 
+  // The save* actions below already report failures through `error` (rendered
+  // as a banner at the top of Bookings.tsx). These one-shot mutations did not:
+  // an accept/decline/delete that 4xx'd rejected into nothing, leaving the row
+  // in its old state with no indication the server had refused. Same banner.
+  function fail(e: unknown, fallback: string) {
+    setError(e instanceof Error ? e.message : fallback)
+  }
+
   // --- Locations ---
   async function addLocation(e: React.FormEvent) {
     e.preventDefault()
     if (!locForm.name.trim()) return
-    const created = await cappeApi.post<CappeLocation>(`/sites/${siteId}/locations`, {
-      name: locForm.name.trim(),
-      timezone: locForm.timezone || null,
-      address: locForm.address.trim() || null,
-      contact_phone: locForm.phone.trim() || null,
-    })
-    setLocations((ls) => [...ls, created])
-    setLocForm({ name: '', timezone: '', address: '', phone: '' })
-    switchLocation(created.id)
+    setError(null)
+    try {
+      const created = await cappeApi.post<CappeLocation>(`/sites/${siteId}/locations`, {
+        name: locForm.name.trim(),
+        timezone: locForm.timezone || null,
+        address: locForm.address.trim() || null,
+        contact_phone: locForm.phone.trim() || null,
+      })
+      setLocations((ls) => [...ls, created])
+      setLocForm({ name: '', timezone: '', address: '', phone: '' })
+      switchLocation(created.id)
+    } catch (e) {
+      fail(e, 'Could not add this location')
+    }
   }
   async function setLocationDefault(id: string) {
     const updated = await cappeApi.put<CappeLocation>(`/sites/${siteId}/locations/${id}`, { is_default: true })
@@ -116,20 +130,28 @@ export function useBookings() {
   async function addType(e: React.FormEvent) {
     e.preventDefault()
     if (!typeForm.name.trim()) return
-    const created = await cappeApi.post<CappeBookingType>(`/sites/${siteId}/booking-types`, {
-      name: typeForm.name.trim(),
-      description: typeForm.description.trim() || null,
-      duration_minutes: parseInt(typeForm.duration_minutes, 10) || 30,
-      pricing_mode: typeForm.pricing_mode,
-      price_cents: Math.round((parseFloat(typeForm.price) || 0) * 100),
-      requires_approval: typeForm.requires_approval,
-      category: typeForm.category.trim() || null,
-      buffer_minutes: parseInt(typeForm.buffer, 10) || 0,
-      staff_ids: typeForm.staffIds,
-      location_id: selLoc || null,
-    })
-    setTypes((t) => [...t, created])
-    setTypeForm({ name: '', description: '', duration_minutes: '30', pricing_mode: 'flat', price: '', requires_approval: false, category: '', buffer: '0', staffIds: [] })
+    setError(null)
+    // Refuse an unparseable price rather than saving it as $0 (utils/money.ts).
+    const priceCents = typeForm.price.trim() === '' ? 0 : parseMoneyCents(typeForm.price)
+    if (priceCents === null) { setError('Enter the price as a plain amount, e.g. 75 or 75.00'); return }
+    try {
+      const created = await cappeApi.post<CappeBookingType>(`/sites/${siteId}/booking-types`, {
+        name: typeForm.name.trim(),
+        description: typeForm.description.trim() || null,
+        duration_minutes: parseInt(typeForm.duration_minutes, 10) || 30,
+        pricing_mode: typeForm.pricing_mode,
+        price_cents: priceCents,
+        requires_approval: typeForm.requires_approval,
+        category: typeForm.category.trim() || null,
+        buffer_minutes: parseInt(typeForm.buffer, 10) || 0,
+        staff_ids: typeForm.staffIds,
+        location_id: selLoc || null,
+      })
+      setTypes((t) => [...t, created])
+      setTypeForm({ name: '', description: '', duration_minutes: '30', pricing_mode: 'flat', price: '', requires_approval: false, category: '', buffer: '0', staffIds: [] })
+    } catch (e) {
+      fail(e, 'Could not add this appointment type')
+    }
   }
 
   // --- Staff ---
@@ -156,13 +178,23 @@ export function useBookings() {
   }
 
   async function patchType(id: string, patch: Partial<CappeBookingType>) {
-    const updated = await cappeApi.put<CappeBookingType>(`/sites/${siteId}/booking-types/${id}`, patch)
-    setTypes((t) => t.map((x) => (x.id === id ? updated : x)))
+    setError(null)
+    try {
+      const updated = await cappeApi.put<CappeBookingType>(`/sites/${siteId}/booking-types/${id}`, patch)
+      setTypes((t) => t.map((x) => (x.id === id ? updated : x)))
+    } catch (e) {
+      fail(e, 'Could not update this appointment type')
+    }
   }
 
   async function removeType(id: string) {
-    await cappeApi.delete(`/sites/${siteId}/booking-types/${id}`)
-    setTypes((t) => t.filter((x) => x.id !== id))
+    setError(null)
+    try {
+      await cappeApi.delete(`/sites/${siteId}/booking-types/${id}`)
+      setTypes((t) => t.filter((x) => x.id !== id))
+    } catch (e) {
+      fail(e, 'Could not remove this appointment type')
+    }
   }
 
   function addSlot() {
@@ -283,24 +315,39 @@ export function useBookings() {
   }
 
   // --- Booking actions ---
-  async function acceptBooking(b: CappeBooking) {
-    const updated = await cappeApi.post<CappeBooking>(`/sites/${siteId}/bookings/${b.id}/accept`)
+  const mergeBooking = (b: CappeBooking, updated: CappeBooking) =>
     setBookings((list) => list.map((x) => (
       x.id === b.id ? { ...updated, location_name: updated.location_name ?? x.location_name } : x
     )))
+
+  async function acceptBooking(b: CappeBooking) {
+    setError(null)
+    try {
+      mergeBooking(b, await cappeApi.post<CappeBooking>(`/sites/${siteId}/bookings/${b.id}/accept`))
+    } catch (e) {
+      fail(e, 'Could not accept this booking')
+    }
   }
   async function declineBooking(b: CappeBooking) {
-    const reason = window.prompt('Reason for declining (optional, shown to the customer):') ?? undefined
-    const updated = await cappeApi.post<CappeBooking>(`/sites/${siteId}/bookings/${b.id}/decline`, { reason })
-    setBookings((list) => list.map((x) => (
-      x.id === b.id ? { ...updated, location_name: updated.location_name ?? x.location_name } : x
-    )))
+    // prompt() returns null on Cancel and '' on an empty OK. Only Cancel backs
+    // out — `?? undefined` used to fold it into "no reason" and decline anyway.
+    const answer = window.prompt('Reason for declining (optional, shown to the customer):')
+    if (answer === null) return
+    const reason = answer.trim() || undefined
+    setError(null)
+    try {
+      mergeBooking(b, await cappeApi.post<CappeBooking>(`/sites/${siteId}/bookings/${b.id}/decline`, { reason }))
+    } catch (e) {
+      fail(e, 'Could not decline this booking')
+    }
   }
   async function setBookingStatus(b: CappeBooking, status: string) {
-    const updated = await cappeApi.patch<CappeBooking>(`/sites/${siteId}/bookings/${b.id}`, { status })
-    setBookings((list) => list.map((x) => (
-      x.id === b.id ? { ...updated, location_name: updated.location_name ?? x.location_name } : x
-    )))
+    setError(null)
+    try {
+      mergeBooking(b, await cappeApi.patch<CappeBooking>(`/sites/${siteId}/bookings/${b.id}`, { status }))
+    } catch (e) {
+      fail(e, 'Could not change this booking')
+    }
   }
 
   const pending = bookings.filter((b) => b.status === 'pending' && b.requires_approval)

@@ -28,12 +28,23 @@ from ..models.cappe import (
     CappeSubscriptionAddon,
 )
 from ..services import billing as billing_svc
+from ..services.email import dashboard_url
 from ..services.entitlements import decode_features, mailbox_quota
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
+from .payments import _own_dashboard_url
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Where a caller-supplied Stripe redirect lands when it isn't one of ours.
+# Stripe renders these URLs on its own hosted, Stripe-branded pages, so an
+# arbitrary address there is a phishing redirect wearing our checkout flow.
+_BILLING_FALLBACK_URL = "/sites"
+
+
+def _billing_return_url(url: str | None) -> str:
+    return _own_dashboard_url(url) or dashboard_url(_BILLING_FALLBACK_URL)
 
 
 def _prices_for(rows, code: str) -> list[CappePlanPrice]:
@@ -232,8 +243,8 @@ async def start_checkout(
             price_id=price["stripe_price_id"],
             intro_price_id=intro_price_id,
             trial_days=intro_days,
-            success_url=body.success_url,
-            cancel_url=body.cancel_url,
+            success_url=_billing_return_url(body.success_url),
+            cancel_url=_billing_return_url(body.cancel_url),
             metadata={
                 "type": "cappe_subscription",
                 "account_id": str(account.id),
@@ -271,7 +282,7 @@ async def open_portal(
         )
     try:
         session = await get_cappe_stripe().create_billing_portal_session(
-            customer_id=customer_id, return_url=body.return_url
+            customer_id=customer_id, return_url=_billing_return_url(body.return_url)
         )
     except CappeStripeError as exc:
         raise HTTPException(
