@@ -110,7 +110,7 @@ export function SubscribersTab({
               </tr>
             ))}
             {filteredSubs.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-500">No subscribers yet</td></tr>
+              <tr><td colSpan={7} className="px-4 py-6 text-center text-zinc-500">No subscribers yet</td></tr>
             )}
           </tbody>
         </table>

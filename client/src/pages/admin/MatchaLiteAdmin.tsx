@@ -65,7 +65,7 @@ export default function MatchaLiteAdmin() {
   }
 
   return (
-    <div className="p-6 max-w-3xl">
+    <div className="p-5 max-w-3xl">
       <h1 className="text-xl font-semibold text-zinc-100 mb-1">Self-Serve Signup Links</h1>
       <p className="text-sm text-zinc-500 mb-6">Comp signup links and pricing for Lite, Matcha-X, and Compliance.</p>
 
@@ -150,7 +150,7 @@ export default function MatchaLiteAdmin() {
           <tbody>
             {tokens.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-zinc-500 text-sm">No links generated yet</td>
+                <td colSpan={4} className="px-4 py-6 text-center text-zinc-500 text-sm">No links generated yet</td>
               </tr>
             )}
             {tokens.map((t) => (
@@ -315,7 +315,7 @@ function BespokeInvitesPanel() {
           <tbody>
             {invites.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-zinc-500 text-sm">No invites generated yet</td>
+                <td colSpan={4} className="px-4 py-6 text-center text-zinc-500 text-sm">No invites generated yet</td>
               </tr>
             )}
             {invites.map((inv) => (

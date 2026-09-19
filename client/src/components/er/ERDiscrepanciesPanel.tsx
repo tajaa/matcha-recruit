@@ -49,12 +49,12 @@ export function ERDiscrepanciesPanel({ caseId }: Props) {
   }, [caseId])
 
   if (loading) {
-    return <p className="text-sm text-zinc-500 py-8 text-center">Detecting discrepancies...</p>
+    return <p className="text-sm text-zinc-500 py-6 text-center">Detecting discrepancies...</p>
   }
 
   if (!data || !data.generated_at) {
     return (
-      <div className="text-center py-8">
+      <div className="text-center py-6">
         <p className="text-sm text-zinc-500 mb-2">
           Detect contradictions and inconsistencies across witness statements and documents.
         </p>

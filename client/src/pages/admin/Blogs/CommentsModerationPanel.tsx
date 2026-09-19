@@ -44,7 +44,7 @@ export default function CommentsModerationPanel({ onCountChange }: { onCountChan
   if (error) return <div className="text-amber-400 text-sm">{error}</div>
   if (comments.length === 0) {
     return (
-      <div className="text-zinc-500 text-sm py-12 text-center border border-dashed border-zinc-800 rounded">
+      <div className="text-zinc-500 text-sm py-8 text-center border border-dashed border-zinc-800 rounded">
         No pending comments. New comments will appear here.
       </div>
     )

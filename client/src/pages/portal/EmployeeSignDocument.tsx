@@ -102,7 +102,7 @@ export default function EmployeeSignDocument() {
       {doc.description && <p className="text-sm text-zinc-500 mt-1">{doc.description}</p>}
 
       {content ? (
-        <Card className="mt-6 p-6 max-h-[60vh] overflow-y-auto">
+        <Card className="mt-6 p-5 max-h-[60vh] overflow-y-auto">
           <div className="space-y-8">
             {content.sections.map((s, i) => (
               <section key={i}>

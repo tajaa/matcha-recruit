@@ -14,7 +14,7 @@ export function Log300Table({ entries, year, navigate }: Log300TableProps) {
   return (
     <div className="bg-zinc-900/40 border border-white/[0.06] rounded-lg overflow-hidden">
       {entries.length === 0 ? (
-        <div className="p-8 text-center">
+        <div className="p-6 text-center">
           <p className="text-sm text-zinc-400">No OSHA-recordable incidents for {year}.</p>
           <p className="text-[11px] text-zinc-600 mt-1">Mark an incident OSHA recordable from its detail page.</p>
         </div>

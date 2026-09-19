@@ -131,7 +131,7 @@ export function NewsletterHeroSection({ variant = 'caramel' }: { variant?: Newsl
         />
       )}
 
-      <div className="relative max-w-2xl mx-auto px-6 text-center">
+      <div className="relative max-w-2xl mx-auto px-5 text-center">
         <span
           className="inline-flex items-center gap-2 rounded-full px-3.5 py-1 text-[11px] uppercase tracking-[0.22em] font-medium mb-4"
           style={{
@@ -221,7 +221,7 @@ export function NewsletterHeroSection({ variant = 'caramel' }: { variant?: Newsl
               <button
                 type="submit"
                 disabled={status === 'submitting'}
-                className="shrink-0 inline-flex items-center gap-1.5 rounded-full px-6 py-2.5 text-sm font-semibold transition-transform hover:scale-[1.03] active:scale-95 disabled:opacity-50"
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-full px-5 py-2.5 text-sm font-semibold transition-transform hover:scale-[1.03] active:scale-95 disabled:opacity-50"
                 style={{
                   backgroundColor: P.btnBg,
                   color: P.btnText,

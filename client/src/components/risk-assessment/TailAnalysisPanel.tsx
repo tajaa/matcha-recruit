@@ -39,10 +39,10 @@ export function TailAnalysisPanel({ qs }: Props) {
 
   useEffect(() => { load() }, [load])
 
-  if (loading) return <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 text-xs text-zinc-500 animate-pulse">Loading tail analysis...</div>
+  if (loading) return <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 text-xs text-zinc-500 animate-pulse">Loading tail analysis...</div>
   if (!data || !data.has_sufficient_data) {
     return (
-      <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6">
+      <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5">
         <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-2">Tail Analysis</div>
         <p className="text-xs text-zinc-500">Requires at least 6 months of history data.</p>
       </div>
@@ -60,7 +60,7 @@ export function TailAnalysisPanel({ qs }: Props) {
   })
 
   return (
-    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
+    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-4">
       <div className="flex items-center justify-between">
         <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Tail Analysis & Anomalies<InfoTip text="Time series of risk metrics with statistical process control bands (mean +/- 2 standard deviations). Points outside the shaded band are anomalies — warnings at 2σ, alerts at 3σ. These flag unusual spikes that may need investigation." /></div>
         <div className="flex gap-2">

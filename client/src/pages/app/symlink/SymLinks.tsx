@@ -132,9 +132,9 @@ export default function SymLinks() {
 
       <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/50">
         {loading ? (
-          <p className="px-5 py-6 text-xs uppercase tracking-wider text-zinc-500">Loading sym-links...</p>
+          <p className="px-5 py-5 text-xs uppercase tracking-wider text-zinc-500">Loading sym-links...</p>
         ) : visible.length === 0 ? (
-          <div className="flex flex-col items-center px-6 py-14 text-center">
+          <div className="flex flex-col items-center px-5 py-14 text-center">
             <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06]">
               <Link2 className="h-4 w-4 text-emerald-400" />
             </span>

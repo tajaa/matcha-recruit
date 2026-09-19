@@ -76,7 +76,7 @@ export function NewslettersTab({
           <div className="space-y-2">{sent.map(nl => <NlRow key={nl.id} nl={nl} />)}</div>
         </div>
       )}
-      {newsletters.length === 0 && <p className="text-zinc-500 text-sm py-8 text-center">No newsletters yet.</p>}
+      {newsletters.length === 0 && <p className="text-zinc-500 text-sm py-6 text-center">No newsletters yet.</p>}
     </div>
   )
 }

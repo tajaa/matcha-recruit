@@ -23,13 +23,13 @@ export function IRPeopleCard() {
         People by incident count
       </h2>
       {people === null && !error ? (
-        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 flex items-center justify-center text-zinc-500">
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 flex items-center justify-center text-zinc-500">
           <Loader2 className="w-4 h-4 animate-spin" />
         </div>
       ) : error ? (
         <p className="text-sm text-red-400">{error}</p>
       ) : !people || people.length === 0 ? (
-        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 text-sm text-zinc-500 text-center">
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 text-sm text-zinc-500 text-center">
           No people tracked yet. Names entered on incident reports appear here automatically.
         </div>
       ) : (

@@ -86,7 +86,7 @@ export default function FractionalClientDetail() {
   const c = detail.client
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-5 space-y-5">
       <Link to="/admin/fractional-hr" className="inline-flex items-center gap-1 text-sm text-zinc-400 hover:text-zinc-200">
         <ArrowLeft size={14} /> Book of business
       </Link>
@@ -279,7 +279,7 @@ function TasksTab({
                 </tr>
               )
             })}
-            {tasks.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-zinc-500 text-sm">No tasks yet.</td></tr>}
+            {tasks.length === 0 && <tr><td colSpan={6} className="py-5 text-center text-zinc-500 text-sm">No tasks yet.</td></tr>}
           </tbody>
         </table>
       </div>

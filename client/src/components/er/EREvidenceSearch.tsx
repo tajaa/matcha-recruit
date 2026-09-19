@@ -76,7 +76,7 @@ export function EREvidenceSearch({ caseId }: Props) {
           </p>
 
           {data.results.length === 0 && (
-            <p className="text-sm text-zinc-400 text-center py-6">No matching evidence found.</p>
+            <p className="text-sm text-zinc-400 text-center py-5">No matching evidence found.</p>
           )}
 
           {data.results.map((r: EvidenceSearchResult) => (
@@ -112,7 +112,7 @@ export function EREvidenceSearch({ caseId }: Props) {
 
       {/* Empty state before first search */}
       {!data && !loading && (
-        <p className="text-sm text-zinc-500 text-center py-6">
+        <p className="text-sm text-zinc-500 text-center py-5">
           Search across all uploaded documents for specific evidence, quotes, or topics.
         </p>
       )}

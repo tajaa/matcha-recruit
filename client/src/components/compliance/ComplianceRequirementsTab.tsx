@@ -251,13 +251,13 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
       )}
 
       {sectionCount === 0 && searchQuery ? (
-        <div className="border border-white/[0.06] bg-zinc-900/40 rounded-lg px-4 py-6 text-center">
+        <div className="border border-white/[0.06] bg-zinc-900/40 rounded-lg px-4 py-5 text-center">
           <p className="text-sm text-zinc-500">No requirements matching &ldquo;{searchQuery}&rdquo;</p>
           <button type="button" onClick={() => setSearchQuery('')}
             className="text-xs text-emerald-500 hover:text-emerald-400 mt-1 transition-colors">Clear search</button>
         </div>
       ) : sectionCount === 0 ? (
-        <div className="border border-white/[0.06] bg-zinc-900/40 rounded-lg px-4 py-6 text-center">
+        <div className="border border-white/[0.06] bg-zinc-900/40 rounded-lg px-4 py-5 text-center">
           <p className="text-sm text-zinc-600">No requirements found. Run a compliance check to populate.</p>
         </div>
       ) : groupBy === 'jurisdiction' ? (

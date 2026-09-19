@@ -101,7 +101,7 @@ export default function Training() {
       <h2 className="text-sm font-semibold text-zinc-300 mb-3">Required trainings</h2>
       <div className="space-y-3 mb-8">
         {requirements.length === 0 && (
-          <Card className="p-6 text-sm text-zinc-500">
+          <Card className="p-5 text-sm text-zinc-500">
             No training requirements yet. Matcha-Lite tenants get CA SB 1343
             harassment-prevention requirements seeded automatically once the
             content templates are generated. Run{' '}

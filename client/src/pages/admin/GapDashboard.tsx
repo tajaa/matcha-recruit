@@ -124,7 +124,7 @@ export default function GapDashboard() {
   const driftActive = !!drift && (drift.new_locations > 0 || drift.new_jurisdictions > 0)
 
   return (
-    <div className="p-6 max-w-6xl">
+    <div className="p-5 max-w-6xl">
       {/* Header */}
       <div className="flex items-center gap-3 mb-1">
         <Link to="/admin/gap-analysis" className="text-zinc-500 hover:text-zinc-300"><ArrowLeft size={18} /></Link>
@@ -177,7 +177,7 @@ export default function GapDashboard() {
 
       {/* never_run empty state */}
       {data?.status === 'never_run' && !enrich.running && !enrich.done && (
-        <div className="ml-9 rounded-xl border border-vsc-border bg-vsc-panel p-8 text-center">
+        <div className="ml-9 rounded-xl border border-vsc-border bg-vsc-panel p-6 text-center">
           <FileSearch className="w-8 h-8 text-zinc-600 mx-auto mb-3" />
           <h2 className="text-sm font-medium text-zinc-200">No gap analysis yet</h2>
           <p className="text-xs text-zinc-500 mt-1 mb-4 max-w-md mx-auto">
@@ -335,7 +335,7 @@ export default function GapDashboard() {
             </div>
 
             {gaps.length === 0 ? (
-              <div className="text-center py-6 text-sm text-emerald-300 flex items-center justify-center gap-2">
+              <div className="text-center py-5 text-sm text-emerald-300 flex items-center justify-center gap-2">
                 <CheckCircle2 className="w-4 h-4" /> No open gaps — every scoped requirement is covered.
               </div>
             ) : (

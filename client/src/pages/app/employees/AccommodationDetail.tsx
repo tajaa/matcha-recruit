@@ -105,8 +105,8 @@ export default function AccommodationDetail() {
     setDocs(updated)
   }
 
-  if (loading) return <div className="flex justify-center py-12"><Loader2 className="animate-spin text-zinc-500" size={20} /></div>
-  if (!accase) return <div className="text-center py-12 text-zinc-500">Case not found</div>
+  if (loading) return <div className="flex justify-center py-8"><Loader2 className="animate-spin text-zinc-500" size={20} /></div>
+  if (!accase) return <div className="text-center py-8 text-zinc-500">Case not found</div>
 
   const stepIdx = accase.status === 'requested' ? 0
     : accase.status === 'medical_review' ? 1

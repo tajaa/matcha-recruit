@@ -41,7 +41,7 @@ export function HowItWorksModal({ title, steps, onClose }: {
           </button>
         </div>
 
-        <div className="px-6 py-6">
+        <div className="px-5 py-5">
           <div className="flex items-center gap-3">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06]">
               <Icon className="h-4.5 w-4.5 text-emerald-400" />

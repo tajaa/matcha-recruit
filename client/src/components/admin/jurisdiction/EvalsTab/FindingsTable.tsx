@@ -92,7 +92,7 @@ export function FindingsTable({ detail, onResolved }: { detail: RunDetail; onRes
             ))}
             {!rows.length && (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-zinc-600">No findings match.</td>
+                <td colSpan={6} className="px-3 py-5 text-center text-zinc-600">No findings match.</td>
               </tr>
             )}
           </tbody>

@@ -96,7 +96,7 @@ export default function TrainingDetail() {
           <tbody className="divide-y divide-zinc-800">
             {records.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-zinc-500 text-xs">
+                <td colSpan={7} className="px-4 py-5 text-center text-zinc-500 text-xs">
                   No records yet. Click "Assign" on the requirements list.
                 </td>
               </tr>

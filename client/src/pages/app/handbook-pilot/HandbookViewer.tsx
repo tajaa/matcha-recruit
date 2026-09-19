@@ -156,7 +156,7 @@ export default function HandbookViewer({ sessionId, refreshKey, onDraftRequireme
             {scan ? 'Re-scan compliance' : 'Run compliance scan'}
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-5">
           {isEmpty ? (
             <div className="h-full flex flex-col items-center justify-center text-center text-zinc-600">
               <Sparkles className="h-8 w-8 text-zinc-700 mb-3" />

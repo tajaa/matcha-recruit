@@ -14,7 +14,7 @@ export function OshaLogsPanel() {
 
   if (osha.loading) {
     return (
-      <div className="flex justify-center py-12">
+      <div className="flex justify-center py-8">
         <Loader2 className="animate-spin text-zinc-500" size={20} />
       </div>
     )
@@ -34,7 +34,7 @@ export function OshaLogsPanel() {
 
   if (osha.locations.length === 0) {
     return (
-      <div className="bg-zinc-900/40 border border-white/[0.06] rounded-lg p-8 text-center">
+      <div className="bg-zinc-900/40 border border-white/[0.06] rounded-lg p-6 text-center">
         <p className="text-sm text-zinc-300">No business locations defined.</p>
         <p className="text-[11px] text-zinc-600 mt-1">
           OSHA 300A summaries and ITA filings are per establishment. Add a location under Compliance to begin.
