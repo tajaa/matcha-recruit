@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 
 os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
@@ -104,3 +105,57 @@ def test_owner_and_shopper_token_scopes_are_mutually_rejected():
     assert decode_cappe_token(shopper_token, "access") is None
     assert helpers.decode_token(owner_token, "access") is None
     assert helpers.decode_token(shopper_token, "access")["site_id"] == str(site_id)
+
+
+@pytest.mark.asyncio
+async def test_issue_code_invalidates_old_code_and_stores_only_hash(monkeypatch):
+    site_id, email = uuid4(), "buyer@example.com"
+    conn = _CodeConn(None)
+    monkeypatch.setattr(shopper_auth.secrets, "randbelow", lambda _limit: 42)
+    code = await shopper_auth.issue_login_code(conn, site={"id": site_id}, email=f" {email.upper()} ")
+    assert code == "000042"
+    assert any("consumed_at=NOW()" in query for query, _ in conn.executed)
+    inserted = next(args for query, args in conn.executed if "INSERT INTO cappe_shopper_login_codes" in query)
+    assert inserted[1] == email
+    assert inserted[2] == shopper_auth.code_hash(site_id, email, code)
+    assert code not in inserted
+
+
+class _SessionConn:
+    def __init__(self, shopper, refresh_hash=None):
+        self.shopper = shopper
+        self.refresh_hash = refresh_hash
+        self.executed = []
+
+    async def execute(self, query, *args):
+        self.executed.append((query, args))
+
+    async def fetchrow(self, query, *args):
+        if "FROM cappe_shoppers" in query:
+            return self.shopper
+        if "FROM cappe_shopper_sessions" in query:
+            return {"refresh_hash": self.refresh_hash}
+        raise AssertionError(query)
+
+
+@pytest.mark.asyncio
+async def test_session_issue_and_rotating_refresh_resolution():
+    shopper = {
+        "id": uuid4(), "site_id": uuid4(), "email": "buyer@example.com",
+        "name": None, "phone": None, "push_order_updates": True, "tokens_valid_after": None,
+    }
+    conn = _SessionConn(shopper)
+    pair = await shopper_auth.issue_session(conn, shopper)
+    assert pair["shopper"]["site_id"] == str(shopper["site_id"])
+    insert = next(args for query, args in conn.executed if "cappe_shopper_sessions" in query)
+    conn.refresh_hash = insert[2]
+    site = {"id": shopper["site_id"]}
+    resolved, payload = await shopper_auth.resolve_shopper(
+        conn, site, pair["refresh_token"], "refresh", lock=True,
+    )
+    assert resolved == shopper
+    assert payload["site_id"] == str(site["id"])
+
+    with pytest.raises(HTTPException) as caught:
+        await shopper_auth.resolve_shopper(conn, {"id": uuid4()}, pair["access_token"])
+    assert caught.value.status_code == 401
