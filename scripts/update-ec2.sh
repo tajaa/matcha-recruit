@@ -101,16 +101,36 @@ sync_nginx() {
     ssh_cmd "sudo rm -f /etc/nginx/conf.d/matcha-backend-active.conf /etc/nginx/conf.d/matcha-frontend-active.conf"
 
     log_info "Syncing nginx config (deploy/nginx/*.conf)..."
+    # One timestamp for the whole run so a failure can restore exactly the files
+    # THIS run replaced (nginx cannot -t a single file, so the bad config is on
+    # disk by the time we find out; leaving it there breaks every later reload —
+    # blue/green swaps, the lego deploy-hook, the certificate workflow).
+    local ts synced=()
+    ts="$(date +%Y%m%d-%H%M%S)"
     for f in deploy/nginx/*.conf; do
+        local base
+        base="$(basename "$f")"
         scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new "$f" \
-            "$EC2_USER@$EC2_HOST:/tmp/$(basename "$f")"
-        ssh_cmd "sudo cp /etc/nginx/conf.d/$(basename "$f") /etc/nginx/conf.d/$(basename "$f").bak-\$(date +%Y%m%d-%H%M%S) 2>/dev/null; sudo mv /tmp/$(basename "$f") /etc/nginx/conf.d/$(basename "$f")"
+            "$EC2_USER@$EC2_HOST:/tmp/$base"
+        ssh_cmd "sudo cp /etc/nginx/conf.d/$base /etc/nginx/conf.d/$base.bak-$ts 2>/dev/null; sudo mv /tmp/$base /etc/nginx/conf.d/$base"
+        synced+=("$base")
     done
     if ssh_cmd "sudo nginx -t" ; then
         ssh_cmd "sudo nginx -s reload"
         log_success "nginx config synced + reloaded"
     else
-        log_error "nginx -t failed on EC2 — config NOT reloaded, previous config still serving. Check /etc/nginx/conf.d/*.bak-* to diff."
+        log_error "nginx -t failed on EC2 — rolling back to the pre-sync config..."
+        for base in "${synced[@]}"; do
+            # A file with no .bak-$ts is one this run CREATED (no prior version);
+            # remove it rather than leaving a new broken block behind.
+            ssh_cmd "if [ -f /etc/nginx/conf.d/$base.bak-$ts ]; then sudo cp /etc/nginx/conf.d/$base.bak-$ts /etc/nginx/conf.d/$base; else sudo rm -f /etc/nginx/conf.d/$base; fi"
+        done
+        if ssh_cmd "sudo nginx -t"; then
+            log_success "Rolled back; /etc/nginx/conf.d is valid again (NOT reloaded)."
+        else
+            log_error "Rollback did NOT restore a valid config — /etc/nginx/conf.d is broken. Fix by hand before any reload."
+        fi
+        log_error "Deploy aborted. Diff deploy/nginx/*.conf against /etc/nginx/conf.d/*.bak-$ts."
         exit 1
     fi
 }

@@ -391,3 +391,112 @@ describe('shared parity fixture', () => {
     })
   }
 })
+
+/** Every position below arrives as JSON from a model. The appliers used to
+ *  feed them straight to `Math.min`/`Math.max`/`splice`, all of which coerce:
+ *  a NaN or a missing field collapsed to 0, so a malformed op silently moved
+ *  or inserted a section at the top of the page and reported success. */
+describe('index preconditions', () => {
+  const bad = [undefined, null, NaN, '1', 1.5, Infinity] as unknown[]
+
+  it('refuses a move_block whose `to` is not a whole number', () => {
+    for (const to of bad) {
+      const r = run([hero(), features()], [{ op: 'move_block', block: 'k2', to } as unknown as MerlinOp])
+      expect(r.results[0].ok).toBe(false)
+      expect(r.blocks.map((b) => b._k)).toEqual(['k1', 'k2'])
+    }
+  })
+
+  it('refuses an add_block whose `at` is not a whole number', () => {
+    for (const at of bad) {
+      const r = run([hero()], [{ op: 'add_block', type: 'hero', at } as unknown as MerlinOp])
+      expect(r.results[0].ok).toBe(false)
+      expect(r.blocks).toHaveLength(1)
+    }
+  })
+
+  it('refuses a duplicate_block whose explicit `at` is not a whole number', () => {
+    const r = run([hero()], [{ op: 'duplicate_block', block: 'k1', at: NaN } as unknown as MerlinOp])
+    expect(r.results[0].ok).toBe(false)
+    expect(r.blocks).toHaveLength(1)
+  })
+
+  it('still accepts a valid in-range index', () => {
+    const r = run([hero(), features()], [{ op: 'move_block', block: 'k2', to: 0 }])
+    expect(r.results[0].ok).toBe(true)
+    expect(r.blocks.map((b) => b._k)).toEqual(['k2', 'k1'])
+  })
+})
+
+describe('add_block content is content, not identity', () => {
+  it('strips the structural keys a content bag must never set', () => {
+    const r = run([], [{
+      op: 'add_block',
+      type: 'hero',
+      at: 0,
+      content: { heading: 'Hi', type: 'canvas', _design: { bg: { type: 'image' } }, id: 'spoofed' },
+    } as unknown as MerlinOp])
+
+    expect(r.results[0].ok).toBe(true)
+    const b = r.blocks[0]
+    expect(b.heading).toBe('Hi')
+    // The block stays the type that was asked for, with its own generated key
+    // and no design bag smuggled in through `content`.
+    expect(b.type).toBe('hero')
+    expect(b._design).toBeUndefined()
+    expect(b.id).toBeUndefined()
+    expect(b._k).toBeTruthy()
+  })
+
+  it('leaves an explicit `design` bag alone — that is the sanctioned channel', () => {
+    const r = run([], [{
+      op: 'add_block', type: 'hero', at: 0, design: { motion: { heading: 'rise' } },
+    }])
+    expect(r.blocks[0]._design).toEqual({ motion: { heading: 'rise' } })
+  })
+})
+
+describe('design registry check reaches every op that writes _design', () => {
+  const schema = { design: { motion: { heading: { enum: ['none', 'rise'] } } } }
+
+  it('skips a set_design_bulk key the schema does not list', () => {
+    const r = applyMerlinOps([hero()], {}, [
+      { op: 'set_design_bulk', blocks: ['k1'], design: { motion: { nope: 'x' } } },
+    ], schema)
+    expect(r.results[0].ok).toBe(false)
+    expect(r.blocks[0]._design).toBeUndefined()
+  })
+
+  it('skips a set_design_bulk group the schema does not list', () => {
+    // Deliberately off-contract: the guard exists for a model (or an older
+    // bundle) that names a group the registry has never heard of, which the
+    // MerlinDesignGroup union forbids at compile time but not at runtime.
+    const r = applyMerlinOps([hero()], {}, [
+      { op: 'set_design_bulk', blocks: ['k1'], design: { nosuchgroup: { a: 1 } } as never },
+    ], schema)
+    expect(r.results[0].ok).toBe(false)
+  })
+
+  it('skips an add_block design key the schema does not list', () => {
+    // This one used to be unreachable: `const schema = BLOCK_SCHEMAS[op.type]`
+    // shadowed the registry parameter of the same name inside the case.
+    const r = applyMerlinOps([], {}, [
+      { op: 'add_block', type: 'hero', at: 0, design: { motion: { nope: 'x' } } },
+    ], schema)
+    expect(r.results[0].ok).toBe(false)
+    expect(r.blocks).toHaveLength(0)
+  })
+
+  it('applies a known key through both ops', () => {
+    const r = applyMerlinOps([hero()], {}, [
+      { op: 'set_design_bulk', blocks: ['k1'], design: { motion: { heading: 'rise' } } },
+      { op: 'add_block', type: 'hero', at: 1, design: { motion: { heading: 'rise' } } },
+    ], schema)
+    expect(r.results.map((x) => x.ok)).toEqual([true, true])
+  })
+
+  it('still applies unvalidated when no schema is passed', () => {
+    const r = run([hero()], [{ op: 'set_design_bulk', blocks: ['k1'], design: { motion: { anything: 1 } } }])
+    expect(r.results[0].ok).toBe(true)
+  })
+})

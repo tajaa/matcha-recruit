@@ -10,6 +10,7 @@ import StripeConnectCard from '../components/StripeConnectCard'
 import TermSheet from './TermSheet'
 import CounterSheet from './CounterSheet'
 import { fmtCents, type CollabTerms, type DealCheckSeverity, type OfferDetail } from '../types'
+import { safeHttpUrl } from '../utils/safeUrl'
 
 function timeAgo(iso: string): string {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000)
@@ -34,6 +35,9 @@ export default function OfferDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // Captured once: "how overdue is this payment" must not change between two
+  // renders of the same data (Date.now() in render is impure).
+  const [now] = useState(() => Date.now())
   const [showCounter, setShowCounter] = useState(false)
   const [payoutsBlocked, setPayoutsBlocked] = useState(false)
   const [message, setMessage] = useState('')
@@ -152,7 +156,7 @@ export default function OfferDetailPage() {
     setBusy(true)
     try {
       const { url } = await cappeApi.post<{ url: string }>(`/collab/offers/${offerId}/payments/${paymentId}/checkout`)
-      window.location.href = url
+      window.location.assign(url)
     } catch (e) {
       if (e instanceof CappeApiError && e.code === 'payouts_not_ready') {
         setPayoutsBlocked(true)
@@ -306,9 +310,14 @@ export default function OfferDetailPage() {
                 {d.review_note && d.status === 'revision_requested' && (
                   <p className="mt-1.5 rounded bg-orange-500/10 px-2 py-1 text-xs text-orange-300">{d.review_note}</p>
                 )}
-                {d.submission_url && (
-                  <a href={d.submission_url} target="_blank" rel="noopener noreferrer" className="mt-1.5 block truncate text-xs text-emerald-400 hover:text-emerald-300">{d.submission_url}</a>
-                )}
+                {/* The other side of the deal typed this URL. Render it as a
+                    link only when it is really http(s) — a stored
+                    `javascript:` value would otherwise run on click. */}
+                {safeHttpUrl(d.submission_url) ? (
+                  <a href={safeHttpUrl(d.submission_url)} target="_blank" rel="noopener noreferrer" className="mt-1.5 block truncate text-xs text-emerald-400 hover:text-emerald-300">{d.submission_url}</a>
+                ) : d.submission_url ? (
+                  <p className="mt-1.5 truncate text-xs text-zinc-500">{d.submission_url}</p>
+                ) : null}
 
                 {side === 'creator' && ['pending', 'revision_requested'].includes(d.status) && (
                   <DeliverableSubmitForm onSubmit={(url, note, proofMediaUrl) => submitDeliverable(d.id, url, note, proofMediaUrl)} busy={busy} />
@@ -336,7 +345,7 @@ export default function OfferDetailPage() {
           <div className="space-y-2">
             {offer.payments.length === 0 && <p className="text-sm text-zinc-500">Gifting collab — no payments.</p>}
             {offer.payments.map((p) => {
-              const daysOverdue = p.due_at ? (Date.now() - new Date(p.due_at).getTime()) / 86_400_000 : 0
+              const daysOverdue = p.due_at ? (now - new Date(p.due_at).getTime()) / 86_400_000 : 0
               const isOverdue = ['due', 'processing'].includes(p.status) && daysOverdue > 3
               return (
                 <div key={p.id} className={`rounded-lg border p-3 text-sm ${isOverdue ? 'border-amber-500/40 bg-amber-500/[0.04]' : 'border-zinc-800'}`}>

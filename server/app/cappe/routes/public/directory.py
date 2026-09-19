@@ -30,7 +30,7 @@ screen can never be six "Untitled Site" cards.
 import os
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import HTTPException, Query, Request, status
 
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
@@ -38,7 +38,9 @@ from ...models.cappe import CappeDirectoryPage, CappeDirectoryCategories
 from ...services.directory import CATEGORY_LABELS, category_options, normalize_category
 from ...services.render.sanitize import _safe_image
 
-router = APIRouter()
+from ._body_limit import limited_public_router
+
+router = limited_public_router()
 
 _BASE_DOMAIN = os.getenv("CAPPE_BASE_DOMAIN", "hey-matcha.com")
 

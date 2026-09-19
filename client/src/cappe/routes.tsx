@@ -13,6 +13,7 @@ import CappeOnboardingWizard from './onboarding/CappeOnboardingWizard'
 import CappeTemplates from './pages/CappeTemplates'
 import CappeSiteEditor from './pages/CappeSiteEditor'
 import CreatorsLanding from './creators/CreatorsLanding'
+import RequireAccountType from './components/RequireAccountType'
 
 const CreatorDirectory = lazy(() => import('./creators/CreatorDirectory'))
 const CreatorPublicProfile = lazy(() => import('./creators/CreatorPublicProfile'))
@@ -92,22 +93,25 @@ export default function CappeRoutes() {
           <Route path="sites/:siteId/clients" element={<Clients />} />
           <Route path="sites/:siteId/reviews" element={<Reviews />} />
           <Route path="sites/:siteId/blog" element={<Blog />} />
-          {/* Creator marketplace: creator self-service + brand-side collabs. */}
-          <Route path="creator" element={<CreatorHome />} />
-          <Route path="creator/deals" element={<CreatorDeals />} />
-          <Route path="creator/deals/:offerId" element={<OfferDetailPage />} />
-          <Route path="creator/earnings" element={<CreatorEarnings />} />
+          {/* Creator marketplace: creator self-service + brand-side collabs.
+              Each group is wrapped in RequireAccountType — CappeLayout above
+              only proves a session exists, not that it is the right KIND of
+              account for this half of the marketplace. */}
+          <Route path="creator" element={<RequireAccountType type="creator"><CreatorHome /></RequireAccountType>} />
+          <Route path="creator/deals" element={<RequireAccountType type="creator"><CreatorDeals /></RequireAccountType>} />
+          <Route path="creator/deals/:offerId" element={<RequireAccountType type="creator"><OfferDetailPage /></RequireAccountType>} />
+          <Route path="creator/earnings" element={<RequireAccountType type="creator"><CreatorEarnings /></RequireAccountType>} />
           {/* Canonical Gummfit Creators dashboard URLs. The singular
               /creator routes above remain as legacy deep-link aliases. */}
-          <Route path="creators/dashboard" element={<CreatorHome />} />
-          <Route path="creators/dashboard/deals" element={<CreatorDeals />} />
-          <Route path="creators/dashboard/deals/:offerId" element={<OfferDetailPage />} />
-          <Route path="creators/dashboard/earnings" element={<CreatorEarnings />} />
-          <Route path="creators/brands/dashboard" element={<BrandHome />} />
-          <Route path="creators/brands/dashboard/collabs" element={<BrandCollabs />} />
-          <Route path="creators/brands/dashboard/collabs/:offerId" element={<OfferDetailPage />} />
-          <Route path="collabs" element={<BrandCollabs />} />
-          <Route path="collabs/:offerId" element={<OfferDetailPage />} />
+          <Route path="creators/dashboard" element={<RequireAccountType type="creator"><CreatorHome /></RequireAccountType>} />
+          <Route path="creators/dashboard/deals" element={<RequireAccountType type="creator"><CreatorDeals /></RequireAccountType>} />
+          <Route path="creators/dashboard/deals/:offerId" element={<RequireAccountType type="creator"><OfferDetailPage /></RequireAccountType>} />
+          <Route path="creators/dashboard/earnings" element={<RequireAccountType type="creator"><CreatorEarnings /></RequireAccountType>} />
+          <Route path="creators/brands/dashboard" element={<RequireAccountType type="business"><BrandHome /></RequireAccountType>} />
+          <Route path="creators/brands/dashboard/collabs" element={<RequireAccountType type="business"><BrandCollabs /></RequireAccountType>} />
+          <Route path="creators/brands/dashboard/collabs/:offerId" element={<RequireAccountType type="business"><OfferDetailPage /></RequireAccountType>} />
+          <Route path="collabs" element={<RequireAccountType type="business"><BrandCollabs /></RequireAccountType>} />
+          <Route path="collabs/:offerId" element={<RequireAccountType type="business"><OfferDetailPage /></RequireAccountType>} />
         </Route>
       </Routes>
     </Suspense>

@@ -281,6 +281,24 @@ else
     fi
     echo "      non-reserved user emails, excl. preserved (must be 0): $LEAK"
     [[ "$LEAK" == "0" ]] || { echo "${RED}PII LEAK DETECTED — anonymizer missed rows.${NC}"; exit 1; }
+    # Cappe (gummfit.com) has its own identity tables, so the users check above
+    # says nothing about it. Block 8 of anonymize_dev.sql scrubs them; this is
+    # the matching gate. A dump from before the cappe tables existed (no
+    # cappe_accounts) degrades to a skip rather than failing the refresh.
+    HAS_CAPPE=$(ddev -tA -d "$DB_NAME" -c "SELECT 1 FROM information_schema.tables WHERE table_name='cappe_accounts';")
+    if [[ "$HAS_CAPPE" == "1" ]]; then
+        CAPPE_LEAK=$(ddev -tA -d "$DB_NAME" -c "SELECT
+              (SELECT count(*) FROM cappe_accounts    WHERE email NOT LIKE '%@example.com' AND email <> ALL(ARRAY[${PRESERVE_SQL}]::text[]))
+            + (SELECT count(*) FROM cappe_subscribers WHERE email NOT LIKE '%@example.com')
+            + (SELECT count(*) FROM cappe_orders      WHERE customer_email IS NOT NULL AND customer_email NOT LIKE '%@example.com')
+            + (SELECT count(*) FROM cappe_bookings    WHERE customer_email IS NOT NULL AND customer_email NOT LIKE '%@example.com')
+            + (SELECT count(*) FROM cappe_clients     WHERE email NOT LIKE '%@example.com')
+            + (SELECT count(*) FROM cappe_threads     WHERE client_email NOT LIKE '%@example.com');")
+        echo "      non-reserved cappe consumer emails, excl. preserved (must be 0): $CAPPE_LEAK"
+        [[ "$CAPPE_LEAK" == "0" ]] || { echo "${RED}PII LEAK DETECTED — anonymizer missed cappe rows.${NC}"; exit 1; }
+    else
+        echo "      cappe tables absent in this dump — cappe leak check skipped."
+    fi
 fi
 echo "      sample logins:"
 ddev -tA -d "$DB_NAME" -c "SELECT '        '||role||'  ->  '||email FROM users WHERE role IN ('admin','client','individual') ORDER BY role LIMIT 6;"

@@ -2,6 +2,7 @@
 and `_render_block` (the per-block dispatch + `_apply_design` wrapper)."""
 import re
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 from .design import _apply_design, _font_stack
@@ -445,6 +446,21 @@ _OPENNOW_JS = "<script>" + (_ASSETS / "opennow.js").read_text(encoding="utf-8") 
 _DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
+def _day_index(h: Any) -> int:
+    """Weekday index from one owner-entered hours row, -1 when unusable.
+
+    `hours` is free-form JSON on cappe_locations / meta_config, so a row can
+    carry `"day": "mon"` or `null`. `int()` on that raised, and the exception
+    escaped `_render` — one bad row 500'd the entire published page.
+    """
+    if not isinstance(h, dict):
+        return -1
+    try:
+        return int(h.get("day", -1))
+    except (TypeError, ValueError):
+        return -1
+
+
 def _hours(b, t, editable=False):
     """Structured weekly hours table + a client-computed "Open now" badge (the
     badge is computed in-browser from injected hours+tz, so it's cache-safe)."""
@@ -456,7 +472,7 @@ def _hours(b, t, editable=False):
         return ""
     rows = ""
     for i, name in enumerate(_DAY_NAMES):
-        e = next((h for h in hours if isinstance(h, dict) and int(h.get("day", -1)) == i), None)
+        e = next((h for h in hours if _day_index(h) == i), None)
         if e and not e.get("closed") and e.get("open") and e.get("close"):
             val = f'{_esc(e["open"])} – {_esc(e["close"])}'
         else:

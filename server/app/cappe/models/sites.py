@@ -4,10 +4,29 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from ._validators import MAX_SNAPSHOT_BYTES, assert_json_size
 
 # Apex-domain shape (labels 1-63 chars, alnum/hyphen, real-looking TLD).
 _DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")
+
+
+def _base_domain() -> str:
+    """The configured Cappe base domain, lowercased and bare.
+
+    Read at call time, not import time: models are imported before the app
+    lifespan loads settings, and the env var is the same source config reads.
+    """
+    import os
+
+    try:
+        from ...config import get_settings
+
+        base = get_settings().cappe_base_domain or ""
+    except Exception:
+        base = os.getenv("CAPPE_BASE_DOMAIN", "hey-matcha.com")
+    return base.strip().lower().strip(".")
 
 
 def normalize_custom_domain(value: Optional[str]) -> Optional[str]:
@@ -29,17 +48,37 @@ def normalize_custom_domain(value: Optional[str]) -> Optional[str]:
         v = v[4:]
     if not _DOMAIN_RE.match(v) or len(v) > 255:
         raise ValueError("Enter a valid domain, like example.com")
-    if (
-        v == "hey-matcha.com"
-        or v.endswith(".hey-matcha.com")
-        or v == "localhost"
-        or v.endswith(".localhost")
-    ):
-        raise ValueError("That domain can't be connected")
+    # Our own hostnames are never connectable. `hey-matcha.com` is hardcoded
+    # because it is where existing tenants live; the configured base domain is
+    # read lazily, since on gummfit.com the apex (and every tenant subdomain
+    # under it) would otherwise be claimable through the verify flow.
+    blocked = {"hey-matcha.com", "localhost"}
+    base = _base_domain()
+    if base:
+        blocked.add(base)
+    for host in blocked:
+        if v == host or v.endswith("." + host):
+            raise ValueError("That domain can't be connected")
     return v
 
 
 # --- Sites ------------------------------------------------------------------
+
+class _SnapshotSizeLimit(BaseModel):
+    """Bound the opaque page/theme JSON before anything renders or stores it.
+
+    `content` / `theme_config` / `meta_config` are deliberately untyped — the
+    block editor stores whatever the canvas produced — so nothing else caps
+    them. The renderer walks every block synchronously on the request path.
+    """
+
+    @model_validator(mode="after")
+    def _bounded_json(self):
+        for field in ("content", "theme_config", "meta_config"):
+            if field in type(self).model_fields:
+                assert_json_size(field, getattr(self, field, None))
+        return self
+
 
 class CappeSiteCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
@@ -54,7 +93,7 @@ class CappeSiteFromTemplate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=255)
 
 
-class CappeSiteUpdate(BaseModel):
+class CappeSiteUpdate(_SnapshotSizeLimit):
     name: Optional[str] = Field(default=None, max_length=255)
     # The tenant subdomain (<sub>.gummfit.com). Editable after creation; the
     # route slugifies + checks reserved/uniqueness before applying.
@@ -73,7 +112,11 @@ class CappeSiteUpdate(BaseModel):
     # Explicit null clears the threshold (model_fields_set gate in the route).
     shipping_free_threshold_cents: Optional[int] = Field(default=None, ge=0)
     shipping_label: Optional[str] = Field(default=None, max_length=40)
-    receipt_prefix: Optional[str] = Field(default=None, max_length=12)
+    # Reaches a Content-Disposition filename on both receipt routes, so it is
+    # restricted to characters that can't break out of the quoted header value.
+    receipt_prefix: Optional[str] = Field(
+        default=None, max_length=12, pattern=r"^[A-Za-z0-9-]{1,12}$"
+    )
 
 
 class CappeReadinessItem(BaseModel):
@@ -153,7 +196,7 @@ class CappeDirectoryListingUpdate(BaseModel):
 
 # --- Pages ------------------------------------------------------------------
 
-class CappePageCreate(BaseModel):
+class CappePageCreate(_SnapshotSizeLimit):
     title: str = Field(min_length=1, max_length=255)
     slug: Optional[str] = Field(default=None, max_length=160)
     content: dict[str, Any] = Field(default_factory=dict)
@@ -161,7 +204,7 @@ class CappePageCreate(BaseModel):
     status: Literal["draft", "published", "archived"] = "draft"
 
 
-class CappePageUpdate(BaseModel):
+class CappePageUpdate(_SnapshotSizeLimit):
     title: Optional[str] = Field(default=None, max_length=255)
     slug: Optional[str] = Field(default=None, max_length=160)
     content: Optional[dict[str, Any]] = None
@@ -169,7 +212,7 @@ class CappePageUpdate(BaseModel):
     status: Optional[Literal["draft", "published", "archived"]] = None
 
 
-class CappePagePreview(BaseModel):
+class CappePagePreview(_SnapshotSizeLimit):
     """Unsaved page content to render for the live editor preview.
 
     `theme_config` lets the editor preview an unsaved theme (live theme
@@ -214,6 +257,7 @@ class CappeTemplateDetail(CappeTemplateSummary):
 
 
 __all__ = [
+    "MAX_SNAPSHOT_BYTES",
     "normalize_custom_domain",
     "CappeSiteCreate",
     "CappeSiteFromTemplate",

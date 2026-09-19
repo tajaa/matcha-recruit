@@ -1,11 +1,13 @@
 """Cappe public surface — blog."""
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import HTTPException, Request, status
 
 from ....database import get_connection
 from ...models.cappe import CappePost
 from ._common import _published_site, _read_rate_limit
 
-router = APIRouter()
+from ._body_limit import limited_public_router
+
+router = limited_public_router()
 
 
 @router.get("/public/sites/{slug}/posts", response_model=list[CappePost])

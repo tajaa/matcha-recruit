@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Check, Copy, Rocket, Loader2, Sparkles, ArrowRight, CircleAlert } from 'lucide-react'
+import { Check, Copy, Rocket, Loader2, RotateCw, Sparkles, ArrowRight, CircleAlert } from 'lucide-react'
 import { cappeApi } from '../api'
 import { cappeSiteHost } from '../host'
 import type { CappePage, CappeReadiness, CappeSite } from '../types'
@@ -20,14 +20,24 @@ interface SetupGuideProps {
 export default function SetupGuide({ site, pages, publishing, onPublish, refreshKey }: SetupGuideProps) {
   const navigate = useNavigate()
   const [readiness, setReadiness] = useState<CappeReadiness | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [creatingPage, setCreatingPage] = useState(false)
 
-  const load = useCallback(() => {
-    cappeApi.get<CappeReadiness>(`/sites/${site.id}/readiness`).then(setReadiness).catch(() => {})
+  // A swallowed failure left `readiness` null forever, which renders as the
+  // permanent spinner below — the launch checklist, the only route to
+  // publishing, silently never appeared.
+  // State is only ever set from the request's own callbacks — an effect body
+  // that calls setState synchronously re-renders before the fetch even starts.
+  const fetchReadiness = useCallback(() => {
+    return cappeApi.get<CappeReadiness>(`/sites/${site.id}/readiness`)
+      .then((r) => { setReadiness(r); setError(null) })
+      .catch((e) => setError(e instanceof Error ? e.message : 'Could not load the launch checklist'))
   }, [site.id])
 
-  useEffect(() => { load() }, [load, refreshKey, site.status])
+  useEffect(() => { void fetchReadiness() }, [fetchReadiness, refreshKey, site.status])
+
+  const retry = () => { setError(null); void fetchReadiness() }
 
   const host = cappeSiteHost(site)
   const url = `https://${host}`
@@ -91,6 +101,19 @@ export default function SetupGuide({ site, pages, publishing, onPublish, refresh
     )
   }
 
+  if (error && !readiness) {
+    return (
+      <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <p className="text-sm text-zinc-400">{error}</p>
+        <button
+          onClick={retry}
+          className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
+        >
+          <RotateCw className="h-4 w-4" /> Try again
+        </button>
+      </section>
+    )
+  }
   if (!readiness) {
     return (
       <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">

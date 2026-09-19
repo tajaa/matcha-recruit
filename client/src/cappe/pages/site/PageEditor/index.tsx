@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { cappeApi } from '../../../api'
@@ -20,6 +20,8 @@ import { useMerlin, type MerlinSelection } from './useMerlin'
 import { usePagePreview } from './usePagePreview'
 import { useThemeBridge, type ThemeRegion } from './useThemeBridge'
 import { useThemeEditor } from './useThemeEditor'
+import { useUnsavedGuard } from './useUnsavedGuard'
+import { confirmLeave } from '../../../utils/unsavedGuard'
 
 // Stable per-block key so form-mode drag-reorder reconciles correctly (index
 // keys would strand each card's local open/collapse state on reorder). Stripped
@@ -70,6 +72,10 @@ export default function PageEditor() {
     selectedBlock?: string | null
     selection?: MerlinSelection | null
   }>({ blocks, theme: themeEditor.theme })
+  // Declared up here (history itself is created further down, after the state it
+  // records) so the Merlin callback below closes over an existing ref; it is
+  // filled by a layout effect once `history` exists.
+  const historyRef = useRef<ReturnType<typeof useEditorHistory> | null>(null)
   const merlin = useMerlin(
     siteId, pageId,
     () => liveStateRef.current,
@@ -77,7 +83,7 @@ export default function PageEditor() {
       // Close the history entry for anything the user typed before this turn,
       // and force the turn itself to record as its own entry instead of
       // merging with whatever they type in the next 500ms.
-      historyRef.current.checkpoint()
+      historyRef.current?.checkpoint()
       if (blocksChanged) setBlocks(nextBlocks)
       if (themeChanged) { themeEditor.loadTheme(nextTheme); themeEditor.markDirty() }
     },
@@ -128,12 +134,18 @@ export default function PageEditor() {
   // one used to exist here and silently dropped any field added to one type
   // but not the other.
   const merlinSelection: MerlinSelection | null = canvas.selection
-  liveStateRef.current = {
-    blocks,
-    theme: themeEditor.theme,
-    selectedBlock: canvas.selBlock != null ? (blocks[canvas.selBlock]?._k as string | undefined) ?? null : null,
-    selection: merlinSelection,
-  }
+  // Mirrors are synced in a layout effect, not during render: a render can be
+  // thrown away or replayed, and a ref written then would expose state that
+  // never committed. useLayoutEffect runs after commit and before any event,
+  // message or passive effect can read them, so handlers still see the latest.
+  useLayoutEffect(() => {
+    liveStateRef.current = {
+      blocks,
+      theme: themeEditor.theme,
+      selectedBlock: canvas.selBlock != null ? (blocks[canvas.selBlock]?._k as string | undefined) ?? null : null,
+      selection: merlinSelection,
+    }
+  })
   // Merlin's own acknowledgment of the current selection ("Working on Hero —
   // what should we do here?") — a display label, not the `_k` used above.
   const selectedBlockType = canvas.selBlock != null ? blocks[canvas.selBlock]?.type : undefined
@@ -194,6 +206,21 @@ export default function PageEditor() {
   const [meta, setMeta] = useState<Record<string, unknown>>({})
   const [promosDirty, setPromosDirty] = useState(false)
 
+  // What is currently persisted, held by REFERENCE. React keeps a state
+  // reference stable until its setter runs (the same equality useEditorHistory
+  // relies on), so `blocks !== saved.blocks` means "edited since the last
+  // successful save" — and it stays false after a save, which `history.canUndo`
+  // does not (the undo stack survives a save, so it would report every saved
+  // page as unsaved for the rest of the session).
+  type SavedState = {
+    blocks: CappeBlock[]
+    title: string
+    status: 'draft' | 'published'
+    meta: Record<string, unknown>
+    theme: Record<string, unknown>
+  }
+  const savedRef = useRef<SavedState | null>(null)
+
   // Copy/paste a section's design (`_design`). Persisted to localStorage so it
   // survives page/tab switches. `anchor.id` is dropped on paste (ids stay unique).
   const [styleClip, setStyleClip] = useState<Record<string, unknown> | null>(() => {
@@ -209,13 +236,22 @@ export default function PageEditor() {
       .then(([pages, site]) => {
         const p = pages.find((x) => x.id === pageId)
         if (!p) { setError('Page not found'); return }
+        const loadedStatus = p.status === 'published' ? 'published' : 'draft'
+        const bs = (p.content?.blocks as CappeBlock[]) || []
+        const loadedBlocks = withKeys(Array.isArray(bs) ? bs : [])
+        const loadedTheme = themeObj(site?.theme_config)
+        const loadedMeta = themeObj(site?.meta_config)
         setPage(p)
         setTitle(p.title)
-        setStatus(p.status === 'published' ? 'published' : 'draft')
-        const bs = (p.content?.blocks as CappeBlock[]) || []
-        setBlocks(withKeys(Array.isArray(bs) ? bs : []))
-        themeEditor.loadTheme(themeObj(site?.theme_config))
-        setMeta(themeObj(site?.meta_config))
+        setStatus(loadedStatus)
+        setBlocks(loadedBlocks)
+        themeEditor.loadTheme(loadedTheme)
+        setMeta(loadedMeta)
+        // Baseline for the unsaved-work guard: what the server just gave us.
+        savedRef.current = {
+          blocks: loadedBlocks, title: p.title, status: loadedStatus,
+          meta: loadedMeta, theme: loadedTheme,
+        }
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load page'))
       .finally(() => setLoading(false))
@@ -229,7 +265,9 @@ export default function PageEditor() {
   // same block must still re-open + re-scroll its card), so FormModeView can
   // force-open the matching card even if the user had collapsed it.
   const [selectTick, setSelectTick] = useState(0)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // A tick is an EVENT counter (re-open the card even for a repeat click on the
+  // same block), which has no derived form — it has to be bumped in response.
+  // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
   useEffect(() => { if (editMode === 'form' && canvas.selBlock != null) setSelectTick((t) => t + 1) }, [editMode, canvas.selectSeq])
   // The block just added should open expanded once, instead of the new
   // collapsed-by-default state.
@@ -295,12 +333,11 @@ export default function PageEditor() {
     { blocks, title, meta, theme: themeEditor.theme },
     (s) => { setBlocks(s.blocks); setTitle(s.title); setMeta(s.meta); themeEditor.loadTheme(s.theme); themeEditor.markDirty() },
   )
-  const historyRef = useRef(history)
-  historyRef.current = history
+  useLayoutEffect(() => { historyRef.current = history })
   // Reset history baseline once the page has loaded so the first undo doesn't
   // rewind into the empty pre-load state.
   useEffect(() => {
-    if (page) historyRef.current.reset({ blocks, title, meta, theme: themeEditor.theme })
+    if (page) historyRef.current?.reset({ blocks, title, meta, theme: themeEditor.theme })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page?.id])
   useEffect(() => {
@@ -310,17 +347,35 @@ export default function PageEditor() {
       const el = document.activeElement
       if (el && (el as HTMLElement).isContentEditable) return
       e.preventDefault()
-      if (e.shiftKey) historyRef.current.redo(); else historyRef.current.undo()
+      if (e.shiftKey) historyRef.current?.redo(); else historyRef.current?.undo()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  // Unsaved-work guard. `confirmLeave()` (utils/unsavedGuard.ts) reads this
+  // probe from the sidebar / sign-out / back button; a `beforeunload` listener
+  // covers closing the tab. There is no useBlocker here — Cappe runs under
+  // <BrowserRouter>, not a data router, so that hook would throw.
+  const isDirty = () => {
+    const s = savedRef.current
+    if (!s) return false
+    return blocks !== s.blocks
+      || title !== s.title
+      || status !== s.status
+      || meta !== s.meta
+      || themeEditor.theme !== s.theme
+  }
+  useUnsavedGuard(isDirty)
 
   async function save() {
     if (!siteId || !pageId) return
     setSaving(true)
     setError(null)
     setNotice(null)
+    // Captured before the await: an edit made while the PUT is in flight was
+    // not part of it, so the guard must still consider the page dirty.
+    const sent: SavedState = { blocks, title, status, meta, theme: themeEditor.theme }
     try {
       const updated = await cappeApi.put<CappePage>(`/sites/${siteId}/pages/${pageId}`, {
         title,
@@ -337,6 +392,7 @@ export default function PageEditor() {
         themeEditor.markClean()
         setPromosDirty(false)
       }
+      savedRef.current = sent
       setNotice('Saved.')
       setTimeout(() => setNotice(null), 2000)
     } catch (e) {
@@ -383,7 +439,7 @@ export default function PageEditor() {
           setStatus={setStatus}
           saving={saving}
           onSave={save}
-          onBack={() => navigate(`/cappe/sites/${siteId}`)}
+          onBack={() => { if (confirmLeave()) navigate(`/cappe/sites/${siteId}`) }}
           onUndo={history.undo}
           onRedo={history.redo}
           canUndo={history.canUndo}

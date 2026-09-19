@@ -42,7 +42,8 @@
 -- (gusto_webhook_tokens, beta_invitations, project_outreach) isn't in the
 -- sync's descend graph regardless, so scrubbing it can't leak to prod.
 --
--- Column list validated against the live prod schema on 2026-05-25. Re-validate
+-- Column list validated against the live prod schema on 2026-05-25 (matcha)
+-- and against server/alembic/versions/zzzzcappe* on 2026-09-17 (cappe, block 8). Re-validate
 -- (\d <table>) if the schema has changed since.
 
 \set ON_ERROR_STOP on
@@ -211,6 +212,84 @@ UPDATE mw_subscriptions  SET stripe_subscription_id = 'sub_dev_' || replace(id::
 UPDATE mw_stripe_sessions SET stripe_session_id      = 'cs_dev_'  || replace(id::text,'-','')
     WHERE NOT EXISTS (SELECT 1 FROM _test_companies tc WHERE tc.id = mw_stripe_sessions.company_id);
 
+-- ============================================================================
+-- 8. CAPPE (gummfit.com) — consumer PII + secrets. Cappe has its own identity
+--    model (cappe_accounts, not users/companies), so nothing above reaches it
+--    and the is_test carve-out does not apply. Emails are id-derived (UNIQUE /
+--    composite-unique columns), tokens regenerated, Stripe ids faked so dev
+--    never touches a prod Connect account. The preserve allowlist is honoured
+--    for cappe_accounts the same way it is for users, so the dev owner's own
+--    Gummfit login keeps working. Free-text bodies (messages, reviews, notes on
+--    orders/bookings) are kept, same as the matcha chat bodies above; form
+--    submissions are emptied because their whole payload is a person's answers.
+-- ============================================================================
+UPDATE cappe_accounts SET
+    password_hash      = '__DEV_PW_HASH__',
+    email              = 'cappe_' || replace(id::text, '-', '') || '@example.com',
+    name               = CASE WHEN name IS NOT NULL THEN 'Cappe Owner ' || left(replace(id::text,'-',''), 6) END,
+    verification_token = NULL,
+    stripe_account_id  = CASE WHEN stripe_account_id IS NOT NULL THEN 'acct_dev_' || replace(id::text,'-','') END,
+    stripe_customer_id = CASE WHEN stripe_customer_id IS NOT NULL THEN 'cus_dev_' || replace(id::text,'-','') END
+WHERE email <> ALL(ARRAY[__PRESERVE_EMAILS__]::text[]);
+UPDATE cappe_subscribers SET
+    email             = 'sub_' || replace(id::text,'-','') || '@example.com',
+    name              = CASE WHEN name IS NOT NULL THEN 'Subscriber ' || left(replace(id::text,'-',''), 6) END,
+    unsubscribe_token = replace(gen_random_uuid()::text, '-', '');
+-- A live confirm link subscribes a real address to a real tenant's list. The
+-- column arrives with zzzzcappe31; this file aborts on an unknown column, and a
+-- dump taken before prod ran that migration does not have it — hence the guard.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'cappe_subscribers' AND column_name = 'confirm_token') THEN
+        UPDATE cappe_subscribers SET confirm_token = gen_random_uuid()
+         WHERE confirm_token IS NOT NULL;
+    END IF;
+END $$;
+UPDATE cappe_orders SET
+    customer_email        = CASE WHEN customer_email IS NOT NULL THEN 'order_' || replace(id::text,'-','') || '@example.com' END,
+    customer_name         = CASE WHEN customer_name IS NOT NULL THEN 'Customer ' || left(replace(id::text,'-',''), 6) END,
+    access_token          = CASE WHEN access_token IS NOT NULL THEN replace(gen_random_uuid()::text, '-', '') END,
+    shipping_address      = NULL,
+    stripe_session_id     = CASE WHEN stripe_session_id IS NOT NULL THEN 'cs_dev_' || replace(id::text,'-','') END,
+    stripe_payment_intent = CASE WHEN stripe_payment_intent IS NOT NULL THEN 'pi_dev_' || replace(id::text,'-','') END,
+    payment_ref           = CASE WHEN payment_ref IS NOT NULL THEN 'pi_dev_' || replace(id::text,'-','') END;
+UPDATE cappe_bookings SET
+    customer_email = CASE WHEN customer_email IS NOT NULL THEN 'booking_' || replace(id::text,'-','') || '@example.com' END,
+    customer_name  = CASE WHEN customer_name IS NOT NULL THEN 'Customer ' || left(replace(id::text,'-',''), 6) END,
+    access_token   = CASE WHEN access_token IS NOT NULL THEN replace(gen_random_uuid()::text, '-', '') END;
+UPDATE cappe_clients SET
+    email = 'client_' || replace(id::text,'-','') || '@example.com',
+    name  = CASE WHEN name IS NOT NULL THEN 'Client ' || left(replace(id::text,'-',''), 6) END,
+    phone = NULL,
+    notes = NULL;
+UPDATE cappe_threads SET
+    client_email = 'thread_' || replace(id::text,'-','') || '@example.com',
+    client_name  = CASE WHEN client_name IS NOT NULL THEN 'Client ' || left(replace(id::text,'-',''), 6) END,
+    access_token = gen_random_uuid();
+UPDATE cappe_form_submissions SET
+    submitter_email = CASE WHEN submitter_email IS NOT NULL THEN 'form_' || replace(id::text,'-','') || '@example.com' END,
+    data            = '{}'::jsonb;
+UPDATE cappe_reviews SET author_name = 'Reviewer ' || left(replace(id::text,'-',''), 6);
+-- AI-booking access links/sessions are minutes-lived secrets keyed by client
+-- email — nothing to keep.
+TRUNCATE cappe_booking_suggestion_links, cappe_booking_suggestion_sessions;
+-- Platform-side Stripe ids (domain purchases, plan subscriptions, collab payouts).
+UPDATE cappe_domains SET
+    verification_token    = NULL,
+    stripe_session_id     = CASE WHEN stripe_session_id IS NOT NULL THEN 'cs_dev_' || replace(id::text,'-','') END,
+    stripe_payment_intent = CASE WHEN stripe_payment_intent IS NOT NULL THEN 'pi_dev_' || replace(id::text,'-','') END,
+    stripe_customer_id    = CASE WHEN stripe_customer_id IS NOT NULL THEN 'cus_dev_' || replace(id::text,'-','') END;
+UPDATE cappe_subscriptions SET
+    stripe_subscription_id = CASE WHEN stripe_subscription_id IS NOT NULL THEN 'sub_dev_' || replace(id::text,'-','') END,
+    stripe_customer_id     = CASE WHEN stripe_customer_id IS NOT NULL THEN 'cus_dev_' || replace(id::text,'-','') END;
+UPDATE cappe_subscription_items SET stripe_item_id = 'si_dev_' || replace(id::text,'-','');
+UPDATE cappe_intro_redemptions SET
+    stripe_subscription_id = CASE WHEN stripe_subscription_id IS NOT NULL THEN 'sub_dev_' || replace(id::text,'-','') END;
+UPDATE cappe_collab_payments SET
+    stripe_checkout_session_id = CASE WHEN stripe_checkout_session_id IS NOT NULL THEN 'cs_dev_' || replace(id::text,'-','') END,
+    stripe_payment_intent      = CASE WHEN stripe_payment_intent IS NOT NULL THEN 'pi_dev_' || replace(id::text,'-','') END;
+
 COMMIT;
 
 -- Sanity (outside the txn): must return 0. Preserved (allowlisted) emails and
@@ -228,3 +307,13 @@ WHERE email NOT LIKE '%@example.com'
     SELECT user_id FROM employees WHERE user_id IS NOT NULL
       AND org_id IN (SELECT id FROM _test_companies)
   );
+
+-- Cappe consumer identities (no allowlist except the owner's own account).
+SELECT 'LEAK: non-reserved cappe emails = ' || (
+    (SELECT count(*) FROM cappe_accounts   WHERE email NOT LIKE '%@example.com' AND email <> ALL(ARRAY[__PRESERVE_EMAILS__]::text[]))
+  + (SELECT count(*) FROM cappe_subscribers WHERE email NOT LIKE '%@example.com')
+  + (SELECT count(*) FROM cappe_orders      WHERE customer_email IS NOT NULL AND customer_email NOT LIKE '%@example.com')
+  + (SELECT count(*) FROM cappe_bookings    WHERE customer_email IS NOT NULL AND customer_email NOT LIKE '%@example.com')
+  + (SELECT count(*) FROM cappe_clients     WHERE email NOT LIKE '%@example.com')
+  + (SELECT count(*) FROM cappe_threads     WHERE client_email NOT LIKE '%@example.com')
+) AS check;

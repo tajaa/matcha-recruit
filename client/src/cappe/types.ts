@@ -151,7 +151,23 @@ export type CappeDomainSearchResult = {
   price_cents: number | null
 }
 
-export type CappeDomainStatus = 'pending' | 'registering' | 'active' | 'failed' | 'expired'
+export type CappeDomainStatus =
+  | 'pending'
+  | 'registering'
+  | 'active'
+  | 'failed'
+  | 'expired'
+  | 'transfer_requested'
+
+/** CloudFront-side lifecycle, independent of `status`: a domain can be
+ *  registered and paid for while its certificate is still validating. */
+export type CappeDomainEdgeStatus = 'none' | 'provisioning' | 'pending_dns' | 'live' | 'failed'
+
+export type CappeDomainConfig = {
+  enabled: boolean
+  /** Host the tenant's apex ALIAS/ANAME (or www CNAME) must point at. */
+  routing_endpoint: string | null
+}
 
 export type CappeDomain = {
   id: string
@@ -159,6 +175,9 @@ export type CappeDomain = {
   domain: string
   kind: 'register' | 'connect'
   status: CappeDomainStatus
+  edge_status: CappeDomainEdgeStatus
+  edge_error: string | null
+  cf_routing_endpoint: string | null
   price_cents: number | null
   auto_renew: boolean
   expires_at: string | null

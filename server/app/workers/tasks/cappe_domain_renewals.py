@@ -30,6 +30,30 @@ async def _dispatch_cappe_domain_renewals() -> dict:
             print("[Cappe Renewals] Scheduler disabled, skipping.")
             return {"renewed": 0, "skipped": True}
 
+        # A domain with a transfer-out request is deliberately NOT renewed (the
+        # tenant said they are leaving, and charging them another year would be
+        # wrong), but it also keeps serving until the registration really ends.
+        # Once it is past expiry it is gone either way — transferred or lapsed —
+        # so it becomes `expired`, which is what tells the edge sweeper to tear
+        # the CloudFront tenant down.
+        lapsed_transfers = await conn.fetch(
+            "UPDATE cappe_domains SET status = 'expired', updated_at = NOW() "
+            "WHERE status = 'transfer_requested' AND expires_at IS NOT NULL AND expires_at < NOW() "
+            "RETURNING domain, kind"
+        )
+        # Nobody is paying us for a transfer-requested domain, so Porkbun must
+        # not keep renewing it on our account. Switched off as soon as it enters
+        # the renewal window — waiting for expiry is too late, Porkbun renews
+        # BEFORE the expiry date — and again on lapse. Idempotent at Porkbun;
+        # /transfer-request/cancel turns it back on.
+        leaving = await conn.fetch(
+            """SELECT domain FROM cappe_domains
+                WHERE kind = 'register' AND status = 'transfer_requested'
+                  AND expires_at IS NOT NULL
+                  AND expires_at < NOW() + ($1 || ' days')::interval""",
+            str(_RENEW_WINDOW_DAYS),
+        )
+
         rows = await conn.fetch(
             """SELECT id, domain, retail_cents, stripe_customer_id, expires_at,
                       (expires_at < NOW()) AS past_due,
@@ -43,14 +67,25 @@ async def _dispatch_cappe_domain_renewals() -> dict:
     finally:
         await conn.close()
 
-    if not rows:
-        return {"renewed": 0, "failed": 0, "lapsed": 0}
-
     from app.cappe.services.stripe_connect import CappeStripeError, get_cappe_stripe
     from app.cappe.services.porkbun import PorkbunError, get_porkbun
 
+    stop_billing = {r["domain"] for r in leaving}
+    stop_billing |= {r["domain"] for r in lapsed_transfers if r["kind"] == "register"}
+    for domain in sorted(stop_billing):
+        try:
+            await get_porkbun().set_auto_renew(domain, False)
+        except PorkbunError as exc:
+            logger.warning(
+                "[Cappe Renewals] %s: could not switch Porkbun auto-renew off: %s", domain, exc
+            )
+
+    if not rows:
+        return {"renewed": 0, "failed": 0, "lapsed": len(lapsed_transfers)}
+
     cs = get_cappe_stripe()
-    renewed = failed = lapsed = 0
+    renewed = failed = 0
+    lapsed = len(lapsed_transfers)
 
     for r in rows:
         if not r["stripe_customer_id"] or not r["retail_cents"]:

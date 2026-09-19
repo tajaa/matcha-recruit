@@ -7,24 +7,28 @@ import { ui, badgeFor } from '../components/ui'
 import { fmtCents, type PublicCreatorProfile } from '../types'
 import SendOfferSheet from './SendOfferSheet'
 import { creatorPaths } from './creatorPaths'
+import { safeCssUrl, safeHttpUrl } from '../utils/safeUrl'
 
 export default function CreatorPublicProfile() {
   const { handle } = useParams<{ handle: string }>()
   const navigate = useNavigate()
   const { account } = useCappeMe()
-  const [profile, setProfile] = useState<PublicCreatorProfile | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [notFound, setNotFound] = useState(false)
+  // The result is keyed to the handle it was fetched for; `loading` is "no result
+  // for the current handle yet", so a handle change needs no synchronous reset.
+  const [result, setResult] = useState<{ handle: string; profile: PublicCreatorProfile | null } | null>(null)
+  const settled = !!handle && result?.handle === handle
+  const loading = !!handle && !settled
+  const profile = settled ? result!.profile : null
+  const notFound = settled && !result!.profile
   const [showOffer, setShowOffer] = useState(false)
 
   useEffect(() => {
     if (!handle) return
-    setLoading(true)
-    setNotFound(false)
+    let stale = false
     fetchPublicCreator(handle)
-      .then(setProfile)
-      .catch(() => setNotFound(true))
-      .finally(() => setLoading(false))
+      .then((p) => { if (!stale) setResult({ handle, profile: p }) })
+      .catch(() => { if (!stale) setResult({ handle, profile: null }) })
+    return () => { stale = true }
   }, [handle])
 
   if (loading) {
@@ -34,13 +38,16 @@ export default function CreatorPublicProfile() {
     return <div className={`${ui.page} flex items-center justify-center text-sm text-zinc-500`}>Creator not found.</div>
   }
 
+  // The creator typed these; this page is what a *brand* sees. Both are
+  // scheme-checked before they reach a sink — see utils/safeUrl.ts.
+  const coverUrl = safeCssUrl(profile.cover_url)
   const canOffer = account?.account_type === 'business'
   const isLoggedOut = !getCappeToken()
   const isHiddenCta = account && !canOffer
 
   return (
     <div className={ui.page}>
-      <div className="h-48 bg-zinc-800" style={profile.cover_url ? { backgroundImage: `url(${profile.cover_url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined} />
+      <div className="h-48 bg-zinc-800" style={coverUrl ? { backgroundImage: `url("${coverUrl}")`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined} />
       <div className="mx-auto max-w-4xl px-6">
         <div className="-mt-12 flex items-end justify-between">
           <div className="flex items-end gap-4">
@@ -108,8 +115,8 @@ export default function CreatorPublicProfile() {
                     <video src={p.media_url} controls className="h-36 w-full bg-black object-cover" />
                   ) : p.media_url ? (
                     <img src={p.media_url} alt={p.title} className="h-36 w-full object-cover" />
-                  ) : p.external_url ? (
-                    <a href={p.external_url} target="_blank" rel="noopener noreferrer" className="flex h-36 w-full items-center justify-center bg-zinc-800 text-sm text-zinc-400">
+                  ) : safeHttpUrl(p.external_url) ? (
+                    <a href={safeHttpUrl(p.external_url)} target="_blank" rel="noopener noreferrer" className="flex h-36 w-full items-center justify-center bg-zinc-800 text-sm text-zinc-400">
                       <ExternalLink className="mr-1.5 h-4 w-4" /> View
                     </a>
                   ) : null}

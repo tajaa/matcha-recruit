@@ -42,12 +42,31 @@ class CappeDomainCheckoutResponse(BaseModel):
     checkout_url: str
 
 
+class CappeDomainConfig(BaseModel):
+    """Whether custom domains are switched on, and where a tenant's DNS points.
+
+    The UI reads this instead of hardcoding an IP or hiding the panel on a build
+    flag — the edge is configured per environment (see
+    `docs/ops/CAPPE_CUSTOM_DOMAINS.md`).
+    """
+    enabled: bool
+    routing_endpoint: Optional[str] = None
+
+
 class CappeDomain(BaseModel):
     id: UUID
     site_id: UUID
     domain: str
     kind: Literal["register", "connect"] = "register"
-    status: Literal["pending", "registering", "active", "failed", "expired"]
+    status: Literal[
+        "pending", "registering", "active", "failed", "expired", "transfer_requested"
+    ]
+    # CloudFront-side lifecycle, independent of `status`: a domain can be
+    # registered + paid ('active') while its certificate is still validating.
+    edge_status: Literal["none", "provisioning", "pending_dns", "live", "failed"] = "none"
+    edge_error: Optional[str] = None
+    # The host the tenant's apex ALIAS/ANAME (or www CNAME) must point at.
+    cf_routing_endpoint: Optional[str] = None
     price_cents: Optional[int] = None
     auto_renew: bool = True
     expires_at: Optional[datetime] = None
@@ -86,6 +105,7 @@ __all__ = [
     "CappeDomainPurchaseRequest",
     "CappeDomainConnectRequest",
     "CappeDomainCheckoutResponse",
+    "CappeDomainConfig",
     "CappeDomain",
     "CappeDnsRecord",
     "CappeDnsRecordInput",

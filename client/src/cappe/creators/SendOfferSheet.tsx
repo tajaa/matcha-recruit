@@ -9,6 +9,7 @@ import {
   type PublicCreatorProfile, type TermsDeliverable,
 } from '../types'
 import { brandCollabPath } from './creatorPaths'
+import { parseMoneyCents } from '../utils/money'
 
 type DeliverableRow = TermsDeliverable
 
@@ -97,17 +98,25 @@ export default function SendOfferSheet({ profile, onClose, onSent }: {
       { type: rate.deliverable_type, platform: rate.platform, quantity: 1, spec: null, due_date: null },
     ])
     setCompDollars((prev) => {
-      const current = prev ? Math.round(parseFloat(prev) * 100) : 0
+      // An unreadable current value must not be treated as $0 — that would
+      // silently wipe compensation the brand already typed. Leave it alone and
+      // let submit() below refuse it with a message.
+      const current = prev.trim() === '' ? 0 : parseMoneyCents(prev)
+      if (current === null) return prev
       return (((current + rate.price_cents) / 100)).toString()
     })
   }
 
-  const totalCents = compDollars ? Math.round(parseFloat(compDollars) * 100) : 0
+  // `null` = the brand typed something we can't read as money. Kept distinct
+  // from 0 (gifting is a real, deliberate $0 offer) so submit() can refuse it
+  // rather than send a $0 contract — parseFloat('1,500') is 1.
+  const totalCents = compDollars.trim() === '' ? 0 : parseMoneyCents(compDollars)
   const deliverableCount = deliverables.reduce((n, d) => n + (d.quantity || 0), 0)
-  const installments = previewInstallments(totalCents, schedule, deliverableCount)
+  const installments = previewInstallments(totalCents ?? 0, schedule, deliverableCount)
 
   async function submit() {
     setError(null)
+    if (totalCents === null) { setError('Enter the compensation as a plain amount, e.g. 1500 or 1500.00'); return }
     if (!title.trim()) { setError('Title is required'); return }
     if (deliverables.length === 0) { setError('Add at least one deliverable'); return }
     if (exclusive && !exclusiveCategory.trim()) { setError('Exclusivity needs a category'); return }

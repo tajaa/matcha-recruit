@@ -350,13 +350,63 @@ async def update_site(
     return site_row_to_dict(row)
 
 
+async def _delete_edge_tenants(tenants: list[tuple[str, str]]) -> None:
+    """Fast-path CloudFront cleanup after a site is gone.
+
+    Only an optimisation. The durable record is `cappe_edge_tombstones`, written
+    in the same transaction as the site delete: CloudFront refuses to delete a
+    tenant still deploying its disable, and a container swap kills this task, so
+    a failure here is expected and the `cappe_edge_sync` sweeper finishes the
+    job. On success the tombstone is cleared so the sweeper has nothing to do."""
+    from ..services.cloudfront_tenants import CappeEdgeError, get_cloudfront_tenants
+
+    edge = get_cloudfront_tenants()
+    for tenant_id, domain in tenants:
+        try:
+            await edge.delete_tenant(tenant_id)
+        except CappeEdgeError as exc:
+            logger.warning(
+                "cappe site delete: CloudFront tenant %s (%s) not removed yet, left for the "
+                "edge sweeper: %s", tenant_id, domain, exc,
+            )
+            continue
+        async with get_connection() as conn:
+            await conn.execute(
+                "DELETE FROM cappe_edge_tombstones WHERE cf_tenant_id = $1", tenant_id
+            )
+
+
 @router.delete("/sites/{site_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_site(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
-    """Delete an owned site (cascades to its pages)."""
+async def delete_site(
+    site_id: UUID,
+    background: BackgroundTasks,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Delete an owned site (cascades to its pages and its domain rows).
+
+    The cascade removes `cappe_domains`, and with it the only record of each
+    domain's CloudFront tenant — which would keep billing, keep answering on our
+    certificate, and make reconnecting the same domain to a new site fail with
+    "already exists". So the tenant ids are copied into `cappe_edge_tombstones`
+    in the SAME transaction as the delete: the record survives the cascade, a
+    failed cleanup, and a container swap, and the edge sweeper drains it."""
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
-        await conn.execute(
-            "DELETE FROM cappe_sites WHERE id = $1 AND account_id = $2", site_id, account.id
+        async with conn.transaction():
+            tenants = await conn.fetch(
+                """INSERT INTO cappe_edge_tombstones (cf_tenant_id, domain)
+                   SELECT cf_tenant_id, domain FROM cappe_domains
+                    WHERE site_id = $1 AND cf_tenant_id IS NOT NULL
+                   ON CONFLICT (cf_tenant_id) DO NOTHING
+                   RETURNING cf_tenant_id, domain""",
+                site_id,
+            )
+            await conn.execute(
+                "DELETE FROM cappe_sites WHERE id = $1 AND account_id = $2", site_id, account.id
+            )
+    if tenants:
+        background.add_task(
+            _delete_edge_tenants, [(t["cf_tenant_id"], t["domain"]) for t in tenants]
         )
     await invalidate_render_cache(site_id)
 

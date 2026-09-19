@@ -1,12 +1,14 @@
 """Cappe public surface — site render data."""
-from fastapi import APIRouter, Request
+from fastapi import Request
 
 from ....database import get_connection
 from ...models.cappe import CappePublicSite
 from .._shared import loads, page_row_to_dict
 from ._common import _published_site, _read_rate_limit
 
-router = APIRouter()
+from ._body_limit import limited_public_router
+
+router = limited_public_router()
 
 
 @router.get("/public/sites/{slug}", response_model=CappePublicSite)

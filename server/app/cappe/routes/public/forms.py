@@ -1,7 +1,7 @@
 """Cappe public surface — form submissions."""
 import json
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from fastapi import BackgroundTasks, HTTPException, Request, status
 
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
@@ -9,7 +9,9 @@ from ...services.email import dashboard_url, send_cappe_form_alert_email
 from .._shared import _site_owner
 from ._common import _published_site, _reject_reserved
 
-router = APIRouter()
+from ._body_limit import MAX_PUBLIC_CART_BODY_BYTES, limited_public_router
+
+router = limited_public_router(MAX_PUBLIC_CART_BODY_BYTES)
 
 # Max serialized size of a public form submission's `data` blob. Public form
 # intake is unauthenticated and stored verbatim, so cap it to stop multi-MB

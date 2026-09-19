@@ -1,10 +1,17 @@
 # Host nginx server blocks (app EC2)
 
 These are the **host** nginx configs that live on the app EC2
-(`54.177.107.107`) at `/etc/nginx/conf.d/`. They are **hand-managed** — NOT
-baked into any image and NOT applied by `build-and-push.sh` / `update-ec2.sh`.
-This copy is the source of truth for disaster recovery; if the box is rebuilt,
-restore from here.
+(`54.177.107.107`) at `/etc/nginx/conf.d/`. They are NOT baked into any image.
+
+**Every `*.conf` in this directory IS pushed to the host by `update-ec2.sh`
+(`sync_nginx`) on every non-hotfix deploy**, backed up to `<name>.bak-<ts>` and
+followed by `nginx -t`. A failed test rolls each file back to that backup (or
+deletes it, if this run created it), re-tests, and aborts the deploy. `--hotfix`
+skips the sync entirely. What is *not* synced: the snippets under
+`/etc/nginx/snippets/` (they carry secrets) and `/etc/nginx/upstream/*.conf`
+(written by the blue/green scripts). Those two are hand-managed on the host.
+This copy is also the source of truth for disaster recovery; if the box is
+rebuilt, restore from here.
 
 Public TLS terminates at CloudFront with an ACM-managed certificate for
 `hey-matcha.com`, `www.hey-matcha.com`, `gummfit.com`, and `*.gummfit.com`.
@@ -17,6 +24,15 @@ external backstop and verifies the origin files, nginx config, and public TLS.
 |---|---|---|
 | `matcha.conf` | `hey-matcha.com` | `matcha_frontend` / `matcha_backend` blue-green upstreams, WS, LiveKit |
 | `cappe.conf` | `gummfit.com` + `*.gummfit.com` (Cappe) | apex SPA `matcha_frontend`; tenant renderer + API `matcha_backend` |
+| `cappe-custom-domains.conf` | any other host (`default_server` on :443) — Cappe tenant-owned domains | renderer + API `matcha_backend` |
+
+`cappe-custom-domains.conf` is the explicit `:443 default_server`. Without it
+nginx answers an unknown SNI with the first block on the port (cappe.conf's
+gummfit apex), which handed a tenant's custom domain the gummfit certificate and
+the Gummfit SPA. Public TLS for those hosts is a CloudFront-managed certificate
+on a per-domain *distribution tenant* — see `docs/ops/CAPPE_CUSTOM_DOMAINS.md`.
+nginx permits exactly one `default_server` per listen address, so check the host
+(`sudo grep -rn default_server /etc/nginx/`) before the first install.
 
 **Never hardcode `127.0.0.1:8082/8083/8002/8003` in these files.** Blue-green
 deploys alternate ports and remove the old container; the active port lives in
@@ -31,6 +47,11 @@ page after the 2026-07-01 swap to 8083/8003 (fixed 2026-07-02).
 > `client/nginx.conf` (baked into the `matcha-frontend` image).
 
 ## Apply a change
+
+The normal path is a deploy: `./scripts/update-ec2.sh --matcha` (or
+`--frontend`/`--backend` without `--hotfix`) syncs, tests, reloads, and rolls
+back on failure. The manual path below is for a config-only change you do not
+want to tie to a deploy:
 
 ```bash
 scp -i secrets/roonMT-arm.pem deploy/nginx/cappe.conf deploy/nginx/matcha.conf ec2-user@54.177.107.107:/tmp/

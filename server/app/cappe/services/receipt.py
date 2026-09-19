@@ -237,6 +237,21 @@ async def email_receipt(order: dict, pdf: bytes) -> None:
         logger.exception("Cappe receipt email failed for %s", to_email)
 
 
+async def issue_receipt_on(conn, order_id: UUID, site_id: UUID) -> None:
+    """The receipt flow on a connection the caller already holds. Celery workers
+    are pool-free, so they cannot use `issue_receipt_for_paid_order` (which
+    takes one from the pool). Best-effort; never raises."""
+    try:
+        await assign_receipt_number(conn, order_id, site_id)
+        rendered = await render_order_receipt_pdf(conn, order_id)
+        if rendered is None:
+            return
+        order, pdf = rendered
+        await email_receipt(order, pdf)
+    except Exception:
+        logger.exception("Cappe receipt issuance failed for order %s", order_id)
+
+
 async def issue_receipt_for_paid_order(order_id: UUID, site_id: UUID) -> None:
     """Full post-payment receipt flow: assign number → render PDF → email.
     Best-effort; never raises (called from the webhook)."""

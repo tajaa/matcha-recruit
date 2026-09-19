@@ -55,6 +55,9 @@ export default function CappeBookingManage() {
       setSlots(res.slots)
       setSlotsTz(res.timezone)
     } catch (e) {
+      // `slots` stays null on a spinner forever otherwise — the error banner
+      // renders above, but the panel below it never resolves.
+      setSlots([])
       setError(e instanceof Error ? e.message : 'Could not load times')
     }
   }

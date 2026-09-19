@@ -1,14 +1,20 @@
 """Cappe public surface — messages (client side, token-gated)."""
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from fastapi import BackgroundTasks, HTTPException, Request, status
 
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
 from ...models.cappe import CappeMessageCreate, CappePublicThread
 from ...services.email import dashboard_url, send_cappe_message_email
 
-router = APIRouter()
+from ._body_limit import limited_public_router
+
+# A reply may be 10,000 characters (CappeMessageCreate.body) and a character is
+# up to 4 bytes of UTF-8, so the default 8 KB pre-parse cap rejected messages the
+# model itself allows — ~8,200 ASCII characters, or ~2,700 CJK/emoji ones, got a
+# 413 before validation ran. 48 KB covers the worst case plus the JSON envelope.
+router = limited_public_router(48 * 1024)
 
 
 @router.get("/public/threads/{token}", response_model=CappePublicThread)
