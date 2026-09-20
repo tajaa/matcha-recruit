@@ -7,7 +7,10 @@ that DB-mutating tests are never auto-run.
 
 Run from server/:  ./venv/bin/python -m pytest tests/cappe/test_merlin_setup_actions.py -q
 """
+import asyncio
 import os
+
+import pytest
 
 os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
@@ -240,12 +243,32 @@ def test_creator_digital_product_is_blocked_with_alternative():
     assert "booking" in v.message or "service" in v.message
 
 
-def test_creator_booking_product_is_allowed():
+def test_booking_product_is_rejected_with_safe_alternatives():
     v = sa.evaluate_setup_stage(
         "create_product", {"name": "1:1 Session", "fulfillment": "booking", "price_cents": 5000},
         entitlements=CREATOR, plan="creator",
     )
-    assert v.kind == "stage"
+    assert v.kind == "invalid"
+    assert "create_booking_type" in v.message
+    assert "service" in v.message
+
+
+def test_create_product_prompt_only_advertises_safe_fulfillments():
+    spec = sa.SETUP_ACTIONS_BY_NAME["create_product"]
+    assert '"booking"' not in spec.prompt_shape
+    assert "create_booking_type" in " ".join(spec.prompt_rules)
+
+
+def test_legacy_staged_booking_product_is_refused_before_db_write():
+    """A proposed action persisted by an older deployment remains safe when
+    approved after this validator change."""
+    with pytest.raises(sa.SetupActionError, match="create_booking_type"):
+        asyncio.run(sa._execute_create_product(
+            None,
+            {"id": "site-1"},
+            object(),
+            {"name": "1:1 Session", "fulfillment": "booking", "price_cents": 5000},
+        ))
 
 
 def test_free_physical_product_is_allowed():

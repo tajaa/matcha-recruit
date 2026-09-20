@@ -463,7 +463,6 @@ async def stream_setup_turn(
         async with persist_lock:
             if persisted:
                 return
-            persisted = True
             async with get_connection() as conn:
                 stored = await merlin_store.add_message(
                     conn, conversation_id, role="assistant",
@@ -472,8 +471,9 @@ async def stream_setup_turn(
                     results=final_result.get("results") or None,
                     tier=final_result.get("tier"),
                 )
-            final_result["conversation_id"] = str(conversation_id)
-            final_result["message_id"] = str(stored["id"])
+                final_result["conversation_id"] = str(conversation_id)
+                final_result["message_id"] = str(stored["id"])
+                persisted = True
 
     try:
         try:
@@ -496,7 +496,14 @@ async def stream_setup_turn(
             yield _sse({"type": "error", "message": "Merlin failed to respond."})
 
         if result is not None:
-            await asyncio.shield(persist(result))
+            for attempt in range(2):
+                try:
+                    await asyncio.shield(persist(result))
+                    break
+                except Exception as exc:  # noqa: BLE001 — delivery survives transcript failure
+                    logger.warning(
+                        "Merlin setup assistant persist attempt %s failed: %s", attempt + 1, exc
+                    )
             yield _sse({"type": "result", "data": result})
         yield "data: [DONE]\n\n"
     finally:

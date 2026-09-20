@@ -226,26 +226,32 @@ async def add_message(
     persists it on the message even when the SSE stream never delivered a
     `result` frame, and a reopened conversation with `ops` set but no
     `results` yet is a turn the panel can offer to apply retroactively."""
-    row = await conn.fetchrow(
-        """
-        INSERT INTO cappe_merlin_messages
-            (conversation_id, role, content, results, steps, attachments, ops, tier)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING id, role, content, results, steps, attachments, ops, tier, created_at
-        """,
-        conversation_id,
-        role,
-        content or "",
-        json.dumps(results) if results is not None else None,
-        json.dumps(steps) if steps is not None else None,
-        json.dumps(attachments) if attachments is not None else None,
-        json.dumps(ops) if ops is not None else None,
-        tier,
-    )
-    await conn.execute(
-        "UPDATE cappe_merlin_conversations SET updated_at = NOW() WHERE id = $1",
-        conversation_id,
-    )
+    # The message and the conversation's recency marker are one persistence
+    # unit. Stream callers may retry this function after a transient failure;
+    # without a transaction, an INSERT that succeeded before the UPDATE failed
+    # would be duplicated by that retry. asyncpg nests this as a savepoint when
+    # a caller already owns a wider transaction.
+    async with conn.transaction():
+        row = await conn.fetchrow(
+            """
+            INSERT INTO cappe_merlin_messages
+                (conversation_id, role, content, results, steps, attachments, ops, tier)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id, role, content, results, steps, attachments, ops, tier, created_at
+            """,
+            conversation_id,
+            role,
+            content or "",
+            json.dumps(results) if results is not None else None,
+            json.dumps(steps) if steps is not None else None,
+            json.dumps(attachments) if attachments is not None else None,
+            json.dumps(ops) if ops is not None else None,
+            tier,
+        )
+        await conn.execute(
+            "UPDATE cappe_merlin_conversations SET updated_at = NOW() WHERE id = $1",
+            conversation_id,
+        )
     m = dict(row)
     for key in ("results", "steps", "attachments", "ops"):
         m[key] = loads_list(m[key]) if m[key] is not None else None

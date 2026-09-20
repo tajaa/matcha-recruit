@@ -13,7 +13,7 @@ file (`tests/cappe/fixtures/merlin_apply_cases.json`) through this applier and
 what an op *does* fails a test rather than silently making the screenshot lie
 about the page.
 
-Two deliberate divergences, both because the data lives client-side only:
+One documented divergence remains:
 
 - **`add_block` has no schema defaults.** The client builds a new block from
   `BLOCK_SCHEMAS[type].make()` (placeholder copy per type, in `blockSchemas.ts`);
@@ -23,13 +23,6 @@ Two deliberate divergences, both because the data lives client-side only:
   the editor. Self-correcting (the model sees the empty section) and mostly
   moot in practice — `apply_section_preset` expands to an add_block that
   carries full content.
-- **`set_theme key="preset"` can't repaint.** The full preset config (palette,
-  fonts, radius) lives in `cappeThemes.ts`; `theme_presets.py` mirrors only
-  `{id, name, blurb, premium, mode}`. So a preset swap applies `preset` + its
-  `mode` and leaves the palette alone. Mode is the axis that actually decides
-  whether a design reads, and preset swaps are gated behind explicit theme
-  intent, so this rarely bites.
-
 Everything here is pure: no I/O, no DB, no mutation of the caller's lists.
 """
 import copy
@@ -158,9 +151,11 @@ def _apply_theme_op(
         preset = PRESETS_BY_ID.get(value if isinstance(value, str) else "")
         if preset is None:
             return None
-        # Palette/fonts resolve client-side (see module docstring) — mode is
-        # what the screenshot most needs to be right about.
-        return {**theme, "preset": preset.id, "mode": preset.mode}
+        # Match the client's applyThemeOp/useThemeEditor.applyPreset contract:
+        # a preset replaces the whole theme instead of merging into the old
+        # one.  Keeping stale palette/font/radius keys here made the agent
+        # screenshot a page different from the one the client actually applies.
+        return {**copy.deepcopy(preset.config), "preset": preset.id}
 
     if key == "colors.brand" and isinstance(value, str):
         # Must derive brandText exactly like the client's applyThemeOp, or the

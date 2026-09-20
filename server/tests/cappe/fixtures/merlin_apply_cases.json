@@ -9,8 +9,8 @@
     "  server:  tests/cappe/test_merlin_apply.py",
     "  client:  merlinOps.test.ts ('shared parity fixture')",
     "Blocks carry `id` here; the client harness maps it to `_k` before applying.",
-    "Cases deliberately avoid add_block's default content and set_theme preset — the",
-    "two documented divergences (see merlin_apply.py's module docstring)."
+    "Cases deliberately avoid add_block's default content — the one documented",
+    "divergence (see merlin/apply.py's module docstring)."
   ],
   "cases": [
     {
@@ -19,6 +19,28 @@
       "theme": {},
       "ops": [{ "op": "set_field", "block": "b1", "path": "heading", "value": "New" }],
       "expect_blocks": [{ "id": "b1", "type": "hero", "heading": "New", "subheading": "Sub" }],
+      "expect_ok": [true]
+    },
+    {
+      "name": "theme preset replaces the whole prior config",
+      "blocks": [],
+      "theme": {
+        "mode": "dark",
+        "fonts": { "heading": "Fraunces", "body": "Inter" },
+        "radius": "2xl",
+        "colors": { "brand": "#b4532a", "bg": "#111111" },
+        "style": { "container": "wide" }
+      },
+      "ops": [{ "op": "set_theme", "key": "preset", "value": "minimal" }],
+      "expect_theme": {
+        "mode": "light",
+        "fonts": { "heading": "Inter", "body": "Inter" },
+        "radius": "sm",
+        "heroStyle": "minimal",
+        "navStyle": "simple",
+        "colors": { "brand": "#18181b", "brandText": "#ffffff", "accent": "#18181b" },
+        "preset": "minimal"
+      },
       "expect_ok": [true]
     },
     {

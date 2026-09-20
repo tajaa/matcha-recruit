@@ -36,6 +36,12 @@ export default function PageEditor() {
   const navigate = useNavigate()
   const designerUnlocked = usePremium()
 
+  // Async loads/saves capture the route they started for. Keep the committed
+  // route in a ref so a response that lands after :siteId/:pageId changes can
+  // never repaint the destination editor with the previous page.
+  const routeRef = useRef({ siteId, pageId })
+  useLayoutEffect(() => { routeRef.current = { siteId, pageId } }, [siteId, pageId])
+
   const [page, setPage] = useState<CappePage | null>(null)
   const [title, setTitle] = useState('')
   const [status, setStatus] = useState<'draft' | 'published'>('draft')
@@ -220,6 +226,14 @@ export default function PageEditor() {
     theme: Record<string, unknown>
   }
   const savedRef = useRef<SavedState | null>(null)
+  // Save completion must compare against the state that is live *after* its
+  // awaits, not the render closure that started the request. A newer edit gets
+  // a new object reference, so it keeps its dirty marker and remains eligible
+  // for the next Save.
+  const liveSiteStateRef = useRef({ meta, theme: themeEditor.theme })
+  useLayoutEffect(() => {
+    liveSiteStateRef.current = { meta, theme: themeEditor.theme }
+  }, [meta, themeEditor.theme])
 
   // Copy/paste a section's design (`_design`). Persisted to localStorage so it
   // survives page/tab switches. `anchor.id` is dropped on paste (ids stay unique).
@@ -229,11 +243,24 @@ export default function PageEditor() {
 
   useEffect(() => {
     if (!siteId || !pageId) return
+    let cancelled = false
+    // Route transitions are the one place these synchronous resets are
+    // intentional: the component is reused across :pageId values, and leaving
+    // the old page interactive until the fetch resolves can save it to the new
+    // route. Treat the route change itself as the external event we sync to.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setLoading(true)
+    setPage(null)
+    setError(null)
+    setNotice(null)
+    /* eslint-enable react-hooks/set-state-in-effect */
+    savedRef.current = null
     Promise.all([
       cappeApi.get<CappePage[]>(`/sites/${siteId}/pages`),
       cappeApi.get<CappeSite>(`/sites/${siteId}`).catch(() => null),
     ])
       .then(([pages, site]) => {
+        if (cancelled || routeRef.current.siteId !== siteId || routeRef.current.pageId !== pageId) return
         const p = pages.find((x) => x.id === pageId)
         if (!p) { setError('Page not found'); return }
         const loadedStatus = p.status === 'published' ? 'published' : 'draft'
@@ -246,15 +273,26 @@ export default function PageEditor() {
         setStatus(loadedStatus)
         setBlocks(loadedBlocks)
         themeEditor.loadTheme(loadedTheme)
+        themeEditor.markClean()
         setMeta(loadedMeta)
+        setPromosDirty(false)
         // Baseline for the unsaved-work guard: what the server just gave us.
         savedRef.current = {
           blocks: loadedBlocks, title: p.title, status: loadedStatus,
           meta: loadedMeta, theme: loadedTheme,
         }
       })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load page'))
-      .finally(() => setLoading(false))
+      .catch((e) => {
+        if (!cancelled && routeRef.current.siteId === siteId && routeRef.current.pageId === pageId) {
+          setError(e instanceof Error ? e.message : 'Failed to load page')
+        }
+      })
+      .finally(() => {
+        if (!cancelled && routeRef.current.siteId === siteId && routeRef.current.pageId === pageId) {
+          setLoading(false)
+        }
+      })
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId, pageId])
 
@@ -331,7 +369,14 @@ export default function PageEditor() {
   // ── Undo / redo (blocks + title + meta + theme) ────────────────────────────
   const history = useEditorHistory(
     { blocks, title, meta, theme: themeEditor.theme },
-    (s) => { setBlocks(s.blocks); setTitle(s.title); setMeta(s.meta); themeEditor.loadTheme(s.theme); themeEditor.markDirty() },
+    (s) => {
+      setBlocks(s.blocks)
+      setTitle(s.title)
+      setMeta(s.meta)
+      setPromosDirty(true)
+      themeEditor.loadTheme(s.theme)
+      themeEditor.markDirty()
+    },
   )
   useLayoutEffect(() => { historyRef.current = history })
   // Reset history baseline once the page has loaded so the first undo doesn't
@@ -369,29 +414,42 @@ export default function PageEditor() {
   useUnsavedGuard(isDirty)
 
   async function save() {
-    if (!siteId || !pageId) return
+    // During route-param navigation the old page is deliberately removed while
+    // the new one loads. Never combine retained editor state with the new URL.
+    if (!siteId || !pageId || !page || page.id !== pageId || page.site_id !== siteId) return
     setSaving(true)
     setError(null)
     setNotice(null)
     // Captured before the await: an edit made while the PUT is in flight was
     // not part of it, so the guard must still consider the page dirty.
     const sent: SavedState = { blocks, title, status, meta, theme: themeEditor.theme }
+    const baseline = savedRef.current
+    const themeNeedsSave = !baseline || sent.theme !== baseline.theme
+    const metaNeedsSave = !baseline || sent.meta !== baseline.meta
+    const isCurrentRoute = () => (
+      routeRef.current.siteId === siteId && routeRef.current.pageId === pageId
+    )
     try {
       const updated = await cappeApi.put<CappePage>(`/sites/${siteId}/pages/${pageId}`, {
-        title,
-        status,
-        content: { blocks: stripKeys(blocks) },
+        title: sent.title,
+        status: sent.status,
+        content: { blocks: stripKeys(sent.blocks) },
       })
+      if (!isCurrentRoute()) return
       setPage(updated)
-      // Persist the theme + promos (meta_config) to the site too, if changed here.
-      if (themeEditor.themeDirty || promosDirty) {
+      // Persist from the saved baseline rather than the presentation-only dirty
+      // flags. In particular, undo can restore meta from history after a save;
+      // that value still needs a site PUT even though the old flag was cleared.
+      if (themeNeedsSave || metaNeedsSave) {
         const patch: Record<string, unknown> = {}
-        if (themeEditor.themeDirty) patch.theme_config = themeEditor.theme
-        if (promosDirty) patch.meta_config = meta
+        if (themeNeedsSave) patch.theme_config = sent.theme
+        if (metaNeedsSave) patch.meta_config = sent.meta
         await cappeApi.put<CappeSite>(`/sites/${siteId}`, patch)
-        themeEditor.markClean()
-        setPromosDirty(false)
+        if (!isCurrentRoute()) return
       }
+      const live = liveSiteStateRef.current
+      if (live.theme === sent.theme) themeEditor.markClean()
+      if (live.meta === sent.meta) setPromosDirty(false)
       savedRef.current = sent
       setNotice('Saved.')
       setTimeout(() => setNotice(null), 2000)

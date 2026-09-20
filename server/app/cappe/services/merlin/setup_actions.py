@@ -277,7 +277,12 @@ async def _execute_add_blocks(conn, site: dict[str, Any], account: Any, payload:
 # create_product
 # ---------------------------------------------------------------------------
 
-_FULFILLMENTS = frozenset({"physical", "digital", "service", "booking"})
+_FULFILLMENTS = frozenset({"physical", "digital", "service"})
+_BOOKING_PRODUCT_GUIDANCE = (
+    "'booking' products require a configured booking type — use "
+    "create_booking_type for scheduled appointments, or 'service' "
+    "for a session sold without a calendar"
+)
 
 
 def _validate_create_product(payload: dict[str, Any]) -> tuple[Optional[dict[str, Any]], Optional[str]]:
@@ -287,8 +292,10 @@ def _validate_create_product(payload: dict[str, Any]) -> tuple[Optional[dict[str
     if not isinstance(name, str) or not (1 <= len(name.strip()) <= 255):
         return None, "'name' must be 1-255 characters"
     fulfillment = payload.get("fulfillment", "physical")
+    if fulfillment == "booking":
+        return None, _BOOKING_PRODUCT_GUIDANCE
     if fulfillment not in _FULFILLMENTS:
-        return None, "'fulfillment' must be one of: physical, digital, service, booking"
+        return None, "'fulfillment' must be one of: physical, digital, service"
     price_cents = payload.get("price_cents", 0)
     if not isinstance(price_cents, int) or isinstance(price_cents, bool) or price_cents < 0:
         return None, "'price_cents' must be a non-negative integer (cents)"
@@ -324,6 +331,12 @@ def _summary_create_product(payload: dict[str, Any]) -> str:
 
 
 async def _execute_create_product(conn, site: dict[str, Any], account: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    # Entries staged by an older deployment can still contain `booking` even
+    # though validation no longer permits it.  Refuse before touching the DB so
+    # approving one cannot create another active, permanently uncheckoutable
+    # product with a NULL booking_type_id.
+    if payload.get("fulfillment") == "booking":
+        raise SetupActionError(_BOOKING_PRODUCT_GUIDANCE)
     # A digital good with no file yet would be a sale with nothing to deliver
     # — created as a draft so it can't be bought until the seller finishes it
     # in Shop. Everything else is safe to activate straight from chat.
@@ -571,10 +584,11 @@ SETUP_ACTIONS: tuple[SetupActionSpec, ...] = (
         gate=_gate_create_product,
         execute=_execute_create_product,
         summary=_summary_create_product,
-        prompt_shape='{"name":"<product name>","fulfillment":"physical"|"digital"|"service"|"booking","price_cents":<int>,"description":"<optional>","digital_file_url":"<optional, digital only>","category":"<optional>"}',
+        prompt_shape='{"name":"<product name>","fulfillment":"physical"|"digital"|"service","price_cents":<int>,"description":"<optional>","digital_file_url":"<optional, digital only>","category":"<optional>"}',
         prompt_rules=(
-            "'service'/'booking' fulfillment is for selling a session or appointment WITHOUT a booking "
-            "calendar — prefer create_booking_type instead when the user wants real availability/scheduling.",
+            "'service' fulfillment is for selling a session or appointment WITHOUT a booking calendar. "
+            "Never use fulfillment='booking' here — use create_booking_type when the user wants real "
+            "availability or scheduling.",
             "A digital product with no digital_file_url is created as a draft (nothing to deliver yet) — "
             "say so, and point them to Shop to attach the file.",
         ),

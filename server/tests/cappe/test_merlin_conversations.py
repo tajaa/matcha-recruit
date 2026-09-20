@@ -10,7 +10,8 @@ Run from server/:  ./venv/bin/python -m pytest tests/cappe/test_merlin_conversat
 import json
 import os
 from datetime import datetime, timezone
-from uuid import UUID, uuid4
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -63,6 +64,19 @@ class FakeConn:
     async def execute(self, sql, *args):
         self.statements.append(sql)
         return "OK"
+
+    def transaction(self):
+        conn = self
+
+        class _Transaction:
+            async def __aenter__(self):
+                conn.statements.append("BEGIN")
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                conn.statements.append("ROLLBACK" if exc_type else "COMMIT")
+
+        return _Transaction()
 
 
 # --- titles ------------------------------------------------------------------
@@ -290,6 +304,102 @@ async def test_resolve_conversation_rejects_a_setup_kind_conversation():
             conn, body=_Body(), site={"id": uuid4()}, page_uuid=None, account=_Account()
         )
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_resolve_conversation_rejects_a_conversation_from_another_owned_site():
+    """Account ownership is necessary but not sufficient: route site B must
+    never load or append to site A's page transcript."""
+    from app.cappe.routes.merlin import _resolve_conversation
+
+    account_id, convo_id, site_a, site_b, page_id = (
+        uuid4(), uuid4(), uuid4(), uuid4(), uuid4()
+    )
+    conn = FakeConn(fetchrow={"WHERE id = $1 AND account_id = $2": {
+        "id": convo_id, "account_id": account_id, "site_id": site_a,
+        "page_id": page_id, "kind": "page", "staged_actions": None,
+        "title": "site A", "created_at": _NOW, "updated_at": _NOW,
+    }})
+
+    class _Body:
+        conversation_id = convo_id
+        message = "change the hero"
+
+    class _Account:
+        id = account_id
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _resolve_conversation(
+            conn, body=_Body(), site={"id": site_b}, page_uuid=page_id, account=_Account()
+        )
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_resolve_conversation_rejects_named_conversation_without_valid_page_id():
+    """A malformed/missing page id must not disable the page-scope check for
+    an otherwise account-owned page conversation."""
+    from app.cappe.routes.merlin import _resolve_conversation
+
+    account_id, convo_id = uuid4(), uuid4()
+    site_id = uuid4()
+    conn = FakeConn(fetchrow={"WHERE id = $1 AND account_id = $2": {
+        "id": convo_id, "account_id": account_id, "site_id": site_id,
+        "page_id": uuid4(), "kind": "page", "staged_actions": None,
+        "title": "page chat", "created_at": _NOW, "updated_at": _NOW,
+    }})
+
+    class _Body:
+        conversation_id = convo_id
+        message = "change the hero"
+
+    class _Account:
+        id = account_id
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _resolve_conversation(
+            conn, body=_Body(), site={"id": site_id}, page_uuid=None, account=_Account(),
+        )
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_prepare_turn_authorizes_site_before_auto_routing(monkeypatch):
+    """An authenticated caller cannot spend the auto-tier classifier budget
+    against a random or foreign site id."""
+    from app.cappe.routes import merlin as merlin_route
+
+    routed = False
+
+    class _ConnCtx:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_args):
+            return False
+
+    async def _not_owned(*_args, **_kwargs):
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    async def _route(*_args, **_kwargs):
+        nonlocal routed
+        routed = True
+        return "regular", True
+
+    monkeypatch.setattr(merlin_route, "get_connection", lambda: _ConnCtx())
+    monkeypatch.setattr(merlin_route, "get_owned_site", _not_owned)
+    monkeypatch.setattr(merlin_route, "route_tier", _route)
+
+    class _Account:
+        id = uuid4()
+        plan = "pro"
+
+    with pytest.raises(HTTPException) as exc_info:
+        await merlin_route._prepare_turn(
+            uuid4(), SimpleNamespace(blocks=[], theme={}), _Account(), allow_agentic=True,
+        )
+    assert exc_info.value.status_code == 404
+    assert routed is False
 
 
 def test_parse_page_id_degrades_rather_than_raising():

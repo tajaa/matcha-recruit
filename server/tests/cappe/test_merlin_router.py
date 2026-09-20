@@ -149,6 +149,30 @@ async def test_a_short_message_without_a_selection_is_not_assumed_trivial(classi
     assert tier == "regular"
 
 
+@pytest.mark.asyncio
+async def test_classifier_cost_gate_runs_only_immediately_before_a_real_call(monkeypatch):
+    events = []
+
+    async def _guard():
+        events.append("guard")
+
+    async def _classify(*_a, **_k):
+        events.append("classify")
+        return "regular"
+
+    monkeypatch.setattr(merlin_router, "_classify", _classify)
+    await route_tier(
+        "auto", _PRO, message="warmer colors across the page", before_classify=_guard,
+    )
+    assert events == ["guard", "classify"]
+
+    events.clear()
+    await route_tier(
+        "auto", _PRO, message="redesign the whole page", before_classify=_guard,
+    )
+    assert events == []  # the max-tier heuristic is free
+
+
 # --- classifier --------------------------------------------------------------
 
 @pytest.mark.asyncio

@@ -914,10 +914,16 @@ export function useMerlin(
       setError(msg)
       setMessages((m) => [...m, { role: 'assistant', content: `Something went wrong: ${msg}` }])
     } finally {
-      if (abortRef.current === abort) abortRef.current = null
-      setStatus(null)
-      setLiveSteps([])
-      setSending(false)
+      // A page change aborts this controller and may immediately start a new
+      // turn with a different one. Only the turn that still owns abortRef may
+      // clear shared progress/sending state; otherwise this stale finally would
+      // unlock and hide the newer request.
+      if (abortRef.current === abort) {
+        abortRef.current = null
+        setStatus(null)
+        setLiveSteps([])
+        setSending(false)
+      }
     }
   }
 

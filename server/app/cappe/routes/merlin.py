@@ -17,8 +17,8 @@ page can hold several of them. See `services/merlin/turn.py` for the op
 validation and prompt logic.
 
 `/merlin/chat` (single-shot) and `/merlin/agent` (the loop, falling back to
-single-shot on a non-agentic tier/plan) share one preamble — size gate, tier
-routing, rate limit, attachment load, conversation resolution — via
+single-shot on a non-agentic tier/plan) share one preamble — size gate, site
+ownership, tier routing, rate limit, attachment load, conversation resolution — via
 `_prepare_turn`, so the two can't drift out of sync with each other the way
 they once did as independently hand-maintained copies.
 """
@@ -83,6 +83,9 @@ _PAID_HOURLY_LIMIT = 60
 # Agent turns are several Gemini calls + screenshots each, so they get their own
 # tighter counter rather than sharing the single-shot allowance.
 _AGENT_HOURLY_LIMIT = 20
+# Ambiguous `auto` turns spend an extra classifier call. Bound that call per
+# account as well as globally; heuristic and pinned-tier turns never touch it.
+_ROUTE_HOURLY_LIMIT = 20
 # Serialized blocks+theme ceiling. Lives in services/common.py now so the page
 # and site write models enforce the same number; re-exported here because this
 # is the name existing callers and tests import.
@@ -237,7 +240,12 @@ async def _resolve_conversation(
         convo = await merlin_store.get_owned_conversation(
             conn, body.conversation_id, account.id
         )
-        if convo.get("kind") != "page" or (page_uuid is not None and convo["page_id"] != page_uuid):
+        if (
+            convo.get("kind") != "page"
+            or page_uuid is None
+            or convo["site_id"] != site["id"]
+            or convo["page_id"] != page_uuid
+        ):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
             )
@@ -275,8 +283,8 @@ class _PreparedTurn:
 async def _prepare_turn(
     site_id: UUID, body: CappeMerlinChatRequest, account: CappeAccount, *, allow_agentic: bool,
 ) -> _PreparedTurn:
-    """Shared preamble for `/merlin/chat` and `/merlin/agent`: size gate → tier
-    routing → rate limit → attachment load → conversation resolution. The two
+    """Shared preamble for `/merlin/chat` and `/merlin/agent`: size gate → site
+    ownership → tier routing → rate limit → attachment load → conversation resolution. The two
     routes used to hand-repeat this (drift risk — see the module docstring);
     this is the single copy.
 
@@ -287,9 +295,9 @@ async def _prepare_turn(
     all, so it passes `allow_agentic=False` and always draws from the single-
     shot counter, exactly as it did before this was shared.
 
-    Order is preserved exactly: the size gate runs before any Gemini call OR
-    any write; both rate-limit gates run before the transcript write, so a
-    rejected turn never leaves an unanswered question in the history.
+    The size gate and site-ownership check run before any Gemini call or write.
+    Both rate-limit gates run before the transcript write, so a rejected turn
+    never leaves an unanswered question in the history.
     """
     # Size gate BEFORE any Gemini call OR any write. Pydantic bounds the item
     # counts, but a 200-block page can still be megabytes of text, and the whole
@@ -303,11 +311,25 @@ async def _prepare_turn(
             detail="This page is too large for Merlin — edit it in Form or Canvas mode.",
         )
 
+    # Authorize the resource before auto-routing: an ambiguous paid request can
+    # spend a classifier call, and a caller must not be able to spend that cost
+    # against an unowned/random site id. Release the connection before routing;
+    # the classifier can take seconds and must not pin a pool slot.
+    async with get_connection() as conn:
+        site = await get_owned_site(conn, site_id, account.id)
+
     premium = is_premium_plan(account.plan)
+
+    async def check_classifier_budget() -> None:
+        await check_rate_limit(
+            str(account.id), "cappe_merlin_route", _ROUTE_HOURLY_LIMIT, 3600
+        )
+
     tier, routed = await route_tier(
         body.model_tier, account.plan,
         message=body.message, has_selected_block=bool(body.selected_block or body.selection),
         history_tail=_recent_history_tail(body.history),
+        before_classify=check_classifier_budget,
     )
     agentic = allow_agentic and premium and tier in AGENT_TIERS
     # Cost guard until the token wallet exists: free plans get a smaller
@@ -328,7 +350,6 @@ async def _prepare_turn(
     attachment_meta = [{"url": a["url"], "mime": a["mime"]} for a in attachments]
 
     async with get_connection() as conn:
-        site = await get_owned_site(conn, site_id, account.id)
         # Resolve the conversation BEFORE the model call: it's what history is
         # read from, and a client that sent none needs the id back even if the
         # turn itself degrades to a message-only response.
@@ -367,8 +388,8 @@ async def merlin_chat(
     user message is stored before the Gemini call, the assistant message after,
     so a turn that fails mid-flight still leaves the question in the history.
 
-    Shares its preamble (size gate, tier routing, rate limit, attachment load,
-    conversation resolution) with `/merlin/agent` via `_prepare_turn` —
+    Shares its preamble (size gate, site ownership, tier routing, rate limit,
+    attachment load, conversation resolution) with `/merlin/agent` via `_prepare_turn` —
     `allow_agentic=False` because this route never runs the agent loop, so it
     always draws from the single-shot hourly counter regardless of tier.
     """
