@@ -247,13 +247,25 @@ final class FavoritesStore: ObservableObject {
 @MainActor
 final class AppRouter: ObservableObject {
     enum Tab: Hashable { case shop, saved, cart, account }
-    enum AccountRoute: Hashable { case order(String) }
+    enum AccountRoute: Hashable {
+        case order(String)
+
+        var survivesSessionEnd: Bool {
+            switch self {
+            case .order: true
+            }
+        }
+    }
     @Published var selectedTab: Tab = .shop
     @Published var accountPath: [AccountRoute] = []
 
     func openOrder(_ token: String) {
         accountPath = [.order(token)]
         selectedTab = .account
+    }
+
+    func handleSessionEnded() {
+        accountPath = accountPath.filter(\.survivesSessionEnd)
     }
 }
 

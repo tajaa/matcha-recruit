@@ -20,6 +20,18 @@ enum SessionKeychain {
     static func clear() { SecItemDelete(query as CFDictionary) }
 }
 
+enum StorefrontURL {
+    /// Foundation leaves "+" literal in a percent-encoded query, while the
+    /// server's form-style query parser decodes it as a space.
+    static func queryString(_ items: [URLQueryItem]) -> String {
+        var components = URLComponents()
+        components.queryItems = items
+        return components.percentEncodedQuery
+            .map { "?" + $0.replacingOccurrences(of: "+", with: "%2B") }
+            ?? ""
+    }
+}
+
 @MainActor final class StorefrontAPI {
     static let shared = StorefrontAPI()
     let config = Config.current

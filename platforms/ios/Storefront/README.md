@@ -14,3 +14,10 @@ make test
 
 `CAPPE_API_URL` is read only by Debug builds. Release builds always use the
 `CappeAPIBase` value generated into the target Info.plist.
+
+PR CI regenerates the project, compiles the app and test target, and checks
+that the app contains its asset catalog and privacy manifest. Run the same
+gate from the repository root with
+`CI=true ./scripts/xcode-build.sh storefront build-for-testing`.
+XcodeGen and an installed iOS Simulator runtime are required. This gate
+compiles tests; `make test SIM="<installed simulator name>"` executes them.

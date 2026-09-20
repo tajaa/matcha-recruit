@@ -13,8 +13,10 @@ targets:
   Ahnimal:
     type: application
     platform: iOS
-    sources: [Sources]
-    resources: [Resources]
+    sources:
+      - path: Sources
+      - path: Resources
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ahnimal.app

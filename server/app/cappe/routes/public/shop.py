@@ -7,7 +7,7 @@ from ...models.cappe import CappeCheckoutRequest, CappeOrderReceipt, CappeProduc
 from ...services.commerce import create_public_order
 from ...dependencies import optional_shopper
 from ...models.shopper import CartQuoteRequest
-from ...services.cart import price_cart
+from ...services.cart import price_cart, priceable_products
 from ...services.recurring import build_subscription_lines
 from ...services.common import receipt_filename as _receipt_filename
 from ...services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
@@ -85,9 +85,7 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
         groups = await fetch_option_groups(conn, [r["id"] for r in products])
         discounts = await fetch_active_discounts(conn, site["id"])
         today = site_today(await conn.fetchval("SELECT NOW()"), site["timezone"])
-    products = {r["id"]: {**dict(r), "option_groups": groups.get(r["id"], []),
-        "discount_percent": best_discount_percent(discounts, kind="product", target_id=str(r["id"]), on_date=today)}
-        for r in products}
+    products = priceable_products(products, groups, discounts, today)
     if body.interval:
         _stripe_lines, lines, totals = build_subscription_lines(
             products, body.items, body.interval, dict(settings)

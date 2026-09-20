@@ -2,6 +2,13 @@
 # Exercises the question-only publication path in a disposable Git repository.
 set -euo pipefail
 
+# This disposable fixture intentionally uses example.invalid instead of the
+# production board. GitHub Actions exports GITHUB_ACTIONS to every test, so
+# keep that ambient marker from reclassifying the fixture as production
+# automation. The fail-closed production scope guard has explicit coverage in
+# test_kanban_autopr.sh.
+unset GITHUB_ACTIONS
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 AUTOPR_SOURCE="$REPO_ROOT/apps/msandbox/harness"
 TMP_DIR="$(mktemp -d)"

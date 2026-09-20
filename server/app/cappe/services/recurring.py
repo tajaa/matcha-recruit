@@ -7,12 +7,17 @@ from urllib.parse import urlsplit
 from fastapi import HTTPException
 
 from app.database import get_connection
-from .cart import cart_totals, price_cart
+from .cart import cart_totals, price_cart, priceable_products
 from .common import loads_list, site_origins, url_within_origins
+from .discounts import fetch_active_discounts, site_today
 from .entitlements import resolve_entitlements, require_can_sell
 from .options import fetch_option_groups
 from .shopper_customers import connected_customer
 from .stripe_connect import get_cappe_stripe, CappeStripeError
+
+
+_OPEN_CHECKOUT_STATUSES = ("preparing", "incomplete", "cancel_requested")
+_TERMINAL_STATUSES = ("canceled", "incomplete_expired")
 
 
 async def validate_product_subscription(conn, plan, product, *, changed=True):
@@ -61,6 +66,123 @@ def build_subscription_lines(products, items, interval, site):
     return lines, snapshot, {**totals, "currency": currency}
 
 
+async def _attach_checkout_session(row, shopper, session_id):
+    """Persist Stripe's session before deciding whether its URL is still safe.
+
+    The shopper lock is taken first, matching checkout creation and account
+    deletion. Cancellation claims the subscription row separately. If either
+    side won while Stripe was creating the session, keep the id durable and put
+    the row in ``cancel_requested`` so expiry can be retried, but never return
+    the payable URL.
+    """
+    async with get_connection() as conn, conn.transaction():
+        live = await conn.fetchrow(
+            "SELECT deleting FROM cappe_shoppers WHERE id=$1 AND site_id=$2 FOR UPDATE",
+            shopper["id"], row["site_id"],
+        )
+        current = await conn.fetchrow(
+            "SELECT status,stripe_checkout_session_id,stripe_subscription_id "
+            "FROM cappe_shopper_subscriptions WHERE id=$1 FOR UPDATE",
+            row["id"],
+        )
+        if not current:
+            return False
+        existing = current["stripe_checkout_session_id"]
+        if existing and existing != session_id:
+            return False
+        await conn.execute(
+            "UPDATE cappe_shopper_subscriptions SET stripe_checkout_session_id=$2,updated_at=NOW() "
+            "WHERE id=$1",
+            row["id"], session_id,
+        )
+        if (live and not live["deleting"] and current["status"] == "preparing"
+                and not current["stripe_subscription_id"]):
+            attached = await conn.fetchval(
+                "UPDATE cappe_shopper_subscriptions SET status='incomplete',updated_at=NOW() "
+                "WHERE id=$1 AND status='preparing' AND stripe_subscription_id IS NULL RETURNING id",
+                row["id"],
+            )
+            return bool(attached)
+        if not current["stripe_subscription_id"]:
+            # A stale preparation may already have been terminalized. Re-open
+            # it only as a durable cancellation claim now that a real remote
+            # session exists; successful compensation closes it again below.
+            await conn.execute(
+                "UPDATE cappe_shopper_subscriptions SET status='cancel_requested',updated_at=NOW() "
+                "WHERE id=$1 AND stripe_subscription_id IS NULL",
+                row["id"],
+            )
+        return False
+
+
+async def _expire_checkout_session(row, session_id):
+    """Expire one known session, retaining a retryable local claim on failure."""
+    try:
+        state = await get_cappe_stripe().expire_checkout_session(
+            row["stripe_account_id"], session_id,
+        )
+    except CappeStripeError as exc:
+        raise HTTPException(
+            503, "Checkout cancellation could not be confirmed; retry shortly."
+        ) from exc
+    if state != "expired":
+        raise HTTPException(409, "Payment is settling; retry after it completes")
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE cappe_shopper_subscriptions SET status='incomplete_expired',updated_at=NOW() "
+            "WHERE id=$1 AND stripe_subscription_id IS NULL "
+            "AND stripe_checkout_session_id=$2",
+            row["id"], session_id,
+        )
+    return {"status": "incomplete_expired"}
+
+
+async def _claim_checkout_cancellation(subscription_id):
+    """Claim a not-yet-subscribed checkout without guessing about Stripe.
+
+    A fresh row without a session may still be inside Stripe creation. Mark it
+    so the creator compensates, then make the caller retry instead of claiming
+    cancellation finished. After five minutes, a process that died before it
+    could persist any session is considered abandoned; a late creator will
+    still persist and compensate its session through ``_attach_checkout_session``.
+    """
+    async with get_connection() as conn, conn.transaction():
+        current = await conn.fetchrow(
+            "SELECT sub.*, sub.updated_at <= NOW() - interval '5 minutes' AS preparation_stale "
+            "FROM cappe_shopper_subscriptions sub WHERE id=$1 FOR UPDATE",
+            subscription_id,
+        )
+        if not current:
+            raise HTTPException(404, "Subscription not found")
+        if current["stripe_subscription_id"]:
+            return current, None
+        if current["status"] in _TERMINAL_STATUSES:
+            return current, {"status": current["status"]}
+        if current["stripe_checkout_session_id"]:
+            current = await conn.fetchrow(
+                "UPDATE cappe_shopper_subscriptions SET status='cancel_requested',updated_at=NOW() "
+                "WHERE id=$1 AND stripe_subscription_id IS NULL RETURNING *",
+                subscription_id,
+            )
+            return current, None
+        if current["preparation_stale"]:
+            current = await conn.fetchrow(
+                "UPDATE cappe_shopper_subscriptions SET status='incomplete_expired',updated_at=NOW() "
+                "WHERE id=$1 AND stripe_subscription_id IS NULL "
+                "AND stripe_checkout_session_id IS NULL RETURNING *",
+                subscription_id,
+            )
+            return current, {"status": "incomplete_expired"}
+        if current["status"] != "cancel_requested":
+            current = await conn.fetchrow(
+                "UPDATE cappe_shopper_subscriptions SET status='cancel_requested',updated_at=NOW() "
+                "WHERE id=$1 AND stripe_subscription_id IS NULL "
+                "AND stripe_checkout_session_id IS NULL RETURNING *",
+                subscription_id,
+            )
+        return current, "preparing"
+
+
 async def checkout(site, shopper, body):
     origins = site_origins(site)
     success, cancel = url_within_origins(body.success_url, origins), url_within_origins(body.cancel_url, origins)
@@ -74,22 +196,29 @@ async def checkout(site, shopper, body):
             raise HTTPException(402, "Recurring orders are not enabled")
         if not owner or not owner["stripe_account_id"] or not owner["stripe_charges_enabled"]:
             raise HTTPException(409, "This store has not enabled card payments")
-        products = await conn.fetch("SELECT * FROM cappe_products WHERE site_id=$1 AND id=ANY($2::uuid[])", site["id"], [i.product_id for i in body.items])
-        groups = await fetch_option_groups(conn, [r["id"] for r in products])
+        product_rows = await conn.fetch("SELECT * FROM cappe_products WHERE site_id=$1 AND id=ANY($2::uuid[])", site["id"], [i.product_id for i in body.items])
+        groups = await fetch_option_groups(conn, [r["id"] for r in product_rows])
+        discounts = await fetch_active_discounts(conn, site["id"])
+        today = site_today(await conn.fetchval("SELECT NOW()"), site.get("timezone"))
+        products = priceable_products(product_rows, groups, discounts, today)
         stripe_lines, snapshot, totals = build_subscription_lines(
-            {r["id"]: {**dict(r), "option_groups": groups.get(r["id"], [])} for r in products}, body.items, body.interval, site,
+            products, body.items, body.interval, site,
         )
     customer_id = await connected_customer(shopper, owner["stripe_account_id"])
     async with get_connection() as conn, conn.transaction():
         live = await conn.fetchrow("SELECT deleting FROM cappe_shoppers WHERE id=$1 AND site_id=$2 FOR UPDATE", shopper["id"], site["id"])
         if not live or live["deleting"]:
             raise HTTPException(409, "Account deletion is in progress")
-        pending = await conn.fetchval("SELECT count(*) FROM cappe_shopper_subscriptions WHERE shopper_id=$1 AND status='incomplete'", shopper["id"])
+        pending = await conn.fetchval(
+            "SELECT count(*) FROM cappe_shopper_subscriptions "
+            "WHERE shopper_id=$1 AND status=ANY($2::text[])",
+            shopper["id"], list(_OPEN_CHECKOUT_STATUSES),
+        )
         if pending >= 10:
             raise HTTPException(409, "Too many pending checkouts; cancel an existing checkout first")
         row = await conn.fetchrow(
-            "INSERT INTO cappe_shopper_subscriptions(site_id,shopper_id,stripe_account_id,interval,items,subtotal_cents,tax_cents,shipping_cents,total_cents,currency) "
-            "VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10) RETURNING *",
+            "INSERT INTO cappe_shopper_subscriptions(site_id,shopper_id,stripe_account_id,status,interval,items,subtotal_cents,tax_cents,shipping_cents,total_cents,currency) "
+            "VALUES($1,$2,$3,'preparing',$4,$5::jsonb,$6,$7,$8,$9,$10) RETURNING *",
             site["id"], shopper["id"], owner["stripe_account_id"], body.interval, json.dumps(snapshot),
             totals["subtotal_cents"], totals["tax_cents"], totals["shipping_cents"], totals["total_cents"], totals["currency"],
         )
@@ -111,8 +240,9 @@ async def checkout(site, shopper, body):
         # The Stripe request may have succeeded before a timeout. Keep this row
         # so metadata on a later webhook can recover the paid subscription.
         raise HTTPException(503, "Checkout could not be confirmed. Check subscriptions before retrying.") from exc
-    async with get_connection() as conn:
-        await conn.execute("UPDATE cappe_shopper_subscriptions SET stripe_checkout_session_id=$1,updated_at=NOW() WHERE id=$2", session["id"], row["id"])
+    if not await _attach_checkout_session(row, shopper, session["id"]):
+        await _expire_checkout_session(row, session["id"])
+        raise HTTPException(409, "Checkout was canceled before it could open")
     return {"checkout_url": session["url"], "subscription_id": str(row["id"]), "order_token": row["checkout_token"]}
 
 
@@ -136,7 +266,8 @@ async def sync_subscription(conn, row, subscription, event_at):
             "UPDATE cappe_shopper_subscriptions SET stripe_subscription_id=$2,status=$3,"
             "cancel_at_period_end=$4,current_period_end=to_timestamp($5),updated_at=NOW() "
             "WHERE id=$1 AND (status NOT IN ('canceled','incomplete_expired') "
-            "OR $3 IN ('canceled','incomplete_expired'))",
+            "OR $3 IN ('canceled','incomplete_expired') "
+            "OR (stripe_subscription_id IS NULL AND $2 IS NOT NULL))",
             *values,
         )
     else:
@@ -144,7 +275,9 @@ async def sync_subscription(conn, row, subscription, event_at):
             "UPDATE cappe_shopper_subscriptions SET stripe_subscription_id=$2,status=$3,cancel_at_period_end=$4,"
             "current_period_end=to_timestamp($5),stripe_event_at=GREATEST(stripe_event_at,$6),updated_at=NOW() "
             "WHERE id=$1 AND (stripe_event_at IS NULL OR stripe_event_at<=$6) "
-            "AND (status NOT IN ('canceled','incomplete_expired') OR $3 IN ('canceled','incomplete_expired'))",
+            "AND (status NOT IN ('canceled','incomplete_expired') "
+            "OR $3 IN ('canceled','incomplete_expired') "
+            "OR (stripe_subscription_id IS NULL AND $2 IS NOT NULL))",
             *values, event_at,
         )
 
@@ -226,7 +359,11 @@ async def handle_event(etype, obj, event, background):
         if subscription:
             await sync_subscription(conn, row, subscription, event_at)
         if etype == "checkout.session.expired":
-            await conn.execute("UPDATE cappe_shopper_subscriptions SET status='incomplete_expired' WHERE id=$1 AND status='incomplete' AND stripe_subscription_id IS NULL", row["id"])
+            await conn.execute(
+                "UPDATE cappe_shopper_subscriptions SET status='incomplete_expired',updated_at=NOW() "
+                "WHERE id=$1 AND status=ANY($2::text[]) AND stripe_subscription_id IS NULL",
+                row["id"], list(_OPEN_CHECKOUT_STATUSES),
+            )
         if etype == "invoice.paid" and obj.get("paid") and obj.get("billing_reason") in ("subscription_create", "subscription_cycle"):
             order_id, stock_shortfall = await record_invoice_order(conn, row, obj)
     if order_id:
@@ -263,35 +400,32 @@ async def handle_event(etype, obj, event, background):
     return {"received": True}
 
 
-async def change_subscription(row, cancel):
-    if not row["stripe_subscription_id"]:
-        if not cancel:
-            raise HTTPException(409, "Checkout has not completed")
-        if not row["stripe_checkout_session_id"]:
-            # Stripe never returned a session URL, so the shopper could not have
-            # opened or completed this Checkout Session. Make the local attempt
-            # terminal so failed preparation cannot block account deletion or
-            # consume the pending-checkout allowance forever.
-            async with get_connection() as conn:
-                await conn.execute(
-                    "UPDATE cappe_shopper_subscriptions SET status='incomplete_expired',updated_at=NOW() "
-                    "WHERE id=$1 AND stripe_subscription_id IS NULL AND stripe_checkout_session_id IS NULL",
-                    row["id"],
-                )
-            return {"status": "incomplete_expired"}
-        state = await get_cappe_stripe().expire_checkout_session(row["stripe_account_id"], row["stripe_checkout_session_id"])
-        if state == "complete":
-            raise HTTPException(409, "Payment is settling; retry after it completes")
-        async with get_connection() as conn:
-            await conn.execute("UPDATE cappe_shopper_subscriptions SET status='incomplete_expired' WHERE id=$1 AND stripe_subscription_id IS NULL", row["id"])
-        return {"status": "incomplete_expired"}
-    subscription = await get_cappe_stripe().modify_connected_subscription(
-        account_id=row["stripe_account_id"], subscription_id=row["stripe_subscription_id"], cancel_at_period_end=cancel,
-    )
+async def change_subscription(row, cancel, *, immediate=False):
+    if cancel:
+        row, local_result = await _claim_checkout_cancellation(row["id"])
+        if local_result == "preparing":
+            raise HTTPException(409, "Checkout is still being prepared; retry shortly")
+        if local_result is not None:
+            return local_result
+        if not row["stripe_subscription_id"]:
+            return await _expire_checkout_session(row, row["stripe_checkout_session_id"])
+    elif not row["stripe_subscription_id"]:
+        raise HTTPException(409, "Checkout has not completed")
+    if cancel and immediate:
+        subscription = await get_cappe_stripe().cancel_connected_subscription(
+            row["stripe_account_id"], row["stripe_subscription_id"],
+        )
+    else:
+        subscription = await get_cappe_stripe().modify_connected_subscription(
+            account_id=row["stripe_account_id"], subscription_id=row["stripe_subscription_id"], cancel_at_period_end=cancel,
+        )
     async with get_connection() as conn, conn.transaction():
         await conn.fetchval("SELECT id FROM cappe_shopper_subscriptions WHERE id=$1 FOR UPDATE", row["id"])
         await sync_subscription(conn, row, subscription, None)
-    return {"status": subscription["status"], "cancel_at_period_end": subscription["cancel_at_period_end"]}
+    return {
+        "status": subscription["status"],
+        "cancel_at_period_end": bool(subscription.get("cancel_at_period_end")),
+    }
 
 
 async def delete_shopper_subscriptions(site, shopper):
@@ -302,9 +436,8 @@ async def delete_shopper_subscriptions(site, shopper):
         rows = await conn.fetch("SELECT * FROM cappe_shopper_subscriptions WHERE shopper_id=$1 AND site_id=$2 AND status NOT IN ('canceled','incomplete_expired')",
                                 shopper["id"], site["id"])
     for row in rows:
-        if row["stripe_subscription_id"]:
-            subscription = await get_cappe_stripe().cancel_connected_subscription(row["stripe_account_id"], row["stripe_subscription_id"])
-            async with get_connection() as conn:
-                await sync_subscription(conn, row, subscription, None)
-        else:
-            await change_subscription(row, True)
+        # Reload/lock inside change_subscription: a checkout webhook may attach
+        # the Stripe subscription after this snapshot. Account deletion always
+        # cancels that refreshed subscription immediately, never merely at the
+        # end of its billing period.
+        await change_subscription(row, True, immediate=True)

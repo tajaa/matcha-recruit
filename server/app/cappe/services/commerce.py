@@ -15,6 +15,7 @@ import logging
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Iterable, Optional, Sequence
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
@@ -621,22 +622,20 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
     return_urls_requested = bool(body.success_url and body.cancel_url)
     success_url = url_within_origins(body.success_url, allowed_origins) or site_home
     cancel_url = url_within_origins(body.cancel_url, allowed_origins) or site_home
-    # The order token doesn't exist when the app asks for checkout. Bind its
-    # callback on the server, after the same origin validation as web checkout.
-    if shopper:
-        from urllib.parse import urlsplit
-        for field, value in (("success", success_url), ("cancel", cancel_url)):
-            if value and urlsplit(value).path == "/__cappe/app-return":
-                parsed = urlsplit(value)
-                callback = f"{parsed.scheme}://{parsed.netloc}/__cappe/app-return?o={order['access_token']}&r={field}"
-                if field == "success":
-                    success_url = callback
-                else:
-                    cancel_url = callback
     if return_urls_requested and (success_url != body.success_url or cancel_url != body.cancel_url):
         logger.warning(
             "cappe checkout: off-site return URL rejected for site %s", site["id"]
         )
+    # Bind both guest and signed-in app returns to this order after origin
+    # validation. The token does not exist when the app requests checkout.
+    for field, value in (("success", success_url), ("cancel", cancel_url)):
+        if value and urlsplit(value).path == "/__cappe/app-return":
+            parsed = urlsplit(value)
+            callback = f"{parsed.scheme}://{parsed.netloc}/__cappe/app-return?o={order['access_token']}&r={field}"
+            if field == "success":
+                success_url = callback
+            else:
+                cancel_url = callback
     can_pay = bool(
         pay_total > 0 and owner and owner["stripe_account_id"]
         and owner["stripe_charges_enabled"] and return_urls_requested

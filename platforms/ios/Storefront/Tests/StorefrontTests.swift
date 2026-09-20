@@ -98,6 +98,7 @@ final class StorefrontTests: XCTestCase {
         XCTAssertEqual(value.tagline, "Shop tagline")
     }
 
+    @MainActor
     func testHostedCheckoutCallbackDistinguishesSuccessAndCancel() {
         XCTAssertEqual(
             CheckoutService.hostedResult(from: URL(string: "ahnimal://order/token?r=success")),
@@ -110,11 +111,32 @@ final class StorefrontTests: XCTestCase {
         XCTAssertNil(CheckoutService.hostedResult(from: URL(string: "ahnimal://order/token")))
     }
 
+    func testOrderCursorQueryPreservesTimezoneOffsetPlus() {
+        let cursor = "2026-09-19T10:00:00+00:00|11111111-1111-1111-1111-111111111111"
+        let query = StorefrontURL.queryString([
+            URLQueryItem(name: "cursor", value: cursor),
+        ])
+
+        XCTAssertTrue(query.contains("%2B00:00"))
+        XCTAssertFalse(query.contains("+"))
+
+        let components = URLComponents(string: "https://shop.example.test/orders\(query)")
+        XCTAssertEqual(
+            components?.queryItems?.first(where: { $0.name == "cursor" })?.value,
+            cursor
+        )
+    }
+
     @MainActor
     func testOrderLinkSelectsAccountAndBuildsDirectRoute() {
         let router = AppRouter()
         router.openOrder("0123456789abcdef0123456789abcdef")
         XCTAssertEqual(router.selectedTab, .account)
+        XCTAssertEqual(router.accountPath, [
+            .order("0123456789abcdef0123456789abcdef")
+        ])
+
+        router.handleSessionEnded()
         XCTAssertEqual(router.accountPath, [
             .order("0123456789abcdef0123456789abcdef")
         ])

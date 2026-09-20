@@ -70,7 +70,7 @@ struct StorefrontRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .storeSessionEnded)) { _ in
             session.handleSessionEnded()
             favorites.handleSignOut()
-            router.accountPath = []
+            router.handleSessionEnded()
         }
     }
 }

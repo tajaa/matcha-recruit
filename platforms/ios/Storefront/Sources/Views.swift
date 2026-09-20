@@ -510,9 +510,9 @@ struct OrdersView: View {
         do {
             var path = Config.current.shopperPath + "/me/orders"
             if !reset, let cursor = nextCursor {
-                var query = URLComponents()
-                query.queryItems = [URLQueryItem(name: "cursor", value: cursor)]
-                path += "?\(query.percentEncodedQuery ?? "")"
+                path += StorefrontURL.queryString([
+                    URLQueryItem(name: "cursor", value: cursor),
+                ])
             }
             let page: OrderPage = try await StorefrontAPI.shared.request(path)
             orders = reset ? page.orders : orders + page.orders
