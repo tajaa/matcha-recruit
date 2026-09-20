@@ -94,18 +94,19 @@ export default function PageEditor() {
       if (themeChanged) { themeEditor.loadTheme(nextTheme); themeEditor.markDirty() }
     },
   )
+  const setMerlinOpen = merlin.setOpen
 
   // Merlin opens by default for Pro/Business — the editor used to default
   // straight into Canvas mode instead, which fights Merlin's own gate (it
   // suppresses the floating field editor whenever Merlin is open, so
   // section clicks looked broken). Free accounts stay on Form + Merlin
   // closed, unchanged.
-  useEffect(() => { if (canvasUnlocked) merlin.setOpen(() => true) }, [canvasUnlocked])
+  useEffect(() => { if (canvasUnlocked) setMerlinOpen(() => true) }, [canvasUnlocked, setMerlinOpen])
   // Explicitly picking a mode in the toolbar closes Merlin, so the mode the
   // user asked for actually behaves the way that mode behaves (see above).
   const setEditModeAndCloseMerlin = (m: 'form' | 'canvas') => {
     setEditMode(m)
-    merlin.setOpen(() => false)
+    setMerlinOpen(() => false)
   }
 
   // The theme drawer (18rem) and Merlin panel (user-resizable) are real flex

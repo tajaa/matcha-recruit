@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { cappeApi } from '../../../api'
 import { postCappeSSE } from '../../../sse'
 import type { CappeBlock } from '../../../types'
@@ -366,16 +366,21 @@ export function useMerlin(
   // over a stale `pageId` otherwise, and the persist effect must NOT list
   // pageId/siteId as dependencies (see that effect's comment for why).
   const siteIdRef = useRef(siteId)
-  siteIdRef.current = siteId
   const pageIdRef = useRef(pageId)
-  pageIdRef.current = pageId
+  useLayoutEffect(() => {
+    siteIdRef.current = siteId
+    pageIdRef.current = pageId
+  }, [siteId, pageId])
 
   // The conversation this panel is showing. `null` = a fresh one, opened
   // server-side by the first turn (which returns its id).
   const [conversationId, setConversationId] = useState<string | null>(null)
   const conversationIdRef = useRef<string | null>(null)
-  conversationIdRef.current = conversationId
   const [conversations, setConversations] = useState<MerlinConversation[]>([])
+  const updateConversationId = (id: string | null) => {
+    conversationIdRef.current = id
+    setConversationId(id)
+  }
 
   // Bumped every time the user SWITCHES which conversation the panel is
   // showing (open/new — not the auto-adopt of a fresh conversation's own id
@@ -397,7 +402,7 @@ export function useMerlin(
   const openConversation = async (id: string, opts?: { silent?: boolean }) => {
     sessionRef.current += 1
     if (!opts?.silent) setMessages([])
-    setConversationId(id)
+    updateConversationId(id)
     setError(null)
     try {
       const detail = await cappeApi.get<{ id: string; messages: StoredMessage[] }>(
@@ -475,7 +480,7 @@ export function useMerlin(
    *  first turn, so this is purely local state until then. */
   const newConversation = () => {
     sessionRef.current += 1
-    setConversationId(null)
+    updateConversationId(null)
     setMessages([])
     setError(null)
   }
@@ -518,14 +523,19 @@ export function useMerlin(
     // screenshots) rather than letting it run on invisibly.
     abortRef.current?.abort()
     abortRef.current = null
+    // This hook intentionally resets page-scoped state at the route boundary;
+    // delaying the reset until an async callback would leave the prior page's
+    // transcript interactive on the destination route.
+    /* eslint-disable react-hooks/set-state-in-effect */
     setMessages([])
     setConversations([])
-    setConversationId(null)
+    updateConversationId(null)
     setError(null)
     setStatus(null)
     setLiveSteps([])
     updateAttachments(() => [])
     setSending(false)
+    /* eslint-enable react-hooks/set-state-in-effect */
     if (!siteId || !pageId) return
     let cancelled = false
     void (async () => {
@@ -825,7 +835,10 @@ export function useMerlin(
           const frame = raw as AgentFrame
           if (frame.type === 'status') setStatus(frame.message)
           else if (frame.type === 'step') {
-            const { type: _t, ...step } = frame
+            const step: MerlinStep = {
+              kind: frame.kind, label: frame.label,
+              results: frame.results, image_url: frame.image_url,
+            }
             steps.push(step)
             setLiveSteps([...steps])
           } else if (frame.type === 'error') collected.error = frame.message
@@ -855,8 +868,7 @@ export function useMerlin(
       // it in the history list. Done before the navigation guard below: the row
       // exists regardless of where the user has navigated to.
       if (res.conversation_id && !conversationIdRef.current) {
-        setConversationId(res.conversation_id)
-        conversationIdRef.current = res.conversation_id
+        updateConversationId(res.conversation_id)
         void refreshConversations(siteId, sentForPageId)
       }
 
