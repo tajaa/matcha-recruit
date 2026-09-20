@@ -18,6 +18,12 @@
 # no model call.
 set -uo pipefail
 
+# This disposable end-to-end fixture intentionally targets example.invalid.
+# GitHub Actions exports GITHUB_ACTIONS to every test, so remove that ambient
+# marker before the real harness helpers apply their production-board guard.
+# The guard itself remains covered explicitly in test_kanban_autopr.sh.
+unset GITHUB_ACTIONS
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 AUTOPR_DIR="$REPO_ROOT/apps/msandbox/harness"
 TMP_DIR="$(mktemp -d)"
