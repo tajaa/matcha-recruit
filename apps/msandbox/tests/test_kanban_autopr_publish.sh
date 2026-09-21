@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Exercises the question-only publication path in a disposable Git repository.
 set -euo pipefail
+# Fixtures point at example.invalid; harness/lib.sh fail-closes on that under Actions.
+unset GITHUB_ACTIONS
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 AUTOPR_SOURCE="$REPO_ROOT/apps/msandbox/harness"

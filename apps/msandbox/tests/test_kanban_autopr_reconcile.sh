@@ -2,6 +2,8 @@
 # Isolated recovery test: a missed pull_request webhook must be repaired before
 # selection, while unrelated Todo work remains in the candidate stream.
 set -euo pipefail
+# Fixtures point at example.invalid; harness/lib.sh fail-closes on that under Actions.
+unset GITHUB_ACTIONS
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 RECONCILE="$REPO_ROOT/apps/msandbox/harness/reconcile-merged-cards.sh"
