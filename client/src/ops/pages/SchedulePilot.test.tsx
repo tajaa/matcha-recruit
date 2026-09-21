@@ -317,7 +317,10 @@ describe('SchedulePilot — Huume', () => {
     }))
     renderPilot()
 
-    fireEvent.click(await screen.findByRole('button', { name: /Opener 1 open/ }))
+    // The rail renders after the inputs resolve; on the CI runner the first
+    // full-page paint alone can exceed findBy's 1s default.
+    await waitFor(() => expect(planningInputsMock).toHaveBeenCalled())
+    fireEvent.click(await screen.findByRole('button', { name: /Opener 1 open/ }, { timeout: 5000 }))
 
     expect(screen.queryByText(/selected shift as context/)).not.toBeInTheDocument()
     const input = await screen.findByPlaceholderText('Try: add an opener Monday')
