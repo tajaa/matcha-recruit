@@ -32,7 +32,7 @@ interface SchedulePilotToolbarProps {
   threadOpen: boolean
   onToggleThread(): void
   huumeSelectionCount: number
-  autopilot?: { visible: boolean; running: boolean; disabled: boolean; title?: string; onRun(): void }
+  autopilot?: { visible: boolean; running: boolean; onOpen(): void }
 }
 
 function saveLabel(state: ScheduleSaveState, lastSavedAt: Date | null): string {
@@ -64,7 +64,7 @@ export default function SchedulePilotToolbar({
         <span className="ml-1 inline-flex items-center gap-1.5 text-xs text-zinc-500"><CalendarDays className="h-3.5 w-3.5" /> Week of {weekStart}</span>
         <LocationPicker locations={locations} value={locationId} onChange={onChangeLocation} />
         {autopilot?.visible && (
-          <button type="button" onClick={autopilot.onRun} disabled={autopilot.running || autopilot.disabled} title={autopilot.title} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/35 bg-emerald-500/[0.07] px-2.5 py-1.5 text-xs text-emerald-200 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-40">
+          <button type="button" onClick={autopilot.onOpen} disabled={autopilot.running} title="Check setup and prepare a reviewable week" className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/35 bg-emerald-500/[0.07] px-2.5 py-1.5 text-xs text-emerald-200 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-40">
             {autopilot.running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} Build with Autopilot
           </button>
         )}

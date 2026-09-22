@@ -1087,3 +1087,9 @@ V1 weather effects are explicit manager policy (`none`, `rain_hurts`, or
 `rain_helps`) and are shown in the demand model. They are not learned elasticity
 and are not a legal or optimality claim. Hourly POS demand, learned weather
 elasticity, holidays, employer burden, and Toast ingestion remain follow-ups.
+
+The Schedule Pilot toolbar opens a three-step Autopilot wizard even when
+readiness is blocked: repair required setup, inspect optional input quality and
+save planning choices, then explicitly build a Huume review. Returning from the
+Week setup or Jobs drawer rechecks readiness. Generation is gated on a fresh
+server readiness read; it never confirms a proposal or publishes shifts.

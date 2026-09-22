@@ -27,6 +27,7 @@ import WeekStartPane from '../../components/employees/schedule-editor/WeekStartP
 import BoardPane from '../../components/employees/schedule-pilot/BoardPane'
 import InputsRail from '../../components/employees/schedule-pilot/InputsRail'
 import ReviewPane from '../../components/employees/schedule-pilot/ReviewPane'
+import AutopilotWizard from '../../components/employees/schedule-pilot/AutopilotWizard'
 import ScenariosStrip, { type StagedChip } from '../../components/employees/schedule-pilot/ScenariosStrip'
 import SchedulePilotToolbar, { type CenterView } from '../../components/employees/schedule-pilot/SchedulePilotToolbar'
 import { asScheduleReview } from '../../components/employees/schedule-pilot/reviewShape'
@@ -100,7 +101,11 @@ export default function SchedulePilot() {
   const [automaticSuggestion, setAutomaticSuggestion] = useState<ScheduleSuggestionStatus | null>(null)
   const [weekRules, setWeekRules] = useState<LocationScheduleProfile['week_rules'] | null>(null)
   const [autopilotReadiness, setAutopilotReadiness] = useState<AutopilotReadiness | null>(null)
+  const [autopilotReadinessLoading, setAutopilotReadinessLoading] = useState(false)
+  const [autopilotReadinessError, setAutopilotReadinessError] = useState<string | null>(null)
   const [autopilotRunning, setAutopilotRunning] = useState(false)
+  const [autopilotWizardOpen, setAutopilotWizardOpen] = useState(false)
+  const [returnToAutopilot, setReturnToAutopilot] = useState(false)
   const [huumeSelectedShiftIds, setHuumeSelectedShiftIds] = useState<Set<string>>(() => new Set())
   const { jobs, reloadJobs } = useScheduleJobs(locationId)
   const openBreakPlanner = useCallback((shift: Shift, _employeeId: string, message: string) => {
@@ -142,15 +147,31 @@ export default function SchedulePilot() {
 
   useEffect(() => { reloadWeekRules() }, [reloadWeekRules])
 
+  const autopilotReadinessRequest = useRef(0)
+  const refreshAutopilotReadiness = useCallback(async (stillActive: () => boolean = () => true) => {
+    const token = ++autopilotReadinessRequest.current
+    setAutopilotReadiness(null)
+    setAutopilotReadinessError(null)
+    if (!autopilotEnabled || !locationId) {
+      setAutopilotReadinessLoading(false)
+      return
+    }
+    setAutopilotReadinessLoading(true)
+    try {
+      const value = await fetchAutopilotReadiness(locationId, weekStart)
+      if (token === autopilotReadinessRequest.current && stillActive()) setAutopilotReadiness(value)
+    } catch (error) {
+      if (token === autopilotReadinessRequest.current && stillActive()) setAutopilotReadinessError(errorMessage(error))
+    } finally {
+      if (token === autopilotReadinessRequest.current && stillActive()) setAutopilotReadinessLoading(false)
+    }
+  }, [autopilotEnabled, locationId, weekStart])
+
   useEffect(() => {
     let cancelled = false
-    setAutopilotReadiness(null)
-    if (!autopilotEnabled || !locationId) return () => { cancelled = true }
-    void fetchAutopilotReadiness(locationId, weekStart)
-      .then((value) => { if (!cancelled) setAutopilotReadiness(value) })
-      .catch(() => { if (!cancelled) setAutopilotReadiness(null) })
+    void Promise.resolve().then(() => { if (!cancelled) return refreshAutopilotReadiness(() => !cancelled) })
     return () => { cancelled = true }
-  }, [autopilotEnabled, locationId, weekStart, planning.inputs])
+  }, [refreshAutopilotReadiness, planning.inputs])
 
   const afterApplied = useCallback(() => {
     setAutomaticSuggestion(null)
@@ -175,6 +196,8 @@ export default function SchedulePilot() {
     setHuumeSelectedShiftIds(new Set())
     setReviewSource({ kind: 'staged' })
     setDrawer(null)
+    setAutopilotWizardOpen(false)
+    setReturnToAutopilot(false)
     setInspectorShiftId(null)
     setNewDefaults(null)
   }, [locationId, weekStart])
@@ -285,6 +308,20 @@ export default function SchedulePilot() {
   }), [])
   const openWeekSetup = useCallback(() => setDrawer('weekSetup'), [])
   const openJobs = useCallback(() => setDrawer('jobs'), [])
+  function openAutopilotSetup(kind: 'weekSetup' | 'jobs') {
+    setAutopilotWizardOpen(false)
+    setReturnToAutopilot(true)
+    setDrawer(kind)
+  }
+
+  function closeDrawer() {
+    setDrawer(null)
+    if (returnToAutopilot) {
+      setReturnToAutopilot(false)
+      setAutopilotWizardOpen(true)
+      void refreshAutopilotReadiness()
+    }
+  }
 
   function closeGuide() {
     try { window.localStorage.setItem(GUIDE_STORAGE_KEY, 'seen') } catch { /* best effort */ }
@@ -350,21 +387,43 @@ export default function SchedulePilot() {
     }
   }
 
-  async function buildWithAutopilot() {
-    if (!locationId) return
+  async function buildWithAutopilot(): Promise<boolean> {
+    if (!locationId) return false
+    if (thread.busy) {
+      toast('Wait for Huume to finish its current reply before building a review.', 'info')
+      return false
+    }
     setAutopilotRunning(true)
     try {
+      const latest = await fetchAutopilotReadiness(locationId, weekStart)
+      setAutopilotReadiness(latest)
+      if (!latest.ready) {
+        toast(latest.blockers.join(' ') || 'Autopilot setup is not ready yet.', 'info')
+        return false
+      }
       const result = await runAutopilot(locationId, weekStart)
       toast(result.message, result.status === 'generated' ? 'success' : 'info')
       if (result.status === 'generated') {
-        const status = await getScheduleSuggestionStatus(locationId, weekStart)
-        setAutomaticSuggestion(status.available ? status : null)
+        try {
+          const status = await getScheduleSuggestionStatus(locationId, weekStart)
+          setAutomaticSuggestion(status.available ? status : null)
+        } catch {
+          // The generation succeeded; a failed banner refresh must not imply it did not.
+        }
+        // Opening the same session adopts the newly prepared automatic run
+        // into its staged action. Selecting Review alone would show an empty
+        // pane because the existing thread state predates generation.
+        thread.openChat(thread.sessionId)
         setThreadOpen(true)
         setReviewSource({ kind: 'staged' })
         setCenterView('review')
+        setMobileTab('review')
+        return true
       }
+      return false
     } catch (error) {
       toast(errorMessage(error), 'error')
+      return false
     } finally {
       setAutopilotRunning(false)
     }
@@ -476,6 +535,7 @@ export default function SchedulePilot() {
       locationName={currentLocationName}
       credentialsEnabled={credentialTemplatesEnabled}
       autopilotReadiness={autopilotReadiness}
+      onOpenAutopilot={autopilotEnabled ? () => { setAutopilotWizardOpen(true); void refreshAutopilotReadiness() } : undefined}
       onOpenWeekSetup={openWeekSetup}
       onOpenJobs={openJobs}
       onAskHuume={askHuume}
@@ -527,13 +587,9 @@ export default function SchedulePilot() {
           onToggleThread={() => setThreadOpen((open) => !open)}
           huumeSelectionCount={huumeSelectedShifts.length}
           autopilot={{
-            visible: autopilotEnabled && !(editor.summary?.published ?? 0),
+            visible: autopilotEnabled && !!locationId,
             running: autopilotRunning,
-            disabled: !autopilotReadiness?.ready,
-            title: autopilotReadiness?.ready
-              ? 'Build a reviewable week from forecasts and this store’s setup'
-              : autopilotReadiness?.blockers.join(' ') || 'Checking Autopilot readiness…',
-            onRun: () => { void buildWithAutopilot() },
+            onOpen: () => { setAutopilotWizardOpen(true); void refreshAutopilotReadiness() },
           }}
         />
         {automaticSuggestion && locationId && (
@@ -604,11 +660,11 @@ export default function SchedulePilot() {
                   <div className="absolute inset-0 z-20 flex flex-col overflow-y-auto bg-zinc-950/98 backdrop-blur" role="dialog" aria-label={drawer === 'jobs' ? 'Jobs' : 'Week setup'}>
                     <div className="flex shrink-0 items-center justify-between border-b border-white/[0.06] px-4 py-2">
                       <span className="text-xs font-medium text-zinc-200">{drawer === 'jobs' ? (credentialTemplatesEnabled ? 'Jobs & credentials' : 'Jobs') : 'Week setup'}</span>
-                      <button type="button" onClick={() => setDrawer(null)} className="rounded p-1 text-zinc-500 hover:text-zinc-100" aria-label="Close"><X className="h-4 w-4" /></button>
+                      <button type="button" onClick={closeDrawer} className="rounded p-1 text-zinc-500 hover:text-zinc-100" aria-label={returnToAutopilot ? 'Return to Autopilot wizard' : 'Close'}><X className="h-4 w-4" /></button>
                     </div>
                     <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
                       {drawer === 'jobs'
-                        ? <ScheduleJobsTab key={locationId} locationId={locationId} credentialTemplatesEnabled={credentialTemplatesEnabled} laborCostEnabled={laborCostEnabled} onJobsChanged={reloadJobs} />
+                        ? <ScheduleJobsTab key={locationId} locationId={locationId} credentialTemplatesEnabled={credentialTemplatesEnabled} laborCostEnabled={laborCostEnabled} onJobsChanged={async () => { await reloadJobs(); await refreshAutopilotReadiness() }} />
                         : <WeekStartPane key={locationId} locationId={locationId} jobs={jobs} onSaved={() => { void reloadLocations(); reloadWeekRules(); planning.reload() }} />}
                     </div>
                   </div>
@@ -623,6 +679,24 @@ export default function SchedulePilot() {
       </div>
       <DragOverlay>{activeDrag ? <div className="rounded-lg border border-emerald-500/50 bg-zinc-900 px-3 py-2 text-xs text-zinc-200 shadow-xl">{activeDrag.kind === 'shift' ? 'Moving shift' : activeDrag.kind === 'shift-assignment' ? 'Moving assignment' : 'Scheduling employee'}</div> : null}</DragOverlay>
       <ScheduleEditorGuide open={guideOpen} onClose={closeGuide} />
+      {autopilotWizardOpen && locationId && (
+        <AutopilotWizard
+          key={`${locationId}:${weekStart}`}
+          locationId={locationId}
+          locationName={currentLocationName}
+          weekStart={weekStart}
+          readiness={autopilotReadiness}
+          readinessLoading={autopilotReadinessLoading}
+          readinessError={autopilotReadinessError}
+          running={autopilotRunning}
+          onClose={() => setAutopilotWizardOpen(false)}
+          onRefresh={refreshAutopilotReadiness}
+          onOpenWeekSetup={() => openAutopilotSetup('weekSetup')}
+          onOpenJobs={() => openAutopilotSetup('jobs')}
+          onProfileSaved={() => { reloadWeekRules(); planning.reload() }}
+          onGenerate={buildWithAutopilot}
+        />
+      )}
     </DndContext>
   )
 }

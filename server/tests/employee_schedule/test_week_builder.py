@@ -9,6 +9,7 @@ from uuid import UUID
 import pytest
 
 from app.matcha.services.scheduling import week_builder
+from app.matcha.services.scheduling.autopilot.policy import POLICY_SALES_HISTORY_DAYS
 from app.matcha.services.scheduling.week_builder import _coerce_constraints, build_plan
 
 
@@ -448,6 +449,28 @@ async def test_readiness_keeps_the_choose_blocker_without_a_default(monkeypatch)
 
     assert result["default_week_template_id"] is None
     assert any("Choose which saved week template" in b for b in result["blockers"])
+
+
+@pytest.mark.asyncio
+async def test_autopilot_readiness_counts_the_full_sales_window(monkeypatch):
+    conn = _FakeConn({"id": LOCATION_ID, "name": "Downtown", "timezone": "America/Los_Angeles"})
+    _empty_week(monkeypatch, conn, [])
+    monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={
+        "employees": [_employee("amy", "Amy")], "gated_job_ids": set(),
+    }))
+    sales_queries = []
+
+    async def fetchval(query, *args):
+        if "COUNT(DISTINCT business_date)" in query:
+            sales_queries.append(args)
+
+    conn.fetchval = fetchval
+    await week_builder.get_week_build_readiness(
+        company_id=COMPANY_ID, location_id=LOCATION_ID,
+        week_start=WEEK_START, source_mode="autopilot",
+    )
+
+    assert sales_queries == [(COMPANY_ID, LOCATION_ID, WEEK_START - timedelta(days=POLICY_SALES_HISTORY_DAYS), WEEK_START)]
 
 
 @pytest.mark.asyncio

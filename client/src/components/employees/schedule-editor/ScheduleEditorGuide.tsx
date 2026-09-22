@@ -26,7 +26,7 @@ const STEPS: GuideStep[] = [
   {
     eyebrow: '02 / Define the work',
     title: 'Jobs, credentials and week setup live in the rail',
-    body: 'Open Jobs to add the work areas your location schedules and who is qualified for each; open Week setup for hours, week start, staffing pattern and the leader rule. Huume refuses to build a week until setup is saved — the rail says what is missing.',
+    body: 'Open Jobs to add the work areas your location schedules and who is qualified for each; open Week setup for hours, week start and the leader rule. Template builds also need a staffing pattern. The rail says what is missing for each path.',
     icon: BriefcaseBusiness,
     detail: <span>Required credentials belong to the job. An extracted or unconfirmed expiration date is never trusted for scheduling.</span>,
   },
@@ -42,7 +42,7 @@ const STEPS: GuideStep[] = [
     title: 'Huume is always on the right',
     body: 'Ask in plain language or by voice: fill the open shifts, build the whole week, move someone, cover a call-out. The server picks people under the staffing rules; Huume relays what it staged, what it refused and why, and what stayed open.',
     icon: Sparkles,
-    detail: <span>Every AI-drafted change is staged first. The card in the thread is where you confirm or cancel it.</span>,
+    detail: <span>If your company has Autopilot, “Build with Autopilot” walks through setup, optional forecast inputs and planning choices before it stages a review. Nothing is published here. The card in the thread is where you confirm or cancel it.</span>,
   },
   {
     eyebrow: '05 / Review before it is real',

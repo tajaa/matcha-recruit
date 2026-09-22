@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 from app.core.feature_flags import get_company_features
 from app.database import connection_or_direct
 
+from .autopilot.policy import POLICY_SALES_HISTORY_DAYS
 from .assignment_guard import (
     POLICY_MAX_CONSECUTIVE_DAYS, POLICY_MAX_SHIFTS_PER_DAY, POLICY_MIN_REST_HOURS,
 )
@@ -2060,7 +2061,7 @@ async def get_week_build_readiness(
                    FROM inventory_sales_imports
                    WHERE company_id=$1 AND location_id=$2 AND status='committed'
                      AND business_date >= $3 AND business_date < $4""",
-                company_id, location_id, week_start - timedelta(days=84), week_start,
+                company_id, location_id, week_start - timedelta(days=POLICY_SALES_HISTORY_DAYS), week_start,
             ) or 0)
             weather_days = int(await conn.fetchval(
                 """SELECT COUNT(*) FROM schedule_weather_days

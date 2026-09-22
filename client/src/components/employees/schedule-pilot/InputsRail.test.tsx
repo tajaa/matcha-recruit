@@ -205,6 +205,21 @@ describe('InputsRail — policy and law', () => {
 })
 
 describe('InputsRail — setup', () => {
+  it('distinguishes template setup from ready Autopilot and opens its wizard', () => {
+    const onOpenAutopilot = vi.fn()
+    renderRail({
+      weekRules: { established: false, missing: ['staffing_pattern'] },
+      autopilotReadiness: {
+        ready: true, blockers: [],
+        autopilot: { sales_weeks: 0, sales_confidence: 'none', weather_days_available: 0, history_weeks: 0 },
+      },
+      onOpenAutopilot,
+    })
+    expect(screen.getByText(/Autopilot is ready without one/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Open Autopilot wizard' }))
+    expect(onOpenAutopilot).toHaveBeenCalledOnce()
+  })
+
   it('names what is missing and offers both ways to fix it', () => {
     const props = renderRail({ weekRules: { established: false, missing: ['operating_hours', 'leader_rule'] } })
 
