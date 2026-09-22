@@ -35,6 +35,8 @@ from app.core.services.session_tokens import (
     issue_stamp_ms,
     refresh_token_times,
     token_predates_watermark,
+    SessionLifetimes,
+    refresh_session_expired,
 )
 
 __all__ = ["ScopedTokenHelpers", "make_token_helpers", "is_token_revoked"]
@@ -64,13 +66,24 @@ class ScopedTokenHelpers:
     decode_token: Callable[..., Optional[dict]]
 
 
-def make_token_helpers(scope: str) -> ScopedTokenHelpers:
+def make_token_helpers(scope: str, *, lifetimes: Optional[SessionLifetimes] = None,
+                       extra_claims_keys: tuple[str, ...] = ()) -> ScopedTokenHelpers:
     """Build the create/decode trio for one product scope."""
+    reserved = {"sub", "email", "scope", "exp", "iat", "iat_ms", "type", "session_started_at"}
+    if reserved.intersection(extra_claims_keys):
+        raise ValueError("Extra claims cannot override token identity or lifetime")
+
+    def claims(values):
+        values = values or {}
+        if set(values) - set(extra_claims_keys):
+            raise ValueError("Unrecognized token claims")
+        return values
 
     def create_access_token(
         account_id: UUID,
         email: str,
         expires_delta: Optional[timedelta] = None,
+        *, extra_claims: Optional[dict] = None,
     ) -> str:
         settings = get_settings()
         issued_at = datetime.now(timezone.utc)
@@ -87,6 +100,7 @@ def make_token_helpers(scope: str) -> ScopedTokenHelpers:
             # a logout from one minted just after. See token_predates_watermark.
             "iat_ms": issue_stamp_ms(issued_at),
             "type": "access",
+            **claims(extra_claims),
         }
         return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
@@ -94,9 +108,10 @@ def make_token_helpers(scope: str) -> ScopedTokenHelpers:
         account_id: UUID,
         email: str,
         session_started_at: Optional[int] = None,
+        *, extra_claims: Optional[dict] = None,
     ) -> str:
         settings = get_settings()
-        issued_at, started_at, expire = refresh_token_times(session_started_at)
+        issued_at, started_at, expire = refresh_token_times(session_started_at, lifetimes=lifetimes)
         payload = {
             "sub": str(account_id),
             "email": email,
@@ -106,6 +121,7 @@ def make_token_helpers(scope: str) -> ScopedTokenHelpers:
             "iat_ms": issue_stamp_ms(issued_at),
             "session_started_at": started_at,
             "type": "refresh",
+            **claims(extra_claims),
         }
         return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
@@ -140,6 +156,10 @@ def make_token_helpers(scope: str) -> ScopedTokenHelpers:
         if expected_type and payload.get("type") != expected_type:
             return None
         if payload.get("type") == "access" and access_token_stale(payload.get("iat")):
+            return None
+        if lifetimes and payload.get("type") == "refresh" and refresh_session_expired(
+            payload.get("iat"), payload.get("session_started_at"), lifetimes=lifetimes,
+        ):
             return None
         if "sub" not in payload:
             return None

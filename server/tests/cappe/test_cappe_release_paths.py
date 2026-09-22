@@ -21,6 +21,7 @@ from fastapi import HTTPException  # noqa: E402
 from app.cappe.routes import shop as shop_mod  # noqa: E402
 from app.cappe.routes.public import messages as messages_mod  # noqa: E402
 from app.cappe.models.cappe import CappeMessageCreate  # noqa: E402
+from app.cappe.models.shop import CappeOrderStatusUpdate  # noqa: E402
 from app.cappe.services import inventory as inv_mod  # noqa: E402
 from app.cappe.services import porkbun as porkbun_mod  # noqa: E402
 from app.cappe.services.stripe_connect import CappeStripeError  # noqa: E402
@@ -168,10 +169,32 @@ def test_only_a_releasing_transition_closes_checkout(monkeypatch, new_status, cl
     log = _route(monkeypatch, conn)
     monkeypatch.setattr(shop_mod, "build_patch", lambda *a, **k: (["status = $1"], [new_status]))
     asyncio.run(shop_mod.update_order_status(
-        SITE, ORDER, SimpleNamespace(status=new_status), account=SimpleNamespace(id=ACCOUNT_ID),
+        SITE, ORDER, SimpleNamespace(status=new_status, tracking_number=None), account=SimpleNamespace(id=ACCOUNT_ID),
     ))
     assert ("close" in log) is closes
     assert ("bookings" in log) is closes
+
+
+@pytest.mark.parametrize(("body", "current_tracking", "expected"), [
+    (CappeOrderStatusUpdate(tracking_number="same"), "same", []),
+    (CappeOrderStatusUpdate(status="cancelled", tracking_number="new"), "old", []),
+    (CappeOrderStatusUpdate(tracking_number="new"), "old", ["shipped"]),
+])
+def test_tracking_push_requires_a_new_number_on_a_live_order(
+    monkeypatch, body, current_tracking, expected,
+):
+    updated_status = body.status or "paid"
+    conn = OrderConn([
+        {"status": "paid", "tracking_number": current_tracking},
+        {"id": ORDER, "status": updated_status, "tracking_number": body.tracking_number},
+    ])
+    _route(monkeypatch, conn)
+    pushed = []
+    monkeypatch.setattr("app.cappe.services.push.schedule_push", lambda _order, event: pushed.append(event))
+    asyncio.run(shop_mod.update_order_status(
+        SITE, ORDER, body, account=SimpleNamespace(id=ACCOUNT_ID),
+    ))
+    assert pushed == expected
 
 
 # ── inventory: retake is the exact inverse of restock ────────────────────────

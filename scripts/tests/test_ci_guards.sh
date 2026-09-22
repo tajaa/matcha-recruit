@@ -28,6 +28,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 UPDATE_EC2="$REPO_ROOT/scripts/update-ec2.sh"
 BUILD_PUSH="$REPO_ROOT/scripts/build-and-push.sh"
 CI_WORKFLOW="$REPO_ROOT/.github/workflows/ci.yml"
+XCODE_BUILD="$REPO_ROOT/scripts/xcode-build.sh"
 
 PASS=0
 FAIL=0
@@ -364,6 +365,33 @@ if [ -n "$discovered_bad" ]; then
 else
     check "every discovered shell file parses" 0
 fi
+
+################################################################################
+# Case 11 — Storefront is a generated Xcode project. CI must compile both the
+# app and unit-test bundle from project.yml without hard-coding a simulator
+# device, and it must fail if generation drops the App Store resources again.
+################################################################################
+storefront_target_ok=0
+grep -qF 'storefront)' "$XCODE_BUILD" || storefront_target_ok=1
+grep -qF 'generic/platform=iOS Simulator' "$XCODE_BUILD" || storefront_target_ok=1
+grep -qF 'build-for-testing)' "$XCODE_BUILD" || storefront_target_ok=1
+grep -qF 'XCODE_DESTINATION' "$XCODE_BUILD" || storefront_target_ok=1
+grep -qF 'Storefront test requires XCODE_DESTINATION' "$XCODE_BUILD" || storefront_target_ok=1
+check "xcode-build.sh exposes Storefront build-for-testing on a generic simulator destination" "$storefront_target_ok"
+
+storefront_products_ok=0
+grep -qF 'xcodegen generate' "$XCODE_BUILD" || storefront_products_ok=1
+grep -qF 'Assets.xcassets in Resources' "$XCODE_BUILD" || storefront_products_ok=1
+grep -qF 'PrivacyInfo.xcprivacy in Resources' "$XCODE_BUILD" || storefront_products_ok=1
+grep -qF 'Assets.car' "$XCODE_BUILD" || storefront_products_ok=1
+grep -qF 'StorefrontTests.xctest' "$XCODE_BUILD" || storefront_products_ok=1
+check "Storefront native build regenerates the project and verifies app resources plus tests" "$storefront_products_ok"
+
+storefront_workflow_ok=0
+grep -qF "platforms/ios/Storefront/" "$CI_WORKFLOW" || storefront_workflow_ok=1
+grep -qF "scripts/xcode-build\\.sh\$" "$CI_WORKFLOW" || storefront_workflow_ok=1
+grep -qF './scripts/xcode-build.sh storefront build-for-testing' "$CI_WORKFLOW" || storefront_workflow_ok=1
+check "PR native CI runs Storefront build-for-testing for Storefront or helper changes" "$storefront_workflow_ok"
 
 echo
 echo "----------------------------------------"

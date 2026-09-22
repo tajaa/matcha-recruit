@@ -45,6 +45,7 @@ const SITE_NAV: { to: string; label: string; icon: typeof Globe; end?: boolean }
   { to: 'messages', label: 'Messages', icon: MessageSquare },
   { to: 'clients', label: 'Clients', icon: Users },
   { to: 'orders', label: 'Orders', icon: Receipt },
+  { to: 'subscriptions', label: 'Subscriptions', icon: Receipt },
   { to: 'bookings', label: 'Bookings', icon: Calendar },
   { to: 'locations', label: 'Locations', icon: MapPin },
   { to: 'shop', label: 'Storefront', icon: ShoppingBag },

@@ -1,0 +1,4 @@
+.derived/
+build/
+*.xcuserstate
+xcuserdata/

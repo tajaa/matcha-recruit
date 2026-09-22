@@ -296,6 +296,16 @@ else
             + (SELECT count(*) FROM cappe_threads     WHERE client_email NOT LIKE '%@example.com');")
         echo "      non-reserved cappe consumer emails, excl. preserved (must be 0): $CAPPE_LEAK"
         [[ "$CAPPE_LEAK" == "0" ]] || { echo "${RED}PII LEAK DETECTED — anonymizer missed cappe rows.${NC}"; exit 1; }
+        HAS_SHOPPERS=$(ddev -tA -d "$DB_NAME" -c "SELECT to_regclass('public.cappe_shoppers') IS NOT NULL;")
+        if [[ "$HAS_SHOPPERS" == "t" ]]; then
+            SHOPPER_LEAK=$(ddev -tA -d "$DB_NAME" -c "SELECT
+                (SELECT count(*) FROM cappe_shoppers WHERE email NOT LIKE '%@example.com' OR phone IS NOT NULL OR stripe_customer_id IS NOT NULL)
+                + (SELECT count(*) FROM cappe_shopper_login_codes)
+                + (SELECT count(*) FROM cappe_shopper_sessions)
+                + (SELECT count(*) FROM cappe_shopper_devices)
+                + (SELECT count(*) FROM cappe_shopper_addresses);")
+            [[ "$SHOPPER_LEAK" == "0" ]] || { echo "PII LEAK DETECTED — shopper data remains."; exit 1; }
+        fi
     else
         echo "      cappe tables absent in this dump — cappe leak check skipped."
     fi

@@ -133,6 +133,7 @@ class CappeStripe:
         cancel_url: str,
         metadata: dict[str, str],
         customer_email: Optional[str] = None,
+        customer_id: Optional[str] = None,
         collect_shipping_address: bool = False,
         shipping_option: Optional[dict] = None,
     ):
@@ -155,6 +156,12 @@ class CappeStripe:
 
         def _create():
             extra: dict[str, Any] = {}
+            if customer_id:
+                extra["customer"] = customer_id
+                if collect_shipping_address:
+                    extra["customer_update"] = {"shipping": "auto"}
+            else:
+                extra["customer_email"] = customer_email or None
             if collect_shipping_address:
                 extra["shipping_address_collection"] = {"allowed_countries": CAPPE_SHIPPING_COUNTRIES}
                 opts = build_shipping_options(shipping_option, currency)
@@ -165,7 +172,6 @@ class CappeStripe:
                 success_url=success_url,
                 cancel_url=cancel_url,
                 line_items=line_items,
-                customer_email=customer_email or None,
                 metadata=metadata,
                 payment_intent_data={
                     "application_fee_amount": fee,
@@ -181,6 +187,63 @@ class CappeStripe:
             return await asyncio.to_thread(_create)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to create checkout session: {exc}") from exc
+
+    async def ensure_connected_customer(self, *, account_id, email, name=None, shipping=None,
+                                        customer_id=None, idempotency_key=None):
+        self._ensure_key()
+        def save():
+            values = {"email": email, "name": name, "stripe_account": account_id}
+            if shipping:
+                values["shipping"] = shipping
+            if customer_id:
+                return stripe.Customer.modify(customer_id, **values)
+            return stripe.Customer.create(**values, idempotency_key=idempotency_key)
+        try:
+            return (await asyncio.to_thread(save))["id"]
+        except Exception as exc:
+            raise CappeStripeError("Could not prepare customer checkout") from exc
+
+    async def create_subscription_checkout(self, *, account_id, customer_id, line_items,
+                                           application_fee_percent, success_url, cancel_url,
+                                           metadata, collect_shipping, idempotency_key):
+        self._ensure_key()
+        def create():
+            extra = {}
+            if collect_shipping:
+                extra = {"shipping_address_collection": {"allowed_countries": CAPPE_SHIPPING_COUNTRIES},
+                         "customer_update": {"shipping": "auto"}}
+            return stripe.checkout.Session.create(
+                mode="subscription", customer=customer_id, line_items=line_items,
+                subscription_data={"metadata": metadata, "application_fee_percent": application_fee_percent},
+                metadata=metadata, success_url=success_url, cancel_url=cancel_url,
+                stripe_account=account_id, idempotency_key=idempotency_key, **extra,
+            )
+        try:
+            return await asyncio.to_thread(create)
+        except Exception as exc:
+            raise CappeStripeError("Could not start subscription checkout") from exc
+
+    async def retrieve_connected_subscription(self, account_id, subscription_id):
+        self._ensure_key()
+        try:
+            return await asyncio.to_thread(stripe.Subscription.retrieve, subscription_id, stripe_account=account_id)
+        except Exception as exc:
+            raise CappeStripeError("Could not retrieve subscription") from exc
+
+    async def modify_connected_subscription(self, *, account_id, subscription_id, cancel_at_period_end):
+        self._ensure_key()
+        try:
+            return await asyncio.to_thread(stripe.Subscription.modify, subscription_id,
+                                          stripe_account=account_id, cancel_at_period_end=cancel_at_period_end)
+        except Exception as exc:
+            raise CappeStripeError("Could not update subscription") from exc
+
+    async def cancel_connected_subscription(self, account_id, subscription_id):
+        self._ensure_key()
+        try:
+            return await asyncio.to_thread(stripe.Subscription.delete, subscription_id, stripe_account=account_id)
+        except Exception as exc:
+            raise CappeStripeError("Could not cancel subscription") from exc
 
     async def retrieve_checkout_session(self, account_id: str, session_id: str):
         """Fetch a Checkout Session from the connected account (webhook fallback

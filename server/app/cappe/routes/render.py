@@ -15,13 +15,15 @@ lookup + a Redis GET on the hot path.
 import os
 import time
 import json
+import re
 from html import escape
 
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ...core.services.redis_cache import cache_get, cache_set, get_redis_cache
 from ...database import get_connection
+from ..models._validators import is_app_url_scheme
 from ..services.booking_suggestion_access import canonical_suggestion_host
 from ..services.common import normalize_host_header
 from ..services.render import render_site_html
@@ -29,6 +31,28 @@ from ..services.render_cache import invalidate_site_render_cache
 from ._shared import RESERVED_SUBDOMAINS, loads, loads_list
 
 router = APIRouter()
+
+
+@router.get("/__cappe/app-return")
+async def app_return(request: Request, o: str = "", r: str = "success"):
+    if not re.fullmatch(r"[0-9a-f]{32}", o) or r not in ("success", "cancel"):
+        raise HTTPException(400, "Invalid checkout return")
+    async with get_connection() as conn:
+        site = await _resolve_published_site(conn, request.headers.get("host"))
+        if not site:
+            raise HTTPException(404, "Site not found")
+        scheme = await conn.fetchval("SELECT app_url_scheme FROM cappe_sites WHERE id=$1", site["id"])
+        exists = await conn.fetchval("SELECT id FROM cappe_orders WHERE access_token=$1 AND site_id=$2", o, site["id"])
+        if not exists:
+            exists = await conn.fetchval("SELECT id FROM cappe_shopper_subscriptions WHERE checkout_token=$1 AND site_id=$2", o, site["id"])
+    if not exists:
+        raise HTTPException(404, "Order not found")
+    headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+    # Same rule as the write side (`CappeSiteUpdate`), re-checked here so a row
+    # that predates the denylist can never become a web/script redirect.
+    if is_app_url_scheme(scheme):
+        return RedirectResponse(f"{scheme}://order/{o}?r={r}", status_code=302, headers=headers)
+    return HTMLResponse("<!doctype html><html><body><h1>Return to the app</h1><p>You can close this window and check your order in the app.</p></body></html>", headers=headers)
 
 # Labels that are never a tenant subdomain (brand / infra / auth hostnames on
 # the shared apex). Centralized in _shared so site creation steers slugs away

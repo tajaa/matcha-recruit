@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react'
 import { Routes, Route } from 'react-router-dom'
+import Subscriptions from './pages/site/Subscriptions'
 import CappeLayout from './layout/CappeLayout'
 import CappeLanding from './pages/CappeLanding'
 import CappeDiscover from './pages/CappeDiscover'
@@ -84,6 +85,7 @@ export default function CappeRoutes() {
           <Route path="sites/:siteId/pages/:pageId" element={<PageEditor />} />
           <Route path="sites/:siteId/shop" element={<Shop />} />
           <Route path="sites/:siteId/orders" element={<Orders />} />
+          <Route path="sites/:siteId/subscriptions" element={<Subscriptions />} />
           <Route path="sites/:siteId/subscribers" element={<Subscribers />} />
           <Route path="sites/:siteId/campaigns" element={<Campaigns />} />
           <Route path="sites/:siteId/forms" element={<Forms />} />

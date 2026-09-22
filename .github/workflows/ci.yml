@@ -235,6 +235,18 @@ jobs:
             ./scripts/xcode-build.sh gummfit build
             ran=1
           fi
+          # Storefront's project.yml is the release source of truth, so this
+          # target regenerates the project before compiling. build-for-testing
+          # uses a generic simulator destination: it compiles both Ahnimal.app
+          # and StorefrontTests.xctest without hard-coding one simulator device.
+          # The hosted Xcode image still supplies the simulator runtime needed
+          # by actool. The helper also verifies Assets.car and
+          # PrivacyInfo.xcprivacy in the built app bundle.
+          if grep -qE '^(platforms/ios/Storefront/|scripts/xcode-build\.sh$)' <<< "$changed"; then
+            command -v xcodegen >/dev/null 2>&1 || brew install xcodegen
+            ./scripts/xcode-build.sh storefront build-for-testing
+            ran=1
+          fi
           if [ "$ran" = 0 ]; then echo "No native project changed."; fi
 
   lint:

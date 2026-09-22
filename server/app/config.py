@@ -154,6 +154,12 @@ class Settings:
     # main apex (site-x.hey-matcha.com); set CAPPE_BASE_DOMAIN to a dedicated
     # domain post-MVP to move every tenant site without code changes.
     cappe_base_domain: str = "hey-matcha.com"
+    cappe_shopper_refresh_idle_days: int = 30
+    cappe_shopper_refresh_absolute_days: int = 180
+    cappe_apns_bundle_ids: str = ""
+    cappe_apns_key_id: Optional[str] = None
+    cappe_apns_team_id: Optional[str] = None
+    cappe_apns_auth_key_path: Optional[str] = None
 
     # Email (Gmail API via OAuth2)
     gmail_token_path: str = "agent/workspace/token.json"
@@ -413,6 +419,12 @@ def load_settings() -> Settings:
         apns_bundle_id_tellus=os.getenv("APNS_BUNDLE_ID_TELLUS", "com.beetlejuse.app"),
         apns_use_sandbox=os.getenv("APNS_USE_SANDBOX", "true").lower() == "true",
         cappe_base_domain=os.getenv("CAPPE_BASE_DOMAIN", "hey-matcha.com"),
+        cappe_shopper_refresh_idle_days=int(os.getenv("CAPPE_SHOPPER_REFRESH_IDLE_DAYS", "30")),
+        cappe_shopper_refresh_absolute_days=int(os.getenv("CAPPE_SHOPPER_REFRESH_ABSOLUTE_DAYS", "180")),
+        cappe_apns_bundle_ids=os.getenv("CAPPE_APNS_BUNDLE_IDS", ""),
+        cappe_apns_key_id=os.getenv("CAPPE_APNS_KEY_ID"),
+        cappe_apns_team_id=os.getenv("CAPPE_APNS_TEAM_ID"),
+        cappe_apns_auth_key_path=os.getenv("CAPPE_APNS_AUTH_KEY_PATH"),
         gmail_token_path=os.getenv("GMAIL_TOKEN_PATH", "agent/workspace/token.json"),
         gmail_from_email=os.getenv("GMAIL_FROM_EMAIL", ""),
         gmail_from_name=os.getenv("GMAIL_FROM_NAME", "Matcha Recruit"),

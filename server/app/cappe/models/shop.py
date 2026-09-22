@@ -53,6 +53,8 @@ class CappeProductOptionGroup(BaseModel):
 
 
 class CappeProductCreate(BaseModel):
+    subscription_intervals: list[Literal["week", "month"]] = Field(default_factory=list, max_length=2)
+    subscription_discount_bps: int = Field(default=0, ge=0, le=5000)
     name: str = Field(min_length=1, max_length=255)
     description: Optional[str] = None
     price_cents: int = Field(default=0, ge=0)
@@ -74,8 +76,17 @@ class CappeProductCreate(BaseModel):
     # None = leave option groups untouched; [] = clear them.
     option_groups: Optional[list[CappeProductOptionGroupInput]] = None
 
+    @field_validator("subscription_intervals")
+    @classmethod
+    def unique_subscription_intervals(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("Select each subscription interval at most once")
+        return value
+
 
 class CappeProductUpdate(BaseModel):
+    subscription_intervals: Optional[list[Literal["week", "month"]]] = Field(default=None, max_length=2)
+    subscription_discount_bps: Optional[int] = Field(default=None, ge=0, le=5000)
     name: Optional[str] = Field(default=None, max_length=255)
     description: Optional[str] = None
     price_cents: Optional[int] = Field(default=None, ge=0)
@@ -94,8 +105,17 @@ class CappeProductUpdate(BaseModel):
     category: Optional[str] = Field(default=None, max_length=120)
     option_groups: Optional[list[CappeProductOptionGroupInput]] = None
 
+    @field_validator("subscription_intervals")
+    @classmethod
+    def unique_subscription_intervals(cls, value):
+        if value is not None and len(value) != len(set(value)):
+            raise ValueError("Select each subscription interval at most once")
+        return value
+
 
 class CappeProduct(BaseModel):
+    subscription_intervals: list[Literal["week", "month"]] = Field(default_factory=list)
+    subscription_discount_bps: int = 0
     id: UUID
     site_id: UUID
     name: str
@@ -115,6 +135,10 @@ class CappeProduct(BaseModel):
     intake_fields: list[dict[str, Any]] = Field(default_factory=list)
     category: Optional[str] = None
     option_groups: list[CappeProductOptionGroup] = Field(default_factory=list)
+    # Public storefront pricing. Owner responses default to the undiscounted
+    # shape; public routes populate these from the active promotion calendar.
+    discount_percent: int = 0
+    discounted_price_cents: Optional[int] = None
 
 
 class CappeStockAdjust(BaseModel):
@@ -134,12 +158,7 @@ class CappeInventoryAdjustment(BaseModel):
     reason: str
     note: Optional[str] = None
     created_at: datetime
-    created_at: datetime
     updated_at: datetime
-    # Storefront display only — best active discount for this product (0 if none).
-    # Order pricing is still recomputed server-side at checkout.
-    discount_percent: int = 0
-    discounted_price_cents: Optional[int] = None
 
 
 class CappeOrderItem(BaseModel):
@@ -157,6 +176,7 @@ class CappeOrderItem(BaseModel):
 
 
 class CappeOrder(BaseModel):
+    subscription_id: Optional[UUID] = None
     id: UUID
     site_id: UUID
     customer_email: Optional[str] = None
@@ -243,6 +263,13 @@ class CappeCartItem(BaseModel):
     starts_at: Optional[datetime] = None  # required for booking-fulfillment items
     # Chosen option ids; the server validates + prices them (never trusts deltas).
     selected_option_ids: list[UUID] = Field(default_factory=list)
+
+    @field_validator("selected_option_ids")
+    @classmethod
+    def unique_options(cls, value):
+        if len(value) > 100 or len(value) != len(set(value)):
+            raise ValueError("Select each option at most once (maximum 100)")
+        return value
 
 
 class CappeCheckoutRequest(BaseModel):

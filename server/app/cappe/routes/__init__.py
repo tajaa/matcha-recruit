@@ -8,6 +8,7 @@ templates, and public sub-routers are intentionally unauthenticated.
 from fastapi import APIRouter, Depends
 
 from ..dependencies import require_cappe_platform_admin
+from ..services.push import flush_pushes
 
 from .admin_billing import router as admin_billing_router
 from .auth import router as auth_router
@@ -33,16 +34,18 @@ from .reviews import router as reviews_router
 from .rider import router as rider_router
 from .staff import router as staff_router
 from .shop import router as shop_router
+from .shopper_subscriptions import router as shopper_subscriptions_router
 from .sites import router as sites_router
 from .templates import router as templates_router
 from .uploads import router as uploads_router
 
-cappe_router = APIRouter(tags=["cappe"])
+cappe_router = APIRouter(tags=["cappe"], dependencies=[Depends(flush_pushes)])
 
 # Unauthenticated surfaces.
 cappe_router.include_router(auth_router)
 cappe_router.include_router(templates_router)
 cappe_router.include_router(public_router)
+cappe_router.include_router(shopper_subscriptions_router)
 
 # Stripe Connect: /payments/connect + /payments/status gate on require_cappe_account
 # per-route; /payments/webhook is public (Stripe-signature verified).

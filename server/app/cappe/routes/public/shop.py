@@ -1,10 +1,14 @@
 """Cappe public surface — shop (products, orders, receipts)."""
-from fastapi import BackgroundTasks, HTTPException, Request, status
+from fastapi import BackgroundTasks, Depends, HTTPException, Request, status
 
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
 from ...models.cappe import CappeCheckoutRequest, CappeOrderReceipt, CappeProduct
 from ...services.commerce import create_public_order
+from ...dependencies import optional_shopper
+from ...models.shopper import CartQuoteRequest
+from ...services.cart import price_cart, priceable_products
+from ...services.recurring import build_subscription_lines
 from ...services.common import receipt_filename as _receipt_filename
 from ...services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
 from .._shared import fetch_option_groups, loads_list
@@ -17,6 +21,7 @@ router = limited_public_router(MAX_PUBLIC_CART_BODY_BYTES)
 # Public product listing exposes everything EXCEPT digital_file_url (the gated
 # deliverable — released only via the order receipt once paid/fulfilled).
 _PUBLIC_PRODUCT_COLS = (
+    "subscription_intervals, subscription_discount_bps, "
     "id, site_id, name, description, price_cents, currency, image_url, sku, "
     "inventory, status, sort_order, fulfillment, booking_type_id, requires_approval, "
     "intake_fields, category, created_at, updated_at"
@@ -51,7 +56,8 @@ async def public_products(slug: str, request: Request):
 
 
 @router.post("/public/sites/{slug}/orders", status_code=status.HTTP_201_CREATED)
-async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Request, background: BackgroundTasks):
+async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Request, background: BackgroundTasks,
+                              shopper=Depends(optional_shopper)):
     """Create an order for a mixed cart (physical / digital / service /
     booking). Prices + totals are recomputed server-side from the live product
     rows. The order lands `pending`; when the business has Stripe Connect ready
@@ -59,14 +65,33 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
     is decremented only for physical lines; booking lines create a scheduled
     booking; service lines validate intake answers. All in one transaction — see
     `services/commerce.py:create_public_order`."""
-    ip = client_ip(request)
+    ip = f"shopper:{shopper['id']}" if shopper else client_ip(request)
     await check_rate_limit(ip, "cappe_order", 10, 60)
     await check_rate_limit(ip, "cappe_order_hr", 50, 3600)
-    _reject_reserved(str(body.customer_email).strip().lower())
+    _reject_reserved(shopper["email"] if shopper else str(body.customer_email).strip().lower())
 
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
-    return await create_public_order(site, body, background)
+    return await create_public_order(site, body, background, shopper=shopper)
+
+
+@router.post("/public/sites/{slug}/quote")
+async def quote(slug: str, body: CartQuoteRequest, request: Request):
+    await _read_rate_limit(request)
+    async with get_connection() as conn:
+        site = await _published_site(conn, slug)
+        settings = await conn.fetchrow("SELECT tax_rate_bps,shipping_flat_cents,shipping_free_threshold_cents FROM cappe_sites WHERE id=$1", site["id"])
+        products = await conn.fetch("SELECT * FROM cappe_products WHERE site_id=$1 AND id=ANY($2::uuid[])", site["id"], [i.product_id for i in body.items])
+        groups = await fetch_option_groups(conn, [r["id"] for r in products])
+        discounts = await fetch_active_discounts(conn, site["id"])
+        today = site_today(await conn.fetchval("SELECT NOW()"), site["timezone"])
+    products = priceable_products(products, groups, discounts, today)
+    if body.interval:
+        _stripe_lines, lines, totals = build_subscription_lines(
+            products, body.items, body.interval, dict(settings)
+        )
+        return {"lines": lines, **totals}
+    return price_cart(products, body.items, dict(settings))
 
 
 @router.get("/public/orders/{token}/receipt.pdf")

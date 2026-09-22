@@ -1,13 +1,28 @@
 """Shared lifetime rules for every user-facing refresh token."""
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from ...config import get_settings
 
 
+@dataclass(frozen=True)
+class SessionLifetimes:
+    refresh_idle_minutes: int
+    refresh_absolute_minutes: int
+
+    def __post_init__(self):
+        if min(self.refresh_idle_minutes, self.refresh_absolute_minutes) <= 0:
+            raise ValueError("Session lifetimes must be positive")
+
+
 def access_token_stale(issued_at: Optional[int], *, now: Optional[datetime] = None) -> bool:
-    """Reject legacy long-lived access tokens after the configured short TTL."""
+    """Reject legacy long-lived access tokens after the configured short TTL.
+
+    Deliberately ignores per-scope `SessionLifetimes`: those bound the refresh
+    window only. Every product keeps the one short global access TTL.
+    """
     if issued_at is None:
         return True
     try:
@@ -22,11 +37,18 @@ def access_token_stale(issued_at: Optional[int], *, now: Optional[datetime] = No
 
 def refresh_token_times(
     session_started_at: Optional[int] = None,
+    *, lifetimes: Optional[SessionLifetimes] = None,
 ) -> tuple[datetime, int, datetime]:
     """Return issued-at, original session start, and bounded expiry."""
     settings = get_settings()
     issued_at = datetime.now(timezone.utc)
     started_at = int(session_started_at or issued_at.timestamp())
+    if lifetimes is not None:
+        return issued_at, started_at, min(
+            issued_at + timedelta(minutes=lifetimes.refresh_idle_minutes),
+            datetime.fromtimestamp(started_at, timezone.utc)
+            + timedelta(minutes=lifetimes.refresh_absolute_minutes),
+        )
     rolling_expiry = issued_at + timedelta(days=settings.jwt_refresh_token_expire_days)
     absolute_expiry = datetime.fromtimestamp(started_at, timezone.utc) + timedelta(
         hours=settings.jwt_session_absolute_expire_hours
@@ -39,6 +61,7 @@ def refresh_session_expired(
     session_started_at: Optional[int],
     *,
     now: Optional[datetime] = None,
+    lifetimes: Optional[SessionLifetimes] = None,
 ) -> bool:
     """Return whether a refresh is outside its idle or absolute window.
 
@@ -53,11 +76,17 @@ def refresh_session_expired(
     except (TypeError, ValueError):
         return True
 
-    settings = get_settings()
     now_epoch = int((now or datetime.now(timezone.utc)).timestamp())
-    if now_epoch - issued > settings.jwt_refresh_idle_expire_minutes * 60:
+    if lifetimes:
+        idle = lifetimes.refresh_idle_minutes
+        absolute = lifetimes.refresh_absolute_minutes
+    else:
+        settings = get_settings()
+        idle = settings.jwt_refresh_idle_expire_minutes
+        absolute = settings.jwt_session_absolute_expire_hours * 60
+    if now_epoch - issued > idle * 60:
         return True
-    return now_epoch - started > settings.jwt_session_absolute_expire_hours * 3600
+    return now_epoch - started > absolute * 60
 
 
 def issue_stamp_ms(issued_at: datetime) -> int:
