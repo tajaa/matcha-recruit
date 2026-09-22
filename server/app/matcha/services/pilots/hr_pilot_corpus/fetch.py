@@ -188,7 +188,8 @@ async def _fetch_schedule_autopilot(conn, company_id) -> list[dict]:
         )
         return [dict(row) for row in rows]
     except Exception:  # noqa: BLE001
-        logger.warning("hr_pilot_corpus: Autopilot fetch failed for %s", company_id)
+        # No tenant identifier in the message (CodeQL py/clear-text-logging).
+        logger.warning("hr_pilot_corpus: Autopilot fetch failed")
         return []
 
 
