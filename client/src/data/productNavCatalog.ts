@@ -1,7 +1,7 @@
 import {
   AlertTriangle, BadgeCheck, BarChart3, Boxes, Building2, CalendarClock, CalendarDays,
   ClipboardList, FileCheck2, FileSearch, FileSignature, FileText, GraduationCap,
-  HeartPulse, MessageSquare, QrCode, Scale, Shield, ShieldCheck, Siren,
+  HeartPulse, Link2, MessageSquare, QrCode, Scale, Shield, ShieldCheck, Siren,
   Sparkles, TrendingUp, Users, Wallet,
 } from 'lucide-react'
 import type { NavIcon } from '../components/sidebars/SidebarShell'
@@ -59,6 +59,7 @@ export const PRODUCT_NAV_CATALOG: Record<string, ProductNavEntry> = {
   cobra: { to: '/app/employees', icon: HeartPulse, label: 'COBRA' },
   separation_agreements: { to: '/app/employees', icon: FileSignature, label: 'Separations' },
   benefits_admin: { to: '/app/benefits', icon: HeartPulse, label: 'Benefits' },
+  symlink: { to: '/app/symlink', icon: Link2, label: 'Sym-links' },
 }
 
 /** Nav rows every product gets regardless of features. */
