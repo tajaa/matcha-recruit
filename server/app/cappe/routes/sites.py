@@ -86,6 +86,11 @@ async def _enforce_site_limit(conn, account: CappeAccount) -> None:
 
     The cap comes from the billing catalog (`site_limit`, NULL = unlimited) so
     it is admin-editable; it used to be a hardcoded `{"free": 1}` dict here.
+
+    Callers must hold the account row lock from
+    `_lock_account_for_site_creation` inside the same transaction through the
+    site INSERT.  Otherwise two concurrent creates can both observe the same
+    count and exceed the cap.
     """
     limit = (await resolve_entitlements(account.plan, conn=conn)).site_limit
     if limit is None:
@@ -99,6 +104,23 @@ async def _enforce_site_limit(conn, account: CappeAccount) -> None:
                 "Upgrade to create more."
             ),
         )
+
+
+async def _lock_account_for_site_creation(conn, account_id: UUID) -> None:
+    """Serialize cap checks and inserts for one account.
+
+    A row lock is preferable to a process-local lock: it coordinates every API
+    worker and is released automatically with the surrounding transaction.
+    The auth dependency already proved the account exists, but it can still be
+    deleted between authentication and this transaction; fail closed instead
+    of continuing without a lock and surfacing a foreign-key error later.
+    """
+    locked_id = await conn.fetchval(
+        "SELECT id FROM cappe_accounts WHERE id = $1 FOR UPDATE",
+        account_id,
+    )
+    if locked_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account not found")
 
 
 @router.get("/sites", response_model=list[CappeSite])
@@ -120,10 +142,13 @@ async def list_sites(account: CappeAccount = Depends(require_cappe_account)):
 async def create_site(body: CappeSiteCreate, account: CappeAccount = Depends(require_cappe_account)):
     """Create a blank or bring-your-own site."""
     async with get_connection() as conn:
-        await _enforce_site_limit(conn, account)
-        # slug doubles as the tenant subdomain — keep it off reserved labels.
-        slug = await unique_slug(conn, safe_subdomain_base(body.name), "cappe_sites")
         async with conn.transaction():
+            await _lock_account_for_site_creation(conn, account.id)
+            await _enforce_site_limit(conn, account)
+            # Slug doubles as the tenant subdomain — keep it off reserved
+            # labels. Allocate it after the account lock so two creates for the
+            # same account cannot both carry the same pre-lock candidate.
+            slug = await unique_slug(conn, safe_subdomain_base(body.name), "cappe_sites")
             row = await conn.fetchrow(
                 f"""INSERT INTO cappe_sites
                         (account_id, name, slug, subdomain, source_type, is_multi_location)
@@ -154,7 +179,8 @@ async def create_site_from_template(
     """Clone a template into a new site: copy its theme and pages in one
     transaction."""
     async with get_connection() as conn:
-        await _enforce_site_limit(conn, account)
+        # Validate before taking the account lock: a missing/inactive template
+        # remains a 404 and cannot make a legitimate create wait behind it.
         template = await conn.fetchrow(
             "SELECT id, name, structure, is_active FROM cappe_templates WHERE id = $1",
             body.template_id,
@@ -167,9 +193,11 @@ async def create_site_from_template(
         pages = structure.get("pages") or []
 
         name = body.name or template["name"]
-        slug = await unique_slug(conn, safe_subdomain_base(name), "cappe_sites")
 
         async with conn.transaction():
+            await _lock_account_for_site_creation(conn, account.id)
+            await _enforce_site_limit(conn, account)
+            slug = await unique_slug(conn, safe_subdomain_base(name), "cappe_sites")
             site = await conn.fetchrow(
                 f"""INSERT INTO cappe_sites
                         (account_id, name, slug, subdomain, source_type, template_id, theme_config)

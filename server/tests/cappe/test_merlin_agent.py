@@ -668,6 +668,61 @@ def _patch_generate_image(monkeypatch, *, url="https://cdn.example.test/g.png", 
     return calls
 
 
+def test_later_rate_limit_keeps_completed_ops_and_generated_image(monkeypatch):
+    """A limit reached between agent iterations must not erase work from the
+    prior iteration.  In particular, the image step carries the generated URL
+    that agent_stream catalogs after receiving the final result frame."""
+    from app.core.services.rate_limiter import RateLimitExceeded
+
+    _patch_generate_image(monkeypatch)
+    fake = _FakeClient([[
+        ("apply_ops", {
+            "ops": '[{"op":"set_field","block":"b1","path":"heading","value":"New"}]',
+        }),
+        ("generate_image", {"block_id": "b1", "prompt": "a warm sunset", "field": "image"}),
+    ]])
+
+    class _LimitedAfterFirstCall:
+        def __init__(self):
+            self.checks = 0
+
+        async def check_limit(self, *_a, **_k):
+            self.checks += 1
+            if self.checks > 1:
+                raise RateLimitExceeded("cap reached", "daily", 100, 100)
+
+        async def record_call(self, *_a, **_k):
+            return None
+
+    monkeypatch.setattr(merlin_agent, "get_genai_client", lambda *a, **k: fake)
+    monkeypatch.setattr(merlin_agent, "ApiRateLimiter", _LimitedAfterFirstCall)
+
+    import asyncio
+
+    async def _collect():
+        return [
+            frame
+            async for frame in run_merlin_agent(
+                message="update the hero",
+                history=[],
+                blocks=_BLOCKS,
+                theme={},
+                render_html=lambda b, t: "<html></html>",
+                model_tier="max",
+                plan="pro",
+                account_id="acct-1",
+            )
+        ]
+
+    frames = asyncio.run(_collect())
+    assert not any(frame["type"] == "error" for frame in frames)
+    data = _result(frames)
+    assert "capacity limit" in data["message"]
+    assert [op["op"] for op in data["ops"]] == ["set_field", "set_field"]
+    image_steps = [step for step in data["steps"] if step.get("kind") == "image"]
+    assert image_steps[0]["image_url"] == "https://cdn.example.test/g.png"
+
+
 def test_generate_image_tool_places_the_result_and_logs_a_set_field(patched, monkeypatch):
     calls = _patch_generate_image(monkeypatch)
     frames, _ = patched([

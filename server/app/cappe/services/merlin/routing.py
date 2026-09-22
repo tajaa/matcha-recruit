@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any, Optional
 
 from google.genai import types
@@ -162,6 +163,7 @@ async def route_tier(
     message: str = "",
     has_selected_block: bool = False,
     history_tail: Optional[str] = None,
+    before_classify: Optional[Callable[[], Awaitable[None]]] = None,
 ) -> tuple[str, bool]:
     """Resolve the tier for one turn. Returns `(tier, was_routed)`.
 
@@ -184,6 +186,11 @@ async def route_tier(
     if heuristic is not None:
         return heuristic, True
 
+    # The route layer supplies a per-account cost gate here. Keeping the hook
+    # immediately beside the actual classifier means pinned tiers, free plans,
+    # and heuristic auto decisions do not consume classifier allowance.
+    if before_classify is not None:
+        await before_classify()
     classified = await _classify(message, history_tail)
     tier = classified or _FALLBACK_TIER
     return (tier if tier in MODEL_TIERS else _FALLBACK_TIER), True

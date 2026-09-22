@@ -1041,7 +1041,19 @@ async def run_merlin_agent(
                 image_bearing_indices.append(len(contents) - 1)
 
     except RateLimitExceeded:
-        raise
+        # Preserve work from an iteration that already completed before the
+        # NEXT model-call budget check failed.  Re-raising here used to bypass
+        # the result frame entirely, so validated ops disappeared and a paid
+        # generated image (whose URL lives on its step) was neither recoverable
+        # from the transcript nor catalogued by agent_stream.  A limit hit
+        # before the loop did any useful work still propagates to the route's
+        # normal capacity response.
+        if not op_log and not steps:
+            raise
+        final_message = (
+            "Merlin reached its capacity limit before finishing, but I kept "
+            "the work completed so far."
+        )
     except Exception as exc:  # noqa: BLE001 — never-raises past rate limiting
         logger.warning("Merlin agent turn failed: %s", exc, exc_info=True)
         yield {"type": "error", "message": "Merlin hit a problem mid-edit — keeping what worked."}

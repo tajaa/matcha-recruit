@@ -72,8 +72,8 @@ async def stream_agent_turn(
         async with persist_lock:
             if persisted:
                 return
-            persisted = True
             if prep.conversation is None:
+                persisted = True
                 return
             async with get_connection() as conn:
                 stored = await merlin_store.add_message(
@@ -85,8 +85,12 @@ async def stream_agent_turn(
                     ops=final_result.get("ops") or None,
                     tier=final_result.get("tier"),
                 )
-            final_result["conversation_id"] = str(prep.conversation["id"])
-            final_result["message_id"] = str(stored["id"])
+                final_result["conversation_id"] = str(prep.conversation["id"])
+                final_result["message_id"] = str(stored["id"])
+                # `add_message` committed its inner transaction. Mark success
+                # before returning the connection to the pool, so a pool-release
+                # error cannot trigger a duplicate retry of an already-written row.
+                persisted = True
 
     try:
         try:
@@ -137,7 +141,18 @@ async def stream_agent_turn(
 
         if result is not None:
             result["routed"] = prep.routed
-            await asyncio.shield(persist(result))
+            # A short-lived pool/DB failure must not discard a completed model
+            # answer. Retry once before delivery; if storage is still down the
+            # result remains usable client-side and the finally block gets one
+            # last best-effort attempt because `persisted` is still false.
+            for attempt in range(2):
+                try:
+                    await asyncio.shield(persist(result))
+                    break
+                except Exception as exc:  # noqa: BLE001 — delivery survives transcript failure
+                    logger.warning(
+                        "Merlin assistant persist attempt %s failed: %s", attempt + 1, exc
+                    )
             # Catalog anything the agent generated this turn (do_generate_image
             # rides prompt/aspect/image_size on the step for exactly this).
             # Best-effort, same reasoning as the upload routes: a broken
