@@ -455,9 +455,32 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
             "when": item["week_start"],
         })
 
+    _autopilot_records: list[dict] = []
+    for item in grounding.get("schedule_autopilot") or []:
+        model = item.get("demand_model") or {}
+        if isinstance(model, str):
+            import json as _json
+            try:
+                model = _json.loads(model)
+            except (TypeError, ValueError):
+                model = {}
+        labor = model.get("labor") or {}
+        bits = [str(model.get("sentence") or "Autopilot generated a reviewable week.")]
+        if labor.get("labor_pct") is not None:
+            bits.append(f"scheduled labor is {labor['labor_pct']}% of forecast sales")
+        _autopilot_records.append({
+            "cid": f"schedint:autopilot.{item['location_id']}",
+            "ref": f"Schedule Autopilot — {item['location_name']}, week of {item['week_start']}",
+            "summary": "; ".join(bits) + " Forecast-driven plan, not worked time or payroll.",
+            "when": str(item["week_start"]),
+        })
+
     sources["schedint"] = {
         "label": "Schedule Intelligence — analytics",
-        "records": _schedint_records(grounding.get("schedule_intelligence")) + _labor_cost_records,
+        "records": (
+            _schedint_records(grounding.get("schedule_intelligence"))
+            + _labor_cost_records + _autopilot_records
+        ),
     }
     # Nameless (state-level law + ordinances, no employee data) — like
     # benefits, NOT in _SUPERVISOR_ONLY_SOURCES, so Ask HR employees keep it.

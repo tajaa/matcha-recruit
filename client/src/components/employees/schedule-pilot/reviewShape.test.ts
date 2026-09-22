@@ -17,6 +17,7 @@ function review(overrides: Partial<ScheduleReview> = {}): ScheduleReview {
     // The normalizer resolves an absent cost block to null, so a "fully
     // formed" review carries the key explicitly.
     cost: null,
+    demand_model: null,
     ...overrides,
   }
 }

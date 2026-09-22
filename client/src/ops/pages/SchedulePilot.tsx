@@ -12,10 +12,11 @@ import { useScheduleHuumeThread } from '../../hooks/employees/useScheduleHuumeTh
 import { useToast } from '../../components/ui'
 import { adoptScheduleProposal, getScheduleSuggestionStatus, type ScheduleSuggestionStatus } from '../../api/employees/scheduleAssistant'
 import { fetchLocationScheduleProfile } from '../../api/employees/locationProfile'
+import { fetchAutopilotReadiness, runAutopilot } from '../../api/employees/employeeSchedule'
 import LocationPicker from '../../components/shared/LocationPicker'
 import {
   addDays, errorMessage, startOfWeek, toISODate,
-  type LocationScheduleProfile, type Shift,
+  type AutopilotReadiness, type LocationScheduleProfile, type Shift,
 } from '../../types/employeeSchedule'
 import { resolveScheduleDrop, type ScheduleDragData, type ScheduleDropData } from '../../components/employees/schedule-editor/drag'
 import type { NewShiftDefaults } from '../../components/employees/schedule-editor/ShiftInspector'
@@ -82,6 +83,7 @@ export default function SchedulePilot() {
   // the flag AND the caller is a business admin, so this check only decides
   // whether to ASK for the column — it is not the gate.
   const laborCostEnabled = hasFeature('labor_cost')
+  const autopilotEnabled = hasFeature('schedule_autopilot')
   const [editPublished, setEditPublished] = useState(false)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const [inspectorShiftId, setInspectorShiftId] = useState<string | null>(null)
@@ -97,6 +99,8 @@ export default function SchedulePilot() {
   const [reviewSource, setReviewSource] = useState<ReviewSource>({ kind: 'staged' })
   const [automaticSuggestion, setAutomaticSuggestion] = useState<ScheduleSuggestionStatus | null>(null)
   const [weekRules, setWeekRules] = useState<LocationScheduleProfile['week_rules'] | null>(null)
+  const [autopilotReadiness, setAutopilotReadiness] = useState<AutopilotReadiness | null>(null)
+  const [autopilotRunning, setAutopilotRunning] = useState(false)
   const [huumeSelectedShiftIds, setHuumeSelectedShiftIds] = useState<Set<string>>(() => new Set())
   const { jobs, reloadJobs } = useScheduleJobs(locationId)
   const openBreakPlanner = useCallback((shift: Shift, _employeeId: string, message: string) => {
@@ -137,6 +141,16 @@ export default function SchedulePilot() {
   }, [locationId])
 
   useEffect(() => { reloadWeekRules() }, [reloadWeekRules])
+
+  useEffect(() => {
+    let cancelled = false
+    setAutopilotReadiness(null)
+    if (!autopilotEnabled || !locationId) return () => { cancelled = true }
+    void fetchAutopilotReadiness(locationId, weekStart)
+      .then((value) => { if (!cancelled) setAutopilotReadiness(value) })
+      .catch(() => { if (!cancelled) setAutopilotReadiness(null) })
+    return () => { cancelled = true }
+  }, [autopilotEnabled, locationId, weekStart, planning.inputs])
 
   const afterApplied = useCallback(() => {
     setAutomaticSuggestion(null)
@@ -336,6 +350,26 @@ export default function SchedulePilot() {
     }
   }
 
+  async function buildWithAutopilot() {
+    if (!locationId) return
+    setAutopilotRunning(true)
+    try {
+      const result = await runAutopilot(locationId, weekStart)
+      toast(result.message, result.status === 'generated' ? 'success' : 'info')
+      if (result.status === 'generated') {
+        const status = await getScheduleSuggestionStatus(locationId, weekStart)
+        setAutomaticSuggestion(status.available ? status : null)
+        setThreadOpen(true)
+        setReviewSource({ kind: 'staged' })
+        setCenterView('review')
+      }
+    } catch (error) {
+      toast(errorMessage(error), 'error')
+    } finally {
+      setAutopilotRunning(false)
+    }
+  }
+
   async function handleDragEnd(event: DragEndEvent) {
     setActiveDrag(null)
     const active = event.active.data.current as ScheduleDragData | undefined
@@ -441,6 +475,7 @@ export default function SchedulePilot() {
       weekRules={weekRules}
       locationName={currentLocationName}
       credentialsEnabled={credentialTemplatesEnabled}
+      autopilotReadiness={autopilotReadiness}
       onOpenWeekSetup={openWeekSetup}
       onOpenJobs={openJobs}
       onAskHuume={askHuume}
@@ -491,6 +526,15 @@ export default function SchedulePilot() {
           threadOpen={threadOpen}
           onToggleThread={() => setThreadOpen((open) => !open)}
           huumeSelectionCount={huumeSelectedShifts.length}
+          autopilot={{
+            visible: autopilotEnabled && !(editor.summary?.published ?? 0),
+            running: autopilotRunning,
+            disabled: !autopilotReadiness?.ready,
+            title: autopilotReadiness?.ready
+              ? 'Build a reviewable week from forecasts and this store’s setup'
+              : autopilotReadiness?.blockers.join(' ') || 'Checking Autopilot readiness…',
+            onRun: () => { void buildWithAutopilot() },
+          }}
         />
         {automaticSuggestion && locationId && (
           <div className="flex items-center gap-3 border-b border-emerald-500/20 bg-emerald-500/[0.07] px-4 py-2 text-xs text-emerald-100 md:px-6">

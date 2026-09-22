@@ -55,6 +55,15 @@ def _serialize(bundle: dict, *, location_id: UUID) -> dict:
         "week_start_weekday": int(profile.get("week_start_weekday") or 0),
         "open_buffer_minutes": int(profile.get("open_buffer_minutes") or 0),
         "close_buffer_minutes": int(profile.get("close_buffer_minutes") or 0),
+        "weather_sensitivity": profile.get("weather_sensitivity") or "none",
+        "min_floor_staff": int(
+            profile["min_floor_staff"] if profile.get("min_floor_staff") is not None else 1
+        ),
+        "target_labor_pct": (
+            float(profile["target_labor_pct"]) if profile.get("target_labor_pct") is not None else None
+        ),
+        "autopilot_shift_min_minutes": profile.get("autopilot_shift_min_minutes"),
+        "autopilot_shift_max_minutes": profile.get("autopilot_shift_max_minutes"),
         "template": template,
     }
 
@@ -137,6 +146,11 @@ async def update_location_schedule_profile(
                     week_start_weekday=patch.get("week_start_weekday", UNSET),
                     open_buffer_minutes=patch.get("open_buffer_minutes", UNSET),
                     close_buffer_minutes=patch.get("close_buffer_minutes", UNSET),
+                    weather_sensitivity=patch.get("weather_sensitivity", UNSET),
+                    min_floor_staff=patch.get("min_floor_staff", UNSET),
+                    target_labor_pct=patch.get("target_labor_pct", UNSET),
+                    autopilot_shift_min_minutes=patch.get("autopilot_shift_min_minutes", UNSET),
+                    autopilot_shift_max_minutes=patch.get("autopilot_shift_max_minutes", UNSET),
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc

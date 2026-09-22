@@ -909,7 +909,12 @@ TOOLS: tuple[HuumeTool, ...] = (
         "demand to build the selected location's entire week. Returns the "
         "available demand sources, roster readiness, and exact blockers. "
         "Call this before building a week when the inputs are uncertain.",
-        properties={},
+        properties={
+            "source_mode": _s(
+                type="string", enum=["auto", "existing", "template", "autopilot"],
+                description="Use autopilot when checking readiness for an Autopilot build.",
+            ),
+        },
         discovery=True,
         intent_hints=("build this week", "create the schedule", "schedule readiness", "staff the week"),
     ),
@@ -1018,8 +1023,8 @@ TOOLS: tuple[HuumeTool, ...] = (
         "turn with the exact confirm_id; the resulting shifts remain drafts.",
         properties={
             "source_mode": _s(
-                type="string", enum=["auto", "existing", "template"],
-                description="Use auto unless the manager selected a specific source.",
+                type="string", enum=["auto", "existing", "template", "autopilot"],
+                description="Use auto unless the manager selected a specific source; use autopilot only when enabled.",
             ),
             "week_template_id": _s(
                 type="string",

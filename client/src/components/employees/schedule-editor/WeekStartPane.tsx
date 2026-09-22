@@ -13,6 +13,7 @@ import type {
 } from '../../../types/employeeSchedule'
 import { WEEKDAY_LABELS, WEEK_RULE_LABELS, errorMessage } from '../../../types/employeeSchedule'
 import { TemplateForm } from './TemplateForm'
+import { useMe } from '../../../hooks/useMe'
 
 const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-500'
 
@@ -56,6 +57,8 @@ export default function WeekStartPane(
   },
 ) {
   const { toast } = useToast()
+  const { hasFeature } = useMe()
+  const autopilotEnabled = hasFeature('schedule_autopilot')
   const [profile, setProfile] = useState<LocationScheduleProfile | null>(null)
   const [templates, setTemplates] = useState<WeekTemplate[]>([])
   const [loading, setLoading] = useState(true)
@@ -71,6 +74,11 @@ export default function WeekStartPane(
   const [notes, setNotes] = useState('')
   const [openBuffer, setOpenBuffer] = useState('0')
   const [closeBuffer, setCloseBuffer] = useState('0')
+  const [weatherSensitivity, setWeatherSensitivity] = useState<'none' | 'rain_hurts' | 'rain_helps'>('none')
+  const [minFloorStaff, setMinFloorStaff] = useState('1')
+  const [targetLaborPct, setTargetLaborPct] = useState('')
+  const [shiftMinHours, setShiftMinHours] = useState('')
+  const [shiftMaxHours, setShiftMaxHours] = useState('')
 
   const applyProfile = useCallback((next: LocationScheduleProfile) => {
     setProfile(next)
@@ -88,6 +96,11 @@ export default function WeekStartPane(
     setNotes(next.notes ?? '')
     setOpenBuffer(String(next.open_buffer_minutes ?? 0))
     setCloseBuffer(String(next.close_buffer_minutes ?? 0))
+    setWeatherSensitivity(next.weather_sensitivity ?? 'none')
+    setMinFloorStaff(String(next.min_floor_staff ?? 1))
+    setTargetLaborPct(next.target_labor_pct == null ? '' : String(next.target_labor_pct))
+    setShiftMinHours(next.autopilot_shift_min_minutes == null ? '' : String(next.autopilot_shift_min_minutes / 60))
+    setShiftMaxHours(next.autopilot_shift_max_minutes == null ? '' : String(next.autopilot_shift_max_minutes / 60))
   }, [])
 
   const load = useCallback(async () => {
@@ -168,6 +181,23 @@ export default function WeekStartPane(
     }, 'Location scheduling setup saved')
   }
 
+  function optionalNumber(raw: string): number | null {
+    const value = Number(raw)
+    return raw.trim() && Number.isFinite(value) ? value : null
+  }
+
+  async function saveAutopilot() {
+    const minHours = optionalNumber(shiftMinHours)
+    const maxHours = optionalNumber(shiftMaxHours)
+    await persist({
+      weather_sensitivity: weatherSensitivity,
+      min_floor_staff: Math.min(20, Math.max(0, Number.parseInt(minFloorStaff, 10) || 0)),
+      target_labor_pct: optionalNumber(targetLaborPct),
+      autopilot_shift_min_minutes: minHours == null ? null : Math.round(minHours * 60),
+      autopilot_shift_max_minutes: maxHours == null ? null : Math.round(maxHours * 60),
+    }, 'Autopilot settings saved')
+  }
+
   /** The pickable jobs: this location's, plus any saved leader job the list
    *  does not carry (company-wide, or since moved) so a saved pick is never
    *  invisible — and never silently dropped on the next save. */
@@ -194,7 +224,9 @@ export default function WeekStartPane(
         <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-500">How this location runs a normal week. Huume fills this in when it interviews you; anything it got wrong you can correct here.</p>
         {profile && !profile.week_rules.established && (
           <p className="mt-2 max-w-2xl rounded-lg border border-amber-500/25 bg-amber-500/[0.08] px-2.5 py-1.5 text-xs text-amber-100">
-            Still missing: {profile.week_rules.missing.map((field) => WEEK_RULE_LABELS[field]).join(', ')}. Huume won’t build a week until these are saved.
+            Still missing: {profile.week_rules.missing.map((field) => WEEK_RULE_LABELS[field]).join(', ')}. {autopilotEnabled
+              ? 'Template builds need a staffing pattern; Autopilot uses the operating hours and leader rule.'
+              : 'Huume won’t build a week until these are saved.'}
           </p>
         )}
       </div>
@@ -287,6 +319,42 @@ export default function WeekStartPane(
       <Card className="space-y-3 border-zinc-800 bg-zinc-900/40 p-4 shadow-none">
         <Textarea label="Notes" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Anything else about how this location schedules — busy nights, split shifts, who to call first." />
       </Card>
+
+      {autopilotEnabled && (
+        <Card className="space-y-3 border-emerald-500/20 bg-emerald-500/[0.04] p-4 shadow-none">
+          <div>
+            <h4 className="text-xs font-medium text-emerald-200">Autopilot</h4>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">Controls how forecast sales and weather become a reviewable staffing plan. These are operating choices, not legal rules.</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Select
+              label="Weather sensitivity"
+              options={[
+                { value: 'none', label: 'None' },
+                { value: 'rain_hurts', label: 'Rain hurts demand' },
+                { value: 'rain_helps', label: 'Rain helps demand' },
+              ]}
+              value={weatherSensitivity}
+              onChange={(event) => setWeatherSensitivity(event.target.value as typeof weatherSensitivity)}
+            />
+            <label className="text-xs text-zinc-400">Minimum floor staff
+              <input type="number" min={0} max={20} value={minFloorStaff} onChange={(event) => setMinFloorStaff(event.target.value)} className={`${inputCls} mt-1`} />
+            </label>
+            <label className="text-xs text-zinc-400">Target labor % <span className="text-zinc-600">optional</span>
+              <input type="number" min={1} max={90} step="0.5" value={targetLaborPct} onChange={(event) => setTargetLaborPct(event.target.value)} className={`${inputCls} mt-1`} placeholder="28" />
+            </label>
+            <label className="text-xs text-zinc-400">Minimum shift hours <span className="text-zinc-600">optional</span>
+              <input type="number" min={2} max={12} step="0.5" value={shiftMinHours} onChange={(event) => setShiftMinHours(event.target.value)} className={`${inputCls} mt-1`} placeholder="4" />
+            </label>
+            <label className="text-xs text-zinc-400">Maximum shift hours <span className="text-zinc-600">optional</span>
+              <input type="number" min={2} max={12} step="0.5" value={shiftMaxHours} onChange={(event) => setShiftMaxHours(event.target.value)} className={`${inputCls} mt-1`} placeholder="9" />
+            </label>
+          </div>
+          <button onClick={() => void saveAutopilot()} disabled={saving} className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/40 px-3 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-50">
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save Autopilot settings
+          </button>
+        </Card>
+      )}
 
       <button onClick={() => void saveSetup()} disabled={saving} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
         {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save week setup

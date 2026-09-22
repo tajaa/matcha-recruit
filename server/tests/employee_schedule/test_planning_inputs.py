@@ -79,11 +79,15 @@ def _build(*, employees, existing=(), demand=(), bundle=None, rules=None, availa
     async def fake_rules(conn, company_id, location_id):
         return rules or {"state": "CA", "status": "curated"}
 
+    async def fake_weather(conn, **kw):
+        return {}
+
     with (
         mock.patch.object(week_builder, "_load_roster_context", fake_roster),
         mock.patch.object(week_builder, "_load_vacant_demand", fake_demand),
         mock.patch.object(planning_inputs, "load_profile_bundle", fake_bundle),
         mock.patch.object(planning_inputs, "jurisdiction_rule_status", fake_rules),
+        mock.patch.object(planning_inputs, "load_weather_days", fake_weather),
     ):
         return _run(planning_inputs.build_planning_inputs(
             _Conn(), company_id=COMPANY, location_id=LOCATION, week_start=WEEK,

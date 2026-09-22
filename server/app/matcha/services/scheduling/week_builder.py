@@ -50,6 +50,7 @@ from .shift_writes import (
 
 
 PLANNER_VERSION = "week-builder-v1"
+AUTOPILOT_PLANNER_VERSION = "week-builder-v2-autopilot"
 _MAX_DEMAND_SHIFTS = 200
 _MAX_ROSTER = 300
 _MAX_PREVIEW_SHIFTS = 100
@@ -155,6 +156,7 @@ def _coverage_sentence(metrics: dict[str, Any]) -> str:
 def _review_payload(
     *, plan: dict[str, Any], snapshot: dict[str, Any],
     source_mode: str, template_name: str | None,
+    demand_model: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the persisted manager-facing view of a generated proposal."""
     metrics = plan["metrics"]
@@ -182,9 +184,9 @@ def _review_payload(
             "existing_assignment_count": len(fixed_names),
         })
     source_label = (
-        "the existing draft shifts"
-        if source_mode == "existing"
-        else f'template "{template_name}"'
+        "the existing draft shifts" if source_mode == "existing" else
+        "sales, weather and this store's setup (Autopilot)" if source_mode == "autopilot" else
+        f'template "{template_name}"'
     )
     summary = (
         f"Built a draft proposal from {source_label}: {metrics['filled_positions']} of "
@@ -197,6 +199,8 @@ def _review_payload(
     # needs review is the honest ending; saying the week is compliant is a
     # claim this planner is not in a position to make.
     summary += _coverage_sentence(metrics)
+    if demand_model and demand_model.get("sentence"):
+        summary += " " + str(demand_model["sentence"])
     if (metrics.get("finding_counts") or {}).get("staffing_concentration") and metrics.get("top_load"):
         top = metrics["top_load"][0]
         summary += (
@@ -1169,6 +1173,7 @@ async def _coverage_profile(conn, *, company_id: UUID, location_id: UUID) -> dic
 
 async def _week_rules_gate(
     conn, *, company_id: UUID, location_id: UUID, location_name: str | None = None,
+    mode: str = "template",
 ) -> dict[str, Any] | None:
     """`None` when this location's week-set rules are established, else the
     clarify to return INSTEAD of planning a week.
@@ -1186,13 +1191,13 @@ async def _week_rules_gate(
     bundle = await load_profile_bundle(
         conn, company_id=company_id, location_id=location_id,
     )
-    message = week_rules_refusal(bundle, location_name=location_name)
+    message = week_rules_refusal(bundle, location_name=location_name, mode=mode)
     if message is None:
         return None
     return {
         "status": "clarify",
         "message": message,
-        "setup_missing": missing_fields(bundle),
+        "setup_missing": missing_fields(bundle, mode=mode),
     }
 
 
@@ -1954,6 +1959,7 @@ async def _load_template_demand(conn, *, company_id: UUID, location_id: UUID,
 async def _planning_snapshot(
     conn, *, company_id: UUID, location_id: UUID, week_start: date,
     source_mode: str, week_template_id: UUID | None,
+    demand_override: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], str | None]:
     roster = await _load_roster_context(
         conn, company_id=company_id, location_id=location_id, week_start=week_start,
@@ -1971,8 +1977,12 @@ async def _planning_snapshot(
             conn, company_id=company_id, location_id=location_id,
             week_start=week_start, template_id=week_template_id,
         )
+    elif source_mode == "autopilot":
+        if demand_override is None:
+            raise ValueError("Autopilot demand must be generated before planning.")
+        demand = demand_override
     else:
-        raise ValueError("Choose existing draft shifts or a week template as the schedule source.")
+        raise ValueError("Choose existing draft shifts, a week template, or Autopilot as the schedule source.")
     snapshot = {
         "location_id": str(location_id), "week_start": week_start.isoformat(),
         "source_mode": source_mode,
@@ -1985,10 +1995,11 @@ async def _planning_snapshot(
 async def get_week_build_readiness(
     *, company_id: UUID, location_id: UUID, week_start: date,
     week_template_id: UUID | None = None,
+    source_mode: str | None = None,
 ) -> dict[str, Any]:
     async with connection_or_direct() as conn:
         location = await conn.fetchrow(
-            "SELECT id, name FROM business_locations WHERE id=$1 AND company_id=$2 AND is_active IS NOT FALSE",
+            "SELECT id, name, timezone FROM business_locations WHERE id=$1 AND company_id=$2 AND is_active IS NOT FALSE",
             location_id, company_id,
         )
         if not location:
@@ -2041,6 +2052,54 @@ async def get_week_build_readiness(
                 conn, company_id=company_id, location_id=location_id, week_start=week_start,
             ) if shift["status"] == "published"
         ]
+        autopilot_info = None
+        autopilot_has_jobs = True
+        if source_mode == "autopilot":
+            sales_days = int(await conn.fetchval(
+                """SELECT COUNT(DISTINCT business_date)
+                   FROM inventory_sales_imports
+                   WHERE company_id=$1 AND location_id=$2 AND status='committed'
+                     AND business_date >= $3 AND business_date < $4""",
+                company_id, location_id, week_start - timedelta(days=84), week_start,
+            ) or 0)
+            weather_days = int(await conn.fetchval(
+                """SELECT COUNT(*) FROM schedule_weather_days
+                   WHERE company_id=$1 AND location_id=$2
+                     AND local_date BETWEEN $3 AND $4""",
+                company_id, location_id, week_start, week_start + timedelta(days=6),
+            ) or 0)
+            history_weeks = int(await conn.fetchval(
+                """SELECT COUNT(DISTINCT date_trunc('week', starts_at))
+                   FROM schedule_shifts
+                   WHERE company_id=$1 AND location_id=$2 AND status='published'
+                     AND kind='work' AND starts_at >= $3 AND starts_at < $4""",
+                company_id, location_id,
+                datetime.combine(week_start - timedelta(weeks=8), time.min, tzinfo=timezone.utc),
+                datetime.combine(week_start, time.min, tzinfo=timezone.utc),
+            ) or 0)
+            job_rows = await conn.fetch(
+                """SELECT id FROM schedule_jobs
+                   WHERE company_id=$1 AND (location_id=$2 OR location_id IS NULL)
+                   ORDER BY id""",
+                company_id, location_id,
+            )
+            active_job_ids = {
+                str(job["job_id"])
+                for employee in roster["employees"]
+                for job in employee.get("jobs") or []
+                if job.get("qualification_status") == "active"
+            }
+            gated_job_ids = roster.get("gated_job_ids") or set()
+            autopilot_has_jobs = any(
+                str(job["id"]) not in gated_job_ids or str(job["id"]) in active_job_ids
+                for job in job_rows
+            )
+            autopilot_info = {
+                "sales_weeks": round(sales_days / 7, 1),
+                "sales_confidence": "high" if sales_days >= 56 else "medium" if sales_days >= 28 else "low" if sales_days else "none",
+                "weather_days_available": weather_days,
+                "history_weeks": history_weeks,
+            }
     pattern_findings = evaluate_week_coverage(
         plan_shifts=pattern_source, baseline_shifts=published_shifts,
         operating_hours=profile["operating_hours"],
@@ -2068,31 +2127,39 @@ async def get_week_build_readiness(
         recommendation = "template"
     else:
         recommendation = None
-    rules_missing = missing_fields(rules_bundle)
+    autopilot_mode = source_mode == "autopilot"
+    rules_missing = missing_fields(rules_bundle, mode="autopilot" if autopilot_mode else "template")
     blockers = []
     # First, because it is the one blocker the manager can act on without any
     # roster or template work — and the one the builder itself enforces.
-    rules_refusal = week_rules_refusal(rules_bundle, location_name=location["name"])
+    rules_refusal = week_rules_refusal(
+        rules_bundle, location_name=location["name"],
+        mode="autopilot" if autopilot_mode else "template",
+    )
     if rules_refusal:
         blockers.append(rules_refusal)
     if not roster["employees"]:
         blockers.append("No active employees are assigned to this location.")
+    if autopilot_mode and not autopilot_has_jobs:
+        blockers.append("Add a schedule job with at least one qualified employee before using Autopilot.")
     if not confirmed:
         blockers.append("No employee has confirmed scheduling availability.")
     selected_template = next(
         (template for template in templates if str(template["id"]) == str(week_template_id)), None,
     ) if week_template_id else None
-    if week_template_id and (not selected_template or not selected_template["block_count"]):
+    if autopilot_mode and not location["timezone"]:
+        blockers.append("This location needs a timezone before Autopilot can build its civil week.")
+    if not autopilot_mode and week_template_id and (not selected_template or not selected_template["block_count"]):
         blockers.append("The selected week template is unavailable or has no shift blocks.")
-    elif not demand and not any(template["block_count"] for template in templates):
+    elif not autopilot_mode and not demand and not any(template["block_count"] for template in templates):
         blockers.append("Add draft shifts or a week template to define the store's staffing needs.")
-    if not demand and shift_counts["published"]:
+    if (autopilot_mode or not demand) and shift_counts["published"]:
         blockers.append(
             "This week already has published shifts. Add only the remaining staffing needs as drafts before asking Huume to fill them."
         )
     usable_templates = [template for template in templates if template["block_count"]]
     if (
-        not demand and not week_template_id
+        not autopilot_mode and not demand and not week_template_id
         and default_template is None and len(usable_templates) > 1
     ):
         blockers.append("Choose which saved week template Huume should use as staffing demand.")
@@ -2107,7 +2174,7 @@ async def get_week_build_readiness(
         "existing_draft_shift_count": len(demand),
         "published_shift_count": shift_counts["published"],
         "existing_required_positions": existing_positions,
-        "week_templates": templates, "recommended_source": recommendation,
+        "week_templates": templates, "recommended_source": "autopilot" if autopilot_mode and not blockers else recommendation,
         "blockers": blockers,
         "week_rules_missing": rules_missing,
         "operating_hours_known": bool(profile["operating_hours"]),
@@ -2119,6 +2186,7 @@ async def get_week_build_readiness(
         "leader_job_names": profile["leader_job_names"],
         "leader_job_name": profile["leader_job_names"][0] if profile["leader_job_names"] else None,
         "pattern_findings": pattern_findings,
+        "autopilot": autopilot_info,
         "employees": [
             {"employee_id": employee["id"], "name": employee["name"],
              "availability_state": employee["availability_state"],
@@ -2171,8 +2239,10 @@ async def propose_week_draft(
         )
         if misaligned:
             return misaligned
+        requested_mode = (source_mode or "auto").strip().lower()
         gate = await _week_rules_gate(
             conn, company_id=company_id, location_id=location_id,
+            mode="autopilot" if requested_mode == "autopilot" else "template",
         )
         if gate:
             return gate
@@ -2184,7 +2254,7 @@ async def propose_week_draft(
         )
         templates = await _list_templates(conn, company_id=company_id, location_id=location_id)
         template_uuid: UUID | None = None
-        selected_source = (source_mode or "auto").strip().lower()
+        selected_source = requested_mode
         if selected_source == "auto":
             if existing:
                 selected_source = "existing"
@@ -2222,30 +2292,61 @@ async def propose_week_draft(
                 else:
                     selected_source = "template"
                     week_template_id = usable[0]["id"]
-        if selected_source not in {"existing", "template"}:
-            return {"status": "clarify", "message": "Use source_mode existing, template, or auto."}
-        if selected_source == "template":
+        if selected_source not in {"existing", "template", "autopilot"}:
+            return {"status": "clarify", "message": "Use source_mode existing, template, autopilot, or auto."}
+        if selected_source in {"template", "autopilot"}:
             if shift_counts["published"]:
                 return {
                     "status": "refused",
                     "message": (
-                        "This week already has published shifts. I won't apply a full-week template "
+                        "This week already has published shifts. I won't apply a full-week build "
                         "on top of them because that could create duplicates."
                     ),
                 }
+            if existing:
+                return {
+                    "status": "refused",
+                    "message": "This week already has draft shifts — clear them or use them as the source.",
+                }
+        if selected_source == "template":
             try:
                 template_uuid = UUID(str(week_template_id))
             except (TypeError, ValueError):
                 return {"status": "clarify", "message": "Choose a week_template_id from the readiness list."}
-            if existing:
+        demand_model: dict[str, Any] | None = None
+        demand_override: list[dict[str, Any]] | None = None
+        if selected_source == "autopilot":
+            features = await get_company_features(company_id, conn=conn)
+            if not features.get("schedule_autopilot"):
+                return {"status": "refused", "message": "Schedule Autopilot is not enabled for this company."}
+            from .autopilot import generate_autopilot_demand
+            from .autopilot.inputs import load_autopilot_inputs
+            profile_bundle = await load_profile_bundle(
+                conn, company_id=company_id, location_id=location_id,
+            )
+            autopilot_roster = await _load_roster_context(
+                conn, company_id=company_id, location_id=location_id, week_start=week_start,
+            )
+            kwargs = await load_autopilot_inputs(
+                conn, company_id=company_id, location_id=location_id,
+                week_start=week_start, roster=autopilot_roster,
+                profile_bundle=profile_bundle,
+            )
+            result = generate_autopilot_demand(**kwargs)
+            demand_override = result.demand
+            demand_model = result.demand_model
+            if not demand_override:
+                notes = "; ".join((demand_model.get("notes") or [])[:3])
                 return {
                     "status": "refused",
-                    "message": "This week already has draft shifts. Use those as the source so I don't create duplicates.",
+                    "message": "Autopilot found nothing to staff" + (f": {notes}" if notes else "."),
+                    "demand_model": demand_model,
                 }
         try:
             snapshot, demand, template_name = await _planning_snapshot(
                 conn, company_id=company_id, location_id=location_id, week_start=week_start,
                 source_mode=selected_source, week_template_id=template_uuid,
+                demand_override=demand_override,
             )
         except ValueError as exc:
             return {"status": "clarify", "message": str(exc)}
@@ -2300,7 +2401,7 @@ async def propose_week_draft(
         )
         review = _review_payload(
             plan=plan, snapshot=snapshot, source_mode=selected_source,
-            template_name=template_name,
+            template_name=template_name, demand_model=demand_model,
         )
         run_id = uuid4()
         # The `ScheduleReview` every schedule surface renders (same contract
@@ -2334,6 +2435,15 @@ async def propose_week_draft(
                 ],
             )],
         )
+        if demand_model and demand_model.get("forecast_sales_week") is not None and draft_cost:
+            total = draft_cost.get("after")
+            if total is not None:
+                forecast_sales = float(demand_model["forecast_sales_week"])
+                demand_model["labor"] = {
+                    "forecast_sales_week": forecast_sales,
+                    "scheduled_cost_after": total,
+                    "labor_pct": round(float(total) * 100 / forecast_sales, 2) if forecast_sales else None,
+                }
         schedule_review = build_week_draft_review(
             plan,
             employee_names={employee["id"]: employee["name"] for employee in snapshot["employees"]},
@@ -2343,7 +2453,12 @@ async def propose_week_draft(
             concentration_findings=concentration_findings,
             cost=draft_cost,
         )
+        if demand_model is not None:
+            schedule_review["demand_model"] = demand_model
         persisted_plan = {**plan, "review": review, "schedule_review": schedule_review}
+        if demand_model is not None:
+            persisted_plan["demand_rows"] = _iso(demand_override or [])
+            persisted_plan["demand_model"] = demand_model
         input_hash = _input_hash(snapshot)
         insert_result = await conn.execute(
             """
@@ -2355,7 +2470,9 @@ async def propose_week_draft(
             ON CONFLICT DO NOTHING
             """,
             run_id, company_id, location_id, week_start, thread_id, selected_source,
-            template_uuid, origin, input_hash, PLANNER_VERSION, json.dumps(constraints),
+            template_uuid, origin, input_hash,
+            AUTOPILOT_PLANNER_VERSION if selected_source == "autopilot" else PLANNER_VERSION,
+            json.dumps(constraints),
             json.dumps(_iso(persisted_plan)), json.dumps(plan["metrics"]), actor_user_id,
         )
         if insert_result == "INSERT 0 0":
@@ -2375,6 +2492,7 @@ async def propose_week_draft(
         "review": schedule_review,
         "compliance_status": schedule_review["compliance_status"],
         "jurisdiction": schedule_review["jurisdiction"],
+        "demand_model": demand_model,
     }
 
 
@@ -2425,10 +2543,11 @@ async def apply_week_draft(
             # setup pane between staging and approval.
             gate = await _week_rules_gate(
                 conn, company_id=company_id, location_id=location_id,
+                mode=run["source_mode"],
             )
             if gate:
                 return {"status": "error", "message": gate["message"]}
-            if run["source_mode"] == "template":
+            if run["source_mode"] in ("template", "autopilot"):
                 shift_counts = await _week_shift_counts(
                     conn, company_id=company_id, location_id=location_id, week_start=week_start,
                 )
@@ -2440,13 +2559,17 @@ async def apply_week_draft(
                     return {
                         "status": "error",
                         "message": (
-                            "This week gained shifts after the template proposal was built. "
+                            "This week gained shifts after the proposal was built. "
                             "Ask me to rebuild it so I don't create duplicates."
                         ),
                     }
+            proposal = run["proposal"]
+            if isinstance(proposal, str):
+                proposal = json.loads(proposal)
             snapshot, _demand, _template_name = await _planning_snapshot(
                 conn, company_id=company_id, location_id=location_id, week_start=week_start,
                 source_mode=run["source_mode"], week_template_id=run["week_template_id"],
+                demand_override=proposal.get("demand_rows") if run["source_mode"] == "autopilot" else None,
             )
             if _input_hash(snapshot) != run["input_hash"]:
                 await conn.execute(
@@ -2457,9 +2580,6 @@ async def apply_week_draft(
                     "status": "error",
                     "message": "The schedule, roster, or availability changed after this proposal was built. Ask me to rebuild it.",
                 }
-            proposal = run["proposal"]
-            if isinstance(proposal, str):
-                proposal = json.loads(proposal)
             shift_id_by_key: dict[str, UUID] = {}
             series_id = uuid4()
             for shift in proposal.get("shifts") or []:

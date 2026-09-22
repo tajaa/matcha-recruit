@@ -148,6 +148,7 @@ _SERVICES_DOMAINS = {
 # literal (no filesystem walk on the hot path of every AI call).
 _SPLIT_SERVICE_PACKAGES = {
     "analysis_packs",
+    "autopilot",
     "broker_pilot",
     "handbook_pilot",
     "hr_pilot_corpus",

@@ -942,6 +942,10 @@ async def run_huume_turn(
                     company_id=company_id,
                     location_id=surface_context.location_id,
                     week_start=surface_context.week_start,
+                    source_mode=(
+                        str(args.get("source_mode"))
+                        if args.get("source_mode") == "autopilot" else None
+                    ),
                 )
                 step = recorder.record(
                     tool=name, kind="read", label="Checked week-building readiness",
@@ -1685,6 +1689,8 @@ async def run_huume_turn(
                             status="rejected", detail=message,
                         )
                         response = {"status": proposal_status or "refused", "message": message}
+                        if proposed.get("demand_model") is not None:
+                            response["demand_model"] = proposed["demand_model"]
                         if proposed.get("setup_missing"):
                             response["setup_missing"] = proposed["setup_missing"]
                         # The leader question is the one gate answer that is a

@@ -55,7 +55,7 @@ def target_week_start(
 
 async def generate_review_suggestion(
     *, company_id: UUID, location_id: UUID, week_start: date,
-    week_template_id: UUID,
+    week_template_id: UUID | None, mode: str = "template",
 ) -> dict:
     """Build one proposal without applying or publishing any schedule data."""
     week_end = week_start + timedelta(days=7)
@@ -99,7 +99,7 @@ async def generate_review_suggestion(
 
     readiness = await get_week_build_readiness(
         company_id=company_id, location_id=location_id, week_start=week_start,
-        week_template_id=week_template_id,
+        week_template_id=week_template_id, source_mode=mode,
     )
     if readiness.get("status") != "ok" or not readiness.get("ready"):
         blockers = readiness.get("blockers") or [readiness.get("message") or "The week is not ready."]
@@ -110,8 +110,8 @@ async def generate_review_suggestion(
         thread_id=None,
         location_id=location_id,
         week_start=week_start,
-        source_mode="template",
-        week_template_id=str(week_template_id),
+        source_mode=mode,
+        week_template_id=str(week_template_id) if week_template_id else None,
         origin="automatic",
     )
     if result.get("status") == "ready":

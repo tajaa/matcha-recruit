@@ -22,6 +22,7 @@ from .location_profile import bundle_leader_jobs, load_profile_bundle, missing_f
 from .schedule_review import jurisdiction_message
 from .shift_compliance import jurisdiction_rule_status
 from . import week_builder
+from .autopilot.weather_store import load_weather_days
 
 _ROSTER_LOAD_CAP = 300
 
@@ -108,6 +109,10 @@ async def build_planning_inputs(
     bundle = await load_profile_bundle(conn, company_id=company_id, location_id=location_id)
     missing = missing_fields(bundle)
     profile = bundle.get("profile") or {}
+    weather = await load_weather_days(
+        conn, company_id=company_id, location_id=location_id,
+        start=week_start, end=week_end,
+    )
     return {
         "week_start": week_start.isoformat(),
         "week_end": week_end.isoformat(),
@@ -124,6 +129,10 @@ async def build_planning_inputs(
             "leader_required": profile.get("leader_required"),
             "leader_job_names": [job["name"] for job in bundle_leader_jobs(bundle)],
         },
+        "weather": [
+            {"date": day.isoformat(), **{key: _iso(value) for key, value in values.items()}}
+            for day, values in sorted(weather.items())
+        ],
     }
 
 

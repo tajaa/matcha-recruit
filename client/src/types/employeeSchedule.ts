@@ -539,6 +539,11 @@ export interface LocationScheduleProfile {
    *  required window by these. */
   open_buffer_minutes: number
   close_buffer_minutes: number
+  weather_sensitivity: 'none' | 'rain_hurts' | 'rain_helps'
+  min_floor_staff: number
+  target_labor_pct: number | null
+  autopilot_shift_min_minutes: number | null
+  autopilot_shift_max_minutes: number | null
   template: LocationScheduleProfileTemplate | null
 }
 
@@ -557,6 +562,11 @@ export interface LocationScheduleProfileUpdate {
   default_week_template_id?: string | null
   open_buffer_minutes?: number
   close_buffer_minutes?: number
+  weather_sensitivity?: 'none' | 'rain_hurts' | 'rain_helps'
+  min_floor_staff?: number
+  target_labor_pct?: number | null
+  autopilot_shift_min_minutes?: number | null
+  autopilot_shift_max_minutes?: number | null
 }
 
 export interface ScheduleAutomationRule {
@@ -566,6 +576,7 @@ export interface ScheduleAutomationRule {
   timezone: string
   enabled: boolean
   cadence: ScheduleAutomationCadence
+  mode: 'template' | 'autopilot'
   week_template_id: string | null
   week_template_name: string | null
   run_weekday: number | null
@@ -584,7 +595,8 @@ export interface ScheduleAutomationRule {
 export interface ScheduleAutomationPayload {
   enabled: boolean
   cadence: ScheduleAutomationCadence
-  week_template_id: string
+  mode: 'template' | 'autopilot'
+  week_template_id?: string | null
   run_weekday: number | null
   run_date: string | null
   run_time: string
@@ -751,6 +763,59 @@ export type ScheduleReview = {
   jurisdiction: ScheduleJurisdiction
   /** Absent unless the tenant has `labor_cost` — see `ScheduleSummary.cost`. */
   cost?: ReviewLaborCost | null
+  demand_model?: AutopilotDemandModel | null
+}
+
+export type AutopilotDemandDay = {
+  date: string
+  weekday: string
+  open: string | null
+  close: string | null
+  window_with_buffers: string | null
+  closed: boolean
+  forecast_sales: number | null
+  baseline_sales: number | null
+  sales_index: number | null
+  weather: {
+    condition: string | null
+    precip_probability: number | null
+    modifier: number
+    sensitivity: 'none' | 'rain_hurts' | 'rain_helps'
+  }
+  labor_hours_target: number | null
+  labor_hours_planned: number
+  labor_method: string | null
+  shape_source: string | null
+  staffing_curve: Array<{ start: string; end: string; headcount: number }>
+  shifts_count: number
+  notes: string[]
+}
+
+export type AutopilotDemandModel = {
+  week_start: string
+  days: AutopilotDemandDay[]
+  forecast_sales_week: number | null
+  labor_hours_week: number
+  labor_hours_target_week: number
+  confidence: 'none' | 'low' | 'medium' | 'high'
+  inputs_used: string[]
+  inputs_missing: string[]
+  capacity: { employees: number; weekly_hours: number }
+  policy: Record<string, unknown>
+  notes: string[]
+  sentence: string
+  labor?: { forecast_sales_week: number; scheduled_cost_after: number; labor_pct: number | null }
+}
+
+export type AutopilotReadiness = {
+  ready: boolean
+  blockers: string[]
+  autopilot: {
+    sales_weeks: number
+    sales_confidence: 'none' | 'low' | 'medium' | 'high'
+    weather_days_available: number
+    history_weeks: number
+  } | null
 }
 
 export type PlanningRosterPerson = {
@@ -790,6 +855,10 @@ export type PlanningInputs = {
   jurisdiction: ScheduleJurisdiction
   week_rules: { established: boolean; missing: string[] }
   profile: { operating_hours: Record<string, unknown>; leader_required: boolean | null; leader_job_names: string[] }
+  weather?: Array<{
+    date: string; condition: string | null; precip_probability: number | null
+    precip_qpf_mm: number | null; max_temp_c: number | null; min_temp_c: number | null; fetched_at: string
+  }>
 }
 
 export type FillVacantPreviewRequest = {

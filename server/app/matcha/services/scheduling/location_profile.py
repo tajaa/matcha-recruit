@@ -29,7 +29,9 @@ from .week_template_writes import (
 PROFILE_COLS = (
     "id, company_id, location_id, operating_hours, default_week_template_id, "
     "leader_job_id, leader_job_ids, leader_required, notes, week_start_weekday, "
-    "open_buffer_minutes, close_buffer_minutes, created_at, updated_at"
+    "open_buffer_minutes, close_buffer_minutes, weather_sensitivity, min_floor_staff, "
+    "target_labor_pct, autopilot_shift_min_minutes, autopilot_shift_max_minutes, "
+    "created_at, updated_at"
 )
 
 # `leader_job_ids` is the rule (any ONE of these jobs on shift is lead
@@ -227,7 +229,7 @@ def join_or(names: Sequence[str]) -> str:
     return f"{', '.join(names[:-1])} or {names[-1]}"
 
 
-def missing_fields(bundle: dict) -> list[str]:
+def missing_fields(bundle: dict, *, mode: str = "template") -> list[str]:
     """Which of the three intake answers Huume still has to ask for.
 
     This is THE predicate for "are this location's week-set rules established":
@@ -239,7 +241,7 @@ def missing_fields(bundle: dict) -> list[str]:
     missing = []
     if not hours_answered(profile.get("operating_hours")):
         missing.append("operating_hours")
-    if not (template.get("blocks") or []):
+    if mode != "autopilot" and not (template.get("blocks") or []):
         missing.append("staffing_pattern")
     # Tri-state: None is "never asked", False is a real answer ("no lead
     # needed"), True has to name the job — same distinction the buffers keep.
@@ -273,7 +275,9 @@ _MISSING_PROMPT = {
 }
 
 
-def week_rules_refusal(bundle: dict, *, location_name: str) -> Optional[str]:
+def week_rules_refusal(
+    bundle: dict, *, location_name: str, mode: str = "template",
+) -> Optional[str]:
     """The refusal a caller returns instead of planning an unbounded week.
 
     Names ONE missing answer — the interview asks one question per turn, and a
@@ -281,7 +285,7 @@ def week_rules_refusal(bundle: dict, *, location_name: str) -> Optional[str]:
     of it. Pure, so the builder, readiness and the confirm path all say the
     same sentence.
     """
-    missing = missing_fields(bundle)
+    missing = missing_fields(bundle, mode=mode)
     if not missing:
         return None
     return f"I can't build this week yet — {location_name} has {_MISSING_PROMPT[missing[0]]}"
@@ -464,6 +468,9 @@ async def upsert_location_profile(
     leader_job_id: Any = UNSET, leader_job_ids: Any = UNSET, leader_required: Any = UNSET,
     notes: Any = UNSET, week_start_weekday: Any = UNSET,
     open_buffer_minutes: Any = UNSET, close_buffer_minutes: Any = UNSET,
+    weather_sensitivity: Any = UNSET, min_floor_staff: Any = UNSET,
+    target_labor_pct: Any = UNSET, autopilot_shift_min_minutes: Any = UNSET,
+    autopilot_shift_max_minutes: Any = UNSET,
 ) -> dict:
     """Create or patch the location's profile. Only supplied fields are written.
 
@@ -518,6 +525,34 @@ async def upsert_location_profile(
         supplied["close_buffer_minutes"] = validate_buffer_minutes(
             close_buffer_minutes, label="Closing buffer",
         )
+    if weather_sensitivity is not UNSET:
+        if weather_sensitivity not in ("none", "rain_hurts", "rain_helps"):
+            raise ValueError("Weather sensitivity must be none, rain_hurts, or rain_helps")
+        supplied["weather_sensitivity"] = weather_sensitivity
+    if min_floor_staff is not UNSET:
+        value = int(min_floor_staff)
+        if not 0 <= value <= 20:
+            raise ValueError("Minimum floor staff must be between 0 and 20")
+        supplied["min_floor_staff"] = value
+    if target_labor_pct is not UNSET:
+        value = None if target_labor_pct is None else float(target_labor_pct)
+        if value is not None and not 1 <= value <= 90:
+            raise ValueError("Target labor percentage must be between 1 and 90")
+        supplied["target_labor_pct"] = value
+    minimum = None
+    maximum = None
+    if autopilot_shift_min_minutes is not UNSET:
+        minimum = None if autopilot_shift_min_minutes is None else int(autopilot_shift_min_minutes)
+        if minimum is not None and not 120 <= minimum <= 720:
+            raise ValueError("Autopilot minimum shift must be between 120 and 720 minutes")
+        supplied["autopilot_shift_min_minutes"] = minimum
+    if autopilot_shift_max_minutes is not UNSET:
+        maximum = None if autopilot_shift_max_minutes is None else int(autopilot_shift_max_minutes)
+        if maximum is not None and not 120 <= maximum <= 720:
+            raise ValueError("Autopilot maximum shift must be between 120 and 720 minutes")
+        supplied["autopilot_shift_max_minutes"] = maximum
+    if minimum is not None and maximum is not None and minimum > maximum:
+        raise ValueError("Autopilot minimum shift length cannot exceed its maximum")
 
     columns = ["company_id", "location_id", "created_by", "updated_by", *supplied]
     values = [company_id, location_id, actor_user_id, actor_user_id, *supplied.values()]
@@ -548,6 +583,8 @@ async def upsert_location_profile(
             raise ValueError(
                 "Name at least one job that leads every shift, or say no lead is required."
             ) from exc
+        if any(word in str(exc) for word in ("weather", "floor", "labor_pct", "autopilot_shift")):
+            raise ValueError("Autopilot settings are outside the supported bounds.") from exc
         raise
     return _row_to_profile(row)
 

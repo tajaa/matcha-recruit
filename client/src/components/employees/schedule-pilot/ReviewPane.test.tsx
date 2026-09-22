@@ -57,6 +57,35 @@ describe('ReviewPane — nothing staged', () => {
 })
 
 describe('ReviewPane — what a change will do', () => {
+  it('shows Autopilot demand and keeps the server explanation verbatim', () => {
+    renderPane({ review: review({
+      demand_model: {
+        week_start: '2026-08-23', days: [{
+          date: '2026-08-24', weekday: 'Monday', open: '08:00', close: '16:00',
+          window_with_buffers: '08:00–16:00', closed: false,
+          forecast_sales: 1200, baseline_sales: 1300, sales_index: 0.92,
+          weather: { condition: 'RAIN', precip_probability: 65, modifier: 0.9, sensitivity: 'rain_hurts' },
+          labor_hours_target: 16, labor_hours_planned: 16, labor_method: 'splh',
+          shape_source: 'history', staffing_curve: [], shifts_count: 2, notes: [],
+        }],
+        forecast_sales_week: 1200, labor_hours_week: 16, labor_hours_target_week: 16,
+        confidence: 'medium', inputs_used: ['sales_history'], inputs_missing: ['hourly_sales'],
+        capacity: { employees: 3, weekly_hours: 120 }, policy: {},
+        notes: ['rain Monday trimmed demand 10%'],
+        sentence: 'Forecast $1,200 from sales; 16 labor hours planned.',
+      },
+    }) })
+    expect(screen.getByLabelText('Autopilot demand model')).toBeInTheDocument()
+    expect(screen.getByText('Forecast $1,200 from sales; 16 labor hours planned.')).toBeInTheDocument()
+    expect(screen.getByText('rain Monday trimmed demand 10%')).toBeInTheDocument()
+    expect(screen.getByText('rain · 65%')).toBeInTheDocument()
+  })
+
+  it('does not render an Autopilot block for a normal review', () => {
+    renderPane()
+    expect(screen.queryByLabelText('Autopilot demand model')).not.toBeInTheDocument()
+  })
+
   it('counts staged, not staged, unfilled, warnings and advisories in the header', () => {
     renderPane({
       review: review({

@@ -77,6 +77,7 @@ def _automatic_action(row) -> dict:
         "review": schedule_review or None,
         "compliance_status": schedule_review.get("compliance_status"),
         "jurisdiction": schedule_review.get("jurisdiction"),
+        "demand_model": proposal.get("demand_model"),
     }
 
 

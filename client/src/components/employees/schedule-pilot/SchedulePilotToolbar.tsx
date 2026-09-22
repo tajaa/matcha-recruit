@@ -1,4 +1,4 @@
-import { CalendarDays, ChevronLeft, ChevronRight, Edit3, HelpCircle, LayoutGrid, ListChecks, Loader2, MessageSquareText, PanelLeft, Save, Send, X } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, Edit3, HelpCircle, LayoutGrid, ListChecks, Loader2, MessageSquareText, PanelLeft, Save, Send, Sparkles, X } from 'lucide-react'
 import type { ScheduleSaveState } from '../../../hooks/employees/useScheduleEditor'
 import type { CompanyLocation } from '../../../hooks/useLocationScope'
 import LocationPicker from '../../shared/LocationPicker'
@@ -32,6 +32,7 @@ interface SchedulePilotToolbarProps {
   threadOpen: boolean
   onToggleThread(): void
   huumeSelectionCount: number
+  autopilot?: { visible: boolean; running: boolean; disabled: boolean; title?: string; onRun(): void }
 }
 
 function saveLabel(state: ScheduleSaveState, lastSavedAt: Date | null): string {
@@ -45,7 +46,7 @@ export default function SchedulePilotToolbar({
   weekStart, summary, saveState, lastSavedAt, editPublished, publishing,
   locations, locationId, onChangeLocation,
   onPreviousWeek, onNextWeek, onThisWeek, onTogglePublishedEditing, onPublish, onExit, onHelp,
-  centerView, onSetCenterView, reviewReady, railOpen, onToggleRail, threadOpen, onToggleThread, huumeSelectionCount,
+  centerView, onSetCenterView, reviewReady, railOpen, onToggleRail, threadOpen, onToggleThread, huumeSelectionCount, autopilot,
 }: SchedulePilotToolbarProps) {
   const paneButton = (active: boolean) => `hidden items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs lg:inline-flex ${active ? 'border-emerald-500/50 text-emerald-300' : 'border-zinc-800 text-zinc-400 hover:text-zinc-100'}`
   return (
@@ -62,6 +63,11 @@ export default function SchedulePilotToolbar({
         <button onClick={onNextWeek} className="rounded-lg border border-zinc-800 p-1.5 text-zinc-400 hover:text-zinc-100" aria-label="Next week"><ChevronRight className="h-4 w-4" /></button>
         <span className="ml-1 inline-flex items-center gap-1.5 text-xs text-zinc-500"><CalendarDays className="h-3.5 w-3.5" /> Week of {weekStart}</span>
         <LocationPicker locations={locations} value={locationId} onChange={onChangeLocation} />
+        {autopilot?.visible && (
+          <button type="button" onClick={autopilot.onRun} disabled={autopilot.running || autopilot.disabled} title={autopilot.title} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/35 bg-emerald-500/[0.07] px-2.5 py-1.5 text-xs text-emerald-200 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-40">
+            {autopilot.running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} Build with Autopilot
+          </button>
+        )}
         <div className="h-5 w-px bg-zinc-800" />
         <div className="inline-flex overflow-hidden rounded-lg border border-white/[0.08] bg-zinc-900" role="tablist" aria-label="Center pane">
           <button role="tab" aria-selected={centerView === 'board'} onClick={() => onSetCenterView('board')} className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.14em] ${centerView === 'board' ? 'bg-white/[0.06] text-zinc-100' : 'text-zinc-500 hover:text-zinc-200'}`}><LayoutGrid className="h-3.5 w-3.5" /> Board</button>

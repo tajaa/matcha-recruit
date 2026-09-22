@@ -62,6 +62,7 @@ export function asScheduleReview(loose: HuumeScheduleReview | ScheduleReview | n
     findings: loose.findings ?? [],
     // Absent stays null. A 0 here would tell the pane the week is free.
     cost: (loose as { cost?: ScheduleReview['cost'] }).cost ?? null,
+    demand_model: (loose as { demand_model?: ScheduleReview['demand_model'] }).demand_model ?? null,
     jurisdiction: {
       state: jurisdiction.state ?? null,
       status: jurisdiction.status ?? 'unmapped',

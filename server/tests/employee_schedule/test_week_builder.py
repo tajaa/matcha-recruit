@@ -478,6 +478,54 @@ async def test_template_snapshot_includes_live_week_shift_state(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_autopilot_snapshot_uses_frozen_demand_rows(monkeypatch):
+    frozen = [{"key": "autopilot:2026-08-24:barista:1", "required_staff": 2}]
+    roster = {"employees": [], "availability": {}, "existing_assignments": [],
+              "unavailable_ranges": {}, "gated_job_ids": set()}
+    monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value=roster))
+    monkeypatch.setattr(week_builder, "_load_week_shift_state", AsyncMock(return_value=[]))
+    live_template = AsyncMock(side_effect=AssertionError("must not reload a template"))
+    monkeypatch.setattr(week_builder, "_load_template_demand", live_template)
+
+    snapshot, demand, name = await week_builder._planning_snapshot(
+        object(), company_id=COMPANY_ID, location_id=LOCATION_ID,
+        week_start=date(2026, 8, 23), source_mode="autopilot",
+        week_template_id=None, demand_override=frozen,
+    )
+
+    assert demand is frozen and snapshot["demand"] is frozen and name is None
+    assert snapshot["source_mode"] == "autopilot"
+    live_template.assert_not_awaited()
+    assert week_builder._input_hash(snapshot) == week_builder._input_hash({**snapshot, "demand": list(frozen)})
+
+
+@pytest.mark.asyncio
+async def test_apply_autopilot_passes_persisted_demand_to_snapshot(monkeypatch):
+    run_id = UUID("3f6b1c22-2000-4000-8000-000000000003")
+    frozen = [{"key": "autopilot:2026-08-24:barista:1", "required_staff": 2}]
+    conn = _FakeConn({
+        "id": run_id, "company_id": COMPANY_ID, "location_id": LOCATION_ID,
+        "week_start": date(2026, 8, 23), "status": "proposed",
+        "source_mode": "autopilot", "week_template_id": None,
+        "proposal": {"demand_rows": frozen, "shifts": []},
+    })
+    monkeypatch.setattr(week_builder, "connection_or_direct", lambda: _AsyncContext(conn))
+    monkeypatch.setattr(week_builder, "_week_rules_gate", AsyncMock(return_value=None))
+    monkeypatch.setattr(week_builder, "_week_shift_counts", AsyncMock(return_value={"draft": 0, "published": 0}))
+    snapshot = AsyncMock(side_effect=RuntimeError("snapshot reached"))
+    monkeypatch.setattr(week_builder, "_planning_snapshot", snapshot)
+
+    with pytest.raises(RuntimeError, match="snapshot reached"):
+        await week_builder.apply_week_draft(
+            company_id=COMPANY_ID, actor_user_id=None, generation_run_id=run_id,
+            location_id=LOCATION_ID, week_start=date(2026, 8, 23),
+        )
+
+    assert snapshot.await_args.kwargs["demand_override"] is frozen
+    assert snapshot.await_args.kwargs["source_mode"] == "autopilot"
+
+
+@pytest.mark.asyncio
 async def test_apply_template_proposal_rechecks_empty_week_guard(monkeypatch):
     company_id = UUID("3f6b1c22-2000-4000-8000-000000000001")
     location_id = UUID("3f6b1c22-2000-4000-8000-000000000002")

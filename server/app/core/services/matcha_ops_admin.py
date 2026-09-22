@@ -31,6 +31,7 @@ OPS_FEATURES = frozenset({
     "sales_intake",
     "employee_schedule",
     "schedule_intelligence",
+    "schedule_autopilot",
     "werk_lite",
 })
 

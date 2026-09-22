@@ -1061,5 +1061,29 @@ access is missing, because a caller must never mistake "no access" for "free".
 - **Employer burden** (taxes, workers' comp, benefits). A per-location burden
   multiplier is the obvious next step; guessing one now would make the figure
   wrong in a way nobody could see.
-- **Budgets and labor-%-of-sales.** `sales_intake` + `inventory_forecasting` are
-  the hook when that comes back; dollars only for now.
+- **Budgets and employer burden.** Autopilot can show forecast labor percentage
+  when the wage-data gate is on, but it does not own a budget workflow or guess
+  taxes, benefits, workers' compensation, or other burden.
+
+## Schedule Autopilot (`schedule_autopilot`, 2026-09-22)
+
+Premium, deterministic whole-week generation from the location's operating
+hours/buffers/leader rule, qualified roster, committed location-scoped sales,
+persisted Google Weather daily forecasts, and eight weeks of published schedule
+history. The pure engine is `autopilot/`; DB inputs are isolated in
+`autopilot/inputs.py` and `weather_store.py`. Missing sales or weather degrades
+honestly to the coverage floor and labelled notes—neither input is invented.
+
+Autopilot is a demand source, not a second scheduling writer. It feeds the same
+`build_plan -> compliance preflight -> findings -> labor cost -> ScheduleReview
+-> schedule_generation_runs -> Huume approval -> apply_week_draft` path as a
+template. Its generated `demand_rows` and `demand_model` are frozen on the run,
+so later sales/weather refreshes do not stale an approval; roster, availability,
+qualification, or week-state changes still do. Drafts remain drafts until a
+manager publishes them. Weather snapshots are refreshed by the disabled-by-
+default `location_weather_refresh` task and never overwrite a past civil day.
+
+V1 weather effects are explicit manager policy (`none`, `rain_hurts`, or
+`rain_helps`) and are shown in the demand model. They are not learned elasticity
+and are not a legal or optimality claim. Hourly POS demand, learned weather
+elasticity, holidays, employer burden, and Toast ingestion remain follow-ups.

@@ -40,6 +40,7 @@ RequestDecision = Literal["approved", "denied"]
 AvailabilityState = Literal["unconfirmed", "always_available", "windows"]
 QualificationStatus = Literal["active", "training", "suspended"]
 ScheduleAutomationCadence = Literal["weekly", "once"]
+ScheduleAutomationMode = Literal["template", "autopilot"]
 
 # ISO-ish weekday integers: 0=Sunday .. 6=Saturday.
 Weekday = Literal[0, 1, 2, 3, 4, 5, 6]
@@ -393,6 +394,11 @@ class LocationScheduleProfileUpdate(BaseModel):
     # before the doors open / after they shut. The bound matches the DB CHECK.
     open_buffer_minutes: Optional[int] = Field(None, ge=0, le=240)
     close_buffer_minutes: Optional[int] = Field(None, ge=0, le=240)
+    weather_sensitivity: Optional[Literal["none", "rain_hurts", "rain_helps"]] = None
+    min_floor_staff: Optional[int] = Field(None, ge=0, le=20)
+    target_labor_pct: Optional[Decimal] = Field(None, ge=1, le=90, decimal_places=2)
+    autopilot_shift_min_minutes: Optional[int] = Field(None, ge=120, le=720)
+    autopilot_shift_max_minutes: Optional[int] = Field(None, ge=120, le=720)
 
     @model_validator(mode="after")
     def _check_weekday_keys(self) -> "LocationScheduleProfileUpdate":
@@ -403,6 +409,12 @@ class LocationScheduleProfileUpdate(BaseModel):
             # Deduped here, in the order sent: the first entry is what the
             # single-value mirror fields report back.
             self.leader_job_ids = list(dict.fromkeys(self.leader_job_ids))
+        if (
+            self.autopilot_shift_min_minutes is not None
+            and self.autopilot_shift_max_minutes is not None
+            and self.autopilot_shift_min_minutes > self.autopilot_shift_max_minutes
+        ):
+            raise ValueError("Autopilot minimum shift length cannot exceed its maximum")
         return self
 
 
@@ -655,7 +667,8 @@ class ScheduleAutomationRuleUpsert(BaseModel):
 
     enabled: bool = True
     cadence: ScheduleAutomationCadence = "weekly"
-    week_template_id: UUID
+    mode: ScheduleAutomationMode = "template"
+    week_template_id: Optional[UUID] = None
     run_weekday: Optional[Weekday] = None
     run_date: Optional[date] = None
     run_time: time
@@ -664,6 +677,10 @@ class ScheduleAutomationRuleUpsert(BaseModel):
 
     @model_validator(mode="after")
     def _check_cadence_shape(self) -> "ScheduleAutomationRuleUpsert":
+        if self.mode == "template" and self.week_template_id is None:
+            raise ValueError("template schedules require week_template_id")
+        if self.mode == "autopilot" and self.week_template_id is not None:
+            raise ValueError("Autopilot schedules do not use a week template")
         if self.cadence == "weekly":
             if self.run_weekday is None or self.target_weeks_ahead is None:
                 raise ValueError("weekly schedules require run_weekday and target_weeks_ahead")
@@ -692,3 +709,7 @@ class FillVacantPreviewRequest(BaseModel):
     exclude_employee_ids: Optional[List[UUID]] = Field(None, max_length=300)
     allow_split_shift: bool = False
     label: Optional[str] = Field(None, max_length=60)
+
+
+class AutopilotRunRequest(BaseModel):
+    week_start: date

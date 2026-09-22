@@ -11,7 +11,10 @@ const mocks = vi.hoisted(() => ({
   fetchTemplates: vi.fn(),
   runNow: vi.fn(),
   saveRule: vi.fn(),
+  hasFeature: vi.fn(),
 }))
+
+vi.mock('../../hooks/useMe', () => ({ useMe: () => ({ hasFeature: mocks.hasFeature }) }))
 
 vi.mock('../../api/employees/employeeSchedule', () => ({
   fetchAutoSchedule: mocks.fetchRule,
@@ -26,6 +29,7 @@ const template = {
 
 describe('AutoSchedulesTab', () => {
   beforeEach(() => {
+    mocks.hasFeature.mockReturnValue(false)
     mocks.fetchRule.mockResolvedValue({ rule: null })
     mocks.fetchTemplates.mockResolvedValue({ week_templates: [template] })
     mocks.saveRule.mockImplementation(async (_locationId: string, payload: Record<string, unknown>) => ({
@@ -44,6 +48,19 @@ describe('AutoSchedulesTab', () => {
     }))
   })
 
+  it('saves Autopilot without a week template when the premium flag is enabled', async () => {
+    mocks.hasFeature.mockImplementation((flag: string) => flag === 'schedule_autopilot')
+    render(<ToastProvider><AutoSchedulesTab locationId="loc-1" /></ToastProvider>)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Autopilot' }))
+    expect(screen.queryByLabelText('Week template')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save auto schedule' }))
+
+    await waitFor(() => expect(mocks.saveRule).toHaveBeenCalledWith('loc-1', expect.objectContaining({
+      mode: 'autopilot', week_template_id: null,
+    })))
+  })
+
   it('saves a weekly, location-scoped review cadence', async () => {
     render(<ToastProvider><AutoSchedulesTab locationId="loc-1" /></ToastProvider>)
 
@@ -57,6 +74,7 @@ describe('AutoSchedulesTab', () => {
     await waitFor(() => expect(mocks.saveRule).toHaveBeenCalledWith('loc-1', {
       enabled: true,
       cadence: 'weekly',
+      mode: 'template',
       week_template_id: 'template-1',
       run_time: '08:30',
       run_weekday: 2,
