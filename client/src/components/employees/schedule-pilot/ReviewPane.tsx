@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { AlertTriangle, ArrowRight, CircleCheck, CircleSlash, MessageSquareText, Search } from 'lucide-react'
 import { LABEL } from '../../ui'
-import type { ScheduleComplianceStatus, ScheduleReview } from '../../../types/employeeSchedule'
+import type { AutopilotDemandModel, ScheduleComplianceStatus, ScheduleReview } from '../../../types/employeeSchedule'
 import { fmtDayLabel, fmtTime } from '../../../types/employeeSchedule'
 import { LoadBar, POLICY_WEEKLY_MINUTES } from './LoadLedger'
 import { askAbout, compareReviews, costDeltaLabel, costLabel, hoursLabel } from './reviewShape'
@@ -62,6 +62,47 @@ function RowActions({ shiftId, ask, onShowShift, onAskHuume }: { shiftId?: strin
         <button type="button" onClick={() => onAskHuume(ask)} className="rounded p-1 text-zinc-500 hover:bg-white/[0.06] hover:text-emerald-300" aria-label="Ask Huume about this" title="Ask Huume about this"><MessageSquareText className="h-3 w-3" /></button>
       )}
     </span>
+  )
+}
+
+function DemandModelBlock({ model }: { model: AutopilotDemandModel }) {
+  return (
+    <section className="mt-3 border-t border-emerald-500/15 bg-emerald-500/[0.025] px-4 py-3" aria-label="Autopilot demand model">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <span className={LABEL}>Autopilot demand</span>
+        <span className="text-xs text-emerald-200">{model.confidence} confidence</span>
+        <span className="text-[11px] text-zinc-500">{model.sentence}</span>
+      </div>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full min-w-[620px] text-left text-[11px]">
+          <thead className="text-zinc-600"><tr><th className="pb-1 font-medium">Day</th><th className="pb-1 font-medium">Window</th><th className="pb-1 font-medium">Forecast</th><th className="pb-1 font-medium">Index</th><th className="pb-1 font-medium">Weather</th><th className="pb-1 font-medium">Hours</th><th className="pb-1 text-right font-medium">Shifts</th></tr></thead>
+          <tbody className="divide-y divide-white/[0.04]">
+            {model.days.map((day) => (
+              <tr key={day.date} className="text-zinc-400">
+                <td className="py-1.5 text-zinc-200">{day.weekday.slice(0, 3)}</td>
+                <td>{day.closed ? 'Closed' : day.window_with_buffers}</td>
+                <td>{day.forecast_sales == null ? '—' : `$${Math.round(day.forecast_sales).toLocaleString()}`}</td>
+                <td>{day.sales_index == null ? '—' : `${day.sales_index.toFixed(2)}×`}</td>
+                <td>{[day.weather.condition?.replaceAll('_', ' ').toLowerCase(), day.weather.precip_probability == null ? null : `${day.weather.precip_probability}%`].filter(Boolean).join(' · ') || '—'}</td>
+                <td>{day.labor_hours_target ?? '—'} → {day.labor_hours_planned}h</td>
+                <td className="text-right">{day.shifts_count}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {model.notes.length > 0 && <ul className="mt-2 list-disc space-y-0.5 pl-4 text-[11px] text-zinc-500">{model.notes.map((note, index) => <li key={`${index}-${note}`}>{note}</li>)}</ul>}
+      {/* The per-day "why" (forecast method, weather trim, floor, roster clip)
+          lives on each day, verbatim from the server — never re-worded here. */}
+      {model.days.some((day) => day.notes?.length) && (
+        <ul className="mt-2 space-y-0.5 text-[11px] text-zinc-500" aria-label="Autopilot day notes">
+          {model.days.filter((day) => day.notes?.length).map((day) => (
+            <li key={day.date}><span className="text-zinc-300">{day.weekday.slice(0, 3)}:</span> {day.notes.join('; ')}</li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-2 text-[10px] text-zinc-600">Used: {model.inputs_used.join(', ')}{model.inputs_missing.length ? ` · Missing: ${model.inputs_missing.join(', ')}` : ''}{model.labor?.labor_pct != null ? ` · Scheduled labor ${model.labor.labor_pct}% of forecast sales` : ''}</p>
+    </section>
   )
 }
 
@@ -139,6 +180,8 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
           <span className="font-medium">{tone.label}.</span> {review.jurisdiction.message}
         </div>
       </header>
+
+      {review.demand_model && <DemandModelBlock model={review.demand_model} />}
 
       {diff && compare ? (
         <>

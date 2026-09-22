@@ -249,3 +249,106 @@ async def test_unconfigured_location_yields_not_ready(monkeypatch):
     assert result["status"] == "not_ready"
     assert "no saved hours" in result["message"]
     propose.assert_not_awaited()
+
+
+def _autopilot_rule(features):
+    scheduled_for = datetime(2026, 8, 27, 16, tzinfo=timezone.utc)
+    return scheduled_for, {
+        "id": uuid4(), "company_id": uuid4(), "location_id": uuid4(),
+        "mode": "autopilot", "week_template_id": None,
+        "enabled": True, "cadence": "weekly", "run_weekday": 4, "run_time": time(9),
+        "target_weeks_ahead": 1, "target_week_start": None,
+        "next_run_at": scheduled_for, "schedule_version": 1,
+        "timezone": "America/Los_Angeles", "enabled_features": features,
+        "signup_source": None, "company_status": "approved",
+    }
+
+
+@pytest.mark.asyncio
+async def test_autopilot_rule_needs_the_premium_flag(monkeypatch):
+    base = {"employee_schedule": True, "huume": True, "matcha_work": True}
+    scheduled_for, rule = _autopilot_rule(base)
+    conn = _Conn(rule)
+    monkeypatch.setattr(worker, "get_db_connection", AsyncMock(return_value=conn))
+    generate = AsyncMock()
+    monkeypatch.setattr(worker, "generate_review_suggestion", generate)
+
+    result = await worker._run(str(rule["id"]), 1, scheduled_for.isoformat())
+
+    assert result == {"skipped": True, "reason": "feature_disabled"}
+    generate.assert_not_awaited()
+    assert "feature_disabled" in conn.execute_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_autopilot_rule_builds_without_a_template(monkeypatch):
+    scheduled_for, rule = _autopilot_rule({
+        "employee_schedule": True, "huume": True, "matcha_work": True, "schedule_autopilot": True,
+    })
+    conn = _Conn(rule)
+    monkeypatch.setattr(worker, "get_db_connection", AsyncMock(return_value=conn))
+    generate = AsyncMock(return_value={"status": "generated", "message": "Ready", "generation_run_id": str(uuid4())})
+    monkeypatch.setattr(worker, "generate_review_suggestion", generate)
+    monkeypatch.setattr(worker, "enqueue_schedule_automation", Mock())
+
+    result = await worker._run(str(rule["id"]), 1, scheduled_for.isoformat())
+
+    assert result["status"] == "generated"
+    assert generate.await_args.kwargs["mode"] == "autopilot"
+    assert generate.await_args.kwargs["week_template_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_manager_rebuild_supersedes_only_unapproved_suggestion(monkeypatch):
+    company_id, location_id, user_id = uuid4(), uuid4(), uuid4()
+
+    class Conn(_SuggestionConn):
+        def __init__(self):
+            super().__init__()
+            self.stale_queries = []
+
+        async def execute(self, query, *args):
+            self.stale_queries.append(query)
+            return "UPDATE 1"
+
+    conn = Conn()
+    monkeypatch.setattr(schedule_automation, "connection_or_direct", lambda: _AsyncContext(conn))
+    readiness = AsyncMock(return_value={"status": "ok", "ready": True})
+    monkeypatch.setattr(week_builder, "get_week_build_readiness", readiness)
+    propose = AsyncMock(return_value={"status": "ready", "generation_run_id": "run"})
+    monkeypatch.setattr(week_builder, "propose_week_draft", propose)
+
+    result = await schedule_automation.generate_review_suggestion(
+        company_id=company_id, location_id=location_id, week_start=date(2026, 8, 30),
+        week_template_id=None, mode="autopilot",
+        actor_user_id=user_id, actor_role="client", supersede_proposed=True,
+    )
+
+    assert result["status"] == "generated"
+    # A proposal the manager has not approved no longer blocks the rebuild;
+    # an applied one still does.
+    assert "status='applied'" in conn.existing_query
+    assert "'proposed'" not in conn.existing_query
+    assert any("AND status='proposed'" in query for query in conn.stale_queries)
+    assert readiness.await_args.kwargs["source_mode"] == "autopilot"
+    kwargs = propose.await_args.kwargs
+    assert (kwargs["actor_user_id"], kwargs["actor_role"]) == (user_id, "client")
+    assert (kwargs["source_mode"], kwargs["week_template_id"], kwargs["origin"]) == ("autopilot", None, "automatic")
+
+
+@pytest.mark.asyncio
+async def test_rebuild_does_not_supersede_when_setup_is_not_ready(monkeypatch):
+    class Conn(_SuggestionConn):
+        async def execute(self, query, *args):
+            assert "status='proposed'" not in query, "must not discard a suggestion it cannot replace"
+            return "UPDATE 0"
+
+    monkeypatch.setattr(schedule_automation, "connection_or_direct", lambda: _AsyncContext(Conn()))
+    monkeypatch.setattr(week_builder, "get_week_build_readiness", AsyncMock(return_value={
+        "status": "ok", "ready": False, "blockers": ["This week already has draft shifts."],
+    }))
+    result = await schedule_automation.generate_review_suggestion(
+        company_id=uuid4(), location_id=uuid4(), week_start=date(2026, 8, 30),
+        week_template_id=None, mode="autopilot", supersede_proposed=True,
+    )
+    assert result == {"status": "not_ready", "message": "This week already has draft shifts."}

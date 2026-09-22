@@ -26,13 +26,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.core.feature_flags import get_company_features
 from app.database import get_connection
 
-from ...dependencies import require_company_member
-from ...models.scheduling.employee_schedule import FillVacantPreviewRequest
+from ...dependencies import require_company_member, require_feature
+from ...models.scheduling.employee_schedule import AutopilotRunRequest, FillVacantPreviewRequest
 from ...services.scheduling import schedule_chat
 from ...services.scheduling.planning_inputs import build_planning_inputs
 from ...services.scheduling.schedule_assistant_session import assert_manager_location
+from ...services.scheduling.location_profile import WEEKDAY_NAMES, resolve_week_start_weekday
+from ...services.scheduling.schedule_automation import generate_review_suggestion
+from ...services.scheduling.schedule_rules import align_week_start
 from ...services.scheduling.week_builder import (
-    explain_unfilled, plan_vacant_fill, vacant_fill_edit_requests,
+    explain_unfilled, get_week_build_readiness, plan_vacant_fill, vacant_fill_edit_requests,
 )
 from ._shared import require_company_id
 
@@ -41,6 +44,62 @@ router = APIRouter()
 
 def _iso(value):
     return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+@router.get("/locations/{location_id}/autopilot/readiness")
+async def get_autopilot_readiness(
+    location_id: UUID,
+    week_start: date = Query(...),
+    current_user=Depends(require_company_member),
+    _feature_user=Depends(require_feature("schedule_autopilot")),
+):
+    company_id = await require_company_id(current_user)
+    async with get_connection() as conn:
+        await assert_manager_location(
+            conn, company_id=company_id, user_id=current_user.id,
+            actor_role=current_user.role, location_id=location_id,
+        )
+    result = await get_week_build_readiness(
+        company_id=company_id, location_id=location_id,
+        week_start=week_start, source_mode="autopilot",
+    )
+    blockers = list(result.get("blockers") or [])
+    if result.get("message") and not blockers:
+        blockers.append(result["message"])
+    return {
+        "ready": result.get("status") == "ok" and bool(result.get("ready")),
+        "blockers": blockers,
+        "autopilot": result.get("autopilot"),
+    }
+
+
+@router.post("/locations/{location_id}/autopilot/run")
+async def run_autopilot(
+    location_id: UUID,
+    body: AutopilotRunRequest,
+    current_user=Depends(require_company_member),
+    _feature_user=Depends(require_feature("schedule_autopilot")),
+):
+    company_id = await require_company_id(current_user)
+    async with get_connection() as conn:
+        await assert_manager_location(
+            conn, company_id=company_id, user_id=current_user.id,
+            actor_role=current_user.role, location_id=location_id,
+        )
+        weekday = await resolve_week_start_weekday(
+            conn, company_id=company_id, location_id=location_id,
+        )
+    if align_week_start(body.week_start, weekday) != body.week_start:
+        raise HTTPException(
+            status_code=422,
+            detail=f"week_start must be a {WEEKDAY_NAMES[weekday]} for this location.",
+        )
+    return await generate_review_suggestion(
+        company_id=company_id, location_id=location_id,
+        week_start=body.week_start, week_template_id=None, mode="autopilot",
+        actor_user_id=current_user.id, actor_role=current_user.role,
+        supersede_proposed=True,
+    )
 
 
 @router.get("/locations/{location_id}/planning-inputs")

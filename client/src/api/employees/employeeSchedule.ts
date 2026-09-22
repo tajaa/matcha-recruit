@@ -11,6 +11,7 @@ import type {
   ScheduleAuditFilters, ScheduleAuditResponse,
   ShiftBreakStagger, PlannedBreak,
   PlanningInputs, FillVacantPreviewRequest, FillVacantPreviewResponse, FillVacantApplyResponse,
+  AutopilotReadiness,
 } from '../../types/employeeSchedule'
 
 // ---- Admin: shifts + weekly view ----
@@ -444,6 +445,18 @@ export function submitMyAvailabilityRequest(payload: MyAvailabilityRequestPayloa
 export function fetchPlanningInputs(locationId: string, weekStart: string) {
   return api.get<PlanningInputs>(
     `/employee-schedule/locations/${locationId}/planning-inputs?week_start=${encodeURIComponent(weekStart)}`,
+  )
+}
+
+export function fetchAutopilotReadiness(locationId: string, weekStart: string) {
+  return api.get<AutopilotReadiness>(
+    `/employee-schedule/locations/${locationId}/autopilot/readiness?week_start=${encodeURIComponent(weekStart)}`,
+  )
+}
+
+export function runAutopilot(locationId: string, weekStart: string) {
+  return api.post<{ status: string; message: string; generation_run_id?: string }>(
+    `/employee-schedule/locations/${locationId}/autopilot/run`, { week_start: weekStart },
   )
 }
 

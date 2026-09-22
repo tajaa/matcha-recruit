@@ -10,6 +10,7 @@ import type {
 } from '../../types/employeeSchedule'
 import { addDays, errorMessage, startOfWeek, toISODate, WEEKDAY_LABELS } from '../../types/employeeSchedule'
 import { useToast } from '../ui'
+import { useMe } from '../../hooks/useMe'
 
 
 const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 focus:border-zinc-500 focus:outline-none'
@@ -17,6 +18,7 @@ const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2
 type FormState = {
   enabled: boolean
   cadence: ScheduleAutomationCadence
+  mode: 'template' | 'autopilot'
   weekTemplateId: string
   runWeekday: number
   runDate: string
@@ -33,6 +35,7 @@ function defaults(weekStartWeekday = 0): FormState {
   return {
     enabled: true,
     cadence: 'weekly',
+    mode: 'template',
     weekTemplateId: '',
     runWeekday: 4,
     runDate: tomorrow,
@@ -47,6 +50,7 @@ function fromRule(rule: ScheduleAutomationRule, weekStartWeekday = 0): FormState
   return {
     enabled: rule.enabled,
     cadence: rule.cadence,
+    mode: rule.mode ?? 'template',
     weekTemplateId: rule.week_template_id ?? '',
     runWeekday: rule.run_weekday ?? fallback.runWeekday,
     runDate: rule.run_date ?? fallback.runDate,
@@ -66,8 +70,12 @@ function formatTimestamp(value: string, timezoneName: string): string {
 
 export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: { locationId: string; weekStartWeekday?: number }) {
   const { toast } = useToast()
+  const { hasFeature } = useMe()
+  const autopilotEnabled = hasFeature('schedule_autopilot')
+  // Read by in-flight run-now callbacks to drop a result for a location the
+  // manager has since left; synced after render, never written during it.
   const locationIdRef = useRef(locationId)
-  locationIdRef.current = locationId
+  useEffect(() => { locationIdRef.current = locationId }, [locationId])
   const [form, setForm] = useState<FormState>(defaults)
   const [rule, setRule] = useState<ScheduleAutomationRule | null>(null)
   const [templates, setTemplates] = useState<WeekTemplate[]>([])
@@ -76,7 +84,11 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
   const [running, setRunning] = useState(false)
   const [generatedWeekStart, setGeneratedWeekStart] = useState<string | null>(null)
 
+  // Reset and refetch whenever the location changes — the synchronous
+  // setState the rule objects to is clearing the previous location's rule
+  // before the request leaves, so it can never render under the new one.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRule(null)
     setForm(defaults(weekStartWeekday))
     setTemplates([])
@@ -95,7 +107,7 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
   }, [locationId, toast])
 
   async function save() {
-    if (!form.weekTemplateId) {
+    if (form.mode === 'template' && !form.weekTemplateId) {
       toast('Choose a saved week template first.', 'error')
       return
     }
@@ -104,7 +116,8 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
       const saved = await saveAutoSchedule(locationId, {
         enabled: form.enabled,
         cadence: form.cadence,
-        week_template_id: form.weekTemplateId,
+        mode: form.mode,
+        week_template_id: form.mode === 'template' ? form.weekTemplateId : null,
         run_time: form.runTime,
         run_weekday: form.cadence === 'weekly' ? form.runWeekday : null,
         run_date: form.cadence === 'once' ? form.runDate : null,
@@ -154,7 +167,7 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
           <div>
             <h2 className="text-sm font-medium text-zinc-100">A ready-to-review week, on your timing</h2>
             <p className="mt-1 text-sm leading-6 text-zinc-400">
-              Huume uses this location’s confirmed availability and saved staffing template to prepare a suggestion. It never creates or publishes shifts until a manager approves the proposal in the full shift editor.
+              Huume uses this location’s confirmed availability and {form.mode === 'autopilot' ? 'Autopilot forecast' : 'saved staffing template'} to prepare a suggestion. It never creates or publishes shifts until a manager approves the proposal in the full shift editor.
             </p>
           </div>
         </div>
@@ -173,14 +186,25 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
             </label>
           </div>
 
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-zinc-400">Week template</span>
-            <select aria-label="Week template" className={inputCls} value={form.weekTemplateId} onChange={(e) => setForm({ ...form, weekTemplateId: e.target.value })}>
-              <option value="">Choose a template…</option>
-              {templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
-            </select>
-            {templates.length === 0 && <span className="text-xs text-amber-400">Create a week template before enabling automation.</span>}
-          </label>
+          {autopilotEnabled && (
+            <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-emerald-500/25 text-sm">
+              <button type="button" onClick={() => setForm({ ...form, mode: 'template' })} className={`px-3 py-2 ${form.mode === 'template' ? 'bg-emerald-500/15 text-emerald-100' : 'text-zinc-500 hover:text-zinc-300'}`}>From template</button>
+              <button type="button" onClick={() => setForm({ ...form, mode: 'autopilot', weekTemplateId: '' })} className={`px-3 py-2 ${form.mode === 'autopilot' ? 'bg-emerald-500/15 text-emerald-100' : 'text-zinc-500 hover:text-zinc-300'}`}>Autopilot</button>
+            </div>
+          )}
+
+          {form.mode === 'template' ? (
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-zinc-400">Week template</span>
+              <select aria-label="Week template" className={inputCls} value={form.weekTemplateId} onChange={(e) => setForm({ ...form, weekTemplateId: e.target.value })}>
+                <option value="">Choose a template…</option>
+                {templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+              </select>
+              {templates.length === 0 && <span className="text-xs text-amber-400">Create a week template before enabling automation.</span>}
+            </label>
+          ) : (
+            <p className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.05] px-3 py-2 text-xs leading-5 text-zinc-400">Build from operating hours, committed sales, weather, published schedule history, and the qualified roster.</p>
+          )}
 
           <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-zinc-700 text-sm">
             <button type="button" onClick={() => setForm({ ...form, cadence: 'weekly' })} className={`px-3 py-2 ${form.cadence === 'weekly' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}>Every week</button>
@@ -213,7 +237,7 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
           )}
 
           <div className="flex flex-wrap gap-2 border-t border-white/[0.06] pt-4">
-            <button onClick={save} disabled={saving || !form.weekTemplateId} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-40">
+            <button onClick={save} disabled={saving || (form.mode === 'template' && !form.weekTemplateId)} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-40">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save auto schedule
             </button>
             {rule && <button onClick={runNow} disabled={running} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:text-zinc-100 disabled:opacity-40">

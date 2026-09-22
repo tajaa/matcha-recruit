@@ -55,9 +55,19 @@ def target_week_start(
 
 async def generate_review_suggestion(
     *, company_id: UUID, location_id: UUID, week_start: date,
-    week_template_id: UUID,
+    week_template_id: UUID | None, mode: str = "template",
+    actor_user_id: UUID | None = None, actor_role: str | None = None,
+    supersede_proposed: bool = False,
 ) -> dict:
-    """Build one proposal without applying or publishing any schedule data."""
+    """Build one proposal without applying or publishing any schedule data.
+
+    The scheduled worker passes no actor. A manager's own click passes
+    ``actor_user_id``/``actor_role`` (audit attribution, and the role
+    `cost_delta_for_rows` needs before it prices the week) and
+    ``supersede_proposed=True``: rebuilding after tuning the inputs replaces
+    the still-unapproved suggestion for that week instead of being refused by
+    it. An applied run is never superseded.
+    """
     week_end = week_start + timedelta(days=7)
     week_start_at = datetime.combine(week_start, time.min, tzinfo=timezone.utc)
     week_end_at = datetime.combine(week_end, time.min, tzinfo=timezone.utc)
@@ -81,10 +91,11 @@ async def generate_review_suggestion(
             """,
             company_id, location_id, week_start, week_start_at, week_end_at,
         )
+        blocking = "status='applied'" if supersede_proposed else "status IN ('proposed', 'applied')"
         existing = await conn.fetchrow(
-            """SELECT id, status FROM schedule_generation_runs
+            f"""SELECT id, status FROM schedule_generation_runs
                WHERE company_id=$1 AND location_id=$2 AND week_start=$3
-                 AND status IN ('proposed', 'applied')
+                 AND {blocking}
                ORDER BY created_at DESC LIMIT 1""",
             company_id, location_id, week_start,
         )
@@ -99,19 +110,29 @@ async def generate_review_suggestion(
 
     readiness = await get_week_build_readiness(
         company_id=company_id, location_id=location_id, week_start=week_start,
-        week_template_id=week_template_id,
+        week_template_id=week_template_id, source_mode=mode,
     )
     if readiness.get("status") != "ok" or not readiness.get("ready"):
         blockers = readiness.get("blockers") or [readiness.get("message") or "The week is not ready."]
         return {"status": "not_ready", "message": " ".join(blockers)}
+    if supersede_proposed:
+        async with connection_or_direct() as conn:
+            await conn.execute(
+                """UPDATE schedule_generation_runs
+                   SET status='stale', updated_at=NOW()
+                   WHERE company_id=$1 AND location_id=$2 AND week_start=$3
+                     AND status='proposed'""",
+                company_id, location_id, week_start,
+            )
     result = await propose_week_draft(
         company_id=company_id,
-        actor_user_id=None,
+        actor_user_id=actor_user_id,
+        actor_role=actor_role,
         thread_id=None,
         location_id=location_id,
         week_start=week_start,
-        source_mode="template",
-        week_template_id=str(week_template_id),
+        source_mode=mode,
+        week_template_id=str(week_template_id) if week_template_id else None,
         origin="automatic",
     )
     if result.get("status") == "ready":

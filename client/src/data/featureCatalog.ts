@@ -34,6 +34,7 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       credential_templates: 'Credential Templates',
       employee_schedule: 'Employee Schedule (shift scheduling — assignments, templates, swap/drop requests)',
       schedule_intelligence: 'Schedule Intelligence (incident correlation, Fair Workweek exposure, qualified coverage — needs Employee Schedule too)',
+      schedule_autopilot: 'Schedule Autopilot (forecast-driven week generation — needs Employee Schedule, Huume and Matcha Work)',
       benefits_admin: 'Benefits (roster ingest, eligibility exceptions, renewal-risk radar)',
     },
   },
@@ -66,6 +67,7 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       inventory_waste: 'Ops — Inventory Waste & Shrinkage (waste log, variance, predictive par) — needs Inventory too',
       employee_schedule: 'Ops — Employee Schedule',
       schedule_intelligence: 'Ops — Schedule Intelligence — needs Employee Schedule too',
+      schedule_autopilot: 'Ops — Schedule Autopilot — needs Employee Schedule, Huume and Matcha Work',
       matcha_ops_calls_all_members: 'Matcha Ops — any member can start calls',
       werk_lite: 'Werk Lite (Ops channels + Work boards)',
     },
@@ -113,6 +115,7 @@ export const FEATURE_REQUIRES: Record<string, string[]> = {
   inventory_forecasting: ['inventory', 'sales_intake'],
   inventory_waste: ['inventory'],
   schedule_intelligence: ['employee_schedule'],
+  schedule_autopilot: ['employee_schedule', 'huume', 'matcha_work'],
   matcha_ops_calls_all_members: ['matcha_ops'],
   werk_lite: ['matcha_ops', 'matcha_work'],
   // osha_export/osha_auto_report/ir_magic_links/ir_copilot are deliberately

@@ -2,7 +2,7 @@ import { memo, useMemo, useState } from 'react'
 import { useDraggable, useDroppable } from '@dnd-kit/core'
 import { AlertTriangle, BriefcaseBusiness, CalendarCog, Search, Sparkles, UserRound, Wallet, X } from 'lucide-react'
 import { LABEL } from '../../ui'
-import type { LocationScheduleProfile, PlanningInputs, PlanningRosterPerson, RosterEmployee, RosterFlags, WeekLaborCost } from '../../../types/employeeSchedule'
+import type { AutopilotReadiness, LocationScheduleProfile, PlanningInputs, PlanningRosterPerson, RosterEmployee, RosterFlags, WeekLaborCost } from '../../../types/employeeSchedule'
 import { WEEK_RULE_LABELS, fmtDayLabel, fmtTime } from '../../../types/employeeSchedule'
 import { SETUP_KICKOFF_PROMPT } from '../../../hooks/employees/useScheduleHuumeThread'
 import { LoadBar, POLICY_WEEKLY_MINUTES } from './LoadLedger'
@@ -23,6 +23,8 @@ export interface InputsRailProps {
   weekRules: LocationScheduleProfile['week_rules'] | null
   locationName: string
   credentialsEnabled: boolean
+  autopilotReadiness?: AutopilotReadiness | null
+  onOpenAutopilot?(): void
   onOpenWeekSetup(): void
   onOpenJobs(): void
   onAskHuume(text: string): void
@@ -143,7 +145,8 @@ function Section({ label, count, children, action }: { label: string; count?: nu
  *  now also what Huume reads (`get_schedule_overview.roster_load`). */
 function InputsRail({
   inputs, loading, roster, rosterFlags, selectedEmployeeId, onSelectEmployee, requiredJobId, requiredJobDate,
-  cost, weekRules, locationName, credentialsEnabled, onOpenWeekSetup, onOpenJobs, onAskHuume, onShowShift,
+  cost, weekRules, locationName, credentialsEnabled, autopilotReadiness, onOpenAutopilot,
+  onOpenWeekSetup, onOpenJobs, onAskHuume, onShowShift,
 }: InputsRailProps) {
   const [query, setQuery] = useState('')
   const { setNodeRef, isOver } = useDroppable({ id: 'schedule-unassign', data: { kind: 'unassign' } })
@@ -328,7 +331,11 @@ function InputsRail({
           <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.08] px-2.5 py-2 text-[11px] text-amber-100">
             <div className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
-              <span>{locationName || 'This location'} is still missing {weekRules.missing.map((field) => WEEK_RULE_LABELS[field]).join(', ')}. Huume can’t build a week until these are saved.</span>
+              <span>{locationName || 'This location'} is still missing {weekRules.missing.map((field) => WEEK_RULE_LABELS[field]).join(', ')}. {autopilotReadiness
+                ? autopilotReadiness.ready && weekRules.missing.every((field) => field === 'staffing_pattern')
+                  ? 'Template builds need a staffing pattern; Autopilot is ready without one.'
+                  : 'Template builds need these saved; check Autopilot readiness below for its own requirements.'
+                : 'Huume can’t build a template week until these are saved.'}</span>
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               <button type="button" onClick={() => onAskHuume(SETUP_KICKOFF_PROMPT)} className="rounded-md border border-amber-400/40 px-2 py-1 text-[10px] font-medium hover:bg-amber-400/10">Set up with Huume</button>
@@ -342,6 +349,28 @@ function InputsRail({
           <button type="button" onClick={onOpenWeekSetup} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-2.5 py-1.5 text-xs text-zinc-400 hover:text-zinc-100" title="Operating hours, week start, and this location's staffing pattern"><CalendarCog className="h-3.5 w-3.5" /> Week setup</button>
           <button type="button" onClick={onOpenJobs} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-2.5 py-1.5 text-xs text-zinc-400 hover:text-zinc-100" title={credentialsEnabled ? 'Configure location jobs and their required credentials' : 'Configure location jobs'}><BriefcaseBusiness className="h-3.5 w-3.5" /> {credentialsEnabled ? 'Jobs & credentials' : 'Jobs'}</button>
         </div>
+        {autopilotReadiness && (
+          <div className="mt-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] px-2.5 py-2 text-[10px] text-zinc-400">
+            <div className="flex flex-wrap gap-1.5">
+              <span className="rounded bg-zinc-900 px-1.5 py-0.5">Sales {autopilotReadiness.autopilot?.sales_confidence ?? 'unknown'}</span>
+              <span className="rounded bg-zinc-900 px-1.5 py-0.5">{autopilotReadiness.autopilot?.weather_days_available ?? 0}/7 weather days</span>
+              <span className="rounded bg-zinc-900 px-1.5 py-0.5">{autopilotReadiness.autopilot?.history_weeks ?? 0} history weeks</span>
+              <span className={`rounded px-1.5 py-0.5 ${autopilotReadiness.ready ? 'bg-emerald-500/10 text-emerald-200' : 'bg-amber-500/10 text-amber-200'}`}>{autopilotReadiness.ready ? 'Autopilot ready' : 'Autopilot blocked'}</span>
+            </div>
+            {!autopilotReadiness.ready && <p className="mt-1.5 text-amber-200/80">{autopilotReadiness.blockers.join(' ')}</p>}
+            {onOpenAutopilot && <button type="button" onClick={onOpenAutopilot} className="mt-2 inline-flex items-center gap-1 rounded border border-emerald-500/30 px-2 py-1 text-[10px] font-medium text-emerald-200 hover:bg-emerald-500/10"><Sparkles className="h-3 w-3" /> Open Autopilot wizard</button>}
+          </div>
+        )}
+        {!!inputs?.weather?.length && (
+          <div className="mt-2 grid grid-cols-7 gap-1" aria-label="Weather forecast">
+            {(inputs.weather ?? []).map((day) => (
+              <div key={day.date} className="rounded bg-zinc-900 px-1 py-1 text-center text-[9px] text-zinc-500" title={`${day.condition?.replaceAll('_', ' ') ?? 'Weather unavailable'}${day.precip_probability == null ? '' : ` · ${day.precip_probability}% precipitation`}`}>
+                <div className="text-zinc-300">{fmtDayLabel(day.date).slice(0, 3)}</div>
+                <div>{day.precip_probability == null ? '—' : `${day.precip_probability}%`}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </Section>
       <div className="px-3 py-3 text-[10px] text-zinc-700"><UserRound className="mr-1 inline h-3 w-3" />Huume reads this same list before it names anyone.</div>
     </aside>

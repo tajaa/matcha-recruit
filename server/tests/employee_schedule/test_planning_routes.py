@@ -454,3 +454,53 @@ def test_selected_employee_identity_reaches_real_resolution_and_saved_proposal(m
         assert result["status"] == "clarify" and "no longer active" in result["message"]
         guard.assert_not_awaited()
         assert conn.saved["status"] == "clarifying"
+
+
+# ── Schedule Autopilot endpoints ──────────────────────────────────────────
+
+
+def test_autopilot_readiness_is_manager_scoped_and_trimmed(monkeypatch):
+    company_id = uuid4()
+    authz = _wire(monkeypatch, _Conn(), company_id=company_id)
+    readiness = AsyncMock(return_value={
+        "status": "ok", "ready": False, "blockers": ["Add a timezone."],
+        "autopilot": {"sales_weeks": 2.0}, "employees": [{"name": "not returned"}],
+    })
+    monkeypatch.setattr(planning, "get_week_build_readiness", readiness)
+
+    body = _run(planning.get_autopilot_readiness(LOCATION, week_start=WEEK, current_user=_user(), _feature_user=None))
+
+    assert body == {"ready": False, "blockers": ["Add a timezone."], "autopilot": {"sales_weeks": 2.0}}
+    authz.assert_awaited_once()
+    assert readiness.await_args.kwargs["source_mode"] == "autopilot"
+
+    # A location-level refusal surfaces as the blocker, never as "ready".
+    readiness.return_value = {"status": "error", "message": "Location not found"}
+    body = _run(planning.get_autopilot_readiness(LOCATION, week_start=WEEK, current_user=_user(), _feature_user=None))
+    assert body["ready"] is False and body["blockers"] == ["Location not found"]
+
+
+def test_autopilot_run_checks_week_alignment_before_building(monkeypatch):
+    from app.matcha.models.scheduling.employee_schedule import AutopilotRunRequest
+
+    company_id = uuid4()
+    _wire(monkeypatch, _Conn(), company_id=company_id)
+    monkeypatch.setattr(planning, "resolve_week_start_weekday", AsyncMock(return_value=0))
+    generate = AsyncMock(return_value={"status": "generated", "message": "ok", "generation_run_id": "r"})
+    monkeypatch.setattr(planning, "generate_review_suggestion", generate)
+    user = _user()
+
+    with pytest.raises(HTTPException) as exc:
+        _run(planning.run_autopilot(
+            LOCATION, AutopilotRunRequest(week_start=date(2026, 8, 24)), current_user=user, _feature_user=None,
+        ))
+    assert exc.value.status_code == 422 and "Sunday" in exc.value.detail
+    generate.assert_not_awaited()
+
+    result = _run(planning.run_autopilot(
+        LOCATION, AutopilotRunRequest(week_start=WEEK), current_user=user, _feature_user=None,
+    ))
+    assert result["status"] == "generated"
+    kwargs = generate.await_args.kwargs
+    assert kwargs["mode"] == "autopilot" and kwargs["week_template_id"] is None
+    assert (kwargs["actor_user_id"], kwargs["actor_role"], kwargs["supersede_proposed"]) == (user.id, "client", True)

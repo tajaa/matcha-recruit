@@ -28,9 +28,14 @@ def enqueue_schedule_automation(rule_id: UUID, schedule_version: int, scheduled_
     )
 
 
-def supports_automatic_generation(enabled_features, signup_source: str | None) -> bool:
+def supports_automatic_generation(
+    enabled_features, signup_source: str | None, mode: str = "template",
+) -> bool:
     features = merge_company_features(enabled_features, signup_source)
-    return all(features.get(key) for key in ("employee_schedule", "huume", "matcha_work"))
+    required = ["employee_schedule", "huume", "matcha_work"]
+    if mode == "autopilot":
+        required.append("schedule_autopilot")
+    return all(features.get(key) for key in required)
 
 
 async def _run(rule_id: str, schedule_version: int, scheduled_for: str) -> dict:
@@ -56,8 +61,9 @@ async def _run(rule_id: str, schedule_version: int, scheduled_for: str) -> dict:
             return {"skipped": True, "reason": "stale_or_disabled_rule"}
         if rule["next_run_at"] != expected_at:
             return {"skipped": True, "reason": "superseded_occurrence"}
+        mode = rule.get("mode") or "template"
         if rule["company_status"] not in (None, "approved") or not supports_automatic_generation(
-            rule["enabled_features"], rule["signup_source"],
+            rule["enabled_features"], rule["signup_source"], mode,
         ):
             await conn.execute(
                 """UPDATE schedule_automation_rules
@@ -106,15 +112,18 @@ async def _run(rule_id: str, schedule_version: int, scheduled_for: str) -> dict:
             ),
         )
         try:
-            if rule["week_template_id"] is None:
+            if mode == "template" and rule["week_template_id"] is None:
                 result = {"status": "not_ready", "message": "Choose a saved week template."}
             else:
-                result = await generate_review_suggestion(
-                    company_id=rule["company_id"],
-                    location_id=rule["location_id"],
-                    week_start=week_start,
-                    week_template_id=rule["week_template_id"],
-                )
+                kwargs = {
+                    "company_id": rule["company_id"],
+                    "location_id": rule["location_id"],
+                    "week_start": week_start,
+                    "week_template_id": rule["week_template_id"],
+                }
+                if mode == "autopilot":
+                    kwargs["mode"] = mode
+                result = await generate_review_suggestion(**kwargs)
         except Exception as exc:
             logger.exception("Schedule planner failed rule=%s", rule_uuid)
             result = {"status": "failed", "message": str(exc)[:1000]}

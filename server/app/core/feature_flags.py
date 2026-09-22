@@ -349,6 +349,10 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # reads + the cost UI in Schedule Pilot. Default off; admin-toggle; NOT
     # bundled. → services/scheduling/CLAUDE.md
     "labor_cost": False,
+    # Forecast-driven week generation from operating hours, committed sales,
+    # weather, published schedule history, and the qualified roster. Premium,
+    # deterministic, review-only, and never bundled.
+    "schedule_autopilot": False,
     # Real `require_feature(...)`-gated flags that were only in the admin
     # toggle grid's separate KNOWN_FEATURES whitelist (admin/_shared.py) and
     # not here — so ALL_FEATURES never saw them, hiding er_copilot from
@@ -821,6 +825,7 @@ FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "inventory_waste": ("inventory",),
     "schedule_intelligence": ("employee_schedule",),
     "labor_cost": ("employee_schedule",),
+    "schedule_autopilot": ("employee_schedule", "huume", "matcha_work"),
     "matcha_ops_calls_all_members": ("matcha_ops",),
 }
 

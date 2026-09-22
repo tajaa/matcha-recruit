@@ -1025,3 +1025,37 @@ def test_schedlaw_audit_gate_resolves_real_citation_and_drops_invented(grounding
     clean, cites, dropped = audit_citations(text, corpus["index"])
     assert dropped == ["schedlaw:CA-invented"]
     assert {c["cid"] for c in cites} == {"schedlaw:CA-meal_break_after_hours"}
+
+
+def test_autopilot_records_are_aggregate_schedint_entries():
+    import json
+
+    grounding = {"schedule_autopilot": [
+        {"location_id": "loc-1", "location_name": "Downtown", "week_start": date(2026, 9, 27),
+         "demand_model": json.dumps({"sentence": "Forecast $9,000 for the week.",
+                                     "labor": {"labor_pct": 24.5}})},
+        {"location_id": "loc-2", "location_name": "Mission", "week_start": date(2026, 9, 27),
+         "demand_model": "not json"},
+    ]}
+    records = build_hr_pilot_corpus(grounding, [])["sources"]["schedint"]["records"]
+    by_cid = {record["cid"]: record for record in records}
+    downtown = by_cid["schedint:autopilot.loc-1"]
+    assert "Forecast $9,000" in downtown["summary"]
+    assert "24.5% of forecast sales" in downtown["summary"]
+    assert "not worked time or payroll" in downtown["summary"]
+    assert "Autopilot generated a reviewable week." in by_cid["schedint:autopilot.loc-2"]["summary"]
+
+
+@pytest.mark.asyncio
+async def test_autopilot_fetch_reads_upcoming_runs_and_fails_soft():
+    from unittest.mock import AsyncMock
+
+    from app.matcha.services.pilots.hr_pilot_corpus import fetch
+
+    conn = AsyncMock()
+    conn.fetch.return_value = [{"location_id": "loc-1"}]
+    assert await fetch._fetch_schedule_autopilot(conn, "company") == [{"location_id": "loc-1"}]
+    sql = conn.fetch.await_args.args[0]
+    assert "source_mode='autopilot'" in sql and "week_start >= CURRENT_DATE" in sql
+    conn.fetch.side_effect = RuntimeError("db down")
+    assert await fetch._fetch_schedule_autopilot(conn, "company") == []

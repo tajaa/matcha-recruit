@@ -886,6 +886,26 @@ export interface HuumeScheduleReview {
   advisories?: Array<{ message?: string; statute?: string | null; employee_name?: string | null; shift_id?: string | null }>
   findings?: Array<Record<string, unknown>>
   jurisdiction?: { state?: string | null; status?: string; message?: string }
+  demand_model?: HuumeAutopilotDemandModel | null
+}
+
+export interface HuumeAutopilotDemandModel {
+  week_start?: string
+  days?: Array<{
+    date?: string; weekday?: string; window_with_buffers?: string | null; closed?: boolean
+    forecast_sales?: number | null; sales_index?: number | null
+    weather?: { condition?: string | null; precip_probability?: number | null; modifier?: number }
+    labor_hours_target?: number | null; labor_hours_planned?: number; shifts_count?: number
+    notes?: string[]
+  }>
+  forecast_sales_week?: number | null
+  labor_hours_week?: number
+  confidence?: 'none' | 'low' | 'medium' | 'high'
+  inputs_used?: string[]
+  inputs_missing?: string[]
+  notes?: string[]
+  sentence?: string
+  labor?: { forecast_sales_week?: number; scheduled_cost_after?: number; labor_pct?: number | null }
 }
 
 export interface HuumeActionScheduleWeekDraft {
@@ -895,7 +915,7 @@ export interface HuumeActionScheduleWeekDraft {
   generation_run_id: string
   location_id: string
   week_start: string
-  source_mode: 'existing' | 'template'
+  source_mode: 'existing' | 'template' | 'autopilot'
   week_template_id?: string | null
   summary?: string | null
   metrics?: {
@@ -963,6 +983,7 @@ export interface HuumeActionScheduleWeekDraft {
   review?: HuumeScheduleReview
   compliance_status?: 'verified' | 'advisory' | 'unmapped' | 'unavailable'
   jurisdiction?: { state?: string | null; status?: string; message?: string }
+  demand_model?: HuumeAutopilotDemandModel | null
 }
 
 export interface HuumeActionScheduleNote {

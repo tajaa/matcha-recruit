@@ -9,6 +9,11 @@ const mocks = vi.hoisted(() => ({
   fetchProfile: vi.fn(),
   saveProfile: vi.fn(),
   fetchTemplates: vi.fn(),
+  autopilotEnabled: false,
+}))
+
+vi.mock('../../../hooks/useMe', () => ({
+  useMe: () => ({ hasFeature: (feature: string) => feature === 'schedule_autopilot' && mocks.autopilotEnabled }),
 }))
 
 vi.mock('../../../api/employees/locationProfile', () => ({
@@ -56,6 +61,35 @@ function renderPane() {
     </ToastProvider>,
   )
 }
+
+beforeEach(() => { mocks.autopilotEnabled = false })
+
+describe('WeekStartPane — Autopilot choices', () => {
+  beforeEach(() => {
+    mocks.fetchProfile.mockResolvedValue(profile)
+    mocks.saveProfile.mockResolvedValue(profile)
+    mocks.fetchTemplates.mockResolvedValue({ week_templates: [] })
+  })
+
+  it('shows planning choices only with the feature and saves only those fields', async () => {
+    mocks.autopilotEnabled = true
+    renderPane()
+    fireEvent.change(await screen.findByLabelText('Minimum floor staff'), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Autopilot settings' }))
+
+    await waitFor(() => expect(mocks.saveProfile).toHaveBeenCalled())
+    expect(mocks.saveProfile.mock.calls[0][1]).toEqual({
+      weather_sensitivity: 'none', min_floor_staff: 2, target_labor_pct: null,
+      autopilot_shift_min_minutes: null, autopilot_shift_max_minutes: null,
+    })
+  })
+
+  it('keeps Autopilot choices hidden without the premium feature', async () => {
+    renderPane()
+    await screen.findByText('Week setup')
+    expect(screen.queryByRole('button', { name: 'Save Autopilot settings' })).not.toBeInTheDocument()
+  })
+})
 
 describe('WeekStartPane — prep and close buffers', () => {
   beforeEach(() => {
@@ -197,7 +231,9 @@ describe('WeekStartPane — the leader answer', () => {
   it('reads a single-role profile from before the set exactly as before', async () => {
     // Older payloads carry only `leader_job_id`; a one-role store must look
     // and save the same as it always did.
-    const { leader_job_ids: _ids, leader_job_names: _names, ...legacy } = profile
+    const legacy: Partial<typeof profile> = { ...profile }
+    delete legacy.leader_job_ids
+    delete legacy.leader_job_names
     mocks.fetchProfile.mockResolvedValue({ ...legacy, leader_required: true, leader_job_id: 'job-1', leader_job_name: 'Shift Lead' })
     renderWithJobs()
 

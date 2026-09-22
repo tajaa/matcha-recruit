@@ -7,7 +7,18 @@ silence would otherwise read as "nobody is scheduled".
 import logging
 from datetime import datetime, timezone
 
-from ._config import _INCIDENT_LOOKBACK_DAYS, _MAX_BENEFIT_PLANS, _MAX_HR_PILOT_POLICIES, _MAX_HR_PILOT_SECTIONS, _MAX_RECENT_INCIDENTS, _MAX_SCHEDULE_SHIFTS, _MAX_TRAINING_DETAIL, _MAX_TRAINING_PROGRAMS, _SCHEDLAW_RULE_KEY_TO_CHECK, _SCHEDULE_LOOKAHEAD_DAYS
+from ._config import (
+    _INCIDENT_LOOKBACK_DAYS,
+    _MAX_BENEFIT_PLANS,
+    _MAX_HR_PILOT_POLICIES,
+    _MAX_HR_PILOT_SECTIONS,
+    _MAX_RECENT_INCIDENTS,
+    _MAX_SCHEDULE_SHIFTS,
+    _MAX_TRAINING_DETAIL,
+    _MAX_TRAINING_PROGRAMS,
+    _SCHEDLAW_RULE_KEY_TO_CHECK,
+    _SCHEDULE_LOOKAHEAD_DAYS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,11 +156,41 @@ async def gather_hr_pilot_grounding(conn, company_id) -> dict:
             if features.get("labor_cost") and features.get("employee_schedule")
             else None
         )
+        out["schedule_autopilot"] = (
+            await _fetch_schedule_autopilot(conn, company_id)
+            if features.get("schedule_autopilot") and features.get("employee_schedule")
+            else None
+        )
         out["schedule_law"] = (
             await _fetch_schedule_law(conn, company_id, features)
             if features.get("employee_schedule") else None
         )
     return out
+
+
+async def _fetch_schedule_autopilot(conn, company_id) -> list[dict]:
+    """Latest generated demand model per location; aggregates only, no people."""
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT ON (r.location_id)
+                   r.location_id, l.name AS location_name, r.week_start,
+                   r.proposal->'demand_model' AS demand_model
+            FROM schedule_generation_runs r
+            JOIN business_locations l ON l.id=r.location_id AND l.company_id=r.company_id
+            WHERE r.company_id=$1 AND r.source_mode='autopilot'
+              AND r.week_start >= CURRENT_DATE
+              AND r.status IN ('proposed','applied')
+              AND r.proposal ? 'demand_model'
+            ORDER BY r.location_id, r.week_start, r.created_at DESC
+            """,
+            company_id,
+        )
+        return [dict(row) for row in rows]
+    except Exception:  # noqa: BLE001
+        # No tenant identifier in the message (CodeQL py/clear-text-logging).
+        logger.warning("hr_pilot_corpus: Autopilot fetch failed")
+        return []
 
 
 async def _fetch_shifts(conn, company_id) -> list[dict]:
@@ -414,8 +455,13 @@ async def _fetch_labor_cost(conn, company_id) -> list[dict]:
     corpus, even though this group is supervisor-only: HR Pilot answers get
     quoted, and a wage in a quoted answer is a different kind of disclosure
     from a wage on a page the manager had to open."""
-    from app.matcha.services.scheduling.labor_cost_service import load_job_rates, load_week_cost
-    from app.matcha.services.scheduling.location_profile import resolve_week_start_weekday
+    from app.matcha.services.scheduling.labor_cost_service import (
+        load_job_rates,
+        load_week_cost,
+    )
+    from app.matcha.services.scheduling.location_profile import (
+        resolve_week_start_weekday,
+    )
     from app.matcha.services.scheduling.schedule_rules import align_week_start
 
     rows = await conn.fetch(
@@ -478,8 +524,7 @@ async def _fetch_schedule_law(conn, company_id, features: dict) -> list[dict]:
 
     Company-wide, not per-thread-location — same aggregation level every
     other HR Pilot group uses."""
-    from app.matcha.services.scheduling import schedule_compliance
-    from app.matcha.services.scheduling import fair_workweek
+    from app.matcha.services.scheduling import fair_workweek, schedule_compliance
 
     out: list[dict] = []
     try:

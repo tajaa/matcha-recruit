@@ -8,6 +8,7 @@ const {
   useMeMock, useEditorMock, useLocationScopeMock, useScheduleJobsMock,
   getSessionMock, listSessionsMock, adoptProposalMock, suggestionStatusMock,
   fetchLocationProfileMock, planningInputsMock, previewFillMock, applyFillMock, cancelFillMock,
+  fetchAutopilotReadinessMock, runAutopilotMock,
   fetchShiftBreakStaggerMock, sendMessageStreamMock, reloadMock, reloadLocationsMock,
 } = vi.hoisted(() => ({
   useMeMock: vi.fn(),
@@ -19,6 +20,8 @@ const {
   adoptProposalMock: vi.fn(),
   suggestionStatusMock: vi.fn(),
   fetchLocationProfileMock: vi.fn(),
+  fetchAutopilotReadinessMock: vi.fn(),
+  runAutopilotMock: vi.fn(),
   planningInputsMock: vi.fn(),
   previewFillMock: vi.fn(),
   applyFillMock: vi.fn(),
@@ -54,6 +57,8 @@ vi.mock('../../api/employees/employeeSchedule', () => ({
   applyFillVacant: applyFillMock,
   cancelFillVacant: cancelFillMock,
   fetchShiftBreakStagger: fetchShiftBreakStaggerMock,
+  fetchAutopilotReadiness: fetchAutopilotReadinessMock,
+  runAutopilot: runAutopilotMock,
 }))
 vi.mock('../../work/api/matchaWork/messaging', () => ({ sendMessageStream: sendMessageStreamMock }))
 vi.mock('../../components/employees/schedule-editor/ScheduleJobsTab', () => ({
@@ -144,6 +149,11 @@ beforeEach(() => {
   fetchShiftBreakStaggerMock.mockReset().mockResolvedValue({
     schema_version: 1, max_concurrent_breaks: 1, results: [], advisories: [],
   })
+  fetchAutopilotReadinessMock.mockReset().mockResolvedValue({
+    ready: true, blockers: [],
+    autopilot: { sales_weeks: 4, sales_confidence: 'medium', weather_days_available: 7, history_weeks: 3 },
+  })
+  runAutopilotMock.mockReset().mockResolvedValue({ status: 'generated', message: 'Review prepared.' })
   fetchLocationProfileMock.mockReset().mockResolvedValue({
     location_id: 'loc1', profile_exists: true,
     week_rules: { established: true, missing: [] },
@@ -241,6 +251,74 @@ describe('SchedulePilot — the workspace', () => {
 })
 
 describe('SchedulePilot — setup and drawers', () => {
+  it('opens Autopilot setup even when blocked and returns from week setup', async () => {
+    useMeMock.mockReturnValue({ me: { profile: { name: 'Jamie Rivera' } }, hasFeature: (feature: string) => feature === 'schedule_autopilot' })
+    fetchAutopilotReadinessMock.mockResolvedValue({
+      ready: false, blockers: ['Save operating hours before building.'], autopilot: null,
+    })
+    renderPilot()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Build with Autopilot' }))
+    expect(await within(screen.getByRole('dialog', { name: 'Check setup' })).findByText('Save operating hours before building.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit week setup' }))
+    expect(screen.getByText('Week setup pane')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Return to Autopilot wizard' }))
+    expect(await screen.findByRole('dialog', { name: 'Check setup' })).toBeInTheDocument()
+    expect(runAutopilotMock).not.toHaveBeenCalled()
+  })
+
+  it('builds only after the wizard confirmation and opens review', async () => {
+    useMeMock.mockReturnValue({ me: { profile: { name: 'Jamie Rivera' } }, hasFeature: (feature: string) => feature === 'schedule_autopilot' })
+    const session = {
+      session_id: 'session-1', thread_id: 'thread-1', location_id: 'loc1',
+      week_start: '2026-08-09', week_end: '2026-08-16', messages: [], version: 1,
+      current_state: {},
+    }
+    getSessionMock.mockResolvedValueOnce(session).mockResolvedValue({
+      ...session,
+      version: 2,
+      current_state: {
+        huume_action: {
+          type: 'schedule_week_draft', status: 'proposed', confirm_id: 'auto1234',
+          generation_run_id: 'generation-1', origin: 'automatic', auto_generated: true,
+          review: review(),
+        },
+      },
+    })
+    renderPilot()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Build with Autopilot' }))
+    expect(runAutopilotMock).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+    await screen.findByLabelText('Minimum floor staff')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Build review' }))
+
+    await waitFor(() => expect(runAutopilotMock).toHaveBeenCalledWith('loc1', '2026-08-09'))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Generate review' })).not.toBeInTheDocument())
+    expect(centerTab(/Review/)).toHaveAttribute('aria-selected', 'true')
+    await waitFor(() => expect(getSessionMock).toHaveBeenCalledWith('loc1', '2026-08-09', 'session-1'))
+    expect(await within(reviewPane()).findByText(/Aisha Rivera/)).toBeInTheDocument()
+  })
+
+  it('rechecks readiness before generation when setup changes during the wizard', async () => {
+    useMeMock.mockReturnValue({ me: { profile: { name: 'Jamie Rivera' } }, hasFeature: (feature: string) => feature === 'schedule_autopilot' })
+    renderPilot()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Build with Autopilot' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+    await screen.findByLabelText('Minimum floor staff')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Build review' })).not.toBeDisabled())
+    fetchAutopilotReadinessMock.mockResolvedValue({
+      ready: false, blockers: ['Availability changed; recheck the team.'], autopilot: null,
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Build review' }))
+
+    await waitFor(() => expect(screen.getByText('Generation is blocked until setup is ready.')).toBeInTheDocument())
+    expect(runAutopilotMock).not.toHaveBeenCalled()
+  })
+
   it('warns in the rail when the week rules are unsaved, and opens the pane', async () => {
     fetchLocationProfileMock.mockResolvedValue({
       location_id: 'loc1', profile_exists: false,

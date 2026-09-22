@@ -38,6 +38,7 @@ def _serialize(row) -> dict:
         "location_name": row["location_name"],
         "timezone": row["timezone"] or "UTC",
         "enabled": row["enabled"],
+        "mode": row["mode"],
         "cadence": row["cadence"],
         "week_template_id": str(row["week_template_id"]) if row["week_template_id"] else None,
         "week_template_name": row["week_template_name"],
@@ -100,15 +101,20 @@ async def save_auto_schedule(
         )
         if not location:
             raise HTTPException(status_code=404, detail="Location not found")
-        template_exists = await conn.fetchval(
-            """SELECT EXISTS(
-                   SELECT 1 FROM schedule_week_templates
-                   WHERE id=$1 AND company_id=$2 AND (location_id=$3 OR location_id IS NULL)
-               )""",
-            body.week_template_id, company_id, location_id,
-        )
-        if not template_exists:
-            raise HTTPException(status_code=422, detail="Choose a week template available to this location.")
+        if body.mode == "template":
+            template_exists = await conn.fetchval(
+                """SELECT EXISTS(
+                       SELECT 1 FROM schedule_week_templates
+                       WHERE id=$1 AND company_id=$2 AND (location_id=$3 OR location_id IS NULL)
+                   )""",
+                body.week_template_id, company_id, location_id,
+            )
+            if not template_exists:
+                raise HTTPException(status_code=422, detail="Choose a week template available to this location.")
+        else:
+            features = await get_company_features(company_id, conn=conn)
+            if not features.get("schedule_autopilot"):
+                raise HTTPException(status_code=403, detail="Schedule Autopilot is not enabled for this company.")
         if body.target_week_start is not None:
             # The payload can't validate this itself: which weekday starts a
             # week is the LOCATION's setting, not a global constant.
@@ -138,11 +144,12 @@ async def save_auto_schedule(
             row = await conn.fetchrow(
                 """
                 INSERT INTO schedule_automation_rules(
-                    company_id, location_id, week_template_id, enabled, cadence,
+                    company_id, location_id, mode, week_template_id, enabled, cadence,
                     run_weekday, run_date, run_time, target_weeks_ahead,
                     target_week_start, next_run_at, created_by, updated_by
-                ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)
+                ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)
                 ON CONFLICT (company_id, location_id) DO UPDATE SET
+                    mode=EXCLUDED.mode,
                     week_template_id=EXCLUDED.week_template_id,
                     enabled=EXCLUDED.enabled,
                     cadence=EXCLUDED.cadence,
@@ -157,14 +164,15 @@ async def save_auto_schedule(
                     updated_at=NOW()
                 RETURNING id, schedule_version
                 """,
-                company_id, location_id, body.week_template_id, body.enabled, body.cadence,
+                company_id, location_id, body.mode, body.week_template_id, body.enabled, body.cadence,
                 body.run_weekday, body.run_date, body.run_time, body.target_weeks_ahead,
                 body.target_week_start, scheduled_at, current_user.id,
             )
             await log_audit(
                 conn, company_id, "schedule_automation", row["id"], current_user.id,
                 "schedule_automation.save",
-                {"location_id": str(location_id), "cadence": body.cadence, "enabled": body.enabled},
+                {"location_id": str(location_id), "cadence": body.cadence,
+                 "mode": body.mode, "enabled": body.enabled},
             )
         saved = await _fetch_rule(conn, company_id, location_id)
 
@@ -185,7 +193,7 @@ async def run_auto_schedule_now(
         row = await _fetch_rule(conn, company_id, location_id)
     if not row:
         raise HTTPException(status_code=404, detail="Configure this location's auto schedule first.")
-    if not row["week_template_id"]:
+    if row["mode"] == "template" and not row["week_template_id"]:
         raise HTTPException(status_code=422, detail="Choose a saved week template first.")
     async with get_connection() as conn:
         location_week_start_weekday = await resolve_week_start_weekday(
@@ -204,6 +212,7 @@ async def run_auto_schedule_now(
         location_id=location_id,
         week_start=target,
         week_template_id=row["week_template_id"],
+        mode=row["mode"],
     )
     generation_id = result.get("generation_run_id")
     async with get_connection() as conn:
