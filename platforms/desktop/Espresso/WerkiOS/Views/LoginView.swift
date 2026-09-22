@@ -9,21 +9,23 @@ struct LoginView: View {
     private enum Field { case email, password }
 
     var body: some View {
-        VStack(spacing: 24) {
+        ScrollView {
+        VStack(spacing: 28) {
             Spacer()
-            VStack(spacing: 8) {
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.tint)
-                Text("Werk")
-                    .font(.largeTitle.bold())
-                Text("Sign in to your workspace")
+            VStack(spacing: 16) {
+                Image("BrandMark").resizable().scaledToFit().frame(width: 104, height: 104)
+                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .shadow(color: .black.opacity(0.12), radius: 20, y: 10).accessibilityHidden(true)
+                Text("Espresso")
+                    .font(.largeTitle.weight(.bold)).tracking(-1)
+                Text("A little focus. A lot of possibility.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
-            VStack(spacing: 12) {
-                TextField("Email", text: $email)
+            VStack(alignment: .leading, spacing: 12) {
+                Text("WELCOME BACK").font(.caption2.weight(.semibold)).tracking(1.3).foregroundStyle(.secondary)
+                TextField("Email", text: $email, prompt: Text("Email").foregroundStyle(EspressoStyle.placeholder))
                     .textContentType(.username)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
@@ -31,14 +33,17 @@ struct LoginView: View {
                     .focused($focus, equals: .email)
                     .submitLabel(.next)
                     .onSubmit { focus = .password }
+                    .padding(.vertical, 10)
 
-                SecureField("Password", text: $password)
+                Divider()
+                SecureField("Password", text: $password, prompt: Text("Password").foregroundStyle(EspressoStyle.placeholder))
                     .textContentType(.password)
                     .focused($focus, equals: .password)
                     .submitLabel(.go)
                     .onSubmit(submit)
+                    .padding(.vertical, 10)
             }
-            .textFieldStyle(.roundedBorder)
+            .textFieldStyle(.plain).espressoCard()
 
             if let err = appState.authError {
                 Text(err)
@@ -51,7 +56,7 @@ struct LoginView: View {
                 if appState.isLoggingIn {
                     ProgressView().frame(maxWidth: .infinity)
                 } else {
-                    Text("Log In").frame(maxWidth: .infinity)
+                    Text("Settle in").frame(maxWidth: .infinity)
                 }
             }
             .buttonStyle(.borderedProminent)
@@ -61,16 +66,18 @@ struct LoginView: View {
             Spacer()
             Spacer()
         }
-        .padding(.horizontal, 32)
+        .padding(32).padding(.top, 60).frame(maxWidth: 500)
+        .frame(maxWidth: .infinity)
+        }.espressoBackground()
     }
 
     private var canSubmit: Bool {
-        !email.isEmpty && !password.isEmpty && !appState.isLoggingIn
+        !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty && !appState.isLoggingIn
     }
 
     private func submit() {
         guard canSubmit else { return }
         focus = nil
-        Task { await appState.login(email: email, password: password) }
+        Task { await appState.login(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password) }
     }
 }

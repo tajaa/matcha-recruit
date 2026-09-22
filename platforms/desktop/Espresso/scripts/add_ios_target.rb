@@ -8,7 +8,7 @@
 #   onto the iOS target so `import LiveKit` links.
 # - iOS-only sources live under WerkiOS/.
 #
-# Idempotent: re-running removes any existing WerkiOS target first.
+# Idempotent: preserve target identity, signing settings, versions and schemes.
 require 'xcodeproj'
 
 project_path = File.expand_path('../Matcha.xcodeproj', __dir__)
@@ -28,16 +28,9 @@ swift_version = mac_target.build_configurations.first.build_settings['SWIFT_VERS
 
 # --- clean re-run -----------------------------------------------------------
 existing = project.targets.find { |t| t.name == IOS_TARGET_NAME }
-if existing
-  puts "Removing existing #{IOS_TARGET_NAME} target for clean re-run"
-  existing.remove_from_project
-end
-if (g = project.main_group.children.find { |c| c.respond_to?(:display_name) && c.display_name == IOS_TARGET_NAME })
-  g.remove_from_project
-end
 
 # --- create the iOS target --------------------------------------------------
-ios = project.new_target(:application, IOS_TARGET_NAME, :ios, DEPLOY)
+ios = existing || project.new_target(:application, IOS_TARGET_NAME, :ios, DEPLOY)
 
 # Shared files to add to the iOS target (matched by basename among existing
 # project file references — all basenames are unique in this project).
@@ -47,7 +40,7 @@ shared_basenames = %w[
   APIClient.swift AuthService.swift KeychainHelper.swift ChannelsService.swift
   InboxService.swift ChannelsWebSocket.swift CallService.swift
   BroadcastService.swift WorkDetailVMStore.swift
-  ServiceCache.swift MultipartUploadBuilder.swift SafeURL.swift UsageBeaconService.swift
+  ServiceCache.swift MultipartUploadBuilder.swift SafeURL.swift UsageBeaconService.swift MWLog.swift
   ChannelChatViewModel.swift
   CommonModels.swift DashboardModels.swift ProjectModels.swift ProjectTaskModels.swift
   ProjectBizModels.swift ProjectElementModels.swift ReplayModels.swift ThreadModels.swift
@@ -68,7 +61,6 @@ shared_refs = shared_basenames.map do |bn|
   raise "shared file ref not found: #{bn}" unless ref
   ref
 end
-ios.source_build_phase.clear
 shared_refs.each { |ref| ios.source_build_phase.add_file_reference(ref, true) }
 puts "Added #{shared_refs.size} shared source files to #{IOS_TARGET_NAME}"
 
@@ -78,19 +70,22 @@ puts "Added #{shared_refs.size} shared source files to #{IOS_TARGET_NAME}"
 # referenced (not compiled). Re-running the script picks up newly added files,
 # so there's no per-file pbxproj surgery as the iOS surface grows.
 def add_tree(project, parent_group, fs_path, rel_name, target)
-  group = parent_group.new_group(rel_name, rel_name)
+  group = parent_group.groups.find { |item| item.path == rel_name } || parent_group.new_group(rel_name, rel_name)
   added = 0
   Dir.children(fs_path).sort.each do |entry|
     full = File.join(fs_path, entry)
     next if entry.start_with?('.')
-    if File.directory?(full)
+    if entry.end_with?('.xcassets')
+      ref = group.files.find { |item| item.path == entry } || group.new_reference(entry)
+      target.resources_build_phase.add_file_reference(ref, true)
+    elsif File.directory?(full)
       added += add_tree(project, group, full, entry, target)
     elsif entry.end_with?('.swift')
-      ref = group.new_reference(entry)
-      target.add_file_references([ref])
+      ref = group.files.find { |item| item.path == entry } || group.new_reference(entry)
+      target.source_build_phase.add_file_reference(ref, true)
       added += 1
     elsif entry == 'Info.plist' || entry.end_with?('.entitlements')
-      group.new_reference(entry)
+      group.new_reference(entry) unless group.files.any? { |item| item.path == entry }
     end
   end
   added
@@ -102,6 +97,7 @@ puts "Added #{ios_count} iOS-only Swift files from #{IOS_TARGET_NAME}/"
 # --- mirror Swift Package product dependencies (LiveKit, WebRTC, …) ----------
 mirrored = []
 mac_target.package_product_dependencies.each do |dep|
+  next if ios.package_product_dependencies.any? { |item| item.product_name == dep.product_name }
   new_dep = project.new(Xcodeproj::Project::Object::XCSwiftPackageProductDependency)
   new_dep.package = dep.package if dep.package
   new_dep.product_name = dep.product_name
@@ -125,8 +121,10 @@ ios.build_configurations.each do |cfg|
   s['GENERATE_INFOPLIST_FILE'] = 'NO'
   s['INFOPLIST_FILE'] = 'WerkiOS/Info.plist'
   s['CODE_SIGN_ENTITLEMENTS'] = 'WerkiOS/WerkiOS.entitlements'
-  s['MARKETING_VERSION'] = '1.0'
-  s['CURRENT_PROJECT_VERSION'] = '1'
+  s['APS_ENVIRONMENT'] = cfg.name == 'Release' ? 'production' : 'development'
+  s['ASSETCATALOG_COMPILER_APPICON_NAME'] = 'AppIcon'
+  s['MARKETING_VERSION'] ||= '1.0'
+  s['CURRENT_PROJECT_VERSION'] ||= '1'
   s['SWIFT_VERSION'] = swift_version
   s['CODE_SIGN_STYLE'] = 'Automatic'
   s['ENABLE_PREVIEWS'] = 'YES'
@@ -141,8 +139,11 @@ project.save
 puts "Saved. Targets now: #{project.targets.map(&:name).join(', ')}"
 
 # --- shared scheme so `xcodebuild -scheme WerkiOS` works --------------------
-scheme = Xcodeproj::XCScheme.new
-scheme.add_build_target(ios)
-scheme.set_launch_target(ios)
-scheme.save_as(project_path, IOS_TARGET_NAME, true)
+scheme_path = File.join(project_path, 'xcshareddata', 'xcschemes', "#{IOS_TARGET_NAME}.xcscheme")
+unless existing && File.exist?(scheme_path)
+  scheme = Xcodeproj::XCScheme.new
+  scheme.add_build_target(ios)
+  scheme.set_launch_target(ios)
+  scheme.save_as(project_path, IOS_TARGET_NAME, true)
+end
 puts "Wrote shared scheme #{IOS_TARGET_NAME}"

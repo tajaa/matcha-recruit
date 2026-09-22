@@ -221,6 +221,8 @@ jobs:
           ran=0
           if grep -q '^platforms/desktop/Espresso/' <<< "$changed"; then
             ./scripts/xcode-build.sh espresso build
+            ./scripts/xcode-build.sh espresso-ios build
+            bash platforms/desktop/Espresso/scripts/test_ios_core.sh
             ran=1
           fi
           if grep -q '^platforms/ios/MatchaTutor/' <<< "$changed"; then

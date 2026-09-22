@@ -37,13 +37,15 @@ struct ChannelListView: View {
             }
             .refreshable { await vm.load() }
         }
-        .task { await vm.load(initial: true) }
+        .task { await vm.load(initial: true); consumePendingChannel() }
         .onAppear { wireGlobalMessages() }
-        .onChange(of: appState.pendingChannelId) { _, id in
-            guard let id, let channel = vm.channels.first(where: { $0.id == id }) else { return }
-            path = [channel]
-            appState.pendingChannelId = nil
-        }
+        .onChange(of: appState.pendingChannelId) { _, _ in consumePendingChannel() }
+    }
+
+    private func consumePendingChannel() {
+        guard let id = appState.pendingChannelId, let channel = vm.channels.first(where: { $0.id == id }) else { return }
+        path = [channel]
+        appState.pendingChannelId = nil
     }
 
     private var accountMenu: some View {

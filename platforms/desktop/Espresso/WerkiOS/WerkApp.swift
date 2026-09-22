@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// iOS entry point for Werk (chat). Shares the networking/model/chat-logic core
+/// iOS entry point for Espresso. Shares the networking/model/chat-logic core
 /// with the macOS target (`Matcha/`) via target membership; the views here are
 /// touch-native (NavigationStack), not the macOS split-pane layouts.
 @main
@@ -14,6 +14,7 @@ struct WerkApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .tint(EspressoStyle.accent)
                 .environment(appState)
                 .environment(callService)
                 .environment(broadcastService)
@@ -26,6 +27,7 @@ struct WerkApp: App {
                 if appState.isAuthenticated {
                     ChannelsWebSocket.shared.connect()
                     ProjectWebSocket.shared.connect()
+                    Task { await appState.refreshSubscription() }
                 }
             case .background, .inactive:
                 appState.isSceneActive = false
@@ -41,10 +43,22 @@ private struct RootView: View {
 
     var body: some View {
         Group {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-espresso-preview") {
+                MobileDesignPreview().allowsHitTesting(false)
+            } else { sessionContent }
+            #else
+            sessionContent
+            #endif
+        }
+    }
+
+    private var sessionContent: some View {
+        Group {
             if !appState.didRestore {
                 ProgressView().controlSize(.large)
             } else if appState.isAuthenticated {
-                MainTabView()
+                MainTabView(initialTab: appState.pendingProjectId != nil ? 0 : appState.pendingConversationId != nil ? 2 : appState.pendingChannelId != nil ? 1 : 0)
             } else {
                 LoginView()
             }
