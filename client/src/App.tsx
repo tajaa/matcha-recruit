@@ -22,6 +22,7 @@ const CappeRoutes = lazy(() => import("./cappe/routes")); // Cappe — website b
 // pull what they land on (Home + Login stay eager: first paint + funnel).
 const MatchaWorkPage = lazy(() => import("./pages/landing/MatchaWorkPage"));
 const MatchaOpsPage = lazy(() => import("./pages/simpler-pages/Ops"));
+const SchedulingLanding = lazy(() => import("./pages/landing/scheduling"));
 const ServicesPage = lazy(() => import("./pages/landing/ServicesPage"));
 // Marketing pages restyled closer to /services (originals retired 2026-07-05).
 const SimpleCompliancePage = lazy(
@@ -144,6 +145,7 @@ export default function App() {
         <Route path="/" element={isCappeHost ? <CappeRoutes /> : <Home />} />
         <Route path="/matcha-work" element={<MatchaWorkPage />} />
         <Route path="/matcha-ops" element={<MatchaOpsPage />} />
+        <Route path="/matcha-scheduling" element={<SchedulingLanding />} />
         <Route path="/matcha-lite" element={<SimpleLitePage />} />
         <Route path="/matcha-compliance" element={<SimpleCompliancePage />} />
         <Route path="/matcha-platform" element={<SimplePlatformPage />} />

@@ -19,6 +19,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@excalidraw/excalidraw": "^0.18.0",
+    "@remotion/player": "4.0.527",
     "@tanstack/react-query": "^5.103.1",
     "@tiptap/extension-image": "^3.31.3",
     "@tiptap/extension-link": "^3.31.3",
@@ -42,7 +43,8 @@
     "react-simple-maps": "^5.0.5",
     "recharts": "^3.10.1",
     "rehype-raw": "^7.0.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "remotion": "4.0.527"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
