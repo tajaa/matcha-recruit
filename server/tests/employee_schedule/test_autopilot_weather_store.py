@@ -96,37 +96,64 @@ async def test_coordinates_skip_non_us_missing_rows_and_errors(monkeypatch):
     ) is None
 
 
+class _Ctx:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        return self.conn
+
+    async def __aexit__(self, *_exc):
+        return False
+
+
 @pytest.mark.asyncio
-async def test_refresh_needs_a_civil_timezone_coordinates_and_a_forecast(monkeypatch):
+async def test_refresh_needs_a_key_timezone_coordinates_and_a_forecast(monkeypatch):
     company_id, location_id = uuid4(), uuid4()
-    coords = AsyncMock(return_value=None)
+    conn = AsyncMock()
+    monkeypatch.setattr(weather_store, "connection_or_direct", lambda: _Ctx(conn))
+    geocode = AsyncMock(return_value=None)
     fetch = AsyncMock(return_value=None)
     upsert = AsyncMock(return_value=1)
     load = AsyncMock(return_value={"loaded": True})
-    monkeypatch.setattr(weather_store, "ensure_location_coordinates", coords)
+    monkeypatch.setattr(weather_store, "geocode", geocode)
     monkeypatch.setattr(weather_store, "fetch_daily_forecast", fetch)
     monkeypatch.setattr(weather_store, "upsert_weather_days", upsert)
     monkeypatch.setattr(weather_store, "load_weather_days", load)
 
-    for tz in (None, "Not/AZone"):
-        conn = AsyncMock()
-        conn.fetchrow.return_value = {"timezone": tz}
-        assert await weather_store.refresh_location_weather(
-            conn, company_id=company_id, location_id=location_id,
-        ) == {}
-    coords.assert_not_awaited()
+    async def refresh():
+        return await weather_store.refresh_location_weather(
+            company_id=company_id, location_id=location_id,
+        )
 
-    conn = AsyncMock()
-    conn.fetchrow.return_value = {"timezone": "America/Los_Angeles"}
-    assert await weather_store.refresh_location_weather(conn, company_id=company_id, location_id=location_id) == {}
+    # No key: a forecast could never be fetched, so nothing is read or geocoded.
+    monkeypatch.setattr(weather_store, "is_configured", lambda: False)
+    assert await refresh() == {}
+    conn.fetchrow.assert_not_awaited()
+
+    monkeypatch.setattr(weather_store, "is_configured", lambda: True)
+    location = {
+        "timezone": "America/Los_Angeles", "lat": None, "lng": None, "address": "1 Main",
+        "city": "Town", "state": "CA", "zipcode": "90000", "country_code": "US",
+    }
+    for tz in (None, "Not/AZone"):
+        conn.fetchrow.return_value = {**location, "timezone": tz}
+        assert await refresh() == {}
+    geocode.assert_not_awaited()
+
+    conn.fetchrow.return_value = location
+    assert await refresh() == {}           # the geocode found nothing
     fetch.assert_not_awaited()
 
-    coords.return_value = (37.0, -122.0)
-    assert await weather_store.refresh_location_weather(conn, company_id=company_id, location_id=location_id) == {}
-    upsert.assert_not_awaited()   # an outage is never written as an empty week
+    geocode.return_value = {"lat": 37.0, "lng": -122.0, "source": "census"}
+    assert await refresh() == {}           # provider outage
+    upsert.assert_not_awaited()            # an outage is never written as an empty week
+    assert "UPDATE business_locations" in conn.execute.await_args.args[0]
 
+    geocode.reset_mock()
+    conn.fetchrow.return_value = {**location, "lat": 37.0, "lng": -122.0}
     fetch.return_value = [{"local_date": date(2026, 9, 22)}]
-    assert await weather_store.refresh_location_weather(
-        conn, company_id=company_id, location_id=location_id,
-    ) == {"loaded": True}
+    assert await refresh() == {"loaded": True}
+    geocode.assert_not_awaited()           # stored coordinates are reused
+    assert fetch.await_args.kwargs == {"lat": 37.0, "lng": -122.0, "days": 10}
     assert upsert.await_args.kwargs["rows"] == fetch.return_value

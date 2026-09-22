@@ -26,7 +26,7 @@ export default function AutopilotPolicyFields({ value, onChange }: {
       </label>
       <label className="text-xs text-zinc-400">Target labor % <span className="text-zinc-600">optional</span>
         <input type="number" aria-label="Target labor %" min={1} max={90} step="0.5" value={value.targetLaborPct} onChange={(event) => change({ targetLaborPct: event.target.value })} className={inputCls} placeholder="28" />
-        <span className="mt-1 block text-[10px] text-zinc-600">Used when sales and pay data are available.</span>
+        <span className="mt-1 block text-[10px] text-zinc-600">A ceiling: caps planned labor at this share of forecast sales when sales and pay rates are on file.</span>
       </label>
       <label className="text-xs text-zinc-400">Minimum shift hours <span className="text-zinc-600">optional</span>
         <input type="number" min={2} max={12} step="0.5" value={value.shiftMinHours} onChange={(event) => change({ shiftMinHours: event.target.value })} className={inputCls} placeholder={String(DEFAULT_MIN_SHIFT_HOURS)} />

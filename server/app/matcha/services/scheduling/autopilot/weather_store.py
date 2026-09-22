@@ -11,7 +11,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 
 from app.core.services.geo import geocode
-from app.core.services.weather.google_weather import fetch_daily_forecast
+from app.core.services.weather.google_weather import fetch_daily_forecast, is_configured
+from app.database import connection_or_direct
 
 logger = logging.getLogger(__name__)
 
@@ -78,63 +79,87 @@ async def load_weather_days(
     }
 
 
+async def _geocode_row(client: httpx.AsyncClient, row) -> dict | None:
+    if row.get("country_code") not in (None, "", "US", "USA"):
+        return None
+    return await geocode(client, row["address"], row["city"], row["state"], row["zipcode"])
+
+
+async def _save_coordinates(conn, *, company_id: UUID, location_id: UUID, result: dict) -> tuple[float, float]:
+    lat, lng = float(result["lat"]), float(result["lng"])
+    await conn.execute(
+        """UPDATE business_locations
+           SET lat=$1, lng=$2, geocoded_at=NOW(), geocode_source=$3
+           WHERE id=$4 AND company_id=$5""",
+        lat, lng, result.get("source") or "census", location_id, company_id,
+    )
+    return lat, lng
+
+
+_LOCATION_SQL = """SELECT lat, lng, address, city, state, zipcode, country_code, timezone
+                   FROM business_locations WHERE id=$1 AND company_id=$2"""
+
+
 async def ensure_location_coordinates(
     conn, client: httpx.AsyncClient, *, company_id: UUID, location_id: UUID,
 ) -> tuple[float, float] | None:
     try:
-        row = await conn.fetchrow(
-            """SELECT lat, lng, address, city, state, zipcode, country_code
-               FROM business_locations WHERE id=$1 AND company_id=$2""",
-            location_id, company_id,
-        )
+        row = await conn.fetchrow(_LOCATION_SQL, location_id, company_id)
         if not row:
             return None
         if row["lat"] is not None and row["lng"] is not None:
             return float(row["lat"]), float(row["lng"])
-        if row.get("country_code") not in (None, "", "US", "USA"):
-            return None
-        result = await geocode(client, row["address"], row["city"], row["state"], row["zipcode"])
+        result = await _geocode_row(client, row)
         if not result:
             return None
-        lat, lng = float(result["lat"]), float(result["lng"])
-        await conn.execute(
-            """UPDATE business_locations
-               SET lat=$1, lng=$2, geocoded_at=NOW(), geocode_source=$3
-               WHERE id=$4 AND company_id=$5""",
-            lat, lng, result.get("source") or "census", location_id, company_id,
-        )
-        return lat, lng
+        return await _save_coordinates(conn, company_id=company_id, location_id=location_id, result=result)
     except Exception:
         logger.warning("Autopilot coordinate lookup failed for %s", location_id, exc_info=True)
         return None
 
 
 async def refresh_location_weather(
-    conn, *, company_id: UUID, location_id: UUID,
+    *, company_id: UUID, location_id: UUID,
 ) -> dict[date, dict]:
-    location = await conn.fetchrow(
-        "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
-        location_id, company_id,
-    )
+    """Fetch and store one location's forecast, holding a connection only for
+    the reads and writes — never across the geocode or the provider calls.
+
+    Skips everything, geocode included, when no Google Weather key is set.
+    """
+    if not is_configured():
+        return {}
+    async with connection_or_direct() as conn:
+        location = await conn.fetchrow(_LOCATION_SQL, location_id, company_id)
     if not location or not location["timezone"]:
         return {}
     try:
         today = datetime.now(ZoneInfo(location["timezone"])).date()
     except (KeyError, ValueError, ZoneInfoNotFoundError):
         return {}
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        coords = await ensure_location_coordinates(
-            conn, client, company_id=company_id, location_id=location_id,
-        )
+    coords: tuple[float, float] | None = None
+    if location["lat"] is not None and location["lng"] is not None:
+        coords = float(location["lat"]), float(location["lng"])
+    else:
+        try:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                result = await _geocode_row(client, location)
+            if result:
+                async with connection_or_direct() as conn:
+                    coords = await _save_coordinates(
+                        conn, company_id=company_id, location_id=location_id, result=result,
+                    )
+        except Exception:
+            logger.warning("Autopilot coordinate lookup failed for %s", location_id, exc_info=True)
     if not coords:
         return {}
     rows = await fetch_daily_forecast(lat=coords[0], lng=coords[1], days=10)
     if rows is None:
         return {}
-    await upsert_weather_days(
-        conn, company_id=company_id, location_id=location_id, rows=rows, today=today,
-    )
-    return await load_weather_days(
-        conn, company_id=company_id, location_id=location_id,
-        start=today, end=today + timedelta(days=9),
-    )
+    async with connection_or_direct() as conn:
+        await upsert_weather_days(
+            conn, company_id=company_id, location_id=location_id, rows=rows, today=today,
+        )
+        return await load_weather_days(
+            conn, company_id=company_id, location_id=location_id,
+            start=today, end=today + timedelta(days=9),
+        )

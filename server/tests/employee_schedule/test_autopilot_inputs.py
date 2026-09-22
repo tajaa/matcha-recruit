@@ -19,7 +19,8 @@ async def test_sales_loader_includes_earliest_forecast_day(monkeypatch):
     sales = {oldest_day: Decimal(123)}
     load_sales = AsyncMock(return_value=sales)
     monkeypatch.setattr(inputs, "load_sales_by_day", load_sales)
-    monkeypatch.setattr(inputs, "_fresh_weather", AsyncMock(return_value={}))
+    monkeypatch.setattr(inputs, "load_weather_days", AsyncMock(return_value={}))
+    monkeypatch.setattr(inputs, "load_location_holidays", AsyncMock(return_value={}))
     monkeypatch.setattr(inputs, "load_schedule_history", AsyncMock(return_value=[]))
     monkeypatch.setattr(inputs, "load_blended_hourly_rate", AsyncMock(return_value=None))
     conn = AsyncMock()
@@ -44,66 +45,105 @@ def _weather(days, fetched_at):
     return {day: {"precip_probability": 10, "fetched_at": fetched_at} for day in days}
 
 
-@pytest.mark.asyncio
-async def test_week_past_forecast_horizon_never_calls_the_provider(monkeypatch):
+def test_refresh_is_needed_only_when_a_provider_call_can_help():
     from datetime import datetime, timezone
 
-    refresh = AsyncMock(side_effect=AssertionError("no provider call expected"))
-    monkeypatch.setattr(inputs, "refresh_location_weather", refresh)
-    monkeypatch.setattr(inputs, "load_weather_days", AsyncMock(return_value={}))
     today = date(2026, 9, 1)
-    rows = await inputs._fresh_weather(
-        AsyncMock(), company_id=uuid4(), location_id=uuid4(),
-        week_start=today + timedelta(days=14), today=today,
-    )
-    assert rows == {}
-    refresh.assert_not_awaited()
-
-    # A fresh, complete in-horizon week is reused as stored.
+    now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
     week = today + timedelta(days=2)
-    stored = _weather([week + timedelta(days=i) for i in range(7)], datetime.now(timezone.utc))
-    monkeypatch.setattr(inputs, "load_weather_days", AsyncMock(return_value=stored))
-    assert await inputs._fresh_weather(
-        AsyncMock(), company_id=uuid4(), location_id=uuid4(), week_start=week, today=today,
-    ) == stored
+    fresh = _weather([week + timedelta(days=i) for i in range(7)], now)
+    # Wholly past the 10-day horizon, or already over: nothing to fetch.
+    assert not inputs.weather_refresh_needed({}, week_start=today + timedelta(days=14), today=today, now=now)
+    assert not inputs.weather_refresh_needed({}, week_start=today - timedelta(days=14), today=today, now=now)
+    # A fresh, complete in-horizon week is reused as stored.
+    assert not inputs.weather_refresh_needed(fresh, week_start=week, today=today, now=now)
+    # Stale, or missing an in-horizon day, is worth a call.
+    stale = _weather(list(fresh), now - timedelta(hours=30))
+    assert inputs.weather_refresh_needed(stale, week_start=week, today=today, now=now)
+    assert inputs.weather_refresh_needed(_weather([week], now), week_start=week, today=today, now=now)
+
+
+class _TrackedConnection:
+    def __init__(self, conn, events):
+        self.conn, self.events = conn, events
+
+    async def __aenter__(self):
+        self.events.append("open")
+        return self.conn
+
+    async def __aexit__(self, *_exc):
+        self.events.append("close")
+        return False
 
 
 @pytest.mark.asyncio
-async def test_stale_or_missing_in_horizon_days_refresh_best_effort(monkeypatch):
-    from datetime import datetime, timezone
-
-    today = date(2026, 9, 1)
-    week = today + timedelta(days=5)          # days 5..11; horizon ends day 9
-    old = datetime.now(timezone.utc) - timedelta(hours=30)
-    stale = _weather([week + timedelta(days=i) for i in range(5)], old)
-    fresh = _weather([week], datetime.now(timezone.utc))
-    monkeypatch.setattr(inputs, "load_weather_days", AsyncMock(side_effect=[stale, fresh]))
-    refresh = AsyncMock()
-    monkeypatch.setattr(inputs, "refresh_location_weather", refresh)
-    assert await inputs._fresh_weather(
-        AsyncMock(), company_id=uuid4(), location_id=uuid4(), week_start=week, today=today,
-    ) == fresh
-    refresh.assert_awaited_once()
-
-    # A provider failure keeps the stored rows instead of failing the build.
-    monkeypatch.setattr(inputs, "load_weather_days", AsyncMock(return_value=stale))
-    monkeypatch.setattr(inputs, "refresh_location_weather", AsyncMock(side_effect=RuntimeError("down")))
-    assert await inputs._fresh_weather(
-        AsyncMock(), company_id=uuid4(), location_id=uuid4(), week_start=week, today=today,
-    ) == stale
-
-
-@pytest.mark.asyncio
-async def test_location_without_timezone_skips_refresh(monkeypatch):
+async def test_weather_refresh_runs_with_no_connection_held(monkeypatch):
+    events: list[str] = []
+    conn = AsyncMock()
+    conn.fetchval.return_value = "America/Los_Angeles"
+    monkeypatch.setattr(inputs, "connection_or_direct", lambda: _TrackedConnection(conn, events))
+    features = AsyncMock(return_value={"schedule_autopilot": True})
+    monkeypatch.setattr(inputs, "get_company_features", features)
     monkeypatch.setattr(inputs, "load_weather_days", AsyncMock(return_value={}))
-    refresh = AsyncMock(side_effect=AssertionError("no provider call expected"))
+
+    async def refresh(**_kwargs):
+        events.append("refresh")
+
     monkeypatch.setattr(inputs, "refresh_location_weather", refresh)
-    for tz in (None, "Not/AZone"):
-        conn = AsyncMock()
+    today = date(2026, 9, 1)
+    args = {"company_id": uuid4(), "location_id": uuid4(), "week_start": today + timedelta(days=2)}
+    await inputs.ensure_autopilot_weather(**args, today=today)
+    assert events == ["open", "close", "refresh"]
+
+    # The location's own civil date decides the horizon when none is given.
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    events.clear()
+    local_today = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+    await inputs.ensure_autopilot_weather(**{**args, "week_start": local_today + timedelta(days=1)})
+    assert events == ["open", "close", "refresh"]
+
+    # Not entitled, no usable timezone, or past the horizon: no provider call.
+    for tz, flags, week_start in (
+        ("America/Los_Angeles", {}, local_today),
+        ("Not/AZone", {"schedule_autopilot": True}, local_today),
+        (None, {"schedule_autopilot": True}, local_today),
+        ("America/Los_Angeles", {"schedule_autopilot": True}, local_today + timedelta(days=21)),
+    ):
+        events.clear()
         conn.fetchval.return_value = tz
-        assert await inputs._fresh_weather(
-            conn, company_id=uuid4(), location_id=uuid4(), week_start=date(2026, 9, 21),
-        ) == {}
+        features.return_value = flags
+        await inputs.ensure_autopilot_weather(**{**args, "week_start": week_start})
+        assert "refresh" not in events
+
+    # A provider failure never fails the build.
+    features.return_value = {"schedule_autopilot": True}
+
+    async def boom(**_kwargs):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(inputs, "refresh_location_weather", boom)
+    await inputs.ensure_autopilot_weather(**args, today=today)
+
+
+@pytest.mark.asyncio
+async def test_holidays_only_for_us_or_unknown_country_stores():
+    conn = AsyncMock()
+    start, end = date(2026, 11, 20), date(2026, 11, 30)
+    conn.fetchval.return_value = "US"
+    holidays = await inputs.load_location_holidays(
+        conn, company_id=uuid4(), location_id=uuid4(), start=start, end=end,
+    )
+    assert holidays == {date(2026, 11, 26): "Thanksgiving", date(2026, 11, 27): "Black Friday"}
+    conn.fetchval.return_value = None
+    assert await inputs.load_location_holidays(
+        conn, company_id=uuid4(), location_id=uuid4(), start=start, end=end,
+    ) == holidays
+    conn.fetchval.return_value = "CA"
+    assert await inputs.load_location_holidays(
+        conn, company_id=uuid4(), location_id=uuid4(), start=start, end=end,
+    ) == {}
 
 
 @pytest.mark.asyncio

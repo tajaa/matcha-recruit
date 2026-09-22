@@ -45,17 +45,23 @@ class SalesForecast:
     notes: tuple[str, ...]
 
 
+def _window_sales(
+    sales_by_day: dict[date, Decimal], anchor: date, exclude_dates: frozenset[date],
+) -> list[tuple[date, Decimal]]:
+    start = anchor - timedelta(days=POLICY_SALES_HISTORY_DAYS)
+    return [
+        (when, _d(value)) for when, value in sales_by_day.items()
+        if start <= when < anchor and when not in exclude_dates
+    ]
+
+
 def weekday_baseline(
     day: date, *, sales_by_day: dict[date, Decimal], anchor: date,
+    exclude_dates: frozenset[date] = frozenset(),
 ) -> tuple[Decimal | None, int, str]:
-    start = anchor - timedelta(days=POLICY_SALES_HISTORY_DAYS)
-    known = sorted(
-        (_d(value) for when, value in sales_by_day.items() if start <= when < anchor),
-    )
-    same = sorted(
-        (_d(value) for when, value in sales_by_day.items()
-         if start <= when < anchor and when.weekday() == day.weekday()),
-    )
+    window = _window_sales(sales_by_day, anchor, exclude_dates)
+    known = sorted(value for _when, value in window)
+    same = sorted(value for when, value in window if when.weekday() == day.weekday())
     if len(same) >= POLICY_WEEKDAY_MEDIAN_MIN_OBS:
         return _d(median(same)), len(same), "weekday_median"
     if known:
@@ -92,14 +98,21 @@ def weather_effect(day: date, weather_by_day: dict[date, dict], sensitivity: str
 
 def forecast_day(
     day: date, *, sales_by_day: dict[date, Decimal], weather_by_day: dict[date, dict],
-    sensitivity: str, anchor: date,
+    sensitivity: str, anchor: date, exclude_dates: frozenset[date] = frozenset(),
 ) -> SalesForecast:
-    baseline, observations, method = weekday_baseline(day, sales_by_day=sales_by_day, anchor=anchor)
+    baseline, observations, method = weekday_baseline(
+        day, sales_by_day=sales_by_day, anchor=anchor, exclude_dates=exclude_dates,
+    )
     effect = weather_effect(day, weather_by_day, sensitivity)
     notes: list[str] = []
     if method == "trailing_mean":
+        # Name the days actually averaged: "13-week average" read as thirteen
+        # weeks of data when a store had imported two.
+        known = len(_window_sales(sales_by_day, anchor, exclude_dates))
         notes.append(
-            f"only {observations} past {day.strftime('%A')}s with sales — using 13-week daily average"
+            f"only {observations} past {day.strftime('%A')}{'' if observations == 1 else 's'} with sales — "
+            f"using the average of "
+            f"all {known} sales day{'s' if known != 1 else ''}"
         )
     elif method == "none":
         notes.append("no sales history — coverage floor only")

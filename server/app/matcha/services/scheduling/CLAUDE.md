@@ -1086,7 +1086,51 @@ default `location_weather_refresh` task and never overwrite a past civil day.
 V1 weather effects are explicit manager policy (`none`, `rain_hurts`, or
 `rain_helps`) and are shown in the demand model. They are not learned elasticity
 and are not a legal or optimality claim. Hourly POS demand, learned weather
-elasticity, holidays, employer burden, and Toast ingestion remain follow-ups.
+elasticity, employer burden, and Toast ingestion remain follow-ups.
+
+Review fixes (2026-09-22, the first pass after launch) — each was a real miss:
+
+- **Hours ladder (`labor.labor_target`).** Sales + learned $/labor-hour first,
+  and a manager's `target_labor_pct` is a CEILING on that pace (`splh_capped`,
+  with a note naming both numbers) — it was silently ignored whenever a pace
+  could be learned, while the wizard said it applied. No sales at all now
+  repeats the usual published hours for that weekday (`usual_hours`, needs
+  `POLICY_MIN_HISTORY_WEEKS` observed dates of it) instead of dropping a store
+  with eight weeks of schedules to the bare floor.
+- **Capacity is who the planner can schedule** (`autopilot/availability.py`).
+  Per 30-minute slot: confirmed availability only (the planner refuses
+  `unconfirmed`), approved time away, weekly windows, and qualification by
+  date. It imports `week_builder._job_qualified` / `_is_unavailable` lazily
+  (week_builder imports `autopilot.policy`, so a top-level import is circular)
+  — it is NOT a fourth copy of the qualification rule. The curve clips per slot
+  and names the clipped hours.
+- **The history shape averages over every observed date of the weekday**, not
+  only the dates that staffed the slot — a one-off event night used to carry
+  full weight into every future curve.
+- **Leader seats.** Every configured leader job anyone can work carries them,
+  gated jobs first; a leader job with no qualified list (open to the whole
+  roster) is used only when no gated one has anyone, and the note says so.
+  Seats are balanced across the WEEK by qualified headcount (leader seats are
+  one interval a day, so a per-day mix gave every one to the same job), and
+  configured leader jobs never soak up crew seats.
+- **A job never gets more concurrent seats than it has available qualified
+  people, or more weekly minutes than they can give** (`_assign_jobs`); what
+  cannot be placed is assigned anyway and counted in
+  `capacity.shifts_beyond_qualified_staff` with a day note, so the unfilled
+  seats are said up front.
+- **Holidays** (`autopilot/holidays.py`, US or unknown-country stores): the
+  demand-moving days (Thanksgiving, Christmas, Mother's Day, …) are left out of
+  every baseline, pace and shape, and a holiday in the target week gets a note
+  telling the manager to staff it by hand. Calendar facts, never a modifier.
+- **A rebuild retires the old suggestion in the insert's transaction**
+  (`propose_week_draft(supersede_proposed=True)`), so a refused rebuild keeps
+  the previous suggestion instead of leaving the week empty.
+- **Weather is refreshed before the build takes its connection**
+  (`inputs.ensure_autopilot_weather`); `refresh_location_weather` holds a
+  connection only for its reads and writes and skips entirely — geocode
+  included — when no Google key is set (the worker too).
+- `inputs_missing` lists only inputs that could have changed THIS plan.
+  Readiness counts history weeks by the location's week start, not ISO weeks.
 
 The Schedule Pilot toolbar opens a three-step Autopilot wizard even when
 readiness is blocked: repair required setup, inspect optional input quality and

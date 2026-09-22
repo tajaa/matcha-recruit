@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 
 from app.core.feature_flags import merge_company_features
-from app.core.services.weather.google_weather import fetch_daily_forecast
+from app.core.services.weather.google_weather import fetch_daily_forecast, is_configured
 from app.matcha.services.scheduling.autopilot.weather_store import (
     ensure_location_coordinates,
     upsert_weather_days,
@@ -30,6 +30,10 @@ async def _run(*, force: bool = False) -> dict:
         settings = await scheduler_settings_row(conn, "location_weather_refresh")
         if not force and (not settings or not settings["enabled"]):
             return {"status": "disabled"}
+        if not is_configured():
+            # Without a key every fetch fails; don't spend a Census geocode
+            # per location (or the claim below) on a run that cannot succeed.
+            return {"status": "unconfigured"}
         batch = int((settings and settings["max_per_cycle"]) or DEFAULT_BATCH)
         if not force:
             claimed = await conn.fetchval(

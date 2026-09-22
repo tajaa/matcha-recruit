@@ -26,6 +26,12 @@ def _api_key() -> str | None:
     return get_settings().google_weather_api_key
 
 
+def is_configured() -> bool:
+    """Whether a forecast call can succeed at all — checked before anything
+    spends a geocode on a location whose forecast could never be fetched."""
+    return bool(_api_key())
+
+
 def _number(value: Any) -> Decimal | None:
     if value is None:
         return None

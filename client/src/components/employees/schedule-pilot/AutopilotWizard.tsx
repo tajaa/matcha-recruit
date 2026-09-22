@@ -182,7 +182,7 @@ export default function AutopilotWizard({
                 <p><span className="text-zinc-500">Week:</span> {weekStart}</p>
                 <p><span className="text-zinc-500">Coverage floor:</span> {profile?.min_floor_staff ?? 1} staff</p>
                 <p><span className="text-zinc-500">Weather:</span> {profile?.weather_sensitivity === 'rain_hurts' ? 'Rain lowers demand' : profile?.weather_sensitivity === 'rain_helps' ? 'Rain raises demand' : 'No weather adjustment'}</p>
-                <p><span className="text-zinc-500">Target labor:</span> {profile?.target_labor_pct == null ? 'Automatic fallback' : `${profile.target_labor_pct}%`}</p>
+                <p><span className="text-zinc-500">Target labor:</span> {profile?.target_labor_pct == null ? 'None — pace learned from past weeks' : `${profile.target_labor_pct}% ceiling`}</p>
                 <p><span className="text-zinc-500">Shift length:</span> {profile?.autopilot_shift_min_minutes == null ? 'Default minimum' : `${profile.autopilot_shift_min_minutes / 60}h minimum`} to {profile?.autopilot_shift_max_minutes == null ? 'default maximum' : `${profile.autopilot_shift_max_minutes / 60}h maximum`}</p>
               </div>
               {readinessLoading ? (

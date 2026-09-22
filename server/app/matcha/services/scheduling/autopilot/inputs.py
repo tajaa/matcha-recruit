@@ -8,6 +8,10 @@ from decimal import Decimal
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.core.feature_flags import get_company_features
+from app.database import connection_or_direct
+
+from .holidays import holidays_between
 from .policy import POLICY_SALES_HISTORY_DAYS
 from .weather_store import load_weather_days, refresh_location_weather
 
@@ -83,47 +87,79 @@ async def load_blended_hourly_rate(
     return Decimal(str(value)) if value is not None else None
 
 
-async def _fresh_weather(
-    conn, *, company_id: UUID, location_id: UUID, week_start: date,
-    today: date | None = None,
-) -> dict[date, dict]:
-    """Stored forecast for the week, refreshed only when a refresh can help.
+def weather_refresh_needed(
+    rows: dict[date, dict], *, week_start: date, today: date, now: datetime | None = None,
+) -> bool:
+    """Whether a provider call could improve the stored week.
 
     Google forecasts 10 days out. A week wholly past that horizon (or already
     over) can never be filled, so it must not trigger a geocode + provider
-    call on every build while this request holds a pooled connection.
+    call on every build.
     """
     end = week_start + timedelta(days=6)
-    rows = await load_weather_days(
-        conn, company_id=company_id, location_id=location_id, start=week_start, end=end,
-    )
-    if today is None:
-        tz_name = await conn.fetchval(
-            "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
-            location_id, company_id,
-        )
-        try:
-            today = datetime.now(ZoneInfo(tz_name)).date() if tz_name else None
-        except (KeyError, ValueError, ZoneInfoNotFoundError):
-            today = None
-    if today is None:
-        return rows
     first = max(week_start, today)
     last = min(end, today + timedelta(days=FORECAST_HORIZON_DAYS - 1))
     if first > last:
-        return rows
+        return False
     wanted = {first + timedelta(days=offset) for offset in range((last - first).days + 1)}
     newest = max((row.get("fetched_at") for row in rows.values() if row.get("fetched_at")), default=None)
-    stale = newest is None or newest < datetime.now(timezone.utc) - timedelta(hours=24)
-    if stale or not wanted <= set(rows):
-        try:
-            await refresh_location_weather(conn, company_id=company_id, location_id=location_id)
+    now = now or datetime.now(timezone.utc)
+    return newest is None or newest < now - timedelta(hours=24) or not wanted <= set(rows)
+
+
+def _location_today(tz_name: str | None) -> date | None:
+    try:
+        return datetime.now(ZoneInfo(tz_name)).date() if tz_name else None
+    except (KeyError, ValueError, ZoneInfoNotFoundError):
+        return None
+
+
+async def ensure_autopilot_weather(
+    *, company_id: UUID, location_id: UUID, week_start: date, today: date | None = None,
+) -> None:
+    """Refresh the stored forecast when it can help, holding NO connection
+    across the provider calls.
+
+    The build used to refresh from inside `propose_week_draft`'s connection,
+    parking a pooled connection on a Census geocode plus two 10-second Google
+    pages. Called before the build acquires its own; best effort — a failure
+    leaves the stored rows and the build goes on without them.
+    """
+    try:
+        async with connection_or_direct() as conn:
+            features = await get_company_features(company_id, conn=conn)
+            if not features.get("schedule_autopilot"):
+                return
             rows = await load_weather_days(
-                conn, company_id=company_id, location_id=location_id, start=week_start, end=end,
+                conn, company_id=company_id, location_id=location_id,
+                start=week_start, end=week_start + timedelta(days=6),
             )
-        except Exception:
-            logger.warning("Autopilot weather refresh failed for %s", location_id, exc_info=True)
-    return rows
+            if today is None:
+                today = _location_today(await conn.fetchval(
+                    "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
+                    location_id, company_id,
+                ))
+        if today is None or not weather_refresh_needed(rows, week_start=week_start, today=today):
+            return
+        await refresh_location_weather(company_id=company_id, location_id=location_id)
+    except Exception:
+        logger.warning("Autopilot weather refresh failed for %s", location_id, exc_info=True)
+
+
+async def load_location_holidays(
+    conn, *, company_id: UUID, location_id: UUID, start: date, end: date,
+) -> dict[date, str]:
+    """US demand holidays in [start, end] for a US (or unknown-country) store.
+
+    A store outside the US gets none rather than the wrong country's calendar.
+    """
+    country = await conn.fetchval(
+        "SELECT country_code FROM business_locations WHERE id=$1 AND company_id=$2",
+        location_id, company_id,
+    )
+    if country not in (None, "", "US", "USA"):
+        return {}
+    return holidays_between(start, end)
 
 
 async def load_autopilot_inputs(
@@ -154,14 +190,21 @@ async def load_autopilot_inputs(
             conn, company_id=company_id, location_id=location_id,
             start=sales_start, end=week_start - timedelta(days=1),
         ),
-        "weather_by_day": await _fresh_weather(
-            conn, company_id=company_id, location_id=location_id, week_start=week_start,
+        # Read only: `ensure_autopilot_weather` refreshed it before this
+        # connection was taken.
+        "weather_by_day": await load_weather_days(
+            conn, company_id=company_id, location_id=location_id,
+            start=week_start, end=week_start + timedelta(days=6),
         ),
         "history_shifts": await load_schedule_history(
             conn, company_id=company_id, location_id=location_id, week_start=week_start,
         ),
         "blended_hourly_rate": await load_blended_hourly_rate(
             conn, company_id=company_id, location_id=location_id,
+        ),
+        "holidays": await load_location_holidays(
+            conn, company_id=company_id, location_id=location_id,
+            start=sales_start, end=week_start + timedelta(days=6),
         ),
         "anchor": week_start,
     }
