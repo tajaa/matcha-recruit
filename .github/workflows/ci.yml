@@ -67,7 +67,7 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: client/package-lock.json
 
@@ -85,45 +85,9 @@ jobs:
         working-directory: client
 
       - name: Frontend unit tests
-        # Main has one exact known assertion failure. Accept only that
-        # fingerprint; any additional or different failure makes CI red.
-        run: |
-          set +e
-          npm run test:run -- --reporter=json --outputFile="$RUNNER_TEMP/vitest.json" \
-            >"$RUNNER_TEMP/vitest.log" 2>&1
-          rc=$?
-          set -e
-          cat "$RUNNER_TEMP/vitest.log"
-          if [ "$rc" -eq 0 ]; then exit 0; fi
-          python - "$RUNNER_TEMP/vitest.json" <<'PY'
-          import json
-          import sys
-
-          with open(sys.argv[1], encoding="utf-8") as handle:
-              report = json.load(handle)
-          failed_results = [
-              result for result in report.get("testResults", [])
-              if result.get("status") == "failed"
-          ]
-          failed = [
-              (result["name"], assertion["fullName"])
-              for result in report.get("testResults", [])
-              for assertion in result.get("assertionResults", [])
-              if assertion.get("status") == "failed"
-          ]
-          expected = [(
-              "src/data/featureCatalog.test.ts",
-              "applyFeatureToggle disables dependent features without disabling unrelated prerequisites",
-          )]
-          normalized = [(name.replace("\\", "/"), title) for name, title in failed]
-          summary_matches = (
-              report.get("numFailedTests") == 1
-              and len(failed_results) == 1
-          )
-          if not summary_matches or len(normalized) != 1 or not normalized[0][0].endswith(expected[0][0]) or normalized[0][1] != expected[0][1]:
-              raise SystemExit(f"unexpected Vitest failures: {failed!r}")
-          print("Accepted the one exact main-branch Vitest baseline failure.")
-          PY
+        # No accepted baseline failures. The default reporter prints each
+        # failing assertion with its message and stack, so a red run says why.
+        run: npm run test:run
         working-directory: client
 
       - name: Tellus production build
@@ -347,7 +311,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         if: hashFiles('client/package-lock.json') != ''
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: client/package-lock.json
 
@@ -399,7 +363,7 @@ jobs:
           echo "frontend=$frontend" >> "$GITHUB_OUTPUT"
           echo "backend=$backend frontend=$frontend"
 
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
         if: steps.changed.outputs.backend == 'true' || steps.changed.outputs.frontend == 'true'
 
       - name: Build backend image

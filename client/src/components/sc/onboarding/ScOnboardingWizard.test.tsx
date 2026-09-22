@@ -86,8 +86,9 @@ describe('ScOnboardingWizard', () => {
   async function reachLocationsStep(user: ReturnType<typeof userEvent.setup>) {
     renderWizard()
     await waitFor(() => expect(screen.getByText('Set up Safety Co')).toBeInTheDocument())
-    // Select is a button-based dropdown, not a native <select>.
-    await user.click(screen.getByRole('button', { name: /Choose a range/ }))
+    // Select is a button-based dropdown, not a native <select>; its <label>
+    // names the trigger, so the placeholder text is not its accessible name.
+    await user.click(screen.getByRole('button', { name: /Company size/ }))
     await user.click(screen.getByRole('button', { name: /11.50 employees/ }))
     await user.type(screen.getByRole('textbox'), '722511')
     await user.click(screen.getByRole('button', { name: 'Continue' }))

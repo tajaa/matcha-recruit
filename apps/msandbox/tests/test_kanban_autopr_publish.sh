@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Exercises the question-only publication path in a disposable Git repository.
 set -euo pipefail
+# Fixtures point at example.invalid; harness/lib.sh fail-closes on that under Actions.
+unset GITHUB_ACTIONS
 
 # This disposable fixture intentionally uses example.invalid instead of the
 # production board. GitHub Actions exports GITHUB_ACTIONS to every test, so

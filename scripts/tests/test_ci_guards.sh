@@ -195,12 +195,15 @@ if grep -q 'continue-on-error:' "$CI_WORKFLOW"; then
 else
     check "PR CI has no blanket continue-on-error escape hatch" 0
 fi
-# The Vitest baseline is the one accepted failure left, and it is still matched
-# exactly rather than waved through.
-if grep -qF 'unexpected Vitest failures' "$CI_WORKFLOW"; then
-    check "PR CI still fingerprints the one accepted Vitest baseline failure" 0
+# The Vitest baseline failure (featureCatalog.test.ts) was fixed in 280ebd5,
+# and the fingerprint gate that excused it then failed from the other side.
+# Same replacement invariant as the server case below: the frontend job runs
+# vitest plainly, with no accepted-failure escape at all.
+if grep -qF 'unexpected Vitest failures' "$CI_WORKFLOW" \
+    || grep -qF 'baseline failure' <<< "$(grep -v '^[[:space:]]*#' "$CI_WORKFLOW")"; then
+    check "frontend test suite has no pinned-failure escape hatch" 1
 else
-    check "PR CI still fingerprints the one accepted Vitest baseline failure" 1
+    check "frontend test suite has no pinned-failure escape hatch" 0
 fi
 # The server suite's two fingerprints ('7c1de748641e', the fresh-migration
 # baseline, and "cannot import name 'internal_mobility'") are GONE on purpose:

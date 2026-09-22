@@ -17,6 +17,8 @@
 # ownership stamps run-codex-sandboxed.sh writes. No network, no containers,
 # no model call.
 set -uo pipefail
+# Fixtures point at example.invalid; harness/lib.sh fail-closes on that under Actions.
+unset GITHUB_ACTIONS
 
 # This disposable end-to-end fixture intentionally targets example.invalid.
 # GitHub Actions exports GITHUB_ACTIONS to every test, so remove that ambient
