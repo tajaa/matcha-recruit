@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ...core.services.redis_cache import cache_get, cache_set, get_redis_cache
 from ...database import get_connection
+from ..models._validators import is_app_url_scheme
 from ..services.booking_suggestion_access import canonical_suggestion_host
 from ..services.common import normalize_host_header
 from ..services.render import render_site_html
@@ -47,7 +48,9 @@ async def app_return(request: Request, o: str = "", r: str = "success"):
     if not exists:
         raise HTTPException(404, "Order not found")
     headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
-    if scheme and re.fullmatch(r"[a-z][a-z0-9+.-]{1,30}", scheme):
+    # Same rule as the write side (`CappeSiteUpdate`), re-checked here so a row
+    # that predates the denylist can never become a web/script redirect.
+    if is_app_url_scheme(scheme):
         return RedirectResponse(f"{scheme}://order/{o}?r={r}", status_code=302, headers=headers)
     return HTMLResponse("<!doctype html><html><body><h1>Return to the app</h1><p>You can close this window and check your order in the app.</p></body></html>", headers=headers)
 

@@ -17,9 +17,12 @@ class SessionLifetimes:
             raise ValueError("Session lifetimes must be positive")
 
 
-def access_token_stale(issued_at: Optional[int], *, now: Optional[datetime] = None,
-                       lifetimes: Optional[SessionLifetimes] = None) -> bool:
-    """Reject legacy long-lived access tokens after the configured short TTL."""
+def access_token_stale(issued_at: Optional[int], *, now: Optional[datetime] = None) -> bool:
+    """Reject legacy long-lived access tokens after the configured short TTL.
+
+    Deliberately ignores per-scope `SessionLifetimes`: those bound the refresh
+    window only. Every product keeps the one short global access TTL.
+    """
     if issued_at is None:
         return True
     try:
@@ -73,10 +76,14 @@ def refresh_session_expired(
     except (TypeError, ValueError):
         return True
 
-    settings = get_settings()
     now_epoch = int((now or datetime.now(timezone.utc)).timestamp())
-    idle = lifetimes.refresh_idle_minutes if lifetimes else settings.jwt_refresh_idle_expire_minutes
-    absolute = lifetimes.refresh_absolute_minutes if lifetimes else settings.jwt_session_absolute_expire_hours * 60
+    if lifetimes:
+        idle = lifetimes.refresh_idle_minutes
+        absolute = lifetimes.refresh_absolute_minutes
+    else:
+        settings = get_settings()
+        idle = settings.jwt_refresh_idle_expire_minutes
+        absolute = settings.jwt_session_absolute_expire_hours * 60
     if now_epoch - issued > idle * 60:
         return True
     return now_epoch - started > absolute * 60

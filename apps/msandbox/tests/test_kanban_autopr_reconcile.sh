@@ -2,6 +2,8 @@
 # Isolated recovery test: a missed pull_request webhook must be repaired before
 # selection, while unrelated Todo work remains in the candidate stream.
 set -euo pipefail
+# Fixtures point at example.invalid; harness/lib.sh fail-closes on that under Actions.
+unset GITHUB_ACTIONS
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 RECONCILE="$REPO_ROOT/apps/msandbox/harness/reconcile-merged-cards.sh"
@@ -84,7 +86,10 @@ PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" RUNNER_TEMP="$TMP_DIR
   AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch2.json" AUTOPR_TEST_GH_LOG="$TMP_DIR/gh2.log" \
   AUTOPR_BOT_PRS_FILE="$TMP_DIR/bot-prs.json" GITHUB_REPOSITORY=tajaa/matcha-recruit \
   "$RECONCILE" "$TMP_DIR/cards2.json" > "$TMP_DIR/remaining2.json"
-jq -s -e 'length == 1 and .[0].board_column == "todo"' "$TMP_DIR/card-patch2.json" >/dev/null
+# The hand-back goes through the server's pr-closed endpoint (which owns the
+# column move + note rewrite); the bare board_column PATCH is only the 404
+# fallback for a lagging deploy, so the stub (always 200) must see one POST.
+jq -s -e 'length == 1 and .[0].pr_number == 503' "$TMP_DIR/card-patch2.json" >/dev/null
 jq -e 'length == 2 and (map(.id8) | sort) == ["eeee0000","ffff0000"]' "$TMP_DIR/remaining2.json" >/dev/null
 ! grep -q '^pr view 505 ' "$TMP_DIR/gh2.log"
 grep -q '^pr view 503 ' "$TMP_DIR/gh2.log"

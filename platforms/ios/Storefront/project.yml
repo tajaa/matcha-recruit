@@ -13,8 +13,10 @@ targets:
   Ahnimal:
     type: application
     platform: iOS
-    sources: [Sources]
-    resources: [Resources]
+    sources:
+      - path: Sources
+      - path: Resources
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ahnimal.app
@@ -38,6 +40,8 @@ targets:
         CappeSiteSlug: ahnimal
         CappeSiteOrigin: https://ahnimal.gummfit.com
         AppURLScheme: ahnimal
+        CappeDisplayName: Ahnimal
+        CappeTagline: Better choices for people, animals, and the planet.
         CFBundleURLTypes:
           - CFBundleURLSchemes: [ahnimal]
             CFBundleURLName: com.ahnimal.app

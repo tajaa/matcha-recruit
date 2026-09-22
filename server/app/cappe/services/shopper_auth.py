@@ -108,7 +108,8 @@ async def issue_session(conn, shopper, *, sid=None, started=None):
         sid, shopper["id"], refresh_hash(refresh), payload["exp"],
     )
     return {"access_token": access, "refresh_token": refresh, "token_type": "bearer",
-            "expires_in": 900, "shopper": Shopper.model_validate(dict(shopper)).model_dump(mode="json")}
+            "expires_in": get_settings().jwt_access_token_expire_minutes * 60,
+            "shopper": Shopper.model_validate(dict(shopper)).model_dump(mode="json")}
 
 
 async def resolve_shopper(conn, site, token, kind="access", *, lock=False):

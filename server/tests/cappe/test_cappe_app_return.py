@@ -56,6 +56,29 @@ async def test_app_return_redirects_only_to_configured_scheme(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("scheme", ["https", "http", "javascript", "data", "file"])
+async def test_app_return_never_redirects_to_web_or_script_schemes(monkeypatch, scheme):
+    # A row that predates the write-side denylist must fall back to the
+    # close-window page rather than 302 the shopper to a browser-executed URL.
+    _wire(monkeypatch, _Conn(scheme=scheme))
+    response = await render.app_return(_request(), o=TOKEN, r="success")
+    assert isinstance(response, HTMLResponse)
+    assert "location" not in response.headers
+
+
+def test_site_update_rejects_web_and_script_app_schemes():
+    from pydantic import ValidationError
+
+    from app.cappe.models.sites import CappeSiteUpdate
+
+    for bad in ("https", "javascript", "data", "Ahnimal", "1app", "a"):
+        with pytest.raises(ValidationError):
+            CappeSiteUpdate(app_url_scheme=bad)
+    assert CappeSiteUpdate(app_url_scheme="ahnimal").app_url_scheme == "ahnimal"
+    assert CappeSiteUpdate(app_url_scheme=None).app_url_scheme is None
+
+
+@pytest.mark.asyncio
 async def test_app_return_without_scheme_serves_close_window_page(monkeypatch):
     _wire(monkeypatch, _Conn(scheme=None, order=False, subscription=True))
     response = await render.app_return(_request(), o=TOKEN, r="cancel")

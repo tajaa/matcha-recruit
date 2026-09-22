@@ -4,9 +4,9 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from ._validators import MAX_SNAPSHOT_BYTES, assert_json_size
+from ._validators import MAX_SNAPSHOT_BYTES, app_url_scheme, assert_json_size
 
 # Apex-domain shape (labels 1-63 chars, alnum/hyphen, real-looking TLD).
 _DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")
@@ -96,6 +96,11 @@ class CappeSiteFromTemplate(BaseModel):
 class CappeSiteUpdate(_SnapshotSizeLimit):
     app_url_scheme: Optional[str] = Field(default=None, pattern=r"^[a-z][a-z0-9+.-]{1,30}$")
     app_bundle_id: Optional[str] = Field(default=None, max_length=155, pattern=r"^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$")
+
+    @field_validator("app_url_scheme")
+    @classmethod
+    def _custom_app_scheme_only(cls, v: Optional[str]) -> Optional[str]:
+        return app_url_scheme(v)
     name: Optional[str] = Field(default=None, max_length=255)
     # The tenant subdomain (<sub>.gummfit.com). Editable after creation; the
     # route slugifies + checks reserved/uniqueness before applying.

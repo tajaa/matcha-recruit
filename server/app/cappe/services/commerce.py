@@ -15,6 +15,7 @@ import logging
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Iterable, Optional, Sequence
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
@@ -550,26 +551,18 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             if subtotal > 0:
                 require_can_sell(owner_ent)
 
-            # Tax (per-site rate, applied to physical/taxable lines only). Added
-            # as a Stripe line item below so the charge matches the receipt total.
+            # Tax (per-site rate, physical lines only) + shipping come from the
+            # same `cart_totals` the public quote endpoint uses, so a quote and
+            # the order it becomes can never disagree. Tax is added as a Stripe
+            # line item below so the charge matches the receipt total.
             tax_cfg = await conn.fetchrow(
                 "SELECT tax_rate_bps, tax_label, shipping_flat_cents, "
                 "shipping_free_threshold_cents, shipping_label "
                 "FROM cappe_sites WHERE id = $1", site["id"]
             )
-            tax_rate_bps = int(tax_cfg["tax_rate_bps"]) if tax_cfg else 0
             tax_label = (tax_cfg["tax_label"] if tax_cfg else None) or "Tax"
-            taxable = sum(unit * qty for (_p, _t, unit, qty, f, *_r) in line_rows if f == "physical")
-            tax_cents = (taxable * tax_rate_bps) // 10000 if tax_rate_bps > 0 else 0
-            has_physical = any(f == "physical" for (_p, _t, _u, _q, f, *_r) in line_rows)
-            shipping_cents = compute_shipping_cents(
-                has_physical=has_physical,
-                goods_subtotal_cents=taxable,
-                flat_cents=int(tax_cfg["shipping_flat_cents"]) if tax_cfg else 0,
-                free_threshold_cents=tax_cfg["shipping_free_threshold_cents"] if tax_cfg else None,
-            )
             shipping_label = (tax_cfg["shipping_label"] if tax_cfg else None) or "Shipping"
-            total_cents = subtotal + tax_cents + shipping_cents
+            has_physical = any(f == "physical" for (_p, _t, _u, _q, f, *_r) in line_rows)
             totals = cart_totals([
                 {"unit_price_cents": unit, "quantity": qty, "fulfillment": fulfillment}
                 for (_pid, _title, unit, qty, fulfillment, *_rest) in line_rows
@@ -621,22 +614,20 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
     return_urls_requested = bool(body.success_url and body.cancel_url)
     success_url = url_within_origins(body.success_url, allowed_origins) or site_home
     cancel_url = url_within_origins(body.cancel_url, allowed_origins) or site_home
-    # The order token doesn't exist when the app asks for checkout. Bind its
-    # callback on the server, after the same origin validation as web checkout.
-    if shopper:
-        from urllib.parse import urlsplit
-        for field, value in (("success", success_url), ("cancel", cancel_url)):
-            if value and urlsplit(value).path == "/__cappe/app-return":
-                parsed = urlsplit(value)
-                callback = f"{parsed.scheme}://{parsed.netloc}/__cappe/app-return?o={order['access_token']}&r={field}"
-                if field == "success":
-                    success_url = callback
-                else:
-                    cancel_url = callback
     if return_urls_requested and (success_url != body.success_url or cancel_url != body.cancel_url):
         logger.warning(
             "cappe checkout: off-site return URL rejected for site %s", site["id"]
         )
+    # Bind both guest and signed-in app returns to this order after origin
+    # validation. The token does not exist when the app requests checkout.
+    for field, value in (("success", success_url), ("cancel", cancel_url)):
+        if value and urlsplit(value).path == "/__cappe/app-return":
+            parsed = urlsplit(value)
+            callback = f"{parsed.scheme}://{parsed.netloc}/__cappe/app-return?o={order['access_token']}&r={field}"
+            if field == "success":
+                success_url = callback
+            else:
+                cancel_url = callback
     can_pay = bool(
         pay_total > 0 and owner and owner["stripe_account_id"]
         and owner["stripe_charges_enabled"] and return_urls_requested

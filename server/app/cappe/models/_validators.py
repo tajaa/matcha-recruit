@@ -12,9 +12,38 @@ which is a stored `javascript:` vector (audit F3).
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from ..services.common import MAX_SNAPSHOT_BYTES
+
+# Custom URL scheme a white-label storefront app registers for checkout returns.
+# `render.app_return` 302s to `<scheme>://order/<token>`, so the scheme must be
+# an app hand-off, never something a browser navigates or executes itself.
+# The regex mirrors RFC 3986 scheme syntax; the denylist removes the schemes a
+# browser treats as web / script / data / local navigation (CodeQL #205).
+APP_URL_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]{1,30}$")
+BLOCKED_APP_URL_SCHEMES = frozenset({
+    "http", "https", "ws", "wss", "ftp", "file", "javascript", "vbscript",
+    "data", "blob", "about", "mailto", "tel", "sms",
+})
+
+
+def is_app_url_scheme(v: str | None) -> bool:
+    """True when `v` is a syntactically valid, non-web custom app scheme."""
+    return bool(v) and bool(APP_URL_SCHEME_RE.fullmatch(v)) and v not in BLOCKED_APP_URL_SCHEMES
+
+
+def app_url_scheme(v: str | None) -> str | None:
+    """Field validator: `None` clears the scheme; anything else must pass
+    `is_app_url_scheme`."""
+    if v is None:
+        return None
+    if not is_app_url_scheme(v):
+        raise ValueError(
+            "app_url_scheme must be a custom app scheme (e.g. \"ahnimal\"), not a web or script scheme"
+        )
+    return v
 
 
 def https_url(v: str | None) -> str | None:
@@ -53,4 +82,7 @@ def assert_json_size(field_name: str, value: Any, limit: int = MAX_SNAPSHOT_BYTE
         )
 
 
-__all__ = ["https_url", "assert_json_size", "MAX_SNAPSHOT_BYTES"]
+__all__ = [
+    "https_url", "assert_json_size", "MAX_SNAPSHOT_BYTES",
+    "APP_URL_SCHEME_RE", "BLOCKED_APP_URL_SCHEMES", "is_app_url_scheme", "app_url_scheme",
+]

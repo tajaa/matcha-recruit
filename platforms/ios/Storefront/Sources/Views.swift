@@ -47,8 +47,8 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Ahnimal").font(.largeTitle.bold())
-                    Text("Better choices for people, animals, and the planet.").foregroundStyle(.secondary)
+                    Text(Config.current.displayName).font(.largeTitle.bold())
+                    Text(Config.current.tagline).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal)
 
@@ -287,13 +287,30 @@ struct CheckoutView: View {
     @State private var isWorking = false
     @State private var message: String?
     @State private var completedOrder: Order?
+    @State private var guestEmail = ""
+    @State private var guestName = ""
+
+    private var isRecurring: Bool { cart.lines.contains { $0.interval != nil } }
+    private var guestEmailValid: Bool {
+        let parts = guestEmail.split(separator: "@")
+        return parts.count == 2 && parts[1].contains(".")
+    }
 
     var body: some View {
         Form {
             if session.shopper == nil {
-                Section {
-                    Text("Sign in with your email to keep order history, saved addresses, and subscriptions together.")
-                    NavigationLink("Sign in") { LoginView() }
+                if isRecurring {
+                    Section {
+                        Text("Sign in to start a subscription and manage renewals.")
+                        NavigationLink("Sign in") { LoginView() }
+                    }
+                } else {
+                    Section("Guest checkout") {
+                        TextField("Email", text: $guestEmail)
+                            .textInputAutocapitalization(.never).keyboardType(.emailAddress)
+                        TextField("Name (optional)", text: $guestName)
+                        NavigationLink("Sign in instead") { LoginView() }
+                    }
                 }
             } else {
                 if !addresses.isEmpty {
@@ -305,15 +322,16 @@ struct CheckoutView: View {
                         }
                     }
                 }
-                Section {
-                    Button {
-                        Task { await beginCheckout() }
-                    } label: {
-                        if isWorking { ProgressView().frame(maxWidth: .infinity) }
-                        else { Text("Open secure checkout").frame(maxWidth: .infinity) }
-                    }
-                    .disabled(isWorking || cart.lines.isEmpty)
+            }
+            Section {
+                Button {
+                    Task { await beginCheckout() }
+                } label: {
+                    if isWorking { ProgressView().frame(maxWidth: .infinity) }
+                    else { Text("Open secure checkout").frame(maxWidth: .infinity) }
                 }
+                .disabled(isWorking || cart.lines.isEmpty ||
+                          (session.shopper == nil && (isRecurring || !guestEmailValid)))
             }
             ErrorText(message: message)
             if let completedOrder {
@@ -331,7 +349,6 @@ struct CheckoutView: View {
     }
 
     private func beginCheckout() async {
-        guard let shopper = session.shopper else { return }
         isWorking = true
         defer { isWorking = false }
         do {
@@ -344,14 +361,23 @@ struct CheckoutView: View {
                     Config.current.shopperPath + "/me/addresses/\(selectedAddress)", method: "PATCH", body: updated.requestObject
                 )
             }
-            let checkout = try await CheckoutService.shared.checkout(lines: cart.lines, shopper: shopper)
+            let checkout = try await CheckoutService.shared.checkout(
+                lines: cart.lines,
+                shopper: session.shopper,
+                guestEmail: session.shopper == nil ? guestEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() : nil,
+                guestName: session.shopper == nil ? guestName.nilIfEmpty : nil
+            )
             guard checkout.checkoutUrl != nil else {
                 message = "This order was sent to the store for manual payment."
                 cart.clear()
                 return
             }
-            let callback = try await CheckoutService.shared.openHostedCheckout(checkout)
-            guard callback != nil else { return }
+            let result = try await CheckoutService.shared.openHostedCheckout(checkout)
+            guard let result else { return }
+            guard result == .success else {
+                message = "Checkout canceled. Your cart is still here."
+                return
+            }
             if checkout.subscriptionId != nil {
                 message = "Subscription started. It may take a moment to appear in your account."
                 cart.clear()
@@ -416,7 +442,6 @@ struct SavedItemsView: View {
 
 struct AccountHomeView: View {
     @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var router: AppRouter
 
     var body: some View {
         Group {
@@ -427,7 +452,7 @@ struct AccountHomeView: View {
                         Text(shopper.email).font(.caption).foregroundStyle(.secondary)
                     }
                     Section {
-                        NavigationLink("Orders") { OrdersView(initialToken: router.linkedOrderToken) }
+                        NavigationLink("Orders") { OrdersView(initialToken: nil) }
                         NavigationLink("Addresses") { AddressesView() }
                         NavigationLink("Subscriptions") { SubscriptionsView() }
                         NavigationLink("Notifications") { NotificationSettingsView() }
@@ -451,29 +476,49 @@ struct AccountHomeView: View {
 
 struct OrdersView: View {
     let initialToken: String?
-    @EnvironmentObject private var router: AppRouter
     @State private var orders: [Order] = []
     @State private var linked: Order?
+    @State private var nextCursor: String?
+    @State private var isLoading = false
     @State private var errorMessage: String?
 
     var body: some View {
         List {
             if let linked { Section("Opened order") { OrderSummary(order: linked) } }
             ForEach(orders) { OrderSummary(order: $0) }
+            if nextCursor != nil {
+                Button(isLoading ? "Loading…" : "Load more") { Task { await loadPage() } }
+                    .disabled(isLoading)
+            }
             ErrorText(message: errorMessage)
         }
         .overlay { if orders.isEmpty && linked == nil && errorMessage == nil { ProgressView() } }
         .navigationTitle("Orders")
         .task {
-            do {
-                let page: OrderPage = try await StorefrontAPI.shared.request(Config.current.shopperPath + "/me/orders")
-                orders = page.orders
-                if let token = initialToken {
-                    linked = try? await StorefrontAPI.shared.request("/public/orders/\(token)", authenticated: false)
-                    router.linkedOrderToken = nil
-                }
-            } catch { errorMessage = error.localizedDescription }
+            if let token = initialToken {
+                linked = try? await StorefrontAPI.shared.request("/public/orders/\(token)", authenticated: false)
+            }
+            await loadPage(reset: true)
         }
+    }
+
+    private func loadPage(reset: Bool = false) async {
+        guard !isLoading else { return }
+        if !reset && nextCursor == nil { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            var path = Config.current.shopperPath + "/me/orders"
+            if !reset, let cursor = nextCursor {
+                path += StorefrontURL.queryString([
+                    URLQueryItem(name: "cursor", value: cursor),
+                ])
+            }
+            let page: OrderPage = try await StorefrontAPI.shared.request(path)
+            orders = reset ? page.orders : orders + page.orders
+            nextCursor = page.nextCursor
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
     }
 }
 
@@ -686,7 +731,7 @@ private struct BlogStrip: View {
     let posts: [BlogPost]
     var body: some View {
         VStack(alignment: .leading) {
-            Text("From Ahnimal").font(.title3.bold()).padding(.horizontal)
+            Text("From \(Config.current.displayName)").font(.title3.bold()).padding(.horizontal)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(posts) { post in

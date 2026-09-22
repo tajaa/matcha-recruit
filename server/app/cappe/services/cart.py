@@ -3,7 +3,7 @@ from collections import Counter
 
 from fastapi import HTTPException
 
-from .discounts import apply_discount_cents
+from .discounts import apply_discount_cents, best_discount_percent
 from .options import validate_and_price_options
 
 
@@ -28,6 +28,28 @@ def cart_totals(lines, site):
         raise HTTPException(422, "Cart total exceeds the checkout limit")
     return {"subtotal_cents": subtotal, "tax_cents": tax, "shipping_cents": shipping,
             "total_cents": subtotal + tax + shipping}
+
+
+def priceable_products(rows, option_groups, discounts, on_date):
+    """Attach live option groups and the active promotion used by cart pricing.
+
+    Quotes and checkout must feed ``price_cart`` the same product shape. Keeping
+    that decoration here prevents a recurring quote from advertising a
+    promotion that the eventual Stripe subscription silently drops.
+    """
+    return {
+        row["id"]: {
+            **dict(row),
+            "option_groups": option_groups.get(row["id"], []),
+            "discount_percent": best_discount_percent(
+                discounts,
+                kind="product",
+                target_id=str(row["id"]),
+                on_date=on_date,
+            ),
+        }
+        for row in rows
+    }
 
 
 def price_cart(products_by_id, items, site):

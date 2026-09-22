@@ -5,6 +5,8 @@ struct Config {
     let slug: String
     let origin: URL
     let scheme: String
+    let displayName: String
+    let tagline: String
     static let current = Config(info: Bundle.main.infoDictionary ?? [:], environment: ProcessInfo.processInfo.environment)
 
     init(info: [String: Any], environment: [String: String] = [:]) {
@@ -16,6 +18,8 @@ struct Config {
         slug = info["CappeSiteSlug"] as? String ?? "ahnimal"
         origin = URL(string: info["CappeSiteOrigin"] as? String ?? "https://ahnimal.gummfit.com")!
         scheme = info["AppURLScheme"] as? String ?? "ahnimal"
+        displayName = info["CappeDisplayName"] as? String ?? info["CFBundleDisplayName"] as? String ?? "Store"
+        tagline = info["CappeTagline"] as? String ?? "Thoughtful products, delivered."
     }
     var sitePath: String { "/public/sites/\(slug)" }
     var shopperPath: String { sitePath + "/shopper" }

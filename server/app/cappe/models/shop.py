@@ -135,6 +135,10 @@ class CappeProduct(BaseModel):
     intake_fields: list[dict[str, Any]] = Field(default_factory=list)
     category: Optional[str] = None
     option_groups: list[CappeProductOptionGroup] = Field(default_factory=list)
+    # Public storefront pricing. Owner responses default to the undiscounted
+    # shape; public routes populate these from the active promotion calendar.
+    discount_percent: int = 0
+    discounted_price_cents: Optional[int] = None
 
 
 class CappeStockAdjust(BaseModel):
@@ -154,12 +158,7 @@ class CappeInventoryAdjustment(BaseModel):
     reason: str
     note: Optional[str] = None
     created_at: datetime
-    created_at: datetime
     updated_at: datetime
-    # Storefront display only — best active discount for this product (0 if none).
-    # Order pricing is still recomputed server-side at checkout.
-    discount_percent: int = 0
-    discounted_price_cents: Optional[int] = None
 
 
 class CappeOrderItem(BaseModel):

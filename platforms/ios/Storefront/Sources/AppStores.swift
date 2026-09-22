@@ -70,6 +70,8 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    func handleSessionEnded() { shopper = nil }
+
     func update(name: String?, phone: String?, pushOrderUpdates: Bool? = nil) async throws {
         var body: [String: Any] = ["name": name ?? NSNull(), "phone": phone ?? NSNull()]
         if let pushOrderUpdates { body["push_order_updates"] = pushOrderUpdates }
@@ -177,14 +179,29 @@ final class CartStore: ObservableObject {
 @MainActor
 final class FavoritesStore: ObservableObject {
     @Published private(set) var ids: Set<String> = [] {
-        didSet { UserDefaults.standard.set(Array(ids), forKey: key) }
+        didSet { persist() }
     }
 
-    private let key = "cappe.storefront.favorites.v2.\(Config.current.slug)"
+    private var anonymousKey: String { "cappe.storefront.favorites.v2.\(Config.current.slug).anonymous" }
+    private var legacyKey: String { "cappe.storefront.favorites.v2.\(Config.current.slug)" }
+    private func accountKey(_ shopperID: String) -> String {
+        "cappe.storefront.favorites.v2.\(Config.current.slug).shopper.\(shopperID)"
+    }
+    private var currentKey: String {
+        StorefrontAPI.shared.tokens.map { accountKey($0.shopper.id) } ?? anonymousKey
+    }
 
     init() {
-        ids = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+        let defaults = UserDefaults.standard
+        if let legacy = defaults.stringArray(forKey: legacyKey) {
+            let migrated = Set(defaults.stringArray(forKey: currentKey) ?? []).union(legacy)
+            defaults.set(Array(migrated), forKey: currentKey)
+            defaults.removeObject(forKey: legacyKey)
+        }
+        ids = Set(defaults.stringArray(forKey: currentKey) ?? [])
     }
+
+    private func persist() { UserDefaults.standard.set(Array(ids), forKey: currentKey) }
 
     func contains(_ productId: String) -> Bool { ids.contains(productId) }
 
@@ -203,29 +220,52 @@ final class FavoritesStore: ObservableObject {
     }
 
     func reconcileAfterSignIn() async {
-        guard StorefrontAPI.shared.tokens != nil else { return }
+        guard let shopper = StorefrontAPI.shared.tokens?.shopper else { return }
+        let defaults = UserDefaults.standard
+        let anonymous = Set(defaults.stringArray(forKey: anonymousKey) ?? [])
+        let local = Set(defaults.stringArray(forKey: accountKey(shopper.id)) ?? [])
+        let pending = local.union(anonymous)
         do {
             let remote: [String] = try await StorefrontAPI.shared.request(Config.current.shopperPath + "/me/favorites")
-            let missing = ids.subtracting(remote)
+            let missing = pending.subtracting(remote)
             for id in missing {
                 let _: Empty = try await StorefrontAPI.shared.request(
                     Config.current.shopperPath + "/me/favorites/\(id)", method: "PUT"
                 )
             }
-            ids.formUnion(remote)
+            ids = Set(remote).union(pending)
+            defaults.set(Array(ids), forKey: accountKey(shopper.id))
+            defaults.removeObject(forKey: anonymousKey)
         } catch { }
+    }
+
+    func handleSignOut() {
+        ids = Set(UserDefaults.standard.stringArray(forKey: anonymousKey) ?? [])
     }
 }
 
 @MainActor
 final class AppRouter: ObservableObject {
     enum Tab: Hashable { case shop, saved, cart, account }
+    enum AccountRoute: Hashable {
+        case order(String)
+
+        var survivesSessionEnd: Bool {
+            switch self {
+            case .order: true
+            }
+        }
+    }
     @Published var selectedTab: Tab = .shop
-    @Published var linkedOrderToken: String?
+    @Published var accountPath: [AccountRoute] = []
 
     func openOrder(_ token: String) {
-        linkedOrderToken = token
+        accountPath = [.order(token)]
         selectedTab = .account
+    }
+
+    func handleSessionEnded() {
+        accountPath = accountPath.filter(\.survivesSessionEnd)
     }
 }
 

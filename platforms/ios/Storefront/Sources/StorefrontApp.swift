@@ -40,6 +40,8 @@ struct AhnimalApp: App {
 struct StorefrontRootView: View {
     @EnvironmentObject private var router: AppRouter
     @EnvironmentObject private var cart: CartStore
+    @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var favorites: FavoritesStore
 
     var body: some View {
         TabView(selection: $router.selectedTab) {
@@ -53,10 +55,22 @@ struct StorefrontRootView: View {
                 .tabItem { Label("Cart", systemImage: "bag") }
                 .badge(cart.count)
                 .tag(AppRouter.Tab.cart)
-            NavigationStack { AccountHomeView() }
+            NavigationStack(path: $router.accountPath) {
+                AccountHomeView()
+                    .navigationDestination(for: AppRouter.AccountRoute.self) { route in
+                        switch route {
+                        case .order(let token): OrdersView(initialToken: token)
+                        }
+                    }
+            }
                 .tabItem { Label("Account", systemImage: "person.crop.circle") }
                 .tag(AppRouter.Tab.account)
         }
         .tint(.green)
+        .onReceive(NotificationCenter.default.publisher(for: .storeSessionEnded)) { _ in
+            session.handleSessionEnded()
+            favorites.handleSignOut()
+            router.handleSessionEnded()
+        }
     }
 }

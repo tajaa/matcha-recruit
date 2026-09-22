@@ -10,6 +10,8 @@
 		1CEFCFE25DFF198B561B54DB /* StorefrontTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A647B3A1EFEFF7B9163D8AC8 /* StorefrontTests.swift */; };
 		4982AA6A12F6C65196BF04E6 /* StorefrontApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F9DAD1CC96739FD23130C40 /* StorefrontApp.swift */; };
 		5FEA5DF39BABA22964044DF8 /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63FA949638E64A83A98340DB /* Config.swift */; };
+		7539E852ED8CA28F74788B71 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E0441D69D50646191EB6ADED /* Assets.xcassets */; };
+		770AF8994E210F374ECFE9C4 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5DF492C81CB6EC48D26FAD1F /* PrivacyInfo.xcprivacy */; };
 		874667712F3E8BE781044FA5 /* StorefrontAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB233EE07D34BA069A293F2A /* StorefrontAPI.swift */; };
 		8F54D7B24C557EC80544E98F /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = 652C9BB2145A3611E8DD4A63 /* Views.swift */; };
 		AE77CC2567D4BD688FE23E41 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFC9E6B3DD49C4849CD3F6F /* Models.swift */; };
@@ -30,6 +32,7 @@
 /* Begin PBXFileReference section */
 		1BB4AE45AF089B57737DBD45 /* Ahnimal.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Ahnimal.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		314202B628A711DEE14EEE49 /* AppStores.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStores.swift; sourceTree = "<group>"; };
+		5DF492C81CB6EC48D26FAD1F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		63FA949638E64A83A98340DB /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
 		652C9BB2145A3611E8DD4A63 /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
 		7F9DAD1CC96739FD23130C40 /* StorefrontApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorefrontApp.swift; sourceTree = "<group>"; };
@@ -37,6 +40,7 @@
 		A647B3A1EFEFF7B9163D8AC8 /* StorefrontTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorefrontTests.swift; sourceTree = "<group>"; };
 		AB233EE07D34BA069A293F2A /* StorefrontAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorefrontAPI.swift; sourceTree = "<group>"; };
 		AC12CC559F1B6F6819B5654D /* StorefrontTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = StorefrontTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E0441D69D50646191EB6ADED /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E812709FD55A1BB8BF99B699 /* StorefrontServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorefrontServices.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -44,6 +48,7 @@
 		395B737ED9F8B2003DF17682 = {
 			isa = PBXGroup;
 			children = (
+				E2CE1C3662FECD90D473DFED /* Resources */,
 				C05378145CB609A27E66184B /* Sources */,
 				C4A839CA202DC035FC568AEB /* Tests */,
 				CF3D405D9ADD5872AAF5B7B1 /* Products */,
@@ -81,6 +86,15 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		E2CE1C3662FECD90D473DFED /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				E0441D69D50646191EB6ADED /* Assets.xcassets */,
+				5DF492C81CB6EC48D26FAD1F /* PrivacyInfo.xcprivacy */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -107,6 +121,7 @@
 			buildConfigurationList = F8BD491B3F8C63C23EC1987D /* Build configuration list for PBXNativeTarget "Ahnimal" */;
 			buildPhases = (
 				40AC9D6A88276C3288513A6B /* Sources */,
+				C2E037AAC77D573170F4B8B4 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -157,6 +172,18 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C2E037AAC77D573170F4B8B4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7539E852ED8CA28F74788B71 /* Assets.xcassets in Resources */,
+				770AF8994E210F374ECFE9C4 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		3C99DDD65FB7CCF00311F892 /* Sources */ = {

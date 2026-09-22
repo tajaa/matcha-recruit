@@ -157,4 +157,3 @@ def test_apns_client_requires_credentials_and_caches_sender(monkeypatch, tmp_pat
     second = push.client("com.ahnimal.app", "sandbox")
     assert first is second and created[0]["use_sandbox"] is True
     assert push.client("com.other.app", "sandbox") is None
-
