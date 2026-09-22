@@ -155,7 +155,7 @@ def make_token_helpers(scope: str, *, lifetimes: Optional[SessionLifetimes] = No
             return None
         if expected_type and payload.get("type") != expected_type:
             return None
-        if payload.get("type") == "access" and access_token_stale(payload.get("iat"), lifetimes=lifetimes):
+        if payload.get("type") == "access" and access_token_stale(payload.get("iat")):
             return None
         if lifetimes and payload.get("type") == "refresh" and refresh_session_expired(
             payload.get("iat"), payload.get("session_started_at"), lifetimes=lifetimes,

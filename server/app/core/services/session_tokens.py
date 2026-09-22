@@ -17,9 +17,12 @@ class SessionLifetimes:
             raise ValueError("Session lifetimes must be positive")
 
 
-def access_token_stale(issued_at: Optional[int], *, now: Optional[datetime] = None,
-                       lifetimes: Optional[SessionLifetimes] = None) -> bool:
-    """Reject legacy long-lived access tokens after the configured short TTL."""
+def access_token_stale(issued_at: Optional[int], *, now: Optional[datetime] = None) -> bool:
+    """Reject legacy long-lived access tokens after the configured short TTL.
+
+    Deliberately ignores per-scope `SessionLifetimes`: those bound the refresh
+    window only. Every product keeps the one short global access TTL.
+    """
     if issued_at is None:
         return True
     try:

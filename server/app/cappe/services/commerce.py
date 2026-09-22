@@ -551,26 +551,18 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             if subtotal > 0:
                 require_can_sell(owner_ent)
 
-            # Tax (per-site rate, applied to physical/taxable lines only). Added
-            # as a Stripe line item below so the charge matches the receipt total.
+            # Tax (per-site rate, physical lines only) + shipping come from the
+            # same `cart_totals` the public quote endpoint uses, so a quote and
+            # the order it becomes can never disagree. Tax is added as a Stripe
+            # line item below so the charge matches the receipt total.
             tax_cfg = await conn.fetchrow(
                 "SELECT tax_rate_bps, tax_label, shipping_flat_cents, "
                 "shipping_free_threshold_cents, shipping_label "
                 "FROM cappe_sites WHERE id = $1", site["id"]
             )
-            tax_rate_bps = int(tax_cfg["tax_rate_bps"]) if tax_cfg else 0
             tax_label = (tax_cfg["tax_label"] if tax_cfg else None) or "Tax"
-            taxable = sum(unit * qty for (_p, _t, unit, qty, f, *_r) in line_rows if f == "physical")
-            tax_cents = (taxable * tax_rate_bps) // 10000 if tax_rate_bps > 0 else 0
-            has_physical = any(f == "physical" for (_p, _t, _u, _q, f, *_r) in line_rows)
-            shipping_cents = compute_shipping_cents(
-                has_physical=has_physical,
-                goods_subtotal_cents=taxable,
-                flat_cents=int(tax_cfg["shipping_flat_cents"]) if tax_cfg else 0,
-                free_threshold_cents=tax_cfg["shipping_free_threshold_cents"] if tax_cfg else None,
-            )
             shipping_label = (tax_cfg["shipping_label"] if tax_cfg else None) or "Shipping"
-            total_cents = subtotal + tax_cents + shipping_cents
+            has_physical = any(f == "physical" for (_p, _t, _u, _q, f, *_r) in line_rows)
             totals = cart_totals([
                 {"unit_price_cents": unit, "quantity": qty, "fulfillment": fulfillment}
                 for (_pid, _title, unit, qty, fulfillment, *_rest) in line_rows

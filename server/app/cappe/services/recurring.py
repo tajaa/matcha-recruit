@@ -411,14 +411,21 @@ async def change_subscription(row, cancel, *, immediate=False):
             return await _expire_checkout_session(row, row["stripe_checkout_session_id"])
     elif not row["stripe_subscription_id"]:
         raise HTTPException(409, "Checkout has not completed")
-    if cancel and immediate:
-        subscription = await get_cappe_stripe().cancel_connected_subscription(
-            row["stripe_account_id"], row["stripe_subscription_id"],
-        )
-    else:
-        subscription = await get_cappe_stripe().modify_connected_subscription(
-            account_id=row["stripe_account_id"], subscription_id=row["stripe_subscription_id"], cancel_at_period_end=cancel,
-        )
+    try:
+        if cancel and immediate:
+            subscription = await get_cappe_stripe().cancel_connected_subscription(
+                row["stripe_account_id"], row["stripe_subscription_id"],
+            )
+        else:
+            subscription = await get_cappe_stripe().modify_connected_subscription(
+                account_id=row["stripe_account_id"], subscription_id=row["stripe_subscription_id"], cancel_at_period_end=cancel,
+            )
+    except CappeStripeError as exc:
+        # Local state is untouched (account deletion keeps `deleting=TRUE`), so
+        # the caller can simply retry; surface that instead of a bare 500.
+        raise HTTPException(
+            503, "Subscription update could not be confirmed; retry shortly."
+        ) from exc
     async with get_connection() as conn, conn.transaction():
         await conn.fetchval("SELECT id FROM cappe_shopper_subscriptions WHERE id=$1 FOR UPDATE", row["id"])
         await sync_subscription(conn, row, subscription, None)
