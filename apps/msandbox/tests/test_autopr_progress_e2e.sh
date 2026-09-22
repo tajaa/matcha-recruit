@@ -17,6 +17,8 @@
 # ownership stamps run-codex-sandboxed.sh writes. No network, no containers,
 # no model call.
 set -uo pipefail
+# Fixtures point at example.invalid; harness/lib.sh fail-closes on that under Actions.
+unset GITHUB_ACTIONS
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 AUTOPR_DIR="$REPO_ROOT/apps/msandbox/harness"

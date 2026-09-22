@@ -2,6 +2,8 @@
 # card-control.sh against stubbed curl/gh: resolution rules, the hold reason,
 # unstick ordering, and the cancel-run sequence. No board, GitHub, or runner.
 set -euo pipefail
+# Fixtures point at example.invalid; harness/lib.sh fail-closes on that under Actions.
+unset GITHUB_ACTIONS
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 CONTROL="$REPO_ROOT/apps/msandbox/harness/card-control.sh"

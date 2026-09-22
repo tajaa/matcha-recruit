@@ -317,7 +317,13 @@ describe('SchedulePilot — Huume', () => {
     }))
     renderPilot()
 
-    fireEvent.click(await screen.findByRole('button', { name: /Opener 1 open/ }))
+    // The row is a flex button of three adjacent spans. Browsers blockify flex
+    // items and space their text in the accessible name; jsdom 30 reports them
+    // inline and joins them ("9a–5pOpener1 open"), so query the seat count
+    // text and climb to its button rather than matching the computed name.
+    const seat = (await screen.findByText('1 open')).closest('button')
+    expect(seat).toHaveTextContent('Opener')
+    fireEvent.click(seat!)
 
     expect(screen.queryByText(/selected shift as context/)).not.toBeInTheDocument()
     const input = await screen.findByPlaceholderText('Try: add an opener Monday')

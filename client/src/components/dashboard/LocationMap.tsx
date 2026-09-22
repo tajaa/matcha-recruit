@@ -336,17 +336,15 @@ export function LocationMap({ locations, heatMap }: Props) {
             {({ geographies }) =>
               geographies.map((geo) => (
                 <Geography
-                  key={geo.rpiProperties?.name || geo.id}
+                  key={geo.rsmKey}
                   geography={geo}
                   fill="rgba(161,161,170,0.02)"
                   stroke="#a1a1aa"
                   strokeWidth={0.35}
                   strokeOpacity={0.35}
-                  style={{
-                    default: { outline: 'none' },
-                    hover: { outline: 'none', fill: 'rgba(161,161,170,0.06)', stroke: '#a1a1aa', strokeWidth: 0.5, strokeOpacity: 0.5 },
-                    pressed: { outline: 'none' },
-                  }}
+                  // react-simple-maps 5 dropped the {default,hover,pressed} style
+                  // object; hover is plain CSS now (CSS beats the SVG attributes).
+                  className="outline-none hover:fill-[rgba(161,161,170,0.06)] hover:[stroke-width:0.5] hover:[stroke-opacity:0.5]"
                 />
               ))
             }
@@ -363,7 +361,7 @@ export function LocationMap({ locations, heatMap }: Props) {
                 onMouseEnter={() => setTooltip({ name: dot.name, tier: dot.tier })}
                 onMouseLeave={() => setTooltip(null)}
                 onClick={() => navigate(`/app/compliance?location_id=${dot.id}`)}
-                style={{ default: { cursor: 'pointer' }, hover: { cursor: 'pointer' }, pressed: { cursor: 'pointer' } }}
+                style={{ cursor: 'pointer' }}
               >
                 {/* Outer pulse halo */}
                 <circle r={12} fill={color} opacity={0.1}>
