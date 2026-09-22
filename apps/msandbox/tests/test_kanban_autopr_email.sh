@@ -5,6 +5,8 @@
 # workflow wiring — with Matcha and GitHub stubbed on PATH. All addresses are
 # RFC 2606 reserved (example.com / .org / .net / .invalid).
 set -uo pipefail
+# Fixtures point at example.invalid; harness/lib.sh fail-closes on that under Actions.
+unset GITHUB_ACTIONS
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 AUTOPR_DIR="$REPO_ROOT/apps/msandbox/harness"
