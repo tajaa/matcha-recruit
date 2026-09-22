@@ -7,10 +7,10 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
+from .policy import POLICY_SALES_HISTORY_DAYS
 from .weather_store import load_weather_days, refresh_location_weather
 
 HISTORY_WEEKS = 8
-SALES_HISTORY_DAYS = 84
 logger = logging.getLogger(__name__)
 
 
@@ -117,7 +117,7 @@ async def load_autopilot_inputs(
            WHERE company_id=$1 AND job_id=ANY($2::uuid[])""",
         company_id, [row["id"] for row in jobs_rows],
     ) if jobs_rows else []
-    sales_start = week_start - timedelta(days=SALES_HISTORY_DAYS)
+    sales_start = week_start - timedelta(days=POLICY_SALES_HISTORY_DAYS)
     return {
         "week_start": week_start,
         "profile": profile,
