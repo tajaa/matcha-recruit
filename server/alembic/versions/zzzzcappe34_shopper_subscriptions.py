@@ -58,8 +58,11 @@ _UPGRADE = [
         ADD COLUMN IF NOT EXISTS stripe_invoice_id VARCHAR(255)
     """,
     """CREATE UNIQUE INDEX IF NOT EXISTS idx_cappe_orders_invoice ON cappe_orders(stripe_invoice_id) WHERE stripe_invoice_id IS NOT NULL""",
+    # jsonb_build_object, not a '{"recurring_orders":true}' literal: op.execute
+    # wraps the string in sqlalchemy.text(), which reads ":true" as a bind
+    # parameter and fails with "A value is required for bind parameter 'true'".
     """
-    UPDATE cappe_billing_products SET features=features || '{"recurring_orders":true}'::jsonb
+    UPDATE cappe_billing_products SET features=features || jsonb_build_object('recurring_orders', true)
         WHERE code IN ('business','pro','hosting')
     """,
 ]
