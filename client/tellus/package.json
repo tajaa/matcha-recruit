@@ -11,7 +11,7 @@
   "dependencies": {
     "framer-motion": "^13.2.0",
     "jsqr": "^1.4.0",
-    "konva": "^9.3.22",
+    "konva": "^10.5.0",
     "lucide-react": "^0.562.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.3.0",
