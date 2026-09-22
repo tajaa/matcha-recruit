@@ -13,6 +13,22 @@ branch_labels = None
 depends_on = None
 
 
+def _add_check(table: str, name: str, expression: str) -> None:
+    """Idempotent ADD CONSTRAINT ... CHECK, one statement per op.execute.
+
+    This repo's Alembic runs on asyncpg, which prepares every statement and
+    rejects a multi-command string ("cannot insert multiple commands into a
+    prepared statement"), so the DO blocks cannot share an execute.
+    """
+    op.execute(
+        f"""
+        DO $$ BEGIN
+          ALTER TABLE {table} ADD CONSTRAINT {name} CHECK ({expression});
+        EXCEPTION WHEN duplicate_object THEN NULL; END $$
+        """
+    )
+
+
 def upgrade() -> None:
     op.execute(
         """
@@ -24,30 +40,26 @@ def upgrade() -> None:
           ADD COLUMN IF NOT EXISTS autopilot_shift_max_minutes SMALLINT
         """
     )
-    op.execute(
+    _add_check(
+        "schedule_location_profiles", "schedule_location_profiles_weather_check",
+        "weather_sensitivity IN ('none','rain_hurts','rain_helps')",
+    )
+    _add_check(
+        "schedule_location_profiles", "schedule_location_profiles_floor_check",
+        "min_floor_staff BETWEEN 0 AND 20",
+    )
+    _add_check(
+        "schedule_location_profiles", "schedule_location_profiles_labor_pct_check",
+        "target_labor_pct IS NULL OR target_labor_pct BETWEEN 1 AND 90",
+    )
+    _add_check(
+        "schedule_location_profiles", "schedule_location_profiles_autopilot_shift_check",
         """
-        DO $$ BEGIN
-          ALTER TABLE schedule_location_profiles ADD CONSTRAINT schedule_location_profiles_weather_check
-            CHECK (weather_sensitivity IN ('none','rain_hurts','rain_helps'));
-        EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-        DO $$ BEGIN
-          ALTER TABLE schedule_location_profiles ADD CONSTRAINT schedule_location_profiles_floor_check
-            CHECK (min_floor_staff BETWEEN 0 AND 20);
-        EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-        DO $$ BEGIN
-          ALTER TABLE schedule_location_profiles ADD CONSTRAINT schedule_location_profiles_labor_pct_check
-            CHECK (target_labor_pct IS NULL OR target_labor_pct BETWEEN 1 AND 90);
-        EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-        DO $$ BEGIN
-          ALTER TABLE schedule_location_profiles ADD CONSTRAINT schedule_location_profiles_autopilot_shift_check
-            CHECK (
-              (autopilot_shift_min_minutes IS NULL OR autopilot_shift_min_minutes BETWEEN 120 AND 720)
-              AND (autopilot_shift_max_minutes IS NULL OR autopilot_shift_max_minutes BETWEEN 120 AND 720)
-              AND (autopilot_shift_min_minutes IS NULL OR autopilot_shift_max_minutes IS NULL
-                   OR autopilot_shift_min_minutes <= autopilot_shift_max_minutes)
-            );
-        EXCEPTION WHEN duplicate_object THEN NULL; END $$
-        """
+        (autopilot_shift_min_minutes IS NULL OR autopilot_shift_min_minutes BETWEEN 120 AND 720)
+        AND (autopilot_shift_max_minutes IS NULL OR autopilot_shift_max_minutes BETWEEN 120 AND 720)
+        AND (autopilot_shift_min_minutes IS NULL OR autopilot_shift_max_minutes IS NULL
+             OR autopilot_shift_min_minutes <= autopilot_shift_max_minutes)
+        """,
     )
     op.execute("ALTER TABLE schedule_generation_runs DROP CONSTRAINT IF EXISTS schedule_generation_runs_source_check")
     op.execute("ALTER TABLE schedule_generation_runs DROP CONSTRAINT IF EXISTS schedule_generation_runs_source_mode_check")
@@ -74,18 +86,14 @@ def upgrade() -> None:
         WHERE mode='template' AND week_template_id IS NULL AND enabled
         """
     )
-    op.execute(
-        """
-        DO $$ BEGIN
-          ALTER TABLE schedule_automation_rules ADD CONSTRAINT schedule_automation_rules_mode_check
-            CHECK (mode IN ('template','autopilot'));
-        EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-        DO $$ BEGIN
-          ALTER TABLE schedule_automation_rules ADD CONSTRAINT schedule_automation_rules_template_check
-            -- Deleted templates leave a disabled rule with a NULL template id.
-            CHECK (mode <> 'template' OR week_template_id IS NOT NULL OR enabled=false);
-        EXCEPTION WHEN duplicate_object THEN NULL; END $$
-        """
+    _add_check(
+        "schedule_automation_rules", "schedule_automation_rules_mode_check",
+        "mode IN ('template','autopilot')",
+    )
+    # Deleted templates leave a disabled rule with a NULL template id.
+    _add_check(
+        "schedule_automation_rules", "schedule_automation_rules_template_check",
+        "mode <> 'template' OR week_template_id IS NOT NULL OR enabled=false",
     )
 
 
