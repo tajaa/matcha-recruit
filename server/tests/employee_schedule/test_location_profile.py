@@ -1119,3 +1119,100 @@ async def test_retracting_the_rule_strips_coverage_for_every_saved_leader_job(mo
 
     assert result["status"] == "ok"
     assert [block["name"] for block in result["blocks"]] == ["Opener"]
+
+
+# --- Schedule Autopilot fields ------------------------------------------------
+
+def test_autopilot_mode_does_not_need_a_staffing_pattern():
+    bundle = _bundle(hours=FULL_WEEK_HOURS, leader_required=False)
+    assert missing_fields(bundle) == ["staffing_pattern"]
+    assert missing_fields(bundle, mode="autopilot") == []
+    assert week_rules_refusal(bundle, location_name="Downtown", mode="autopilot") is None
+    assert "Downtown" in week_rules_refusal(bundle, location_name="Downtown")
+
+
+class _ProfileConn:
+    def __init__(self, error=None):
+        self.error = error
+        self.sql = None
+        self.args = None
+
+    async def fetchval(self, *_args):
+        return 1
+
+    async def fetchrow(self, sql, *args):
+        self.sql, self.args = sql, args
+        if self.error:
+            raise self.error
+        return {"operating_hours": "{}", "leader_job_ids": []}
+
+
+@pytest.mark.asyncio
+async def test_upsert_writes_only_the_supplied_autopilot_fields():
+    from decimal import Decimal
+
+    conn = _ProfileConn()
+    await location_profile.upsert_location_profile(
+        conn, company_id=COMPANY_ID, location_id=LOCATION_ID, actor_user_id=ACTOR_ID,
+        weather_sensitivity="rain_hurts", min_floor_staff=2, target_labor_pct=27.5,
+        autopilot_shift_min_minutes=240, autopilot_shift_max_minutes=None,
+    )
+    assert "weather_sensitivity" in conn.sql and "open_buffer_minutes" not in conn.sql.split("RETURNING")[0]
+    assert conn.args[4:] == ("rain_hurts", 2, Decimal("27.5"), 240, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kwargs, fragment", [
+    ({"weather_sensitivity": "snow"}, "Weather sensitivity"),
+    ({"min_floor_staff": 21}, "floor staff"),
+    ({"target_labor_pct": 95}, "between 1 and 90"),
+    ({"target_labor_pct": "lots"}, "must be a number"),
+    ({"autopilot_shift_min_minutes": 60}, "minimum shift"),
+    ({"autopilot_shift_max_minutes": 800}, "maximum shift"),
+    ({"autopilot_shift_min_minutes": 600, "autopilot_shift_max_minutes": 300}, "cannot exceed"),
+])
+async def test_upsert_rejects_out_of_bounds_autopilot_fields(kwargs, fragment):
+    with pytest.raises(ValueError, match=fragment):
+        await location_profile.upsert_location_profile(
+            _ProfileConn(), company_id=COMPANY_ID, location_id=LOCATION_ID, actor_user_id=ACTOR_ID, **kwargs,
+        )
+
+
+@pytest.mark.asyncio
+async def test_db_check_on_autopilot_bounds_becomes_a_readable_error():
+    import asyncpg
+
+    error = asyncpg.exceptions.CheckViolationError(
+        'new row violates check constraint "schedule_location_profiles_autopilot_shift_check"'
+    )
+    with pytest.raises(ValueError, match="Autopilot settings"):
+        await location_profile.upsert_location_profile(
+            _ProfileConn(error), company_id=COMPANY_ID, location_id=LOCATION_ID, actor_user_id=ACTOR_ID,
+            autopilot_shift_min_minutes=600,
+        )
+
+
+def test_profile_update_model_rejects_inverted_shift_bounds():
+    from pydantic import ValidationError
+
+    from app.matcha.models.scheduling.employee_schedule import LocationScheduleProfileUpdate
+
+    with pytest.raises(ValidationError, match="cannot exceed"):
+        LocationScheduleProfileUpdate(autopilot_shift_min_minutes=600, autopilot_shift_max_minutes=300)
+    assert LocationScheduleProfileUpdate(autopilot_shift_min_minutes=240).autopilot_shift_min_minutes == 240
+
+
+def test_automation_rule_model_ties_template_to_mode():
+    from datetime import time
+    from uuid import uuid4
+
+    from pydantic import ValidationError
+
+    from app.matcha.models.scheduling.employee_schedule import ScheduleAutomationRuleUpsert
+
+    common = {"cadence": "weekly", "run_weekday": 4, "run_time": time(9), "target_weeks_ahead": 1}
+    with pytest.raises(ValidationError, match="require week_template_id"):
+        ScheduleAutomationRuleUpsert(**common)
+    with pytest.raises(ValidationError, match="do not use a week template"):
+        ScheduleAutomationRuleUpsert(mode="autopilot", week_template_id=uuid4(), **common)
+    assert ScheduleAutomationRuleUpsert(mode="autopilot", **common).week_template_id is None

@@ -15,6 +15,12 @@ def _d(value) -> Decimal:
     return value if isinstance(value, Decimal) else Decimal(str(value))
 
 
+def _half_hours(value: Decimal) -> Decimal:
+    """Round to the 30-minute grid. `quantize(Decimal("0.5"))` would not: it
+    only borrows that exponent, so it rounds to 0.1h."""
+    return (value * 2).to_integral_value(rounding=ROUND_HALF_UP) / 2
+
+
 @dataclass(frozen=True)
 class RosterCapacity:
     employees: int
@@ -88,8 +94,10 @@ def labor_target(
         )
     else:
         notes.append("coverage floor only — no sales-to-hours conversion")
-    hours = max(raw, floor_hours).quantize(Decimal("0.5"), rounding=ROUND_HALF_UP)
-    if hours > raw:
+    hours = _half_hours(max(raw, floor_hours))
+    # Compared before rounding: a 31.3h target rounding to 31.5h was not
+    # raised by the floor, and must not say so.
+    if raw < floor_hours:
         notes.append(f"coverage floor raised the target to {hours}h")
     return LaborTarget(window.day, hours, method, floor_hours, raw, tuple(notes))
 
@@ -105,7 +113,7 @@ def cap_week_to_capacity(
         return targets, f"roster capacity {capacity.weekly_hours}h is below the {floors}h coverage floor"
     scale = max(Decimal(0), min(Decimal(1), (capacity.weekly_hours - floors) / (planned - floors)))
     out = [
-        replace(t, hours=(t.floor_hours + (t.hours - t.floor_hours) * scale).quantize(Decimal("0.5"), rounding=ROUND_HALF_UP))
+        replace(t, hours=_half_hours(t.floor_hours + (t.hours - t.floor_hours) * scale))
         for t in targets
     ]
     return out, f"roster capacity caps the plan at {capacity.weekly_hours}h (wanted {planned}h)"

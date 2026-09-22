@@ -12,6 +12,7 @@ the pure helpers below them are unit-tested without a database.
 """
 
 import json
+from decimal import Decimal, InvalidOperation
 from datetime import time
 from typing import Any, Optional, Sequence
 from uuid import UUID
@@ -535,10 +536,15 @@ async def upsert_location_profile(
             raise ValueError("Minimum floor staff must be between 0 and 20")
         supplied["min_floor_staff"] = value
     if target_labor_pct is not UNSET:
-        value = None if target_labor_pct is None else float(target_labor_pct)
-        if value is not None and not 1 <= value <= 90:
+        # Decimal, not float: the column is NUMERIC(5,2) and a float would
+        # carry its binary expansion into the value asyncpg encodes.
+        try:
+            pct = None if target_labor_pct is None else Decimal(str(target_labor_pct))
+        except InvalidOperation as exc:
+            raise ValueError("Target labor percentage must be a number") from exc
+        if pct is not None and not (pct.is_finite() and 1 <= pct <= 90):
             raise ValueError("Target labor percentage must be between 1 and 90")
-        supplied["target_labor_pct"] = value
+        supplied["target_labor_pct"] = pct
     minimum = None
     maximum = None
     if autopilot_shift_min_minutes is not UNSET:

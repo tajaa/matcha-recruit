@@ -68,8 +68,12 @@ def weather_effect(day: date, weather_by_day: dict[date, dict], sensitivity: str
     condition = row.get("condition")
     probability = row.get("precip_probability")
     if probability is None:
-        return WeatherEffect(condition, None, sensitivity, Decimal(1),
-                             f"weather unavailable for {day.isoformat()} — no weather adjustment")
+        # With sensitivity "none" weather never moves the forecast, so a
+        # missing day is not worth a note on every row.
+        note = None if sensitivity not in ("rain_hurts", "rain_helps") else (
+            f"weather unavailable for {day.isoformat()} — no weather adjustment"
+        )
+        return WeatherEffect(condition, None, sensitivity, Decimal(1), note)
     probability = int(probability)
     policies = POLICY_RAIN_HURTS if sensitivity == "rain_hurts" else (
         POLICY_RAIN_HELPS if sensitivity == "rain_helps" else ()

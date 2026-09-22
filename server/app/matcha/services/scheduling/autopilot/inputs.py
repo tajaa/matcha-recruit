@@ -6,11 +6,14 @@ import logging
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .policy import POLICY_SALES_HISTORY_DAYS
 from .weather_store import load_weather_days, refresh_location_weather
 
 HISTORY_WEEKS = 8
+# Google Weather daily forecasts reach 10 days (weather_store fetches days=10).
+FORECAST_HORIZON_DAYS = 10
 logger = logging.getLogger(__name__)
 
 
@@ -82,14 +85,37 @@ async def load_blended_hourly_rate(
 
 async def _fresh_weather(
     conn, *, company_id: UUID, location_id: UUID, week_start: date,
+    today: date | None = None,
 ) -> dict[date, dict]:
+    """Stored forecast for the week, refreshed only when a refresh can help.
+
+    Google forecasts 10 days out. A week wholly past that horizon (or already
+    over) can never be filled, so it must not trigger a geocode + provider
+    call on every build while this request holds a pooled connection.
+    """
     end = week_start + timedelta(days=6)
     rows = await load_weather_days(
         conn, company_id=company_id, location_id=location_id, start=week_start, end=end,
     )
+    if today is None:
+        tz_name = await conn.fetchval(
+            "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
+            location_id, company_id,
+        )
+        try:
+            today = datetime.now(ZoneInfo(tz_name)).date() if tz_name else None
+        except (KeyError, ValueError, ZoneInfoNotFoundError):
+            today = None
+    if today is None:
+        return rows
+    first = max(week_start, today)
+    last = min(end, today + timedelta(days=FORECAST_HORIZON_DAYS - 1))
+    if first > last:
+        return rows
+    wanted = {first + timedelta(days=offset) for offset in range((last - first).days + 1)}
     newest = max((row.get("fetched_at") for row in rows.values() if row.get("fetched_at")), default=None)
     stale = newest is None or newest < datetime.now(timezone.utc) - timedelta(hours=24)
-    if stale or len(rows) < 7:
+    if stale or not wanted <= set(rows):
         try:
             await refresh_location_weather(conn, company_id=company_id, location_id=location_id)
             rows = await load_weather_days(

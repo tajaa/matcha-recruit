@@ -56,9 +56,11 @@ async def test_fetch_follows_second_page_and_fails_closed(monkeypatch):
         def json(self):
             return self.payload
 
+    clients = []
+
     class Client:
-        def __init__(self, **_kwargs):
-            pass
+        def __init__(self, **kwargs):
+            clients.append(kwargs)
 
         async def __aenter__(self):
             return self
@@ -78,6 +80,9 @@ async def test_fetch_follows_second_page_and_fails_closed(monkeypatch):
     assert [row["local_date"].day for row in rows] == [22, 23]
     assert calls[1]["pageToken"] == "next"
     assert calls[1]["days"] == calls[0]["days"] == 2
+    # The key rides in a header: an httpx error message quotes the URL.
+    assert clients[0]["headers"] == {"X-Goog-Api-Key": "test"}
+    assert all("key" not in params for params in calls)
 
     class FailedClient(Client):
         async def get(self, _url, *, params):

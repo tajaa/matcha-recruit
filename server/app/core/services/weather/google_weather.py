@@ -1,6 +1,8 @@
 """Best-effort Google Weather daily forecast client.
 
-The API key remains server-side. ``None`` means unconfigured or failed while
+The API key remains server-side and travels in the ``X-Goog-Api-Key``
+header, never the query string, so an httpx error (whose message carries the
+full request URL) cannot write it into the logs. ``None`` means unconfigured or failed while
 ``[]`` means Google returned a genuine empty forecast, allowing callers to
 avoid persisting an outage as an empty weather week.
 """
@@ -72,7 +74,9 @@ async def fetch_daily_forecast(
     token: str | None = None
     rows: list[dict] = []
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(
+            timeout=10.0, headers={"X-Goog-Api-Key": key},
+        ) as client:
             for _ in range(2):
                 params: dict[str, Any] = {
                     "location.latitude": lat,
@@ -80,7 +84,6 @@ async def fetch_daily_forecast(
                     "days": requested,
                     "pageSize": requested,
                     "unitsSystem": "METRIC",
-                    "key": key,
                 }
                 if token:
                     params["pageToken"] = token

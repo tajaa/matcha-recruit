@@ -91,7 +91,16 @@ function DemandModelBlock({ model }: { model: AutopilotDemandModel }) {
           </tbody>
         </table>
       </div>
-      {model.notes.length > 0 && <ul className="mt-2 list-disc space-y-0.5 pl-4 text-[11px] text-zinc-500">{model.notes.map((note) => <li key={note}>{note}</li>)}</ul>}
+      {model.notes.length > 0 && <ul className="mt-2 list-disc space-y-0.5 pl-4 text-[11px] text-zinc-500">{model.notes.map((note, index) => <li key={`${index}-${note}`}>{note}</li>)}</ul>}
+      {/* The per-day "why" (forecast method, weather trim, floor, roster clip)
+          lives on each day, verbatim from the server — never re-worded here. */}
+      {model.days.some((day) => day.notes?.length) && (
+        <ul className="mt-2 space-y-0.5 text-[11px] text-zinc-500" aria-label="Autopilot day notes">
+          {model.days.filter((day) => day.notes?.length).map((day) => (
+            <li key={day.date}><span className="text-zinc-300">{day.weekday.slice(0, 3)}:</span> {day.notes.join('; ')}</li>
+          ))}
+        </ul>
+      )}
       <p className="mt-2 text-[10px] text-zinc-600">Used: {model.inputs_used.join(', ')}{model.inputs_missing.length ? ` · Missing: ${model.inputs_missing.join(', ')}` : ''}{model.labor?.labor_pct != null ? ` · Scheduled labor ${model.labor.labor_pct}% of forecast sales` : ''}</p>
     </section>
   )

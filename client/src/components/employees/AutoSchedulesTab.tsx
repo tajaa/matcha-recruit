@@ -72,8 +72,10 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
   const { toast } = useToast()
   const { hasFeature } = useMe()
   const autopilotEnabled = hasFeature('schedule_autopilot')
+  // Read by in-flight run-now callbacks to drop a result for a location the
+  // manager has since left; synced after render, never written during it.
   const locationIdRef = useRef(locationId)
-  locationIdRef.current = locationId
+  useEffect(() => { locationIdRef.current = locationId }, [locationId])
   const [form, setForm] = useState<FormState>(defaults)
   const [rule, setRule] = useState<ScheduleAutomationRule | null>(null)
   const [templates, setTemplates] = useState<WeekTemplate[]>([])
@@ -82,7 +84,11 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
   const [running, setRunning] = useState(false)
   const [generatedWeekStart, setGeneratedWeekStart] = useState<string | null>(null)
 
+  // Reset and refetch whenever the location changes — the synchronous
+  // setState the rule objects to is clearing the previous location's rule
+  // before the request leaves, so it can never render under the new one.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRule(null)
     setForm(defaults(weekStartWeekday))
     setTemplates([])

@@ -47,16 +47,23 @@ async def _run(*, force: bool = False) -> dict:
             await conn.execute(
                 "UPDATE scheduler_settings SET last_run_at=NOW() WHERE task_key='location_weather_refresh'"
             )
+        # Stalest first: every location needs a fresh forecast daily, so a
+        # fixed created_at order would starve everything past the batch cap.
         rows = await conn.fetch(
             """
             SELECT l.id, l.company_id, l.timezone, c.enabled_features, c.signup_source
             FROM business_locations l
             JOIN companies c ON c.id=l.company_id
+            LEFT JOIN LATERAL (
+                SELECT MAX(w.fetched_at) AS last_fetched_at
+                FROM schedule_weather_days w
+                WHERE w.location_id=l.id
+            ) w ON TRUE
             WHERE l.is_active IS NOT FALSE
               AND COALESCE(l.is_company_wide, false)=false
               AND c.deleted_at IS NULL
               AND COALESCE((c.enabled_features->>'schedule_autopilot')::boolean, false)
-            ORDER BY l.created_at
+            ORDER BY w.last_fetched_at NULLS FIRST, l.created_at, l.id
             LIMIT $1
             """,
             batch,

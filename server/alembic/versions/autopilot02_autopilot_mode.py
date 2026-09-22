@@ -59,6 +59,21 @@ def upgrade() -> None:
         "ALTER TABLE schedule_automation_rules "
         "ADD COLUMN IF NOT EXISTS mode VARCHAR(16) NOT NULL DEFAULT 'template'"
     )
+    # Rules whose template was deleted before the delete route learned to pause
+    # them can still be enabled with a NULL template; the worker only ever
+    # reported those as "not ready". Pause them the same way the route does so
+    # the template CHECK below can be added over existing data.
+    op.execute(
+        """
+        UPDATE schedule_automation_rules
+        SET enabled=false, next_run_at=NULL,
+            schedule_version=schedule_version + 1,
+            last_status='template_deleted',
+            last_message='Paused because its saved week template was deleted.',
+            updated_at=NOW()
+        WHERE mode='template' AND week_template_id IS NULL AND enabled
+        """
+    )
     op.execute(
         """
         DO $$ BEGIN

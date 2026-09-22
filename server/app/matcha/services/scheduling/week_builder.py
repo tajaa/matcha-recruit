@@ -2158,6 +2158,12 @@ async def get_week_build_readiness(
         blockers.append(
             "This week already has published shifts. Add only the remaining staffing needs as drafts before asking Huume to fill them."
         )
+    # Same refusal `propose_week_draft` makes: a full-week build on top of
+    # drafts would duplicate them, so readiness must not call the week ready.
+    if autopilot_mode and demand:
+        blockers.append(
+            "This week already has draft shifts. Clear them before building with Autopilot, or ask Huume to fill the drafts you have."
+        )
     usable_templates = [template for template in templates if template["block_count"]]
     if (
         not autopilot_mode and not demand and not week_template_id

@@ -145,6 +145,9 @@ export default function SchedulePilot() {
       .catch(() => { if (token === weekRulesRequest.current) setWeekRules(null) })
   }, [locationId])
 
+  // Fetch whenever the location changes; the synchronous setState the rule
+  // objects to is clearing the rules when no location is selected.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { reloadWeekRules() }, [reloadWeekRules])
 
   const autopilotReadinessRequest = useRef(0)
@@ -179,8 +182,10 @@ export default function SchedulePilot() {
     void editor.reload()
     planning.reload()
   }, [editor, planning, reloadWeekRules])
+  // The Huume thread calls this after an apply lands; sync the latest
+  // callback after render rather than writing the ref during it.
   const afterAppliedRef = useRef(afterApplied)
-  afterAppliedRef.current = afterApplied
+  useEffect(() => { afterAppliedRef.current = afterApplied }, [afterApplied])
 
   const thread = useScheduleHuumeThread({
     locationId: locationId || null,
@@ -192,7 +197,10 @@ export default function SchedulePilot() {
     onAutomaticActionSettled: () => setAutomaticSuggestion(null),
   })
 
+  // A new location or week is a new workspace: drop every selection and pane
+  // that belonged to the old one.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHuumeSelectedShiftIds(new Set())
     setReviewSource({ kind: 'staged' })
     setDrawer(null)
@@ -208,6 +216,8 @@ export default function SchedulePilot() {
 
   useEffect(() => {
     let cancelled = false
+    // Clear the previous week's banner before this week's status arrives.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setAutomaticSuggestion(null)
     if (!locationId) return () => { cancelled = true }
     void getScheduleSuggestionStatus(locationId, weekStart)

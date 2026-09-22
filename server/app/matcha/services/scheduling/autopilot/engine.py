@@ -54,13 +54,21 @@ def _shift_bounds(profile: Mapping) -> tuple[int, int, list[str]]:
     return minimum, maximum, notes
 
 
-def _job_shares(jobs: list[dict], history: HistoryModel, weekday: int) -> dict[str, Decimal]:
+def _job_shares(
+    jobs: list[dict], history: HistoryModel, weekday: int, qualified_by_job: Mapping[str, int],
+) -> dict[str, Decimal]:
     learned = history.job_share_by_weekday.get(weekday) or history.job_share_all
     values = {str(j["id"]): learned.get(str(j["id"]), Decimal(0)) for j in jobs}
     total = sum(values.values(), Decimal(0))
     if total <= 0:
-        equal = Decimal(1) / len(jobs)
-        return {str(j["id"]): equal for j in jobs}
+        # No learned mix: weight by who can actually work each job, so a job
+        # with one qualified person is not handed as many seats as one with
+        # ten (every one of them would come back unfilled).
+        values = {str(j["id"]): Decimal(max(0, qualified_by_job.get(str(j["id"]), 0))) for j in jobs}
+        total = sum(values.values(), Decimal(0))
+        if total <= 0:
+            equal = Decimal(1) / len(jobs)
+            return {str(j["id"]): equal for j in jobs}
     return {job: value / total for job, value in values.items()}
 
 
@@ -174,7 +182,8 @@ def generate_autopilot_demand(
             )
             notes.extend(staff_cut.notes)
             assignments = _assign_jobs(
-                staff_cut.intervals, eligible, _job_shares(eligible, history, window.weekday),
+                staff_cut.intervals, eligible,
+                _job_shares(eligible, history, window.weekday, capacity.qualified_by_job),
             )
             if leader_job:
                 leader_cut = cut_shifts(
@@ -240,6 +249,19 @@ def generate_autopilot_demand(
         rows = [row for row in rows if row["key"] not in dropped]
         week_notes.append(f"the 200-shift safety cap removed {len(dropped)} smallest shifts")
     rows.sort(key=lambda row: (row["starts_at"], row["ends_at"], row["role"], row["job_id"]))
+    # Per-day figures come from the FINAL rows (net of breaks, after the
+    # safety cap), the same basis as `labor_hours_week`, so the review's day
+    # table sums to its week line. The key carries the business date: an
+    # early open buffer can start a row on the previous calendar day.
+    rows_by_day: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        rows_by_day[row["key"].split(":")[1]].append(row)
+    for block in days:
+        final = rows_by_day.get(block["date"], [])
+        block["shifts_count"] = len(final)
+        block["labor_hours_planned"] = _json_number(sum(
+            (Decimal(row["required_staff"] * row["worked_minutes"]) / 60 for row in final), Decimal(0),
+        ))
     open_dates = {window.day for window in windows if not window.closed}
     forecast_total_values = [
         f.forecast for f in forecasts if f.day in open_dates and f.forecast is not None

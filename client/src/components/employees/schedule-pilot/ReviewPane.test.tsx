@@ -66,7 +66,8 @@ describe('ReviewPane — what a change will do', () => {
           forecast_sales: 1200, baseline_sales: 1300, sales_index: 0.92,
           weather: { condition: 'RAIN', precip_probability: 65, modifier: 0.9, sensitivity: 'rain_hurts' },
           labor_hours_target: 16, labor_hours_planned: 16, labor_method: 'splh',
-          shape_source: 'history', staffing_curve: [], shifts_count: 2, notes: [],
+          shape_source: 'history', staffing_curve: [], shifts_count: 2,
+          notes: ['16.0h from $1,200.00 at $75.00/labor-hour learned from published weeks'],
         }],
         forecast_sales_week: 1200, labor_hours_week: 16, labor_hours_target_week: 16,
         confidence: 'medium', inputs_used: ['sales_history'], inputs_missing: ['hourly_sales'],
@@ -79,6 +80,9 @@ describe('ReviewPane — what a change will do', () => {
     expect(screen.getByText('Forecast $1,200 from sales; 16 labor hours planned.')).toBeInTheDocument()
     expect(screen.getByText('rain Monday trimmed demand 10%')).toBeInTheDocument()
     expect(screen.getByText('rain · 65%')).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Autopilot day notes')).getByText(
+      /16\.0h from \$1,200\.00 at \$75\.00\/labor-hour learned from published weeks/,
+    )).toBeInTheDocument()
   })
 
   it('does not render an Autopilot block for a normal review', () => {

@@ -231,7 +231,9 @@ describe('WeekStartPane — the leader answer', () => {
   it('reads a single-role profile from before the set exactly as before', async () => {
     // Older payloads carry only `leader_job_id`; a one-role store must look
     // and save the same as it always did.
-    const { leader_job_ids: _ids, leader_job_names: _names, ...legacy } = profile
+    const legacy: Partial<typeof profile> = { ...profile }
+    delete legacy.leader_job_ids
+    delete legacy.leader_job_names
     mocks.fetchProfile.mockResolvedValue({ ...legacy, leader_required: true, leader_job_id: 'job-1', leader_job_name: 'Shift Lead' })
     renderWithJobs()
 

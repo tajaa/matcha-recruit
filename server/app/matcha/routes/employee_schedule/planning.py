@@ -97,6 +97,8 @@ async def run_autopilot(
     return await generate_review_suggestion(
         company_id=company_id, location_id=location_id,
         week_start=body.week_start, week_template_id=None, mode="autopilot",
+        actor_user_id=current_user.id, actor_role=current_user.role,
+        supersede_proposed=True,
     )
 
 

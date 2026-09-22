@@ -113,6 +113,9 @@ export default function WeekStartPane(
     }
   }, [applyProfile, locationId, toast])
 
+  // Fetch on mount and whenever the location changes; the synchronous
+  // setState the rule objects to is the spinner going up before the request.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load() }, [load])
 
   /** Re-read `week_rules` without `load()`'s full-pane spinner and WITHOUT

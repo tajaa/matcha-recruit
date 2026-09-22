@@ -226,3 +226,141 @@ def test_capacity_and_floor_remain_bounded(count):
     result = _engine(roster=_roster(count=count))
     assert all(row["required_staff"] <= count for row in result.demand)
     assert len(result.demand) <= POLICY_MAX_DEMAND_SHIFTS
+
+
+def _history_model(**changes):
+    from app.matcha.services.scheduling.autopilot.history import HistoryModel
+
+    fields = {
+        "weeks_observed": 0, "dates_by_weekday": {}, "shape_by_weekday": {},
+        "hours_by_weekday": {}, "job_share_by_weekday": {}, "job_share_all": {},
+        "splh_by_weekday": {}, "splh_all": None,
+    }
+    fields.update(changes)
+    return HistoryModel(**fields)
+
+
+def test_weather_note_only_when_the_store_is_weather_sensitive():
+    assert weather_effect(WEEK, {}, "none").note is None
+    assert "unavailable" in weather_effect(WEEK, {}, "rain_helps").note
+    result = _engine()
+    assert not any("weather unavailable" in note for day in result.demand_model["days"] for note in day["notes"])
+
+
+def test_labor_ladder_and_floor_note_only_when_floor_binds():
+    from dataclasses import replace
+
+    from app.matcha.services.scheduling.autopilot.labor import labor_target
+
+    monday = WEEK + timedelta(days=1)
+    window = day_window(monday, _profile())            # 08:00-16:00 = 8h floor at 1 staff
+    base = forecast_day(monday, sales_by_day={}, weather_by_day={}, sensitivity="none", anchor=WEEK)
+    history = _history_model(splh_all=Decimal(100))
+
+    # 10.3h rounds to 10.5h: rounding is not the floor raising it.
+    above = labor_target(window, replace(base, forecast=Decimal(1030)), history=history,
+                         profile=_profile(), blended_hourly_rate=None, leader_seat=False)
+    assert (above.method, above.hours) == ("splh", Decimal("10.5"))
+    assert not any("coverage floor raised" in note for note in above.notes)
+
+    below = labor_target(window, replace(base, forecast=Decimal(500)), history=history,
+                         profile=_profile(), blended_hourly_rate=None, leader_seat=False)
+    assert below.hours == Decimal("8.0")
+    assert any("coverage floor raised" in note for note in below.notes)
+
+    pct = labor_target(window, replace(base, forecast=Decimal(5000)), history=_history_model(),
+                       profile=_profile(target_labor_pct=Decimal(28)),
+                       blended_hourly_rate=Decimal(20), leader_seat=False)
+    assert (pct.method, pct.hours) == ("labor_pct", Decimal("70.0"))
+
+    scaled = labor_target(window, replace(base, forecast=Decimal(10), index=Decimal("1.50")),
+                          history=_history_model(hours_by_weekday={1: Decimal(16)}),
+                          profile=_profile(), blended_hourly_rate=None, leader_seat=False)
+    assert (scaled.method, scaled.hours) == ("history_hours", Decimal("24.0"))
+
+
+def test_capacity_cap_scales_only_above_the_floor():
+    from app.matcha.services.scheduling.autopilot.labor import (
+        LaborTarget,
+        RosterCapacity,
+        cap_week_to_capacity,
+    )
+
+    targets = [LaborTarget(WEEK, Decimal(20), "splh", Decimal(8), Decimal(20), ())] * 2
+    capped, note = cap_week_to_capacity(targets, RosterCapacity(1, Decimal(28), {}))
+    assert [target.hours for target in capped] == [Decimal(14), Decimal(14)]
+    assert "caps the plan at 28" in note
+    floored, note = cap_week_to_capacity(
+        [LaborTarget(WEEK, Decimal(8), "floor", Decimal(8), Decimal(8), ())] * 2,
+        RosterCapacity(1, Decimal(10), {}),
+    )
+    assert [target.hours for target in floored] == [Decimal(8), Decimal(8)]
+    assert "below the 16" in note
+
+
+def test_job_mix_without_history_follows_qualified_headcount():
+    from app.matcha.services.scheduling.autopilot.engine import _job_shares
+
+    other = "00000000-0000-4000-8000-000000000003"
+    jobs = [{"id": JOB, "name": "Barista"}, {"id": other, "name": "Cashier"}]
+    shares = _job_shares(jobs, _history_model(), 1, {JOB: 3, other: 1})
+    assert shares == {JOB: Decimal("0.75"), other: Decimal("0.25")}
+    assert _job_shares(jobs, _history_model(), 1, {}) == {JOB: Decimal("0.5"), other: Decimal("0.5")}
+
+    roster = _roster(count=4)
+    for index, employee in enumerate(roster["employees"]):
+        employee["jobs"] = [{"job_id": JOB if index < 3 else other, "qualification_status": "active"}]
+    result = _engine(
+        profile=_profile(min_floor_staff=4), jobs=jobs, roster=roster, gated_job_ids={JOB, other},
+    )
+    seats = {JOB: 0, other: 0}
+    for row in result.demand:
+        seats[row["job_id"]] += row["required_staff"] * row["worked_minutes"]
+    assert seats[JOB] > seats[other] > 0
+
+
+def test_day_table_sums_to_the_week_line_after_breaks_and_cap():
+    long_days = _profile(operating_hours={str(day): {"open": "06:00", "close": "22:00"} for day in range(7)},
+                         min_floor_staff=3)
+    result = _engine(profile=long_days, roster=_roster(count=6))
+    days = result.demand_model["days"]
+    assert sum(day["shifts_count"] for day in days) == len(result.demand)
+    assert sum(day["labor_hours_planned"] for day in days) == pytest.approx(result.demand_model["labor_hours_week"])
+    assert any(row["break_minutes"] for row in result.demand)
+
+    jobs = [{"id": f"00000000-0000-4000-8000-00000000001{i}", "name": f"Job{i}"} for i in range(6)]
+    rng = random.Random(3)
+    hourly = {(WEEK + timedelta(days=d), h): Decimal(rng.randrange(1, 50)) for d in range(7) for h in range(24)}
+    capped = _engine(
+        profile=_profile(operating_hours={str(d): {"open": "00:00", "close": "00:00"} for d in range(7)},
+                         min_floor_staff=12, autopilot_shift_min_minutes=120, autopilot_shift_max_minutes=180),
+        jobs=jobs, roster=_roster(count=60), hourly_sales=hourly,
+    )
+    assert len(capped.demand) == POLICY_MAX_DEMAND_SHIFTS
+    assert any("safety cap removed" in note for note in capped.demand_model["notes"])
+    assert sum(day["shifts_count"] for day in capped.demand_model["days"]) == POLICY_MAX_DEMAND_SHIFTS
+
+
+def test_leader_seat_invalid_bounds_and_roster_clip_are_explained():
+    roster = _roster(count=2, jobs=[{"job_id": LEAD, "qualification_status": "active"}])
+    result = _engine(
+        profile=_profile(leader_required=True, leader_job_ids=[LEAD], min_floor_staff=4,
+                         autopilot_shift_min_minutes=600, autopilot_shift_max_minutes=300),
+        jobs=[{"id": JOB, "name": "Barista"}, {"id": LEAD, "name": "Lead"}],
+        roster=roster, gated_job_ids={LEAD},
+    )
+    assert result.demand_model["policy"]["leader_seat"] is True
+    assert any(row["job_id"] == LEAD for row in result.demand)
+    assert any("invalid shift-length overrides" in note for note in result.demand_model["notes"])
+    assert any("clipped to the qualified roster size" in note
+               for day in result.demand_model["days"] for note in day["notes"])
+
+
+def test_cutter_overlap_and_staggered_layers():
+    overlap = cut_shifts([1] * 20, min_slots=11, max_slots=12)
+    assert overlap.over_coverage > 0 and "add" in overlap.notes[0]
+    staggered = cut_shifts([2] * 37, min_slots=8, max_slots=18)
+    first_layer = staggered.intervals[:3]
+    second_layer = staggered.intervals[3:]
+    assert [b - a for a, b in first_layer] == [13, 12, 12]
+    assert [b - a for a, b in second_layer] == [12, 12, 13]

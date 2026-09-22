@@ -1830,3 +1830,112 @@ async def test_apply_names_what_was_left_open_and_what_the_manager_accepted(monk
     assert details["compliance_status"] == "unmapped" and details["jurisdiction"]["state"] == "TX"
     assert details["advisories_acknowledged"] == result["advisories_acknowledged"]
     assert details["dropped"] == result["dropped"]
+
+
+# ── Schedule Autopilot propose path ──────────────────────────────────────
+
+
+def _autopilot_env(monkeypatch, conn, *, demand, features=None, existing=(), published=0,
+                   demand_model=None):
+    from app.matcha.services.scheduling import autopilot
+    from app.matcha.services.scheduling.autopilot import inputs as autopilot_inputs
+    from app.matcha.services.scheduling.autopilot.engine import AutopilotResult
+
+    _propose_env(monkeypatch, conn, demand=demand)
+    monkeypatch.setattr(week_builder, "_load_existing_demand", AsyncMock(return_value=list(existing)))
+    monkeypatch.setattr(week_builder, "_week_shift_counts", AsyncMock(return_value={
+        "draft": len(existing), "published": published,
+    }))
+    gate = AsyncMock(return_value=None)
+    monkeypatch.setattr(week_builder, "_week_rules_gate", gate)
+    monkeypatch.setattr(week_builder, "get_company_features", AsyncMock(
+        return_value=features if features is not None else {"schedule_autopilot": True},
+    ))
+    monkeypatch.setattr(week_builder, "load_profile_bundle", AsyncMock(return_value={"profile": {}}))
+    monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={"employees": []}))
+    monkeypatch.setattr(autopilot_inputs, "load_autopilot_inputs", AsyncMock(return_value={}))
+    model = demand_model if demand_model is not None else {
+        "notes": [], "sentence": "Forecast $1,000 for the week.", "forecast_sales_week": 1000.0,
+    }
+    monkeypatch.setattr(autopilot, "generate_autopilot_demand", lambda **_: AutopilotResult(list(demand), model))
+    return gate
+
+
+async def _propose_autopilot(**kwargs):
+    return await week_builder.propose_week_draft(
+        company_id=COMPANY_ID, actor_user_id=None, thread_id=None,
+        location_id=LOCATION_ID, week_start=WEEK_START, source_mode="autopilot", **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing, published, fragment", [
+    ((), 2, "published shifts"),
+    ([{"key": "draft"}], 0, "draft shifts"),
+])
+async def test_autopilot_refuses_to_build_over_an_existing_week(monkeypatch, existing, published, fragment):
+    conn = _FakeConn(None)
+    _autopilot_env(monkeypatch, conn, demand=[_demand_shift()], existing=existing, published=published)
+    result = await _propose_autopilot()
+    assert result["status"] == "refused" and fragment in result["message"]
+    assert not any("schedule_generation_runs" in call[0] for call in conn.executed)
+
+
+@pytest.mark.asyncio
+async def test_autopilot_needs_the_premium_flag_and_something_to_staff(monkeypatch):
+    conn = _FakeConn(None)
+    _autopilot_env(monkeypatch, conn, demand=[_demand_shift()], features={})
+    result = await _propose_autopilot()
+    assert result == {"status": "refused", "message": "Schedule Autopilot is not enabled for this company."}
+
+    _autopilot_env(monkeypatch, conn, demand=[], demand_model={"notes": ["no job has a qualified employee"]})
+    result = await _propose_autopilot()
+    assert result["status"] == "refused"
+    assert result["message"] == "Autopilot found nothing to staff: no job has a qualified employee"
+
+
+@pytest.mark.asyncio
+async def test_autopilot_freezes_its_rows_and_prices_labor_for_a_manager(monkeypatch):
+    conn = _FakeConn(None)
+    gate = _autopilot_env(monkeypatch, conn, demand=[_demand_shift()])
+    monkeypatch.setattr(week_builder, "cost_delta_for_rows", AsyncMock(return_value={"before": 0.0, "after": 250.0}))
+
+    result = await _propose_autopilot(actor_role="client")
+
+    assert result["status"] == "ready"
+    assert gate.await_args.kwargs["mode"] == "autopilot"
+    assert "Autopilot" in result["summary"] and "Forecast $1,000" in result["summary"]
+    assert result["demand_model"]["labor"] == {
+        "forecast_sales_week": 1000.0, "scheduled_cost_after": 250.0, "labor_pct": 25.0,
+    }
+    insert = next(call for call in conn.executed if "schedule_generation_runs" in call[0])
+    assert insert[6] == "autopilot" and insert[10] == week_builder.AUTOPILOT_PLANNER_VERSION
+    proposal = json.loads(insert[12])
+    assert proposal["demand_rows"][0]["key"] == "shift-1"
+    assert proposal["schedule_review"]["demand_model"]["sentence"] == "Forecast $1,000 for the week."
+
+
+@pytest.mark.asyncio
+async def test_autopilot_labor_block_is_absent_without_visible_cost(monkeypatch):
+    conn = _FakeConn(None)
+    _autopilot_env(monkeypatch, conn, demand=[_demand_shift()])
+    monkeypatch.setattr(week_builder, "cost_delta_for_rows", AsyncMock(return_value=None))
+    result = await _propose_autopilot()
+    assert "labor" not in result["demand_model"]
+
+
+@pytest.mark.asyncio
+async def test_autopilot_readiness_blocks_on_drafts_and_missing_timezone(monkeypatch):
+    conn = _FakeConn({"id": LOCATION_ID, "name": "Downtown", "timezone": None})
+    _empty_week(monkeypatch, conn, [])
+    monkeypatch.setattr(week_builder, "_load_existing_demand", AsyncMock(return_value=[_demand_shift()]))
+    monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={
+        "employees": [_employee("amy", "Amy")], "gated_job_ids": set(),
+    }))
+    result = await week_builder.get_week_build_readiness(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, week_start=WEEK_START, source_mode="autopilot",
+    )
+    assert result["ready"] is False
+    assert any("already has draft shifts" in blocker for blocker in result["blockers"])
+    assert any("needs a timezone" in blocker for blocker in result["blockers"])
+    assert result["recommended_source"] != "autopilot"
