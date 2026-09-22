@@ -1,90 +1,231 @@
 import SwiftUI
 
+/// The same compact workspace for solo and collaborative projects. Desktop-only
+/// project types deliberately keep their specialist workflows on desktop.
 struct CollabProjectView: View {
-    enum Panel: String, CaseIterable, Identifiable { case overview = "Overview", chat = "Chat", kanban = "Kanban", files = "Files", media = "Media", notes = "Notes"; var id: String { rawValue } }
-    let projectId: String
-    let initialTaskId: String?
-    @Environment(AppState.self) private var appState
-    @State private var panel: Panel = .overview
-    @State private var vm: ProjectDetailViewModel
-    @State private var presence = ProjectPresenceViewModel()
-    @State private var selectedTaskId: String?
-
-    init(projectId: String, initialTaskId: String? = nil) {
-        self.projectId = projectId
-        self.initialTaskId = initialTaskId
-        _vm = State(initialValue: WorkDetailVMStore.shared.projectVM(projectId))
-    }
-    var body: some View {
-        VStack(spacing: 0) {
-            if !presence.members.isEmpty {
-                HStack { Spacer(); PresencePillContent(members: presence.members) }
-                    .padding(.horizontal).padding(.top, 4)
-            }
-            Picker("Panel", selection: $panel) { ForEach(Panel.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).padding()
-            Group {
-                switch panel {
-                case .overview: overview
-                case .chat: CollabChatPanel(projectId: projectId, projectName: vm.project?.title ?? "Project")
-                case .kanban: kanban
-                case .files: fileList(files: vm.files.filter { !$0.isImage }, empty: "No files yet.")
-                case .media: fileList(files: vm.files.filter(\.isImage), empty: "No media yet.")
-                case .notes: ScrollView { VStack(alignment: .leading, spacing: 16) { ForEach(vm.project?.sections ?? []) { section in VStack(alignment: .leading, spacing: 6) { Text(section.title).font(.headline); Text(section.content ?? "").foregroundStyle(.secondary) } } }.frame(maxWidth: .infinity, alignment: .leading).padding() }
-                }
+    enum Panel: String, CaseIterable, Identifiable {
+        case tasks = "Tasks", notes = "Notes", files = "Files", chat = "Chat", overview = "Overview"
+        var id: String { rawValue }
+        var symbol: String {
+            switch self {
+            case .tasks: return "checklist"
+            case .notes: return "doc.text"
+            case .files: return "folder"
+            case .chat: return "bubble.left.and.bubble.right"
+            case .overview: return "chart.pie"
             }
         }
-        .navigationTitle(vm.project?.title ?? "Project")
+    }
+    let projectId: String
+    let initialTaskId: String?
+    private let isPreview: Bool
+    @Environment(AppState.self) private var appState
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var panel: Panel = .tasks
+    @State private var vm: ProjectDetailViewModel
+    @State private var presence = ProjectPresenceViewModel()
+    @State private var selectedTask: MWProjectTask?
+    @State private var creatingTask = false
+    @State private var showingPeople = false
+    @State private var editingProject = false
+    @State private var showingAssistant = false
+    @State private var taskSearch = ""
+    @State private var onlyMine = false
+    @State private var initialTaskConsumed = false
+
+    init(projectId: String, initialTaskId: String? = nil, previewVM: ProjectDetailViewModel? = nil) {
+        self.projectId = projectId; self.initialTaskId = initialTaskId
+        isPreview = previewVM != nil
+        _vm = State(initialValue: previewVM ?? WorkDetailVMStore.shared.projectVM(projectId))
+    }
+    private var isCollab: Bool { vm.project?.projectType == "collab" }
+    private var panels: [Panel] { Panel.allCases }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let project = vm.project {
+                projectHeader(project)
+                panelPicker
+                Group {
+                    switch panel {
+                    case .tasks: taskList
+                    case .notes: MobileProjectNotes(vm: vm, projectId: projectId)
+                    case .files: MobileProjectFiles(vm: vm, projectId: projectId)
+                    case .chat:
+                        if isCollab { CollabChatPanel(projectId: projectId, projectName: project.title) }
+                        else { MobileProjectAssistant(projectId: projectId) }
+                    case .overview: overview
+                    }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if vm.isLoading { ProgressView("Opening your workspace…").frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else {
+                EspressoEmptyState(title: "Couldn't open this project", message: "It may have moved, or your connection may be offline.", symbol: "folder.badge.questionmark")
+                Button("Try again") { Task { await refresh() } }
+                Spacer()
+            }
+        }
+        .espressoBackground()
+        .navigationTitle(vm.project?.title ?? "Project").navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await refresh() } }
+                    Button("Ask Espresso", systemImage: "sparkles") { showingAssistant = true }
+                    if isCollab { Button("People", systemImage: "person.2") { showingPeople = true } }
+                    if vm.project?.mobileIsOwner == true {
+                        Button("Edit project", systemImage: "pencil") { editingProject = true }
+                    }
+                } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Project actions")
+            }
+        }
+        .sheet(item: $selectedTask) { MobileTaskSheet(vm: vm, projectId: projectId, task: $0) }
+        .sheet(isPresented: $creatingTask) { MobileTaskSheet(vm: vm, projectId: projectId) }
+        .sheet(isPresented: $showingPeople) { MobileProjectPeople(vm: vm, projectId: projectId) }
+        .sheet(isPresented: $showingAssistant) {
+            NavigationStack { MobileProjectAssistant(projectId: projectId).navigationTitle("Ask Espresso").toolbar { Button("Done") { showingAssistant = false } } }
+        }
+        .sheet(isPresented: $editingProject) {
+            MobileProjectEditor(project: vm.project) { updated in vm.project = updated }
+        }
+        .espressoError($vm.errorMessage)
         .task {
-            await vm.loadProject(id: projectId)
+            guard !isPreview else { return }
+            await refresh()
             vm.attachTaskRealtime(currentUserId: appState.currentUser?.id, projectId: projectId, showToasts: false)
-            await vm.loadProjectActivity()
             presence.start(projectId: projectId, pageKey: panel.rawValue.lowercased())
-            if let initialTaskId, vm.tasks.contains(where: { $0.id == initialTaskId }) {
-                panel = .kanban
-                selectedTaskId = initialTaskId
+            if let initialTaskId, !initialTaskConsumed {
+                initialTaskConsumed = true
+                if !vm.tasks.contains(where: { $0.id == initialTaskId }) { await vm.loadAllDoneTasks() }
+                if let task = vm.tasks.first(where: { $0.id == initialTaskId }) { selectedTask = task }
+                else { vm.errorMessage = "This task is no longer available in the mobile task list." }
             }
         }
         .onChange(of: panel) { _, value in presence.setPage(value.rawValue.lowercased()) }
-        .onDisappear {
-            presence.stop()
-            ProjectWebSocket.shared.unregisterTaskHandlers(owner: vm)
-        }
-        .sheet(isPresented: Binding(get: { selectedTaskId != nil }, set: { if !$0 { selectedTaskId = nil } })) {
-            if let selectedTaskId {
-                CollabTicketSheet(vm: vm, taskId: selectedTaskId)
-            }
-        }
+        .onChange(of: scenePhase) { _, phase in if phase == .active && !isPreview { Task { await refresh() } } }
+        .onDisappear { if !isPreview { presence.stop(); ProjectWebSocket.shared.unregisterTaskHandlers(owner: vm) } }
     }
-    private var overview: some View { List { Section("Progress") { TaskProgressBar(tasks: vm.tasks) }; Section("Collaborators") { ForEach(vm.collaborators) { Text($0.name) } }; Section("Recent activity") { ForEach(vm.recentActivity) { Text($0.text) } } } }
 
-    private var kanban: some View {
-        ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 12) {
-                let columns = vm.groupedColumns(pipeline: false, search: "")
-                ForEach(kanbanColumns, id: \.key) { column in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("\(column.label) (\(columns[column.key, default: []].count))").font(.headline)
-                        ForEach(columns[column.key, default: []]) { task in
-                            Button { selectedTaskId = task.id } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(task.title).font(.subheadline.weight(.semibold)).multilineTextAlignment(.leading)
-                                    Text(task.priority.capitalized).font(.caption).foregroundStyle(.secondary)
-                                }.frame(maxWidth: .infinity, alignment: .leading).padding(10).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
-                            }.buttonStyle(.plain)
-                        }
-                    }.frame(width: 230, alignment: .leading)
+    private func projectHeader(_ project: MWProject) -> some View {
+        HStack(spacing: 12) {
+            EspressoProjectGlyph(symbol: project.icon ?? "folder", color: isCollab ? EspressoStyle.sage : EspressoStyle.accent)
+            VStack(alignment: .leading, spacing: 4) {
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Text(isCollab ? "BETTER, TOGETHER" : "A SPACE OF YOUR OWN").font(.caption2.weight(.semibold)).tracking(1.3).foregroundStyle(.secondary)
                 }
-            }.padding()
-        }
+                Text(project.title).font(dynamicTypeSize.isAccessibilitySize ? .headline : .title2.weight(.semibold))
+                    .tracking(-0.45).lineLimit(2)
+            }
+            Spacer(minLength: 0)
+            if isCollab {
+                Button { showingPeople = true } label: { Image(systemName: "person.2").font(.system(size: 18, weight: .medium)).frame(width: 44, height: 44).espressoGlass() }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Project people")
+            }
+        }.padding(.horizontal, 20).padding(.vertical, 16)
     }
 
-    @ViewBuilder private func fileList(files: [MWProjectFile], empty: String) -> some View {
-        if files.isEmpty { ContentUnavailableView(empty, systemImage: "folder") }
-        else { List(files) { file in
-            if SafeURL.isAllowed(file.storageUrl), let url = URL(string: file.storageUrl) {
-                Link(file.filename, destination: url)
-            } else { Text(file.filename).foregroundStyle(.secondary) }
-        } }
+    private var panelPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            EspressoGlassGroup {
+                HStack(spacing: 10) {
+                    ForEach(panels) { option in
+                        Button { panel = option } label: {
+                            Label(option == .chat && !isCollab ? "Espresso" : option.rawValue, systemImage: option == .chat && !isCollab ? "sparkles" : option.symbol).font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 16).frame(minHeight: 44)
+                                .espressoGlass(selected: panel == option)
+                        }.buttonStyle(.plain).accessibilityAddTraits(panel == option ? .isSelected : [])
+                    }
+                }
+            }.padding(.horizontal, 20).padding(.vertical, 8)
+        }.scrollClipDisabled()
+    }
+
+    private var taskList: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Label { TextField("Search tasks", text: $taskSearch, prompt: Text("Search tasks").foregroundStyle(EspressoStyle.placeholder)) } icon: { Image(systemName: "magnifyingglass").foregroundStyle(.secondary) }
+                        .padding(14).espressoSurface(cornerRadius: 20)
+                    Button { creatingTask = true } label: { Image(systemName: "plus").font(.system(size: 20, weight: .medium)).frame(width: 48, height: 48).espressoGlass(selected: true) }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Add task")
+                        .disabled(vm.project?.mobileCanEdit != true)
+                }
+                Toggle("Assigned to me", isOn: $onlyMine).font(.subheadline).tint(EspressoStyle.sage)
+                if vm.tasks.isEmpty {
+                    EspressoEmptyState(title: "One small step", message: "Add your first task and give this project a little momentum.", symbol: "checkmark.circle")
+                }
+                let columns = vm.groupedColumns(pipeline: false, search: taskSearch)
+                if !vm.tasks.isEmpty && columns.values.flatMap({ $0 }).filter({ !onlyMine || $0.assignedTo == appState.currentUser?.id }).isEmpty {
+                    EspressoEmptyState(title: "A clear desk", message: "No tasks match these filters.", symbol: "checkmark.circle")
+                }
+                ForEach(kanbanColumns, id: \.key) { column in
+                    let tasks = columns[column.key, default: []].filter { !onlyMine || $0.assignedTo == appState.currentUser?.id }
+                    if !tasks.isEmpty {
+                        EspressoSectionHeading(title: column.label, detail: "\(tasks.count)").padding(.top, 12)
+                        ForEach(tasks) { task in
+                            Button { selectedTask = task } label: { MobileTaskRow(task: task) }.buttonStyle(EspressoPressStyle())
+                        }
+                    }
+                }
+                if vm.doneScope != "all" && vm.doneTotal > vm.tasks.filter({ $0.boardColumn == "done" }).count {
+                    Button("Load earlier completed tasks", systemImage: "clock.arrow.circlepath") { Task { await vm.loadAllDoneTasks() } }
+                        .frame(maxWidth: .infinity).padding()
+                } else if vm.doneScope == "all" && vm.doneTotal > vm.tasks.filter({ $0.boardColumn == "done" }).count {
+                    Text("Showing the most recent completed tasks. Older history is available on desktop.").font(.caption).foregroundStyle(.secondary)
+                }
+            }.padding(20).frame(maxWidth: 760).frame(maxWidth: .infinity)
+        }.refreshable { await refresh() }
+    }
+
+    private var overview: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 16) {
+                    EspressoSectionHeading(title: "Moving forward", detail: "This workspace")
+                    TaskProgressBar(tasks: vm.tasks)
+                    Text("Progress reflects the loaded tasks, including this week's completed work.").font(.caption).foregroundStyle(.secondary)
+                }.espressoCard()
+                EspressoSectionHeading(title: "Recent activity")
+                if vm.recentActivity.isEmpty { Text("Your project's story starts here.").foregroundStyle(.secondary) }
+                ForEach(vm.recentActivity) { item in
+                    HStack(alignment: .top, spacing: 14) {
+                        Image(systemName: item.icon).foregroundStyle(EspressoStyle.accent).frame(width: 24)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(item.text).font(.subheadline)
+                            Text(item.timestamp, style: .relative).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }.padding(20).frame(maxWidth: 760).frame(maxWidth: .infinity)
+        }.refreshable { await refresh() }
+    }
+
+    private func refresh() async { await vm.loadProject(id: projectId); await vm.loadProjectActivity() }
+}
+
+struct MobileTaskRow: View {
+    let task: MWProjectTask
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: task.boardColumn == "done" ? "checkmark.circle.fill" : "circle")
+                .font(.title3).foregroundStyle(task.boardColumn == "done" ? EspressoStyle.sage : Color.secondary)
+            VStack(alignment: .leading, spacing: 12) {
+                Text(task.title).font(.headline).multilineTextAlignment(.leading).foregroundStyle(.primary)
+                ViewThatFits(in: .horizontal) {
+                    HStack { metadata }
+                    VStack(alignment: .leading, spacing: 8) { metadata }
+                }
+            }
+            Spacer(minLength: 0)
+        }.espressoCard()
+    }
+    @ViewBuilder private var metadata: some View {
+        EspressoBadge(text: task.priority.capitalized, color: EspressoStyle.priority(task.priority))
+        if let name = task.displayAssignee { Text(name).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+        if let due = MobileTaskDates.parse(task.dueDate) { Label(due.formatted(date: .abbreviated, time: .omitted), systemImage: "calendar").font(.caption).foregroundStyle(.secondary) }
+        if let total = task.subtaskTotal, total > 0 { Label("\(task.subtaskDone ?? 0)/\(total)", systemImage: "checklist").font(.caption).foregroundStyle(.secondary) }
     }
 }
 
@@ -93,61 +234,20 @@ struct CollabChatPanel: View {
     let projectName: String
     @State private var channelId: String?
     @State private var errorMessage: String?
-    var body: some View { Group { if let channelId { ChannelChatView(channelId: channelId, channelName: projectName, isEmbedded: true) } else if let errorMessage { ContentUnavailableView("Couldn't open chat", systemImage: "exclamationmark.triangle", description: Text(errorMessage)).overlay(alignment: .bottom) { Button("Retry") { Task { await loadChannel() } }.padding() } } else { ProgressView() } }.task { await loadChannel() } }
-    private func loadChannel() async { do { channelId = try await MatchaWorkService.shared.ensureProjectDiscussionChannel(projectId: projectId); errorMessage = nil } catch { errorMessage = error.localizedDescription } }
-}
-
-private struct CollabTicketSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    let vm: ProjectDetailViewModel
-    let taskId: String
-
-    private var task: MWProjectTask? { vm.tasks.first { $0.id == taskId } }
-
     var body: some View {
-        NavigationStack {
-            Group {
-                if let task { ticketContent(task) }
-                else { ContentUnavailableView("Ticket unavailable", systemImage: "exclamationmark.triangle") }
-            }.navigationTitle(task?.title ?? "Ticket").toolbar { Button("Done") { dismiss() } }
-        }
+        Group {
+            if let channelId { ChannelChatView(channelId: channelId, channelName: projectName, isEmbedded: true) }
+            else if let errorMessage {
+                VStack {
+                    EspressoEmptyState(title: "Couldn't open chat", message: errorMessage, symbol: "bubble.left")
+                    Button("Retry") { Task { await loadChannel() } }
+                }
+            } else { ProgressView() }
+        }.task { if channelId == nil { await loadChannel() } }
     }
-
-    private func ticketContent(_ task: MWProjectTask) -> some View {
-        List {
-            ticketDetails(task)
-            ticketSubtasks(task)
-        }
-        .task(id: task.id) { await vm.loadSubtasks(taskId: task.id) }
-    }
-
-    private func ticketDetails(_ task: MWProjectTask) -> some View {
-        Section("Details") {
-            Text(task.description ?? "No description.")
-            LabeledContent("Priority", value: task.priority.capitalized)
-            Picker("Column", selection: columnBinding(for: task)) {
-                ForEach(kanbanColumns, id: \.key) { Text($0.label).tag($0.key) }
-            }
-        }
-    }
-
-    private func ticketSubtasks(_ task: MWProjectTask) -> some View {
-        Section("Subtasks") {
-            ForEach(vm.taskSubtasks[task.id] ?? []) { subtask in
-                Toggle(subtask.title, isOn: subtaskBinding(taskId: task.id, subtask: subtask))
-            }
-        }
-    }
-
-    private func columnBinding(for task: MWProjectTask) -> Binding<String> {
-        Binding(get: { task.boardColumn }, set: { value in
-            Task { await vm.moveTask(id: task.id, toColumn: value) }
-        })
-    }
-
-    private func subtaskBinding(taskId: String, subtask: MWSubtask) -> Binding<Bool> {
-        Binding(get: { subtask.isDone }, set: { isDone in
-            Task { await vm.toggleSubtask(taskId: taskId, subtaskId: subtask.id, isDone: isDone) }
-        })
+    private func loadChannel() async {
+        errorMessage = nil
+        do { channelId = try await MatchaWorkService.shared.ensureProjectDiscussionChannel(projectId: projectId) }
+        catch { errorMessage = error.localizedDescription }
     }
 }

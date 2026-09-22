@@ -6,6 +6,8 @@ struct MainTabView: View {
     @Environment(AppState.self) private var appState
     @State private var tab = 0
 
+    init(initialTab: Int = 0) { _tab = State(initialValue: initialTab) }
+
     var body: some View {
         TabView(selection: $tab) {
             ProjectsListView()

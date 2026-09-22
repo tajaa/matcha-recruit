@@ -46,13 +46,15 @@ struct InboxListView: View {
             }
             .refreshable { await vm.load() }
         }
-        .task { await vm.load(initial: true) }
-        .onChange(of: appState.pendingConversationId) { _, id in
-            guard let id else { return }
-            if !path.contains(id) { path.append(id) }
-            appState.pendingConversationId = nil
-        }
+        .task { await vm.load(initial: true); consumePendingConversation() }
+        .onChange(of: appState.pendingConversationId) { _, _ in consumePendingConversation() }
         .badge(vm.unreadTotal)
+    }
+
+    private func consumePendingConversation() {
+        guard let id = appState.pendingConversationId else { return }
+        path = [id]
+        appState.pendingConversationId = nil
     }
 
     private func titleForId(_ cid: String) -> String {

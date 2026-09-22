@@ -12,9 +12,10 @@ final class AppState {
     // Session
     var isAuthenticated = false
     var currentUser: UserInfo?
-    /// matcha-work personal Plus — gates go-live/calls power features. Wired in
-    /// the calls phase; false until then.
-    var isPlusActive = false
+    /// Server-resolved plan, including beta grants and Business accounts.
+    var entitlements: MWEntitlements?
+    var isPlusActive: Bool { entitlements?.has("go_live") == true }
+    private var isLoggingOut = false
 
     // Login UI
     var isLoggingIn = false
@@ -40,6 +41,10 @@ final class AppState {
     private var deepLinkObserver: NSObjectProtocol?
 
     init() {
+        #if DEBUG
+        // Screenshot fixtures never restore credentials or contact a backend.
+        if ProcessInfo.processInfo.arguments.contains("-espresso-preview") { didRestore = true; return }
+        #endif
         // A failed token refresh anywhere in the app drops us to the login gate.
         APIClient.shared.onUnauthorized = { [weak self] in
             Task { @MainActor in self?.didLogout() }
@@ -55,6 +60,8 @@ final class AppState {
     // MARK: - Auth
 
     func login(email: String, password: String) async {
+        guard !isLoggingOut else { authError = "Finishing sign out. Please try again in a moment."; return }
+        guard !isLoggingIn else { return }
         isLoggingIn = true
         authError = nil
         defer { isLoggingIn = false }
@@ -86,18 +93,28 @@ final class AppState {
     }
 
     func logout() {
+        guard !isLoggingOut else { return }
+        isLoggingOut = true
         Task {
+            // Unregister while this account's bearer is still available.
+            await PushService.shared.unregister()
             try? await AuthService.shared.logout()
             didLogout()
+            isLoggingOut = false
         }
     }
 
     func didLogout() {
         isAuthenticated = false
         currentUser = nil
-        isPlusActive = false
+        entitlements = nil
         selectedChannelId = nil
-        Task { await PushService.shared.unregister() }
+        pendingChannelId = nil; pendingConversationId = nil
+        pendingProjectId = nil; pendingTaskId = nil
+        APIClient.shared.accessToken = nil
+        KeychainHelper.delete(key: KeychainHelper.Keys.accessToken)
+        KeychainHelper.delete(key: KeychainHelper.Keys.refreshToken)
+        UIApplication.shared.unregisterForRemoteNotifications()
         Task { await CallService.shared.leave() }
         Task { await BroadcastService.shared.leave() }
         let ws = ChannelsWebSocket.shared
@@ -141,17 +158,17 @@ final class AppState {
         }
     }
 
-    /// Resolve matcha-work personal Plus → `isPlusActive` (gates starting calls /
-    /// going live; joining is open to all members and server-enforced).
+    /// Keep the last-known gates on transient failures or a future plan value.
+    /// A result from a previous account must never publish into a new session.
     func refreshSubscription() async {
+        guard let userId = currentUser?.id else { return }
         do {
-            let sub: MWSubscription = try await APIClient.shared.request(
-                method: "GET", path: "/matcha-work/billing/subscription"
+            let result: MWEntitlements = try await APIClient.shared.request(
+                method: "GET", path: "/matcha-work/entitlements"
             )
-            isPlusActive = sub.isPersonalPlus
-        } catch {
-            isPlusActive = false
-        }
+            guard currentUser?.id == userId else { return }
+            entitlements = result
+        } catch { /* Server authorization remains authoritative. */ }
     }
 
     // MARK: - Push (APNs)
@@ -175,9 +192,13 @@ final class AppState {
         } else if let m = userInfo["metadata"] as? [AnyHashable: Any] {
             for (k, v) in m { if let ks = k as? String { meta[ks] = v } }
         }
-        if let cid = meta["channel_id"] as? String { pendingChannelId = cid }
-        if let conv = meta["conversation_id"] as? String { pendingConversationId = conv }
-        if let project = meta["project_id"] as? String { pendingProjectId = project }
-        if let task = meta["task_id"] as? String { pendingTaskId = task }
+        pendingChannelId = nil; pendingConversationId = nil
+        pendingProjectId = nil; pendingTaskId = nil
+        // Set the detail before publishing the project navigation trigger.
+        if let project = meta["project_id"] as? String {
+            pendingTaskId = meta["task_id"] as? String
+            pendingProjectId = project
+        } else if let conv = meta["conversation_id"] as? String { pendingConversationId = conv }
+        else if let cid = meta["channel_id"] as? String { pendingChannelId = cid }
     }
 }

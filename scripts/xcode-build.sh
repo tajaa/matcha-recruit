@@ -9,6 +9,7 @@
 #
 # Targets:
 #   espresso     platforms/desktop/Espresso/Matcha.xcodeproj  (scheme Matcha, macOS)
+#   espresso-ios platforms/desktop/Espresso/Matcha.xcodeproj  (scheme WerkiOS, iOS)
 #   matchatutor  platforms/ios/MatchaTutor/MatchaTutor.xcodeproj
 #   tellus       platforms/ios/TellUs/TellUs.xcodeproj
 #   gummfit      platforms/ios/Gummfit/Gummfit.xcodeproj
@@ -48,6 +49,11 @@ case "$TARGET" in
         SCHEME="Matcha"
         DESTINATION="platform=macOS"
         ;;
+    espresso-ios)
+        PROJECT="$REPO_ROOT/platforms/desktop/Espresso/Matcha.xcodeproj"
+        SCHEME="WerkiOS"
+        DESTINATION="${IOS_DESTINATION:-generic/platform=iOS Simulator}"
+        ;;
     matchatutor)
         PROJECT="$REPO_ROOT/platforms/ios/MatchaTutor/MatchaTutor.xcodeproj"
         SCHEME="MatchaTutor"
@@ -86,7 +92,7 @@ plutil -lint "$PROJECT/project.pbxproj"
 # NB: expanded as ${ARR[@]+"${ARR[@]}"} below — macOS ships bash 3.2, where a
 # plain "${ARR[@]}" on an EMPTY array trips `set -u` with "unbound variable".
 XCODEBUILD_SETTINGS=()
-if [[ "${CI:-}" == "true" && "$TARGET" == "espresso" ]]; then
+if [[ "${CI:-}" == "true" && ( "$TARGET" == "espresso" || "$TARGET" == "espresso-ios" ) ]]; then
     XCODEBUILD_SETTINGS+=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO)
 fi
 
@@ -95,10 +101,21 @@ case "$ACTION" in
         open "$PROJECT"
         ;;
     build)
-        xcodebuild -project "$PROJECT" -scheme "$SCHEME" -destination "$DESTINATION" \
-            ${XCODEBUILD_SETTINGS[@]+"${XCODEBUILD_SETTINGS[@]}"} build
+        if [[ "$TARGET" == "espresso-ios" ]]; then
+            # A direct SDK build also works when Xcode has the simulator SDK
+            # but its newer device-platform component is not installed.
+            xcodebuild -project "$PROJECT" -target "$SCHEME" -sdk iphonesimulator \
+                ${XCODEBUILD_SETTINGS[@]+"${XCODEBUILD_SETTINGS[@]}"} build
+        else
+            xcodebuild -project "$PROJECT" -scheme "$SCHEME" -destination "$DESTINATION" \
+                ${XCODEBUILD_SETTINGS[@]+"${XCODEBUILD_SETTINGS[@]}"} build
+        fi
         ;;
     test)
+        if [[ "$TARGET" == "espresso-ios" ]]; then
+            bash "$REPO_ROOT/platforms/desktop/Espresso/scripts/test_ios_core.sh"
+            exit 0
+        fi
         xcodebuild -project "$PROJECT" -scheme "$SCHEME" -destination "$DESTINATION" \
             ${XCODEBUILD_SETTINGS[@]+"${XCODEBUILD_SETTINGS[@]}"} test
         ;;
