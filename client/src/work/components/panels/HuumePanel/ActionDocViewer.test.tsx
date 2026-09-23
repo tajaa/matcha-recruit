@@ -112,3 +112,14 @@ describe('ActionDocViewer — beside a review pane', () => {
     expect(screen.getByText('Built a draft proposal: 8 of 8 positions filled.')).toBeInTheDocument()
   })
 })
+
+describe('ActionDocViewer — demand source', () => {
+  it.each([
+    ['existing', 'Existing draft shifts'],
+    ['template', 'Saved template'],
+    ['autopilot', 'Autopilot forecast'],
+  ] as const)('labels %s as %s', (source_mode, label) => {
+    render(<ActionDocViewer action={weekDraft({ source_mode })} />)
+    expect(screen.getByText(label)).toBeInTheDocument()
+  })
+})
