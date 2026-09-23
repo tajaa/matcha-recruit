@@ -468,6 +468,8 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
         bits = [str(model.get("sentence") or "Autopilot generated a reviewable week.")]
         if labor.get("labor_pct") is not None:
             bits.append(f"scheduled labor is {labor['labor_pct']}% of forecast sales")
+        elif labor.get("note"):
+            bits.append(str(labor["note"]))
         _autopilot_records.append({
             "cid": f"schedint:autopilot.{item['location_id']}",
             "ref": f"Schedule Autopilot — {item['location_name']}, week of {item['week_start']}",

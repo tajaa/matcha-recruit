@@ -361,6 +361,8 @@ def _empty_week(monkeypatch, conn, templates, *, week_start_weekday=0):
         week_builder, "_week_shift_counts", AsyncMock(return_value={"draft": 0, "published": 0}),
     )
     monkeypatch.setattr(week_builder, "_list_templates", AsyncMock(return_value=templates))
+    # Autopilot readiness reads credential blocks; nobody is blocked by default.
+    monkeypatch.setattr(week_builder, "schedule_eligibility_roster_flags", AsyncMock(return_value={}))
 
 
 @pytest.mark.asyncio
@@ -479,6 +481,47 @@ async def test_autopilot_readiness_counts_the_full_sales_window(monkeypatch):
     assert hourly_queries == [(COMPANY_ID, LOCATION_ID, WEEK_START - timedelta(weeks=8), WEEK_START)]
     assert result["autopilot"]["sales_weeks"] == round(20 / 7, 1)
     assert result["autopilot"]["hourly_sales_days"] == 12
+
+
+@pytest.mark.asyncio
+async def test_autopilot_readiness_warns_when_credentials_block_the_roster(monkeypatch):
+    """Found on prod (Po Coffee Mission, 2026-09-22): readiness said "ready",
+    then every seat came back open because nobody's Food Handler Card was
+    verified. Warn before the build — without blocking it."""
+    conn = _FakeConn({"id": LOCATION_ID, "name": "Mission", "timezone": "America/Los_Angeles"})
+    _empty_week(monkeypatch, conn, [])
+    amy, ben = str(BREAK_EMPLOYEE), str(SECOND_EMPLOYEE)
+    monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={
+        "employees": [_employee(amy, "Amy"), _employee(ben, "Ben")], "gated_job_ids": set(),
+    }))
+    card = "Food Handler Card requires an approved credential document before scheduling."
+    flags = AsyncMock(return_value={
+        amy: {"blocking_credentials": [card, card], "credential_warnings": [], "credential_expirations": []},
+        ben: {"blocking_credentials": [], "credential_warnings": [], "credential_expirations": []},
+    })
+    monkeypatch.setattr(week_builder, "schedule_eligibility_roster_flags", flags)
+
+    result = await week_builder.get_week_build_readiness(
+        company_id=COMPANY_ID, location_id=LOCATION_ID,
+        week_start=WEEK_START, source_mode="autopilot",
+    )
+
+    assert flags.await_args.args[1] == COMPANY_ID
+    assert flags.await_args.args[2] == [amy, ben]
+    assert flags.await_args.kwargs == {"as_of": WEEK_START}
+    assert result["autopilot"]["credential_blocked"] == {"count": 1, "total": 2, "reasons": [card]}
+    assert result["warnings"] == [
+        f"1 of 2 staff can't be scheduled this week, so their seats will stay open. {card}",
+    ]
+    assert not any("credential" in blocker for blocker in result["blockers"])
+
+    # A template build never reads it.
+    flags.reset_mock()
+    template = await week_builder.get_week_build_readiness(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, week_start=WEEK_START,
+    )
+    assert template["warnings"] == []
+    flags.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -977,6 +1020,84 @@ async def test_a_normally_staffed_shift_is_only_an_advisory(monkeypatch):
     assert [f["kind"] for f in findings] == ["break_relief_thin"]
     assert findings[0]["severity"] == "advisory"
     assert findings[0]["kind"] not in week_builder.GAP_KINDS
+
+
+def _two_row_plan(second_start="08:00", second_end="17:00"):
+    """Two one-seat rows — the shape Autopilot writes — one person each."""
+    rows = []
+    for key, start, end, employee in (
+        ("shift-1", "08:00", "17:00", BREAK_EMPLOYEE),
+        ("shift-2", second_start, second_end, SECOND_EMPLOYEE),
+    ):
+        shift = _demand_shift(start, end, key=key)
+        rows.append({
+            **{k: v for k, v in shift.items() if k != "fixed_employee_ids"},
+            "starts_at": shift["starts_at"].isoformat(), "ends_at": shift["ends_at"].isoformat(),
+            "fixed_employee_ids": [],
+            "proposed_assignments": [{"employee_id": str(employee), "employee_name": key}],
+        })
+    return {"shifts": rows}
+
+
+@pytest.mark.asyncio
+async def test_a_coworker_on_another_row_relieves_a_one_seat_shift(monkeypatch):
+    """Found on prod (Po Coffee, 2026-09-22): a fully staffed generated week
+    reported every shift as "the floor is empty while they take it" because
+    each one-seat row was judged alone, with a coworker beside them all day."""
+    _patch_break_loader(monkeypatch, {
+        "shift-1": {BREAK_EMPLOYEE: _break_plan()},
+        "shift-2": {SECOND_EMPLOYEE: _break_plan()},
+    })
+
+    findings = await week_builder._break_relief_findings(
+        object(), company_id=COMPANY_ID, location_id=LOCATION_ID, plan=_two_row_plan(),
+        employee_names={str(BREAK_EMPLOYEE): "Amy", str(SECOND_EMPLOYEE): "Ben"},
+    )
+
+    assert [f["kind"] for f in findings] == ["break_relief_thin", "break_relief_thin"]
+    assert all(f["severity"] == "advisory" for f in findings)
+    assert "drops to 1" in findings[0]["detail"]
+
+
+@pytest.mark.asyncio
+async def test_a_coworker_who_leaves_before_the_break_does_not_count(monkeypatch):
+    """Relief has to be on the floor during the break, not merely that day."""
+    _patch_break_loader(monkeypatch, {
+        "shift-1": {BREAK_EMPLOYEE: _break_plan(earliest=11, deadline=14)},
+        "shift-2": {SECOND_EMPLOYEE: _break_plan(earliest=6, deadline=9)},
+    })
+
+    findings = await week_builder._break_relief_findings(
+        object(), company_id=COMPANY_ID, location_id=LOCATION_ID,
+        plan=_two_row_plan("05:00", "10:00"),
+        employee_names={str(BREAK_EMPLOYEE): "Amy", str(SECOND_EMPLOYEE): "Ben"},
+    )
+
+    by_key = {f["shift_key"]: f for f in findings}
+    assert by_key["shift-1"]["kind"] == "break_relief_uncovered"
+    assert "Amy" in by_key["shift-1"]["detail"]
+
+
+def test_others_on_floor_is_the_fewest_bodies_across_the_interval():
+    at = lambda hour: datetime(2026, 8, 24, hour, tzinfo=UTC)  # noqa: E731
+    windows = [
+        ("me", at(8), at(17), [BREAK_EMPLOYEE]),
+        ("a", at(8), at(12), [SECOND_EMPLOYEE]),
+        ("b", at(11), at(17), [SECOND_EMPLOYEE, BREAK_EMPLOYEE]),
+    ]
+    assert week_builder._others_on_floor(windows, "me", at(9), at(10)) == 1
+    assert week_builder._others_on_floor(windows, "me", at(11), at(12)) == 3
+    assert week_builder._others_on_floor(windows, "me", at(10), at(13)) == 1
+    # A gap in the middle means nobody can relieve for the whole break.
+    windows[2] = ("b", at(13), at(17), [SECOND_EMPLOYEE])
+    assert week_builder._others_on_floor(windows, "me", at(11), at(14)) == 0
+    assert week_builder._others_on_floor(windows, "me", at(10), at(10)) == 0
+    # Location-local suggestions compare by wall clock against UTC-tagged rows.
+    from zoneinfo import ZoneInfo
+    la = ZoneInfo("America/Los_Angeles")
+    assert week_builder._others_on_floor(
+        windows, "me", datetime(2026, 8, 24, 9, tzinfo=la), datetime(2026, 8, 24, 10, tzinfo=la),
+    ) == 1
 
 
 @pytest.mark.asyncio
@@ -1992,12 +2113,31 @@ async def test_autopilot_freezes_its_rows_and_prices_labor_for_a_manager(monkeyp
     assert "Autopilot" in result["summary"] and "Forecast $1,000" in result["summary"]
     assert result["demand_model"]["labor"] == {
         "forecast_sales_week": 1000.0, "scheduled_cost_after": 250.0, "labor_pct": 25.0,
+        "open_positions": 0,
     }
     insert = next(call for call in conn.executed if "schedule_generation_runs" in call[0])
     assert insert[6] == "autopilot" and insert[10] == week_builder.AUTOPILOT_PLANNER_VERSION
     proposal = json.loads(insert[12])
     assert proposal["demand_rows"][0]["key"] == "shift-1"
     assert proposal["schedule_review"]["demand_model"]["sentence"] == "Forecast $1,000 for the week."
+
+
+@pytest.mark.asyncio
+async def test_autopilot_labor_pct_is_withheld_while_seats_are_open(monkeypatch):
+    """Found on prod (Po Coffee Mission, 2026-09-22): a week with every seat
+    open read "0.0% labor". Open seats are not in the cost, so the percentage
+    only prices who could be scheduled — withhold it and say why."""
+    conn = _FakeConn(None)
+    _autopilot_env(monkeypatch, conn, demand=[_demand_shift(required=2)])
+    monkeypatch.setattr(week_builder, "cost_delta_for_rows", AsyncMock(return_value={"before": 0.0, "after": 125.0}))
+
+    result = await _propose_autopilot(actor_role="client")
+
+    labor = result["demand_model"]["labor"]
+    assert labor["labor_pct"] is None
+    assert labor["open_positions"] == 1
+    assert labor["note"] == "1 seat is still open, so labor % isn't shown."
+    assert labor["scheduled_cost_after"] == 125.0
 
 
 @pytest.mark.asyncio

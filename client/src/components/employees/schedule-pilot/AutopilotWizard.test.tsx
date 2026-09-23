@@ -41,6 +41,25 @@ beforeEach(() => {
 })
 
 describe('AutopilotWizard', () => {
+  it('shows server warnings on a ready week without blocking the build', async () => {
+    const warning = "5 of 5 staff can't be scheduled this week, so their seats will stay open."
+    const callbacks = renderWizard({ readiness: { ...ready, warnings: [warning] } })
+    expect(screen.getByText('The required setup is ready.')).toBeInTheDocument()
+    expect(screen.getByText(warning)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await screen.findByLabelText('Minimum floor staff')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    // Repeated where the manager decides to build — and the build still runs.
+    expect(screen.getByText(warning)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Build review' }))
+    await waitFor(() => expect(callbacks.onGenerate).toHaveBeenCalledOnce())
+  })
+
+  it('renders no warning box when the server sends none', () => {
+    renderWizard()
+    expect(screen.queryByText('Heads up before you build:')).not.toBeInTheDocument()
+  })
+
   it('shows blockers and repair paths instead of hiding the build entry point', async () => {
     const callbacks = renderWizard({
       readiness: {

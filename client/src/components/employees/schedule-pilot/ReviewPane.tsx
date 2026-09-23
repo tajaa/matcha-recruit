@@ -101,7 +101,7 @@ function DemandModelBlock({ model }: { model: AutopilotDemandModel }) {
           ))}
         </ul>
       )}
-      <p className="mt-2 text-[10px] text-zinc-600">Used: {model.inputs_used.join(', ')}{model.inputs_missing.length ? ` · Missing: ${model.inputs_missing.join(', ')}` : ''}{model.labor?.labor_pct != null ? ` · Scheduled labor ${model.labor.labor_pct}% of forecast sales` : ''}</p>
+      <p className="mt-2 text-[10px] text-zinc-600">Used: {model.inputs_used.join(', ')}{model.inputs_missing.length ? ` · Missing: ${model.inputs_missing.join(', ')}` : ''}{model.labor?.labor_pct != null ? ` · Scheduled labor ${model.labor.labor_pct}% of forecast sales` : model.labor?.note ? ` · ${model.labor.note}` : ''}</p>
     </section>
   )
 }

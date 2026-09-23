@@ -1036,6 +1036,9 @@ def test_autopilot_records_are_aggregate_schedint_entries():
                                      "labor": {"labor_pct": 24.5}})},
         {"location_id": "loc-2", "location_name": "Mission", "week_start": date(2026, 9, 27),
          "demand_model": "not json"},
+        {"location_id": "loc-3", "location_name": "NY", "week_start": date(2026, 9, 27),
+         "demand_model": {"sentence": "No sales forecast was available.",
+                          "labor": {"labor_pct": None, "note": "26 seats are still open, so labor % isn't shown."}}},
     ]}
     records = build_hr_pilot_corpus(grounding, [])["sources"]["schedint"]["records"]
     by_cid = {record["cid"]: record for record in records}
@@ -1044,6 +1047,9 @@ def test_autopilot_records_are_aggregate_schedint_entries():
     assert "24.5% of forecast sales" in downtown["summary"]
     assert "not worked time or payroll" in downtown["summary"]
     assert "Autopilot generated a reviewable week." in by_cid["schedint:autopilot.loc-2"]["summary"]
+    # Open seats withhold the percentage; the pilot relays why instead of a 0%.
+    ny = by_cid["schedint:autopilot.loc-3"]["summary"]
+    assert "26 seats are still open" in ny and "% of forecast sales" not in ny
 
 
 @pytest.mark.asyncio

@@ -1147,6 +1147,26 @@ Review fixes (2026-09-22, the first pass after launch) — each was a real miss:
 - `inputs_missing` lists only inputs that could have changed THIS plan.
   Readiness counts history weeks by the location's week start, not ISO weeks.
 
+Found testing Po Coffee in prod (2026-09-22) — output that made a week
+impossible to judge:
+
+- **Break relief counts the whole floor.** Autopilot writes one-seat rows, and
+  `_break_relief_findings` judged each alone, so a fully staffed week reported
+  every shift as "the floor is empty while they take it". A solo row's
+  `coverage_shortfall` now adds bodies from OTHER plan rows present for the
+  whole placed break slot (`_others_on_floor`, wall clock); anyone there ⇒
+  `break_relief_thin` (advisory), nobody ⇒ the gap stays. Template builds too.
+- **Labor % is withheld while seats are open** (`labor_pct: None`,
+  `open_positions`, server-worded `note`). Open seats are not in the cost, so
+  a week with nobody on it read "0.0%" — unstaffed, not cheap. The HR Pilot
+  record relays the note.
+- **Readiness warns about credential blocks** (`autopilot.credential_blocked`
+  + non-blocking `warnings`, from `schedule_eligibility_roster_flags` — the
+  checker's own sentences). The preflight refuses those people seat by seat,
+  so a roster nobody can be scheduled from used to read "ready" and come back
+  with every seat open. A warning, not a blocker: the manager may want the
+  plan in view while the paperwork is sorted.
+
 The Schedule Pilot toolbar opens a three-step Autopilot wizard even when
 readiness is blocked: repair required setup, inspect optional input quality and
 save planning choices, then explicitly build a Huume review. Returning from the

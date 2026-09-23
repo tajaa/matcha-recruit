@@ -74,8 +74,15 @@ describe('ReviewPane — what a change will do', () => {
         capacity: { employees: 3, weekly_hours: 120 }, policy: {},
         notes: ['rain Monday trimmed demand 10%'],
         sentence: 'Forecast $1,200 from sales; 16 labor hours planned.',
+        labor: {
+          forecast_sales_week: 1200, scheduled_cost_after: 300, labor_pct: null,
+          open_positions: 2, note: "2 seats are still open, so labor % isn't shown.",
+        },
       },
     }) })
+    // An open week never reads as a percentage — the server's reason instead.
+    expect(screen.getByText(/2 seats are still open, so labor % isn't shown\./)).toBeInTheDocument()
+    expect(screen.queryByText(/of forecast sales/)).not.toBeInTheDocument()
     expect(screen.getByLabelText('Autopilot demand model')).toBeInTheDocument()
     expect(screen.getByText('Forecast $1,200 from sales; 16 labor hours planned.')).toBeInTheDocument()
     expect(screen.getByText('rain Monday trimmed demand 10%')).toBeInTheDocument()
