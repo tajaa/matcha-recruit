@@ -188,3 +188,66 @@ def test_next_turn_falls_back_to_got_it_on_empty_message(monkeypatch, text):
     result = asyncio.run(chat.next_turn([], {}, CRED, []))
     assert result["error"] is False
     assert result["assistant_message"] == "Got it."
+
+
+# ── the model's words are held to the deterministic check ─────────────────
+
+PHOTO = materialize_spec("custom", SpecOverrides(
+    goal="Confirm the shirt size for the uniform order.",
+    fields=[SpecFieldOverride(key="shirt_size", label="Shirt size", type="choice", choices=["S", "M", "L", "XL"])],
+    attachments=[SpecAttachmentOverride(slot="photo", label="Any photo", accept=[".png"])],
+))
+
+# Verbatim from the 2026-09-23 prod smoke test: the recipient said "I'll upload
+# a photo now" and the model answered as if it had arrived.
+PROD_HALLUCINATION = (
+    "Thanks! Since you've uploaded the photo and your shirt size (L) is confirmed, everything "
+    "looks good. Please review your details and send them off using the review step!"
+)
+
+
+@pytest.mark.parametrize("message", [
+    PROD_HALLUCINATION,
+    "Got your photo — you're all set!",
+    "The photo has been uploaded. Ready to review?",
+    "I have received your file, thanks.",
+    "That's everything — please review and send.",
+])
+def test_ground_message_replaces_false_wrap_up_while_an_upload_is_missing(message):
+    out = chat.ground_message(message, {"shirt_size": "L"}, [], PHOTO)
+    assert out != message
+    assert "Any photo" in out and "upload button" in out
+
+
+def test_ground_message_nudges_the_first_missing_field_when_no_upload_is_owed():
+    out = chat.ground_message("All set, thanks!", {}, ["photo"], PHOTO)
+    assert out == "Thanks! Could you tell me: Shirt size?"
+
+
+@pytest.mark.parametrize("message", [
+    "Thanks! Could you tap the upload button to attach a photo?",
+    "What shirt size do you wear?",
+])
+def test_ground_message_keeps_ordinary_questions(message):
+    assert chat.ground_message(message, {}, [], PHOTO) == message
+
+
+def test_ground_message_keeps_a_wrap_up_once_everything_is_in():
+    msg = "Everything looks good — please review and send."
+    assert chat.ground_message(msg, {"shirt_size": "L"}, ["photo"], PHOTO) == msg
+
+
+def test_next_turn_does_not_echo_a_false_upload_claim(monkeypatch):
+    payload = json.dumps({"assistant_message": PROD_HALLUCINATION, "shirt_size": "L"})
+    monkeypatch.setattr(chat, "genai_env_client", lambda: _FakeClient(_FakeModels(text=payload)))
+    transcript = [{"role": "user", "content": "I'll upload a photo now"}]
+    result = asyncio.run(chat.next_turn(transcript, {"shirt_size": "L"}, PHOTO, []))
+    assert result["complete"] is False
+    assert "you've uploaded" not in result["assistant_message"].lower()
+    assert "upload button" in result["assistant_message"]
+
+
+def test_prompt_says_the_attachment_list_is_the_only_upload_truth():
+    prompt = chat.build_prompt(PHOTO, [], {"shirt_size": "L"}, [])
+    assert "photo: Any photo (required) — not yet uploaded" in prompt
+    assert "ONLY\ntruth about uploads" in prompt

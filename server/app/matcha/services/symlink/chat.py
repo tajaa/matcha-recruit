@@ -12,12 +12,19 @@ Two invariants, both enforced here and not in the model:
     question; it never says "done".
   * A turn can only ADD or refine a known field, never blank one (`coerce_fields`
     mirrors `_coerce_public_chat_fields`).
+
+The model's *words* are held to the same truth: `ground_message` swaps out a
+reply that claims a file arrived or that everything is collected while the
+deterministic check still has something missing (prod, 2026-09-23: "I'll
+upload a photo now" got "Since you've uploaded the photo… everything looks
+good" with the slot still empty).
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Iterable
 
 from google.genai import types
@@ -124,6 +131,39 @@ def is_complete(fields: dict | None, present_slots: Iterable[str], spec: dict) -
     return not missing_items(fields, present_slots, spec)
 
 
+# Phrases that only belong in a reply when nothing required is missing: a claim
+# that a file arrived, or a wrap-up inviting the recipient to review and send.
+_FALSE_WRAP_UP = re.compile(
+    r"\b(?:you(?:'ve| have)|i(?:'ve| have))\s+(?:now\s+)?(?:uploaded|attached|received|got)\b"
+    r"|\b(?:photo|file|document|attachment|upload)s?\s+(?:is|are|has been|have been|was|were)\s+"
+    r"(?:uploaded|attached|received|in)\b"
+    r"|\ball set\b"
+    r"|\beverything\s+(?:looks|is|seems)\b"
+    r"|\bthat(?:'s| is) everything\b"
+    r"|\bready to (?:review|send|submit)\b"
+    r"|\breview (?:step|and send|and submit|your (?:details|answers|info))\b",
+    re.IGNORECASE,
+)
+
+
+def missing_nudge(missing: list[dict]) -> str:
+    """Deterministic next ask for the first missing item."""
+    first = missing[0]
+    if first["kind"] == "attachment":
+        return (f"I don't see \"{first['label']}\" yet — tap the upload button to add it, "
+                "and it'll show up here once it's in.")
+    return f"Thanks! Could you tell me: {first['label']}?"
+
+
+def ground_message(message: str, fields: dict | None, present_slots: Iterable[str], spec: dict) -> str:
+    """Replace a reply that claims completion (or a received file) while the
+    deterministic check still has required items missing."""
+    missing = missing_items(fields, present_slots, spec)
+    if missing and _FALSE_WRAP_UP.search(message):
+        return missing_nudge(missing)
+    return message
+
+
 # ── prompt ─────────────────────────────────────────────────────────────────
 
 
@@ -184,7 +224,10 @@ OPTIONAL FIELDS (ask about each at most once; skipping is fine):
 {chr(10).join(_field_line(f) for f in optional) or '(none)'}
 
 ATTACHMENTS (the recipient uploads these with the paperclip button — you cannot receive files
-in chat; when one is missing, ask them to tap the upload button for it):
+in chat; when one is missing, ask them to tap the upload button for it). This list is the ONLY
+truth about uploads: if it says "not yet uploaded", the file has NOT arrived, even when the
+recipient says they uploaded it or are about to — never say you received, see, or have a file
+that is not marked UPLOADED:
 {attach_text}
 
 KNOWN FIELDS SO FAR:
@@ -197,8 +240,8 @@ CONVERSATION SO FAR:
 {_render_transcript(transcript)}
 
 Rules: extract any field values the recipient just gave (keep their wording, don't embellish);
-never ask for a field already known; when nothing required is missing, say so briefly and
-invite them to review and send. Keep assistant_message under 60 words.
+never ask for a field already known; only when STILL MISSING says nothing is missing, say so
+briefly and invite them to review and send — otherwise ask for the next missing item. Keep assistant_message under 60 words.
 
 Return ONLY valid JSON with exactly these keys:
 {{"assistant_message": "<next short question or wrap-up>", {schema_keys}}}
@@ -250,6 +293,7 @@ async def next_turn(
     fields = coerce_fields(payload if isinstance(payload, dict) else {}, known_fields, spec)
     message = payload.get("assistant_message") if isinstance(payload, dict) else None
     message = message.strip() if isinstance(message, str) and message.strip() else "Got it."
+    message = ground_message(message, fields, present, spec)
     return {
         "assistant_message": message[:600],
         "fields": fields,
