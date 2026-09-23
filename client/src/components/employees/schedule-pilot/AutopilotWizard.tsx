@@ -9,6 +9,18 @@ import { policyDraftFromProfile, policyPayload, type AutopilotPolicyDraft } from
 
 const STEPS = ['Check setup', 'Tune the plan', 'Generate review'] as const
 
+/** Things that will not stop a build but will leave seats open — worded by
+ *  the server, shown before the manager spends a build finding out. */
+function ReadinessWarnings({ warnings }: { warnings?: string[] }) {
+  if (!warnings?.length) return null
+  return (
+    <div role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-3 text-xs leading-5 text-amber-100">
+      <p className="font-medium text-amber-200">Heads up before you build:</p>
+      <ul className="mt-1 list-disc space-y-1 pl-4">{warnings.map((warning, index) => <li key={`${index}-${warning}`}>{warning}</li>)}</ul>
+    </div>
+  )
+}
+
 export default function AutopilotWizard({
   locationId, locationName, weekStart, readiness, readinessLoading, readinessError,
   running, onClose, onRefresh, onOpenWeekSetup, onOpenJobs, onProfileSaved, onGenerate,
@@ -139,7 +151,10 @@ export default function AutopilotWizard({
               ) : readinessError ? (
                 <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">Could not check readiness: {readinessError}</p>
               ) : ready ? (
-                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200"><Check className="mr-2 inline h-4 w-4" />The required setup is ready.</div>
+                <>
+                  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200"><Check className="mr-2 inline h-4 w-4" />The required setup is ready.</div>
+                  <ReadinessWarnings warnings={readiness?.warnings} />
+                </>
               ) : (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
                   <p className="text-xs font-medium text-amber-200">Resolve these before generating:</p>
@@ -195,6 +210,7 @@ export default function AutopilotWizard({
                   <button type="button" onClick={() => setStep(0)} className="mt-2 text-amber-200 underline underline-offset-2">Back to setup</button>
                 </div>
               )}
+              {!readinessLoading && ready && <ReadinessWarnings warnings={readiness?.warnings} />}
               <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] p-3 text-xs leading-5 text-emerald-100">
                 <strong>Nothing is published by this step.</strong> A review is staged in Huume. A manager must confirm it to create drafts, then publish separately when the schedule is right.
               </div>

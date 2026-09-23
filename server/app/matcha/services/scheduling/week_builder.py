@@ -29,6 +29,7 @@ from .location_profile import (
 from .schedule_break_stagger import StaggerAssignment, stagger_shift_breaks
 from .schedule_batch import BatchItem, MAX_BATCH_OPERATIONS, plan_batches, split_plan_message
 from .schedule_breaks import reinterpret_schedule_wall_time
+from .schedule_eligibility import schedule_eligibility_roster_flags
 from .schedule_coverage import (
     GAP_KINDS, evaluate_week_coverage, make_finding, sort_findings,
 )
@@ -889,6 +890,41 @@ def _break_relief_finding(
     return None
 
 
+def _wall(value: datetime) -> datetime:
+    """Wall clock with the zone dropped: plan rows are UTC-tagged wall clock,
+    stagger suggestions are location-local, and only the clock faces compare."""
+    return value.replace(tzinfo=None)
+
+
+def _others_on_floor(
+    windows: list[tuple[str, datetime, datetime, list[UUID]]],
+    key: str, start: datetime, end: datetime,
+) -> int:
+    """Fewest people from OTHER plan rows on the floor at any instant of
+    ``[start, end)`` — who could cover while this row's person is on break.
+
+    A generated week is one-seat rows, so judging each row alone called every
+    fully staffed shift "the floor is empty while they take it" even with a
+    coworker working beside them the whole day.
+    """
+    start, end = _wall(start), _wall(end)
+    if end <= start:
+        return 0
+    others = [
+        (_wall(row_start), _wall(row_end), len(ids))
+        for row_key, row_start, row_end, ids in windows
+        if row_key != key and _wall(row_start) < end and _wall(row_end) > start
+    ]
+    cuts = sorted({start, end, *(
+        point for row_start, row_end, _ in others for point in (row_start, row_end)
+        if start < point < end
+    )})
+    return min(
+        sum(bodies for row_start, row_end, bodies in others if row_start <= left and row_end >= right)
+        for left, right in zip(cuts, cuts[1:])
+    )
+
+
 async def _break_relief_findings(
     conn, *, company_id: UUID, location_id: UUID, plan: dict[str, Any],
     employee_names: dict[str, str],
@@ -961,9 +997,23 @@ async def _break_relief_findings(
                 employee_names.get(str(employee_ids[0])) if assigned == 1 else None
             )
             if any(item.get("code") == "coverage_shortfall" for item in stagger.advisories):
+                floor = assigned
+                if assigned == 1:
+                    # Relief can come from another row on the floor. Judge the
+                    # placed break slots when there are any, else the shift.
+                    slots = [
+                        (result.suggested_start, result.suggested_end)
+                        for result in stagger.results
+                        if result.suggested_start and result.suggested_end
+                    ] or [(starts_at, ends_at)]
+                    floor += min(
+                        _others_on_floor(windows, key, slot_start, slot_end)
+                        for slot_start, slot_end in slots
+                    )
                 finding = _break_relief_finding(
-                    code="coverage_shortfall", shift=shift, day=day, assigned=assigned,
-                    employee_name=solo_name, duration=duration, reason=None,
+                    code="coverage_shortfall", shift=shift, day=day, assigned=floor,
+                    employee_name=solo_name if floor == 1 else None, duration=duration,
+                    reason=None,
                 )
                 if finding:
                     findings.append(finding)
@@ -2120,12 +2170,34 @@ async def get_week_build_readiness(
                 str(job["id"]) not in gated_job_ids or str(job["id"]) in active_job_ids
                 for job in job_rows
             )
+            # The compliance preflight refuses these people seat by seat; say
+            # so before the build, or a week the roster cannot staff reads
+            # "ready" and comes back with every seat open.
+            flags = await schedule_eligibility_roster_flags(
+                conn, company_id, [employee["id"] for employee in roster["employees"]],
+                as_of=week_start,
+            )
+            blocked = {
+                employee_id: detail["blocking_credentials"]
+                for employee_id, detail in flags.items() if detail["blocking_credentials"]
+            }
             autopilot_info = {
                 "sales_weeks": round(sales_days / 7, 1),
                 "sales_confidence": "high" if sales_days >= 56 else "medium" if sales_days >= 28 else "low" if sales_days else "none",
                 "weather_days_available": weather_days,
                 "history_weeks": history_weeks,
                 "hourly_sales_days": hourly_days,
+                "credential_blocked": {
+                    "count": len(blocked),
+                    "total": len(roster["employees"]),
+                    # The checker's own sentences, most common first — never
+                    # a credential inferred from a code.
+                    "reasons": [
+                        message for message, _ in Counter(
+                            message for messages in blocked.values() for message in dict.fromkeys(messages)
+                        ).most_common(3)
+                    ],
+                },
             }
     pattern_findings = evaluate_week_coverage(
         plan_shifts=pattern_source, baseline_shifts=published_shifts,
@@ -2190,6 +2262,16 @@ async def get_week_build_readiness(
         blockers.append(
             "This week already has draft shifts. Clear them before building with Autopilot, or ask Huume to fill the drafts you have."
         )
+    # Not blockers: a manager may still want the plan (and its open seats) in
+    # view while the paperwork is sorted out.
+    warnings: list[str] = []
+    credential_blocked = (autopilot_info or {}).get("credential_blocked") or {}
+    if credential_blocked.get("count"):
+        reasons = " ".join(credential_blocked["reasons"][:2])
+        warnings.append(
+            f"{credential_blocked['count']} of {credential_blocked['total']} staff can't be "
+            f"scheduled this week, so their seats will stay open. {reasons}".strip()
+        )
     usable_templates = [template for template in templates if template["block_count"]]
     if (
         not autopilot_mode and not demand and not week_template_id
@@ -2209,6 +2291,7 @@ async def get_week_build_readiness(
         "existing_required_positions": existing_positions,
         "week_templates": templates, "recommended_source": "autopilot" if autopilot_mode and not blockers else recommendation,
         "blockers": blockers,
+        "warnings": warnings,
         "week_rules_missing": rules_missing,
         "operating_hours_known": bool(profile["operating_hours"]),
         "open_buffer_minutes": profile["open_buffer_minutes"],
@@ -2487,11 +2570,24 @@ async def propose_week_draft(
             total = draft_cost.get("after")
             if total is not None:
                 forecast_sales = float(demand_model["forecast_sales_week"])
-                demand_model["labor"] = {
+                open_positions = int(plan["metrics"].get("open_positions") or 0)
+                labor: dict[str, Any] = {
                     "forecast_sales_week": forecast_sales,
                     "scheduled_cost_after": total,
                     "labor_pct": round(float(total) * 100 / forecast_sales, 2) if forecast_sales else None,
+                    "open_positions": open_positions,
                 }
+                if open_positions:
+                    # Open seats are not in the cost, so a percentage here is
+                    # the cost of the people who could be scheduled — a week
+                    # with nobody on it read "0.0% labor", which is not cheap,
+                    # it is unstaffed.
+                    labor["labor_pct"] = None
+                    labor["note"] = (
+                        f"{open_positions} seat{'s are' if open_positions != 1 else ' is'} still open, "
+                        "so labor % isn't shown."
+                    )
+                demand_model["labor"] = labor
         schedule_review = build_week_draft_review(
             plan,
             employee_names={employee["id"]: employee["name"] for employee in snapshot["employees"]},

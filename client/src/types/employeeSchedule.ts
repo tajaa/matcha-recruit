@@ -805,18 +805,22 @@ export type AutopilotDemandModel = {
   policy: Record<string, unknown>
   notes: string[]
   sentence: string
-  labor?: { forecast_sales_week: number; scheduled_cost_after: number; labor_pct: number | null }
+  /** `labor_pct` is null while seats are still open — `note` says why. */
+  labor?: { forecast_sales_week: number; scheduled_cost_after: number; labor_pct: number | null; open_positions?: number; note?: string }
 }
 
 export type AutopilotReadiness = {
   ready: boolean
   blockers: string[]
+  /** Non-blocking: the build still runs, but these will leave seats open. */
+  warnings?: string[]
   autopilot: {
     sales_weeks: number
     sales_confidence: 'none' | 'low' | 'medium' | 'high'
     weather_days_available: number
     history_weeks: number
     hourly_sales_days?: number
+    credential_blocked?: { count: number; total: number; reasons: string[] }
   } | null
 }
 

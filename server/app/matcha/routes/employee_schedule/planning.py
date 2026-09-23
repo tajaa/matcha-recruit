@@ -69,6 +69,7 @@ async def get_autopilot_readiness(
     return {
         "ready": result.get("status") == "ok" and bool(result.get("ready")),
         "blockers": blockers,
+        "warnings": list(result.get("warnings") or []),
         "autopilot": result.get("autopilot"),
     }
 

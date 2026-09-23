@@ -464,13 +464,18 @@ def test_autopilot_readiness_is_manager_scoped_and_trimmed(monkeypatch):
     authz = _wire(monkeypatch, _Conn(), company_id=company_id)
     readiness = AsyncMock(return_value={
         "status": "ok", "ready": False, "blockers": ["Add a timezone."],
+        "warnings": ["1 of 2 staff can't be scheduled this week."],
         "autopilot": {"sales_weeks": 2.0}, "employees": [{"name": "not returned"}],
     })
     monkeypatch.setattr(planning, "get_week_build_readiness", readiness)
 
     body = _run(planning.get_autopilot_readiness(LOCATION, week_start=WEEK, current_user=_user(), _feature_user=None))
 
-    assert body == {"ready": False, "blockers": ["Add a timezone."], "autopilot": {"sales_weeks": 2.0}}
+    assert body == {
+        "ready": False, "blockers": ["Add a timezone."],
+        "warnings": ["1 of 2 staff can't be scheduled this week."],
+        "autopilot": {"sales_weeks": 2.0},
+    }
     authz.assert_awaited_once()
     assert readiness.await_args.kwargs["source_mode"] == "autopilot"
 
@@ -478,6 +483,7 @@ def test_autopilot_readiness_is_manager_scoped_and_trimmed(monkeypatch):
     readiness.return_value = {"status": "error", "message": "Location not found"}
     body = _run(planning.get_autopilot_readiness(LOCATION, week_start=WEEK, current_user=_user(), _feature_user=None))
     assert body["ready"] is False and body["blockers"] == ["Location not found"]
+    assert body["warnings"] == []
 
 
 def test_autopilot_run_checks_week_alignment_before_building(monkeypatch):
