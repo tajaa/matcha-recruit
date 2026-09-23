@@ -457,7 +457,7 @@ export function WeekComposition({ variant }: WeekProps) {
               whiteSpace: 'nowrap',
             }}
           >
-            <div style={{ fontFamily: DISPLAY, fontWeight: 900, fontSize: (variant === 'wide' ? 104 : 72) * s, lineHeight: 0.9, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            <div style={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: (variant === 'wide' ? 104 : 72) * s, lineHeight: 0.9, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
               Published
             </div>
             <div style={mono(12, { marginTop: 8 * s, fontWeight: 700, letterSpacing: '0.14em' })}>
@@ -734,3 +734,5 @@ function Figure({
     </div>
   )
 }
+
+export default WeekComposition

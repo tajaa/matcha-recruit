@@ -110,3 +110,19 @@ export function clock(h: number): string {
   const twelve = hour % 12 === 0 ? 12 : hour % 12
   return `${twelve}${suffix}`
 }
+
+/** Straight-time + weekly OT cost per role, largest first. */
+export function laborByRole(moved: boolean): { role: string; people: number; hours: number; cost: number }[] {
+  const hours = weeklyHours(moved)
+  const byRole = new Map<string, { role: string; people: number; hours: number; cost: number }>()
+  CREW.forEach((c, i) => {
+    const h = hours[i]
+    const ot = Math.max(0, h - 40)
+    const row = byRole.get(c.role) ?? { role: c.role, people: 0, hours: 0, cost: 0 }
+    row.people += 1
+    row.hours += h
+    row.cost += h * c.rate + ot * c.rate * 0.5
+    byRole.set(c.role, row)
+  })
+  return [...byRole.values()].sort((a, b) => b.cost - a.cost)
+}

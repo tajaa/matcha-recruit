@@ -67,3 +67,29 @@ export const T = {
   stamp: 494,
   fadeOut: 576,
 }
+
+// ── chat edit composition ────────────────────────────────────────────────
+
+export const CHAT_SIZES: Record<Variant, { w: number; h: number; s: number }> = {
+  wide: { w: 1000, h: 740, s: 1 },
+  narrow: { w: 720, h: 1180, s: 1.3 },
+}
+
+export const CHAT_DURATION = 420
+export const CHAT_STILL = 360
+
+export const C = {
+  ana: 8,
+  type: 34,
+  typeEnd: 92,
+  send: 98,
+  dots: 108,
+  card: 136,
+  rows: 150,
+  checks: 172,
+  pulse: 214,
+  press: 246,
+  confirmed: 254,
+  system: 276,
+  fadeOut: 396,
+}
