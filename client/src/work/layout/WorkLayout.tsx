@@ -7,7 +7,7 @@ import NotificationBell from '../components/shell/NotificationBell'
 import NotificationSettingsMenu from '../components/shell/NotificationSettingsMenu'
 import WorkSidebar from '../components/shell/WorkSidebar'
 import WerkLiteSidebar from '../components/shell/WerkLiteSidebar'
-import OpsSidebar from '../../ops/components/OpsSidebar'
+import OpsWorkspaceSidebar from '../../ops/components/OpsWorkspaceSidebar'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMe } from '../../hooks/useMe'
 import { api } from '../../api/client'
@@ -157,7 +157,9 @@ function TokenIndicator() {
                 cancel_url: window.location.href,
               })
               window.location.href = res.checkout_url
-            } catch {}
+            } catch {
+              // Checkout could not start; the button stays for another try.
+            }
           }}
           className="px-2 py-0.5 rounded-md bg-w-accent text-black font-medium hover:bg-w-accent-hi transition-colors"
         >
@@ -208,7 +210,7 @@ export default function WorkLayout() {
   // in the top bar — the channel's own header used to stack a second X-row
   // directly under the burger, which read as cramped.
   const inChannel = new RegExp(`^${base}/channels/[^/]+$`).test(pathname)
-  const SidebarComp = surface === 'werk-lite' ? WerkLiteSidebar : surface === 'matcha-ops' ? OpsSidebar : WorkSidebar
+  const SidebarComp = surface === 'werk-lite' ? WerkLiteSidebar : surface === 'matcha-ops' ? OpsWorkspaceSidebar : WorkSidebar
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     const saved = localStorage.getItem('mw-sidebar')
     return saved !== 'closed'
@@ -216,9 +218,11 @@ export default function WorkLayout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   // Close mobile menu on route change
-  useEffect(() => {
+  const [menuPath, setMenuPath] = useState(pathname)
+  if (pathname !== menuPath) {
+    setMenuPath(pathname)
     setMobileMenuOpen(false)
-  }, [pathname])
+  }
 
   // Paint <html> in the Werk black so overscroll bounce (and the iOS keyboard
   // resize) shows app chrome instead of a flash of white.
@@ -306,7 +310,8 @@ export default function WorkLayout() {
             <X className="h-5 w-5" />
           </Link>
         )}
-        {(surface === 'matcha-work' || surface === 'matcha-ops') && (
+        {/* matcha-ops has no Back: its rail carries the Matcha | Ops switch. */}
+        {surface === 'matcha-work' && (
           <>
             <Link
               to="/app"

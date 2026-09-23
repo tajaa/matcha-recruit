@@ -31,6 +31,7 @@ export default function ProductSidebar({ product }: { product: ProductDefinition
 
   return (
     <SidebarShell
+      workspaceSwitch
       logoTo={items[0]?.to ?? '/app/company'}
       logoLabel={product.name}
       nav={loading ? [] : items}

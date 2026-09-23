@@ -25,6 +25,7 @@ export default function ComplianceSidebar() {
 
   return (
     <SidebarShell
+      workspaceSwitch
       logoTo="/app/compliance"
       logoLabel="Matcha Compliance"
       nav={loading ? [] : nav}

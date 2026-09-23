@@ -110,6 +110,7 @@ export default function MatchaXSidebar() {
 
   return (
     <SidebarShell
+      workspaceSwitch
       logoTo="/app/ir"
       logoLabel="Matcha-X"
       nav={loading ? [] : items}
