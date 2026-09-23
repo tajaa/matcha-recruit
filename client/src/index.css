@@ -226,6 +226,14 @@ html[data-theme="light"] .bg-\[\#141416\] {
   background-color: #ffffff;
 }
 
+/* Same escape hatch for the public/auth page canvas (PublicPageShell, signup,
+   reset-password, anonymous report, …). Left unflipped, the inverted zinc text
+   ramp paints near-black headings onto this near-black canvas — invisible for
+   every visitor with no saved preference, since the default theme is light. */
+html[data-theme="light"] .bg-\[\#0c0c0e\] {
+  background-color: var(--color-zinc-950);
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    white/[alpha] hairlines in light mode.
    The whole app's dark-mode chrome (frames, dividers, "lifted" panels) is

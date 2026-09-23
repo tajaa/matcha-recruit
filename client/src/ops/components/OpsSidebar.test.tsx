@@ -36,4 +36,40 @@ describe('OpsSidebar', () => {
     expect(screen.getByRole('button', { name: /Inventory/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Schedule/ })).toBeInTheDocument()
   })
+  function renderSidebar() {
+    render(
+      <MemoryRouter initialEntries={['/ops']}>
+        <WorkSurfaceProvider value="matcha-ops">
+          <OpsSidebar open onToggle={vi.fn()} />
+        </WorkSurfaceProvider>
+      </MemoryRouter>,
+    )
+  }
+
+  it('shows Sym-links to a company admin whose company has the flag', () => {
+    useMeMock.mockReturnValue({
+      me: { user: { role: 'client' }, profile: null },
+      hasFeature: (f: string) => f === 'symlink',
+    })
+    renderSidebar()
+    expect(screen.getByRole('button', { name: /Sym-links/ })).toBeInTheDocument()
+  })
+
+  it('hides Sym-links without the flag', () => {
+    useMeMock.mockReturnValue({
+      me: { user: { role: 'client' }, profile: null },
+      hasFeature: () => false,
+    })
+    renderSidebar()
+    expect(screen.queryByRole('button', { name: /Sym-links/ })).not.toBeInTheDocument()
+  })
+
+  it('hides Sym-links from employees even when the company has the flag', () => {
+    useMeMock.mockReturnValue({
+      me: { user: { role: 'employee' }, profile: null },
+      hasFeature: () => true,
+    })
+    renderSidebar()
+    expect(screen.queryByRole('button', { name: /Sym-links/ })).not.toBeInTheDocument()
+  })
 })
