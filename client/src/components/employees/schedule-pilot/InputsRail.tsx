@@ -355,6 +355,7 @@ function InputsRail({
               <span className="rounded bg-zinc-900 px-1.5 py-0.5">Sales {autopilotReadiness.autopilot?.sales_confidence ?? 'unknown'}</span>
               <span className="rounded bg-zinc-900 px-1.5 py-0.5">{autopilotReadiness.autopilot?.weather_days_available ?? 0}/7 weather days</span>
               <span className="rounded bg-zinc-900 px-1.5 py-0.5">{autopilotReadiness.autopilot?.history_weeks ?? 0} history weeks</span>
+              <span className="rounded bg-zinc-900 px-1.5 py-0.5">{autopilotReadiness.autopilot?.hourly_sales_days ?? 0} hourly sales days</span>
               <span className={`rounded px-1.5 py-0.5 ${autopilotReadiness.ready ? 'bg-emerald-500/10 text-emerald-200' : 'bg-amber-500/10 text-amber-200'}`}>{autopilotReadiness.ready ? 'Autopilot ready' : 'Autopilot blocked'}</span>
             </div>
             {!autopilotReadiness.ready && <p className="mt-1.5 text-amber-200/80">{autopilotReadiness.blockers.join(' ')}</p>}

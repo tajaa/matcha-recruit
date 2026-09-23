@@ -10,6 +10,7 @@ from statistics import median
 
 from .policy import (
     POLICY_MIN_HISTORY_WEEKS,
+    POLICY_MIN_HOURLY_DATES,
     POLICY_MIN_SPLH_OBSERVATIONS,
     POLICY_SLOT_MINUTES,
 )
@@ -126,3 +127,43 @@ def learn_history(
         {w: shares(v) for w, v in shares_by_weekday.items()}, shares(all_shares),
         splh_by_weekday, splh_all,
     )
+
+
+def learn_hourly_profile(
+    rows: list[dict], *, exclude_dates: frozenset[date] = frozenset(),
+) -> dict[int, dict[int, Decimal]]:
+    """Weekday (Sunday=0) -> local hour -> mean share of that day's sales.
+
+    `rows` are `inventory_sales_hourly` rows (business_date, hour,
+    gross_sales). Each date is normalized to its own total first, so a busy
+    week does not outweigh a slow one — this is the SHAPE of a day, the
+    forecast sets its size. The mean is over every observed date of the
+    weekday (an hour with no sales that day counts as zero). A weekday needs
+    `POLICY_MIN_HOURLY_DATES` dates; refunds netting an hour negative count as
+    zero, never as negative demand.
+    """
+    by_date: dict[date, dict[int, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
+    for row in rows:
+        day = row["business_date"]
+        if day in exclude_dates:
+            continue
+        by_date[day][int(row["hour"])] += _d(row["gross_sales"])
+    shares: dict[int, dict[int, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
+    dates: dict[int, int] = defaultdict(int)
+    for day, hours in sorted(by_date.items()):
+        positive = {hour: max(Decimal(0), value) for hour, value in hours.items()}
+        total = sum(positive.values(), Decimal(0))
+        if total <= 0:
+            continue
+        weekday = sunday_weekday(day)
+        dates[weekday] += 1
+        for hour, value in positive.items():
+            shares[weekday][hour] += value / total
+    return {
+        weekday: {
+            hour: (value / dates[weekday]).quantize(Decimal("0.0001"), rounding=ROUND_HALF_EVEN)
+            for hour, value in sorted(hours.items())
+        }
+        for weekday, hours in sorted(shares.items())
+        if dates[weekday] >= POLICY_MIN_HOURLY_DATES
+    }

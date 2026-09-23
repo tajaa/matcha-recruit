@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from .base import ExternalSalesLine, FinalizedSalesDay
+from .base import ExternalSalesHour, ExternalSalesLine, FinalizedSalesDay
 
 
 class SquareProvider:
@@ -153,6 +153,9 @@ class SquareProvider:
         end_local = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=tz).astimezone(dt_timezone.utc)
         cursor = None
         by_day: dict[date, dict[str, dict]] = defaultdict(dict)
+        # day -> local hour -> [gross, orders]; the same line dollars as
+        # by_day, bucketed by when the order closed.
+        by_hour: dict[date, dict[int, list]] = defaultdict(lambda: defaultdict(lambda: [Decimal("0"), 0]))
         while True:
             body = {
                 "location_ids": [external_location_id],
@@ -181,6 +184,8 @@ class SquareProvider:
                 if not start_date <= closed.date() <= end_date:
                     continue
                 day = by_day[closed.date()]
+                hour_bucket = by_hour[closed.date()][closed.hour]
+                hour_bucket[1] += 1
                 line_items = list(order.get("line_items", []))
                 # Square surfaces returns differently across API versions. A
                 # returned_quantity on the sale line is preferred; otherwise
@@ -220,6 +225,8 @@ class SquareProvider:
                     gross_sales = Decimal(str(money["amount"])) / Decimal("100") if money.get("amount") is not None else None
                     if line.get("_return") and gross_sales is not None:
                         gross_sales = -abs(gross_sales)
+                    if gross_sales is not None:
+                        hour_bucket[0] += gross_sales
                     existing = day.get(external_item_id)
                     if existing is None:
                         day[external_item_id] = {
@@ -242,6 +249,10 @@ class SquareProvider:
                 timezone=timezone,
                 external_batch_id=f"{external_location_id}:{business_date.isoformat()}",
                 lines=[ExternalSalesLine(external_item_id=item_id, **values) for item_id, values in lines.items()],
+                hours=tuple(
+                    ExternalSalesHour(hour=hour, gross_sales=gross, order_count=orders)
+                    for hour, (gross, orders) in sorted(by_hour.get(business_date, {}).items())
+                ),
             )
             for business_date, lines in sorted(by_day.items())
         ]

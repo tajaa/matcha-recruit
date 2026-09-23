@@ -458,19 +458,27 @@ async def test_autopilot_readiness_counts_the_full_sales_window(monkeypatch):
     monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={
         "employees": [_employee("amy", "Amy")], "gated_job_ids": set(),
     }))
-    sales_queries = []
+    sales_queries, hourly_queries = [], []
 
     async def fetchval(query, *args):
-        if "COUNT(DISTINCT business_date)" in query:
+        if "FROM inventory_sales_imports" in query and "UNION" in query:
             sales_queries.append(args)
+            return 20
+        if "COUNT(DISTINCT business_date) FROM inventory_sales_hourly" in query:
+            hourly_queries.append(args)
+            return 12
 
     conn.fetchval = fetchval
-    await week_builder.get_week_build_readiness(
+    result = await week_builder.get_week_build_readiness(
         company_id=COMPANY_ID, location_id=LOCATION_ID,
         week_start=WEEK_START, source_mode="autopilot",
     )
 
     assert sales_queries == [(COMPANY_ID, LOCATION_ID, WEEK_START - timedelta(days=POLICY_SALES_HISTORY_DAYS), WEEK_START)]
+    # Hourly coverage is read over the eight weeks the shape learns from.
+    assert hourly_queries == [(COMPANY_ID, LOCATION_ID, WEEK_START - timedelta(weeks=8), WEEK_START)]
+    assert result["autopilot"]["sales_weeks"] == round(20 / 7, 1)
+    assert result["autopilot"]["hourly_sales_days"] == 12
 
 
 @pytest.mark.asyncio
