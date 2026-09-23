@@ -80,8 +80,9 @@ export function TopBar({ onContact }: { onContact: () => void }) {
   }, [])
   return (
     <div
-      className="sticky top-0 z-50 transition-[background-color,box-shadow] duration-300"
+      className="sticky top-0 z-50 transition-[background-color,box-shadow,color] duration-300"
       style={{
+        color: scrolled ? INK : PAPER,
         backgroundColor: scrolled ? hexA(PAPER, 0.84) : 'transparent',
         backdropFilter: scrolled ? 'blur(14px) saturate(1.3)' : 'none',
         WebkitBackdropFilter: scrolled ? 'blur(14px) saturate(1.3)' : 'none',
@@ -91,11 +92,11 @@ export function TopBar({ onContact }: { onContact: () => void }) {
       <div className={`${WRAP} flex h-16 items-center justify-between gap-6`}>
         <Link to="/" className="sched-focus flex items-baseline gap-2 rounded" aria-label="Matcha home">
           <span style={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: 25, letterSpacing: '0.01em' }}>MATCHA</span>
-          <span style={mono('10.5px', { color: INK_SOFT })}>/ Scheduling</span>
+          <span style={mono('10.5px', { color: scrolled ? INK_SOFT : hexA(PAPER, 0.6) })}>/ Scheduling</span>
         </Link>
         <nav aria-label="Page sections" className="hidden items-center gap-7 lg:flex">
           {STEPS.map((s) => (
-            <a key={s.id} href={`#${s.id}`} className="sched-link sched-focus rounded" style={mono('10.5px', { color: INK })}>
+            <a key={s.id} href={`#${s.id}`} className="sched-link sched-focus rounded" style={mono('10.5px', { color: 'inherit' })}>
               {s.label}
             </a>
           ))}
@@ -107,7 +108,7 @@ export function TopBar({ onContact }: { onContact: () => void }) {
           <button
             type="button"
             onClick={onContact}
-            className="sched-btn sched-btn-ink sched-focus hidden h-10 items-center rounded-full px-4 text-[14px] font-semibold sm:inline-flex"
+            className={`sched-btn ${scrolled ? 'sched-btn-ink' : 'sched-btn-paper'} sched-focus hidden h-10 items-center rounded-full px-4 text-[14px] font-semibold sm:inline-flex`}
           >
             Book a walkthrough
           </button>

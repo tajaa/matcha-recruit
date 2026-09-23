@@ -1,12 +1,11 @@
 import { Reveal } from '../motion'
 import { WRAP, display, mono } from '../styles'
-import { INK_SOFT, PAPER, STAMP, graphPaper, hexA } from '../theme'
+import { INK_SOFT, PAPER, STAMP, hexA } from '../theme'
 import { PrimaryButton } from './Chrome'
 
 export function Closing({ onContact }: { onContact: () => void }) {
   return (
     <section className="relative overflow-hidden">
-      <div aria-hidden className="pointer-events-none absolute inset-0" style={graphPaper(24, 0.45)} />
       <div className={`${WRAP} relative py-28 sm:py-44`}>
         <Reveal className="relative">
           <h2 style={{ ...display, fontWeight: 800, fontSize: 'clamp(3.6rem, 12vw, 11.5rem)', lineHeight: 0.82 }}>
