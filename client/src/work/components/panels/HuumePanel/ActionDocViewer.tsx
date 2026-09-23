@@ -15,6 +15,14 @@ interface ActionDocViewerProps {
   compact?: boolean
 }
 
+/** An Autopilot week used to read "Existing draft shifts" — the else-branch
+ *  of a two-way check written before the third source existed. */
+const DEMAND_SOURCE: Record<string, string> = {
+  existing: 'Existing draft shifts',
+  template: 'Saved template',
+  autopilot: 'Autopilot forecast',
+}
+
 function Meta({ label, value }: { label: string; value?: string | number | null }) {
   if (value === undefined || value === null || value === '') return null
   return (
@@ -392,7 +400,7 @@ export default function ActionDocViewer({ action, lightMode, compact = false }: 
         <>
           <div className="grid grid-cols-2 gap-x-4 gap-y-2">
             <Meta label="Week of" value={action.week_start} />
-            <Meta label="Demand source" value={action.source_mode === 'template' ? 'Saved template' : 'Existing draft shifts'} />
+            <Meta label="Demand source" value={DEMAND_SOURCE[action.source_mode] ?? 'Existing draft shifts'} />
             {action.auto_generated && <Meta label="Prepared" value="Automatically by Huume" />}
             <Meta label="Shifts" value={action.metrics?.shift_count} />
             <Meta label="Positions filled" value={action.metrics?.filled_positions} />
