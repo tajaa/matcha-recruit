@@ -98,7 +98,7 @@ export function Hero({ onContact }: { onContact: () => void }) {
         </div>
 
         {/* Each word is a torn slip pasted onto the sheet, one after another. */}
-        <h1 className="mt-6" style={{ ...display, fontSize: 'clamp(3.4rem, 10.6vw, 10.2rem)', lineHeight: 0.9 }}>
+        <h1 className="mt-6" style={{ ...display, fontSize: 'clamp(2.6rem, 6.8vw, 6.6rem)', lineHeight: 0.9 }}>
           {HEADLINE.map((line, li) => (
             <span key={li} className="flex flex-wrap gap-x-[0.1em]" style={{ marginTop: li ? '0.04em' : 0 }}>
               {line.map((w) => (
