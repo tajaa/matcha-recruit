@@ -2,7 +2,7 @@ import SidebarShell from '../sidebars/SidebarShell'
 import type { NavItem } from '../sidebars/SidebarShell'
 import { useMe } from '../../hooks/useMe'
 import { useSidebarBadges } from '../../hooks/useSidebarBadges'
-import { buildProductNav } from '../../data/productNavCatalog'
+import { buildProductNav, withCompanyAddons } from '../../data/productNavCatalog'
 import type { ProductDefinition } from '../../types/dashboard'
 
 /**
@@ -12,13 +12,14 @@ import type { ProductDefinition } from '../../types/dashboard'
  * granted features through PRODUCT_NAV_CATALOG (with the admin's optional
  * ordering/labels). Every row still carries its `feature` flag, so a row whose
  * flag was later revoked hides itself the same way it does in every other
- * sidebar.
+ * sidebar. Add-ons switched on for the company alone (PRODUCT_ADDON_FLAGS, e.g.
+ * sym-links) are appended, or the page is unreachable from the nav.
  */
 export default function ProductSidebar({ product }: { product: ProductDefinition }) {
-  const { me, loading } = useMe()
+  const { me, loading, hasFeature } = useMe()
   const { badges, markSeen } = useSidebarBadges()
 
-  const items: NavItem[] = buildProductNav(product).map((entry) => {
+  const items: NavItem[] = withCompanyAddons(buildProductNav(product), hasFeature).map((entry) => {
     const item: NavItem = { to: entry.to, icon: entry.icon, label: entry.label }
     if (entry.to === '/app/ir') {
       return { ...item, badge: badges.ir || undefined, onSeen: () => markSeen('ir') }

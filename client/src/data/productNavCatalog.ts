@@ -62,6 +62,31 @@ export const PRODUCT_NAV_CATALOG: Record<string, ProductNavEntry> = {
   symlink: { to: '/app/symlink', icon: Link2, label: 'Sym-links' },
 }
 
+/**
+ * Admin-toggled add-ons a company can hold WITHOUT its product granting them.
+ * Only default-off flags belong here: `hasFeature` also answers true for the
+ * default-on ones (handbooks, discipline, …), which would otherwise leak into
+ * every product's sidebar.
+ */
+export const PRODUCT_ADDON_FLAGS = ['symlink'] as const
+
+/** Product nav plus any add-on the company itself has switched on, appended
+ *  before the always-on rows and deduped by route like `buildProductNav`. */
+export function withCompanyAddons(
+  entries: ProductNavEntry[],
+  hasFeature: (flag: string) => boolean,
+): ProductNavEntry[] {
+  const routes = new Set(entries.map((e) => e.to))
+  const addons = PRODUCT_ADDON_FLAGS
+    .filter((flag) => hasFeature(flag))
+    .map((flag) => PRODUCT_NAV_CATALOG[flag])
+    .filter((e) => e && !routes.has(e.to))
+  if (!addons.length) return entries
+  const alwaysRoutes = new Set(PRODUCT_ALWAYS_NAV.map((e) => e.to))
+  const at = entries.findIndex((e) => alwaysRoutes.has(e.to))
+  return at === -1 ? [...entries, ...addons] : [...entries.slice(0, at), ...addons, ...entries.slice(at)]
+}
+
 /** Nav rows every product gets regardless of features. */
 export const PRODUCT_ALWAYS_NAV: ProductNavEntry[] = [
   { to: '/app/company', icon: Building2, label: 'Company' },
