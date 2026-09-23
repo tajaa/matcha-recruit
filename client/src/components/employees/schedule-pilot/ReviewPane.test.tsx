@@ -81,7 +81,7 @@ describe('ReviewPane — what a change will do', () => {
       },
     }) })
     // An open week never reads as a percentage — the server's reason instead.
-    expect(screen.getByText(/2 seats are still open, so labor % isn't shown\./)).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Autopilot demand model')).getByText(/2 seats are still open, so labor % isn't shown\./)).toBeInTheDocument()
     expect(screen.queryByText(/of forecast sales/)).not.toBeInTheDocument()
     expect(screen.getByLabelText('Autopilot demand model')).toBeInTheDocument()
     expect(screen.getByText('Forecast $1,200 from sales; 16 labor hours planned.')).toBeInTheDocument()
@@ -97,7 +97,7 @@ describe('ReviewPane — what a change will do', () => {
     expect(screen.queryByLabelText('Autopilot demand model')).not.toBeInTheDocument()
   })
 
-  it('counts staged, not staged, unfilled, warnings and advisories in the header', () => {
+  it('answers "can I approve this?" first, then counts the evidence', () => {
     renderPane({
       review: review({
         assignments: [review().assignments[0], WARNED],
@@ -108,19 +108,81 @@ describe('ReviewPane — what a change will do', () => {
       }),
     })
 
-    const line = (text: string) => screen.getByText((_content, element) => element?.textContent === text)
-    expect(line('2 staged')).toBeInTheDocument()
-    expect(line('1 not staged')).toBeInTheDocument()
-    expect(line('1 unfilled')).toBeInTheDocument()
-    expect(line('1 with warnings')).toBeInTheDocument()
-    expect(line('1 advisories')).toBeInTheDocument()
+    const verdict = screen.getByLabelText('Approval verdict')
+    expect(within(verdict).getByText('1 of 3 shifts would stay open')).toBeInTheDocument()
+    expect(within(verdict).getByText('2/3 filled')).toBeInTheDocument()
+    const issues = within(verdict).getByLabelText('Before you approve')
+    expect(within(issues).getByText('1 shift left open')).toBeInTheDocument()
+    expect(within(issues).getByText('1 assignment not staged')).toBeInTheDocument()
+    expect(within(issues).getByText('1 statutory advisory to acknowledge')).toBeInTheDocument()
+    // The verdict precedes every evidence block in the document.
+    const evidence = screen.getByText('Staged').closest('details') as HTMLElement
+    expect(verdict.compareDocumentPosition(evidence) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const count = (label: string) => (screen.getByText(label).closest('summary') as HTMLElement).textContent
+    expect(count('Staged')).toContain('2')
+    expect(count('Not staged')).toContain('1')
+    expect(count('Unfilled')).toContain('1')
+  })
+
+  it('collapses the evidence of a big proposal and keeps a small change open', () => {
+    const many = Array.from({ length: 12 }, (_, index) => ({ ...review().assignments[0], shift_id: `s${index}` }))
+    const { unmount } = renderPane({ review: review({ assignments: many }) })
+    expect((screen.getByText('Staged').closest('details') as HTMLDetailsElement).open).toBe(false)
+    unmount()
+    renderPane()
+    expect((screen.getByText('Staged').closest('details') as HTMLDetailsElement).open).toBe(true)
+  })
+
+  it('approves and cancels from the review when the caller can decide', () => {
+    const onApprove = vi.fn()
+    const onCancel = vi.fn()
+    renderPane({ review: review({ unfilled: [UNFILLED] }), onApprove, onCancel })
+    // With a gap the button names it, so approval happens with it in view.
+    fireEvent.click(screen.getByRole('button', { name: 'Approve with 1 shift open' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(onApprove).toHaveBeenCalledOnce()
+    expect(onCancel).toHaveBeenCalledOnce()
+  })
+
+  it('disables the decision while the thread is mid-reply, and offers none without a handler', () => {
+    const { unmount } = renderPane({ onApprove: vi.fn(), decisionDisabled: true })
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled()
+    unmount()
+    renderPane()
+    expect(screen.queryByRole('button', { name: /^Approve/ })).not.toBeInTheDocument()
+  })
+
+  it('routes each fix to where it can be fixed', () => {
+    const onAskHuume = vi.fn()
+    const onSelectPerson = vi.fn()
+    renderPane({
+      review: review({
+        unfilled: [UNFILLED],
+        employees: [{ employee_id: 'e-dana', name: 'Dana Reyes', before: { minutes: 1800 }, after: { minutes: 2640 }, warnings: [] }],
+      }),
+      onAskHuume, onSelectPerson,
+    })
+    fireEvent.click(within(screen.getByLabelText('Approval verdict')).getByRole('button', { name: /Ask Huume/ }))
+    expect(onAskHuume.mock.calls[0][0]).toMatch(/1 shift would stay open \(policy: second shift that day\)/)
+    fireEvent.click(screen.getByRole('button', { name: /Show their week/ }))
+    expect(onSelectPerson).toHaveBeenCalledWith('e-dana')
+  })
+
+  it('offers the board view only for a generated week', () => {
+    const onShowWeek = vi.fn()
+    const { unmount } = renderPane({ onShowWeek })
+    expect(screen.queryByRole('button', { name: /See the week on the board/ })).not.toBeInTheDocument()
+    unmount()
+    renderPane({ review: review({ kind: 'week_draft' }), onShowWeek })
+    fireEvent.click(screen.getByRole('button', { name: /See the week on the board/ }))
+    expect(onShowWeek).toHaveBeenCalledOnce()
   })
 
   it('names each refusal with the server’s own reason', () => {
     renderPane({ review: review({ rejected: [REJECTED] }) })
 
-    expect(screen.getByText('Not staged')).toBeInTheDocument()
-    expect(screen.getByText(/would overlap the Shift Lead Mon Aug 24 06:00–14:00 shift earlier in this batch/)).toBeInTheDocument()
+    const block = screen.getByText('Not staged').closest('details') as HTMLElement
+    expect(within(block).getByText(/would overlap the Shift Lead Mon Aug 24 06:00–14:00 shift earlier in this batch/)).toBeInTheDocument()
   })
 
   it('marks a policy warning as policy so it is never mistaken for law', () => {
@@ -146,8 +208,9 @@ describe('ReviewPane — what a change will do', () => {
       }),
     })
 
-    expect(screen.getByText(/Employee is scheduled 48.0h this week/)).toBeInTheDocument()
-    expect(screen.getByText(/\(FLSA, 29 U.S.C. § 207\(a\)\)/)).toBeInTheDocument()
+    const block = screen.getByText('Statutory advisories').closest('details') as HTMLElement
+    expect(within(block).getByText(/Employee is scheduled 48.0h this week/)).toBeInTheDocument()
+    expect(within(block).getByText(/\(FLSA, 29 U.S.C. § 207\(a\)\)/)).toBeInTheDocument()
   })
 
   it('separates a real hole from something worth a look in the findings', () => {
@@ -160,9 +223,28 @@ describe('ReviewPane — what a change will do', () => {
       }),
     })
 
-    expect(screen.getByText('gap')).toBeInTheDocument()
-    expect(screen.getByText('advisory')).toBeInTheDocument()
-    expect(screen.getByText(/Amy is already on overlapping shifts/)).toBeInTheDocument()
+    const findings = screen.getByLabelText('Findings by kind')
+    expect(within(findings).getByText('gap')).toBeInTheDocument()
+    expect(within(findings).getByText('advisory')).toBeInTheDocument()
+    expect(within(findings).getByText(/Amy is already on overlapping shifts/)).toBeInTheDocument()
+    // Only the real hole reaches the verdict; the advisory stays evidence.
+    const verdict = screen.getByLabelText('Before you approve')
+    expect(within(verdict).getByText('1 × someone already double-booked')).toBeInTheDocument()
+    expect(within(verdict).queryByText(/carries 6 of 6/)).not.toBeInTheDocument()
+  })
+
+  it('folds identical findings into one line with a count', () => {
+    renderPane({
+      review: review({
+        findings: Array.from({ length: 28 }, (_, index) => ({
+          kind: 'break_relief_thin', severity: 'advisory', detail: `Shift ${index % 2} has no spare cover.`,
+        })),
+      }),
+    })
+    const findings = screen.getByLabelText('Findings by kind')
+    expect(within(findings).getAllByRole('listitem').filter((item) => item.parentElement === findings)).toHaveLength(1)
+    expect(within(findings).getByText('28')).toBeInTheDocument()
+    expect(within(findings).getByText('Shift 0 has no spare cover.')).toBeInTheDocument()
   })
 
   it('shows each person’s hours before and after with their warnings', () => {

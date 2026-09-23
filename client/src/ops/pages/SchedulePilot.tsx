@@ -31,6 +31,7 @@ import AutopilotWizard from '../../components/employees/schedule-pilot/Autopilot
 import ScenariosStrip, { type StagedChip } from '../../components/employees/schedule-pilot/ScenariosStrip'
 import SchedulePilotToolbar, { type CenterView } from '../../components/employees/schedule-pilot/SchedulePilotToolbar'
 import { asScheduleReview } from '../../components/employees/schedule-pilot/reviewShape'
+import { approvalVerdict, demandCoverage, proposalPreviewShifts } from '../../components/employees/schedule-pilot/reviewVerdict'
 
 // Bump when guide content materially changes so existing managers see the new
 // workspace walkthrough instead of staying pinned to the old editor's.
@@ -107,6 +108,9 @@ export default function SchedulePilot() {
   const [autopilotWizardOpen, setAutopilotWizardOpen] = useState(false)
   const [returnToAutopilot, setReturnToAutopilot] = useState(false)
   const [huumeSelectedShiftIds, setHuumeSelectedShiftIds] = useState<Set<string>>(() => new Set())
+  /** Draw a generated week on the board before it exists. On by default: the
+   *  board is where a manager judges a week, and it is empty until approval. */
+  const [showProposal, setShowProposal] = useState(true)
   const { jobs, reloadJobs } = useScheduleJobs(locationId)
   const openBreakPlanner = useCallback((shift: Shift, _employeeId: string, message: string) => {
     setNewDefaults(null)
@@ -271,7 +275,7 @@ export default function SchedulePilot() {
     ? (stagedChip?.label ?? 'Nothing staged')
     : (reviewScenario?.label ?? 'Scenario')
   const reviewSubtitle = reviewSource.kind === 'staged'
-    ? (stagedReview ? 'Confirm or cancel it in the Huume thread.' : null)
+    ? (stagedReview ? 'Approve or cancel it here or in the Huume thread.' : null)
     : reviewScenario?.status === 'applied'
       ? reviewScenario.applied_message ?? 'Applied.'
       : 'A simulation — nothing is written until you apply it or stage it in the thread.'
@@ -283,6 +287,19 @@ export default function SchedulePilot() {
   const caps = useMemo(() => Object.fromEntries((planning.inputs?.roster ?? []).map((person) => [person.employee_id, {
     max_weekly_minutes: person.caps.max_weekly_minutes, allow_overtime: person.caps.allow_overtime,
   }])), [planning.inputs])
+  const policyMinutes = planning.inputs?.policy.default_weekly_cap_minutes
+  // The proposal layer: only a generated week has shifts the board cannot
+  // already show (see `proposalPreviewShifts`).
+  const previewShifts = useMemo(() => (showProposal ? proposalPreviewShifts(review) : []), [review, showProposal])
+  const previewDemand = useMemo(() => (showProposal ? demandCoverage(review) : {}), [review, showProposal])
+  const previewVerdict = useMemo(
+    () => (review && previewShifts.length ? approvalVerdict(review, caps, policyMinutes) : null),
+    [review, previewShifts.length, caps, policyMinutes],
+  )
+  // Approve/Cancel send the literal turn the chat strip's buttons send, so the
+  // server's two-turn confirm and the executor's row lock still decide.
+  const canDecide = reviewSource.kind === 'staged' && stagedAction?.status === 'proposed' && !!stagedReview
+  const decide = useCallback((text: 'confirm' | 'cancel') => { void thread.send(text) }, [thread])
 
   const setWeek = useCallback((next: string) => {
     setSearchParams((current) => {
@@ -492,21 +509,48 @@ export default function SchedulePilot() {
   const showRail = railOpen
   const showThread = threadOpen
 
+  const showWeek = () => { setShowProposal(true); setCenterView('board'); setMobileTab('board') }
+  const openReview = () => { setCenterView('review'); setMobileTab('review') }
   const centerContent = centerView === 'review' ? (
     <ReviewPane
       review={review}
       title={reviewTitle}
       subtitle={reviewSubtitle}
       caps={caps}
-      policyMinutes={planning.inputs?.policy.default_weekly_cap_minutes}
+      policyMinutes={policyMinutes}
       compare={compareScenario ? { label: compareScenario.label, review: compareScenario.review } : null}
       onShowShift={showShift}
       onAskHuume={askHuume}
+      onShowWeek={showWeek}
+      onSelectPerson={(employeeId) => { setSelectedEmployeeId(employeeId); setShowProposal(true); setCenterView('board'); setMobileTab('board') }}
+      onApprove={canDecide ? () => decide('confirm') : undefined}
+      onCancel={canDecide ? () => decide('cancel') : undefined}
+      decisionDisabled={thread.busy}
       emptyHint={reviewSource.kind === 'staged'
         ? 'Nothing is staged in the thread. Ask Huume for a change, run a scenario from the strip, and what it would do appears here before anything is written.'
         : undefined}
     />
   ) : (
+    <div className="flex h-full min-h-0 flex-col">
+      {previewVerdict && (
+        <div role="status" className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-2 text-xs text-emerald-100">
+          <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-300" />
+          <span className="min-w-0">
+            Previewing the generated week — dashed shifts are not written until you approve.
+            <span className="ml-2 font-mono text-[11px] text-emerald-200/80">{previewVerdict.facts[0]}</span>
+          </span>
+          <span className="ml-auto flex items-center gap-1.5">
+            <button type="button" onClick={openReview} className="rounded border border-emerald-400/30 px-2 py-1 text-[11px] hover:bg-emerald-400/10">Back to review</button>
+            <button type="button" onClick={() => setShowProposal(false)} className="rounded border border-white/[0.1] px-2 py-1 text-[11px] text-zinc-300 hover:bg-white/[0.06]">Hide preview</button>
+            {canDecide && (
+              <button type="button" disabled={thread.busy} onClick={() => decide('confirm')} className={`rounded px-2 py-1 text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${previewVerdict.tone === 'bad' ? 'border border-amber-400/50 text-amber-100 hover:bg-amber-400/10' : 'bg-emerald-500 text-zinc-950 hover:bg-emerald-400'}`}>
+                {previewVerdict.approveLabel}
+              </button>
+            )}
+          </span>
+        </div>
+      )}
+      <div className="min-h-0 flex-1">
     <BoardPane
       days={days}
       editor={editor}
@@ -521,6 +565,8 @@ export default function SchedulePilot() {
       trainingEnabled={trainingEnabled}
       costByDay={weekCost?.by_day}
       unpricedDays={unpricedDays}
+      previewShifts={previewShifts}
+      demand={previewDemand}
       canMutate={canMutate}
       onOpenNew={openNew}
       onOpenShift={openShift}
@@ -528,6 +574,8 @@ export default function SchedulePilot() {
       onCreated={onCreated}
       onToggleHuumeSelection={toggleHuumeSelection}
     />
+      </div>
+    </div>
   )
 
   const railContent = (
