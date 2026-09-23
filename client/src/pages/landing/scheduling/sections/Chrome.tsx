@@ -2,12 +2,29 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { ArrowRight } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Reveal } from '../motion'
+import { tornClip } from '../torn'
 import { STEPS, WRAP, display, mono, type StepId } from '../styles'
 import { DISPLAY, GRAIN, HILITE, INK, INK_SOFT, PAPER, hexA } from '../theme'
 
-export function PrimaryButton({ onClick, children, tone = 'ink' }: { onClick: () => void; children: ReactNode; tone?: 'ink' | 'paper' }) {
+export function PrimaryButton({
+  onClick,
+  children,
+  tone = 'ink',
+  torn,
+}: {
+  onClick: () => void
+  children: ReactNode
+  tone?: 'ink' | 'paper'
+  /** Seed for a torn-paper edge instead of a pill. */
+  torn?: number
+}) {
   return (
-    <button type="button" onClick={onClick} className={`group sched-btn sched-btn-${tone} sched-focus inline-flex h-12 items-center gap-2 rounded-full px-6 text-[15px] font-semibold`}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group sched-btn sched-btn-${tone} sched-focus inline-flex items-center gap-2 text-[15px] font-semibold ${torn === undefined ? 'h-12 rounded-full px-6' : 'sched-btn-torn h-14 px-7'}`}
+      style={torn === undefined ? undefined : { clipPath: tornClip(torn, { tear: 10, cut: 1.5, steps: 16 }) }}
+    >
       {children}
       <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5" />
     </button>
@@ -219,6 +236,16 @@ export function LandingStyles() {
       .sched-root ::selection { background: ${HILITE}; color: ${INK}; }
       html:has(.sched-root) { scroll-behavior: smooth; scroll-padding-top: 80px; }
 
+      /* a word slip pasted onto the page: drops in tilted, lands, settles */
+      .cut-in { animation: schedCutIn .75s cubic-bezier(.2,1.25,.35,1) var(--d, 0ms) both; transform-origin: 50% 80%; }
+      @keyframes schedCutIn {
+        0% { opacity: 0; transform: translateY(-0.35em) rotate(var(--r0)) scale(1.12); }
+        45% { opacity: 1; }
+        100% { opacity: 1; transform: rotate(var(--r1)); }
+      }
+      .cut-fade { animation: schedFade .8s ease var(--d, 0ms) both; }
+      @keyframes schedFade { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
       .sr { opacity: 0; transform: translateY(22px); transition: opacity .8s cubic-bezier(.2,.7,.2,1) var(--d, 0ms), transform .9s cubic-bezier(.2,.7,.2,1) var(--d, 0ms); }
       .sr.is-in { opacity: 1; transform: none; }
 
@@ -233,10 +260,8 @@ export function LandingStyles() {
         padding: 0 .06em; margin: 0 -.06em;
         -webkit-box-decoration-break: clone; box-decoration-break: clone;
       }
-      .sched-hilite-swipe { animation: schedSwipe 1s cubic-bezier(.2,.7,.2,1) .35s both; }
       .sr .sched-hilite-scroll { background-size: 0% 30%; transition: background-size 1s cubic-bezier(.2,.7,.2,1) .45s; }
       .sr.is-in .sched-hilite-scroll { background-size: 100% 30%; }
-      @keyframes schedSwipe { from { background-size: 0% 30%; } to { background-size: 100% 30%; } }
 
       .sched-btn { transition: background-size .45s cubic-bezier(.6,.05,.25,1), color .25s, transform .25s; background-repeat: no-repeat; background-position: 0 0; background-size: 0% 100%; }
       .sched-btn:hover { background-size: 100% 100%; }
@@ -249,6 +274,8 @@ export function LandingStyles() {
       .sched-link:hover { background-size: 100% 1.5px; }
 
       .sched-focus:focus-visible { outline: 2px solid ${INK}; outline-offset: 3px; }
+      /* clip-path would cut an outside ring off, so torn buttons ring inside */
+      .sched-btn-torn.sched-focus:focus-visible { outline: 2px solid ${HILITE}; outline-offset: -6px; }
       .sched-dark .sched-focus:focus-visible, footer .sched-focus:focus-visible { outline-color: ${PAPER}; }
 
       .grow-bar { transform-box: fill-box; transform-origin: 50% 100%; transform: scaleY(0); transition: transform .8s cubic-bezier(.2,.7,.2,1) var(--d, 0ms); }
@@ -269,7 +296,8 @@ export function LandingStyles() {
         html:has(.sched-root) { scroll-behavior: auto; }
         .sr, .sr.is-in { opacity: 1; transform: none; transition: none; }
         .pen-mark path, .pen-draw { stroke-dashoffset: 0; transition: none; }
-        .sched-hilite-swipe { animation: none; }
+        .cut-in { animation: none; transform: rotate(var(--r1)); }
+        .cut-fade { animation: none; }
         .sr .sched-hilite-scroll { background-size: 100% 30%; transition: none; }
         .grow-bar, .grow-x { transform: none; transition: none; }
         .sun-rays { animation: none; }

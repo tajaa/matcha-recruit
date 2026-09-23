@@ -6,8 +6,21 @@ import { WRAP, display, mono } from '../styles'
 import { HILITE, INK, INK_SOFT, RED_PEN, STAMP, TAPE, graphPaper, hexA } from '../theme'
 import { DURATION, LAYOUTS, STILL_FRAME } from '../timeline'
 import { PrimaryButton } from './Chrome'
+import { Slip, type SlipTone } from './Cutout'
 
 const loadWeek = () => import('../WeekComposition')
+
+const HEADLINE: { text: string; seed: number; tone: SlipTone; delay: number }[][] = [
+  [
+    { text: 'Next', seed: 11, tone: 'paper', delay: 80 },
+    { text: 'week’s', seed: 12, tone: 'paper', delay: 200 },
+  ],
+  [{ text: 'schedule,', seed: 13, tone: 'paper', delay: 330 }],
+  [
+    { text: 'already', seed: 14, tone: 'hilite', delay: 520 },
+    { text: 'written.', seed: 15, tone: 'hilite', delay: 660 },
+  ],
+]
 
 // Torn ends, like a strip pulled off the roll by hand.
 const TORN = 'polygon(3% 0, 97% 5%, 100% 28%, 96% 52%, 100% 76%, 97% 100%, 2% 95%, 0 72%, 4% 48%, 0 22%)'
@@ -84,22 +97,29 @@ export function Hero({ onContact }: { onContact: () => void }) {
           <span className="hidden sm:inline">Week 41 · Oct 5–11</span>
         </div>
 
-        <h1 className="mt-6" style={{ ...display, fontSize: 'clamp(3.6rem, 11.6vw, 11.2rem)', lineHeight: 0.86 }}>
-          <span className="block">Next week’s</span>
-          <span className="block">schedule,</span>
-          <span className="block">
-            <span className="sched-hilite sched-hilite-swipe">already written.</span>
-          </span>
+        {/* Each word is a torn slip pasted onto the sheet, one after another. */}
+        <h1 className="mt-6" style={{ ...display, fontSize: 'clamp(3.4rem, 10.6vw, 10.2rem)', lineHeight: 0.9 }}>
+          {HEADLINE.map((line, li) => (
+            <span key={li} className="flex flex-wrap gap-x-[0.1em]" style={{ marginTop: li ? '0.04em' : 0 }}>
+              {line.map((w) => (
+                <Slip key={w.text} seed={w.seed} tone={w.tone} delay={w.delay}>
+                  {w.text}
+                </Slip>
+              ))}
+            </span>
+          ))}
         </h1>
 
-        <div className="mt-10 grid grid-cols-1 gap-8 lg:grid-cols-12 lg:items-end">
+        <div className="cut-fade mt-12 grid grid-cols-1 gap-8 lg:grid-cols-12 lg:items-end" style={{ ['--d' as string]: '1050ms' }}>
           <p className="max-w-[36rem] text-[1.125rem] leading-[1.6] sm:text-[1.3rem] lg:col-span-7" style={{ color: INK }}>
             Matcha drafts the week from your sales history, the weather, and who can actually work — then checks every shift for overtime,
             short turnarounds, and availability before you see it.{' '}
             <span style={{ color: INK_SOFT }}>You review. You publish.</span>
           </p>
           <div className="flex flex-wrap items-center gap-6 lg:col-span-5 lg:justify-end">
-            <PrimaryButton onClick={onContact}>Book a walkthrough</PrimaryButton>
+            <PrimaryButton onClick={onContact} torn={31}>
+              Book a walkthrough
+            </PrimaryButton>
             <Link to="/login" className="sched-link sched-focus rounded text-[15px] font-medium">
               Log in
             </Link>
