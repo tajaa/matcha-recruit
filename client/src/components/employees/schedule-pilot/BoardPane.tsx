@@ -4,6 +4,7 @@ import type { useScheduleEditor } from '../../../hooks/employees/useScheduleEdit
 import type { ScheduleJob, Shift } from '../../../types/employeeSchedule'
 import ShiftInspector, { type NewShiftDefaults } from '../schedule-editor/ShiftInspector'
 import WeekTimeGrid from '../schedule-editor/WeekTimeGrid'
+import type { DemandSegment, PreviewShift } from './reviewVerdict'
 
 export interface BoardPaneProps {
   days: string[]
@@ -20,6 +21,9 @@ export interface BoardPaneProps {
   /** Undefined when the viewer has no `labor_cost` access. */
   costByDay?: Record<string, number>
   unpricedDays?: ReadonlySet<string>
+  /** A generated week under review, drawn read-only (see `reviewVerdict`). */
+  previewShifts?: PreviewShift[]
+  demand?: Record<string, DemandSegment[]>
   canMutate(shift: Shift | undefined): boolean
   onOpenNew(defaults: NewShiftDefaults): void
   onOpenShift(shift: Shift): void
@@ -33,7 +37,7 @@ export interface BoardPaneProps {
  *  wraps the whole workspace so drags still land here. */
 function BoardPane({
   days, editor, editPublished, selectedEmployeeId, huumeSelectedShiftIds, inspectorShift, newDefaults,
-  locationId, locationName, jobs, trainingEnabled, costByDay, unpricedDays, canMutate, onOpenNew, onOpenShift, onCloseInspector, onCreated,
+  locationId, locationName, jobs, trainingEnabled, costByDay, unpricedDays, previewShifts, demand, canMutate, onOpenNew, onOpenShift, onCloseInspector, onCreated,
   onToggleHuumeSelection,
 }: BoardPaneProps) {
   if (editor.loading) {
@@ -51,6 +55,8 @@ function BoardPane({
         huumeSelectedShiftIds={huumeSelectedShiftIds}
         costByDay={costByDay}
         unpricedDays={unpricedDays}
+        previewShifts={previewShifts}
+        demand={demand}
         onCreateAt={(date, minute, employeeId) => onOpenNew({ date, minute, employeeIds: employeeId ? [employeeId] : undefined })}
         onOpenShift={onOpenShift}
         onToggleHuumeSelection={onToggleHuumeSelection}

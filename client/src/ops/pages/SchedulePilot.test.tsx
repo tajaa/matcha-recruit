@@ -449,6 +449,60 @@ describe('SchedulePilot — Huume', () => {
     expect(centerTab(/Review/)).toHaveAttribute('aria-selected', 'true')
   })
 
+  it('approves a staged week from the review with the same thread turn the chat sends', async () => {
+    getSessionMock.mockResolvedValue({
+      session_id: 'session-1', thread_id: 'thread-1', location_id: 'loc1',
+      week_start: '2026-08-09', week_end: '2026-08-16', messages: [], version: 2,
+      current_state: {
+        huume_action: {
+          type: 'schedule_week_draft', status: 'proposed', confirm_id: 'wk123456',
+          generation_run_id: 'generation-1', review: review({ kind: 'week_draft' }),
+        },
+      },
+    })
+    renderPilot()
+
+    const verdict = await screen.findByLabelText('Approval verdict')
+    expect(reviewPane()).toContainElement(verdict)
+    expect(within(verdict).getByText('Ready to approve')).toBeInTheDocument()
+    fireEvent.click(within(verdict).getByRole('button', { name: 'Approve' }))
+    // A literal 'confirm' turn — never a REST shortcut around the two-turn rule.
+    await waitFor(() => expect(sendMessageStreamMock).toHaveBeenCalled())
+    expect(sendMessageStreamMock.mock.calls[0][1]).toBe('confirm')
+  })
+
+  it('previews a generated week on the board before it exists', async () => {
+    getSessionMock.mockResolvedValue({
+      session_id: 'session-1', thread_id: 'thread-1', location_id: 'loc1',
+      week_start: '2026-08-09', week_end: '2026-08-16', messages: [], version: 2,
+      current_state: {
+        huume_action: {
+          type: 'schedule_week_draft', status: 'proposed', confirm_id: 'wk654321',
+          generation_run_id: 'generation-1',
+          review: review({
+            kind: 'week_draft',
+            assignments: [{
+              shift_id: 'autopilot:2026-08-09:opener:1', role: 'Opener', starts_at: '2026-08-09T09:00:00Z', ends_at: '2026-08-09T17:00:00Z',
+              employee_id: 'e1', employee_name: 'Aisha Rivera', op: 'assign', verdict: 'ok', reasons: [],
+            }],
+          }),
+        },
+      },
+    })
+    renderPilot()
+
+    await screen.findByLabelText('Approval verdict')
+    fireEvent.click(within(reviewPane()).getByRole('button', { name: /See the week on the board/ }))
+    expect(centerTab(/Board/)).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByRole('img', { name: /^Proposed Opener .+: Aisha Rivera$/ })).toBeInTheDocument()
+    expect(screen.getByText(/dashed shifts are not written until you approve/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Hide preview' }))
+    expect(screen.queryByRole('img', { name: /^Proposed Opener/ })).not.toBeInTheDocument()
+    fireEvent.click(centerTab(/Review/))
+    fireEvent.click(await screen.findByRole('button', { name: /See the week on the board/ }))
+    expect(await screen.findByRole('img', { name: /^Proposed Opener/ })).toBeInTheDocument()
+  })
+
   it('surfaces an automatically prepared schedule for review', async () => {
     suggestionStatusMock.mockResolvedValue({
       available: true, generation_run_id: 'generation-1', week_start: '2026-08-09', created_at: '2026-08-24T16:00:00Z',

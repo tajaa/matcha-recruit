@@ -9,6 +9,10 @@ import { fmtDayLabel, fmtTime, WEEKDAY_LABELS } from '../../../../types/employee
 interface ActionDocViewerProps {
   action: Exclude<HuumeAction, HuumeActionSendOffer>
   lightMode?: boolean
+  /** Beside a Review pane (the Schedule Pilot): skip the week draft's
+   *  shift-by-shift lists — the review and the board show them, and a third
+   *  copy in the chat column is what made a week unreadable. */
+  compact?: boolean
 }
 
 function Meta({ label, value }: { label: string; value?: string | number | null }) {
@@ -182,7 +186,7 @@ function hoursLabel(hours: HuumeActionScheduleLocationProfile['operating_hours']
 /** Renders the 5 non-offer staged actions as readable documents instead of
  * compact label/value rows — they already carry their text inline in
  * current_state, so this is pure presentation (no fetch). */
-export default function ActionDocViewer({ action, lightMode }: ActionDocViewerProps) {
+export default function ActionDocViewer({ action, lightMode, compact = false }: ActionDocViewerProps) {
   const chipEmerald = lightMode ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-emerald-950/40 text-emerald-300 border-emerald-800'
   const chipRed = lightMode ? 'bg-red-50 text-red-700 border-red-300' : 'bg-red-950/40 text-red-300 border-red-800'
 
@@ -407,7 +411,10 @@ export default function ActionDocViewer({ action, lightMode }: ActionDocViewerPr
             hoursKnown={action.metrics?.operating_hours_known}
             chipRed={chipRed}
           />
-          {!!action.schedule_preview?.length && (
+          {compact && (!!action.schedule_preview?.length || !!action.unfilled?.length) && (
+            <p className="text-[11px] opacity-60">Shift-by-shift detail is in the Review pane and on the board.</p>
+          )}
+          {!compact && !!action.schedule_preview?.length && (
             <div>
               <div className="mb-1 text-[10px] uppercase tracking-wide opacity-50">Proposed shifts</div>
               <div className="space-y-1.5">
@@ -430,7 +437,7 @@ export default function ActionDocViewer({ action, lightMode }: ActionDocViewerPr
               )}
             </div>
           )}
-          {!!action.unfilled?.length && (
+          {!compact && !!action.unfilled?.length && (
             <div>
               <div className="mb-1 text-[10px] uppercase tracking-wide opacity-50">Open positions</div>
               <div className="space-y-1">

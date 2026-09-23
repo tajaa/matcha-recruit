@@ -187,7 +187,7 @@ export default function ScheduleHuumePanel({ thread, firstName, weekStart, locat
         {choice && !busy && <HuumeChoiceChips choice={choice} disabled={composerDisabled} onPick={(text) => { void thread.send(text) }} />}
         {(action?.type === 'schedule_week_draft' || action?.type === 'schedule_location_profile') && (
           <div className="max-h-80 overflow-y-auto rounded-lg border border-white/[0.08] bg-white/[0.02]">
-            <ActionDocViewer action={action} lightMode={false} />
+            <ActionDocViewer action={action} lightMode={false} compact={!!onOpenReview} />
           </div>
         )}
         {steps.length > 0 && <div className="mr-4 rounded-lg bg-white/[0.03] px-3 py-2"><HuumeStepTimeline steps={steps} live /></div>}

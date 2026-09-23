@@ -735,6 +735,9 @@ export type ScheduleReviewUnfilled = {
   starts_at: string | null
   ends_at: string | null
   reason: string
+  /** Stable code for grouping ("credential_missing", "not_qualified", …) —
+   *  group on this, never on the English `reason`. */
+  reason_code?: string | null
   exclusions: Record<string, number>
 }
 

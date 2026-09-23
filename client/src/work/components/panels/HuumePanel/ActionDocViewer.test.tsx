@@ -87,3 +87,28 @@ describe('ActionDocViewer — generated week', () => {
     expect(screen.getByText(/Something new happened/)).toBeTruthy()
   })
 })
+
+describe('ActionDocViewer — beside a review pane', () => {
+  const draft = weekDraft({
+    schedule_preview: [{
+      shift_key: 'k1', role: 'Barista', starts_at: '2026-08-24T07:00:00Z', ends_at: '2026-08-24T15:00:00Z',
+      assignment_names: ['Amy'], required_staff: 1,
+    }],
+    unfilled: [{ shift_key: 'k2', role: 'Lead', starts_at: '2026-08-24T13:00:00Z', reason: 'no eligible employees' }],
+  } as Partial<HuumeActionScheduleWeekDraft>)
+
+  it('lists every shift where there is no review to show them', () => {
+    render(<ActionDocViewer action={draft} />)
+    expect(screen.getByText('Proposed shifts')).toBeInTheDocument()
+    expect(screen.getByText('Open positions')).toBeInTheDocument()
+  })
+
+  it('drops the shift-by-shift copy when the review and board carry it', () => {
+    render(<ActionDocViewer action={draft} compact />)
+    expect(screen.queryByText('Proposed shifts')).not.toBeInTheDocument()
+    expect(screen.queryByText('Open positions')).not.toBeInTheDocument()
+    expect(screen.getByText('Shift-by-shift detail is in the Review pane and on the board.')).toBeInTheDocument()
+    // The summary still says what the week is.
+    expect(screen.getByText('Built a draft proposal: 8 of 8 positions filled.')).toBeInTheDocument()
+  })
+})

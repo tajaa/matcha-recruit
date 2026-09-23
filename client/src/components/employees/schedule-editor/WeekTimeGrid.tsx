@@ -2,7 +2,9 @@ import { useDroppable } from '@dnd-kit/core'
 import type { Shift } from '../../../types/employeeSchedule'
 import { fmtDayLabel } from '../../../types/employeeSchedule'
 import { costLabel } from '../schedule-pilot/reviewShape'
+import type { DemandSegment, PreviewShift } from '../schedule-pilot/reviewVerdict'
 import { layoutOverlappingShifts, shiftPosition } from './calendarMath'
+import PreviewShiftBlock from './PreviewShiftBlock'
 import ShiftBlock from './ShiftBlock'
 
 interface WeekTimeGridProps {
@@ -18,6 +20,12 @@ interface WeekTimeGridProps {
   /** Days where somebody worked who could not be priced. Those render a dash:
    *  a "$0" beside a fully-staffed day reads as "this day is free". */
   unpricedDays?: ReadonlySet<string>
+  /** A proposal's shifts, drawn read-only beside the real ones before
+   *  anything is written (a generated week under review). */
+  previewShifts?: PreviewShift[]
+  /** Per ISO day: demanded vs covered headcount, as a band on the column's
+   *  left edge — red where the proposal staffs less than the demand. */
+  demand?: Record<string, DemandSegment[]>
   onCreateAt(date: string, minute: number, employeeId?: string): void
   onOpenShift(shift: Shift): void
   onToggleHuumeSelection(shift: Shift): void
@@ -25,16 +33,28 @@ interface WeekTimeGridProps {
   onResizeShift(shift: Shift, endMinute: number): void
 }
 
+function fmtClock(minute: number): string {
+  return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`
+}
+
 function TimeSlot({ date, minute, onCreate }: { date: string; minute: number; onCreate(): void }) {
   const { setNodeRef, isOver } = useDroppable({ id: `slot-${date}-${minute}`, data: { kind: 'time-slot', date, minute } })
   return <button ref={setNodeRef} onClick={onCreate} className={`absolute left-0 right-0 border-t border-zinc-900/80 text-left ${isOver ? 'bg-emerald-500/10' : 'hover:bg-white/[0.02]'}`} style={{ top: minute, height: 15 }} aria-label={`Create shift on ${date} at ${minute} minutes`} />
 }
 
-export default function WeekTimeGrid({ days, shifts, pendingKeys, editPublished, selectedEmployeeId, huumeSelectedShiftIds, costByDay, unpricedDays, onCreateAt, onOpenShift, onToggleHuumeSelection, onAssignSelected, onResizeShift }: WeekTimeGridProps) {
+type GridItem = { starts_at: string; ends_at: string; real?: Shift; preview?: PreviewShift }
+
+export default function WeekTimeGrid({ days, shifts, pendingKeys, editPublished, selectedEmployeeId, huumeSelectedShiftIds, costByDay, unpricedDays, previewShifts, demand, onCreateAt, onOpenShift, onToggleHuumeSelection, onAssignSelected, onResizeShift }: WeekTimeGridProps) {
   const hours = Array.from({ length: 24 }, (_, i) => i)
   const layouts = days.map((day) => {
-    const dayShifts = shifts.filter((shift) => shift.starts_at.slice(0, 10) === day)
-    const positioned = layoutOverlappingShifts(dayShifts)
+    // Previews share the lanes with real shifts so neither covers the other.
+    const dayItems: GridItem[] = [
+      ...shifts.filter((shift) => shift.starts_at.slice(0, 10) === day)
+        .map((shift) => ({ starts_at: shift.starts_at, ends_at: shift.ends_at, real: shift })),
+      ...(previewShifts ?? []).filter((shift) => shift.starts_at.slice(0, 10) === day)
+        .map((shift) => ({ starts_at: shift.starts_at, ends_at: shift.ends_at, preview: shift })),
+    ]
+    const positioned = layoutOverlappingShifts(dayItems)
     const laneCount = Math.max(1, ...positioned.map((item) => item.laneCount))
     return { day, positioned, width: Math.max(220, laneCount * 180) }
   })
@@ -74,16 +94,32 @@ export default function WeekTimeGrid({ days, shifts, pendingKeys, editPublished,
             return (
               <div key={day} style={{ width }} className="relative h-[1440px] border-l border-zinc-900 bg-[linear-gradient(to_bottom,rgba(63,63,70,.35)_1px,transparent_1px)] bg-[length:100%_60px]">
                 {Array.from({ length: 96 }, (_, index) => <TimeSlot key={index} date={day} minute={index * 15} onCreate={() => onCreateAt(day, index * 15, selectedEmployeeId ?? undefined)} />)}
-                {positioned.map(({ shift, lane, laneCount }) => {
-                  const position = shiftPosition(shift)
+                {demand?.[day]?.map((segment) => {
+                  const short = segment.covered < segment.demand
+                  return (
+                    <span
+                      key={`demand-${segment.start}`}
+                      role="img"
+                      aria-label={`${fmtClock(segment.start)}–${fmtClock(segment.end)}: demand ${segment.demand}, covered ${segment.covered}`}
+                      title={`Demand ${segment.demand} · covered ${segment.covered}`}
+                      className={`absolute left-0 z-20 w-1 ${short ? 'bg-red-400/80' : 'bg-emerald-400/50'}`}
+                      style={{ top: segment.start, height: segment.end - segment.start }}
+                    />
+                  )
+                })}
+                {positioned.map(({ shift: item, lane, laneCount }) => {
+                  const position = shiftPosition(item)
                   const laneWidth = width / laneCount
+                  const box = { top: `${position.topPercent}%`, height: `${position.heightPercent}%`, left: lane * laneWidth + 2, width: Math.max(laneWidth - 4, 120) }
+                  if (item.preview) return <PreviewShiftBlock key={`preview-${item.preview.id}`} shift={item.preview} style={box} />
+                  const shift = item.real as Shift
                   // With a person selected, shifts that neither include them nor
                   // have an open seat for them fade back — their week and the
                   // places they could still go are what is left bright.
                   const dimmed = !!selectedEmployeeId
                     && !shift.assignments.some((assignment) => assignment.employee_id === selectedEmployeeId)
                     && shift.assignments.length >= shift.required_staff
-                  return <ShiftBlock key={shift.id} shift={shift} pending={pendingKeys.has(`shift:${shift.id}`)} editable={shift.status !== 'cancelled' && (shift.status === 'draft' || editPublished)} selectedEmployeeId={selectedEmployeeId} huumeSelected={huumeSelectedShiftIds.has(shift.id)} dimmed={dimmed} style={{ top: `${position.topPercent}%`, height: `${position.heightPercent}%`, left: lane * laneWidth + 2, width: Math.max(laneWidth - 4, 120) }} onOpen={() => onOpenShift(shift)} onToggleHuumeSelection={() => onToggleHuumeSelection(shift)} onAssignSelected={() => onAssignSelected(shift)} onResize={(endMinute) => onResizeShift(shift, endMinute)} />
+                  return <ShiftBlock key={shift.id} shift={shift} pending={pendingKeys.has(`shift:${shift.id}`)} editable={shift.status !== 'cancelled' && (shift.status === 'draft' || editPublished)} selectedEmployeeId={selectedEmployeeId} huumeSelected={huumeSelectedShiftIds.has(shift.id)} dimmed={dimmed} style={box} onOpen={() => onOpenShift(shift)} onToggleHuumeSelection={() => onToggleHuumeSelection(shift)} onAssignSelected={() => onAssignSelected(shift)} onResize={(endMinute) => onResizeShift(shift, endMinute)} />
                 })}
               </div>
             )

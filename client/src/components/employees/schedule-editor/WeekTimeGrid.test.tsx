@@ -58,3 +58,47 @@ describe('WeekTimeGrid day cost', () => {
     expect(screen.getByText('$0')).toBeInTheDocument()
   })
 })
+
+describe('WeekTimeGrid proposal layer', () => {
+  const preview = {
+    id: 'autopilot:2026-09-14:barista:1', starts_at: '2026-09-14T07:00:00+00:00', ends_at: '2026-09-14T15:00:00+00:00',
+    role: 'Barista', names: ['Amy'], open: 1, warn: true, reasons: ['short rest'],
+  }
+
+  it('draws a proposed shift read-only, with who and the open seat', () => {
+    renderGrid({ previewShifts: [preview] })
+    const block = screen.getByRole('img', { name: /^Proposed Barista .+: Amy, 1 open$/ })
+    expect(block).toHaveAttribute('title', 'short rest')
+    // No handles: a preview can't be dragged, resized, opened or sent to Huume.
+    expect(block.querySelector('button')).toBeNull()
+    expect(screen.getByText('open')).toBeInTheDocument()
+  })
+
+  it('shares lanes with real shifts on the same day', () => {
+    renderGrid({
+      previewShifts: [preview],
+      shifts: [{
+        id: 'real-1', starts_at: '2026-09-14T08:00:00+00:00', ends_at: '2026-09-14T12:00:00+00:00',
+        role: 'Shift Lead', status: 'draft', required_staff: 1, assignments: [], kind: 'work',
+      } as unknown as React.ComponentProps<typeof WeekTimeGrid>['shifts'][number]],
+    })
+    const proposed = screen.getByRole('img', { name: /^Proposed Barista/ })
+    expect(proposed.style.left).not.toBe('')
+    expect(screen.getByText('Shift Lead')).toBeInTheDocument()
+  })
+
+  it('bands each day with demand, red where the proposal staffs less', () => {
+    renderGrid({
+      demand: { '2026-09-14': [
+        { start: 420, end: 480, demand: 2, covered: 1 },
+        { start: 480, end: 540, demand: 2, covered: 2 },
+      ] },
+    })
+    const short = screen.getByRole('img', { name: '07:00–08:00: demand 2, covered 1' })
+    const ok = screen.getByRole('img', { name: '08:00–09:00: demand 2, covered 2' })
+    expect(short.className).toContain('bg-red-400')
+    expect(ok.className).toContain('bg-emerald-400')
+    expect(short.style.top).toBe('420px')
+    expect(short.style.height).toBe('60px')
+  })
+})

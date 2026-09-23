@@ -45,6 +45,7 @@ export function asScheduleReview(loose: HuumeScheduleReview | ScheduleReview | n
         starts_at: (record.starts_at as string | null) ?? null,
         ends_at: (record.ends_at as string | null) ?? null,
         reason: String(record.reason ?? 'no eligible employees'),
+        reason_code: typeof record.reason_code === 'string' ? record.reason_code : null,
         exclusions: (record.exclusions as Record<string, number> | undefined) ?? {},
       }
     }),

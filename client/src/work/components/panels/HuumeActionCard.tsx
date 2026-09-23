@@ -17,10 +17,13 @@ interface HuumeActionCardProps {
 }
 
 /** Slim chat-bottom strip between the message list and composer (visible on
- * mobile too) — the ONLY place Confirm/Cancel renders for a staged action.
- * The Huume right panel (ActionDocViewer/OfferLetterViewer) shows the full
- * document plus a passive status line, but never its own actionable
- * buttons, so a staged action can't be double-confirmed from two places. */
+ * mobile too) — where Confirm/Cancel renders for a staged action. The Huume
+ * right panel (ActionDocViewer/OfferLetterViewer) shows the full document
+ * plus a passive status line, never its own buttons. The one other surface
+ * is the Schedule Pilot's Review pane, which sends the SAME literal
+ * 'confirm'/'cancel' turn through the same thread (never a REST shortcut),
+ * so the backend's two-turn rule and the executor's row lock are what stop a
+ * double confirm — not which button was clicked. */
 export default function HuumeActionCard({ action, lightMode, streaming, onSendChat }: HuumeActionCardProps) {
   const cardBg = 'bg-w-accent/10 border-w-accent/30 text-w-accent'
   const chipRed = lightMode ? 'bg-red-50 text-red-700 border-red-300' : 'bg-red-950/40 text-red-300 border-red-800'

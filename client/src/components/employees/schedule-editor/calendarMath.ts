@@ -65,8 +65,10 @@ export function shiftPosition(
   }
 }
 
-export function layoutOverlappingShifts(shifts: Shift[]): Array<{
-  shift: Shift
+/** Lanes for anything with a window — real shifts, and the read-only
+ *  proposal blocks the board overlays on them, which must share the lanes. */
+export function layoutOverlappingShifts<T extends Pick<Shift, 'starts_at' | 'ends_at'>>(shifts: T[]): Array<{
+  shift: T
   lane: number
   laneCount: number
 }> {

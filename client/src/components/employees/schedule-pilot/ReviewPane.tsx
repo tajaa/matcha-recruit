@@ -4,7 +4,9 @@ import { LABEL } from '../../ui'
 import type { AutopilotDemandModel, ScheduleComplianceStatus, ScheduleReview } from '../../../types/employeeSchedule'
 import { fmtDayLabel, fmtTime } from '../../../types/employeeSchedule'
 import { LoadBar, POLICY_WEEKLY_MINUTES } from './LoadLedger'
+import ApprovalVerdict from './ApprovalVerdict'
 import { askAbout, compareReviews, costDeltaLabel, costLabel, hoursLabel } from './reviewShape'
+import { approvalVerdict, groupFindings, type VerdictFix } from './reviewVerdict'
 
 export interface ReviewPaneProps {
   review: ScheduleReview | null
@@ -20,6 +22,15 @@ export interface ReviewPaneProps {
   emptyHint?: string
   onShowShift?(shiftId: string): void
   onAskHuume?(text: string): void
+  /** A proposal that is not on the board yet (a generated week) can be
+   *  looked at there before approving. */
+  onShowWeek?(): void
+  onSelectPerson?(employeeId: string): void
+  /** Approve / Cancel the staged action from here. They send the same thread
+   *  turn the chat strip does, so the server's two-turn confirm still guards. */
+  onApprove?(): void
+  onCancel?(): void
+  decisionDisabled?: boolean
 }
 
 const KIND_LABEL: Record<ScheduleReview['kind'], string> = {
@@ -38,17 +49,21 @@ function when(startsAt: string | null, endsAt: string | null): string {
   return `${fmtDayLabel(startsAt)} ${fmtTime(startsAt)}${endsAt ? `–${fmtTime(endsAt)}` : ''}`
 }
 
-function Block({ label, count, tone, children }: { label: string; count: number; tone?: 'ok' | 'warn' | 'bad'; children: ReactNode }) {
+/** Evidence, not the verdict: collapsed by default on a big proposal (a
+ *  generated week is 28+ rows), open on a small change where the list IS the
+ *  change. Native `<details>` so it needs no state and keyboard works. */
+function Block({ label, count, tone, open = true, children }: { label: string; count: number; tone?: 'ok' | 'warn' | 'bad'; open?: boolean; children: ReactNode }) {
   if (count === 0) return null
   const color = tone === 'bad' ? 'text-red-300' : tone === 'warn' ? 'text-amber-300' : 'text-zinc-300'
   return (
-    <section className="border-t border-white/[0.06] px-4 py-3">
-      <div className="mb-2 flex items-center gap-2">
+    <details open={open} className="group/block border-t border-white/[0.06] px-4 py-3">
+      <summary className="mb-2 flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+        <span className="text-[10px] text-zinc-600 transition-transform group-open/block:rotate-90" aria-hidden>▶</span>
         <span className={LABEL}>{label}</span>
         <span className={`font-mono text-[10px] tabular-nums ${color}`}>{count}</span>
-      </div>
+      </summary>
       {children}
-    </section>
+    </details>
   )
 }
 
@@ -65,14 +80,15 @@ function RowActions({ shiftId, ask, onShowShift, onAskHuume }: { shiftId?: strin
   )
 }
 
-function DemandModelBlock({ model }: { model: AutopilotDemandModel }) {
+function DemandModelBlock({ model, open }: { model: AutopilotDemandModel; open: boolean }) {
   return (
-    <section className="mt-3 border-t border-emerald-500/15 bg-emerald-500/[0.025] px-4 py-3" aria-label="Autopilot demand model">
-      <div className="flex flex-wrap items-baseline gap-2">
+    <details open={open} className="group/block mt-3 border-t border-emerald-500/15 bg-emerald-500/[0.025] px-4 py-3" aria-label="Autopilot demand model">
+      <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-2 [&::-webkit-details-marker]:hidden">
+        <span className="text-[10px] text-zinc-600 transition-transform group-open/block:rotate-90" aria-hidden>▶</span>
         <span className={LABEL}>Autopilot demand</span>
         <span className="text-xs text-emerald-200">{model.confidence} confidence</span>
         <span className="text-[11px] text-zinc-500">{model.sentence}</span>
-      </div>
+      </summary>
       <div className="mt-2 overflow-x-auto">
         <table className="w-full min-w-[620px] text-left text-[11px]">
           <thead className="text-zinc-600"><tr><th className="pb-1 font-medium">Day</th><th className="pb-1 font-medium">Window</th><th className="pb-1 font-medium">Forecast</th><th className="pb-1 font-medium">Index</th><th className="pb-1 font-medium">Weather</th><th className="pb-1 font-medium">Hours</th><th className="pb-1 text-right font-medium">Shifts</th></tr></thead>
@@ -102,7 +118,7 @@ function DemandModelBlock({ model }: { model: AutopilotDemandModel }) {
         </ul>
       )}
       <p className="mt-2 text-[10px] text-zinc-600">Used: {model.inputs_used.join(', ')}{model.inputs_missing.length ? ` · Missing: ${model.inputs_missing.join(', ')}` : ''}{model.labor?.labor_pct != null ? ` · Scheduled labor ${model.labor.labor_pct}% of forecast sales` : model.labor?.note ? ` · ${model.labor.note}` : ''}</p>
-    </section>
+    </details>
   )
 }
 
@@ -110,7 +126,7 @@ function DemandModelBlock({ model }: { model: AutopilotDemandModel }) {
  *  change (schedule_change or generated week), a fill scenario, and the
  *  result after apply — one truth, three sources. Never writes copy about
  *  legality of its own: the compliance banner is the server's sentence. */
-export default function ReviewPane({ review, title, subtitle, caps, policyMinutes = POLICY_WEEKLY_MINUTES, compare, actions, emptyHint, onShowShift, onAskHuume }: ReviewPaneProps) {
+export default function ReviewPane({ review, title, subtitle, caps, policyMinutes = POLICY_WEEKLY_MINUTES, compare, actions, emptyHint, onShowShift, onAskHuume, onShowWeek, onSelectPerson, onApprove, onCancel, decisionDisabled }: ReviewPaneProps) {
   if (!review) {
     return (
       <div className="flex h-full min-h-0 flex-col items-center justify-center gap-2 px-8 text-center">
@@ -124,8 +140,17 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
 
   const tone = COMPLIANCE_TONE[review.compliance_status] ?? COMPLIANCE_TONE.unmapped
   const staged = review.assignments.filter((item) => item.verdict !== 'blocked')
-  const warned = staged.filter((item) => item.verdict === 'warn' || item.reasons.length > 0)
   const diff = compare ? compareReviews(review, compare.review) : null
+  const verdict = approvalVerdict(review, caps, policyMinutes)
+  const findingGroups = groupFindings(review.findings)
+  // Small change: the rows ARE the change, show them. Big proposal: the
+  // verdict and the board carry it, the rows are evidence.
+  const evidenceOpen = staged.length + review.unfilled.length + review.rejected.length <= 8
+  const fix = (target: VerdictFix) => {
+    if (target.kind === 'board') onShowShift?.(target.shiftId)
+    else if (target.kind === 'person') onSelectPerson?.(target.employeeId)
+    else onAskHuume?.(target.text)
+  }
   // `by_employee` covers the week's costed rows. Someone the review touches
   // who is not in it costs nothing — that is $0, not missing payroll data.
   // Only the server's own unpriced list means "no rate on file"; conflating
@@ -148,13 +173,14 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
           </div>
           {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] uppercase tracking-wide text-zinc-500">
-          <span><span className="text-zinc-100">{staged.length}</span> staged</span>
-          {review.rejected.length > 0 && <span><span className="text-red-300">{review.rejected.length}</span> not staged</span>}
-          {review.unfilled.length > 0 && <span><span className="text-amber-300">{review.unfilled.length}</span> unfilled</span>}
-          {warned.length > 0 && <span><span className="text-amber-300">{warned.length}</span> with warnings</span>}
-          {review.advisories.length > 0 && <span><span className="text-amber-300">{review.advisories.length}</span> advisories</span>}
-        </div>
+        <ApprovalVerdict
+          verdict={verdict}
+          onFix={fix}
+          onShowWeek={review.kind === 'week_draft' ? onShowWeek : undefined}
+          onApprove={onApprove}
+          onCancel={onCancel}
+          decisionDisabled={decisionDisabled}
+        />
         {review.cost && (
           <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[11px]">
             <span className="font-mono tabular-nums text-zinc-500">
@@ -181,7 +207,7 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
         </div>
       </header>
 
-      {review.demand_model && <DemandModelBlock model={review.demand_model} />}
+      {review.demand_model && <DemandModelBlock model={review.demand_model} open={evidenceOpen} />}
 
       {diff && compare ? (
         <>
@@ -232,7 +258,7 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
         </>
       ) : (
         <>
-          <Block label="Load" count={review.employees.length}>
+          <Block open={evidenceOpen} label="Load" count={review.employees.length}>
             <ul className="space-y-2.5">
               {review.employees.map((person) => (
                 <li key={person.employee_id} className="group">
@@ -267,7 +293,7 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
             </ul>
           </Block>
 
-          <Block label="Staged" count={staged.length}>
+          <Block open={evidenceOpen} label="Staged" count={staged.length}>
             <ul className="divide-y divide-white/[0.04]">
               {staged.map((item, index) => (
                 <li key={`${item.shift_id}-${item.employee_id}-${index}`} className="group py-1.5 text-xs">
@@ -289,7 +315,7 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
             </ul>
           </Block>
 
-          <Block label="Not staged" count={review.rejected.length} tone="bad">
+          <Block open={evidenceOpen} label="Not staged" count={review.rejected.length} tone="bad">
             <ul className="divide-y divide-white/[0.04]">
               {review.rejected.map((item, index) => (
                 <li key={`${item.shift_id}-${index}`} className="group py-1.5 text-xs">
@@ -306,7 +332,7 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
             </ul>
           </Block>
 
-          <Block label="Unfilled" count={review.unfilled.length} tone="warn">
+          <Block open={evidenceOpen} label="Unfilled" count={review.unfilled.length} tone="warn">
             <ul className="divide-y divide-white/[0.04]">
               {review.unfilled.map((item) => (
                 <li key={item.shift_id} className="group py-1.5 text-xs">
@@ -326,7 +352,7 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
             </ul>
           </Block>
 
-          <Block label="Statutory advisories" count={review.advisories.length} tone="warn">
+          <Block open={evidenceOpen} label="Statutory advisories" count={review.advisories.length} tone="warn">
             <ul className="space-y-1.5 text-[11px] text-zinc-300">
               {review.advisories.map((item, index) => (
                 <li key={index} className="leading-snug">
@@ -338,17 +364,24 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
             </ul>
           </Block>
 
-          <Block label="Findings" count={review.findings.length}>
-            <ul className="space-y-1.5 text-[11px]">
-              {review.findings.map((finding, index) => {
-                const severity = String(finding.severity ?? 'advisory')
-                return (
-                  <li key={index} className="flex items-start gap-2 leading-snug text-zinc-300">
-                    <span className={`mt-0.5 shrink-0 rounded px-1 font-mono text-[9px] uppercase ${severity === 'gap' ? 'bg-red-500/15 text-red-300' : 'bg-amber-500/15 text-amber-300'}`}>{severity}</span>
-                    <span>{String(finding.detail ?? finding.kind ?? '')}</span>
-                  </li>
-                )
-              })}
+          <Block open={evidenceOpen} label="Findings" count={review.findings.length}>
+            {/* One line per KIND with its count — 28 identical sentences are
+                one fact. The distinct details stay one click away. */}
+            <ul className="space-y-1.5 text-[11px]" aria-label="Findings by kind">
+              {findingGroups.map((group) => (
+                <li key={`${group.severity}:${group.kind}`} className="leading-snug text-zinc-300">
+                  <details>
+                    <summary className="flex cursor-pointer list-none items-start gap-2 [&::-webkit-details-marker]:hidden">
+                      <span className={`mt-0.5 shrink-0 rounded px-1 font-mono text-[9px] uppercase ${group.severity === 'gap' ? 'bg-red-500/15 text-red-300' : 'bg-amber-500/15 text-amber-300'}`}>{group.severity}</span>
+                      <span><span className="font-mono tabular-nums text-zinc-100">{group.count}</span> × {group.label}</span>
+                    </summary>
+                    <ul className="ml-10 mt-1 list-disc space-y-0.5 text-zinc-500">
+                      {group.details.slice(0, 6).map((detail) => <li key={detail}>{detail}</li>)}
+                      {group.details.length > 6 && <li className="list-none">+{group.details.length - 6} more like these</li>}
+                    </ul>
+                  </details>
+                </li>
+              ))}
             </ul>
           </Block>
         </>
