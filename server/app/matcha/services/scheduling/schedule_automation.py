@@ -115,15 +115,9 @@ async def generate_review_suggestion(
     if readiness.get("status") != "ok" or not readiness.get("ready"):
         blockers = readiness.get("blockers") or [readiness.get("message") or "The week is not ready."]
         return {"status": "not_ready", "message": " ".join(blockers)}
-    if supersede_proposed:
-        async with connection_or_direct() as conn:
-            await conn.execute(
-                """UPDATE schedule_generation_runs
-                   SET status='stale', updated_at=NOW()
-                   WHERE company_id=$1 AND location_id=$2 AND week_start=$3
-                     AND status='proposed'""",
-                company_id, location_id, week_start,
-            )
+    # The older unapproved suggestion is retired inside propose_week_draft's
+    # insert transaction, only once its replacement exists — retiring it here
+    # first left the week with nothing when the rebuild was refused.
     result = await propose_week_draft(
         company_id=company_id,
         actor_user_id=actor_user_id,
@@ -134,6 +128,7 @@ async def generate_review_suggestion(
         source_mode=mode,
         week_template_id=str(week_template_id) if week_template_id else None,
         origin="automatic",
+        supersede_proposed=supersede_proposed,
     )
     if result.get("status") == "ready":
         return {

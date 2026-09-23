@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 
+from .availability import slot_availability
 from .curve import build_curve
 from .cutter import break_minutes_for, cut_shifts
 from .forecast import attach_index, forecast_day, week_confidence
@@ -72,37 +73,105 @@ def _job_shares(
     return {job: value / total for job, value in values.items()}
 
 
-def _assign_jobs(intervals: list[tuple[int, int]], jobs: list[dict], shares: dict[str, Decimal]) -> list[tuple[int, int, dict]]:
+def _assign_jobs(
+    intervals: list[tuple[int, int]], jobs: list[dict], shares: dict[str, Decimal], *,
+    slot_capacity: Mapping[str, Sequence[int]], minutes_left: dict[str, int],
+    balance: dict[str, Decimal] | None = None,
+) -> tuple[list[tuple[int, int, dict]], dict[str, int]]:
+    """Hand each cut interval to a job, keeping the mix near `shares`.
+
+    A job only takes an interval while it has a qualified, available person
+    for every slot of it (`slot_capacity`) and weekly minutes left among its
+    qualified people (`minutes_left`, shared across the week's days and
+    decremented here). With no job able to take it, the interval goes to the
+    job with the most headroom and is counted in the returned overflow — a
+    seat the planner will report unfilled, said up front instead of hidden.
+
+    `balance` carries slots already given out on earlier days, so a mix is
+    kept across the WEEK — leader seats are one interval a day, and a per-day
+    mix would hand every one of them to the same job.
+    """
     assigned: list[tuple[int, int, dict]] = []
-    actual: dict[str, Decimal] = defaultdict(Decimal)
-    total_slots = Decimal(sum(end - start for start, end in intervals))
+    actual: dict[str, Decimal] = balance if balance is not None else {}
+    used: dict[str, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+    overflow: dict[str, int] = defaultdict(int)
+    total_slots = sum(actual.values(), Decimal(0)) + Decimal(sum(end - start for start, end in intervals))
     by_id = {str(job["id"]): job for job in jobs}
-    for start, end in sorted(intervals, key=lambda pair: (-(pair[1] - pair[0]), pair[0], pair[1])):
-        job_id = min(
-            shares,
-            key=lambda key: (
-                actual[key] - shares[key] * total_slots,
-                str(by_id[key].get("name") or "").lower(), key,
-            ),
+
+    def headroom(key: str, start: int, end: int) -> int:
+        capacity = slot_capacity.get(key) or []
+        return min(
+            (capacity[i] if i < len(capacity) else 0) - used[key][i] for i in range(start, end)
         )
+
+    def deficit(key: str) -> tuple:
+        return (
+            actual.get(key, Decimal(0)) - shares[key] * total_slots,
+            str(by_id[key].get("name") or "").lower(), key,
+        )
+
+    for start, end in sorted(intervals, key=lambda pair: (-(pair[1] - pair[0]), pair[0], pair[1])):
+        minutes = (end - start) * POLICY_SLOT_MINUTES
+        fits = [
+            key for key in shares
+            if headroom(key, start, end) > 0 and minutes_left.get(key, 0) >= minutes
+        ]
+        if fits:
+            job_id = min(fits, key=deficit)
+        else:
+            job_id = min(shares, key=lambda key: (-headroom(key, start, end), *deficit(key)))
+            overflow[job_id] += 1
         assigned.append((start, end, by_id[job_id]))
-        actual[job_id] += Decimal(end - start)
-    return assigned
+        actual[job_id] = actual.get(job_id, Decimal(0)) + Decimal(end - start)
+        minutes_left[job_id] = minutes_left.get(job_id, 0) - minutes
+        for index in range(start, end):
+            used[job_id][index] += 1
+    return assigned, dict(overflow)
 
 
-def _qualified_leader(
-    profile: Mapping, jobs: list[dict], capacity,
-) -> tuple[dict | None, str | None]:
-    if profile.get("leader_required") is not True:
-        return None, None
-    ids = [str(value) for value in (profile.get("leader_job_ids") or [])]
+def _configured_leader_ids(profile: Mapping) -> set[str]:
+    ids = {str(value) for value in (profile.get("leader_job_ids") or [])}
     if not ids and profile.get("leader_job_id"):
-        ids = [str(profile["leader_job_id"])]
+        ids = {str(profile["leader_job_id"])}
+    return ids
+
+
+def _leader_jobs(
+    profile: Mapping, jobs: list[dict], capacity, gated_job_ids: AbstractSet[str],
+) -> tuple[list[dict], list[str]]:
+    """Every configured leader job someone can work, gated ones first.
+
+    Leader seats are spread across all of them (the rule is "any ONE of these
+    jobs on shift"), so one General Manager is not handed every leader seat of
+    the week. A leader job with no qualified list is open to the whole roster;
+    it is used only when no gated leader job has anyone, and said so — it used
+    to win outright because "everyone" outnumbers any real qualified list.
+    """
+    if profile.get("leader_required") is not True:
+        return [], []
+    ids = _configured_leader_ids(profile)
     options = [job for job in jobs if str(job["id"]) in ids and capacity.qualified_by_job.get(str(job["id"]), 0) > 0]
     if not options:
         names = [str(job.get("name")) for job in jobs if str(job["id"]) in ids]
-        return None, f"leader required but nobody is qualified for {', '.join(names) or 'the configured leader job'} — no leader seat planned"
-    return min(options, key=lambda j: (-capacity.qualified_by_job[str(j["id"])], str(j.get("name") or ""), str(j["id"]))), None
+        return [], [f"leader required but nobody is qualified for {', '.join(names) or 'the configured leader job'} — no leader seat planned"]
+    gated = [job for job in options if str(job["id"]) in gated_job_ids]
+    if gated:
+        return gated, []
+    names = [str(job.get("name") or "the leader job") for job in options]
+    verb = "has" if len(names) == 1 else "have"
+    return options, [(
+        f"{' and '.join(names)} {verb} no qualified list, so anyone can fill the leader seat — "
+        "name the qualified leaders in Jobs"
+    )]
+
+
+def _overflow_notes(overflow: Mapping[str, int], jobs: list[dict]) -> list[str]:
+    names = {str(job["id"]): str(job.get("name") or "Shift") for job in jobs}
+    return [
+        f"{count} shift{'s' if count != 1 else ''} exceed{'' if count != 1 else 's'} the staff "
+        f"qualified and available for {names.get(job_id, 'a job')}"
+        for job_id, count in sorted(overflow.items(), key=lambda item: names.get(item[0], ""))
+    ]
 
 
 def generate_autopilot_demand(
@@ -110,7 +179,8 @@ def generate_autopilot_demand(
     gated_job_ids: AbstractSet[str], sales_by_day: Mapping[date, Decimal],
     weather_by_day: Mapping[date, Mapping], history_shifts: Sequence[Mapping],
     blended_hourly_rate: Decimal | None = None,
-    hourly_sales: Mapping[tuple[date, int], Decimal] | None = None,
+    hourly_profile: Mapping[int, Mapping[int, Decimal]] | None = None,
+    holidays: Mapping[date, str] | None = None,
     anchor: date | None = None,
 ) -> AutopilotResult:
     profile = dict(profile or {})
@@ -119,25 +189,36 @@ def generate_autopilot_demand(
     sales = {day: Decimal(str(value)) for day, value in sales_by_day.items()}
     weather = {day: dict(value) for day, value in weather_by_day.items()}
     anchor = anchor or week_start
+    holiday_names = {day: str(name) for day, name in (holidays or {}).items()}
+    excluded = frozenset(holiday_names)
+    sensitivity = str(profile.get("weather_sensitivity") or "none")
     minimum, maximum, week_notes = _shift_bounds(profile)
     history = learn_history(
         [dict(row) for row in history_shifts], sales_by_day=sales,
         week_start_weekday=int(profile.get("week_start_weekday") or 0),
+        exclude_dates=excluded,
     )
-    capacity = roster_capacity(roster, jobs, {str(v) for v in gated_job_ids})
-    leader_job, leader_note = _qualified_leader(profile, jobs, capacity)
-    if leader_note:
-        week_notes.append(leader_note)
-    eligible = [
-        job for job in jobs
-        if capacity.qualified_by_job.get(str(job["id"]), 0) > 0
-        and (not leader_job or str(job["id"]) != str(leader_job["id"]))
-    ]
     windows = [day_window(week_start.fromordinal(week_start.toordinal() + index), profile) for index in range(7)]
+    gated = {str(v) for v in gated_job_ids}
+    availability = slot_availability(windows, roster, [str(job["id"]) for job in jobs], gated)
+    capacity = roster_capacity(roster, availability)
+    # Nobody schedulable is ONE fact; the leader, capacity and job notes it
+    # would otherwise trigger all restate it less clearly.
+    nobody_available = bool(roster.get("employees")) and capacity.employees == 0
+    leader_jobs, leader_notes = _leader_jobs(profile, jobs, capacity, gated)
+    if not nobody_available:
+        week_notes.extend(leader_notes)
+    leader_ids = _configured_leader_ids(profile) if leader_jobs else set()
+    staffable = [job for job in jobs if capacity.qualified_by_job.get(str(job["id"]), 0) > 0]
+    # Every configured leader job carries the leader seat, never crew seats —
+    # an unused open leader job ("anyone can be Assistant Manager") would
+    # otherwise soak up the crew mix. Unless they are the only jobs anyone
+    # can work, in which case they are the crew too.
+    eligible = [job for job in staffable if str(job["id"]) not in leader_ids] or staffable
     forecasts = [
         forecast_day(
             window.day, sales_by_day=sales, weather_by_day=weather,
-            sensitivity=str(profile.get("weather_sensitivity") or "none"), anchor=anchor,
+            sensitivity=sensitivity, anchor=anchor, exclude_dates=excluded,
         )
         for window in windows
     ]
@@ -146,21 +227,40 @@ def generate_autopilot_demand(
         labor_target(
             window, forecast, history=history, profile=profile,
             blended_hourly_rate=blended_hourly_rate,
-            leader_seat=bool(leader_job),
+            leader_seat=bool(leader_jobs),
         )
         for window, forecast in zip(windows, forecasts) if not window.closed
     ]
     targets, capacity_note = cap_week_to_capacity(targets, capacity)
-    if capacity_note:
+    if capacity_note and not nobody_available:
         week_notes.append(capacity_note)
     targets_by_day = {target.day: target for target in targets}
+    # Shared across the week so a job's qualified people are not promised
+    # the same hours on every day.
+    minutes_left = dict(capacity.minutes_by_job)
+    overflow: dict[str, int] = defaultdict(int)
+    leader_shares = {
+        str(job["id"]): Decimal(capacity.qualified_by_job[str(job["id"])]) for job in leader_jobs
+    }
+    leader_total = sum(leader_shares.values(), Decimal(0))
+    leader_shares = {key: value / leader_total for key, value in leader_shares.items()} if leader_total else {}
+    leader_balance: dict[str, Decimal] = {}
 
     rows: list[dict] = []
     days: list[dict] = []
-    if not eligible:
+    if nobody_available:
+        week_notes.append(
+            "nobody at this location has confirmed availability or is free this week — nothing to plan"
+        )
+    elif not eligible:
         week_notes.append("no job has a qualified employee — nothing to plan")
     for window, forecast in zip(windows, forecasts):
         notes = list(forecast.notes)
+        if window.day in holiday_names and not window.closed:
+            notes.append(
+                f"{holiday_names[window.day]} — past holidays are left out of the forecast, so this "
+                f"plans an ordinary {window.day.strftime('%A')}; set holiday staffing by hand"
+            )
         if window.note:
             notes.append(window.note)
         day_rows: list[dict] = []
@@ -170,8 +270,9 @@ def generate_autopilot_demand(
             curve = build_curve(
                 window, target,
                 min_floor=max(0, int(profile.get("min_floor_staff") or 0)),
-                leader_seat=bool(leader_job), shape=history.shape_for(window.weekday),
-                hourly_sales=dict(hourly_sales or {}), max_headcount=capacity.employees,
+                leader_seat=bool(leader_jobs), shape=history.shape_for(window.weekday),
+                hourly_profile=hourly_profile,
+                max_by_slot=availability.by_day.get(window.day, []),
             )
             notes.extend(target.notes)
             notes.extend(curve.notes)
@@ -181,18 +282,33 @@ def generate_autopilot_demand(
                 max_slots=max(1, maximum // POLICY_SLOT_MINUTES),
             )
             notes.extend(staff_cut.notes)
-            assignments = _assign_jobs(
+            slot_capacity = {
+                job_id: days_available.get(window.day, [])
+                for job_id, days_available in availability.by_job_day.items()
+            }
+            assignments, day_overflow = _assign_jobs(
                 staff_cut.intervals, eligible,
                 _job_shares(eligible, history, window.weekday, capacity.qualified_by_job),
+                slot_capacity=slot_capacity, minutes_left=minutes_left,
             )
-            if leader_job:
+            if leader_jobs:
                 leader_cut = cut_shifts(
                     curve.leader,
                     min_slots=max(1, minimum // POLICY_SLOT_MINUTES),
                     max_slots=max(1, maximum // POLICY_SLOT_MINUTES),
                 )
                 notes.extend(leader_cut.notes)
-                assignments.extend((a, b, leader_job) for a, b in leader_cut.intervals)
+                leader_assignments, leader_overflow = _assign_jobs(
+                    leader_cut.intervals, leader_jobs, leader_shares,
+                    slot_capacity=slot_capacity, minutes_left=minutes_left,
+                    balance=leader_balance,
+                )
+                assignments.extend(leader_assignments)
+                for job_id, count in leader_overflow.items():
+                    day_overflow[job_id] = day_overflow.get(job_id, 0) + count
+            for job_id, count in day_overflow.items():
+                overflow[job_id] += count
+            notes.extend(_overflow_notes(day_overflow, jobs))
             merged: dict[tuple, int] = defaultdict(int)
             for start_index, end_index, job in assignments:
                 merged[(start_index, end_index, str(job["id"]), str(job.get("name") or "Shift"))] += 1
@@ -274,21 +390,29 @@ def generate_autopilot_demand(
     confidence = week_confidence(forecasts, {window.day for window in windows if not window.closed})
     inputs_used = ["operating_hours", "roster"]
     inputs_missing: list[str] = []
-    for name, present in (
-        ("sales_history", bool(sales)), ("weather", bool(weather)),
-        ("published_history", history.present()),
-        ("hourly_sales", bool(hourly_sales)),
-        ("blended_hourly_rate", blended_hourly_rate is not None),
-        ("target_labor_pct", profile.get("target_labor_pct") is not None),
-    ):
+    # Only inputs that could have changed THIS plan are reported: weather for a
+    # store that is not weather-sensitive, or a labor target with no sales to
+    # apply it to, is not "missing" — listing it sent managers chasing it.
+    checks: list[tuple[str, bool]] = [
+        ("sales_history", bool(sales)), ("published_history", history.present()),
+    ]
+    if sensitivity in ("rain_hurts", "rain_helps"):
+        checks.append(("weather", bool(weather)))
+    if forecast_total_values:
+        checks.extend((
+            ("blended_hourly_rate", blended_hourly_rate is not None),
+            ("target_labor_pct", profile.get("target_labor_pct") is not None),
+        ))
+    if hourly_profile:
+        checks.append(("hourly_sales", True))
+    for name, present in checks:
         (inputs_used if present else inputs_missing).append(name)
-    sales_weeks = len({
-        day - timedelta(days=day.weekday()) for day in sales
-        if day < anchor
-    })
+    # Counted in days, the unit readiness reports: a Wednesday-to-Tuesday
+    # fortnight touches three calendar weeks but is two weeks of sales.
+    sales_days = sum(1 for day in sales if day < anchor)
     sentence = (
-        (f"Forecast ${forecast_total:,.0f} for the week from {sales_weeks} week(s) of sales "
-         f"({confidence} confidence); " if forecast_total is not None else "No sales forecast was available; ")
+        (f"Forecast ${forecast_total:,.0f} for the week from {sales_days} day{'s' if sales_days != 1 else ''} "
+         f"of sales ({confidence} confidence); " if forecast_total is not None else "No sales forecast was available; ")
         + f"{planned_hours.quantize(Decimal('0.1'))} labor hours planned."
     )
     demand_model = {
@@ -298,12 +422,21 @@ def generate_autopilot_demand(
         "labor_hours_target_week": _json_number(target_hours),
         "confidence": confidence, "inputs_used": inputs_used,
         "inputs_missing": inputs_missing,
-        "capacity": {"employees": capacity.employees, "weekly_hours": _json_number(capacity.weekly_hours)},
+        "capacity": {
+            "employees": capacity.employees, "weekly_hours": _json_number(capacity.weekly_hours),
+            "shifts_beyond_qualified_staff": sum(overflow.values()),
+        },
+        "holidays": [
+            {"date": day.isoformat(), "name": name}
+            for day, name in holiday_names.items() if week_start <= day < week_start + timedelta(days=7)
+        ],
         "policy": {
             "min_shift_minutes": minimum, "max_shift_minutes": maximum,
             "slot_minutes": POLICY_SLOT_MINUTES,
             "floor_staff": int(profile.get("min_floor_staff") or 0),
-            "leader_seat": bool(leader_job), "weather": profile.get("weather_sensitivity") or "none",
+            "leader_seat": bool(leader_jobs),
+            "leader_jobs": [str(job.get("name") or "") for job in leader_jobs],
+            "weather": sensitivity,
             "break_placeholder_minutes": POLICY_DEFAULT_BREAK_MINUTES,
             "break_threshold_minutes": POLICY_BREAK_THRESHOLD_MINUTES,
             "index_bounds": [float(POLICY_INDEX_MIN), float(POLICY_INDEX_MAX)],

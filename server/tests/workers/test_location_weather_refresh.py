@@ -26,6 +26,25 @@ class _Conn:
         self.closed = True
 
 
+@pytest.fixture(autouse=True)
+def _weather_key(monkeypatch):
+    monkeypatch.setattr(worker, "is_configured", lambda: True)
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_key_skips_before_claiming_or_geocoding(monkeypatch):
+    conn = _Conn()
+    monkeypatch.setattr(worker, "is_configured", lambda: False)
+    monkeypatch.setattr(worker, "get_db_connection", AsyncMock(return_value=conn))
+    monkeypatch.setattr(worker, "scheduler_settings_row", AsyncMock(return_value={
+        "enabled": True, "max_per_cycle": 50,
+    }))
+    coords = AsyncMock(side_effect=AssertionError("no geocode without a key"))
+    monkeypatch.setattr(worker, "ensure_location_coordinates", coords)
+    assert await worker._run() == {"status": "unconfigured"}
+    assert conn.query is None and conn.closed
+
+
 @pytest.mark.asyncio
 async def test_disabled_and_unclaimed_sweeps_do_not_fetch(monkeypatch):
     conn = _Conn()

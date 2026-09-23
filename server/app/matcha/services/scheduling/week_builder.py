@@ -37,7 +37,9 @@ from .schedule_profiles import fetch_effective_job_employee_ids
 from .schedule_intelligence import fetch_lapse_items
 from .labor_cost_service import cost_delta_for_rows
 from .schedule_review import build_week_draft_review, compliance_status_for, jurisdiction_message
-from .schedule_rules import align_week_start, availability_violations, template_windows
+from .schedule_rules import (
+    align_week_start, availability_violations, sunday_indexed_weekday, template_windows,
+)
 from .shift_compliance import check_shift_compliance, jurisdiction_rule_status
 from .shift_writes import (
     apply_assignment_core,
@@ -2069,14 +2071,19 @@ async def get_week_build_readiness(
                      AND local_date BETWEEN $3 AND $4""",
                 company_id, location_id, week_start, week_start + timedelta(days=6),
             ) or 0)
+            # Weeks as THIS location starts them (Postgres DOW is Sunday=0,
+            # the repo's weekday convention), not ISO Monday weeks — the
+            # engine's count, so the wizard and the review agree.
             history_weeks = int(await conn.fetchval(
-                """SELECT COUNT(DISTINCT date_trunc('week', starts_at))
+                """SELECT COUNT(DISTINCT (starts_at::date
+                         - ((EXTRACT(DOW FROM starts_at)::int - $5 + 7) % 7)))
                    FROM schedule_shifts
                    WHERE company_id=$1 AND location_id=$2 AND status='published'
                      AND kind='work' AND starts_at >= $3 AND starts_at < $4""",
                 company_id, location_id,
                 datetime.combine(week_start - timedelta(weeks=8), time.min, tzinfo=timezone.utc),
                 datetime.combine(week_start, time.min, tzinfo=timezone.utc),
+                sunday_indexed_weekday(week_start),
             ) or 0)
             job_rows = await conn.fetch(
                 """SELECT id FROM schedule_jobs
@@ -2233,13 +2240,28 @@ async def propose_week_draft(
     employee_hour_caps: Iterable[dict[str, Any]] | None = None,
     origin: str = "manual",
     actor_role: str | None = None,
+    supersede_proposed: bool = False,
 ) -> dict[str, Any]:
+    """Plan a whole week and persist it as a reviewable generation run.
+
+    ``supersede_proposed`` (a manager's own rebuild) marks the week's older
+    unapproved suggestion stale in the SAME transaction that inserts this one,
+    so a rebuild that is refused or fails leaves the previous suggestion in
+    place instead of an empty week.
+    """
     if origin not in {"manual", "automatic"}:
         return {"status": "refused", "message": "Unknown schedule generation origin."}
     try:
         constraints = _coerce_constraints(exclude_employee_ids, employee_hour_caps)
     except ValueError as exc:
         return {"status": "clarify", "message": str(exc)}
+    if (source_mode or "").strip().lower() == "autopilot":
+        # Before this function takes its connection: the refresh may geocode
+        # and call Google, and must not park a pooled connection on either.
+        from .autopilot.inputs import ensure_autopilot_weather
+        await ensure_autopilot_weather(
+            company_id=company_id, location_id=location_id, week_start=week_start,
+        )
     async with connection_or_direct() as conn:
         misaligned = await _misaligned_week(
             conn, company_id=company_id, location_id=location_id, week_start=week_start,
@@ -2467,21 +2489,30 @@ async def propose_week_draft(
             persisted_plan["demand_rows"] = _iso(demand_override or [])
             persisted_plan["demand_model"] = demand_model
         input_hash = _input_hash(snapshot)
-        insert_result = await conn.execute(
-            """
-            INSERT INTO schedule_generation_runs(
-                id, company_id, location_id, week_start, thread_id, source_mode,
-                week_template_id, origin, input_hash, planner_version, constraints,
-                proposal, metrics, created_by
-            ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb,$14)
-            ON CONFLICT DO NOTHING
-            """,
-            run_id, company_id, location_id, week_start, thread_id, selected_source,
-            template_uuid, origin, input_hash,
-            AUTOPILOT_PLANNER_VERSION if selected_source == "autopilot" else PLANNER_VERSION,
-            json.dumps(constraints),
-            json.dumps(_iso(persisted_plan)), json.dumps(plan["metrics"]), actor_user_id,
-        )
+        async with conn.transaction():
+            if supersede_proposed:
+                await conn.execute(
+                    """UPDATE schedule_generation_runs
+                       SET status='stale', updated_at=NOW()
+                       WHERE company_id=$1 AND location_id=$2 AND week_start=$3
+                         AND status='proposed'""",
+                    company_id, location_id, week_start,
+                )
+            insert_result = await conn.execute(
+                """
+                INSERT INTO schedule_generation_runs(
+                    id, company_id, location_id, week_start, thread_id, source_mode,
+                    week_template_id, origin, input_hash, planner_version, constraints,
+                    proposal, metrics, created_by
+                ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb,$14)
+                ON CONFLICT DO NOTHING
+                """,
+                run_id, company_id, location_id, week_start, thread_id, selected_source,
+                template_uuid, origin, input_hash,
+                AUTOPILOT_PLANNER_VERSION if selected_source == "autopilot" else PLANNER_VERSION,
+                json.dumps(constraints),
+                json.dumps(_iso(persisted_plan)), json.dumps(plan["metrics"]), actor_user_id,
+            )
         if insert_result == "INSERT 0 0":
             return {
                 "status": "skipped",

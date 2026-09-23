@@ -800,7 +800,8 @@ export type AutopilotDemandModel = {
   confidence: 'none' | 'low' | 'medium' | 'high'
   inputs_used: string[]
   inputs_missing: string[]
-  capacity: { employees: number; weekly_hours: number }
+  capacity: { employees: number; weekly_hours: number; shifts_beyond_qualified_staff?: number }
+  holidays?: Array<{ date: string; name: string }>
   policy: Record<string, unknown>
   notes: string[]
   sentence: string

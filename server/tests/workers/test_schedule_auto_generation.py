@@ -329,7 +329,11 @@ async def test_manager_rebuild_supersedes_only_unapproved_suggestion(monkeypatch
     # an applied one still does.
     assert "status='applied'" in conn.existing_query
     assert "'proposed'" not in conn.existing_query
-    assert any("AND status='proposed'" in query for query in conn.stale_queries)
+    # Retiring the old suggestion is propose_week_draft's job, inside the
+    # transaction that inserts its replacement — never here, ahead of a
+    # build that might be refused.
+    assert not any("status='proposed'" in query for query in conn.stale_queries)
+    assert propose.await_args.kwargs["supersede_proposed"] is True
     assert readiness.await_args.kwargs["source_mode"] == "autopilot"
     kwargs = propose.await_args.kwargs
     assert (kwargs["actor_user_id"], kwargs["actor_role"]) == (user_id, "client")

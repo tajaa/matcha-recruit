@@ -40,7 +40,15 @@ def _d(value) -> Decimal:
 
 def learn_history(
     rows: list[dict], *, sales_by_day: dict[date, Decimal], week_start_weekday: int,
+    exclude_dates: frozenset[date] = frozenset(),
 ) -> HistoryModel:
+    """Learn from published weeks, skipping `exclude_dates` (holidays).
+
+    A slot's shape value is its mean headcount over EVERY observed date of
+    that weekday — a slot staffed on one Monday in eight is 1/8 of that
+    headcount, not all of it. Averaging only over the days that staffed the
+    slot handed a one-off event night full weight in every future curve.
+    """
     heads: dict[date, dict[int, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
     hours: dict[date, Decimal] = defaultdict(Decimal)
     jobslots: dict[date, dict[str, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
@@ -53,6 +61,8 @@ def learn_history(
         if seats <= 0:
             continue
         business_day = start.date()
+        if business_day in exclude_dates:
+            continue
         weeks.add(business_day - timedelta(days=(sunday_weekday(business_day) - week_start_weekday) % 7))
         first = slot_index_from_midnight(start, business_day)
         slot_count = int((end - start).total_seconds() // (POLICY_SLOT_MINUTES * 60))
@@ -87,7 +97,9 @@ def learn_history(
 
     shape_by_weekday = {
         weekday: {
-            slot: (sum(values, Decimal(0)) / len(values)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_EVEN)
+            slot: (sum(values, Decimal(0)) / dates_by_weekday[weekday]).quantize(
+                Decimal("0.0001"), rounding=ROUND_HALF_EVEN,
+            )
             for slot, values in sorted(slots.items())
         }
         for weekday, slots in sorted(shapes.items())

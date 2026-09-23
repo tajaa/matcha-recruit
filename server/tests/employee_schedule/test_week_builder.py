@@ -1854,6 +1854,7 @@ def _autopilot_env(monkeypatch, conn, *, demand, features=None, existing=(), pub
     monkeypatch.setattr(week_builder, "load_profile_bundle", AsyncMock(return_value={"profile": {}}))
     monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={"employees": []}))
     monkeypatch.setattr(autopilot_inputs, "load_autopilot_inputs", AsyncMock(return_value={}))
+    monkeypatch.setattr(autopilot_inputs, "ensure_autopilot_weather", AsyncMock())
     model = demand_model if demand_model is not None else {
         "notes": [], "sentence": "Forecast $1,000 for the week.", "forecast_sales_week": 1000.0,
     }
@@ -1892,6 +1893,82 @@ async def test_autopilot_needs_the_premium_flag_and_something_to_staff(monkeypat
     result = await _propose_autopilot()
     assert result["status"] == "refused"
     assert result["message"] == "Autopilot found nothing to staff: no job has a qualified employee"
+
+
+class _TxConn(_FakeConn):
+    """Records where each statement ran relative to its transaction."""
+
+    def transaction(self):
+        conn = self
+
+        class _Tx:
+            async def __aenter__(self):
+                conn.executed.append(("BEGIN",))
+
+            async def __aexit__(self, exc_type, exc, tb):
+                conn.executed.append(("COMMIT",) if exc_type is None else ("ROLLBACK",))
+                return False
+
+        return _Tx()
+
+
+@pytest.mark.asyncio
+async def test_rebuild_retires_the_old_suggestion_with_its_replacement(monkeypatch):
+    conn = _TxConn(None)
+    _autopilot_env(monkeypatch, conn, demand=[_demand_shift()])
+    result = await _propose_autopilot(supersede_proposed=True)
+    assert result["status"] == "ready"
+    statements = [call[0].split()[0] if call[0] not in ("BEGIN", "COMMIT") else call[0]
+                  for call in conn.executed]
+    begin = statements.index("BEGIN")
+    assert statements[begin:begin + 4] == ["BEGIN", "UPDATE", "INSERT", "COMMIT"]
+    assert "status='proposed'" in conn.executed[begin + 1][0]
+
+    # A plain build never retires anything.
+    conn = _TxConn(None)
+    _autopilot_env(monkeypatch, conn, demand=[_demand_shift()])
+    await _propose_autopilot()
+    assert not any("SET status='stale'" in call[0] for call in conn.executed)
+
+
+@pytest.mark.asyncio
+async def test_refused_rebuild_keeps_the_previous_suggestion(monkeypatch):
+    conn = _TxConn(None)
+    _autopilot_env(monkeypatch, conn, demand=[], demand_model={"notes": ["no job has a qualified employee"]})
+    result = await _propose_autopilot(supersede_proposed=True)
+    assert result["status"] == "refused"
+    assert not any("schedule_generation_runs" in call[0] for call in conn.executed)
+
+
+@pytest.mark.asyncio
+async def test_autopilot_weather_is_refreshed_before_the_build_takes_a_connection(monkeypatch):
+    from app.matcha.services.scheduling.autopilot import inputs as autopilot_inputs
+
+    events: list[str] = []
+    conn = _FakeConn(None)
+    _autopilot_env(monkeypatch, conn, demand=[_demand_shift()])
+
+    class _Tracked(_AsyncContext):
+        async def __aenter__(self):
+            events.append("connection")
+            return self.value
+
+    async def ensure(**kwargs):
+        events.append("weather")
+        assert kwargs == {"company_id": COMPANY_ID, "location_id": LOCATION_ID, "week_start": WEEK_START}
+
+    monkeypatch.setattr(week_builder, "connection_or_direct", lambda: _Tracked(conn))
+    monkeypatch.setattr(autopilot_inputs, "ensure_autopilot_weather", ensure)
+    await _propose_autopilot()
+    assert events[:2] == ["weather", "connection"]
+
+    # Template and existing-draft builds never touch the weather provider.
+    events.clear()
+    await week_builder.propose_week_draft(
+        company_id=COMPANY_ID, actor_user_id=None, thread_id=None,
+        location_id=LOCATION_ID, week_start=WEEK_START, source_mode="existing",
+    )
+    assert "weather" not in events
 
 
 @pytest.mark.asyncio
