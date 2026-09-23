@@ -53,6 +53,7 @@ export default function IrSidebar() {
 
   return (
     <SidebarShell
+      workspaceSwitch
       logoTo="/app/ir"
       logoLabel="Matcha Lite"
       nav={loading ? [] : items}

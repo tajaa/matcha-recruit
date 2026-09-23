@@ -192,6 +192,7 @@ export default function ClientSidebar() {
 
   return (
     <SidebarShell
+      workspaceSwitch
       logoTo={isPersonal ? '/werk' : '/app'}
       logoLabel="Matcha"
       nav={loading ? [] : isPersonal ? personalNav : withBadges(withBrokerChat(filterByFeatures(nav)))}

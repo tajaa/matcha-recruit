@@ -1,11 +1,13 @@
 import { NavLink, useLocation, Link } from 'react-router-dom'
-import { LogOut, Settings, ChevronDown, Lock, PanelLeftClose } from 'lucide-react'
+import { LogOut, Settings, ChevronDown, Lock, PanelLeftClose, LayoutGrid, Radio } from 'lucide-react'
 import { useState, useEffect, useRef, type ComponentType } from 'react'
 import Avatar from '../shared/Avatar'
 import { useMe } from '../../hooks/useMe'
 import { logoutSession } from '../../api/client'
 import { useLayoutContext } from '../../layouts/LayoutContext'
 import ThemeToggle from '../shared/ThemeToggle'
+import { useOpsNav } from '../../ops/hooks/useOpsNav'
+import { isOpsPath, withoutOpsRows, type Workspace } from './workspaceNav'
 
 /** Any glyph the rail can render: the hand-drawn set in nav-icons.tsx, or a
  *  lucide icon (whose props are a superset of these). */
@@ -52,6 +54,9 @@ type SidebarShellProps = {
   /** Small accessory rendered in the footer next to logout (both collapsed +
    *  expanded) — e.g. a theme toggle. */
   footerSlot?: React.ReactNode
+  /** Tenant rails: when the company has `matcha_ops`, show the Matcha | Ops
+   *  switch — Matcha lists this `nav`, Ops lists the /ops pages. */
+  workspaceSwitch?: boolean
 }
 
 function isGroup(item: NavItem | NavGroup): item is NavGroup {
@@ -67,7 +72,7 @@ function isGroup(item: NavItem | NavGroup): item is NavGroup {
 // match, so only Risk Insights is active there — Incidents still wins on its
 // own sub-routes (e.g. an incident detail page) since nothing else matches.
 function matchLength(pathname: string, to: string): number {
-  const isExact = to === '/app' || to === '/admin' || to === '/broker'
+  const isExact = to === '/app' || to === '/admin' || to === '/broker' || to === '/ops'
   if (isExact) return pathname === to ? to.length : -1
   return pathname === to || pathname.startsWith(`${to}/`) ? to.length : -1
 }
@@ -123,7 +128,7 @@ function NavItemLink({ item, activeTo, collapsed }: { item: NavItem; activeTo: s
 
   const seenRef = useRef(false)
   const onSeenRef = useRef(item.onSeen)
-  onSeenRef.current = item.onSeen
+  useEffect(() => { onSeenRef.current = item.onSeen })
   useEffect(() => {
     if (isActive && item.badge && item.badge > 0 && !seenRef.current) {
       seenRef.current = true
@@ -191,10 +196,12 @@ function NavItemLink({ item, activeTo, collapsed }: { item: NavItem; activeTo: s
 function NavGroupSection({ group, activeTo, collapsed }: { group: NavGroup; activeTo: string | null; collapsed: boolean }) {
   const hasActiveChild = group.items.some((item) => item.to === activeTo)
   const [open, setOpen] = useState(group.defaultOpen || hasActiveChild)
-
-  useEffect(() => {
+  // Opens when a child becomes active; the user can still fold it afterwards.
+  const [wasActive, setWasActive] = useState(hasActiveChild)
+  if (hasActiveChild !== wasActive) {
+    setWasActive(hasActiveChild)
     if (hasActiveChild) setOpen(true)
-  }, [hasActiveChild])
+  }
 
   // Collapsed rail has no room for labels; a hairline keeps the grouping as
   // rhythm rather than dropping it.
@@ -232,7 +239,51 @@ function NavGroupSection({ group, activeTo, collapsed }: { group: NavGroup; acti
   )
 }
 
-export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFooter, footerSlot = <ThemeToggle /> }: SidebarShellProps) {
+function WorkspaceSwitch({ value, onChange, collapsed }: { value: Workspace; onChange: (w: Workspace) => void; collapsed: boolean }) {
+  // Collapsed: one button that flips to the other side, showing where you are.
+  if (collapsed) {
+    const Icon = value === 'ops' ? Radio : LayoutGrid
+    const other = value === 'ops' ? 'Matcha' : 'Ops'
+    return (
+      <div className="flex justify-center pb-2">
+        <button
+          type="button"
+          onClick={() => onChange(value === 'ops' ? 'matcha' : 'ops')}
+          title={`Switch to ${other}`}
+          aria-label={`Switch to ${other}`}
+          className="rounded-md p-2 text-zinc-300 ring-1 ring-zinc-800 transition-colors hover:bg-zinc-900 hover:text-zinc-100"
+        >
+          <Icon className="h-4 w-4" strokeWidth={1.6} />
+        </button>
+      </div>
+    )
+  }
+  return (
+    <div role="tablist" aria-label="Workspace" className="mx-2.5 mb-3 grid grid-cols-2 gap-0.5 rounded-lg bg-zinc-900 p-0.5 ring-1 ring-zinc-800">
+      {(['matcha', 'ops'] as const).map((w) => {
+        const selected = value === w
+        const Icon = w === 'ops' ? Radio : LayoutGrid
+        return (
+          <button
+            key={w}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            onClick={() => onChange(w)}
+            className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-600 ${
+              selected ? 'bg-zinc-800 font-medium text-zinc-100 shadow-sm' : 'font-light text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Icon className="h-3.5 w-3.5" strokeWidth={1.6} />
+            {w === 'ops' ? 'Ops' : 'Matcha'}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFooter, footerSlot = <ThemeToggle />, workspaceSwitch = false }: SidebarShellProps) {
   const location = useLocation()
   const { sidebarCollapsed, setSidebarCollapsed } = useLayoutContext()
   const [loggingOut, setLoggingOut] = useState(false)
@@ -247,10 +298,22 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
     return item.feature && isBetaFeature(item.feature) ? { ...item, tag: item.tag ?? 'Beta' } : item
   }
 
+  // Matcha | Ops: the side follows the URL (so landing in /ops shows the Ops
+  // list) but a click only swaps the list — it doesn't navigate anywhere.
+  const opsNav = useOpsNav(workspaceSwitch)
+  const inOps = isOpsPath(location.pathname)
+  const [workspace, setWorkspace] = useState<Workspace>(inOps ? 'ops' : 'matcha')
+  const [wasInOps, setWasInOps] = useState(inOps)
+  if (inOps !== wasInOps) {
+    setWasInOps(inOps)
+    setWorkspace(inOps ? 'ops' : 'matcha')
+  }
+  const shownNav = opsNav ? (workspace === 'ops' ? opsNav : withoutOpsRows(nav)) : nav
+
   // Enforce the `feature` contract declared on NavItem/NavGroup for every
   // sidebar that renders through this shell. Locked upsell entries carry no
   // `feature` key, so they survive the filter and render their lock UI.
-  const visibleNav = nav.reduce<(NavItem | NavGroup)[]>((out, item) => {
+  const visibleNav = shownNav.reduce<(NavItem | NavGroup)[]>((out, item) => {
     if (isGroup(item)) {
       if (item.feature && !hasFeature(item.feature)) return out
       const items = item.items.filter((child) => !child.feature || hasFeature(child.feature)).map(withBetaTag)
@@ -324,6 +387,8 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
           </>
         )}
       </div>
+
+      {opsNav && <WorkspaceSwitch value={workspace} onChange={setWorkspace} collapsed={sidebarCollapsed} />}
 
       {/* Index */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden pb-3 pl-2.5 pr-2.5 pt-1">

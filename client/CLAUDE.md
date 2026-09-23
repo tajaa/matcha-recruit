@@ -95,6 +95,9 @@ client/src/
   - `pages/admin/newsletter/ComposeTab.tsx` → `work/components/panels/SectionEditor`
   - `pages/shared/CandidateInterview.tsx` → `work/hooks/useVoiceSession`
   - `components/sidebars/SidebarShell.tsx` → `work/api/channelSocket` (disconnect-on-logout)
+  - `components/sidebars/SidebarShell.tsx` → `ops/hooks/useOpsNav` → `work/api/channels` (the rail's
+    Matcha | Ops switch lists the company's operations channels; `/ops` renders this same rail via
+    `ops/components/OpsWorkspaceSidebar`)
   - work→matcha (reverse): `MatchaWorkThread` → `api/compliance` + `types/compliance`;
     `TaskBoard` → `types/dashboard`; `channels/JobPostingDetail` → `api/profileResume`;
     `work/components/panels/HuumePanel/HandbookDraftsViewer` → `api/handbook-pilot`;
