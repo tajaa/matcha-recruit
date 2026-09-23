@@ -176,3 +176,39 @@ async def test_loaders_are_location_scoped_and_published_only():
     assert await inputs.load_blended_hourly_rate(
         conn, company_id=company_id, location_id=location_id,
     ) is None
+
+
+@pytest.mark.asyncio
+async def test_pos_only_days_never_double_count_or_revive_a_discard(monkeypatch):
+    conn = AsyncMock()
+    conn.fetch.return_value = [{"business_date": date(2026, 9, 1), "gross_sales": 640}]
+    company_id, location_id = uuid4(), uuid4()
+    pos_only = await inputs.load_pos_only_sales_by_day(
+        conn, company_id=company_id, location_id=location_id,
+        start=date(2026, 6, 1), end=date(2026, 9, 20),
+    )
+    assert pos_only == {date(2026, 9, 1): Decimal(640)}
+    sql = conn.fetch.await_args.args[0]
+    assert "si.status IN ('committed', 'discarded')" in sql and "h.connection_id IS NOT NULL" in sql
+
+    # A committed import beats the POS total for the same day.
+    week_start = date(2026, 9, 21)
+    committed = {date(2026, 9, 1): Decimal(600)}
+    monkeypatch.setattr(inputs, "load_sales_by_day", AsyncMock(return_value=committed))
+    monkeypatch.setattr(inputs, "load_pos_only_sales_by_day", AsyncMock(return_value={
+        date(2026, 9, 1): Decimal(640), date(2026, 9, 2): Decimal(500),
+    }))
+    monkeypatch.setattr(inputs, "load_sales_hours", AsyncMock(return_value=[]))
+    monkeypatch.setattr(inputs, "load_weather_days", AsyncMock(return_value={}))
+    monkeypatch.setattr(inputs, "load_location_holidays", AsyncMock(return_value={}))
+    monkeypatch.setattr(inputs, "load_schedule_history", AsyncMock(return_value=[]))
+    monkeypatch.setattr(inputs, "load_blended_hourly_rate", AsyncMock(return_value=None))
+    conn = AsyncMock()
+    conn.fetch.return_value = []
+    loaded = await inputs.load_autopilot_inputs(
+        conn, company_id=company_id, location_id=location_id,
+        week_start=week_start, roster={}, profile_bundle={},
+    )
+    assert loaded["sales_by_day"] == {date(2026, 9, 1): Decimal(600), date(2026, 9, 2): Decimal(500)}
+    assert loaded["unreviewed_sales_days"] == frozenset({date(2026, 9, 1), date(2026, 9, 2)})
+    assert loaded["hourly_profile"] == {}

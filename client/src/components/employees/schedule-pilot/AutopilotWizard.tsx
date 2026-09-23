@@ -159,10 +159,11 @@ export default function AutopilotWizard({
           {step === 1 && (
             <>
               <p className="text-sm leading-6 text-zinc-300">These inputs shape demand, but missing sales, weather, or history will not block a build. Autopilot falls back to the saved coverage floor and explains what it could not use.</p>
-              <div className="grid gap-2 sm:grid-cols-3">
+              <div className="grid gap-2 sm:grid-cols-4">
                 <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3"><p className="text-[10px] uppercase tracking-wide text-zinc-500">Sales</p><p className="mt-1 text-sm text-zinc-200">{quality ? `${quality.sales_weeks} weeks · ${quality.sales_confidence} confidence` : 'Checking…'}</p></div>
                 <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3"><p className="text-[10px] uppercase tracking-wide text-zinc-500">Weather</p><p className="mt-1 text-sm text-zinc-200">{quality ? `${quality.weather_days_available} of 7 days` : 'Checking…'}</p></div>
                 <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3"><p className="text-[10px] uppercase tracking-wide text-zinc-500">Past schedules</p><p className="mt-1 text-sm text-zinc-200">{quality ? `${quality.history_weeks} weeks` : 'Checking…'}</p></div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3"><p className="text-[10px] uppercase tracking-wide text-zinc-500">Hourly sales</p><p className="mt-1 text-sm text-zinc-200">{quality ? (quality.hourly_sales_days ? `${quality.hourly_sales_days} days` : 'None — POS sync adds it') : 'Checking…'}</p></div>
               </div>
               <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
                 <h3 className="text-xs font-medium text-zinc-200">Planning choices</h3>

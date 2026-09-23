@@ -181,6 +181,7 @@ def generate_autopilot_demand(
     blended_hourly_rate: Decimal | None = None,
     hourly_profile: Mapping[int, Mapping[int, Decimal]] | None = None,
     holidays: Mapping[date, str] | None = None,
+    unreviewed_sales_days: AbstractSet[date] = frozenset(),
     anchor: date | None = None,
 ) -> AutopilotResult:
     profile = dict(profile or {})
@@ -193,6 +194,12 @@ def generate_autopilot_demand(
     excluded = frozenset(holiday_names)
     sensitivity = str(profile.get("weather_sensitivity") or "none")
     minimum, maximum, week_notes = _shift_bounds(profile)
+    unreviewed = sum(1 for day in unreviewed_sales_days if day in sales and day < anchor)
+    if unreviewed:
+        week_notes.append(
+            f"{unreviewed} day{'s' if unreviewed != 1 else ''} of sales use POS-finalized totals "
+            "whose item mapping is still pending review"
+        )
     history = learn_history(
         [dict(row) for row in history_shifts], sales_by_day=sales,
         week_start_weekday=int(profile.get("week_start_weekday") or 0),
@@ -403,7 +410,7 @@ def generate_autopilot_demand(
             ("blended_hourly_rate", blended_hourly_rate is not None),
             ("target_labor_pct", profile.get("target_labor_pct") is not None),
         ))
-    if hourly_profile:
+    if any(day.get("shape_source") == "hourly_sales" for day in days):
         checks.append(("hourly_sales", True))
     for name, present in checks:
         (inputs_used if present else inputs_missing).append(name)

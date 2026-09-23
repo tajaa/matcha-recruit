@@ -124,3 +124,134 @@ def test_scheduled_sync_uses_each_binding_timezone_for_yesterday():
     assert previous_completed_business_date("America/Los_Angeles", now) == date(2026, 8, 20)
     assert previous_completed_business_date("Asia/Tokyo", now) == date(2026, 8, 21)
     assert previous_completed_business_date("not/a-timezone", now) == date(2026, 8, 21)
+
+
+@pytest.mark.asyncio
+async def test_square_buckets_the_same_dollars_by_local_close_hour():
+    provider = FakeSquare()
+
+    async def request(method, path, credentials, **kwargs):
+        line = {"catalog_object_id": "coffee", "name": "Latte", "quantity": "1", "total_money": {"amount": 500}}
+        return {
+            "orders": [
+                # 07:10 and 07:40 PDT, then 12:05 PDT with a refund.
+                {"closed_at": "2026-08-17T14:10:00Z", "line_items": [line]},
+                {"closed_at": "2026-08-17T14:40:00Z", "line_items": [line, line]},
+                {"closed_at": "2026-08-17T19:05:00Z", "line_items": [line],
+                 "returns": [{"line_items": [{**line, "total_money": {"amount": 200}}]}]},
+            ],
+            "cursor": None,
+        }
+
+    provider._request = request
+    days = await provider.fetch_finalized_sales(
+        credentials={"access_token": "token"}, external_location_id="loc-1",
+        start_date=date(2026, 8, 17), end_date=date(2026, 8, 17), timezone="America/Los_Angeles",
+    )
+    hours = {item.hour: (item.gross_sales, item.order_count) for item in days[0].hours}
+    assert hours == {7: (Decimal("15"), 2), 12: (Decimal("3"), 1)}
+    # The hours carry exactly the day's line dollars, refunds included.
+    assert sum(value for value, _ in hours.values()) == sum(line.gross_sales for line in days[0].lines)
+
+
+class _HourConn:
+    def __init__(self):
+        self.calls = []
+
+    def transaction(self):
+        conn = self
+
+        class _Tx:
+            async def __aenter__(self):
+                conn.calls.append(("BEGIN",))
+
+            async def __aexit__(self, *_exc):
+                conn.calls.append(("COMMIT",))
+                return False
+
+        return _Tx()
+
+    async def execute(self, query, *args):
+        self.calls.append(("execute", query, args))
+
+    async def executemany(self, query, rows):
+        self.calls.append(("executemany", query, rows))
+
+
+@pytest.mark.asyncio
+async def test_sales_hours_replace_the_day_whole():
+    from uuid import uuid4
+
+    from app.matcha.services.inventory.pos.base import ExternalSalesHour
+    from app.matcha.services.inventory.sales_hourly import replace_sales_hours
+
+    conn = _HourConn()
+    company_id, location_id, connection_id = uuid4(), uuid4(), uuid4()
+    written = await replace_sales_hours(
+        conn, company_id=company_id, location_id=location_id, business_date=date(2026, 8, 17),
+        source="square", connection_id=connection_id,
+        hours=[ExternalSalesHour(7, Decimal("15"), 2), ExternalSalesHour(12, Decimal("3"), 1)],
+    )
+    assert written == 2
+    kinds = [call[0] for call in conn.calls]
+    assert kinds == ["BEGIN", "execute", "executemany", "COMMIT"]
+    assert "DELETE FROM inventory_sales_hourly" in conn.calls[1][1]
+    assert conn.calls[2][2][0] == (
+        company_id, location_id, date(2026, 8, 17), 7, Decimal("15"), 2, "square", connection_id,
+    )
+    # A provider with nothing to say by hour never erases a day that had hours.
+    conn = _HourConn()
+    assert await replace_sales_hours(
+        conn, company_id=company_id, location_id=location_id, business_date=date(2026, 8, 17),
+        source="square", connection_id=connection_id, hours=[],
+    ) == 0
+    assert conn.calls == []
+
+
+class _SyncConn(_HourConn):
+    def __init__(self, binding):
+        super().__init__()
+        self.binding = binding
+
+    async def fetch(self, query, *args):
+        return [self.binding] if "inventory_pos_location_bindings" in query else []
+
+    async def fetchrow(self, query, *args):
+        return {"id": "run-1"}
+
+
+@pytest.mark.asyncio
+async def test_sync_records_hours_even_for_a_duplicate_day(monkeypatch):
+    from uuid import uuid4
+
+    from app.matcha.services.inventory.pos import sync
+    from app.matcha.services.inventory.pos.base import ExternalSalesHour, FinalizedSalesDay
+    from app.matcha.services.inventory.sales_commit import DuplicateSalesPeriodError
+
+    location_id = uuid4()
+    binding = {"id": uuid4(), "location_id": location_id, "external_location_id": "loc-1",
+               "timezone": "America/Los_Angeles"}
+    day = FinalizedSalesDay(
+        external_location_id="loc-1", business_date=date(2026, 8, 17), timezone="America/Los_Angeles",
+        external_batch_id="loc-1:2026-08-17", lines=[], hours=(ExternalSalesHour(7, Decimal("15"), 2),),
+    )
+
+    class Provider:
+        async def fetch_finalized_sales(self, **_kwargs):
+            return [day]
+
+    async def duplicate(*_args, **_kwargs):
+        raise DuplicateSalesPeriodError("already committed")
+
+    monkeypatch.setattr(sync, "provider_for", lambda _name: Provider())
+    monkeypatch.setattr(sync, "_credentials", lambda _secrets: {"access_token": "t"})
+    monkeypatch.setattr(sync, "encrypt_secret", lambda value: value)
+    monkeypatch.setattr(sync.sales_commit, "commit_sales_import", duplicate)
+    conn = _SyncConn(binding)
+    connection = {"id": uuid4(), "company_id": uuid4(), "provider": "square", "secrets": {}}
+    result = await sync._sync_one_connection(
+        conn, connection=connection, start_date=date(2026, 8, 17), end_date=date(2026, 8, 17),
+    )
+    assert result["duplicates_skipped"] == 1
+    rows = next(call[2] for call in conn.calls if call[0] == "executemany")
+    assert rows[0][1] == location_id and rows[0][3] == 7

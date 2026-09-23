@@ -816,6 +816,7 @@ export type AutopilotReadiness = {
     sales_confidence: 'none' | 'low' | 'medium' | 'high'
     weather_days_available: number
     history_weeks: number
+    hourly_sales_days?: number
   } | null
 }
 

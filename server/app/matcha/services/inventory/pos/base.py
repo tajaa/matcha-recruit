@@ -16,12 +16,24 @@ class ExternalSalesLine:
 
 
 @dataclass(frozen=True)
+class ExternalSalesHour:
+    """One local clock hour of a day's finalized sales, by order close time."""
+
+    hour: int
+    gross_sales: Decimal
+    order_count: int
+
+
+@dataclass(frozen=True)
 class FinalizedSalesDay:
     external_location_id: str
     business_date: date
     timezone: str
     external_batch_id: str
     lines: list[ExternalSalesLine]
+    # Same dollars as `lines`, bucketed by the hour each order closed.
+    # Empty for a provider that cannot say when.
+    hours: tuple[ExternalSalesHour, ...] = ()
 
 
 class POSProvider(Protocol):

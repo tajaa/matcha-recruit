@@ -1085,8 +1085,23 @@ default `location_weather_refresh` task and never overwrite a past civil day.
 
 V1 weather effects are explicit manager policy (`none`, `rain_hurts`, or
 `rain_helps`) and are shown in the demand model. They are not learned elasticity
-and are not a legal or optimality claim. Hourly POS demand, learned weather
-elasticity, employer burden, and Toast ingestion remain follow-ups.
+and are not a legal or optimality claim. Learned weather elasticity, employer
+burden, and Toast ingestion remain follow-ups.
+
+**Hourly POS shape (migration `autopilot03`).** The Square sync buckets each
+finalized order's line dollars by its local close hour into
+`inventory_sales_hourly` (`services/inventory/sales_hourly.replace_sales_hours`,
+one location-day replaced whole per sync, written BEFORE the import commit so a
+duplicate or still-draft day records hours and re-syncing an old range
+backfills). `history.learn_hourly_profile` turns eight weeks of it into a
+weekday → hour → share-of-day profile (each date normalized to its own total,
+≥`POLICY_MIN_HOURLY_DATES` dates per weekday, holidays out, refunds never
+negative demand) and `curve.slot_weights` prefers it over the published-history
+shape. The forecast still sets the day's SIZE; hours only set its shape. The
+same table also closes a forecast gap: a POS day whose import is still a draft
+(unmapped items) used to vanish from the forecast — `inputs.load_pos_only_
+sales_by_day` fills it from the hourly totals unless a committed import (wins)
+or a manager's discard exists, and the week note counts those days.
 
 Review fixes (2026-09-22, the first pass after launch) — each was a real miss:
 

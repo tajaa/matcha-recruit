@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.core.feature_flags import get_company_features
 from app.database import connection_or_direct
 
+from .history import learn_hourly_profile
 from .holidays import holidays_between
 from .policy import POLICY_SALES_HISTORY_DAYS
 from .weather_store import load_weather_days, refresh_location_weather
@@ -37,6 +38,52 @@ async def load_sales_by_day(
         company_id, location_id, start, end,
     )
     return {row["business_date"]: Decimal(str(row["gross_sales"])) for row in rows}
+
+
+async def load_pos_only_sales_by_day(
+    conn, *, company_id: UUID, location_id: UUID, start: date, end: date,
+) -> dict[date, Decimal]:
+    """POS-finalized totals for days with no reviewed import yet.
+
+    A Square day with any unmapped item stays a DRAFT import until someone maps
+    it, which hid the whole day's revenue from the forecast — though the dollars
+    are final and the mapping only matters for inventory depletion. Those days
+    come from the hourly totals instead. A day with a committed import is never
+    double counted, and a day a manager DISCARDED stays out.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT h.business_date, SUM(h.gross_sales) AS gross_sales
+        FROM inventory_sales_hourly h
+        WHERE h.company_id=$1 AND h.location_id=$2
+          AND h.business_date BETWEEN $3 AND $4
+          AND h.connection_id IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM inventory_sales_imports si
+              WHERE si.company_id=h.company_id AND si.location_id=h.location_id
+                AND si.business_date=h.business_date
+                AND si.status IN ('committed', 'discarded')
+          )
+        GROUP BY h.business_date ORDER BY h.business_date
+        """,
+        company_id, location_id, start, end,
+    )
+    return {row["business_date"]: Decimal(str(row["gross_sales"])) for row in rows}
+
+
+async def load_sales_hours(
+    conn, *, company_id: UUID, location_id: UUID, start: date, end: date,
+) -> list[dict]:
+    rows = await conn.fetch(
+        """
+        SELECT business_date, hour, gross_sales
+        FROM inventory_sales_hourly
+        WHERE company_id=$1 AND location_id=$2 AND business_date BETWEEN $3 AND $4
+        ORDER BY business_date, hour
+        """,
+        company_id, location_id, start, end,
+    )
+    return [dict(row) for row in rows]
 
 
 async def load_schedule_history(
@@ -180,16 +227,32 @@ async def load_autopilot_inputs(
         company_id, [row["id"] for row in jobs_rows],
     ) if jobs_rows else []
     sales_start = week_start - timedelta(days=POLICY_SALES_HISTORY_DAYS)
+    sales_end = week_start - timedelta(days=1)
+    holidays = await load_location_holidays(
+        conn, company_id=company_id, location_id=location_id,
+        start=sales_start, end=week_start + timedelta(days=6),
+    )
+    sales_by_day = await load_sales_by_day(
+        conn, company_id=company_id, location_id=location_id,
+        start=sales_start, end=sales_end,
+    )
+    pos_only = await load_pos_only_sales_by_day(
+        conn, company_id=company_id, location_id=location_id,
+        start=sales_start, end=sales_end,
+    )
+    hours = await load_sales_hours(
+        conn, company_id=company_id, location_id=location_id,
+        start=week_start - timedelta(weeks=HISTORY_WEEKS), end=sales_end,
+    )
     return {
         "week_start": week_start,
         "profile": profile,
         "jobs": [dict(row) for row in jobs_rows],
         "roster": roster,
         "gated_job_ids": {str(row["job_id"]) for row in gated_rows},
-        "sales_by_day": await load_sales_by_day(
-            conn, company_id=company_id, location_id=location_id,
-            start=sales_start, end=week_start - timedelta(days=1),
-        ),
+        "sales_by_day": {**pos_only, **sales_by_day},
+        "unreviewed_sales_days": frozenset(pos_only),
+        "hourly_profile": learn_hourly_profile(hours, exclude_dates=frozenset(holidays)),
         # Read only: `ensure_autopilot_weather` refreshed it before this
         # connection was taken.
         "weather_by_day": await load_weather_days(
@@ -202,9 +265,6 @@ async def load_autopilot_inputs(
         "blended_hourly_rate": await load_blended_hourly_rate(
             conn, company_id=company_id, location_id=location_id,
         ),
-        "holidays": await load_location_holidays(
-            conn, company_id=company_id, location_id=location_id,
-            start=sales_start, end=week_start + timedelta(days=6),
-        ),
+        "holidays": holidays,
         "anchor": week_start,
     }

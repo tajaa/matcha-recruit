@@ -604,3 +604,49 @@ def test_trailing_mean_note_names_the_days_it_averaged():
     forecast = forecast_day(WEEK + timedelta(days=1), sales_by_day=sales, weather_by_day={},
                             sensitivity="none", anchor=WEEK)
     assert "using the average of all 3 sales days" in forecast.notes[0]
+
+
+def test_hourly_profile_is_each_days_shape_averaged_over_every_date():
+    from app.matcha.services.scheduling.autopilot.history import learn_hourly_profile
+
+    mondays = [WEEK + timedelta(days=1) - timedelta(days=7 * n) for n in range(1, 4)]
+    rows = []
+    for index, day in enumerate(mondays):
+        scale = Decimal(10 ** index)                      # one busy week must not dominate
+        rows += [
+            {"business_date": day, "hour": 7, "gross_sales": 3 * scale},
+            {"business_date": day, "hour": 12, "gross_sales": 1 * scale},
+        ]
+    rows.append({"business_date": mondays[0], "hour": 18, "gross_sales": Decimal(-50)})  # refunds
+    tuesday = WEEK + timedelta(days=2) - timedelta(days=7)
+    rows.append({"business_date": tuesday, "hour": 9, "gross_sales": Decimal(100)})      # one date only
+    profile = learn_hourly_profile(rows)
+    assert profile == {1: {7: Decimal("0.7500"), 12: Decimal("0.2500"), 18: Decimal("0.0000")}}
+    assert learn_hourly_profile(rows, exclude_dates=frozenset({mondays[0]})) == {}
+
+
+def test_hourly_profile_puts_staff_where_the_store_sells():
+    profile = {
+        1: {8: Decimal("0.4"), 9: Decimal("0.4"), 10: Decimal("0.05"), 11: Decimal("0.05"),
+            12: Decimal("0.05"), 13: Decimal("0.05")},
+    }
+    result = _engine(
+        hourly_profile=profile, roster=_roster(count=6),
+        sales_by_day={WEEK + timedelta(days=1) - timedelta(days=7 * n): Decimal(1200) for n in range(1, 5)},
+        history_shifts=[],
+    )
+    monday = next(day for day in result.demand_model["days"] if day["weekday"] == "Monday")
+    assert monday["shape_source"] == "hourly_sales"
+    peak = max(monday["staffing_curve"], key=lambda run: run["headcount"])
+    assert peak["start"] in ("08:00", "08:30", "09:00", "09:30")
+    assert "hourly_sales" in result.demand_model["inputs_used"]
+
+
+def test_pos_days_waiting_on_mapping_are_used_and_said():
+    tuesday = WEEK - timedelta(days=5)
+    result = _engine(
+        sales_by_day={tuesday: Decimal(800), tuesday - timedelta(days=1): Decimal(700)},
+        unreviewed_sales_days=frozenset({tuesday, WEEK + timedelta(days=30)}),
+    )
+    assert "1 day of sales use POS-finalized totals whose item mapping is still pending review" in \
+        result.demand_model["notes"]

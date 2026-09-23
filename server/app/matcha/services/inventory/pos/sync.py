@@ -9,6 +9,7 @@ from app.core.services.secret_crypto import decrypt_secret, encrypt_secret
 from app.matcha.services.inventory import sales_commit
 from app.matcha.services.inventory.sales_commit import DuplicateSalesPeriodError
 from app.matcha.services.inventory._codec import decode_jsonb
+from app.matcha.services.inventory.sales_hourly import replace_sales_hours
 from . import provider_for
 
 
@@ -128,6 +129,13 @@ async def _sync_one_connection(
                             else "mapped" if mapping_id else "unmapped"
                         ),
                     })
+                # Before the import: a duplicate or still-draft day has real
+                # hours too, and re-syncing an old range is how they backfill.
+                await replace_sales_hours(
+                    conn, company_id=company_id, location_id=binding["location_id"],
+                    business_date=day.business_date, source=provider_name,
+                    connection_id=connection_id, hours=day.hours,
+                )
                 try:
                     committed = await sales_commit.commit_sales_import(
                         conn,

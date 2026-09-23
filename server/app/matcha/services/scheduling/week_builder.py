@@ -2058,12 +2058,30 @@ async def get_week_build_readiness(
         autopilot_info = None
         autopilot_has_jobs = True
         if source_mode == "autopilot":
+            # Committed imports plus POS days still waiting on item mapping —
+            # the same days the engine forecasts from.
             sales_days = int(await conn.fetchval(
-                """SELECT COUNT(DISTINCT business_date)
-                   FROM inventory_sales_imports
-                   WHERE company_id=$1 AND location_id=$2 AND status='committed'
-                     AND business_date >= $3 AND business_date < $4""",
+                """SELECT COUNT(*) FROM (
+                       SELECT business_date FROM inventory_sales_imports
+                       WHERE company_id=$1 AND location_id=$2 AND status='committed'
+                         AND business_date >= $3 AND business_date < $4
+                       UNION
+                       SELECT h.business_date FROM inventory_sales_hourly h
+                       WHERE h.company_id=$1 AND h.location_id=$2 AND h.connection_id IS NOT NULL
+                         AND h.business_date >= $3 AND h.business_date < $4
+                         AND NOT EXISTS (
+                             SELECT 1 FROM inventory_sales_imports si
+                             WHERE si.company_id=$1 AND si.location_id=$2
+                               AND si.business_date=h.business_date AND si.status='discarded'
+                         )
+                   ) days""",
                 company_id, location_id, week_start - timedelta(days=POLICY_SALES_HISTORY_DAYS), week_start,
+            ) or 0)
+            hourly_days = int(await conn.fetchval(
+                """SELECT COUNT(DISTINCT business_date) FROM inventory_sales_hourly
+                   WHERE company_id=$1 AND location_id=$2
+                     AND business_date >= $3 AND business_date < $4""",
+                company_id, location_id, week_start - timedelta(weeks=8), week_start,
             ) or 0)
             weather_days = int(await conn.fetchval(
                 """SELECT COUNT(*) FROM schedule_weather_days
@@ -2107,6 +2125,7 @@ async def get_week_build_readiness(
                 "sales_confidence": "high" if sales_days >= 56 else "medium" if sales_days >= 28 else "low" if sales_days else "none",
                 "weather_days_available": weather_days,
                 "history_weeks": history_weeks,
+                "hourly_sales_days": hourly_days,
             }
     pattern_findings = evaluate_week_coverage(
         plan_shifts=pattern_source, baseline_shifts=published_shifts,
