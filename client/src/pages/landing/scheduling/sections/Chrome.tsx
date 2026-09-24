@@ -295,6 +295,10 @@ export function LandingStyles() {
       .sent-dot { background-color: ${hexA(INK, 0.08)}; color: ${INK_SOFT}; transition: background-color .3s ease var(--d, 0ms), color .3s ease var(--d, 0ms); }
       .is-in .sent-dot { background-color: ${STAMP}; color: ${PAPER}; }
 
+      /* check report: each result dot fills in its outcome colour as its row lands */
+      .check-dot { background-color: ${hexA(INK, 0.15)}; transition: background-color .3s ease var(--d, 0ms); }
+      .is-in .check-dot { background-color: var(--dot); }
+
       .toast-in { opacity: 0; transform: translateY(-12px) scale(.97); transition: opacity .6s ease .7s, transform .7s cubic-bezier(.2,.9,.3,1.2) .7s; }
       .is-in .toast-in { opacity: 1; transform: none; }
 
@@ -306,6 +310,7 @@ export function LandingStyles() {
         .grow-bar, .grow-x { transform: none; transition: none; }
         .sent-in, .is-in .sent-in { opacity: 1; transform: none; transition: none; }
         .sent-dot { transition: none; }
+        .check-dot { transition: none; }
         .toast-in { opacity: 1; transform: none; transition: none; }
         .sched-btn { transition: none; }
       }

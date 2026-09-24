@@ -32,42 +32,83 @@ function Dot({ color }: { color: string }) {
   return <span aria-hidden className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
 }
 
-/** One band per outcome: what happens on the left, the rules it covers on the
- *  right. Grouped, not numbered — these are rules, not steps. */
-function Band({ outcome, first }: { outcome: Outcome; first: boolean }) {
-  const o = OUTCOME[outcome]
-  const rules = RULES.filter((r) => r.outcome === outcome)
+const STEP = 70 // ms between rows ticking in
+
+/** One rule's line in the report: the rule, what it found on the demo week,
+ *  and the result. The dot fills in its outcome colour as the row lands. */
+function Row({ rule, i }: { rule: (typeof RULES)[number]; i: number }) {
+  const o = OUTCOME[rule.outcome]
+  const result = (
+    <span className="flex shrink-0 items-center gap-2.5 lg:justify-end" style={mono('10px', { color: INK })}>
+      <span
+        aria-hidden
+        className="check-dot inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+        style={{ ['--dot' as string]: o.dot, ['--d' as string]: `${i * STEP + 350}ms` }}
+      />
+      {o.label}
+    </span>
+  )
+  const found = <span style={mono('10.5px', { color: INK })}>{rule.example}</span>
   return (
-    <Reveal
-      as="li"
-      className={`grid grid-cols-1 gap-8 py-12 lg:grid-cols-12 lg:gap-10 ${first ? '' : 'border-t'}`}
-      style={{ borderColor: RULE }}
-    >
+    <Reveal as="li" delay={i * STEP} className="py-5 lg:grid lg:grid-cols-12 lg:items-baseline lg:gap-x-8" style={{ borderBottom: `1px solid ${RULE}` }}>
       <div className="lg:col-span-4">
-        <div className="flex items-center gap-2.5" style={mono('10.5px', { color: INK })}>
-          <Dot color={o.dot} />
-          {o.label}
+        {/* phone: the result rides next to the rule's name */}
+        <div className="flex items-baseline justify-between gap-4">
+          <h3 className="text-[1.05rem] font-medium leading-snug tracking-[-0.015em]" style={{ color: INK }}>
+            {rule.name}
+          </h3>
+          <span className="lg:hidden">{result}</span>
         </div>
-        <p className="mt-3 max-w-[20rem] text-[0.97rem] leading-[1.6]" style={{ color: INK_SOFT }}>
-          {o.means}
+        <p className="mt-1 text-[0.9rem] leading-[1.5]" style={{ color: INK_SOFT }}>
+          {rule.detail}
         </p>
       </div>
-      <ul className="grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-2 lg:col-span-8">
-        {rules.map((rule) => (
-          <li key={rule.name}>
-            <h3 className="text-[1.3rem] font-medium leading-tight tracking-[-0.02em]" style={{ color: INK }}>
-              {rule.name}
-            </h3>
-            <p className="mt-1.5 text-[0.95rem] leading-[1.55]" style={{ color: INK_SOFT }}>
-              {rule.detail}
-            </p>
-            <div className="mt-3" style={mono('10px', { color: INK_SOFT })}>
-              e.g. <span style={{ color: INK }}>{rule.example}</span>
-            </div>
-          </li>
-        ))}
-      </ul>
+      {/* desktop: its own columns */}
+      <div className="hidden lg:col-span-5 lg:block">{found}</div>
+      <div className="hidden lg:col-span-3 lg:block">{result}</div>
+      <div className="mt-3 lg:hidden">{found}</div>
     </Reveal>
+  )
+}
+
+/** The report the rule check produced on the demo week — output, like every
+ *  other section, rather than a list of bullet points. */
+function Report() {
+  const counts = (Object.keys(OUTCOME) as Outcome[]).map((o) => ({ o, n: RULES.filter((r) => r.outcome === o).length }))
+  return (
+    <div className="mt-16">
+      <div className="flex items-baseline justify-between gap-6 pb-3" style={{ ...mono('10px', { color: INK_SOFT }), borderBottom: `1px solid ${RULE}` }}>
+        <span>
+          <span style={{ color: INK }}>Check report</span> · Sun 3:40 PM
+        </span>
+        <span>
+          Week of Oct 5 · {RULES.length} rules
+        </span>
+      </div>
+      <div className="hidden pb-2 pt-5 lg:grid lg:grid-cols-12 lg:gap-x-8" style={{ ...mono('9.5px', { color: INK_SOFT }), borderBottom: `1px solid ${RULE}` }}>
+        <span className="lg:col-span-4">Rule</span>
+        <span className="lg:col-span-5">Found on this draft</span>
+        <span className="text-right lg:col-span-3">Result</span>
+      </div>
+      <ol>
+        {RULES.map((rule, i) => (
+          <Row key={rule.name} rule={rule} i={i} />
+        ))}
+      </ol>
+      <Reveal delay={RULES.length * STEP} className="grid grid-cols-1 gap-6 pt-8 sm:grid-cols-3">
+        {counts.map(({ o, n }) => (
+          <div key={o}>
+            <div className="flex items-center gap-2.5" style={mono('10.5px', { color: INK })}>
+              <Dot color={OUTCOME[o].dot} />
+              {n} {OUTCOME[o].label}
+            </div>
+            <p className="mt-2 max-w-[18rem] text-[0.92rem] leading-snug" style={{ color: INK_SOFT }}>
+              {OUTCOME[o].means}
+            </p>
+          </div>
+        ))}
+      </Reveal>
+    </div>
   )
 }
 
@@ -85,12 +126,7 @@ export function Check() {
       >
         Every rule below runs on the draft. The hard ones also stop a manual edit — drag a shift somewhere it shouldn’t go and Matcha asks first.
       </StepHead>
-
-      <ol className="mt-16" style={{ borderTop: `1px solid ${RULE}`, borderBottom: `1px solid ${RULE}` }}>
-        {(Object.keys(OUTCOME) as Outcome[]).map((o, i) => (
-          <Band key={o} outcome={o} first={i === 0} />
-        ))}
-      </ol>
+      <Report />
     </section>
   )
 }
