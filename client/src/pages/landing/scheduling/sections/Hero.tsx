@@ -11,17 +11,16 @@ const MUTED = hexA(PAPER, 0.58)
 
 export function Hero({ onContact }: { onContact: () => void }) {
   return (
-    // Pulled up under the sticky top bar so the gradient runs to the top edge.
-    <header
-      className="sched-dark relative -mt-16 pt-16"
-      style={{
-        color: PAPER,
-        background: 'radial-gradient(90% 60% at 12% 0%, rgba(38,56,44,0.45) 0%, rgba(38,56,44,0) 65%), linear-gradient(175deg, #0D0F0E 0%, #090A0A 55%, #060707 100%)',
-      }}
-    >
-      <div className={`${WRAP} relative pb-20 pt-10 sm:pt-14`}>
-        <div className="flex items-baseline justify-between gap-6" style={mono('11px', { color: MUTED })}>
-          <span>Shift scheduling · cafés, restaurants &amp; shops</span>
+    // The Draft section inverted: flat dark gray, pulled up under the sticky
+    // top bar so it runs to the top edge.
+    <header className="sched-dark relative -mt-16 pt-16" style={{ color: PAPER, backgroundColor: BOARD.PAPER }}>
+      <div className={`${WRAP} relative pb-28 pt-12 sm:pb-36 sm:pt-20`}>
+        <div className="flex items-center justify-between gap-6" style={mono('11px', { color: MUTED })}>
+          <span className="flex items-center gap-3">
+            <span style={{ color: PAPER, fontWeight: 500 }}>Shift scheduling</span>
+            <span aria-hidden className="hidden h-px w-8 sm:inline-block" style={{ backgroundColor: hexA(PAPER, 0.3) }} />
+            <span className="hidden sm:inline">Cafés, restaurants &amp; shops</span>
+          </span>
           <span className="hidden sm:inline">Week 41 · Oct 5–11</span>
         </div>
 
@@ -52,7 +51,8 @@ export function Hero({ onContact }: { onContact: () => void }) {
           </div>
         </div>
 
-        <div className="relative mt-14 sm:mt-16">
+        {/* the sheet sits flush on the page under one hairline, like the Draft grid */}
+        <div className="relative mt-20 pt-4 sm:mt-24" style={{ borderTop: `1px solid ${hexA(PAPER, 0.1)}` }}>
           <Stage
             eager
             load={loadWeek}
@@ -61,11 +61,9 @@ export function Hero({ onContact }: { onContact: () => void }) {
             stillFrame={STILL_FRAME}
             label="Animated example: a café's week drafts itself from the sales forecast, flags a 44-hour week and a 7-hour close-to-open turnaround, moves both shifts to crew with room, and is published."
             surface={{ backgroundColor: BOARD.PAPER }}
-            mediaClassName="overflow-hidden rounded-[10px]"
-            mediaStyle={{
-              border: `1px solid ${hexA(PAPER, 0.12)}`,
-              boxShadow: '0 50px 90px -40px rgba(0,0,0,0.8), 0 18px 30px -20px rgba(0,0,0,0.6)',
-            }}
+            // Pull the media out by the composition's own side padding (48/1600 wide,
+            // 28/720 narrow) so the sheet's text lines up with the headline above.
+            mediaClassName="-mx-[4.22%] sm:-mx-[3.19%]"
             caption={
               <div className="flex flex-col gap-3 pt-1.5 sm:flex-row sm:items-center sm:justify-between">
                 <span style={mono('10.5px', { color: MUTED })}>Illustrative week · your draft is built from your own store’s data</span>

@@ -61,12 +61,13 @@ export function hexA(hex: string, alpha: number): string {
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
 }
 
-/** The hero's week sheet, set dark into the dark hero. Same roles as the
- *  paper tokens above, inverted; matcha green and red pen lifted to read on it. */
+/** The hero, and the week sheet inside it: the paper tokens above inverted to
+ *  a flat dark gray. The sheet uses the same PAPER as the hero, so it sits
+ *  flush on the page like the Draft grid does. Green and red lifted to read. */
 export const BOARD = {
-  PAPER: '#0F1311', // board
-  PAPER_DEEP: '#232B25', // empty avatar / track
-  CARD: '#1A201C', // raised card
+  PAPER: '#161817', // hero + board
+  PAPER_DEEP: '#272A28', // empty avatar / track
+  CARD: '#1F2220', // raised card
   INK: '#E9EDE5', // chalk-white text and rules
   INK_SOFT: '#8B958C',
   RED_PEN: '#EF6A4C',
