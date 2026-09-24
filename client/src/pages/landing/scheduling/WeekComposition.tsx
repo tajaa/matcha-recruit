@@ -98,9 +98,8 @@ export function WeekComposition({ variant }: WeekProps) {
     ...extra,
   })
 
-  // Transparent: the hero's frosted pane (Hero.tsx mediaStyle) is the sheet's surface.
   return (
-    <AbsoluteFill style={{ overflow: 'hidden' }}>
+    <AbsoluteFill style={{ backgroundColor: PAPER, overflow: 'hidden' }}>
       <AbsoluteFill style={{ opacity: contentOut }}>
         {/* ── header ─────────────────────────────────────────────────── */}
         <div
@@ -441,12 +440,9 @@ function SentCard({ frame, L, s }: { frame: number; L: Layout; s: number }) {
         top: L.pad * 0.7,
         width: Math.min(340 * s, L.w * 0.5),
         padding: `${14 * s}px ${16 * s}px`,
-        // a brighter pane of dark glass on the sheet
-        backgroundColor: hexA(CARD, 0.72),
-        backdropFilter: 'blur(20px) saturate(1.4)',
-        WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
-        borderRadius: 14 * s,
-        boxShadow: `inset 0 0 0 1px ${hexA(INK, 0.1)}, inset 0 1px 0 ${hexA(INK, 0.08)}, 0 24px 48px -20px rgba(0, 0, 0, 0.7)`,
+        backgroundColor: CARD,
+        borderRadius: 12 * s,
+        boxShadow: `0 0 0 1px ${hexA(INK, 0.1)}, 0 24px 48px -20px rgba(0, 0, 0, 0.7)`,
         opacity: inP,
         transform: `translateY(${(1 - inP) * -8 * s}px)`,
       }}
@@ -547,8 +543,7 @@ function ShiftBar({
           width: `${p * 100}%`,
           backgroundColor: moved ? INK : REST,
           borderRadius: 999,
-          // a hairline of light along the top edge: glass, not flat fill
-          boxShadow: flagged ? `0 0 0 ${1.5 * s}px ${RED_PEN}` : `inset 0 1px 0 ${hexA(INK, moved ? 0 : 0.08)}`,
+          boxShadow: flagged ? `0 0 0 ${1.5 * s}px ${RED_PEN}` : 'none',
         }}
       />
       {/* a label only where it fits inside the pill — a 4h shift stays bare */}

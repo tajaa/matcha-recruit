@@ -27,15 +27,15 @@ export function Accent({ children, dark }: { children: ReactNode; dark?: boolean
 
 /** Two soft glows — matcha and amber — for frosted glass to catch. Positions
  *  are kept inside the box so they fade out before its edge. */
-export function Glows({ green, amber, className = '', dark }: { green: string; amber: string; className?: string; dark?: boolean }) {
+export function Glows({ green, amber, className = '' }: { green: string; amber: string; className?: string }) {
   return (
     <div
       aria-hidden
       className={`pointer-events-none absolute inset-0 ${className}`}
       style={{
         background: [
-          `radial-gradient(30% 40% at ${green}, ${hexA(dark ? BOARD.STAMP : STAMP, dark ? 0.12 : 0.16)}, transparent 70%)`,
-          `radial-gradient(28% 36% at ${amber}, ${hexA(dark ? BOARD.AMBER : AMBER, dark ? 0.1 : 0.14)}, transparent 70%)`,
+          `radial-gradient(30% 40% at ${green}, ${hexA(STAMP, 0.16)}, transparent 70%)`,
+          `radial-gradient(28% 36% at ${amber}, ${hexA(AMBER, 0.14)}, transparent 70%)`,
         ].join(', '),
       }}
     />

@@ -3,20 +3,11 @@ import Stage from '../Stage'
 import { WRAP, display, mono } from '../styles'
 import { BOARD, PAPER, hexA } from '../theme'
 import { DURATION, LAYOUTS, STILL_FRAME } from '../timeline'
-import { Accent, Glows, PrimaryButton } from './Chrome'
+import { Accent, PrimaryButton } from './Chrome'
 
 const loadWeek = () => import('../WeekComposition')
 
 const MUTED = hexA(PAPER, 0.58)
-
-// Dark frosted glass: the board colour, translucent, blurred over the glows,
-// with a faint light rim and a highlight along the top edge.
-const GLASS = {
-  backgroundColor: hexA(BOARD.CARD, 0.55),
-  backdropFilter: 'blur(32px) saturate(1.4)',
-  WebkitBackdropFilter: 'blur(32px) saturate(1.4)',
-  boxShadow: `inset 0 0 0 1px ${hexA(PAPER, 0.07)}, inset 0 1px 0 ${hexA(PAPER, 0.09)}, 0 50px 90px -50px rgba(0, 0, 0, 0.7)`,
-}
 
 export function Hero({ onContact }: { onContact: () => void }) {
   return (
@@ -60,10 +51,8 @@ export function Hero({ onContact }: { onContact: () => void }) {
           </div>
         </div>
 
-        {/* the sheet is a pane of dark glass over faint matcha and amber glows —
-            same colours, frosted, like the glass in the sections below */}
-        <div className="relative mt-20 sm:mt-24">
-          <Glows dark green="22% 26%" amber="78% 74%" className="-inset-x-4 -inset-y-10 sm:-inset-x-10" />
+        {/* the sheet sits flush on the page under one hairline, like the Draft grid */}
+        <div className="relative mt-20 pt-4 sm:mt-24" style={{ borderTop: `1px solid ${hexA(PAPER, 0.1)}` }}>
           <Stage
             eager
             load={loadWeek}
@@ -71,11 +60,10 @@ export function Hero({ onContact }: { onContact: () => void }) {
             durationInFrames={DURATION}
             stillFrame={STILL_FRAME}
             label="Animated example: a café's week drafts itself from the sales forecast, flags a 44-hour week and a 7-hour close-to-open turnaround, moves both shifts to crew with room, and is published."
-            surface={GLASS}
+            surface={{ backgroundColor: BOARD.PAPER }}
             // Pull the media out by the composition's own side padding (48/1600 wide,
             // 28/720 narrow) so the sheet's text lines up with the headline above.
-            mediaClassName="-mx-[4.22%] overflow-hidden rounded-[20px] sm:-mx-[3.19%] sm:rounded-[28px]"
-            mediaStyle={GLASS}
+            mediaClassName="-mx-[4.22%] sm:-mx-[3.19%]"
             caption={
               <div className="flex flex-col gap-3 pt-1.5 sm:flex-row sm:items-center sm:justify-between">
                 <span style={mono('10.5px', { color: MUTED })}>Illustrative week · your draft is built from your own store’s data</span>
