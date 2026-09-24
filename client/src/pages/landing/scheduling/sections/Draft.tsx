@@ -215,22 +215,19 @@ function Input({ n, tag, title, body, children, className = '', delay }: { n: st
 export function Draft() {
   return (
     <section id="draft" className={`${WRAP} py-28 sm:py-44`}>
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-        <div className="lg:col-span-8">
-          <StepHead
-            step="draft"
-            title={
-              <>
-                It starts from what you <Accent>already know.</Accent>
-              </>
-            }
-          >
-            The draft reads four things Matcha already has about your store and builds a week that fits all of them at once.
-          </StepHead>
-        </div>
-      </div>
+      <StepHead
+        split
+        step="draft"
+        title={
+          <>
+            It starts from what you <Accent>already know.</Accent>
+          </>
+        }
+      >
+        The draft reads four things Matcha already has about your store and builds a week that fits all of them at once.
+      </StepHead>
       {/* hairline 2×2: rules between cells, none around the outside */}
-      <div className="mt-20 grid grid-cols-1 lg:grid-cols-2" style={{ borderTop: `1px solid ${RULE}` }}>
+      <div className="mt-16 grid grid-cols-1 lg:grid-cols-2" style={{ borderTop: `1px solid ${RULE}` }}>
         <Input n="01" tag="Sales" delay={0} className="lg:border-r lg:pr-14" title="What you sold, by the hour" body="Committed sales from past weeks set how many people each part of the day needs.">
           <SalesChart />
         </Input>

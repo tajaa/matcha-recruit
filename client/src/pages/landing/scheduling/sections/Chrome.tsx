@@ -3,7 +3,7 @@ import { ArrowRight } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Reveal } from '../motion'
 import { STEPS, WRAP, display, mono, type StepId } from '../styles'
-import { GRAIN, HILITE, INK, INK_SOFT, PAPER, SERIF, STAMP, hexA } from '../theme'
+import { BOARD, GRAIN, HILITE, INK, INK_SOFT, PAPER, SERIF, STAMP, hexA } from '../theme'
 
 export function PrimaryButton({ onClick, children, tone = 'ink' }: { onClick: () => void; children: ReactNode; tone?: 'ink' | 'paper' }) {
   return (
@@ -18,28 +18,34 @@ export function PrimaryButton({ onClick, children, tone = 'ink' }: { onClick: ()
   )
 }
 
-/** The one italic serif word in a headline. Green on paper, highlighter on dark. */
+/** The one italic serif word in a headline, in matcha green — lifted on dark. */
 export function Accent({ children, dark }: { children: ReactNode; dark?: boolean }) {
   return (
-    <em style={{ fontFamily: SERIF, fontStyle: 'italic', fontWeight: 400, letterSpacing: '-0.01em', color: dark ? HILITE : STAMP }}>{children}</em>
+    <em style={{ fontFamily: SERIF, fontStyle: 'italic', fontWeight: 400, letterSpacing: '-0.01em', color: dark ? BOARD.STAMP : STAMP }}>{children}</em>
   )
 }
 
-/** Section opener: the step's Sunday timestamp, then the headline. */
+/** Section opener: the step's Sunday timestamp, then the headline. `split`
+ *  puts the copy (and `aside`) in a right-hand column level with the
+ *  headline's last line, like the hero, instead of stacking it underneath. */
 export function StepHead({
   step,
   title,
   children,
+  aside,
   dark,
+  split,
 }: {
   step: StepId
   title: ReactNode
   children?: ReactNode
+  aside?: ReactNode
   dark?: boolean
+  split?: boolean
 }) {
   const s = STEPS.find((x) => x.id === step)!
-  return (
-    <div>
+  const head = (
+    <>
       <Reveal>
         <div className="flex items-center gap-3" style={mono('11px', { color: dark ? PAPER : INK, fontWeight: 500 })}>
           <span>Sun {s.time} PM</span>
@@ -52,13 +58,30 @@ export function StepHead({
           {title}
         </h2>
       </Reveal>
+    </>
+  )
+  const copy = (children || aside) && (
+    <Reveal delay={160}>
       {children && (
-        <Reveal delay={160}>
-          <p className="mt-6 max-w-[34rem] text-[1.075rem] leading-[1.65]" style={{ color: dark ? hexA(PAPER, 0.72) : INK_SOFT }}>
-            {children}
-          </p>
-        </Reveal>
+        <p className={`max-w-[34rem] text-[1.075rem] leading-[1.65] ${split ? '' : 'mt-6'}`} style={{ color: dark ? hexA(PAPER, 0.72) : INK_SOFT }}>
+          {children}
+        </p>
       )}
+      {aside}
+    </Reveal>
+  )
+  if (!split) {
+    return (
+      <div>
+        {head}
+        {copy}
+      </div>
+    )
+  }
+  return (
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-end lg:gap-10">
+      <div className="lg:col-span-7">{head}</div>
+      <div className="lg:col-span-5 lg:pb-2">{copy}</div>
     </div>
   )
 }
