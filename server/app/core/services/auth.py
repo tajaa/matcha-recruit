@@ -8,7 +8,7 @@ from jose import jwt, JWTError
 
 from ...config import get_settings
 from ..models.auth import TokenPayload, UserRole
-from .session_tokens import access_token_stale, issue_stamp_ms, refresh_token_times
+from .session_tokens import SessionLifetimes, access_token_stale, issue_stamp_ms, refresh_token_times
 
 
 def hash_password(password: str) -> str:
@@ -71,10 +71,16 @@ def create_refresh_token(
     email: str,
     role: UserRole,
     session_started_at: Optional[int] = None,
+    *,
+    extra_claims: Optional[dict] = None,
+    lifetimes: Optional[SessionLifetimes] = None,
 ) -> str:
     """Create a JWT refresh token."""
     settings = get_settings()
-    issued_at, started_at, expire = refresh_token_times(session_started_at)
+    extra_claims = extra_claims or {}
+    if set(extra_claims) - {"sid", "cl"}:
+        raise ValueError("Unrecognized refresh token claims")
+    issued_at, started_at, expire = refresh_token_times(session_started_at, lifetimes=lifetimes)
 
     payload = {
         "sub": str(user_id),
@@ -84,7 +90,8 @@ def create_refresh_token(
         "iat": issued_at,
         "iat_ms": issue_stamp_ms(issued_at),
         "session_started_at": started_at,
-        "type": "refresh"
+        "type": "refresh",
+        **extra_claims,
     }
 
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
@@ -196,6 +203,8 @@ def decode_token(token: str, expected_type: Optional[str] = None) -> Optional[To
             iat_ms=payload.get("iat_ms"),
             session_started_at=payload.get("session_started_at"),
             token_type=token_type,
+            sid=payload.get("sid"),
+            cl=payload.get("cl"),
         )
-    except (JWTError, KeyError, TypeError):
+    except (JWTError, KeyError, TypeError, ValueError):
         return None

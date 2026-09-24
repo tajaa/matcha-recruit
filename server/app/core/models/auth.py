@@ -32,6 +32,8 @@ class UserResponse(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    client: Optional[Literal["ios_schedule"]] = None
+    device_name: Optional[str] = Field(default=None, max_length=200)
 
 
 class TokenResponse(BaseModel):
@@ -51,6 +53,8 @@ class TokenPayload(BaseModel):
     iat_ms: Optional[int] = None  # issued-at (epoch ms); exact revocation compare
     session_started_at: Optional[int] = None  # preserved across refresh rotation
     token_type: Optional[str] = None  # "access" or "refresh"
+    sid: Optional[str] = None  # mobile device session id
+    cl: Optional[str] = None  # mobile client identifier
 
 
 class RefreshTokenRequest(BaseModel):

@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File
 from pydantic import BaseModel, EmailStr, Field
 
 from app.database import get_connection
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.core.models.auth import (
     LoginRequest, TokenResponse, RefreshTokenRequest, UserResponse,
@@ -45,7 +45,8 @@ from app.core.feature_flags import (
 )
 from app.core.services.platform_settings import get_visible_features
 from app.core.services.redis_cache import check_rate_limit, client_ip
-from app.core.services.session_tokens import refresh_session_expired
+from app.core.services.session_tokens import SessionLifetimes, refresh_session_expired
+from app.matcha.services.scheduling.schedule_rules import INACTIVE_EMPLOYMENT_STATUSES
 from app.config import get_settings
 
 
@@ -57,6 +58,22 @@ _LOGIN_MINUTE_WINDOW = 60  # seconds
 _LOGIN_HOUR_LIMIT = 40
 _LOGIN_HOUR_WINDOW = 3600  # seconds
 _login_attempts: dict[str, list[float]] = defaultdict(list)
+
+
+def _mobile_lifetimes(settings) -> SessionLifetimes:
+    return SessionLifetimes(
+        settings.mobile_refresh_idle_days * 1440,
+        settings.mobile_refresh_absolute_days * 1440,
+    )
+
+
+def _mobile_session_id(payload: TokenPayload) -> UUID:
+    if payload.cl != "ios_schedule" or not payload.sid or payload.role != "employee":
+        raise HTTPException(status_code=401, detail="Invalid mobile session")
+    try:
+        return UUID(payload.sid)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid mobile session") from None
 
 
 
@@ -150,12 +167,35 @@ async def login(request: LoginRequest, req: Request):
                 detail="This account's company has been deactivated.",
             )
 
+        mobile_sid = None
+        if request.client == "ios_schedule":
+            if user["role"] != "employee":
+                raise HTTPException(status_code=403, detail="Matcha Schedule is for employees")
+            employee = await conn.fetchrow(
+                "SELECT id, employment_status FROM employees WHERE user_id = $1", user["id"]
+            )
+            if not employee or employee["employment_status"] in INACTIVE_EMPLOYMENT_STATUSES:
+                raise HTTPException(status_code=403, detail="Employee account is inactive")
+            mobile_sid = uuid4()
+            await conn.execute(
+                "INSERT INTO auth_device_sessions (id, user_id, client, device_name) "
+                "VALUES ($1, $2, 'ios_schedule', $3)",
+                mobile_sid, user["id"], request.device_name,
+            )
+
         # Non-critical analytics write; keep login response path lean.
         asyncio.create_task(_touch_user_last_login(user["id"]))
 
         settings = get_settings()
         access_token = create_access_token(user["id"], user["email"], user["role"])
-        refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
+        if mobile_sid:
+            refresh_token = create_refresh_token(
+                user["id"], user["email"], user["role"],
+                extra_claims={"sid": str(mobile_sid), "cl": "ios_schedule"},
+                lifetimes=_mobile_lifetimes(settings),
+            )
+        else:
+            refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
 
         return TokenResponse(
             access_token=access_token,
@@ -186,60 +226,88 @@ async def refresh_token(request: RefreshTokenRequest):
         )
 
     async with get_connection() as conn:
-        user = await conn.fetchrow(
-            """SELECT id, email, role, is_active, created_at, last_login,
-                      (
-                        SELECT comp.name
-                          FROM clients cl
-                          JOIN companies comp ON comp.id = cl.company_id
-                         WHERE cl.user_id = users.id
-                           AND comp.is_personal = false
-                         LIMIT 1
-                      ) AS company_name
-                 FROM users WHERE id = $1""",
-            payload.sub
-        )
-
-        if not user or not user["is_active"]:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found or inactive"
+        async with conn.transaction():
+            user = await conn.fetchrow(
+                """SELECT id, email, role, is_active, is_suspended, created_at, last_login,
+                          (
+                            SELECT comp.name
+                              FROM clients cl
+                              JOIN companies comp ON comp.id = cl.company_id
+                             WHERE cl.user_id = users.id
+                               AND comp.is_personal = false
+                             LIMIT 1
+                          ) AS company_name
+                     FROM users WHERE id = $1 FOR UPDATE""",
+                payload.sub
             )
 
-        if refresh_session_expired(payload.iat, payload.session_started_at):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Session expired. Please log in again.",
+            if not user or not user["is_active"]:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="User not found or inactive"
+                )
+
+            mobile_sid = _mobile_session_id(payload) if payload.sid or payload.cl else None
+            if mobile_sid and (user["role"] != "employee" or user["is_suspended"]):
+                raise HTTPException(status_code=401, detail="Invalid mobile session")
+            settings = get_settings()
+            if refresh_session_expired(
+                payload.iat, payload.session_started_at,
+                lifetimes=_mobile_lifetimes(settings) if mobile_sid else None,
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Session expired. Please log in again.",
+                )
+
+            # A revoked refresh token (logout / password change) can't mint new tokens.
+            if await session_revoked(conn, user["id"], payload.iat, payload.iat_ms):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Refresh token has been revoked. Please log in again."
+                )
+
+            if mobile_sid:
+                # The update is atomic against a concurrent mobile logout. A stale,
+                # revoked, or no-longer-employed device cannot rotate its token.
+                active_sid = await conn.fetchval(
+                    """UPDATE auth_device_sessions AS ds
+                       SET last_refreshed_at = NOW()
+                     WHERE ds.id = $1 AND ds.user_id = $2
+                       AND ds.client = 'ios_schedule' AND ds.revoked_at IS NULL
+                       AND EXISTS (
+                           SELECT 1 FROM employees e
+                            WHERE e.user_id = ds.user_id
+                              AND NOT (COALESCE(e.employment_status, 'active') = ANY($3::text[]))
+                       )
+                     RETURNING ds.id""",
+                    mobile_sid, user["id"], list(INACTIVE_EMPLOYMENT_STATUSES),
+                )
+                if not active_sid:
+                    raise HTTPException(status_code=401, detail="Mobile session revoked or employee inactive")
+
+            access_token = create_access_token(user["id"], user["email"], user["role"])
+            new_refresh_token = create_refresh_token(
+                user["id"], user["email"], user["role"],
+                session_started_at=payload.session_started_at or payload.iat,
+                extra_claims={"sid": str(mobile_sid), "cl": "ios_schedule"} if mobile_sid else None,
+                lifetimes=_mobile_lifetimes(settings) if mobile_sid else None,
             )
 
-        # A revoked refresh token (logout / password change) can't mint new tokens.
-        if await session_revoked(conn, user["id"], payload.iat, payload.iat_ms):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Refresh token has been revoked. Please log in again."
+            return TokenResponse(
+                access_token=access_token,
+                refresh_token=new_refresh_token,
+                expires_in=settings.jwt_access_token_expire_minutes * 60,
+                user=UserResponse(
+                    id=user["id"],
+                    email=user["email"],
+                    role=user["role"],
+                    is_active=user["is_active"],
+                    created_at=user["created_at"],
+                    last_login=user["last_login"],
+                    company_name=user["company_name"],
+                )
             )
-
-        settings = get_settings()
-        access_token = create_access_token(user["id"], user["email"], user["role"])
-        new_refresh_token = create_refresh_token(
-            user["id"], user["email"], user["role"],
-            session_started_at=payload.session_started_at or payload.iat,
-        )
-
-        return TokenResponse(
-            access_token=access_token,
-            refresh_token=new_refresh_token,
-            expires_in=settings.jwt_access_token_expire_minutes * 60,
-            user=UserResponse(
-                id=user["id"],
-                email=user["email"],
-                role=user["role"],
-                is_active=user["is_active"],
-                created_at=user["created_at"],
-                last_login=user["last_login"],
-                company_name=user["company_name"],
-            )
-        )
 
 
 
@@ -248,4 +316,25 @@ async def logout(current_user: CurrentUser = Depends(get_current_user)):
     """Logout — revoke all of this user's existing access + refresh tokens."""
     async with get_connection() as conn:
         await revoke_user_sessions(conn, current_user.id)
+    return {"status": "logged_out"}
+
+
+@router.post("/mobile/logout")
+async def mobile_logout(request: RefreshTokenRequest):
+    """Revoke only the Matcha Schedule device identified by this refresh token."""
+    payload = decode_token(request.refresh_token, expected_type="refresh")
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+    sid = _mobile_session_id(payload)
+    try:
+        user_id = UUID(payload.sub)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid mobile session") from None
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE auth_device_sessions SET revoked_at = NOW() "
+            "WHERE id = $1 AND user_id = $2 AND client = 'ios_schedule' "
+            "AND revoked_at IS NULL",
+            sid, user_id,
+        )
     return {"status": "logged_out"}
