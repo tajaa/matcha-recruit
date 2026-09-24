@@ -1,7 +1,7 @@
 import { Reveal } from '../motion'
-import { WRAP, mono } from '../styles'
+import { WRAP, glassChip, glassPane, mono } from '../styles'
 import { AMBER, INK, INK_SOFT, STAMP, hexA } from '../theme'
-import { Accent, StepHead } from './Chrome'
+import { Accent, Glows, StepHead } from './Chrome'
 
 type Outcome = 'stops' | 'draft' | 'priced'
 
@@ -31,16 +31,6 @@ function Dot({ color }: { color: string }) {
 }
 
 const STEP = 70 // ms between rows ticking in
-
-// Frosted glass, as in the Change section's chat: translucent white with a
-// white inner rim, over faint matcha and amber glows.
-const RIM = 'rgba(255, 255, 255, 0.85)'
-const PANE = {
-  backgroundColor: 'rgba(255, 255, 255, 0.5)',
-  backdropFilter: 'blur(28px) saturate(1.5)',
-  WebkitBackdropFilter: 'blur(28px) saturate(1.5)',
-  boxShadow: `inset 0 0 0 1px ${RIM}, 0 0 0 1px ${hexA(INK, 0.05)}, 0 40px 80px -48px ${hexA(INK, 0.3)}`,
-} as const
 
 /** A result: dot + label on a pill tinted with the outcome's colour. The dot
  *  fills in as its row lands. */
@@ -100,18 +90,8 @@ function Report() {
   const counts = (Object.keys(OUTCOME) as Outcome[]).map((o) => ({ o, n: RULES.filter((r) => r.outcome === o).length }))
   return (
     <div className="relative mt-16">
-      {/* glows for the glass to catch; inset so they fade inside the section */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background: [
-            `radial-gradient(30% 40% at 18% 22%, ${hexA(STAMP, 0.16)}, transparent 70%)`,
-            `radial-gradient(28% 36% at 82% 78%, ${hexA(AMBER, 0.14)}, transparent 70%)`,
-          ].join(', '),
-        }}
-      />
-      <div className="relative rounded-[28px] p-2 sm:p-3" style={PANE}>
+      <Glows green="18% 22%" amber="82% 78%" />
+      <div className="relative rounded-[28px] p-2 sm:p-3" style={glassPane}>
         <div className="flex items-baseline justify-between gap-6 px-4 pb-3 pt-3" style={mono('9.5px', { color: INK_SOFT })}>
           <span>
             <span style={{ color: INK }}>Check report</span> · Sun 3:40 PM
@@ -131,7 +111,7 @@ function Report() {
             <div
               key={o}
               className="rounded-2xl px-4 py-3.5"
-              style={{ backgroundColor: 'rgba(255, 255, 255, 0.7)', boxShadow: `inset 0 0 0 1px ${RIM}, 0 0 0 1px ${hexA(INK, 0.04)}` }}
+              style={glassChip}
             >
               <div className="flex items-center gap-2" style={mono('9.5px', { color: INK })}>
                 <Dot color={OUTCOME[o].dot} />
