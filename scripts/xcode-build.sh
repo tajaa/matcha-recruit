@@ -99,7 +99,11 @@ esac
 
 if [[ ( "$TARGET" == "storefront" || "$TARGET" == "matchaschedule" ) && "$ACTION" == "test" ]]; then
     if [[ -z "${XCODE_DESTINATION:-}" || "${XCODE_DESTINATION:-}" == generic/* ]]; then
-        echo "$TARGET test requires XCODE_DESTINATION to name a concrete iOS Simulator." >&2
+        if [[ "$TARGET" == "storefront" ]]; then
+            echo "Storefront test requires XCODE_DESTINATION to name a concrete iOS Simulator." >&2
+        else
+            echo "Matcha Schedule test requires XCODE_DESTINATION to name a concrete iOS Simulator." >&2
+        fi
         exit 1
     fi
 fi
