@@ -49,6 +49,25 @@ Rules (the runner enforces 1–2, you enforce the rest):
 
 ## Packs
 
+- `matcha_schedule_app_review.py` — a separate test company with two employee
+  logins, a San Francisco location, and 63 days of published shifts (including
+  open seats) for Matcha Schedule App Review. It requires
+  `MATCHA_APP_REVIEW_PASSWORD` at generation time; only bcrypt hashes appear in
+  the SQL. Both employees use that password. The reviewer login is
+  `demo-matcha-schedule@example.com`; the coworker login is
+  `coworker-matcha-schedule@example.com`. Set the password without placing it
+  in shell history, then use the guarded runner after the Schedule migrations:
+
+  ```bash
+  read -rs MATCHA_APP_REVIEW_PASSWORD && export MATCHA_APP_REVIEW_PASSWORD
+  ./scripts/seed-prod.sh scripts/seed/matcha_schedule_app_review.py --dry-run
+  ./scripts/seed-prod.sh scripts/seed/matcha_schedule_app_review.py
+  ```
+
+  The second command writes to production and requires separate approval.
+  Fixed IDs make reruns harmless but do not move existing shift dates. To
+  refresh the 63-day window, run the pack with `--undo` first, then rehearse
+  and apply it again. The undo targets this demo company and its two users.
 - `benefits_sunset_dental.sql` — Sunset Smile Dental Group demo benefits
   (plan catalog, a closed + an open enrollment period, elections in every
   status, roster + eligibility exceptions, renewal-risk radar). Undo:
