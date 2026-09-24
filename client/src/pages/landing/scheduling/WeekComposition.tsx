@@ -2,8 +2,8 @@
  * Remotion composition for the scheduling landing hero: a wall schedule that
  * drafts itself, gets checked, gets fixed, and goes out.
  *
- *   grid + crew → forecast per day → shifts highlighted in → rule check sweep
- *   → red-pen loops on the two problems → both shifts move to someone with room
+ *   grid + crew → forecast per day → shifts drawn in → rule check sweep
+ *   → red rings on the two problems → both shifts move to someone with room
  *   → labor settles → sent card, crew notified → fade to the blank sheet (loops cleanly)
  *
  * Rendered live in the browser by @remotion/player (SchedulePlayer.tsx); no
@@ -12,7 +12,7 @@
  */
 import type { CSSProperties } from 'react'
 import { AbsoluteFill, Easing, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion'
-import { BOARD, BOARD_GRID, BODY, DISPLAY, HILITE, INK as BAR_INK, MONO, hexA } from './theme'
+import { BOARD, BODY, MONO, hexA } from './theme'
 import {
   CREW,
   DATES,
@@ -32,10 +32,13 @@ import {
 } from './weekData'
 import { DURATION, LAYOUTS, T, type Layout, type Variant } from './timeline'
 
-// The hero sheet is a dark board (theme.ts BOARD): same instruments,
-// inverted. Local names mirror theme.ts so the drawing code reads the same;
-// only the highlighter shift bars keep dark ink (BAR_INK) on their yellow.
+// The hero sheet is the Draft section's language inverted onto a dark board
+// (theme.ts BOARD): grayscale ink at a few alphas, hairlines, mono labels,
+// Hanken for names and figures. Green means only ok/fixed/sent, red only a
+// problem. Local names mirror theme.ts so the drawing code reads the same.
 const { PAPER, PAPER_DEEP, CARD, INK, INK_SOFT, RED_PEN, STAMP } = BOARD
+const RULE = hexA(INK, 0.08)
+const REST = hexA(INK, 0.14) // a resting mark: shift pill, forecast fill
 
 export type WeekProps = { variant: Variant }
 
@@ -57,8 +60,8 @@ export function WeekComposition({ variant }: WeekProps) {
   const dayX = (day: number) => gridLeft + L.days.indexOf(day) * colW
   const hourX = (day: number, h: number) => dayX(day) + inset + ((h - 6) / 18) * (colW - inset * 2)
   const rowY = (row: number) => L.rowsY + row * L.rowH
-  const barTop = (row: number) => rowY(row) + L.rowH * 0.2
-  const barH = L.rowH * 0.6
+  const barH = L.rowH * 0.42
+  const barTop = (row: number) => rowY(row) + (L.rowH - barH) / 2
 
   // ── timeline scalars ────────────────────────────────────────────────────
   const gridIn = interpolate(frame, [0, 28], [0, 1], { ...clamp, easing: easeOut })
@@ -82,10 +85,10 @@ export function WeekComposition({ variant }: WeekProps) {
 
   const status =
     frame < T.check
-      ? { text: 'Drafting', fg: INK, bg: 'transparent' }
+      ? { text: 'Drafting', fg: INK }
       : frame < T.resolve + 30
-        ? { text: 'Checking rules', fg: RED_PEN, bg: 'transparent' }
-        : { text: 'Ready to publish', fg: STAMP, bg: 'transparent' }
+        ? { text: 'Checking rules', fg: RED_PEN }
+        : { text: 'Ready to publish', fg: STAMP }
 
   const mono = (size: number, extra?: CSSProperties): CSSProperties => ({
     fontFamily: MONO,
@@ -96,7 +99,7 @@ export function WeekComposition({ variant }: WeekProps) {
   })
 
   return (
-    <AbsoluteFill style={{ backgroundColor: PAPER, ...BOARD_GRID, overflow: 'hidden' }}>
+    <AbsoluteFill style={{ backgroundColor: PAPER, overflow: 'hidden' }}>
       <AbsoluteFill style={{ opacity: contentOut }}>
         {/* ── header ─────────────────────────────────────────────────── */}
         <div
@@ -113,23 +116,19 @@ export function WeekComposition({ variant }: WeekProps) {
           }}
         >
           <div>
-            <div style={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: 38 * s, lineHeight: 0.9, color: INK, textTransform: 'uppercase', letterSpacing: '0.01em' }}>
-              {wide ? 'Juniper Café — Mission St.' : 'Juniper Café'}
+            <div style={{ fontFamily: BODY, fontWeight: 500, fontSize: 34 * s, lineHeight: 1, color: INK, letterSpacing: '-0.035em' }}>
+              Juniper Café{wide && <span style={{ color: INK_SOFT }}> · Mission St.</span>}
             </div>
-            <div style={mono(12, { color: INK_SOFT, marginTop: 8 * s })}>
+            <div style={mono(11, { color: INK_SOFT, marginTop: 12 * s })}>
               Week of Oct {DATES[0]}–{DATES[6]}
               {wide && ' · drafted from 8 weeks of sales'}
             </div>
           </div>
           <div
-            style={mono(12, {
+            style={mono(11, {
               flexShrink: 0,
               color: status.fg,
-              backgroundColor: status.bg,
-              border: `${1.5 * s}px solid ${status.fg}`,
-              borderRadius: 999,
-              padding: `${6 * s}px ${14 * s}px`,
-              fontWeight: 700,
+              paddingTop: 8 * s,
               display: 'flex',
               alignItems: 'center',
               gap: 8 * s,
@@ -138,8 +137,8 @@ export function WeekComposition({ variant }: WeekProps) {
           >
             <span
               style={{
-                width: 7 * s,
-                height: 7 * s,
+                width: 6 * s,
+                height: 6 * s,
                 borderRadius: 99,
                 backgroundColor: status.fg,
                 opacity: 0.4 + 0.6 * Math.abs(Math.sin(frame / 9)),
@@ -159,7 +158,7 @@ export function WeekComposition({ variant }: WeekProps) {
               top: rowY(r + 1) - 1,
               height: 1,
               width: (L.w - L.pad * 2) * interpolate(frame, [r * 2, 26 + r * 2], [0, 1], { ...clamp, easing: easeOut }),
-              backgroundColor: hexA(INK, 0.16),
+              backgroundColor: RULE,
             }}
           />
         ))}
@@ -172,12 +171,12 @@ export function WeekComposition({ variant }: WeekProps) {
               top: L.dayHeadY,
               width: 1,
               height: (rowsBottom - L.dayHeadY) * gridIn,
-              backgroundColor: hexA(INK, 0.16),
+              backgroundColor: RULE,
             }}
           />
         ))}
-        <div style={{ position: 'absolute', left: gridRight, top: L.dayHeadY, width: 1, height: (rowsBottom - L.dayHeadY) * gridIn, backgroundColor: hexA(INK, 0.16) }} />
-        <div style={{ position: 'absolute', left: L.pad, top: L.rowsY - 1, height: 2, width: (L.w - L.pad * 2) * gridIn, backgroundColor: INK }} />
+        <div style={{ position: 'absolute', left: gridRight, top: L.dayHeadY, width: 1, height: (rowsBottom - L.dayHeadY) * gridIn, backgroundColor: RULE }} />
+        <div style={{ position: 'absolute', left: L.pad, top: L.rowsY - 1, height: 1, width: (L.w - L.pad * 2) * gridIn, backgroundColor: hexA(INK, 0.2) }} />
 
         {/* ── day headers + forecast ─────────────────────────────────── */}
         {L.days.map((day, i) => {
@@ -197,25 +196,23 @@ export function WeekComposition({ variant }: WeekProps) {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 * s }}>
-                <span style={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: 26 * s, color: INK, textTransform: 'uppercase', lineHeight: 1 }}>
-                  {DAYS[day]}
-                </span>
+                <span style={mono(12, { color: INK, fontWeight: isSat ? 700 : 500 })}>{DAYS[day]}</span>
                 <span style={mono(11, { color: INK_SOFT })}>{DATES[day]}</span>
               </div>
-              <div style={{ marginTop: 10 * s, height: 5 * s, backgroundColor: hexA(INK, 0.08), borderRadius: 3 }}>
+              <div style={{ marginTop: 14 * s, height: 2 * s, backgroundColor: RULE, borderRadius: 99 }}>
                 <div
                   style={{
                     height: '100%',
                     width: `${(FORECAST[day] / max) * 100 * f}%`,
-                    backgroundColor: isSat ? STAMP : hexA(STAMP, 0.55),
-                    borderRadius: 3,
+                    backgroundColor: isSat ? INK : hexA(INK, 0.28),
+                    borderRadius: 99,
                   }}
                 />
               </div>
-              <div style={mono(10.5, { color: INK_SOFT, marginTop: 6 * s, opacity: f, whiteSpace: 'nowrap' })}>
+              <div style={mono(10.5, { color: INK_SOFT, marginTop: 8 * s, opacity: f, whiteSpace: 'nowrap' })}>
                 ${(FORECAST[day] / 1000).toFixed(1)}k
                 {isSat && (
-                  <span style={{ color: STAMP, fontWeight: 700, display: wide ? 'inline' : 'block' }}>
+                  <span style={{ color: INK, display: wide ? 'inline' : 'block' }}>
                     {wide && ' · '}
                     74° sun
                   </span>
@@ -253,7 +250,7 @@ export function WeekComposition({ variant }: WeekProps) {
               transform: `translateX(${interpolate(frame, [14 + r * 3, 30 + r * 3], [-12, 0], { ...clamp, easing: easeOut })}px)`,
             }}
           >
-            <div style={{ fontFamily: BODY, fontWeight: 600, fontSize: 19 * s, color: INK, lineHeight: 1.1, whiteSpace: 'nowrap' }}>{c.name}</div>
+            <div style={{ fontFamily: BODY, fontWeight: 500, fontSize: 17 * s, color: INK, lineHeight: 1.1, letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>{c.name}</div>
             <div style={mono(10, { color: INK_SOFT, marginTop: 3 * s })}>{c.role}</div>
           </div>
         ))}
@@ -264,18 +261,19 @@ export function WeekComposition({ variant }: WeekProps) {
             key={`un-${u.row}-${u.day}`}
             style={{
               position: 'absolute',
-              left: dayX(u.day) + 4,
-              top: rowY(u.row) + 4,
-              width: colW - 8,
-              height: L.rowH - 8,
-              backgroundImage: `repeating-linear-gradient(135deg, ${hexA(INK, 0.14)} 0 1.5px, transparent 1.5px 8px)`,
+              left: dayX(u.day) + inset,
+              top: barTop(u.row),
+              width: colW - inset * 2,
+              height: barH,
+              borderRadius: 999,
+              boxShadow: `inset 0 0 0 1px ${hexA(INK, 0.16)}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               opacity: interpolate(frame, [60, 80], [0, 1], clamp),
             }}
           >
-            <span style={mono(10, { color: INK_SOFT, backgroundColor: PAPER, padding: `${2 * s}px ${6 * s}px` })}>Unavailable</span>
+            <span style={mono(10, { color: INK_SOFT })}>Away</span>
           </div>
         ))}
 
@@ -313,16 +311,17 @@ export function WeekComposition({ variant }: WeekProps) {
                 height: L.rowH,
                 display: 'flex',
                 alignItems: 'center',
-                fontFamily: MONO,
-                fontWeight: 700,
-                fontSize: 20 * s,
+                fontFamily: BODY,
+                fontWeight: 400,
+                fontSize: 22 * s,
+                letterSpacing: '-0.03em',
                 color: over ? RED_PEN : INK,
                 fontVariantNumeric: 'tabular-nums',
                 opacity: frame < T.shifts ? 0 : 1,
               }}
             >
               {value}
-              <span style={{ fontSize: 12 * s, fontWeight: 400, marginLeft: 2, color: over ? RED_PEN : INK_SOFT }}>h</span>
+              <span style={{ fontFamily: MONO, fontSize: 11 * s, marginLeft: 3 * s, color: over ? RED_PEN : INK_SOFT }}>h</span>
             </div>
           )
         })}
@@ -335,66 +334,32 @@ export function WeekComposition({ variant }: WeekProps) {
               left: L.pad,
               right: L.pad,
               top: interpolate(frame, [T.check, T.checkEnd], [L.rowsY, rowsBottom], { ...clamp, easing: Easing.inOut(Easing.quad) }),
-              height: 44 * s,
-              transform: 'translateY(-100%)',
-              background: `linear-gradient(to bottom, transparent, ${hexA(STAMP, 0.12)})`,
-              borderBottom: `2px solid ${STAMP}`,
+              height: 1,
+              backgroundColor: hexA(INK, 0.5),
               opacity: interpolate(frame, [T.checkEnd, T.checkEnd + 6], [1, 0], clamp),
             }}
           />
         )}
 
-        {/* ── red pen ────────────────────────────────────────────────── */}
-        <svg width={L.w} height={L.h} viewBox={`0 0 ${L.w} ${L.h}`} style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
-          <g opacity={flagOut}>
-            <PenLoop
-              frame={frame}
-              start={T.flag}
-              cx={gridRight + 12 * s + 20 * s}
-              cy={rowY(FLAGS.overtime.row) + L.rowH / 2}
-              rx={34 * s}
-              ry={L.rowH * 0.42}
-              seed={1}
-              s={s}
-            />
-            <PenLoop
-              frame={frame}
-              start={T.flag + 10}
-              cx={(hourX(SAT, 7) + hourX(SAT, 15)) / 2}
-              cy={barTop(FLAGS.overtime.row) + barH / 2}
-              rx={(hourX(SAT, 15) - hourX(SAT, 7)) / 2 + 12 * s}
-              ry={barH * 0.72}
-              seed={2}
-              s={s}
-            />
-            <PenNote
-              frame={frame}
-              start={T.flag + 18}
-              x={hourX(SAT, 7) - 4 * s}
-              y={barTop(FLAGS.overtime.row) + barH + 22 * s}
-              text={FLAGS.overtime.label}
-              s={s}
-            />
-            <PenLoop
-              frame={frame}
-              start={T.flag + 22}
-              cx={(hourX(3, 15) + hourX(4, 14)) / 2}
-              cy={barTop(FLAGS.rest.row) + barH / 2}
-              rx={(hourX(4, 14) - hourX(3, 15)) / 2 + 14 * s}
-              ry={barH * 0.78}
-              seed={3}
-              s={s}
-            />
-            <PenNote
-              frame={frame}
-              start={T.flag + 34}
-              x={hourX(3, 15)}
-              y={barTop(FLAGS.rest.row) + barH + 22 * s}
-              text={FLAGS.rest.label}
-              s={s}
-            />
-          </g>
-        </svg>
+        {/* ── problems: a red ring on the shift (ShiftBar), a note under it ── */}
+        <FlagNote
+          frame={frame}
+          start={T.flag + 10}
+          out={flagOut}
+          x={hourX(SAT, 7)}
+          y={barTop(FLAGS.overtime.row) + barH + 6 * s}
+          text={FLAGS.overtime.label}
+          s={s}
+        />
+        <FlagNote
+          frame={frame}
+          start={T.flag + 22}
+          out={flagOut}
+          x={hourX(3, 15)}
+          y={barTop(FLAGS.rest.row) + barH + 6 * s}
+          text={FLAGS.rest.label}
+          s={s}
+        />
 
         {/* ── fixed notes ────────────────────────────────────────────── */}
         {wide && (['mar-sat', 'dev-fri'] as const).map((id, i) => {
@@ -407,14 +372,17 @@ export function WeekComposition({ variant }: WeekProps) {
               style={mono(10, {
                 position: 'absolute',
                 left: hourX(shift.day, shift.start),
-                top: barTop(to) + barH + 3 * s,
-                color: STAMP,
-                fontWeight: 700,
+                top: barTop(to) + barH + 6 * s,
+                color: INK_SOFT,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6 * s,
                 opacity: o * interpolate(frame, [T.stamp, T.stamp + 12], [1, 0], clamp),
                 whiteSpace: 'nowrap',
               })}
             >
-              ✓ moved · {CREW[to].name.split(' ')[0]} {hoursAfter[to]}h
+              <span style={{ width: 5 * s, height: 5 * s, borderRadius: 99, backgroundColor: STAMP }} />
+              moved to {CREW[to].name.split(' ')[0]} · {hoursAfter[to]}h
             </div>
           )
         })}
@@ -437,7 +405,7 @@ export function WeekComposition({ variant }: WeekProps) {
             left: L.pad,
             right: L.pad,
             top: L.dayHeadY - 12 * s,
-            height: 1.5 * s,
+            height: 1,
             backgroundColor: STAMP,
             transformOrigin: '0 50%',
             transform: `scaleX(${interpolate(frame, [T.stamp - 4, T.stamp + 18], [0, 1], { ...clamp, easing: easeOut })})`,
@@ -494,7 +462,7 @@ function SentCard({ frame, L, s }: { frame: number; L: Layout; s: number }) {
             strokeDashoffset={1 - check}
           />
         </svg>
-        <span style={{ fontFamily: BODY, fontWeight: 600, fontSize: 16 * s, color: INK }}>Sent to crew</span>
+        <span style={{ fontFamily: BODY, fontWeight: 500, fontSize: 16 * s, color: INK, letterSpacing: '-0.01em' }}>Sent to crew</span>
         <span style={mono(11, { marginLeft: 'auto', color: INK_SOFT })}>Sun · 4:12 PM</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', marginTop: 12 * s }}>
@@ -562,9 +530,10 @@ function ShiftBar({
   const p = interpolate(frame, [start, start + 11], [0, 1], { ...clamp, easing: easeOut })
   if (p === 0) return null
   const y = fromY + (toY - fromY) * moveP
+  // what changed is the one thing drawn in full ink — the Draft chart's peak bars
+  const moved = MOVES[shift.id] !== undefined && moveP > 0.5
   return (
     <div style={{ position: 'absolute', left: x, top: y, width, height }}>
-      {/* the shift: a clean highlighter block, drawn left to right */}
       <div
         style={{
           position: 'absolute',
@@ -572,12 +541,13 @@ function ShiftBar({
           top: 0,
           height: '100%',
           width: `${p * 100}%`,
-          backgroundColor: HILITE,
-          borderRadius: 5 * s,
-          boxShadow: flagged ? `0 0 0 ${2 * s}px ${RED_PEN}` : 'none',
+          backgroundColor: moved ? INK : REST,
+          borderRadius: 999,
+          boxShadow: flagged ? `0 0 0 ${1.5 * s}px ${RED_PEN}` : 'none',
         }}
       />
-      {labels && (
+      {/* a label only where it fits inside the pill — a 4h shift stays bare */}
+      {labels && width >= 44 * s && (
         <div
           style={{
             position: 'absolute',
@@ -586,9 +556,9 @@ function ShiftBar({
             alignItems: 'center',
             justifyContent: 'center',
             fontFamily: MONO,
-            fontSize: 11.5 * s,
-            fontWeight: 500,
-            color: BAR_INK,
+            fontSize: 11 * s,
+            letterSpacing: '0.04em',
+            color: moved ? PAPER : hexA(INK, 0.85),
             opacity: interpolate(p, [0.6, 1], [0, 1], clamp),
             whiteSpace: 'nowrap',
           }}
@@ -602,87 +572,54 @@ function ShiftBar({
             position: 'absolute',
             left: 0,
             bottom: '100%',
-            marginBottom: 2 * s,
+            marginBottom: 5 * s,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5 * s,
             fontFamily: MONO,
-            fontSize: 9.5 * s,
-            fontWeight: 700,
-            letterSpacing: '0.06em',
-            color: STAMP,
+            fontSize: 9 * s,
+            letterSpacing: '0.08em',
+            color: INK_SOFT,
             opacity: interpolate(frame, [start + 8, start + 20], [0, 1], clamp),
             whiteSpace: 'nowrap',
             textTransform: 'uppercase',
           }}
         >
-          + forecast
+          <span style={{ width: 4 * s, height: 4 * s, borderRadius: 99, backgroundColor: INK }} />
+          forecast
         </div>
       )}
     </div>
   )
 }
 
-/** Hand-drawn loop: a wobbly ellipse that overshoots its own start, drawn on. */
-function PenLoop({
-  frame,
-  start,
-  cx,
-  cy,
-  rx,
-  ry,
-  seed,
-  s,
-}: {
-  frame: number
-  start: number
-  cx: number
-  cy: number
-  rx: number
-  ry: number
-  seed: number
-  s: number
-}) {
-  const p = interpolate(frame, [start, start + 16], [0, 1], { ...clamp, easing: Easing.inOut(Easing.quad) })
-  if (p === 0) return null
-  const pts: string[] = []
-  const a0 = -2.2 + seed * 0.7
-  const steps = 56
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps
-    const a = a0 + t * (Math.PI * 2 + 0.55)
-    const wobble = 1 + 0.045 * Math.sin(3 * a + seed) + 0.03 * t
-    pts.push(`${(cx + Math.cos(a) * rx * wobble).toFixed(1)},${(cy + Math.sin(a) * ry * wobble).toFixed(1)}`)
-  }
+/** A problem, stated plainly under the shift it's about: red dot, mono note. */
+function FlagNote({ frame, start, out, x, y, text, s }: { frame: number; start: number; out: number; x: number; y: number; text: string; s: number }) {
+  const inP = interpolate(frame, [start, start + 8], [0, 1], { ...clamp, easing: easeOut })
+  const o = inP * out
+  if (o === 0) return null
   return (
-    <path
-      d={`M${pts.join(' L')}`}
-      fill="none"
-      stroke={RED_PEN}
-      strokeWidth={2.6 * s}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      pathLength={1}
-      strokeDasharray={1}
-      strokeDashoffset={1 - p}
-    />
-  )
-}
-
-function PenNote({ frame, start, x, y, text, s }: { frame: number; start: number; x: number; y: number; text: string; s: number }) {
-  const o = interpolate(frame, [start, start + 8], [0, 1], clamp)
-  return (
-    <text
-      x={x}
-      y={y}
-      opacity={o}
-      fill={RED_PEN}
-      fontFamily={MONO}
-      fontWeight={700}
-      fontSize={12 * s}
-      letterSpacing="0.06em"
-      transform={`rotate(-3 ${x} ${y})`}
-      style={{ paintOrder: 'stroke', stroke: PAPER, strokeWidth: 4 * s }}
+    <div
+      style={{
+        position: 'absolute',
+        left: x,
+        top: y,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6 * s,
+        opacity: o,
+        transform: `translateY(${(1 - inP) * 4 * s}px)`,
+        fontFamily: MONO,
+        fontSize: 10.5 * s,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        color: RED_PEN,
+        whiteSpace: 'nowrap',
+      }}
     >
+      <span style={{ width: 5 * s, height: 5 * s, borderRadius: 99, backgroundColor: RED_PEN }} />
       {text}
-    </text>
+    </div>
   )
 }
 
@@ -719,6 +656,8 @@ function BottomStrip({
   const wide = L.days.length === 7
 
   return (
+    <>
+    <div style={{ position: 'absolute', left: L.pad, right: L.pad, top: L.bottomY - 16 * s, height: 1, backgroundColor: RULE, opacity: interpolate(frame, [T.shifts, T.shifts + 20], [0, 1], clamp) }} />
     <div
       style={{
         position: 'absolute',
@@ -740,27 +679,13 @@ function BottomStrip({
           const seen = frame >= at
           const fixed = frame >= T.resolve + 24
           const bad = seen && c.flagged && !fixed
-          const color = !seen ? hexA(INK, 0.35) : bad ? RED_PEN : c.flagged ? STAMP : INK
+          const dot = !seen ? hexA(INK, 0.25) : bad ? RED_PEN : c.flagged ? STAMP : INK
+          const color = !seen ? INK_SOFT : bad ? RED_PEN : INK
           return (
-            <div key={c.label} style={mono(11, { color, display: 'flex', alignItems: 'center', gap: 7 * s, whiteSpace: 'nowrap', fontWeight: seen ? 700 : 400 })}>
-              <span
-                style={{
-                  width: 16 * s,
-                  height: 16 * s,
-                  border: `${1.5 * s}px solid ${color}`,
-                  borderRadius: 3 * s,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 11 * s,
-                  lineHeight: 1,
-                  backgroundColor: bad ? hexA(RED_PEN, 0.1) : 'transparent',
-                }}
-              >
-                {!seen ? '' : bad ? '✕' : '✓'}
-              </span>
+            <div key={c.label} style={mono(11, { color, display: 'flex', alignItems: 'center', gap: 8 * s, whiteSpace: 'nowrap' })}>
+              <span style={{ width: 6 * s, height: 6 * s, borderRadius: 99, backgroundColor: dot }} />
               {c.label}
-              {c.flagged && fixed && <span style={{ fontWeight: 400 }}>· fixed</span>}
+              {c.flagged && fixed && <span style={{ color: INK_SOFT }}>· fixed</span>}
             </div>
           )
         })}
@@ -771,6 +696,7 @@ function BottomStrip({
         <Figure label="Overtime" value={money(overtime)} mono={mono} s={s} color={overtime > 0.5 ? RED_PEN : INK} />
       </div>
     </div>
+    </>
   )
 }
 
@@ -790,7 +716,7 @@ function Figure({
   return (
     <div>
       <div style={mono(10, { color: INK_SOFT })}>{label}</div>
-      <div style={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: 44 * s, lineHeight: 1, color, fontVariantNumeric: 'tabular-nums', marginTop: 4 * s }}>{value}</div>
+      <div style={{ fontFamily: BODY, fontWeight: 400, fontSize: 44 * s, lineHeight: 1, letterSpacing: '-0.04em', color, fontVariantNumeric: 'tabular-nums', marginTop: 8 * s }}>{value}</div>
     </div>
   )
 }

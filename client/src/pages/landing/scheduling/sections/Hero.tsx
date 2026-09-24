@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import Stage from '../Stage'
 import { WRAP, display, mono } from '../styles'
-import { BOARD, BOARD_GRID, HILITE, PAPER, hexA } from '../theme'
+import { BOARD, PAPER, hexA } from '../theme'
 import { DURATION, LAYOUTS, STILL_FRAME } from '../timeline'
 import { Accent, PrimaryButton } from './Chrome'
 
@@ -60,7 +60,7 @@ export function Hero({ onContact }: { onContact: () => void }) {
             durationInFrames={DURATION}
             stillFrame={STILL_FRAME}
             label="Animated example: a café's week drafts itself from the sales forecast, flags a 44-hour week and a 7-hour close-to-open turnaround, moves both shifts to crew with room, and is published."
-            surface={{ backgroundColor: BOARD.PAPER, ...BOARD_GRID }}
+            surface={{ backgroundColor: BOARD.PAPER }}
             mediaClassName="overflow-hidden rounded-[10px]"
             mediaStyle={{
               border: `1px solid ${hexA(PAPER, 0.12)}`,
@@ -69,18 +69,22 @@ export function Hero({ onContact }: { onContact: () => void }) {
             caption={
               <div className="flex flex-col gap-3 pt-1.5 sm:flex-row sm:items-center sm:justify-between">
                 <span style={mono('10.5px', { color: MUTED })}>Illustrative week · your draft is built from your own store’s data</span>
-                <span className="flex flex-wrap gap-x-5 gap-y-2" style={mono('10.5px', { color: PAPER })}>
+                <span className="flex flex-wrap gap-x-6 gap-y-2" style={mono('10.5px', { color: MUTED })}>
                   <span className="inline-flex items-center gap-2">
-                    <span className="inline-block h-3 w-6 rounded-sm" style={{ backgroundColor: HILITE }} />
+                    <span className="inline-block h-2 w-5 rounded-full" style={{ backgroundColor: hexA(PAPER, 0.3) }} />
                     Shift
                   </span>
                   <span className="inline-flex items-center gap-2">
-                    <span className="inline-block h-3 w-3 rounded-full border-2" style={{ borderColor: BOARD.RED_PEN }} />
+                    <span className="inline-block h-2 w-5 rounded-full" style={{ boxShadow: `inset 0 0 0 1.5px ${BOARD.RED_PEN}` }} />
                     Flagged
                   </span>
                   <span className="inline-flex items-center gap-2">
-                    <span className="inline-block h-3 w-3 rounded-sm" style={{ backgroundColor: BOARD.STAMP }} />
-                    Fixed · sent
+                    <span className="inline-block h-2 w-5 rounded-full" style={{ backgroundColor: PAPER }} />
+                    Moved
+                  </span>
+                  <span className="inline-flex items-center gap-2">
+                    <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: BOARD.STAMP }} />
+                    Sent
                   </span>
                 </span>
               </div>

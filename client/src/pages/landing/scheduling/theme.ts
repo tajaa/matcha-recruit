@@ -72,12 +72,3 @@ export const BOARD = {
   RED_PEN: '#EF6A4C',
   STAMP: '#8FC46B',
 } as const
-
-/** A barely-there 80px grid for the board, in place of graph paper. */
-export const BOARD_GRID = {
-  backgroundImage: [
-    `linear-gradient(${hexA(BOARD.INK, 0.035)} 1px, transparent 1px)`,
-    `linear-gradient(90deg, ${hexA(BOARD.INK, 0.035)} 1px, transparent 1px)`,
-  ].join(', '),
-  backgroundSize: '80px 80px, 80px 80px',
-}

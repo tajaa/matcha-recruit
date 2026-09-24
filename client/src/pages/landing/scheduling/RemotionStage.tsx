@@ -4,7 +4,6 @@ import { Pause, Play } from 'lucide-react'
 import { useReducedMotion } from './hooks'
 import type { StageProps } from './Stage'
 import { Poster, StageLayout } from './StageFrame'
-import { HILITE, INK } from './theme'
 import { FPS, type Variant } from './timeline'
 
 /**
@@ -117,8 +116,8 @@ export default function RemotionStage({
               type="button"
               onClick={toggle}
               aria-label={playing ? 'Pause animation' : 'Play animation'}
-              className="sched-focus inline-flex h-8 w-8 items-center justify-center rounded-full transition-opacity hover:opacity-80"
-              style={{ backgroundColor: HILITE, color: INK }}
+              // hairline in the surrounding text colour: reads on the dark hero and the paper sections alike
+              className="sched-focus inline-flex h-8 w-8 items-center justify-center rounded-full border border-current opacity-60 transition-opacity hover:opacity-100"
             >
               {playing ? <Pause size={14} /> : <Play size={14} />}
             </button>
