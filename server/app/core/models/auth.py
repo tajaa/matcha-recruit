@@ -80,17 +80,6 @@ class CandidateRegister(BaseModel):
     phone: Optional[str] = None
 
 
-class EmployeeRegister(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=8)
-    first_name: str
-    last_name: str
-    company_id: UUID
-    work_state: Optional[str] = None
-    employment_type: Optional[str] = None  # full_time, part_time, contractor
-    start_date: Optional[datetime] = None
-
-
 class BusinessRegister(BaseModel):
     """
     Unified business registration - creates company + first client/admin user.

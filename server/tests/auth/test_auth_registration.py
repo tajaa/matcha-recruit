@@ -2,10 +2,30 @@ import asyncio
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.core.models.auth import BusinessRegister
 from app.core.routes import auth as auth_routes
+
+
+def test_employee_self_registration_is_not_available():
+    app = FastAPI()
+    app.include_router(auth_routes.router, prefix="/api/auth")
+
+    response = TestClient(app).post(
+        "/api/auth/register/employee",
+        json={
+            "email": "employee@example.com",
+            "password": "supersecret",
+            "first_name": "Test",
+            "last_name": "Employee",
+            "company_id": str(uuid4()),
+        },
+    )
+
+    assert response.status_code in (404, 405)
 
 
 class _FakeConnection:
