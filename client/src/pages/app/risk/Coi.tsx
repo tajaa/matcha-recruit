@@ -61,7 +61,7 @@ export default function Coi() {
             <th className="py-2.5 px-4">Holder / Carrier</th><th>Lines</th><th>Expiry</th><th>Status</th><th>Verify</th><th></th>
           </tr></thead>
           <tbody>
-            {data.certificates.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-zinc-600">No certificates yet — upload one.</td></tr>}
+            {data.certificates.length === 0 && <tr><td colSpan={6} className="px-4 py-5 text-zinc-600">No certificates yet — upload one.</td></tr>}
             {data.certificates.map((c) => (
               <tr key={c.id} className="border-b border-zinc-900">
                 <td className="px-4 py-2.5 text-zinc-200">{c.holder_name || '—'}<div className="text-xs text-zinc-500">{c.carrier || (c.ai_available ? '' : 'not extracted')}</div></td>

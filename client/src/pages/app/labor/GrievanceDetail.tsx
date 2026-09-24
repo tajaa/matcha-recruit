@@ -48,7 +48,7 @@ export default function GrievanceDetail() {
     return <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-zinc-500" /></div>
   }
   if (!g || !grievanceId) {
-    return <Card className="p-8 text-center text-sm text-zinc-500">{error || 'Grievance not found.'}</Card>
+    return <Card className="p-6 text-center text-sm text-zinc-500">{error || 'Grievance not found.'}</Card>
   }
 
   const terminal = TERMINAL.has(g.status)
@@ -392,7 +392,7 @@ function CitationsModal({
     <Modal open onClose={onClose} title="Cited CBA clauses">
       <div className="space-y-3">
         {loading ? (
-          <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-zinc-500" /></div>
+          <div className="flex justify-center py-5"><Loader2 className="w-5 h-5 animate-spin text-zinc-500" /></div>
         ) : clauses.length === 0 ? (
           <p className="text-sm text-zinc-500">This CBA has no clauses. Add some on the CBA page.</p>
         ) : (

@@ -84,11 +84,11 @@ export default function UserSettings() {
   }, [])
 
   return (
-    <div className="max-w-xl mx-auto py-10 px-6">
+    <div className="max-w-xl mx-auto py-6 px-5">
       <h1 className="text-xl font-semibold text-zinc-100 mb-8">Settings</h1>
 
       {/* Avatar section */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
         <h2 className="text-sm font-medium text-zinc-300 mb-4">Profile Photo</h2>
 
         <div className="flex items-center gap-5">
@@ -142,7 +142,7 @@ export default function UserSettings() {
       </div>
 
       {/* Change password */}
-      <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
+      <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
         <div className="flex items-center gap-2 mb-4">
           <Lock className="w-4 h-4 text-zinc-400" />
           <h2 className="text-sm font-medium text-zinc-300">Change Password</h2>

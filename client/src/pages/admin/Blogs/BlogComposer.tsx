@@ -28,7 +28,7 @@ export default function BlogComposer({
   } = useComposer({ isComposer, setPosts, load })
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="p-5 max-w-3xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
         <button
           onClick={() => {

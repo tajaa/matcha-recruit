@@ -37,7 +37,7 @@ export default function BrokerMessages() {
   )
 
   return (
-    <div className="p-6">
+    <div className="p-5">
       <div className="mb-4">
         <h1 className="text-xl font-semibold text-zinc-100">Client Messages</h1>
         <p className="text-sm text-zinc-500">

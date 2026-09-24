@@ -53,7 +53,7 @@ export default function ScheduleJobsTab({ locationId, credentialTemplatesEnabled
         <button onClick={() => setCreating((value) => !value)} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:text-zinc-100"><Plus className="h-4 w-4" /> New job</button>
       </div>
       {creating && <NewJobForm locationId={locationId} credentialTypes={credentialTypes} credentialTemplatesEnabled={credentialTemplatesEnabled} laborCostEnabled={laborCostEnabled} onDone={() => { setCreating(false); void load(); void onJobsChanged?.() }} onCancel={() => setCreating(false)} />}
-      {jobs.length === 0 && !creating ? <p className="rounded-xl border border-dashed border-zinc-800 px-4 py-8 text-center text-sm text-zinc-600">No jobs yet. Start with an area such as Box Office, Concessions, or Ushers.</p> : (
+      {jobs.length === 0 && !creating ? <p className="rounded-xl border border-dashed border-zinc-800 px-4 py-6 text-center text-sm text-zinc-600">No jobs yet. Start with an area such as Box Office, Concessions, or Ushers.</p> : (
         <div className="space-y-2">
           {jobs.map((job) => <JobCard key={job.id} job={job} roster={roster} credentialTypes={credentialTypes} credentialTemplatesEnabled={credentialTemplatesEnabled} laborCostEnabled={laborCostEnabled} onChanged={async () => { await load(); await onJobsChanged?.() }} />)}
         </div>

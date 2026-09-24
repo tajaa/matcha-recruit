@@ -33,7 +33,7 @@ export default function PortalLayout() {
   // message rather than the portal shell or a redirect.
   if (!me) {
     return (
-      <div className="h-screen flex items-center justify-center bg-zinc-950 px-6 text-center text-sm text-zinc-500">
+      <div className="h-screen flex items-center justify-center bg-zinc-950 px-5 text-center text-sm text-zinc-500">
         Could not verify your session. Check your connection and reload.
       </div>
     )
@@ -89,7 +89,7 @@ export default function PortalLayout() {
           </button>
         </div>
 
-        <main className="flex-1 min-w-0 overflow-auto px-6 py-8">
+        <main className="flex-1 min-w-0 overflow-auto px-5 py-6">
           <Outlet />
         </main>
       </div>

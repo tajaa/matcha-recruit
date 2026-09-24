@@ -226,7 +226,7 @@ export default function PolicyBrowserTab() {
       ))}
 
       {filteredDomains.length === 0 && (
-        <p className="text-sm text-zinc-600 text-center py-6">No categories match "{search}"</p>
+        <p className="text-sm text-zinc-600 text-center py-5">No categories match "{search}"</p>
       )}
 
       {/* Detail panel */}
@@ -253,7 +253,7 @@ export default function PolicyBrowserTab() {
           </div>
 
           {loadingDetail ? (
-            <p className="text-sm text-zinc-500 px-4 py-6">Loading requirements...</p>
+            <p className="text-sm text-zinc-500 px-4 py-5">Loading requirements...</p>
           ) : detail && detail.requirements.length > 0 ? (
             <>
               {detail.requirements.length > 10 && (
@@ -313,7 +313,7 @@ export default function PolicyBrowserTab() {
               )}
             </>
           ) : (
-            <p className="text-sm text-zinc-600 px-4 py-6">No requirements found for this category.</p>
+            <p className="text-sm text-zinc-600 px-4 py-5">No requirements found for this category.</p>
           )}
         </div>
       )}

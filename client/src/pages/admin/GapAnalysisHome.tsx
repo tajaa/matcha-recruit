@@ -22,7 +22,7 @@ export default function GapAnalysisHome() {
     }`
 
   return (
-    <div className="p-6">
+    <div className="p-5">
       <div className="flex items-center gap-3 mb-1">
         <Sparkles className="w-5 h-5 text-vsc-accent" />
         <h1 className="text-lg font-semibold text-zinc-100">Gap Analysis</h1>

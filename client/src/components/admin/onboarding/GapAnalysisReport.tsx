@@ -116,7 +116,7 @@ export default function GapAnalysisReport() {
 
   if (loading) {
     return (
-      <div className="p-6 flex items-center gap-2 text-sm text-zinc-500">
+      <div className="p-5 flex items-center gap-2 text-sm text-zinc-500">
         <Loader2 className="w-4 h-4 animate-spin" /> Loading gap analysis…
       </div>
     )
@@ -124,7 +124,7 @@ export default function GapAnalysisReport() {
 
   if (error || !dossier) {
     return (
-      <div className="p-6">
+      <div className="p-5">
         <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-300">
           {error || 'No gap analysis found.'}
         </div>
@@ -142,7 +142,7 @@ export default function GapAnalysisReport() {
   const scope = dossier.scope || {}
 
   return (
-    <div className="p-6 max-w-4xl">
+    <div className="p-5 max-w-4xl">
       <Link
         to={`/admin/gap-analysis/${sessionId}`}
         className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 mb-4"

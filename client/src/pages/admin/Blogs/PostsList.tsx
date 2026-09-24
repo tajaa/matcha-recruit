@@ -125,7 +125,7 @@ export default function PostsList({
           )}
 
           {posts.length === 0 && filter !== 'all' && (
-            <div className="text-zinc-500 text-sm py-8 text-center border border-dashed border-zinc-800 rounded">
+            <div className="text-zinc-500 text-sm py-6 text-center border border-dashed border-zinc-800 rounded">
               No posts with status "{filter}".
             </div>
           )}

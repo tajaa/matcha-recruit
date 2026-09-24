@@ -48,7 +48,7 @@ export function HRNewsSection() {
 
   return (
     <section className="py-16 sm:py-24 md:py-28 border-t" style={{ borderColor: LINE }}>
-      <div className="max-w-[1440px] mx-auto px-5 sm:px-10">
+      <div className="max-w-[1440px] mx-auto px-5 sm:px-6">
         <div className="max-w-2xl mb-12 sm:mb-16">
           <div
             className="text-[11px] uppercase tracking-wider font-medium mb-3 sm:mb-4"
@@ -88,7 +88,7 @@ export function HRNewsSection() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: '-60px' }}
               transition={{ duration: 0.5, delay: i * 0.06, ease: 'easeOut' }}
-              className="p-6 sm:p-8 flex flex-col group transition-colors"
+              className="p-5 sm:p-6 flex flex-col group transition-colors"
               style={{ backgroundColor: BG }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(31,29,26,0.02)')}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = BG)}

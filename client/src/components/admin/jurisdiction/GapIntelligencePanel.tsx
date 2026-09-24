@@ -116,7 +116,7 @@ export default function GapIntelligencePanel() {
 
   if (error || !data) {
     return (
-      <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
+      <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
         <p className="text-sm text-zinc-600">{error ?? 'No data available'}</p>
       </div>
     )
@@ -140,7 +140,7 @@ export default function GapIntelligencePanel() {
       </div>
 
       {filteredGaps.length === 0 ? (
-        <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
+        <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
           <p className="text-sm text-zinc-600">No critical gaps found.</p>
         </div>
       ) : (

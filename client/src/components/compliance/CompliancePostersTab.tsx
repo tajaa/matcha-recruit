@@ -44,7 +44,7 @@ export function CompliancePostersTab({ locationId }: Props) {
   return (
     <div className="space-y-5">
       {locationPosters.length === 0 && locationOrders.length === 0 ? (
-        <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
+        <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
           <p className="text-sm text-zinc-600">No mandatory posters detected for this location.</p>
         </div>
       ) : (

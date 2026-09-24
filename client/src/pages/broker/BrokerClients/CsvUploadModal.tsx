@@ -31,7 +31,7 @@ export function CsvUploadModal({
               onDragOver={(e) => e.preventDefault()}
               onDrop={onDrop}
               onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-zinc-700 rounded-lg p-8 text-center cursor-pointer hover:border-zinc-500 transition-colors"
+              className="border-2 border-dashed border-zinc-700 rounded-lg p-6 text-center cursor-pointer hover:border-zinc-500 transition-colors"
             >
               <Upload className="h-8 w-8 text-zinc-500 mx-auto mb-2" />
               <p className="text-sm text-zinc-400">

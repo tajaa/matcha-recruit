@@ -154,7 +154,7 @@ export default function Accommodations() {
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-12">
+        <div className="flex justify-center py-8">
           <Loader2 className="animate-spin text-zinc-500" size={20} />
         </div>
       ) : cases.length === 0 ? (

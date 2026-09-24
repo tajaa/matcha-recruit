@@ -84,7 +84,7 @@ export default function AdminOnboardingWizard() {
 
   if (loading) {
     return (
-      <div className="p-6 flex items-center gap-2 text-sm text-zinc-500">
+      <div className="p-5 flex items-center gap-2 text-sm text-zinc-500">
         <Loader2 className="w-4 h-4 animate-spin" /> Loading session…
       </div>
     )
@@ -92,7 +92,7 @@ export default function AdminOnboardingWizard() {
 
   if (error || !session) {
     return (
-      <div className="p-6">
+      <div className="p-5">
         <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-300">
           {error || 'Session not found.'}
         </div>
@@ -104,7 +104,7 @@ export default function AdminOnboardingWizard() {
   }
 
   return (
-    <div className="p-6 flex gap-8">
+    <div className="p-5 flex gap-8">
       <aside className="w-56 shrink-0">
         <Link
           to="/admin/gap-analysis"

@@ -71,12 +71,12 @@ export function Chronology({ evidence }: { evidence: EvidencePreview | null }) {
   }, [evidence])
 
   if (!evidence) {
-    return <p className="px-5 py-8 text-sm text-zinc-500">Assembling the record…</p>
+    return <p className="px-5 py-6 text-sm text-zinc-500">Assembling the record…</p>
   }
 
   if (groups.length === 0) {
     return (
-      <div className="px-5 py-8">
+      <div className="px-5 py-6">
         <div className={LABEL}>Chronology</div>
         <p className="mt-2 max-w-[60ch] text-sm leading-relaxed text-zinc-400">
           No dated company records in the evidence scope. Widen the matter's window

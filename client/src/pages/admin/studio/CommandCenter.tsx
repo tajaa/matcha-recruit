@@ -128,11 +128,11 @@ export default function CommandCenter({
       </div>
 
       {loading && !worklist ? (
-        <div className="flex items-center gap-2 py-12 justify-center text-sm text-zinc-500">
+        <div className="flex items-center gap-2 py-8 justify-center text-sm text-zinc-500">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading the worklist…
         </div>
       ) : actions.length === 0 ? (
-        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] px-6 py-12 text-center">
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] px-5 py-8 text-center">
           <CheckCircle2 className="mx-auto h-6 w-6 text-emerald-400" />
           <p className="mt-3 text-sm text-emerald-200">
             Library is as complete and authoritative as current signals show — nothing needs you.

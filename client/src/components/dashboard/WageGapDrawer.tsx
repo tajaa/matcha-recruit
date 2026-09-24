@@ -101,7 +101,7 @@ export function WageGapDrawer({ open, onClose, summary }: Props) {
       {/* Panel */}
       <div className="w-full max-w-5xl bg-zinc-950 border-l border-zinc-800/70 shadow-2xl flex flex-col">
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-zinc-800/60">
+        <div className="flex items-start justify-between gap-4 px-5 py-5 border-b border-zinc-800/60">
           <div>
             <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
               Wage Gap — Action List
@@ -134,7 +134,7 @@ export function WageGapDrawer({ open, onClose, summary }: Props) {
 
         {/* Role rollups */}
         {rollups.length > 0 && (
-          <div className="px-6 pt-5 pb-3 border-b border-zinc-800/60 bg-zinc-900/40">
+          <div className="px-5 pt-5 pb-3 border-b border-zinc-800/60 bg-zinc-900/40">
             <div className="flex items-center justify-between mb-2.5">
               <p className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
                 By Role · click to filter
@@ -184,7 +184,7 @@ export function WageGapDrawer({ open, onClose, summary }: Props) {
         )}
 
         {/* Filter bar */}
-        <div className="px-6 py-3 border-b border-zinc-800/60 flex items-center gap-2 flex-wrap">
+        <div className="px-5 py-3 border-b border-zinc-800/60 flex items-center gap-2 flex-wrap">
           <span className="text-[11px] uppercase tracking-wider text-zinc-500 mr-1">Show:</span>
           {(['below', 'high', 'medium', 'low', 'none', 'all'] as const).map((k) => (
             <button
@@ -212,14 +212,14 @@ export function WageGapDrawer({ open, onClose, summary }: Props) {
         {/* Table */}
         <div className="flex-1 overflow-auto">
           {loading ? (
-            <div className="p-10 text-center text-sm text-zinc-500">Loading...</div>
+            <div className="p-6 text-center text-sm text-zinc-500">Loading...</div>
           ) : err ? (
-            <div className="p-10 flex items-center justify-center gap-2 text-sm text-red-400">
+            <div className="p-6 flex items-center justify-center gap-2 text-sm text-red-400">
               <AlertTriangle className="h-4 w-4" />
               {err}
             </div>
           ) : filtered.length === 0 ? (
-            <div className="p-10 text-center">
+            <div className="p-6 text-center">
               <TrendingDown className="h-8 w-8 text-zinc-700 mx-auto mb-2" />
               <p className="text-sm text-zinc-500">No employees match these filters.</p>
             </div>
@@ -289,7 +289,7 @@ export function WageGapDrawer({ open, onClose, summary }: Props) {
 
         {/* Footer count */}
         {!loading && !err && (
-          <div className="px-6 py-2.5 border-t border-zinc-800/60 text-[11px] text-zinc-500">
+          <div className="px-5 py-2.5 border-t border-zinc-800/60 text-[11px] text-zinc-500">
             Showing <span className="text-zinc-300">{filtered.length}</span> of {employees.length} evaluated employees
             {summary.employees_unclassified > 0 && (
               <span className="ml-3 text-zinc-600">

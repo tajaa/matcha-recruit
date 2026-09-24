@@ -140,7 +140,7 @@ export function NewsletterBuilder({
 
       {/* Block list */}
       {blocks.length === 0 && (
-        <div className="rounded-xl border border-dashed border-white/[0.08] px-4 py-8 text-center">
+        <div className="rounded-xl border border-dashed border-white/[0.08] px-4 py-6 text-center">
           <ImageOff size={20} className="mx-auto text-zinc-600 mb-2" />
           <p className="text-sm text-zinc-400">No blocks yet.</p>
           <p className="text-xs text-zinc-600 mt-0.5">Add a hero, then build your newsletter section by section.</p>

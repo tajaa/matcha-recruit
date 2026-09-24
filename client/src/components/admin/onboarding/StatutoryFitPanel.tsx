@@ -207,7 +207,7 @@ export default function StatutoryFitPanel({ companyId, onCodifyGated, refreshKey
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 rounded-xl border border-vsc-border bg-vsc-panel/40 px-4 py-6 text-xs text-zinc-500">
+      <div className="flex items-center gap-2 rounded-xl border border-vsc-border bg-vsc-panel/40 px-4 py-5 text-xs text-zinc-500">
         <Loader2 className="h-3.5 w-3.5 animate-spin" /> Measuring statutory fit…
       </div>
     )

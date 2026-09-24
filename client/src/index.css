@@ -78,7 +78,64 @@ html[data-app-shell-bg] {
 }
 
 html[data-app-shell-bg="admin"] {
-  background-color: #3f3f46;
+  background-color: var(--color-zinc-700);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Matcha app shell — minimal chrome.
+   Scoped to the Matcha shell (AppLayout sets data-app-shell-bg="true"|"admin");
+   the Werk surface ("werk") and marketing pages keep their own palettes.
+
+   1. Dark mode is near-black: the canvas, sidebar and page frames share one
+      ink, and cards lift off it by a single step (zinc-900) instead of a
+      bordered box. 600 and lighter are untouched, so text contrast holds.
+   2. Structural borders become hairlines. Every static frame/divider class
+      resolves to --hairline instead of a solid gray, which is what made the
+      UI read as a grid of boxes. Elements that carry an interactive border
+      variant (hover:/focus:/focus-within:) are skipped, so inputs, selects
+      and hover-lit rows keep their affordance — and since these rules are
+      unlayered they would otherwise beat those layered variants.
+   ──────────────────────────────────────────────────────────────────────── */
+html[data-app-shell-bg]:not([data-app-shell-bg="werk"]):not([data-theme="light"]) {
+  --color-zinc-950: #070708;
+  --color-zinc-900: #111113;
+  --color-zinc-800: #1b1b1e;
+  --color-zinc-700: #2b2b30;
+
+  --color-vsc-bg:     #070708;
+  --color-vsc-panel:  #111113;
+  --color-vsc-border: #1b1b1e;
+
+  --hairline: rgba(255, 255, 255, 0.055);
+}
+
+html[data-app-shell-bg]:not([data-app-shell-bg="werk"])[data-theme="light"] {
+  --hairline: rgba(31, 29, 26, 0.09);
+}
+
+html[data-app-shell-bg]:not([data-app-shell-bg="werk"]) :is(
+  [class~="border-zinc-900"], [class~="border-zinc-800"], [class~="border-zinc-700"],
+  [class~="border-zinc-800/40"], [class~="border-zinc-800/50"], [class~="border-zinc-800/60"],
+  [class~="border-zinc-800/70"], [class~="border-zinc-800/80"],
+  [class~="border-zinc-700/40"], [class~="border-zinc-700/50"], [class~="border-zinc-700/60"],
+  [class~="border-zinc-700/80"], [class~="border-vsc-border"]
+):not([class*="hover:border"]):not([class*="focus:border"]):not([class*="focus-within:border"]) {
+  border-color: var(--hairline);
+}
+
+html[data-app-shell-bg]:not([data-app-shell-bg="werk"]) :is(
+  [class~="divide-zinc-900"], [class~="divide-zinc-800"], [class~="divide-zinc-700"],
+  [class~="divide-zinc-800/50"], [class~="divide-zinc-800/60"], [class~="divide-vsc-border"]
+) > :not(:last-child) {
+  border-color: var(--hairline);
+}
+
+/* white/alpha frames — dark only; light mode maps these explicitly below. */
+html[data-app-shell-bg]:not([data-app-shell-bg="werk"]):not([data-theme="light"]) :is(
+  [class~="border-white/5"], [class~="border-white/[0.04]"], [class~="border-white/[0.05]"],
+  [class~="border-white/[0.06]"], [class~="border-white/[0.08]"], [class~="border-white/10"]
+):not([class*="hover:border"]):not([class*="focus:border"]):not([class*="focus-within:border"]) {
+  border-color: var(--hairline);
 }
 
 html[data-app-shell-bg="werk"] {
@@ -262,10 +319,10 @@ html[data-theme="light"] :is(
   [class~="border-white/[0.04]"], [class~="border-white/[0.05]"], [class~="border-white/[0.06]"],
   [class~="border-white/5"]
 ) {
-  border-color: rgba(31, 29, 26, 0.12) !important;
+  border-color: rgba(31, 29, 26, 0.09) !important;
 }
 html[data-theme="light"] :is([class~="divide-white/[0.04]"], [class~="divide-white/[0.06]"], [class~="divide-white/5"]) > :not(:last-child) {
-  border-color: rgba(31, 29, 26, 0.12) !important;
+  border-color: rgba(31, 29, 26, 0.09) !important;
 }
 
 html[data-theme="light"] :is([class~="bg-white/[0.08]"], [class~="bg-white/[0.10]"], [class~="bg-white/10"]) {
@@ -275,10 +332,10 @@ html[data-theme="light"] :is(
   [class~="border-white/[0.08]"], [class~="border-white/[0.1]"],
   [class~="border-white/10"], [class~="border-white/15"]
 ) {
-  border-color: rgba(31, 29, 26, 0.18) !important;
+  border-color: rgba(31, 29, 26, 0.13) !important;
 }
 html[data-theme="light"] [class~="divide-white/10"] > :not(:last-child) {
-  border-color: rgba(31, 29, 26, 0.18) !important;
+  border-color: rgba(31, 29, 26, 0.13) !important;
 }
 html[data-theme="light"] [class~="ring-white/10"] {
   --tw-ring-color: rgba(31, 29, 26, 0.18) !important;

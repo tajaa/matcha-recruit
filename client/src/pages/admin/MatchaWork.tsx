@@ -127,7 +127,7 @@ function BusinessWork() {
                 <td className="px-4 py-3 text-right"><Button size="sm" variant="ghost" onClick={() => { setGrantTarget(row); setGrantAmount('') }}><Zap className="h-3.5 w-3.5" /> Grant tokens</Button></td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={7} className="px-4 py-12 text-center text-zinc-500">No Matcha Work businesses found.</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-500">No Matcha Work businesses found.</td></tr>}
           </tbody>
         </table>
       </div>

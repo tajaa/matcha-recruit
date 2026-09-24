@@ -52,7 +52,7 @@ export default function NewsletterAdmin() {
 
   return (
     <div>
-      <div className="rounded-xl border border-white/[0.06] bg-zinc-950 p-6">
+      <div className="rounded-xl border border-white/[0.06] bg-zinc-950 p-5">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-zinc-100">Newsletter</h1>
         <button

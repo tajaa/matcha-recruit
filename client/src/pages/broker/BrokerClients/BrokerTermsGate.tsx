@@ -22,7 +22,7 @@ export function BrokerTermsGate({ onAccepted }: { onAccepted: () => void }) {
   }
 
   return (
-    <div className="max-w-2xl mx-auto py-8 px-4">
+    <div className="max-w-2xl mx-auto py-6 px-4">
       <div className="flex items-center gap-3 mb-4">
         <FileCheck className="h-8 w-8 text-zinc-500" />
         <h2 className="text-lg font-semibold text-zinc-100">Broker Partner Terms of Service</h2>

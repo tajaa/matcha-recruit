@@ -66,7 +66,7 @@ export function ComplianceAlertsTab({ alerts, loading, onMarkRead, onDismiss, on
       </div>
 
       {displayAlerts.length === 0 ? (
-        <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
+        <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
           <p className="text-sm text-zinc-600">No alerts</p>
         </div>
       ) : (

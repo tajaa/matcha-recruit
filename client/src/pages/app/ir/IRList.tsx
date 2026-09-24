@@ -159,11 +159,11 @@ export default function IRList() {
           {/* Incidents table */}
           <div className="bg-zinc-900 border border-white/10 rounded-2xl overflow-hidden">
             {loading ? (
-              <div className="p-8 text-xs text-zinc-500 uppercase tracking-widest font-mono text-center animate-pulse">
+              <div className="p-6 text-xs text-zinc-500 uppercase tracking-widest font-mono text-center animate-pulse">
                 Loading incidents…
               </div>
             ) : filtered.length === 0 ? (
-              <div className="p-12 text-center">
+              <div className="p-8 text-center">
                 <p className="text-sm text-zinc-400">No incidents found.</p>
                 <p className="text-[11px] text-zinc-600 mt-1">Adjust filters or report a new incident.</p>
               </div>

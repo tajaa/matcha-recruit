@@ -24,7 +24,7 @@ export function Scorecard({ cells }: { cells: ScorecardCell[] }) {
 
   if (!cells.length) {
     return (
-      <p className="text-sm text-zinc-500 border border-zinc-800 rounded-lg p-6 text-center">
+      <p className="text-sm text-zinc-500 border border-zinc-800 rounded-lg p-5 text-center">
         No scorecard yet. Trigger a run to populate it.
       </p>
     )

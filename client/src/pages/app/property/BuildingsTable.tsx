@@ -19,7 +19,7 @@ interface BuildingsTableProps {
 export function BuildingsTable({ buildings, risk, exposure, expanded, onToggle, onEdit, onDelete }: BuildingsTableProps) {
   if (buildings.length === 0) {
     return (
-      <Card className="p-8 text-center">
+      <Card className="p-6 text-center">
         <p className="text-sm text-zinc-400">No buildings yet.</p>
         <p className="text-xs text-zinc-600 mt-1">Add your locations' buildings to build the Statement of Values.</p>
       </Card>

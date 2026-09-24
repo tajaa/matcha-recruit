@@ -38,7 +38,7 @@ export function EnhancedBenchmarksPanel({ qs }: Props) {
 
   useEffect(() => { load() }, [load])
 
-  if (loading) return <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 text-xs text-zinc-500 animate-pulse">Loading benchmarks...</div>
+  if (loading) return <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 text-xs text-zinc-500 animate-pulse">Loading benchmarks...</div>
   if (!data) return null
 
   const chartData = data.metrics.map((m) => ({
@@ -50,7 +50,7 @@ export function EnhancedBenchmarksPanel({ qs }: Props) {
   }))
 
   return (
-    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
+    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-4">
       <div className="flex items-center justify-between">
         <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Industry Benchmarks<InfoTip text="Compares your company's rates against NAICS industry medians from BLS, OSHA, and EEOC public data. Blue bars = your company, red bars = industry median. Green = better than peers, red = worse. Pxx = your estimated percentile rank." /></div>
         <div className="text-[10px] text-zinc-600 font-mono">{data.naics_label} ({data.naics_code})</div>

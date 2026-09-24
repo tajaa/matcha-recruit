@@ -175,7 +175,7 @@ export default function RequirementsPanel({
 
   if (loading) {
     return (
-      <div className={`${shell} items-center justify-center py-8`}>
+      <div className={`${shell} items-center justify-center py-6`}>
         <Loader2 className="h-4 w-4 animate-spin text-emerald-500" />
       </div>
     )

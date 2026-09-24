@@ -84,7 +84,7 @@ export default function Step1Locations({ onDone }: { onDone: () => void }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-10">
+      <div className="flex items-center justify-center py-6">
         <Loader2 className="w-5 h-5 text-zinc-500 animate-spin" />
       </div>
     )

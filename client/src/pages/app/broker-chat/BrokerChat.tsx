@@ -60,7 +60,7 @@ export default function BrokerChat() {
 
   if (!summary?.has_active_broker) {
     return (
-      <div className="p-6">
+      <div className="p-5">
         <h1 className="mb-1 text-xl font-semibold text-zinc-100">Broker Messages</h1>
         <div className="mt-8 flex flex-col items-center justify-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 py-16 text-center text-zinc-500">
           <MessageSquare className="h-8 w-8" />
@@ -74,7 +74,7 @@ export default function BrokerChat() {
   }
 
   return (
-    <div className="p-6">
+    <div className="p-5">
       <div className="mb-4">
         <h1 className="text-xl font-semibold text-zinc-100">Broker Messages</h1>
         <p className="text-sm text-zinc-500">

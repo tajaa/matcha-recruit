@@ -154,7 +154,7 @@ export default function LaborRelations() {
 
 function GrievanceTable({ grievances, onOpen }: { grievances: Grievance[]; onOpen: (id: string) => void }) {
   if (grievances.length === 0) {
-    return <Card className="p-8 text-center text-sm text-zinc-500">No grievances yet.</Card>
+    return <Card className="p-6 text-center text-sm text-zinc-500">No grievances yet.</Card>
   }
   return (
     <Card className="divide-y divide-zinc-800">
@@ -183,7 +183,7 @@ function GrievanceTable({ grievances, onOpen }: { grievances: Grievance[]; onOpe
 
 function CbaTable({ cbas, onOpen }: { cbas: CBA[]; onOpen: (id: string) => void }) {
   if (cbas.length === 0) {
-    return <Card className="p-8 text-center text-sm text-zinc-500">No CBAs on file. Upload your first agreement.</Card>
+    return <Card className="p-6 text-center text-sm text-zinc-500">No CBAs on file. Upload your first agreement.</Card>
   }
   return (
     <Card className="divide-y divide-zinc-800">
