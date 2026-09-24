@@ -237,7 +237,7 @@ async def refresh_token(request: RefreshTokenRequest):
                                AND comp.is_personal = false
                              LIMIT 1
                           ) AS company_name
-                     FROM users WHERE id = $1 FOR UPDATE""",
+                     FROM users WHERE id = $1""",
                 payload.sub
             )
 
