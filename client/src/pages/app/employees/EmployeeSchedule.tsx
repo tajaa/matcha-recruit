@@ -103,7 +103,9 @@ export default function EmployeeSchedule() {
 
   useEffect(() => {
     let cancelled = false
-    setAutomaticSuggestion(null)
+    void Promise.resolve().then(() => {
+      if (!cancelled) setAutomaticSuggestion(null)
+    })
     if (!locationId || tab !== 'schedule') return () => { cancelled = true }
     void getScheduleSuggestionStatus(locationId, weekStart)
       .then((result) => {
@@ -801,7 +803,7 @@ function TemplatesTab({ locationId, onGenerated }: { locationId: string; onGener
     const response = await fetchWeekTemplates(locationId)
     setTemplates(response.week_templates)
   }, [locationId])
-  useEffect(() => { load().finally(() => setLoading(false)) }, [load])
+  useEffect(() => { void Promise.resolve().then(load).finally(() => setLoading(false)) }, [load])
 
   function handleDeleted(templateId: string) {
     if (editing?.id === templateId) {
@@ -931,7 +933,7 @@ function RequestsTab({ locationId, onReviewed }: { locationId: string | null; on
     setRequests(requestResult.requests)
     setEligibilityCases(eligibilityResult.cases.filter((item) => item.status === 'warning_open' || item.status === 'removal_requested'))
   }, [locationId])
-  useEffect(() => { load().finally(() => setLoading(false)) }, [load])
+  useEffect(() => { void Promise.resolve().then(load).finally(() => setLoading(false)) }, [load])
 
   async function review(id: string, decision: 'approved' | 'denied') {
     try {
