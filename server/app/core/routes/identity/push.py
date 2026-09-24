@@ -4,14 +4,15 @@ iOS clients register their APNs device token here after the user grants
 notification permission; the token is upserted against the authenticated user so
 `apns_service.send_to_user` can fan a bell notification out to their devices.
 """
-from typing import Optional
+from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.database import get_connection
 from app.core.dependencies import get_current_user
 from app.core.models.auth import CurrentUser
+from app.core.services.apns_service import configured_bundles
 
 router = APIRouter()
 
@@ -20,6 +21,7 @@ class DeviceTokenBody(BaseModel):
     token: str
     platform: str = "ios"
     bundle_id: Optional[str] = None
+    environment: Optional[Literal["sandbox", "production"]] = None
 
 
 class UnregisterBody(BaseModel):
@@ -32,18 +34,21 @@ async def register_device(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Upsert a device token for the current user (idempotent on token)."""
+    if body.bundle_id is not None and body.bundle_id not in configured_bundles():
+        raise HTTPException(status_code=422, detail="Unknown app bundle ID")
     async with get_connection() as conn:
         await conn.execute(
             """
-            INSERT INTO device_tokens (user_id, token, platform, bundle_id, last_seen_at)
-            VALUES ($1, $2, $3, $4, NOW())
+            INSERT INTO device_tokens (user_id, token, platform, bundle_id, environment, last_seen_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
             ON CONFLICT (token) DO UPDATE
               SET user_id = EXCLUDED.user_id,
                   platform = EXCLUDED.platform,
                   bundle_id = EXCLUDED.bundle_id,
+                  environment = EXCLUDED.environment,
                   last_seen_at = NOW()
             """,
-            current_user.id, body.token, body.platform, body.bundle_id,
+            current_user.id, body.token, body.platform, body.bundle_id, body.environment,
         )
     return {"ok": True}
 
