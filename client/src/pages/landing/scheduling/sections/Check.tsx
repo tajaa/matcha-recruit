@@ -1,7 +1,7 @@
 import { Reveal } from '../motion'
 import { WRAP, mono } from '../styles'
 import { INK, INK_SOFT, RED_PEN, STAMP, hexA } from '../theme'
-import { Accent, StepHead } from './Chrome'
+import { Accent, CellLabel, StepHead } from './Chrome'
 
 type Outcome = 'stops' | 'draft' | 'priced'
 
@@ -78,14 +78,12 @@ export function Check() {
               className={`flex flex-col py-10 ${i ? 'border-t' : ''} ${i === 1 ? 'lg:border-t-0' : ''} ${left ? 'lg:border-r lg:pr-14' : 'lg:pl-14'}`}
               style={{ borderColor: RULE }}
             >
-              <div className="flex items-center gap-3" style={mono('10px', { color: INK_SOFT })}>
-                <span style={{ color: INK }}>{String(i + 1).padStart(2, '0')}</span>
-                <span aria-hidden className="h-px w-6" style={{ backgroundColor: hexA(INK, 0.25) }} />
+              <CellLabel n={String(i + 1).padStart(2, '0')}>
                 <span className="inline-flex items-center gap-2">
                   <Dot color={OUTCOME[rule.outcome].dot} />
                   {OUTCOME[rule.outcome].label}
                 </span>
-              </div>
+              </CellLabel>
               <h3 className="mt-5 text-[1.45rem] font-medium leading-tight tracking-[-0.025em]" style={{ color: INK }}>
                 {rule.name}
               </h3>

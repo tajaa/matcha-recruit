@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { Reveal } from '../motion'
 import { WRAP, mono } from '../styles'
 import { CARD, INK, INK_SOFT, RED_PEN, STAMP, hexA } from '../theme'
-import { Accent, StepHead } from './Chrome'
+import { Accent, CellLabel, StepHead } from './Chrome'
 
 /** Saturday, 6a–11p: committed sales per hour (relative) and the people the
  *  draft puts on the floor for it. Same Saturday as the hero. */
@@ -196,11 +196,7 @@ function Certs() {
 function Input({ n, tag, title, body, children, className = '', delay }: { n: string; tag: string; title: string; body: string; children: ReactNode; className?: string; delay: number }) {
   return (
     <Reveal delay={delay} className={`flex flex-col py-12 sm:py-14 ${className}`} style={{ borderColor: RULE }}>
-      <div className="flex items-center gap-3" style={mono('10px', { color: INK_SOFT })}>
-        <span style={{ color: INK }}>{n}</span>
-        <span aria-hidden className="h-px w-6" style={{ backgroundColor: hexA(INK, 0.25) }} />
-        {tag}
-      </div>
+      <CellLabel n={n}>{tag}</CellLabel>
       <h3 className="mt-5 text-[1.45rem] font-medium leading-tight tracking-[-0.025em]" style={{ color: INK }}>
         {title}
       </h3>

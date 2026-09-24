@@ -9,12 +9,14 @@
  */
 import type { CSSProperties } from 'react'
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion'
-import { BODY, CARD, DISPLAY, HILITE, INK, INK_SOFT, MONO, PAPER, STAMP, graphPaper, hexA } from './theme'
+import { BOARD, BODY, CARD, INK, INK_SOFT, MONO, PAPER, STAMP, hexA } from './theme'
 import { C, CHAT_DURATION, CHAT_SIZES, type Variant } from './timeline'
 
 const MESSAGE = '@huume give Dev’s Tuesday open to Jonah'
 const MENTION = '@huume'
 const CHECKS = ['available', 'qualified', '8h+ rest', 'no overtime']
+
+const RULE = hexA(INK, 0.1)
 
 const clamp = { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' } as const
 
@@ -50,7 +52,7 @@ export default function ChatComposition({ variant }: { variant: Variant }) {
   const move = spring({ frame: frame - C.confirmed - 6, fps, config: { damping: 15, stiffness: 110 } })
 
   return (
-    <AbsoluteFill style={{ backgroundColor: PAPER, ...graphPaper(16) }}>
+    <AbsoluteFill style={{ backgroundColor: PAPER }}>
       <AbsoluteFill
         style={{
           opacity: out,
@@ -64,26 +66,27 @@ export default function ChatComposition({ variant }: { variant: Variant }) {
         {/* ── channel window ───────────────────────────────────────────── */}
         <div
           style={{
-            flex: wide ? '0 0 64%' : '1 1 auto',
+            flex: wide ? '0 0 58%' : '1 1 auto',
             display: 'flex',
             flexDirection: 'column',
-            backgroundColor: '#fff',
-            border: `${2 * s}px solid ${INK}`,
-            borderRadius: 16 * s,
-            boxShadow: `${8 * s}px ${8 * s}px 0 ${INK}`,
+            backgroundColor: CARD,
+            borderRadius: 14 * s,
+            boxShadow: `0 0 0 1px ${RULE}, 0 1px 2px ${hexA(INK, 0.04)}, 0 30px 60px -36px ${hexA(INK, 0.3)}`,
             overflow: 'hidden',
             opacity: interpolate(frame, [0, 8], [0, 1], clamp),
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: `${16 * s}px ${22 * s}px`, borderBottom: `1px solid ${hexA(INK, 0.12)}` }}>
-            <span style={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: 28 * s, color: INK, textTransform: 'uppercase', lineHeight: 1 }}># mission-st</span>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: `${16 * s}px ${22 * s}px`, borderBottom: `1px solid ${RULE}` }}>
+            <span style={{ fontFamily: BODY, fontWeight: 500, fontSize: 20 * s, color: INK, letterSpacing: '-0.02em', lineHeight: 1 }}>
+              <span style={{ color: INK_SOFT }}>#</span> mission-st
+            </span>
             <span style={mono(11, { color: INK_SOFT })}>8 members</span>
           </div>
 
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16 * s, padding: `${20 * s}px ${22 * s}px`, fontFamily: BODY, color: INK }}>
             {/* Ana */}
             <div style={{ display: 'flex', gap: 12 * s, ...appear(C.ana) }}>
-              <Avatar s={s} bg={STAMP} fg={PAPER} text="AR" />
+              <Avatar s={s} bg={hexA(INK, 0.08)} fg={INK} text="AR" />
               <div>
                 <div style={mono(10.5, { color: INK_SOFT })}>Ana R. · shift lead</div>
                 <div style={{ fontSize: 17 * s, lineHeight: 1.4, marginTop: 4 * s }}>Dev’s at the dentist Tuesday morning. Can someone take his open?</div>
@@ -93,14 +96,14 @@ export default function ChatComposition({ variant }: { variant: Variant }) {
             {/* manager */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', ...(sent ? appear(C.send) : { opacity: 0 }) }}>
               <div style={{ maxWidth: '86%', backgroundColor: INK, color: PAPER, borderRadius: `${18 * s}px ${18 * s}px ${4 * s}px ${18 * s}px`, padding: `${10 * s}px ${16 * s}px`, fontSize: 17 * s, lineHeight: 1.35 }}>
-                <span style={{ color: HILITE, fontWeight: 600 }}>{MENTION}</span>
+                <span style={{ color: BOARD.STAMP, fontWeight: 500 }}>{MENTION}</span>
                 {MESSAGE.slice(MENTION.length)}
               </div>
             </div>
 
             {/* huume */}
             <div style={{ display: 'flex', gap: 12 * s, position: 'relative' }}>
-              <Avatar s={s} bg={HILITE} fg={INK} text="h" square style={{ opacity: interpolate(frame, [C.dots, C.dots + 6], [0, 1], clamp) }} />
+              <Avatar s={s} bg={INK} fg={PAPER} text="h" square style={{ opacity: interpolate(frame, [C.dots, C.dots + 6], [0, 1], clamp) }} />
               <div style={{ flex: 1, position: 'relative' }}>
                 {frame >= C.dots && frame < C.card + 4 && (
                   <div style={{ position: 'absolute', top: 8 * s, display: 'flex', gap: 5 * s, opacity: interpolate(frame, [C.card, C.card + 4], [1, 0], clamp) }}>
@@ -112,45 +115,52 @@ export default function ChatComposition({ variant }: { variant: Variant }) {
                 <div
                   style={{
                     ...appear(C.card),
-                    backgroundColor: CARD,
-                    border: `${1.5 * s}px solid ${confirmed ? STAMP : hexA(INK, 0.18)}`,
+                    backgroundColor: '#fff',
+                    boxShadow: `0 0 0 ${1 * s}px ${confirmed ? hexA(STAMP, 0.6) : RULE}`,
                     borderRadius: 12 * s,
                     padding: `${14 * s}px ${16 * s}px`,
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 * s, flexWrap: 'wrap' }}>
-                    <span style={mono(10.5, { color: STAMP, fontWeight: 700 })}>{confirmed ? 'Confirmed · reassign' : 'Proposed · reassign'}</span>
+                    <span style={mono(10.5, { color: INK, display: 'flex', alignItems: 'center', gap: 7 * s })}>
+                      <span style={{ width: 6 * s, height: 6 * s, borderRadius: 99, backgroundColor: confirmed ? STAMP : INK }} />
+                      {confirmed ? 'Confirmed · reassign' : 'Proposed · reassign'}
+                    </span>
                     <span style={mono(10.5, { color: INK_SOFT })}>Tue Oct 6 · 7a–3p · Barista</span>
                   </div>
-                  <div style={{ fontSize: 21 * s, fontWeight: 600, marginTop: 8 * s }}>Dev P. → Jonah B.</div>
+                  <div style={{ fontSize: 21 * s, fontWeight: 500, letterSpacing: '-0.02em', marginTop: 10 * s }}>Dev P. → Jonah B.</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 14 * s, rowGap: 4 * s, marginTop: 10 * s, fontSize: 15 * s }}>
                     <span style={{ color: INK_SOFT }}>Jonah</span>
                     <span style={{ fontFamily: MONO }}>
                       32h → {jonah}h{' '}
-                      <span style={{ color: STAMP, opacity: interpolate(frame, [C.rows + 22, C.rows + 30], [0, 1], clamp) }}>· no overtime</span>
+                      <span style={{ color: INK_SOFT, opacity: interpolate(frame, [C.rows + 22, C.rows + 30], [0, 1], clamp) }}>· no overtime</span>
                     </span>
                     <span style={{ color: INK_SOFT }}>Dev</span>
                     <span style={{ fontFamily: MONO }}>32h → {dev}h</span>
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 * s, marginTop: 12 * s }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: `${6 * s}px ${16 * s}px`, marginTop: 14 * s }}>
                     {CHECKS.map((c, i) => (
                       <span
                         key={c}
                         style={mono(10, {
-                          color: STAMP,
-                          border: `${1.2 * s}px solid ${hexA(STAMP, 0.5)}`,
-                          borderRadius: 99,
-                          padding: `${3 * s}px ${9 * s}px`,
+                          color: INK_SOFT,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6 * s,
                           opacity: interpolate(frame, [C.checks + i * 8, C.checks + i * 8 + 6], [0, 1], clamp),
                         })}
                       >
-                        ✓ {c}
+                        <span style={{ width: 5 * s, height: 5 * s, borderRadius: 99, backgroundColor: STAMP }} />
+                        {c}
                       </span>
                     ))}
                   </div>
                   <div style={{ marginTop: 14 * s, minHeight: 38 * s, display: 'flex', alignItems: 'center', gap: 8 * s }}>
                     {confirmed ? (
-                      <span style={{ fontSize: 15 * s, fontWeight: 600, color: STAMP, ...appear(C.confirmed) }}>✓ Confirmed by you · Jonah notified</span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 * s, fontSize: 15 * s, fontWeight: 500, color: INK, ...appear(C.confirmed) }}>
+                        <span style={{ width: 6 * s, height: 6 * s, borderRadius: 99, backgroundColor: STAMP }} />
+                        Confirmed by you · Jonah notified
+                      </span>
                     ) : (
                       <>
                         <span
@@ -160,17 +170,17 @@ export default function ChatComposition({ variant }: { variant: Variant }) {
                             height: 36 * s,
                             padding: `0 ${16 * s}px`,
                             borderRadius: 99,
-                            backgroundColor: STAMP,
+                            backgroundColor: INK,
                             color: PAPER,
-                            fontWeight: 600,
+                            fontWeight: 500,
                             fontSize: 15 * s,
                             transform: `scale(${pressScale})`,
-                            boxShadow: `0 0 0 ${pulse * 6 * s}px ${hexA(HILITE, 0.7 * (1 - pulse * 0.4))}`,
+                            boxShadow: `0 0 0 ${pulse * 6 * s}px ${hexA(INK, 0.12 * (1 - pulse * 0.5))}`,
                           }}
                         >
                           Confirm
                         </span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', height: 36 * s, padding: `0 ${16 * s}px`, borderRadius: 99, border: `1px solid ${hexA(INK, 0.3)}`, fontSize: 15 * s }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', height: 36 * s, padding: `0 ${16 * s}px`, borderRadius: 99, boxShadow: `inset 0 0 0 1px ${hexA(INK, 0.2)}`, fontSize: 15 * s }}>
                           Cancel
                         </span>
                       </>
@@ -184,14 +194,14 @@ export default function ChatComposition({ variant }: { variant: Variant }) {
           </div>
 
           {/* composer */}
-          <div style={{ padding: `${14 * s}px ${22 * s}px`, borderTop: `1px solid ${hexA(INK, 0.12)}` }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 * s, border: `1px solid ${hexA(INK, 0.22)}`, borderRadius: 99, padding: `${9 * s}px ${14 * s}px`, fontSize: 16 * s, fontFamily: BODY }}>
+          <div style={{ padding: `${14 * s}px ${22 * s}px`, borderTop: `1px solid ${RULE}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 * s, border: `1px solid ${hexA(INK, 0.16)}`, borderRadius: 99, padding: `${9 * s}px ${14 * s}px`, fontSize: 16 * s, fontFamily: BODY }}>
               <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', color: sent || typedLen === 0 ? hexA(INK, 0.4) : INK }}>
                 {sent || typedLen === 0 ? (
                   'Message #mission-st'
                 ) : (
                   <>
-                    <span style={{ color: typedLen >= MENTION.length ? STAMP : INK, fontWeight: typedLen >= MENTION.length ? 600 : 400 }}>{MESSAGE.slice(0, Math.min(typedLen, MENTION.length))}</span>
+                    <span style={{ color: typedLen >= MENTION.length ? STAMP : INK, fontWeight: typedLen >= MENTION.length ? 500 : 400 }}>{MESSAGE.slice(0, Math.min(typedLen, MENTION.length))}</span>
                     {MESSAGE.slice(MENTION.length, Math.max(typedLen, MENTION.length))}
                   </>
                 )}
@@ -238,9 +248,9 @@ function Avatar({ s, bg, fg, text, square, style }: { s: number; bg: string; fg:
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontFamily: square ? DISPLAY : MONO,
-        fontWeight: 800,
-        fontSize: (square ? 22 : 12) * s,
+        fontFamily: square ? BODY : MONO,
+        fontWeight: square ? 600 : 500,
+        fontSize: (square ? 18 : 11) * s,
         ...style,
       }}
     >
@@ -263,8 +273,8 @@ function TuesdayStrip({
   mono: (size: number, extra?: CSSProperties) => CSSProperties
 }) {
   const rowH = 58 * s
-  const barTop = rowH * 0.22
-  const barH = rowH * 0.56
+  const barH = rowH * 0.44
+  const barTop = (rowH - barH) / 2
   // 6a → midnight across the lane; Dev's open is 7a–3p
   const x = (h: number) => `${((h - 6) / 18) * 100}%`
   const rows = [
@@ -282,19 +292,19 @@ function TuesdayStrip({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <span style={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: 30 * s, color: INK, textTransform: 'uppercase', lineHeight: 1 }}>Tue 6</span>
+        <span style={mono(12, { color: INK, fontWeight: 500 })}>Tue 6</span>
         <span style={mono(10.5, { color: INK_SOFT })}>Hours this week</span>
       </div>
-      <div style={{ position: 'relative', marginTop: 14 * s, borderTop: `${2 * s}px solid ${INK}` }}>
-        {rows.map((r, i) => {
+      <div style={{ position: 'relative', marginTop: 14 * s, borderTop: `1px solid ${hexA(INK, 0.2)}` }}>
+        {rows.map((r) => {
           const hours = Math.round(r.before + (r.after - r.before) * move)
           return (
-            <div key={r.name} style={{ display: 'flex', alignItems: 'center', height: rowH, borderBottom: `1px solid ${hexA(INK, 0.16)}` }}>
-              <span style={{ width: wide ? 84 * s : 120 * s, fontFamily: BODY, fontWeight: 600, fontSize: 16 * s, color: INK, flexShrink: 0 }}>{r.name}</span>
-              <span style={{ flex: 1, position: 'relative', height: '100%', borderLeft: `1px solid ${hexA(INK, 0.12)}`, borderRight: `1px solid ${hexA(INK, 0.12)}` }} />
-              <span style={{ width: 54 * s, textAlign: 'right', fontFamily: MONO, fontWeight: 700, fontSize: 18 * s, color: i === 1 && hours >= 40 ? STAMP : INK, fontVariantNumeric: 'tabular-nums' }}>
+            <div key={r.name} style={{ display: 'flex', alignItems: 'center', height: rowH, borderBottom: `1px solid ${RULE}` }}>
+              <span style={{ width: wide ? 84 * s : 120 * s, fontFamily: BODY, fontWeight: 500, fontSize: 16 * s, color: INK, flexShrink: 0 }}>{r.name}</span>
+              <span style={{ flex: 1, position: 'relative', height: '100%', borderLeft: `1px solid ${RULE}`, borderRight: `1px solid ${RULE}` }} />
+              <span style={{ width: 54 * s, textAlign: 'right', fontFamily: BODY, fontWeight: 400, fontSize: 20 * s, letterSpacing: '-0.03em', color: INK, fontVariantNumeric: 'tabular-nums' }}>
                 {hours}
-                <span style={{ fontSize: 11 * s, fontWeight: 400, color: INK_SOFT }}>h</span>
+                <span style={{ fontFamily: MONO, fontSize: 11 * s, marginLeft: 2 * s, color: INK_SOFT }}>h</span>
               </span>
             </div>
           )
@@ -316,24 +326,25 @@ function TuesdayStrip({
               width: `calc(${x(15)} - ${x(7)})`,
               top: 0,
               bottom: 0,
-              backgroundColor: hexA(HILITE, 0.9),
-              mixBlendMode: 'multiply',
-              borderRadius: `${3 * s}px ${9 * s}px ${5 * s}px ${8 * s}px`,
-              transform: 'skewX(-4deg)',
+              // the moving shift in full ink, as in the hero
+              backgroundColor: INK,
+              borderRadius: 999,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontFamily: MONO,
-              fontSize: 12 * s,
-              color: INK,
+              fontSize: 11 * s,
+              letterSpacing: '0.04em',
+              color: PAPER,
             }}
           >
             7a–3p
           </div>
         </div>
       </div>
-      <div style={mono(10, { color: STAMP, fontWeight: 700, marginTop: 12 * s, opacity: interpolate(frame, [C.system, C.system + 10], [0, 1], clamp) })}>
-        ✓ published · Jonah notified
+      <div style={mono(10, { color: INK_SOFT, display: 'flex', alignItems: 'center', gap: 7 * s, marginTop: 14 * s, opacity: interpolate(frame, [C.system, C.system + 10], [0, 1], clamp) })}>
+        <span style={{ width: 5 * s, height: 5 * s, borderRadius: 99, backgroundColor: STAMP }} />
+        published · Jonah notified
       </div>
     </div>
   )

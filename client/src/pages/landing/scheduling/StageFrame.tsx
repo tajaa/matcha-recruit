@@ -1,5 +1,5 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { graphPaper, PAPER } from './theme'
+import type { CSSProperties, ReactNode } from 'react'
+import { PAPER } from './theme'
 
 /** Shared chrome for an animation: the media box, then a control + caption
  *  row. Used both by the live stage and by its loading fallback, so swapping
@@ -33,30 +33,9 @@ export function StageLayout({
   )
 }
 
-/** Stand-in while Remotion loads: the same blank sheet the composition opens
- *  on (graph paper, or `surface` when the composition draws its own), so the
- *  handoff is invisible. */
-export function Poster({ width, height, cell = 16, surface }: { width: number; height: number; cell?: number; surface?: CSSProperties }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [scale, setScale] = useState(0)
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const measure = () => setScale(el.offsetWidth / width)
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [width])
-  return (
-    <div
-      ref={ref}
-      aria-hidden
-      style={{
-        width: '100%',
-        aspectRatio: `${width} / ${height}`,
-        ...(surface ?? { backgroundColor: PAPER, ...(scale ? graphPaper(cell * scale) : {}) }),
-      }}
-    />
-  )
+/** Stand-in while Remotion loads: the same blank surface the composition
+ *  opens on (plain paper unless `surface` says otherwise), so the handoff is
+ *  invisible. */
+export function Poster({ width, height, surface }: { width: number; height: number; surface?: CSSProperties }) {
+  return <div aria-hidden style={{ width: '100%', aspectRatio: `${width} / ${height}`, ...(surface ?? { backgroundColor: PAPER }) }} />
 }

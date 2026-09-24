@@ -3,7 +3,7 @@ import { ArrowRight } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Reveal } from '../motion'
 import { STEPS, WRAP, display, mono, type StepId } from '../styles'
-import { BOARD, GRAIN, HILITE, INK, INK_SOFT, PAPER, SERIF, STAMP, hexA } from '../theme'
+import { BOARD, GRAIN, INK, INK_SOFT, PAPER, SERIF, STAMP, hexA } from '../theme'
 
 export function PrimaryButton({ onClick, children, tone = 'ink' }: { onClick: () => void; children: ReactNode; tone?: 'ink' | 'paper' }) {
   return (
@@ -22,6 +22,18 @@ export function PrimaryButton({ onClick, children, tone = 'ink' }: { onClick: ()
 export function Accent({ children, dark }: { children: ReactNode; dark?: boolean }) {
   return (
     <em style={{ fontFamily: SERIF, fontStyle: 'italic', fontWeight: 400, letterSpacing: '-0.01em', color: dark ? BOARD.STAMP : STAMP }}>{children}</em>
+  )
+}
+
+/** A grid cell's label: "01 —— Sales". Shared by every hairline grid. */
+export function CellLabel({ n, children, dark }: { n: string; children: ReactNode; dark?: boolean }) {
+  const ink = dark ? PAPER : INK
+  return (
+    <div className="flex items-center gap-3" style={mono('10px', { color: dark ? hexA(PAPER, 0.55) : INK_SOFT })}>
+      <span style={{ color: ink }}>{n}</span>
+      <span aria-hidden className="h-px w-6" style={{ backgroundColor: hexA(ink, 0.25) }} />
+      {children}
+    </div>
   )
 }
 
@@ -197,8 +209,8 @@ export function TimelineRail() {
                 className="absolute top-[3px] h-[9px] w-[9px] rounded-full transition-colors duration-300"
                 style={{
                   left: -21,
-                  backgroundColor: state === 'now' ? HILITE : state === 'past' ? INK : PAPER,
-                  border: `1.5px solid ${state === 'next' ? hexA(INK, 0.3) : INK}`,
+                  backgroundColor: state === 'now' ? STAMP : state === 'past' ? INK : PAPER,
+                  border: `1.5px solid ${state === 'next' ? hexA(INK, 0.3) : state === 'now' ? STAMP : INK}`,
                 }}
               />
               <a href={`#${s.id}`} className="sched-focus block rounded" aria-current={state === 'now' ? 'step' : undefined}>
@@ -219,7 +231,7 @@ export function TimelineRail() {
 
 export function Footer() {
   return (
-    <footer style={{ backgroundColor: INK, color: PAPER }}>
+    <footer style={{ backgroundColor: BOARD.PAPER, color: PAPER }}>
       <div className={`${WRAP} grid gap-10 py-14 md:grid-cols-12 md:items-end`}>
         <div className="md:col-span-7">
           <div style={{ ...display, fontSize: 'clamp(3rem, 8vw, 6rem)', lineHeight: 0.9 }}>Matcha</div>
@@ -250,7 +262,7 @@ export function LandingStyles() {
   return (
     <style>{`
       .sched-root { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
-      .sched-root ::selection { background: ${HILITE}; color: ${INK}; }
+      .sched-root ::selection { background: ${hexA(STAMP, 0.25)}; color: ${INK}; }
       html:has(.sched-root) { scroll-behavior: smooth; scroll-padding-top: 80px; }
 
       .cut-fade { animation: schedFade .8s ease var(--d, 0ms) both; }
@@ -265,9 +277,9 @@ export function LandingStyles() {
       .sched-btn { transition: background-size .45s cubic-bezier(.6,.05,.25,1), color .25s, transform .25s; background-repeat: no-repeat; background-position: 0 0; background-size: 0% 100%; }
       .sched-btn:hover { background-size: 100% 100%; }
       .sched-btn:active { transform: translateY(1px); }
-      .sched-btn-ink { background-image: linear-gradient(${HILITE}, ${HILITE}); background-color: ${INK}; color: ${PAPER}; }
-      .sched-btn-ink:hover { color: ${INK}; }
-      .sched-btn-paper { background-image: linear-gradient(${HILITE}, ${HILITE}); background-color: ${PAPER}; color: ${INK}; }
+      /* hover wipes in matcha green, left to right */
+      .sched-btn-ink { background-image: linear-gradient(${STAMP}, ${STAMP}); background-color: ${INK}; color: ${PAPER}; }
+      .sched-btn-paper { background-image: linear-gradient(${BOARD.STAMP}, ${BOARD.STAMP}); background-color: ${PAPER}; color: ${INK}; }
 
       .sched-link { background-image: linear-gradient(currentColor, currentColor); background-repeat: no-repeat; background-position: 0 100%; background-size: 0% 1.5px; transition: background-size .35s cubic-bezier(.6,.05,.25,1); padding-bottom: 2px; }
       .sched-link:hover { background-size: 100% 1.5px; }

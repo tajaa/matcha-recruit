@@ -12,8 +12,7 @@ export const mono = (size: string, extra?: CSSProperties): CSSProperties => ({
   ...extra,
 })
 
-/** Headline type: a tight, medium-weight grotesk. Condensed caps (DISPLAY)
- *  stay inside the product — the sheet, the phone, the numbers. */
+/** Headline type: a tight, medium-weight grotesk. */
 export const display: CSSProperties = {
   fontFamily: BODY,
   fontWeight: 500,

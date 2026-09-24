@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { useInView, useReducedMotion } from '../hooks'
 import { Reveal } from '../motion'
 import { WRAP, mono } from '../styles'
-import { DISPLAY, HILITE, INK, PAPER, hexA } from '../theme'
+import { BOARD, PAPER, hexA } from '../theme'
 import { FORECAST_TOTAL, laborByRole, laborCost } from '../weekData'
-import { StepHead } from './Chrome'
+import { CellLabel, StepHead } from './Chrome'
 
 const ROLES = laborByRole(true)
 const TOTAL = laborCost(true).total
-const SWATCH = [HILITE, hexA(HILITE, 0.55), hexA(PAPER, 0.72), hexA(PAPER, 0.38)]
+// Grayscale by share of cost, largest in full ink — the Draft chart's rule.
+const SWATCH = [PAPER, hexA(PAPER, 0.55), hexA(PAPER, 0.32), hexA(PAPER, 0.16)]
+const RULE = hexA(PAPER, 0.1)
 const money = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
 
 /** Counts up to `value` once, the first time it's seen. */
@@ -39,38 +41,41 @@ function CountUp({ value }: { value: number }) {
 export function Cost() {
   const pct = ((TOTAL / FORECAST_TOTAL) * 100).toFixed(1)
   return (
-    <section id="cost" className="sched-dark" style={{ backgroundColor: INK, color: PAPER }}>
-      <div className={`${WRAP} grid grid-cols-1 gap-14 py-28 sm:py-44 lg:grid-cols-12 lg:gap-12`}>
-        <div className="lg:col-span-5">
-          <StepHead step="cost" dark title="Know what the week costs before it’s posted.">
-            Every shift is priced from the pay rate on file, with weekly and California daily overtime applied. Anyone without a rate shows as
-            unpriced — never as $0, so a missing number can’t make the week look cheaper than it is.
-          </StepHead>
-        </div>
+    // Same flat dark gray as the hero: the Draft section, inverted.
+    <section id="cost" className="sched-dark" style={{ backgroundColor: BOARD.PAPER, color: PAPER }}>
+      <div className={`${WRAP} py-28 sm:py-44`}>
+        <StepHead split step="cost" dark title="Know what the week costs before it’s posted.">
+          Every shift is priced from the pay rate on file, with weekly and California daily overtime applied. Anyone without a rate shows as
+          unpriced — never as $0, so a missing number can’t make the week look cheaper than it is.
+        </StepHead>
 
-        <div className="lg:col-span-7 lg:pl-6">
-          <Reveal>
-            <div style={mono('10.5px', { color: hexA(PAPER, 0.6) })}>Scheduled labor · week of Oct 5</div>
-            <div className="mt-6" style={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: 'clamp(5rem, 13vw, 11rem)', lineHeight: 0.86, letterSpacing: '-0.01em' }}>
+        <div className="mt-16 grid grid-cols-1 lg:grid-cols-2" style={{ borderTop: `1px solid ${RULE}` }}>
+          <Reveal className="flex flex-col py-12 lg:border-r lg:pr-14" style={{ borderColor: RULE }}>
+            <CellLabel n="01" dark>Scheduled labor · week of Oct 5</CellLabel>
+            <div className="mt-8 text-[clamp(4.5rem,10vw,8.5rem)] font-normal leading-[0.85] tracking-[-0.05em]" style={{ color: PAPER }}>
               <CountUp value={TOTAL} />
             </div>
-            <div className="mt-6 flex flex-wrap gap-x-8 gap-y-2" style={mono('11px', { color: hexA(PAPER, 0.75) })}>
-              <span>
-                <span style={{ color: HILITE }}>{pct}%</span> of forecast sales
-              </span>
-              <span>
-                <span style={{ color: HILITE }}>$0</span> overtime
-              </span>
-              <span>
-                <span style={{ color: HILITE }}>+12h</span> unpriced
-              </span>
-            </div>
+            <dl className="mt-auto grid grid-cols-3 gap-6 pt-12">
+              {[
+                { k: 'Of forecast sales', v: `${pct}%` },
+                { k: 'Overtime', v: '$0' },
+                { k: 'Unpriced', v: '12h' },
+              ].map((x) => (
+                <div key={x.k}>
+                  <dt style={mono('10px', { color: hexA(PAPER, 0.55) })}>{x.k}</dt>
+                  <dd className="mt-2 text-[1.9rem] font-normal leading-none tracking-[-0.04em]" style={{ color: PAPER, fontVariantNumeric: 'tabular-nums' }}>
+                    {x.v}
+                  </dd>
+                </div>
+              ))}
+            </dl>
           </Reveal>
 
-          <Reveal delay={150} className="mt-12">
-            <div className="grow-x flex h-4 gap-[2px] overflow-hidden rounded-[3px]" role="img" aria-label="Labor cost by role" style={{ ['--d' as string]: '250ms' }}>
+          <Reveal delay={120} className="flex flex-col border-t py-12 lg:border-t-0 lg:pl-14" style={{ borderColor: RULE }}>
+            <CellLabel n="02" dark>By role</CellLabel>
+            <div className="grow-x mt-8 flex h-2 gap-[3px]" role="img" aria-label="Labor cost by role" style={{ ['--d' as string]: '250ms' }}>
               {ROLES.map((r, i) => (
-                <span key={r.role} className="h-full" style={{ width: `${(r.cost / TOTAL) * 100}%`, backgroundColor: SWATCH[i] }} />
+                <span key={r.role} className="h-full rounded-full" style={{ width: `${(r.cost / TOTAL) * 100}%`, backgroundColor: SWATCH[i] }} />
               ))}
             </div>
             <table className="mt-8 w-full border-collapse" style={mono('11px', { color: PAPER })}>
@@ -84,30 +89,30 @@ export function Cost() {
               </thead>
               <tbody>
                 {ROLES.map((r, i) => (
-                  <tr key={r.role} style={{ borderTop: `1px solid ${hexA(PAPER, 0.14)}` }}>
-                    <td className="py-3">
-                      <span className="mr-2.5 inline-block h-2.5 w-2.5 rounded-[1px] align-middle" style={{ backgroundColor: SWATCH[i] }} />
+                  <tr key={r.role} style={{ borderTop: `1px solid ${RULE}` }}>
+                    <td className="py-3.5">
+                      <span className="mr-3 inline-block h-1.5 w-4 rounded-full align-middle" style={{ backgroundColor: SWATCH[i] }} />
                       {r.role}
                     </td>
-                    <td className="py-3 text-right">{r.people}</td>
-                    <td className="py-3 text-right">{r.hours}h</td>
-                    <td className="py-3 text-right">{money(r.cost)}</td>
+                    <td className="py-3.5 text-right">{r.people}</td>
+                    <td className="py-3.5 text-right">{r.hours}h</td>
+                    <td className="py-3.5 text-right">{money(r.cost)}</td>
                   </tr>
                 ))}
-                <tr style={{ borderTop: `1px dashed ${hexA(PAPER, 0.3)}`, color: hexA(PAPER, 0.55) }}>
-                  <td className="py-3">
-                    <span className="mr-2.5 inline-block h-2.5 w-2.5 rounded-[1px] align-middle" style={{ border: `1px dashed ${hexA(PAPER, 0.5)}` }} />
+                <tr style={{ borderTop: `1px solid ${RULE}`, color: hexA(PAPER, 0.55) }}>
+                  <td className="py-3.5">
+                    <span className="mr-3 inline-block h-1.5 w-4 rounded-full align-middle" style={{ boxShadow: `inset 0 0 0 1px ${hexA(PAPER, 0.4)}` }} />
                     Prep · new hire
                   </td>
-                  <td className="py-3 text-right">1</td>
-                  <td className="py-3 text-right">12h</td>
-                  <td className="py-3 text-right" style={{ color: HILITE }}>
+                  <td className="py-3.5 text-right">1</td>
+                  <td className="py-3.5 text-right">12h</td>
+                  <td className="py-3.5 text-right" style={{ color: PAPER }}>
                     Unpriced
                   </td>
                 </tr>
               </tbody>
             </table>
-            <p className="mt-6 text-[0.85rem] leading-[1.6]" style={{ color: hexA(PAPER, 0.5) }}>
+            <p className="mt-6 text-[0.9rem] leading-[1.6]" style={{ color: hexA(PAPER, 0.55) }}>
               No pay rate on file for the new hire, so their hours are listed, not guessed.
             </p>
           </Reveal>
