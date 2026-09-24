@@ -16,7 +16,7 @@ export function Hero({ onContact }: { onContact: () => void }) {
       className="sched-dark relative -mt-16 pt-16"
       style={{
         color: PAPER,
-        background: 'radial-gradient(120% 80% at 15% 0%, #223127 0%, rgba(34,49,39,0) 60%), linear-gradient(170deg, #161C18 0%, #0E100F 55%, #090A09 100%)',
+        background: 'radial-gradient(90% 60% at 12% 0%, rgba(38,56,44,0.45) 0%, rgba(38,56,44,0) 65%), linear-gradient(175deg, #0D0F0E 0%, #090A0A 55%, #060707 100%)',
       }}
     >
       <div className={`${WRAP} relative pb-20 pt-10 sm:pt-14`}>

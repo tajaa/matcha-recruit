@@ -256,8 +256,6 @@ export function LandingStyles() {
       .is-in .grow-bar { transform: scaleY(1); }
       .grow-x { transform-origin: 0 50%; transform: scaleX(0); transition: transform 1.1s cubic-bezier(.6,.05,.25,1) var(--d, 0ms); }
       .is-in .grow-x { transform: scaleX(1); }
-      .sun-rays { transform-box: fill-box; transform-origin: center; animation: schedSpin 48s linear infinite; }
-      @keyframes schedSpin { to { transform: rotate(360deg); } }
 
       .sent-in { opacity: 0; transform: translateY(10px); transition: opacity .7s cubic-bezier(.2,.7,.2,1) .4s, transform .8s cubic-bezier(.2,.7,.2,1) .4s; }
       .is-in .sent-in { opacity: 1; transform: none; }
@@ -273,7 +271,6 @@ export function LandingStyles() {
         .pen-draw { stroke-dashoffset: 0; transition: none; }
         .cut-fade { animation: none; }
         .grow-bar, .grow-x { transform: none; transition: none; }
-        .sun-rays { animation: none; }
         .sent-in, .is-in .sent-in { opacity: 1; transform: none; transition: none; }
         .sent-dot { transition: none; }
         .toast-in { opacity: 1; transform: none; transition: none; }

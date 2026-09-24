@@ -64,7 +64,7 @@ export function hexA(hex: string, alpha: number): string {
 /** The hero's week sheet, set dark into the dark hero. Same roles as the
  *  paper tokens above, inverted; matcha green and red pen lifted to read on it. */
 export const BOARD = {
-  PAPER: '#121714', // board
+  PAPER: '#0F1311', // board
   PAPER_DEEP: '#232B25', // empty avatar / track
   CARD: '#1A201C', // raised card
   INK: '#E9EDE5', // chalk-white text and rules
