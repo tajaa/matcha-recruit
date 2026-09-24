@@ -71,8 +71,8 @@ export const T = {
 // ── chat edit composition ────────────────────────────────────────────────
 
 export const CHAT_SIZES: Record<Variant, { w: number; h: number; s: number }> = {
-  wide: { w: 1320, h: 600, s: 1 },
-  narrow: { w: 720, h: 1180, s: 1.3 },
+  wide: { w: 1320, h: 500, s: 1 },
+  narrow: { w: 720, h: 1060, s: 1.3 },
 }
 
 export const CHAT_DURATION = 420
