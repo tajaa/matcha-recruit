@@ -1,7 +1,7 @@
 import { Reveal } from '../motion'
 import { WRAP, mono } from '../styles'
 import { INK, INK_SOFT, RED_PEN, STAMP, hexA } from '../theme'
-import { Accent, CellLabel, StepHead } from './Chrome'
+import { Accent, StepHead } from './Chrome'
 
 type Outcome = 'stops' | 'draft' | 'priced'
 
@@ -32,21 +32,42 @@ function Dot({ color }: { color: string }) {
   return <span aria-hidden className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
 }
 
-function Key() {
+/** One band per outcome: what happens on the left, the rules it covers on the
+ *  right. Grouped, not numbered — these are rules, not steps. */
+function Band({ outcome, first }: { outcome: Outcome; first: boolean }) {
+  const o = OUTCOME[outcome]
+  const rules = RULES.filter((r) => r.outcome === outcome)
   return (
-    <dl className="mt-8 space-y-3">
-      {(Object.keys(OUTCOME) as Outcome[]).map((o) => (
-        <div key={o} className="grid grid-cols-[10rem_1fr] items-baseline gap-4">
-          <dt className="flex items-center gap-2" style={mono('10px', { color: INK })}>
-            <Dot color={OUTCOME[o].dot} />
-            {OUTCOME[o].label}
-          </dt>
-          <dd className="text-[0.92rem] leading-snug" style={{ color: INK_SOFT }}>
-            {OUTCOME[o].means}
-          </dd>
+    <Reveal
+      as="li"
+      className={`grid grid-cols-1 gap-8 py-12 lg:grid-cols-12 lg:gap-10 ${first ? '' : 'border-t'}`}
+      style={{ borderColor: RULE }}
+    >
+      <div className="lg:col-span-4">
+        <div className="flex items-center gap-2.5" style={mono('10.5px', { color: INK })}>
+          <Dot color={o.dot} />
+          {o.label}
         </div>
-      ))}
-    </dl>
+        <p className="mt-3 max-w-[20rem] text-[0.97rem] leading-[1.6]" style={{ color: INK_SOFT }}>
+          {o.means}
+        </p>
+      </div>
+      <ul className="grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-2 lg:col-span-8">
+        {rules.map((rule) => (
+          <li key={rule.name}>
+            <h3 className="text-[1.3rem] font-medium leading-tight tracking-[-0.02em]" style={{ color: INK }}>
+              {rule.name}
+            </h3>
+            <p className="mt-1.5 text-[0.95rem] leading-[1.55]" style={{ color: INK_SOFT }}>
+              {rule.detail}
+            </p>
+            <div className="mt-3" style={mono('10px', { color: INK_SOFT })}>
+              e.g. <span style={{ color: INK }}>{rule.example}</span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Reveal>
   )
 }
 
@@ -61,41 +82,14 @@ export function Check() {
             Checked <Accent>before</Accent> it reaches you.
           </>
         }
-        aside={<Key />}
       >
         Every rule below runs on the draft. The hard ones also stop a manual edit — drag a shift somewhere it shouldn’t go and Matcha asks first.
       </StepHead>
 
-      {/* the Draft grid's hairline cells, two across */}
-      <ol className="mt-16 grid grid-cols-1 lg:grid-cols-2" style={{ borderTop: `1px solid ${RULE}`, borderBottom: `1px solid ${RULE}` }}>
-        {RULES.map((rule, i) => {
-          const left = i % 2 === 0
-          return (
-            <Reveal
-              as="li"
-              key={rule.name}
-              delay={left ? 0 : 100}
-              className={`flex flex-col py-10 ${i ? 'border-t' : ''} ${i === 1 ? 'lg:border-t-0' : ''} ${left ? 'lg:border-r lg:pr-14' : 'lg:pl-14'}`}
-              style={{ borderColor: RULE }}
-            >
-              <CellLabel n={String(i + 1).padStart(2, '0')}>
-                <span className="inline-flex items-center gap-2">
-                  <Dot color={OUTCOME[rule.outcome].dot} />
-                  {OUTCOME[rule.outcome].label}
-                </span>
-              </CellLabel>
-              <h3 className="mt-5 text-[1.45rem] font-medium leading-tight tracking-[-0.025em]" style={{ color: INK }}>
-                {rule.name}
-              </h3>
-              <p className="mt-2 max-w-[26rem] text-[0.97rem] leading-[1.6]" style={{ color: INK_SOFT }}>
-                {rule.detail}
-              </p>
-              <div className="mt-5" style={mono('10px', { color: INK_SOFT })}>
-                e.g. <span style={{ color: INK }}>{rule.example}</span>
-              </div>
-            </Reveal>
-          )
-        })}
+      <ol className="mt-16" style={{ borderTop: `1px solid ${RULE}`, borderBottom: `1px solid ${RULE}` }}>
+        {(Object.keys(OUTCOME) as Outcome[]).map((o, i) => (
+          <Band key={o} outcome={o} first={i === 0} />
+        ))}
       </ol>
     </section>
   )
