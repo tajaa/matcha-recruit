@@ -33,10 +33,10 @@ export function StageLayout({
   )
 }
 
-/** Stand-in while Remotion loads: the same blank graph-paper sheet the
- *  compositions open on, at the composition's scale, so the handoff is
- *  invisible. */
-export function Poster({ width, height, cell = 16 }: { width: number; height: number; cell?: number }) {
+/** Stand-in while Remotion loads: the same blank sheet the composition opens
+ *  on (graph paper, or `surface` when the composition draws its own), so the
+ *  handoff is invisible. */
+export function Poster({ width, height, cell = 16, surface }: { width: number; height: number; cell?: number; surface?: CSSProperties }) {
   const ref = useRef<HTMLDivElement>(null)
   const [scale, setScale] = useState(0)
   useLayoutEffect(() => {
@@ -55,8 +55,7 @@ export function Poster({ width, height, cell = 16 }: { width: number; height: nu
       style={{
         width: '100%',
         aspectRatio: `${width} / ${height}`,
-        backgroundColor: PAPER,
-        ...(scale ? graphPaper(cell * scale) : {}),
+        ...(surface ?? { backgroundColor: PAPER, ...(scale ? graphPaper(cell * scale) : {}) }),
       }}
     />
   )

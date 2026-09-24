@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
-import { PenMark, Reveal } from '../motion'
+import { Reveal } from '../motion'
 import { WRAP, mono } from '../styles'
 import { CARD, DISPLAY, HILITE, INK, INK_SOFT, RED_PEN, STAMP, hexA } from '../theme'
-import { StepHead } from './Chrome'
+import { Accent, StepHead } from './Chrome'
 
 /** Saturday, 6a–11p: committed sales per hour (relative) and the people the
  *  draft puts on the floor for it. Same Saturday as the hero. */
@@ -193,14 +193,14 @@ function Specimen({ tag, title, body, children, className, delay }: { tag: strin
 
 export function Draft() {
   return (
-    <section id="draft" className={`${WRAP} py-24 sm:py-36`}>
+    <section id="draft" className={`${WRAP} py-28 sm:py-44`}>
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
         <div className="lg:col-span-8">
           <StepHead
             step="draft"
             title={
               <>
-                It starts from what you <PenMark kind="underline">already know.</PenMark>
+                It starts from what you <Accent>already know.</Accent>
               </>
             }
           >

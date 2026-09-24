@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { DISPLAY, MONO } from './theme'
+import { BODY, MONO } from './theme'
 
 /** Page container: 1320 max, 16px phone gutter. */
 export const WRAP = 'mx-auto w-full max-w-[1320px] px-4 sm:px-8 lg:px-12'
@@ -12,12 +12,13 @@ export const mono = (size: string, extra?: CSSProperties): CSSProperties => ({
   ...extra,
 })
 
+/** Headline type: a tight, medium-weight grotesk. Condensed caps (DISPLAY)
+ *  stay inside the product — the sheet, the phone, the numbers. */
 export const display: CSSProperties = {
-  fontFamily: DISPLAY,
-  fontWeight: 800,
-  textTransform: 'uppercase',
-  lineHeight: 0.88,
-  letterSpacing: '-0.005em',
+  fontFamily: BODY,
+  fontWeight: 500,
+  lineHeight: 1,
+  letterSpacing: '-0.04em',
 }
 
 /** The Sunday afternoon the week gets built — every section is one step of it,

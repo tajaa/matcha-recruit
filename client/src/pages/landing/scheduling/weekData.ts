@@ -25,6 +25,13 @@ export const CREW: Crew[] = [
   { name: 'Sam O.', role: 'Barista', rate: 17.5 },
 ]
 
+/** "Ana R." → "AR" */
+export const initials = (name: string) =>
+  name
+    .split(' ')
+    .map((p) => p[0])
+    .join('')
+
 export type Shift = {
   id: string
   row: number

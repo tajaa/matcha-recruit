@@ -4,7 +4,7 @@
  *
  *   grid + crew → forecast per day → shifts highlighted in → rule check sweep
  *   → red-pen loops on the two problems → both shifts move to someone with room
- *   → labor settles → PUBLISHED stamp → fade to the blank sheet (loops cleanly)
+ *   → labor settles → sent card, crew notified → fade to the blank sheet (loops cleanly)
  *
  * Rendered live in the browser by @remotion/player (SchedulePlayer.tsx); no
  * server-side render. Two layouts share one timeline — `narrow` shows Thu–Sun
@@ -12,19 +12,7 @@
  */
 import type { CSSProperties } from 'react'
 import { AbsoluteFill, Easing, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion'
-import {
-  BODY,
-  DISPLAY,
-  HILITE,
-  INK,
-  INK_SOFT,
-  MONO,
-  PAPER,
-  RED_PEN,
-  STAMP,
-  graphPaper,
-  hexA,
-} from './theme'
+import { BOARD, BOARD_GRID, BODY, DISPLAY, HILITE, INK as BAR_INK, MONO, hexA } from './theme'
 import {
   CREW,
   DATES,
@@ -37,11 +25,17 @@ import {
   SHIFTS,
   UNAVAILABLE,
   clock,
+  initials,
   laborCost,
   weeklyHours,
   type Shift,
 } from './weekData'
 import { DURATION, LAYOUTS, T, type Layout, type Variant } from './timeline'
+
+// The hero sheet is a dark board (theme.ts BOARD): same instruments,
+// inverted. Local names mirror theme.ts so the drawing code reads the same;
+// only the highlighter shift bars keep dark ink (BAR_INK) on their yellow.
+const { PAPER, PAPER_DEEP, CARD, INK, INK_SOFT, RED_PEN, STAMP } = BOARD
 
 export type WeekProps = { variant: Variant }
 
@@ -74,9 +68,8 @@ export function WeekComposition({ variant }: WeekProps) {
     spring({ frame: frame - T.resolve - delay, fps, config: { damping: 15, stiffness: 110 } })
   const resolved = moveP(0)
   const flagOut = interpolate(frame, [T.resolve + 24, T.resolve + 44], [1, 0], clamp)
-  const stampSpring = spring({ frame: frame - T.stamp, fps, config: { damping: 11, mass: 0.6, stiffness: 190 } })
-  const stampIn = interpolate(frame, [T.stamp, T.stamp + 3], [0, 1], clamp)
-  const shake = frame >= T.stamp + 2 && frame < T.stamp + 10 ? Math.sin((frame - T.stamp) * 2.4) * 3 * (1 - (frame - T.stamp - 2) / 8) : 0
+  // the status chip hands off to the sent card in the same corner
+  const chipOut = interpolate(frame, [T.stamp - 6, T.stamp + 4], [1, 0], clamp)
 
   const visibleShifts = SHIFTS.filter((x) => L.days.includes(x.day)).sort((a, b) => a.day - b.day || a.row - b.row)
   const stagger = T.shiftsSpan / visibleShifts.length
@@ -92,9 +85,7 @@ export function WeekComposition({ variant }: WeekProps) {
       ? { text: 'Drafting', fg: INK, bg: 'transparent' }
       : frame < T.resolve + 30
         ? { text: 'Checking rules', fg: RED_PEN, bg: 'transparent' }
-        : frame < T.stamp
-          ? { text: 'Ready to publish', fg: STAMP, bg: 'transparent' }
-          : { text: 'Published', fg: PAPER, bg: STAMP }
+        : { text: 'Ready to publish', fg: STAMP, bg: 'transparent' }
 
   const mono = (size: number, extra?: CSSProperties): CSSProperties => ({
     fontFamily: MONO,
@@ -105,8 +96,8 @@ export function WeekComposition({ variant }: WeekProps) {
   })
 
   return (
-    <AbsoluteFill style={{ backgroundColor: PAPER, ...graphPaper(16), overflow: 'hidden' }}>
-      <AbsoluteFill style={{ opacity: contentOut, transform: `translate(${shake}px, ${shake * 0.6}px)` }}>
+    <AbsoluteFill style={{ backgroundColor: PAPER, ...BOARD_GRID, overflow: 'hidden' }}>
+      <AbsoluteFill style={{ opacity: contentOut }}>
         {/* ── header ─────────────────────────────────────────────────── */}
         <div
           style={{
@@ -142,6 +133,7 @@ export function WeekComposition({ variant }: WeekProps) {
               display: 'flex',
               alignItems: 'center',
               gap: 8 * s,
+              opacity: chipOut,
             })}
           >
             <span
@@ -149,8 +141,8 @@ export function WeekComposition({ variant }: WeekProps) {
                 width: 7 * s,
                 height: 7 * s,
                 borderRadius: 99,
-                backgroundColor: status.bg === 'transparent' ? status.fg : PAPER,
-                opacity: frame < T.stamp ? 0.4 + 0.6 * Math.abs(Math.sin(frame / 9)) : 1,
+                backgroundColor: status.fg,
+                opacity: 0.4 + 0.6 * Math.abs(Math.sin(frame / 9)),
               }}
             />
             {status.text}
@@ -438,35 +430,105 @@ export function WeekComposition({ variant }: WeekProps) {
           mono={mono}
         />
 
-        {/* ── stamp ──────────────────────────────────────────────────── */}
-        {frame >= T.stamp && (
-          <div
-            style={{
-              position: 'absolute',
-              left: (gridLeft + gridRight) / 2,
-              top: (L.rowsY + rowsBottom) / 2,
-              transform: `translate(-50%, -50%) rotate(-7deg) scale(${interpolate(stampSpring, [0, 1], [1.9, 1])})`,
-              opacity: stampIn * 0.92,
-              border: `${5 * s}px double ${STAMP}`,
-              borderRadius: 10 * s,
-              padding: `${10 * s}px ${28 * s}px ${12 * s}px`,
-              color: STAMP,
-              textAlign: 'center',
-              backgroundColor: hexA(PAPER, 0.72),
-              mixBlendMode: 'multiply',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            <div style={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: (variant === 'wide' ? 104 : 72) * s, lineHeight: 0.9, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-              Published
-            </div>
-            <div style={mono(12, { marginTop: 8 * s, fontWeight: 700, letterSpacing: '0.14em' })}>
-              Sun Oct 4 · 4:12 PM · 8 crew notified
-            </div>
-          </div>
-        )}
+        {/* ── publish: a hairline under the header, then the sent card ── */}
+        <div
+          style={{
+            position: 'absolute',
+            left: L.pad,
+            right: L.pad,
+            top: L.dayHeadY - 12 * s,
+            height: 1.5 * s,
+            backgroundColor: STAMP,
+            transformOrigin: '0 50%',
+            transform: `scaleX(${interpolate(frame, [T.stamp - 4, T.stamp + 18], [0, 1], { ...clamp, easing: easeOut })})`,
+          }}
+        />
+        {frame >= T.stamp && <SentCard frame={frame} L={L} s={s} />}
       </AbsoluteFill>
     </AbsoluteFill>
+  )
+}
+
+/** The publish beat: a quiet confirmation card where the status chip was,
+ *  then each crew member's initials turn green as their notification lands. */
+function SentCard({ frame, L, s }: { frame: number; L: Layout; s: number }) {
+  const inP = interpolate(frame, [T.stamp, T.stamp + 14], [0, 1], { ...clamp, easing: easeOut })
+  const check = interpolate(frame, [T.stamp + 6, T.stamp + 18], [0, 1], { ...clamp, easing: easeOut })
+  const dotAt = (i: number) => T.stamp + 12 + i * 5
+  const sent = CREW.filter((_, i) => frame >= dotAt(i) + 3).length
+  const dot = 24 * s
+  const mono = (size: number, extra?: CSSProperties): CSSProperties => ({
+    fontFamily: MONO,
+    fontSize: size * s,
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+    ...extra,
+  })
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        right: L.pad,
+        top: L.pad * 0.7,
+        width: Math.min(340 * s, L.w * 0.5),
+        padding: `${14 * s}px ${16 * s}px`,
+        backgroundColor: CARD,
+        borderRadius: 12 * s,
+        boxShadow: `0 0 0 1px ${hexA(INK, 0.1)}, 0 24px 48px -20px rgba(0, 0, 0, 0.7)`,
+        opacity: inP,
+        transform: `translateY(${(1 - inP) * -8 * s}px)`,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 * s }}>
+        <svg width={18 * s} height={18 * s} viewBox="0 0 18 18" style={{ flexShrink: 0 }}>
+          <circle cx={9} cy={9} r={9} fill={STAMP} />
+          <path
+            d="M5 9.4 L7.8 12 L13 6.4"
+            fill="none"
+            stroke={PAPER}
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            pathLength={1}
+            strokeDasharray={1}
+            strokeDashoffset={1 - check}
+          />
+        </svg>
+        <span style={{ fontFamily: BODY, fontWeight: 600, fontSize: 16 * s, color: INK }}>Sent to crew</span>
+        <span style={mono(11, { marginLeft: 'auto', color: INK_SOFT })}>Sun · 4:12 PM</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', marginTop: 12 * s }}>
+        {CREW.map((c, i) => {
+          const on = interpolate(frame, [dotAt(i), dotAt(i) + 6], [0, 1], clamp)
+          return (
+            <span
+              key={c.name}
+              style={{
+                width: dot,
+                height: dot,
+                marginLeft: i ? -5 * s : 0,
+                borderRadius: 99,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontFamily: BODY,
+                fontWeight: 600,
+                fontSize: 9.5 * s,
+                boxShadow: `0 0 0 ${2 * s}px ${CARD}`,
+                backgroundColor: on > 0.5 ? STAMP : PAPER_DEEP,
+                color: on > 0.5 ? PAPER : INK_SOFT,
+                transform: `scale(${1 + Math.sin(on * Math.PI) * 0.12})`,
+              }}
+            >
+              {initials(c.name)}
+            </span>
+          )
+        })}
+        <span style={mono(11, { marginLeft: 'auto', color: sent === CREW.length ? STAMP : INK_SOFT, fontWeight: 700 })}>
+          {sent} notified
+        </span>
+      </div>
+    </div>
   )
 }
 
@@ -502,7 +564,7 @@ function ShiftBar({
   const y = fromY + (toY - fromY) * moveP
   return (
     <div style={{ position: 'absolute', left: x, top: y, width, height }}>
-      {/* highlighter stroke: uneven ends, multiplies over the rules like real ink */}
+      {/* the shift: a clean highlighter block, drawn left to right */}
       <div
         style={{
           position: 'absolute',
@@ -510,10 +572,8 @@ function ShiftBar({
           top: 0,
           height: '100%',
           width: `${p * 100}%`,
-          backgroundColor: hexA(HILITE, 0.88),
-          mixBlendMode: 'multiply',
-          borderRadius: `${3 * s}px ${9 * s}px ${5 * s}px ${8 * s}px`,
-          transform: 'skewX(-4deg)',
+          backgroundColor: HILITE,
+          borderRadius: 5 * s,
           boxShadow: flagged ? `0 0 0 ${2 * s}px ${RED_PEN}` : 'none',
         }}
       />
@@ -528,7 +588,7 @@ function ShiftBar({
             fontFamily: MONO,
             fontSize: 11.5 * s,
             fontWeight: 500,
-            color: INK,
+            color: BAR_INK,
             opacity: interpolate(p, [0.6, 1], [0, 1], clamp),
             whiteSpace: 'nowrap',
           }}

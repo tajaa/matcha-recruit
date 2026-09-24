@@ -1,9 +1,9 @@
-import { PenMark, Reveal } from '../motion'
+import { Reveal } from '../motion'
 import Stage from '../Stage'
 import { WRAP, mono } from '../styles'
 import { INK, INK_SOFT, hexA } from '../theme'
 import { CHAT_DURATION, CHAT_SIZES, CHAT_STILL } from '../timeline'
-import { StepHead } from './Chrome'
+import { Accent, StepHead } from './Chrome'
 
 const loadChat = () => import('../ChatComposition')
 
@@ -12,13 +12,13 @@ const SAYINGS = ['give Dev’s Monday to Sam', 'swap the opener and the closer F
 
 export function Change() {
   return (
-    <section id="change" className={`${WRAP} grid grid-cols-1 gap-14 py-24 sm:py-36 lg:grid-cols-12 lg:items-center lg:gap-12`}>
+    <section id="change" className={`${WRAP} grid grid-cols-1 gap-14 py-28 sm:py-44 lg:grid-cols-12 lg:items-center lg:gap-12`}>
       <div className="lg:col-span-5">
         <StepHead
           step="change"
           title={
             <>
-              Change it in a <PenMark kind="underline">sentence.</PenMark>
+              Change it in a <Accent>sentence.</Accent>
             </>
           }
         >

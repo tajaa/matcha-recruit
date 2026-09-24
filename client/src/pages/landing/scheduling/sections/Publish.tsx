@@ -44,7 +44,7 @@ function Phone() {
         </div>
       </div>
 
-      <div className="rounded-[46px] p-[10px]" style={{ backgroundColor: INK, boxShadow: `0 50px 80px -40px ${hexA(INK, 0.55)}` }}>
+      <div className="rounded-[46px] p-[10px]" style={{ backgroundColor: INK, boxShadow: `0 40px 70px -40px ${hexA(INK, 0.4)}` }}>
         <div className="relative overflow-hidden rounded-[37px]" style={{ backgroundColor: CARD, aspectRatio: '9 / 18.5' }}>
           <div className="absolute left-1/2 top-2.5 h-[22px] w-[88px] -translate-x-1/2 rounded-full" style={{ backgroundColor: INK }} />
           <div className="flex h-full flex-col px-5 pb-5 pt-12">
@@ -90,7 +90,7 @@ function Phone() {
 
 export function Publish() {
   return (
-    <section id="publish" className={`${WRAP} grid grid-cols-1 gap-16 py-24 sm:py-36 lg:grid-cols-12 lg:items-center lg:gap-12`}>
+    <section id="publish" className={`${WRAP} grid grid-cols-1 gap-16 py-28 sm:py-44 lg:grid-cols-12 lg:items-center lg:gap-12`}>
       <Reveal className="order-2 lg:order-1 lg:col-span-5">
         <Phone />
       </Reveal>
@@ -106,7 +106,7 @@ export function Publish() {
           </div>
           <ul>
             {REQUESTS.map((r) => (
-              <li key={r.kind} className="flex items-center justify-between gap-4 py-4" style={{ borderBottom: `1px solid ${hexA(INK, 0.14)}` }}>
+              <li key={r.kind} className="flex items-center justify-between gap-4 py-4" style={{ borderBottom: `1px solid ${hexA(INK, 0.08)}` }}>
                 <span className="min-w-0">
                   <span style={mono('9.5px', { color: INK_SOFT })}>{r.kind}</span>
                   <span className="mt-0.5 block text-[16px] font-semibold" style={{ color: INK }}>

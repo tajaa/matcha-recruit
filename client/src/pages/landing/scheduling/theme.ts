@@ -4,8 +4,9 @@
  *
  * The page is built from the back-office wall schedule: graph-paper sheet,
  * ballpoint ink, a manager's highlighter over each shift, red pen for the
- * problems, a green rubber stamp when the week goes out. Every colour below is
- * one of those instruments; don't add one that isn't.
+ * problems, matcha green once the week goes out. Every colour below is one of
+ * those instruments; don't add one that isn't. The page around the sheet stays
+ * quiet: one grotesk for headlines, a serif italic for the single accent word.
  *
  * Plain hex strings because the Remotion composition renders them inline and
  * inside SVG presentation attributes.
@@ -17,7 +18,7 @@ export const INK = '#18211B' // ballpoint, slightly green-black
 export const INK_SOFT = '#5D675F' // secondary text
 export const HILITE = '#E4EE3F' // highlighter — the shift itself
 export const RED_PEN = '#D9432A' // conflicts
-export const STAMP = '#3F6B2A' // matcha rubber stamp — the published state
+export const STAMP = '#3F6B2A' // matcha green — the sent/published state
 export const CARD = '#FBFCF9' // index card pinned to the sheet
 export const TAPE = '#E6DDBF' // masking tape holding the schedule to the wall
 
@@ -25,6 +26,8 @@ export const TAPE = '#E6DDBF' // masking tape holding the schedule to the wall
 // hero sizes. Saira Extra Condensed ships static, clean at any size.
 export const DISPLAY = "'Saira Extra Condensed', 'Arial Narrow', sans-serif"
 export const BODY = "'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif"
+/** Accent only: one italic word per headline, never a whole line. */
+export const SERIF = "'Instrument Serif', 'Times New Roman', serif"
 export const MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
 
 /** Paper tooth: fractal-noise SVG tile, multiplied over the page at low opacity. */
@@ -32,7 +35,7 @@ export const GRAIN =
   "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.09  0 0 0 0 0.13  0 0 0 0 0.1  0 0 0 .55 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")"
 
 export const FONT_HREF =
-  'https://fonts.googleapis.com/css2?family=Saira+Extra+Condensed:wght@600;700;800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap'
+  'https://fonts.googleapis.com/css2?family=Saira+Extra+Condensed:wght@600;700;800&family=Hanken+Grotesk:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;700&display=swap'
 
 /** Graph-paper background style; `cell` is the minor square in px, with a
  *  heavier rule every fifth line like a real engineering pad. */
@@ -56,4 +59,25 @@ export function graphPaper(cell: number, alpha = 0.55): { backgroundImage: strin
 export function hexA(hex: string, alpha: number): string {
   const n = parseInt(hex.slice(1), 16)
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
+}
+
+/** The hero's week sheet, set dark into the dark hero. Same roles as the
+ *  paper tokens above, inverted; matcha green and red pen lifted to read on it. */
+export const BOARD = {
+  PAPER: '#121714', // board
+  PAPER_DEEP: '#232B25', // empty avatar / track
+  CARD: '#1A201C', // raised card
+  INK: '#E9EDE5', // chalk-white text and rules
+  INK_SOFT: '#8B958C',
+  RED_PEN: '#EF6A4C',
+  STAMP: '#8FC46B',
+} as const
+
+/** A barely-there 80px grid for the board, in place of graph paper. */
+export const BOARD_GRID = {
+  backgroundImage: [
+    `linear-gradient(${hexA(BOARD.INK, 0.035)} 1px, transparent 1px)`,
+    `linear-gradient(90deg, ${hexA(BOARD.INK, 0.035)} 1px, transparent 1px)`,
+  ].join(', '),
+  backgroundSize: '80px 80px, 80px 80px',
 }

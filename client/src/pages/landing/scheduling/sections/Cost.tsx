@@ -40,7 +40,7 @@ export function Cost() {
   const pct = ((TOTAL / FORECAST_TOTAL) * 100).toFixed(1)
   return (
     <section id="cost" className="sched-dark" style={{ backgroundColor: INK, color: PAPER }}>
-      <div className={`${WRAP} grid grid-cols-1 gap-14 py-24 sm:py-36 lg:grid-cols-12 lg:gap-12`}>
+      <div className={`${WRAP} grid grid-cols-1 gap-14 py-28 sm:py-44 lg:grid-cols-12 lg:gap-12`}>
         <div className="lg:col-span-5">
           <StepHead step="cost" dark title="Know what the week costs before it’s posted.">
             Every shift is priced from the pay rate on file, with weekly and California daily overtime applied. Anyone without a rate shows as

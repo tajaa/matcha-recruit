@@ -23,6 +23,7 @@ export default function RemotionStage({
   mediaClassName,
   mediaStyle,
   decor,
+  surface,
 }: StageProps & { variant: Variant }) {
   const reduced = useReducedMotion()
   const size = sizes[variant]
@@ -96,7 +97,7 @@ export default function RemotionStage({
               compositionHeight={size.h}
               style={{ width: '100%', display: 'block' }}
               initialFrame={reduced ? stillFrame : 0}
-              renderLoading={() => <Poster width={size.w} height={size.h} />}
+              renderLoading={() => <Poster width={size.w} height={size.h} surface={surface} />}
               loop
               controls={false}
               clickToPlay={false}

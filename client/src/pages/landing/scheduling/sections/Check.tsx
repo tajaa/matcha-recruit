@@ -1,8 +1,8 @@
 import type { CSSProperties } from 'react'
-import { PenMark, Reveal } from '../motion'
+import { Reveal } from '../motion'
 import { WRAP, display, mono } from '../styles'
 import { HILITE, INK, INK_SOFT, PAPER_DEEP, RED_PEN, STAMP, hexA } from '../theme'
-import { StepHead } from './Chrome'
+import { Accent, StepHead } from './Chrome'
 
 type Outcome = 'stops' | 'draft' | 'priced'
 
@@ -48,14 +48,14 @@ function Mark({ outcome }: { outcome: Outcome }) {
 export function Check() {
   return (
     <section id="check" style={{ backgroundColor: PAPER_DEEP }}>
-      <div className={`${WRAP} grid grid-cols-1 gap-14 py-24 sm:py-36 lg:grid-cols-12 lg:gap-10`}>
+      <div className={`${WRAP} grid grid-cols-1 gap-14 py-28 sm:py-44 lg:grid-cols-12 lg:gap-10`}>
         <div className="lg:col-span-5">
           <div className="lg:sticky lg:top-28">
             <StepHead
               step="check"
               title={
                 <>
-                  Checked <PenMark kind="circle">before</PenMark>
+                  Checked <Accent>before</Accent>
                   <br className="hidden sm:block" /> it reaches you.
                 </>
               }

@@ -24,6 +24,8 @@ export type StageProps = {
   mediaClassName?: string
   mediaStyle?: CSSProperties
   decor?: ReactNode
+  /** Poster background when the composition isn't on graph paper. */
+  surface?: CSSProperties
 }
 
 export default function Stage(props: StageProps) {
@@ -36,7 +38,7 @@ export default function Stage(props: StageProps) {
 
   const poster = (
     <StageLayout
-      media={<Poster width={size.w} height={size.h} />}
+      media={<Poster width={size.w} height={size.h} surface={props.surface} />}
       control={null}
       caption={props.caption}
       mediaClassName={props.mediaClassName}
