@@ -19,13 +19,13 @@ struct RootView: View {
                 MainTabs(profile: profile)
             case .needsWeb:
                 VStack(spacing: 12) {
-                    StatusView(title: "Use Matcha on the web", message: "This app is for employee accounts with a work profile.", symbol: "person.crop.circle.badge.questionmark")
+                    StatusView(title: "Use Matcha on the web", message: "This app is for employee accounts with a work profile.", symbol: "person.crop.circle.badge.questionmark", actionTitle: "Sign out", action: { try await appState.signOut() })
                     Link("Open hey-matcha.com", destination: URL(string: "https://hey-matcha.com")!)
                 }
             case .disabled:
-                StatusView(title: "Scheduling isn’t enabled", message: "Ask your manager to enable employee scheduling for your company.", symbol: "calendar.badge.exclamationmark")
+                StatusView(title: "Scheduling isn’t enabled", message: "Ask your manager to enable employee scheduling for your company.", symbol: "calendar.badge.exclamationmark", actionTitle: "Sign out", action: { try await appState.signOut() })
             case .retry(let message):
-                StatusView(title: "Couldn’t connect", message: message, symbol: "wifi.exclamationmark", action: { Task { await appState.restore() } })
+                StatusView(title: "Couldn’t connect", message: message, symbol: "wifi.exclamationmark", actionTitle: "Try again", action: { await appState.restore() })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -38,14 +38,25 @@ private struct StatusView: View {
     let title: String
     let message: String
     let symbol: String
-    var action: (() -> Void)? = nil
+    var actionTitle: String = "Try again"
+    var action: (() async throws -> Void)? = nil
+    @State private var error: String?
 
     var body: some View {
         VStack(spacing: 18) {
             Image(systemName: symbol).font(.system(size: 46, weight: .thin))
             Text(title).font(.title2.bold())
             Text(message).multilineTextAlignment(.center).foregroundStyle(.secondary)
-            if let action { Button("Try again", action: action).buttonStyle(.borderedProminent) }
+            if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+            if let action {
+                Button(actionTitle) {
+                    Task {
+                        do { try await action() }
+                        catch { self.error = error.localizedDescription }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+            }
         }
         .padding(32)
     }
@@ -102,7 +113,7 @@ private struct MainTabs: View {
         TabView(selection: $state.selectedTab) {
             NavigationStack { ScheduleView(profile: profile) }
                 .tabItem { Label("Schedule", systemImage: "calendar") }.tag(0)
-            NavigationStack { PlaceholderView(title: "Requests", message: "Shift requests and time off will appear here.") }
+            NavigationStack { RequestsView(profile: profile) }
                 .tabItem { Label("Requests", systemImage: "arrow.left.arrow.right") }.tag(1)
             NavigationStack { PlaceholderView(title: "Messages", message: "Team messages will appear here.") }
                 .tabItem { Label("Messages", systemImage: "bubble.left.and.bubble.right") }.tag(2)

@@ -8,6 +8,21 @@ struct ScheduleSnapshot {
 }
 
 enum ScheduleService {
+    static func teamShifts(from start: Date, through end: Date) async throws -> [ScheduleShift] {
+        let from = WallClock.range(starting: start).0
+        let until = WallClock.range(starting: end).0
+        var components = URLComponents()
+        components.queryItems = [
+            URLQueryItem(name: "start", value: from),
+            URLQueryItem(name: "end", value: until),
+            URLQueryItem(name: "team", value: "true")
+        ]
+        let response: ShiftListResponse = try await APIClient.shared.request(
+            method: "GET", path: "/v1/portal/me/schedule?\(components.percentEncodedQuery ?? "")"
+        )
+        return response.shifts
+    }
+
     static func load(week: Date) async throws -> ScheduleSnapshot {
         let (start, end) = WallClock.range(starting: week)
         var components = URLComponents()
