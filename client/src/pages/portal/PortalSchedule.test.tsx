@@ -7,6 +7,7 @@ import PortalSchedule from './PortalSchedule'
 
 const {
   acceptMyRequestMock,
+  createMyRequestMock,
   fetchMyAvailabilityMock,
   submitMyAvailabilityRequestMock,
   fetchMyCoworkersMock,
@@ -14,8 +15,10 @@ const {
   fetchMyRequestsMock,
   fetchMyScheduleMock,
   fetchMyTeamScheduleMock,
+  fetchMyOpenSeatsMock,
 } = vi.hoisted(() => ({
   acceptMyRequestMock: vi.fn(),
+  createMyRequestMock: vi.fn(),
   fetchMyAvailabilityMock: vi.fn(),
   submitMyAvailabilityRequestMock: vi.fn(),
   fetchMyCoworkersMock: vi.fn(),
@@ -23,18 +26,20 @@ const {
   fetchMyRequestsMock: vi.fn(),
   fetchMyScheduleMock: vi.fn(),
   fetchMyTeamScheduleMock: vi.fn(),
+  fetchMyOpenSeatsMock: vi.fn(),
 }))
 
 vi.mock('../../api/employees/employeeSchedule', () => ({
   acceptMyRequest: acceptMyRequestMock,
   cancelMyRequest: vi.fn(),
-  createMyRequest: vi.fn(),
+  createMyRequest: createMyRequestMock,
   fetchMyAvailability: fetchMyAvailabilityMock,
   fetchMyCoworkers: fetchMyCoworkersMock,
   fetchMyOffers: fetchMyOffersMock,
   fetchMyRequests: fetchMyRequestsMock,
   fetchMySchedule: fetchMyScheduleMock,
   fetchMyTeamSchedule: fetchMyTeamScheduleMock,
+  fetchMyOpenSeats: fetchMyOpenSeatsMock,
   submitMyAvailabilityRequest: submitMyAvailabilityRequestMock,
   withdrawMyRequest: vi.fn(),
 }))
@@ -117,10 +122,12 @@ const employeeBSameDayShift: Shift = {
 beforeEach(() => {
   fetchMyScheduleMock.mockResolvedValue({ shifts: [] })
   fetchMyTeamScheduleMock.mockResolvedValue({ shifts: [] })
+  fetchMyOpenSeatsMock.mockResolvedValue({ shifts: [] })
   fetchMyRequestsMock.mockResolvedValue({ requests: [] })
   fetchMyOffersMock.mockResolvedValue({ offers: [selectedSwap] })
   fetchMyCoworkersMock.mockResolvedValue({ employees: [] })
   acceptMyRequestMock.mockResolvedValue({ ...selectedSwap, status: 'awaiting_manager' })
+  createMyRequestMock.mockResolvedValue({ ...selectedSwap, status: 'awaiting_manager' })
   fetchMyAvailabilityMock.mockResolvedValue({
     availability_state: 'always_available', windows: [], pending_request: null,
   })
@@ -325,5 +332,36 @@ describe('PortalSchedule availability changes', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('That week is already published.')
     expect(screen.getByRole('button', { name: /send for approval/i })).toBeDisabled()
+  })
+})
+
+describe('PortalSchedule open shifts and drop requests', () => {
+  it('submits a drop request from one of my shifts', async () => {
+    fetchMyScheduleMock.mockResolvedValue({ shifts: [employeeAShift] })
+    renderPortal()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => expect(createMyRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({ request_type: 'drop', shift_id: employeeAShift.id }),
+    ))
+  })
+
+  it('shows open seats and requests manager review for a claim', async () => {
+    fetchMyOpenSeatsMock.mockResolvedValue({ shifts: [{
+      ...employeeAShift,
+      id: 'open-seat',
+      assignments: [],
+      has_conflict: true,
+    }] })
+    renderPortal()
+
+    expect(await screen.findByText(/Overlaps one of your shifts/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Claim' }))
+
+    await waitFor(() => expect(createMyRequestMock).toHaveBeenCalledWith({
+      request_type: 'claim', shift_id: 'open-seat',
+    }))
   })
 })

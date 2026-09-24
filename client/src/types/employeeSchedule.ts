@@ -3,7 +3,7 @@
 export type ShiftStatus = 'draft' | 'published' | 'cancelled'
 export type ShiftKind = 'work' | 'training'
 export type AssignmentStatus = 'assigned' | 'confirmed' | 'declined'
-export type RequestType = 'swap' | 'drop' | 'pickup' | 'unavailable' | 'availability'
+export type RequestType = 'swap' | 'drop' | 'pickup' | 'unavailable' | 'availability' | 'claim'
 export type RequestStatus = 'pending' | 'awaiting_counterparty' | 'awaiting_manager' | 'approved' | 'denied' | 'cancelled'
 export type AvailabilityState = 'unconfirmed' | 'always_available' | 'windows'
 export type QualificationStatus = 'active' | 'training' | 'suspended'
@@ -140,6 +140,8 @@ export interface Shift {
   published_at: string | null
   assignments: ShiftAssignment[]
 }
+
+export type OpenSeat = Shift & { has_conflict: boolean }
 
 export type ScheduleAuditAction =
   | 'shift.update'

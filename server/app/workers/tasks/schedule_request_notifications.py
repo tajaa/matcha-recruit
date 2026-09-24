@@ -24,7 +24,9 @@ async def _send_pending() -> dict[str, int]:
             """
             SELECT r.id
             FROM schedule_requests r
-            WHERE r.status='awaiting_manager' AND r.counterparty_confirmed_at IS NOT NULL
+            WHERE r.status='awaiting_manager'
+              AND (r.counterparty_confirmed_at IS NOT NULL
+                   OR r.request_type IN ('drop', 'unavailable', 'availability', 'claim'))
             ORDER BY r.updated_at ASC
             LIMIT 500
             """

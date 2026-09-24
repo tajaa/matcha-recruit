@@ -75,6 +75,31 @@ async def test_notification_claims_then_marks_delivery_sent(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("request_type", ["drop", "claim"])
+async def test_unilateral_requests_notify_manager_without_counterparty(monkeypatch, request_type):
+    conn = _ReadyConn()
+
+    async def unilateral_request(*_args):
+        return {
+            "id": conn.request_id, "company_id": conn.company_id,
+            "request_type": request_type, "counterparty_confirmed_at": None,
+            "owner_name": "Avery Owner", "target_name": "",
+        }
+
+    class _Email:
+        def is_configured(self):
+            return False
+
+    conn.fetchrow = unilateral_request
+    monkeypatch.setattr(notifications, "get_email_service", lambda: _Email())
+    monkeypatch.setattr(notifications, "get_settings", lambda: SimpleNamespace(app_base_url="https://matcha.example"))
+    result = await notifications.send_manager_ready_notifications(conn, request_id=conn.request_id)
+    assert result["recipients"] == 1
+    bell = next(args for query, args in conn.executed if "WITH notification" in query)
+    assert f"Avery Owner submitted a {request_type} request." in bell[3]
+
+
+@pytest.mark.asyncio
 async def test_resolved_request_marks_every_matching_manager_alert_read():
     company_id = uuid4()
     request_id = uuid4()

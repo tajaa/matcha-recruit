@@ -32,7 +32,7 @@ def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
 ShiftStatus = Literal["draft", "published", "cancelled"]
 ShiftKind = Literal["work", "training"]
 AssignmentStatus = Literal["assigned", "confirmed", "declined"]
-RequestType = Literal["swap", "drop", "pickup", "unavailable", "availability"]
+RequestType = Literal["swap", "drop", "pickup", "unavailable", "availability", "claim"]
 RequestStatus = Literal[
     "pending", "awaiting_counterparty", "awaiting_manager", "approved", "denied", "cancelled"
 ]
@@ -515,8 +515,13 @@ class ScheduleRequestCreate(BaseModel):
 
     @model_validator(mode="after")
     def _check_shape(self) -> "ScheduleRequestCreate":
-        if self.request_type in ("swap", "drop", "pickup") and self.shift_id is None:
-            raise ValueError("shift_id is required for swap/drop/pickup requests")
+        if self.request_type in ("swap", "drop", "pickup", "claim") and self.shift_id is None:
+            raise ValueError("shift_id is required for swap/drop/pickup/claim requests")
+        if self.request_type == "claim" and (
+            self.target_employee_id is not None or self.unavailable_start is not None
+            or self.unavailable_end is not None
+        ):
+            raise ValueError("claim requests only accept a shift_id and reason")
         if self.request_type == "swap" and self.target_employee_id is None:
             raise ValueError("target_employee_id is required for swap requests")
         if self.request_type == "swap" and self.counter_shift_id is None:

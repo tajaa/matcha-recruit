@@ -30,7 +30,7 @@ async def mark_manager_ready_notifications_resolved(
 
 
 async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[str, int]:
-    """Send each company reviewer one email after both employees confirm.
+    """Send each company reviewer one email for a manager-ready request.
 
     The delivery row is claimed before sending. A failed provider call releases
     the claim, while an interrupted worker's stale claim is reclaimed by the
@@ -47,7 +47,8 @@ async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[st
         LEFT JOIN employees owner ON owner.id=r.employee_id
         LEFT JOIN employees target ON target.id=r.target_employee_id
         WHERE r.id=$1 AND r.status='awaiting_manager'
-          AND r.counterparty_confirmed_at IS NOT NULL
+          AND (r.counterparty_confirmed_at IS NOT NULL
+               OR r.request_type IN ('drop', 'unavailable', 'availability', 'claim'))
         """,
         request_id,
     )
@@ -85,6 +86,11 @@ async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[st
             owner = request["owner_name"] or "Employee"
             target = request["target_name"] or "Coworker"
             request_type = request["request_type"]
+            summary = (
+                f"{owner} and {target} confirmed a {request_type} request."
+                if request["counterparty_confirmed_at"] else
+                f"{owner} submitted a {request_type} request."
+            )
             # One statement commits the bell row and its outbox receipt together,
             # preventing retry recovery from creating duplicate manager alerts.
             await conn.execute(
@@ -98,7 +104,7 @@ async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[st
                 """,
                 recipient["id"], request["company_id"],
                 f"Shift {request_type} request awaiting approval",
-                f"{owner} and {target} confirmed a {request_type} request. Review it to approve or deny it.",
+                f"{summary} Review it to approve or deny it.",
                 link,
                 json.dumps({"request_id": str(request["id"])}),
                 in_app_claimed,
@@ -126,10 +132,15 @@ async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[st
             continue
         owner = request["owner_name"] or "Employee"
         target = request["target_name"] or "Coworker"
+        summary = (
+            f"{owner} and {target} confirmed a {request['request_type']} request."
+            if request["counterparty_confirmed_at"] else
+            f"{owner} submitted a {request['request_type']} request."
+        )
         subject = "Shift request ready for manager approval"
         email_link = f"{settings.app_base_url.rstrip('/')}{link}"
         html = (
-            f"<p>{escape(owner)} and {escape(target)} have confirmed a {escape(request['request_type'])} request.</p>"
+            f"<p>{escape(summary)}</p>"
             f"<p><a href=\"{escape(email_link, quote=True)}\">Review the request</a>. "
             "The schedule remains unchanged until you approve it.</p>"
         )

@@ -47,6 +47,72 @@ async def get_my_schedule(
     return {"shifts": shifts}
 
 
+@router.get("/me/schedule/open-seats", dependencies=_schedule_dep)
+async def list_my_open_seats(
+    start: datetime = Query(...),
+    end: datetime = Query(...),
+    employee: dict = Depends(require_employee_record),
+):
+    """Published future seats the employee may ask a manager to claim."""
+    from app.matcha.routes.employee_schedule._shared import fetch_shifts
+    from app.matcha.services.scheduling.schedule_profiles import fetch_effective_job_employee_ids
+
+    if end <= start:
+        raise HTTPException(status_code=422, detail="end must be after start")
+    company_id, employee_id = employee["org_id"], employee["id"]
+    async with get_connection() as conn:
+        candidates = await conn.fetch(
+            """
+            SELECT s.id, s.job_id, s.starts_at,
+                   EXISTS (
+                       SELECT 1 FROM schedule_shift_assignments mine
+                       JOIN schedule_shifts other ON other.id = mine.shift_id
+                       WHERE mine.employee_id = $2
+                         AND other.company_id = $1 AND other.status = 'published'
+                         AND other.id <> s.id
+                         AND other.starts_at < s.ends_at AND other.ends_at > s.starts_at
+                   ) AS has_conflict
+            FROM schedule_shifts s
+            WHERE s.company_id = $1 AND s.status = 'published'
+              AND s.starts_at >= NOW() AND s.starts_at >= $3 AND s.starts_at < $4
+              AND (SELECT count(*) FROM schedule_shift_assignments a
+                   WHERE a.shift_id = s.id) < s.required_staff
+              AND NOT EXISTS (SELECT 1 FROM schedule_shift_assignments a
+                              WHERE a.shift_id = s.id AND a.employee_id = $2)
+              AND NOT EXISTS (SELECT 1 FROM schedule_requests r
+                              WHERE r.shift_id = s.id AND r.employee_id = $2
+                                AND r.request_type = 'claim'
+                                AND r.status IN ('pending', 'awaiting_manager'))
+            ORDER BY s.starts_at, s.id
+            """,
+            company_id, employee_id, start, end,
+        )
+        qualification: dict[tuple, bool] = {}
+        eligible = []
+        for row in candidates:
+            key = (row["job_id"], row["starts_at"].date())
+            if key not in qualification:
+                qualified = await fetch_effective_job_employee_ids(
+                    conn, company_id=company_id, job_id=row["job_id"],
+                    employee_ids=[employee_id], as_of=key[1],
+                )
+                qualification[key] = employee_id in qualified
+            if qualification[key]:
+                eligible.append(row)
+        shifts = await fetch_shifts(
+            conn, company_id, start, end, status="published",
+            shift_ids=[row["id"] for row in eligible],
+        )
+    conflicts = {str(row["id"]): row["has_conflict"] for row in eligible}
+    for shift in shifts:
+        shift["has_conflict"] = conflicts[shift["id"]]
+        shift["assignments"] = [
+            {key: assignment[key] for key in ("employee_id", "name", "job_title", "status")}
+            for assignment in shift["assignments"]
+        ]
+    return {"shifts": shifts}
+
+
 @router.get("/me/schedule/requests", dependencies=_schedule_dep)
 async def list_my_schedule_requests(
     employee: dict = Depends(require_employee_record),
@@ -107,7 +173,7 @@ async def create_my_schedule_request(
     body: ScheduleRequestCreate,
     employee: dict = Depends(require_employee_record),
 ):
-    """Stage a pickup/swap for counterparty acceptance; no schedule write occurs."""
+    """Stage a schedule request; no assignment write occurs."""
     from app.matcha.routes.employee_schedule._shared import (
         INACTIVE_EMPLOYMENT_STATUSES, REQUEST_SELECT, log_audit, serialize_request,
     )
@@ -127,7 +193,7 @@ async def create_my_schedule_request(
         # GET /me/schedule only serves published shifts, so anything else is a
         # shift this employee was never shown — and the response would echo its
         # window back, leaking an unpublished draft.
-        if body.shift_id is not None:
+        if body.shift_id is not None and body.request_type != "claim":
             shift = await conn.fetchrow(
                 """
                 SELECT s.status
@@ -177,6 +243,41 @@ async def create_my_schedule_request(
                 )
 
         async with conn.transaction():
+            if body.request_type == "claim":
+                from app.matcha.services.scheduling.schedule_profiles import fetch_effective_job_employee_ids
+
+                shift = await conn.fetchrow(
+                    """SELECT id, status, starts_at, required_staff, job_id
+                       FROM schedule_shifts WHERE id=$1 AND company_id=$2 FOR UPDATE""",
+                    body.shift_id, company_id,
+                )
+                if not shift or shift["status"] != "published":
+                    raise HTTPException(status_code=404, detail="Open shift not found")
+                if shift["starts_at"] <= await conn.fetchval("SELECT NOW()"):
+                    raise HTTPException(status_code=409, detail="This shift has already started")
+                assigned = await conn.fetchval(
+                    """SELECT count(*) FROM schedule_shift_assignments
+                       WHERE shift_id=$1""", body.shift_id,
+                )
+                if assigned >= shift["required_staff"]:
+                    raise HTTPException(status_code=409, detail="This shift has no open seats")
+                if await conn.fetchval(
+                    """SELECT 1 FROM schedule_shift_assignments
+                       WHERE shift_id=$1 AND employee_id=$2""",
+                    body.shift_id, employee["id"],
+                ):
+                    raise HTTPException(status_code=409, detail="You are already on this shift")
+                if employee["id"] not in await fetch_effective_job_employee_ids(
+                    conn, company_id=company_id, job_id=shift["job_id"],
+                    employee_ids=[employee["id"]], as_of=shift["starts_at"].date(),
+                ):
+                    raise HTTPException(status_code=409, detail="You are not qualified for this shift")
+                if await conn.fetchval(
+                    """SELECT 1 FROM schedule_requests WHERE employee_id=$1 AND shift_id=$2
+                       AND request_type='claim' AND status IN ('pending', 'awaiting_manager')""",
+                    employee["id"], body.shift_id,
+                ):
+                    raise HTTPException(status_code=409, detail="You already claimed this shift")
             request_id = await conn.fetchval(
                 """
                 INSERT INTO schedule_requests
@@ -198,6 +299,8 @@ async def create_my_schedule_request(
         row = await conn.fetchrow(
             f"{REQUEST_SELECT} WHERE r.id = $1", request_id,
         )
+    if body.request_type in ("drop", "unavailable", "claim"):
+        _dispatch_manager_ready(request_id)
     return serialize_request(dict(row))
 
 
@@ -334,6 +437,15 @@ async def accept_schedule_request(
         # recovery sweep discovers the manager-ready request later.
         pass
     return serialize_request(dict(row))
+
+
+def _dispatch_manager_ready(request_id: UUID) -> None:
+    """Post-commit dispatch; the recovery sweep handles broker outages."""
+    from app.workers.tasks.schedule_request_notifications import send_schedule_request_notifications
+    try:
+        send_schedule_request_notifications.delay(str(request_id))
+    except Exception:
+        pass
 
 
 @router.post("/me/schedule/requests/{request_id}/withdraw", dependencies=_schedule_dep)
@@ -499,6 +611,7 @@ async def request_my_availability_change(
                  "effective_on": body.effective_on.isoformat()},
             )
         row = await conn.fetchrow(f"{REQUEST_SELECT} WHERE r.id = $1", request_id)
+    _dispatch_manager_ready(request_id)
     return serialize_request(dict(row))
 
 

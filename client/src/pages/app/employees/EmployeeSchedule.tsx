@@ -1001,7 +1001,7 @@ function RequestsTab({ locationId, onReviewed }: { locationId: string | null; on
           <div className="flex items-center gap-3 flex-wrap">
             <span className={`px-2 py-0.5 rounded-full border text-[10px] font-semibold uppercase ${REQUEST_TONE[r.status]}`}>{r.status}</span>
             <div className="flex-1 min-w-0">
-              <div className="text-sm text-zinc-200">{r.employee_name} · <span className="capitalize">{r.request_type}</span></div>
+              <div className="text-sm text-zinc-200">{r.employee_name} · <span className="capitalize">{r.request_type === 'claim' ? 'Claim open shift' : r.request_type}</span></div>
               <div className="text-[11px] text-zinc-500">
                 {r.request_type === 'unavailable'
                   ? `${r.unavailable_start ?? ''} → ${r.unavailable_end ?? ''}`

@@ -3,9 +3,9 @@ import { useSearchParams } from 'react-router-dom'
 import { AlertTriangle, CalendarClock, Loader2 } from 'lucide-react'
 import { PillTabs } from '../../components/ui'
 import {
-  fetchMySchedule, fetchMyTeamSchedule, fetchMyRequests, fetchMyOffers, fetchMyCoworkers,
+  fetchMySchedule, fetchMyTeamSchedule, fetchMyOpenSeats, fetchMyRequests, fetchMyOffers, fetchMyCoworkers,
 } from '../../api/employees/employeeSchedule'
-import type { Shift, ScheduleRequest } from '../../types/employeeSchedule'
+import type { Shift, OpenSeat, ScheduleRequest } from '../../types/employeeSchedule'
 import { addDays, errorMessage } from '../../types/employeeSchedule'
 import { HORIZON_DAYS, todayISO } from './schedule/shared'
 import ScheduleTab from './schedule/ScheduleTab'
@@ -28,6 +28,7 @@ export default function PortalSchedule() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [shifts, setShifts] = useState<Shift[]>([])
   const [teamShifts, setTeamShifts] = useState<Shift[]>([])
+  const [openSeats, setOpenSeats] = useState<OpenSeat[]>([])
   const [requests, setRequests] = useState<ScheduleRequest[]>([])
   const [offers, setOffers] = useState<ScheduleRequest[]>([])
   const [coworkers, setCoworkers] = useState<{ id: string; name: string }[]>([])
@@ -45,9 +46,10 @@ export default function PortalSchedule() {
   const load = useCallback(async () => {
     const start = todayISO()
     const end = `${addDays(start, HORIZON_DAYS)}T00:00:00Z`
-    const [schedule, teamSchedule, reqs, openOffers, roster] = await Promise.allSettled([
+    const [schedule, teamSchedule, seats, reqs, openOffers, roster] = await Promise.allSettled([
       fetchMySchedule(`${start}T00:00:00Z`, end),
       fetchMyTeamSchedule(`${start}T00:00:00Z`, end),
+      fetchMyOpenSeats(`${start}T00:00:00Z`, end),
       fetchMyRequests(),
       fetchMyOffers(),
       fetchMyCoworkers(),
@@ -59,6 +61,8 @@ export default function PortalSchedule() {
     const errors: string[] = []
     if (teamSchedule.status === 'fulfilled') setTeamShifts(teamSchedule.value.shifts)
     else errors.push('full schedule')
+    if (seats.status === 'fulfilled') setOpenSeats(seats.value.shifts)
+    else errors.push('open shifts')
     if (reqs.status === 'fulfilled') setRequests(reqs.value.requests)
     else errors.push('request history')
     if (openOffers.status === 'fulfilled') setOffers(openOffers.value.offers)
@@ -133,7 +137,7 @@ export default function PortalSchedule() {
       {requestError && <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">{requestError}</p>}
 
       {tab === 'schedule' && (
-        <ScheduleTab horizonStart={horizonStart} shifts={shifts} teamShifts={teamShifts} coworkers={coworkers} onChanged={load} />
+        <ScheduleTab horizonStart={horizonStart} shifts={shifts} teamShifts={teamShifts} openSeats={openSeats} coworkers={coworkers} onChanged={load} />
       )}
       {tab === 'availability' && (
         <AvailabilityTab teamShifts={teamShifts} onSubmitted={load} />
