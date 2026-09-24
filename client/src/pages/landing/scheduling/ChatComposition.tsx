@@ -9,7 +9,7 @@
  */
 import type { CSSProperties } from 'react'
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion'
-import { BOARD, BODY, CARD, INK, INK_SOFT, MONO, PAPER, STAMP, hexA } from './theme'
+import { AMBER, BOARD, BODY, CARD, INK, INK_SOFT, MONO, PAPER, STAMP, hexA } from './theme'
 import { C, CHAT_DURATION, CHAT_SIZES, type Variant } from './timeline'
 
 const MESSAGE = '@huume give Dev’s Tuesday open to Jonah'
@@ -124,7 +124,7 @@ export default function ChatComposition({ variant }: { variant: Variant }) {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 * s, flexWrap: 'wrap' }}>
                     <span style={mono(10.5, { color: INK, display: 'flex', alignItems: 'center', gap: 7 * s })}>
-                      <span style={{ width: 6 * s, height: 6 * s, borderRadius: 99, backgroundColor: confirmed ? STAMP : INK }} />
+                      <span style={{ width: 6 * s, height: 6 * s, borderRadius: 99, backgroundColor: confirmed ? STAMP : AMBER }} />
                       {confirmed ? 'Confirmed · reassign' : 'Proposed · reassign'}
                     </span>
                     <span style={mono(10.5, { color: INK_SOFT })}>Tue Oct 6 · 7a–3p · Barista</span>

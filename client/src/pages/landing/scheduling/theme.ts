@@ -4,8 +4,9 @@
  *
  * Designed minimalism: paper and ink in a few alphas (and the same inverted to
  * a dark gray, BOARD), hairline grids, mono labels. Colour carries meaning
- * only — matcha green for ok/sent and the one accent word per headline, red
- * for a problem. Don't add a colour that isn't one of those. Type: one
+ * only — matcha green for ok/sent and the one accent word per headline, amber
+ * for something waiting on you (a request, a missing rate, a warm Saturday),
+ * red for a problem. Don't add a colour that isn't one of those. Type: one
  * grotesk, a serif italic for the accent word, mono for labels.
  *
  * Plain hex strings because the Remotion composition renders them inline and
@@ -16,6 +17,7 @@ export const INK = '#18211B' // ballpoint, slightly green-black
 export const INK_SOFT = '#5D675F' // secondary text
 export const RED_PEN = '#D9432A' // conflicts
 export const STAMP = '#3F6B2A' // matcha green — the sent/published state
+export const AMBER = '#C9721C' // waiting on you — pending, unpriced, attention
 export const CARD = '#FBFCF9' // raised card on paper
 
 export const BODY = "'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif"
@@ -47,4 +49,5 @@ export const BOARD = {
   INK_SOFT: '#8B958C',
   RED_PEN: '#EF6A4C',
   STAMP: '#8FC46B',
+  AMBER: '#F0A04B',
 } as const

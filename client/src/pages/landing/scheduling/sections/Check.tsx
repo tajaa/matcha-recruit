@@ -1,14 +1,14 @@
 import { Reveal } from '../motion'
 import { WRAP, mono } from '../styles'
-import { INK, INK_SOFT, RED_PEN, STAMP, hexA } from '../theme'
+import { AMBER, INK, INK_SOFT, STAMP, hexA } from '../theme'
 import { Accent, StepHead } from './Chrome'
 
 type Outcome = 'stops' | 'draft' | 'priced'
 
-// One dot colour per outcome, same vocabulary as the hero sheet: red is the
-// thing that stops you, ink is handled for you, green is money on the week.
+// One dot colour per outcome: amber waits on you, ink is handled for you,
+// green is money on the week.
 const OUTCOME: Record<Outcome, { label: string; means: string; dot: string }> = {
-  stops: { label: 'Stops & asks you', means: 'Won’t save until you override it on purpose.', dot: RED_PEN },
+  stops: { label: 'Stops & asks you', means: 'Won’t save until you override it on purpose.', dot: AMBER },
   draft: { label: 'Fixed in the draft', means: 'The draft is built around it before you see it.', dot: INK },
   priced: { label: 'Priced in', means: 'Shows up in the week’s labor cost.', dot: STAMP },
 }

@@ -3,7 +3,7 @@ import { ArrowRight } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Reveal } from '../motion'
 import { STEPS, WRAP, display, mono, type StepId } from '../styles'
-import { BOARD, GRAIN, INK, INK_SOFT, PAPER, SERIF, STAMP, hexA } from '../theme'
+import { AMBER, BOARD, GRAIN, INK, INK_SOFT, PAPER, SERIF, STAMP, hexA } from '../theme'
 
 export function PrimaryButton({ onClick, children, tone = 'ink' }: { onClick: () => void; children: ReactNode; tone?: 'ink' | 'paper' }) {
   return (
@@ -295,6 +295,16 @@ export function LandingStyles() {
       .sent-dot { background-color: ${hexA(INK, 0.08)}; color: ${INK_SOFT}; transition: background-color .3s ease var(--d, 0ms), color .3s ease var(--d, 0ms); }
       .is-in .sent-dot { background-color: ${STAMP}; color: ${PAPER}; }
 
+      /* Draft inputs: availability cells pop in, cert rows slide in, the pending request breathes */
+      .cell-in { opacity: 0; transform: scale(.85); transition: opacity .45s ease var(--d, 0ms), transform .55s cubic-bezier(.2,.9,.3,1.2) var(--d, 0ms); }
+      .is-in .cell-in { opacity: 1; transform: none; }
+      .row-in { opacity: 0; transform: translateX(-10px); transition: opacity .6s ease var(--d, 0ms), transform .7s cubic-bezier(.2,.7,.2,1) var(--d, 0ms); }
+      .is-in .row-in { opacity: 1; transform: none; }
+      .pulse-ring { animation: schedRing 2.4s ease-in-out infinite; }
+      @keyframes schedRing { 0%, 100% { box-shadow: 0 0 0 1.5px ${AMBER}; } 50% { box-shadow: 0 0 0 1.5px ${AMBER}, 0 0 0 6px ${hexA(AMBER, 0.18)}; } }
+      .pulse-dot { animation: schedDot 1.8s ease-in-out infinite; }
+      @keyframes schedDot { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
       /* check report: each result dot fills in its outcome colour as its row lands */
       .check-dot { background-color: ${hexA(INK, 0.15)}; transition: background-color .3s ease var(--d, 0ms); }
       .is-in .check-dot { background-color: var(--dot); }
@@ -311,6 +321,9 @@ export function LandingStyles() {
         .sent-in, .is-in .sent-in { opacity: 1; transform: none; transition: none; }
         .sent-dot { transition: none; }
         .check-dot { transition: none; }
+        .cell-in, .row-in { opacity: 1; transform: none; transition: none; }
+        .pulse-ring { animation: none; box-shadow: 0 0 0 1.5px ${AMBER}; }
+        .pulse-dot { animation: none; }
         .toast-in { opacity: 1; transform: none; transition: none; }
         .sched-btn { transition: none; }
       }

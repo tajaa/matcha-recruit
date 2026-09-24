@@ -1,6 +1,6 @@
 import { Reveal } from '../motion'
 import { WRAP, mono } from '../styles'
-import { CARD, INK, INK_SOFT, PAPER, RED_PEN, STAMP, hexA } from '../theme'
+import { AMBER, CARD, INK, INK_SOFT, PAPER, STAMP, hexA } from '../theme'
 import { CellLabel, StepHead } from './Chrome'
 
 // Jonah's week after both of the page's edits: the hero moved Dev's Friday
@@ -66,13 +66,13 @@ function Phone() {
                     </span>
                     {s.isNew && (
                       <span className="inline-flex items-center gap-1.5" style={mono('8.5px', { color: INK })}>
-                        <span className="h-1 w-1 rounded-full" style={{ backgroundColor: INK }} />
+                        <span className="h-1 w-1 rounded-full" style={{ backgroundColor: STAMP }} />
                         New
                       </span>
                     )}
                     {s.swap && (
-                      <span className="inline-flex items-center gap-1.5" style={mono('8.5px', { color: RED_PEN })}>
-                        <span className="h-1 w-1 rounded-full" style={{ backgroundColor: RED_PEN }} />
+                      <span className="inline-flex items-center gap-1.5" style={mono('8.5px', { color: AMBER })}>
+                        <span className="h-1 w-1 rounded-full" style={{ backgroundColor: AMBER }} />
                         Swap asked
                       </span>
                     )}
@@ -135,7 +135,7 @@ export function Publish() {
                   <span className="hidden rounded-full px-3.5 py-1.5 text-[13px] sm:inline" style={{ boxShadow: `inset 0 0 0 1px ${hexA(INK, 0.2)}`, color: INK }}>
                     Deny
                   </span>
-                  <span className="rounded-full px-3.5 py-1.5 text-[13px] font-medium" style={{ backgroundColor: INK, color: PAPER }}>
+                  <span className="rounded-full px-3.5 py-1.5 text-[13px] font-medium" style={{ backgroundColor: STAMP, color: PAPER }}>
                     Approve
                   </span>
                 </span>

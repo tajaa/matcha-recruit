@@ -87,7 +87,7 @@ export function WeekComposition({ variant }: WeekProps) {
     frame < T.check
       ? { text: 'Drafting', fg: INK }
       : frame < T.resolve + 30
-        ? { text: 'Checking rules', fg: RED_PEN }
+        ? { text: 'Checking rules', fg: BOARD.AMBER }
         : { text: 'Ready to publish', fg: STAMP }
 
   const mono = (size: number, extra?: CSSProperties): CSSProperties => ({
@@ -204,7 +204,7 @@ export function WeekComposition({ variant }: WeekProps) {
                   style={{
                     height: '100%',
                     width: `${(FORECAST[day] / max) * 100 * f}%`,
-                    backgroundColor: isSat ? INK : hexA(INK, 0.28),
+                    backgroundColor: isSat ? BOARD.AMBER : hexA(INK, 0.28),
                     borderRadius: 99,
                   }}
                 />
@@ -212,7 +212,7 @@ export function WeekComposition({ variant }: WeekProps) {
               <div style={mono(10.5, { color: INK_SOFT, marginTop: 8 * s, opacity: f, whiteSpace: 'nowrap' })}>
                 ${(FORECAST[day] / 1000).toFixed(1)}k
                 {isSat && (
-                  <span style={{ color: INK, display: wide ? 'inline' : 'block' }}>
+                  <span style={{ color: BOARD.AMBER, display: wide ? 'inline' : 'block' }}>
                     {wide && ' · '}
                     74° sun
                   </span>
