@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { motion, useReducedMotion, useMotionValue, useTransform, animate } from 'framer-motion'
 import { Camera, Flame, Star, Store } from 'lucide-react'
+import { StudioReceiptIllustration } from './LandingArtwork'
 
 function usePointCounter(target: number, reduce: boolean, delay = 0.55) {
   const value = useMotionValue(reduce ? target : 0)
@@ -35,7 +36,8 @@ export function HeroTicket() {
 
   return (
     <div className="relative mx-auto w-full max-w-sm">
-      <div className="absolute -inset-6 -z-10 rounded-[2rem] bg-tu-accent/10 blur-2xl" />
+      <div className="absolute -inset-8 -z-10 rounded-[2rem] bg-tu-accent/10 blur-2xl" />
+      <StudioReceiptIllustration className="pointer-events-none absolute -right-14 top-[-30px] z-0 hidden w-40 rotate-6 opacity-70 sm:block" />
 
       {/* Stacked ticket peeking out behind — depth + "there's more than one" */}
       <motion.div
@@ -43,7 +45,7 @@ export function HeroTicket() {
         initial={reduce ? false : { y: -40, opacity: 0, rotate: -3 }}
         animate={{ y: 10, opacity: 1, rotate: -6 }}
         transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 260, damping: 20, delay: 0.05 }}
-        className="tu-tear-edge absolute inset-x-3 top-2 -z-[1] rounded-sm bg-tu-paper-dim/80"
+        className="tu-tear-edge absolute inset-x-3 top-2 -z-[1] rounded-2xl bg-tu-paper-dim/80"
         style={{ height: '92%' }}
       />
 
@@ -51,7 +53,7 @@ export function HeroTicket() {
         initial={reduce ? false : { y: -48, opacity: 0, rotate: -3 }}
         animate={{ y: 0, opacity: 1, rotate: -1 }}
         transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 300, damping: 18, mass: 1 }}
-        className="tu-tear-edge rounded-sm bg-tu-paper p-5 pb-7 text-tu-ink drop-shadow-2xl"
+        className="tu-tear-edge relative z-10 rounded-2xl bg-tu-paper p-5 pb-7 text-tu-ink drop-shadow-[0_24px_30px_rgba(76,55,29,0.18)]"
       >
         <motion.div
           initial={reduce ? false : { opacity: 0 }}
@@ -107,7 +109,7 @@ export function HeroTicket() {
         initial={reduce ? false : { opacity: 0, scale: 0.8, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 300, damping: 16, delay: 1.1 }}
-        className="absolute -bottom-4 -right-4 flex items-center gap-1.5 rounded-sm border border-tu-border bg-tu-panel px-3 py-1.5 text-xs font-mono font-semibold shadow-lg"
+        className="absolute -bottom-4 -right-4 flex items-center gap-1.5 rounded-full border border-tu-border bg-tu-panel px-3 py-1.5 text-xs font-mono font-semibold shadow-[0_10px_22px_rgba(76,55,29,0.14)]"
       >
         <motion.span
           animate={reduce ? undefined : { rotate: [-6, 6, -6] }}
