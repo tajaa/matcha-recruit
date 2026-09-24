@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import UserNotifications
 
 private enum Palette {
     static let background = Color(red: 0.98, green: 0.96, blue: 0.92)
@@ -31,6 +33,10 @@ struct RootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(Palette.ink)
         .background(Palette.background)
+        .onReceive(NotificationCenter.default.publisher(for: .schedulePushTapped)) { notification in
+            appState.handlePush(notification.userInfo ?? [:])
+        }
+        .onOpenURL { appState.handleURL($0) }
     }
 }
 
@@ -115,21 +121,15 @@ private struct MainTabs: View {
                 .tabItem { Label("Schedule", systemImage: "calendar") }.tag(0)
             NavigationStack { RequestsView(profile: profile) }
                 .tabItem { Label("Requests", systemImage: "arrow.left.arrow.right") }.tag(1)
-            NavigationStack { PlaceholderView(title: "Messages", message: "Team messages will appear here.") }
-                .tabItem { Label("Messages", systemImage: "bubble.left.and.bubble.right") }.tag(2)
+            InboxListView()
+                .tabItem { Label("Messages", systemImage: "bubble.left.and.bubble.right") }
+                .badge(appState.unreadMessages)
+                .tag(2)
             NavigationStack { MeView(profile: profile) }
-                .tabItem { Label("Me", systemImage: "person.crop.circle") }.tag(3)
+                .tabItem { Label("Me", systemImage: "person.crop.circle") }
+                .badge(appState.unreadNotifications)
+                .tag(3)
         }
-    }
-}
-
-private struct PlaceholderView: View {
-    let title: String
-    let message: String
-
-    var body: some View {
-        ContentUnavailableView(title, systemImage: "clock", description: Text(message))
-            .navigationTitle(title)
     }
 }
 
@@ -138,12 +138,45 @@ private struct MeView: View {
     let profile: EmployeeProfile
     @State private var error: String?
     @State private var signingOut = false
+    @State private var permission: UNAuthorizationStatus?
 
     var body: some View {
         List {
             Section {
                 LabeledContent("Name", value: profile.displayName)
                 LabeledContent("Company", value: profile.company_name)
+            }
+            Section("Notifications") {
+                NavigationLink {
+                    NotificationFeedView()
+                } label: {
+                    HStack {
+                        Label("Bell feed", systemImage: "bell")
+                        Spacer()
+                        if appState.unreadNotifications > 0 {
+                            Text("\(appState.unreadNotifications)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                LabeledContent("Push permission", value: permissionLabel)
+                if permission == .denied {
+                    Button("Open notification settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    }
+                } else if permission == .notDetermined {
+                    Button("Enable notifications") {
+                        Task {
+                            await PushService.shared.activate()
+                            permission = await PushService.shared.authorizationStatus()
+                        }
+                    }
+                }
+                if let pushError = PushService.shared.lastError {
+                    Text(pushError).font(.footnote).foregroundStyle(.red)
+                }
             }
             Section {
                 Button("Sign out") {
@@ -159,5 +192,17 @@ private struct MeView: View {
             if let error { Text(error).foregroundStyle(.red) }
         }
         .navigationTitle("Me")
+        .task { permission = await PushService.shared.authorizationStatus() }
+    }
+
+    private var permissionLabel: String {
+        switch permission {
+        case .authorized: "Enabled"
+        case .provisional: "Provisional"
+        case .ephemeral: "Temporary"
+        case .denied: "Denied"
+        case .notDetermined: "Not requested"
+        default: "Checking…"
+        }
     }
 }

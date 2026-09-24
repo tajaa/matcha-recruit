@@ -7,6 +7,7 @@ enum KeychainHelper {
     enum Keys {
         static let accessToken = "schedule.accessToken"
         static let refreshToken = "schedule.refreshToken"
+        static let pushToken = "schedule.pushToken"
     }
 
     // Use the data-protection keychain (kSecUseDataProtectionKeychain) rather

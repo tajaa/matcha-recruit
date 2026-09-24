@@ -21,6 +21,7 @@ targets:
       - path: App
       - path: Models
       - path: Services
+      - path: Support
       - path: Views
       - path: Resources
         buildPhase: resources
