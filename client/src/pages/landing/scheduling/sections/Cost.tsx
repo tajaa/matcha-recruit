@@ -49,15 +49,15 @@ export function Cost() {
           unpriced — never as $0, so a missing number can’t make the week look cheaper than it is.
         </StepHead>
 
-        <div className="mt-16 grid grid-cols-1 lg:grid-cols-2" style={{ borderTop: `1px solid ${RULE}` }}>
+        <div className="mt-16 grid grid-cols-1 lg:grid-cols-2" style={{ borderTop: `1px solid ${RULE}`, borderBottom: `1px solid ${RULE}` }}>
           <Reveal className="flex flex-col py-12 lg:border-r lg:pr-14" style={{ borderColor: RULE }}>
             <CellLabel n="01" dark>Scheduled labor · week of Oct 5</CellLabel>
             <div className="mt-8 text-[clamp(4.5rem,10vw,8.5rem)] font-normal leading-[0.85] tracking-[-0.05em]" style={{ color: PAPER }}>
               <CountUp value={TOTAL} />
             </div>
-            <dl className="mt-auto grid grid-cols-3 gap-6 pt-12">
+            <dl className="mt-auto grid grid-cols-3 items-end gap-6 pt-12">
               {[
-                { k: 'Of forecast sales', v: `${pct}%` },
+                { k: 'Of sales', v: `${pct}%` },
                 { k: 'Overtime', v: '$0' },
                 { k: 'Unpriced', v: '12h' },
               ].map((x) => (

@@ -83,7 +83,8 @@ export default function ChatComposition({ variant }: { variant: Variant }) {
             <span style={mono(11, { color: INK_SOFT })}>8 members</span>
           </div>
 
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16 * s, padding: `${20 * s}px ${22 * s}px`, fontFamily: BODY, color: INK }}>
+          {/* anchored to the composer like a real chat: any spare room reads as scrollback above */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 16 * s, padding: `${20 * s}px ${22 * s}px`, fontFamily: BODY, color: INK }}>
             {/* Ana */}
             <div style={{ display: 'flex', gap: 12 * s, ...appear(C.ana) }}>
               <Avatar s={s} bg={hexA(INK, 0.08)} fg={INK} text="AR" />
@@ -287,7 +288,8 @@ function TuesdayStrip({
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'center',
+        justifyContent: 'flex-start',
+        paddingTop: wide ? 18 * s : 0,
         opacity: interpolate(frame, [4, 16], [0, 1], clamp),
       }}
     >

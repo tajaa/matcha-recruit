@@ -47,7 +47,7 @@ function Phone() {
       </div>
 
       <div className="rounded-[46px] p-[10px]" style={{ backgroundColor: INK, boxShadow: `0 40px 70px -40px ${hexA(INK, 0.4)}` }}>
-        <div className="relative overflow-hidden rounded-[37px]" style={{ backgroundColor: CARD, aspectRatio: '9 / 18.5' }}>
+        <div className="relative overflow-hidden rounded-[37px]" style={{ backgroundColor: CARD, aspectRatio: '9 / 16' }}>
           <div className="absolute left-1/2 top-2.5 h-[22px] w-[88px] -translate-x-1/2 rounded-full" style={{ backgroundColor: INK }} />
           <div className="flex h-full flex-col px-5 pb-5 pt-12">
             <div className="flex items-baseline justify-between" style={mono('9px', { color: INK_SOFT })}>
@@ -104,7 +104,7 @@ export function Publish() {
         requests — approve one and the schedule updates, deny it and nothing moves.
       </StepHead>
 
-      <div className="mt-16 grid grid-cols-1 lg:grid-cols-2" style={{ borderTop: `1px solid ${RULE}` }}>
+      <div className="mt-16 grid grid-cols-1 lg:grid-cols-2" style={{ borderTop: `1px solid ${RULE}`, borderBottom: `1px solid ${RULE}` }}>
         <Reveal className="flex flex-col py-12 lg:border-r lg:pr-14" style={{ borderColor: RULE }}>
           <CellLabel n="01">What Jonah sees</CellLabel>
           <div className="mt-20">

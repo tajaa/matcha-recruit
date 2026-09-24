@@ -26,7 +26,7 @@ export function StageLayout({
         {decor}
       </div>
       <div className="mt-4 flex items-start gap-4">
-        <div className="h-8 w-8 shrink-0">{control}</div>
+        {control && <div className="h-8 w-8 shrink-0">{control}</div>}
         <div className="min-w-0 flex-1">{caption}</div>
       </div>
     </div>

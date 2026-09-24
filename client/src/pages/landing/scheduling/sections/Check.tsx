@@ -67,7 +67,7 @@ export function Check() {
       </StepHead>
 
       {/* the Draft grid's hairline cells, two across */}
-      <ol className="mt-16 grid grid-cols-1 lg:grid-cols-2" style={{ borderTop: `1px solid ${RULE}` }}>
+      <ol className="mt-16 grid grid-cols-1 lg:grid-cols-2" style={{ borderTop: `1px solid ${RULE}`, borderBottom: `1px solid ${RULE}` }}>
         {RULES.map((rule, i) => {
           const left = i % 2 === 0
           return (

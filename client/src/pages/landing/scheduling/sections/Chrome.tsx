@@ -180,44 +180,42 @@ export function TimelineRail() {
     }
   }, [])
   const activeIndex = STEPS.findIndex((s) => s.id === active)
+  // No card: a bare mono list in the gutter. It floats over the dark Cost
+  // section too, so its ink follows whichever section is under it.
+  const dark = active === 'cost'
+  const ink = dark ? PAPER : INK
+  const soft = dark ? hexA(PAPER, 0.6) : INK_SOFT
+  const green = dark ? BOARD.STAMP : STAMP
   return (
     <nav
       aria-label="Sunday timeline"
-      className="fixed left-4 top-1/2 z-40 hidden -translate-y-1/2 rounded-xl px-3.5 py-3 transition-opacity duration-500 min-[1560px]:block"
-      style={{
-        opacity: active ? 1 : 0,
-        pointerEvents: active ? 'auto' : 'none',
-        // Floats over full-bleed sections, including the dark one.
-        backgroundColor: hexA(PAPER, 0.92),
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-        boxShadow: `0 0 0 1px ${hexA(INK, 0.1)}, 0 12px 30px -18px ${hexA(INK, 0.5)}`,
-      }}
+      className="fixed left-6 top-1/2 z-40 hidden -translate-y-1/2 transition-opacity duration-500 min-[1560px]:block"
+      style={{ opacity: active ? 1 : 0, pointerEvents: active ? 'auto' : 'none' }}
     >
-      <div style={mono('9.5px', { color: INK_SOFT, lineHeight: 1.5 })}>
+      <div className="transition-colors duration-300" style={mono('9.5px', { color: soft, lineHeight: 1.5 })}>
         Sun
         <br />
         Oct 4
       </div>
-      <ol className="relative mt-4 space-y-5 pl-4" style={{ borderLeft: `1px solid ${hexA(INK, 0.2)}` }}>
+      <ol className="relative mt-4 space-y-5 pl-4 transition-colors duration-300" style={{ borderLeft: `1px solid ${hexA(ink, 0.2)}` }}>
         {STEPS.map((s, i) => {
           const state = i === activeIndex ? 'now' : i < activeIndex ? 'past' : 'next'
           return (
             <li key={s.id} className="relative">
               <span
                 aria-hidden
-                className="absolute top-[3px] h-[9px] w-[9px] rounded-full transition-colors duration-300"
+                className="absolute top-[4px] h-[7px] w-[7px] rounded-full transition-colors duration-300"
                 style={{
-                  left: -21,
-                  backgroundColor: state === 'now' ? STAMP : state === 'past' ? INK : PAPER,
-                  border: `1.5px solid ${state === 'next' ? hexA(INK, 0.3) : state === 'now' ? STAMP : INK}`,
+                  left: -20,
+                  backgroundColor: state === 'now' ? green : state === 'past' ? ink : dark ? BOARD.PAPER : PAPER,
+                  boxShadow: state === 'next' ? `inset 0 0 0 1px ${hexA(ink, 0.3)}` : undefined,
                 }}
               />
               <a href={`#${s.id}`} className="sched-focus block rounded" aria-current={state === 'now' ? 'step' : undefined}>
-                <span className="block transition-colors duration-300" style={mono('11px', { color: state === 'next' ? hexA(INK, 0.35) : INK, fontWeight: 700, letterSpacing: '0.04em' })}>
+                <span className="block transition-colors duration-300" style={mono('11px', { color: state === 'next' ? hexA(ink, 0.35) : ink, fontWeight: 500, letterSpacing: '0.04em' })}>
                   {s.time}
                 </span>
-                <span className="block transition-colors duration-300" style={mono('9px', { color: state === 'next' ? hexA(INK, 0.35) : INK_SOFT })}>
+                <span className="block transition-colors duration-300" style={mono('9px', { color: state === 'next' ? hexA(ink, 0.35) : soft })}>
                   {s.label}
                 </span>
               </a>
