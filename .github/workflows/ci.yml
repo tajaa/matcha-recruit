@@ -247,6 +247,11 @@ jobs:
             ./scripts/xcode-build.sh storefront build-for-testing
             ran=1
           fi
+          if grep -qE '^(platforms/ios/MatchaSchedule/|scripts/xcode-build\.sh$)' <<< "$changed"; then
+            command -v xcodegen >/dev/null 2>&1 || brew install xcodegen
+            ./scripts/xcode-build.sh matchaschedule build-for-testing
+            ran=1
+          fi
           if [ "$ran" = 0 ]; then echo "No native project changed."; fi
 
   lint:
