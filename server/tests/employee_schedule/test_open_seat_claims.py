@@ -251,6 +251,8 @@ async def test_manager_claim_full_shift_requires_force(monkeypatch, force, expec
     monkeypatch.setattr(manager, "mark_manager_ready_notifications_resolved", noop)
     monkeypatch.setattr(manager, "log_audit", noop)
     monkeypatch.setattr(manager, "reconcile_warning_events", noop)
+    monkeypatch.setattr(manager, "stage_request_event", noop)
+    monkeypatch.setattr(manager, "dispatch_events", lambda: None)
     monkeypatch.setattr(manager, "serialize_request", lambda row: row)
 
     if expected_status == 409:

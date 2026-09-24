@@ -159,6 +159,21 @@ async def test_permanent_topic_mismatch_prunes_token(device_env, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_worker_can_send_with_its_own_connection(device_env, monkeypatch):
+    conn, senders = device_env
+    user_id = uuid4()
+    conn.rows = [{"user_id": user_id, "token": "b" * 64,
+                  "bundle_id": "com.heymatcha.schedule", "environment": "sandbox"}]
+
+    def no_pool():
+        raise AssertionError("worker delivery must reuse its raw connection")
+
+    monkeypatch.setattr(apns_service, "get_connection", no_pool)
+    await apns_service.send_to_user(user_id, "Schedule published", kind="schedule_published", conn=conn)
+    assert len(senders[("com.heymatcha.schedule", "sandbox")].sent) == 1
+
+
+@pytest.mark.asyncio
 async def test_register_rejects_unknown_bundle_before_database(monkeypatch):
     monkeypatch.setattr(apns_service, "get_settings", _settings)
     with pytest.raises(HTTPException) as error:

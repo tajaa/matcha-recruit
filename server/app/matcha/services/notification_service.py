@@ -59,6 +59,11 @@ TYPES = {
     "ems_urgent_event": "Urgent Event",
     "event_assigned": "Event Assignment",
     "event_assignment_completed": "Assignment Completed",
+    "schedule_offer_received": "Swap Offer",
+    "schedule_request_accepted": "Schedule Request Accepted",
+    "schedule_request_withdrawn": "Schedule Request Withdrawn",
+    "schedule_request_decided": "Schedule Request Reviewed",
+    "schedule_published": "Schedule Published",
 }
 
 

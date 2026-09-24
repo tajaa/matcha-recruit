@@ -132,6 +132,7 @@ async def send_to_many(
     *,
     kind: str,
     suppress_werk_users: Optional[set[UUID]] = None,
+    conn=None,
 ) -> None:
     """Send one batched lookup to every eligible device, pruning dead tokens."""
     if not user_ids:
@@ -139,7 +140,14 @@ async def send_to_many(
     settings = get_settings()
     if not all((settings.apns_key_id, settings.apns_team_id, settings.apns_auth_key_path)):
         return
-    async with get_connection() as conn:
+    if conn is None:
+        async with get_connection() as read_conn:
+            rows = await read_conn.fetch(
+                "SELECT user_id, token, bundle_id, environment FROM device_tokens "
+                "WHERE user_id = ANY($1::uuid[]) AND platform = 'ios'",
+                user_ids,
+            )
+    else:
         rows = await conn.fetch(
             "SELECT user_id, token, bundle_id, environment FROM device_tokens "
             "WHERE user_id = ANY($1::uuid[]) AND platform = 'ios'",
@@ -179,7 +187,10 @@ async def send_to_many(
             logger.warning("APNs send failed token=%s…: %s", token[:8], exc)
 
     if dead:
-        async with get_connection() as conn:
+        if conn is None:
+            async with get_connection() as write_conn:
+                await write_conn.execute("DELETE FROM device_tokens WHERE token = ANY($1::text[])", dead)
+        else:
             await conn.execute("DELETE FROM device_tokens WHERE token = ANY($1::text[])", dead)
 
 
@@ -191,9 +202,11 @@ async def send_to_user(
     *,
     kind: str,
     suppress_werk: bool = False,
+    conn=None,
 ) -> None:
     """Send to a user's eligible devices across both apps."""
     await send_to_many(
         [user_id], title, body, payload, kind=kind,
         suppress_werk_users={user_id} if suppress_werk else None,
+        conn=conn,
     )
