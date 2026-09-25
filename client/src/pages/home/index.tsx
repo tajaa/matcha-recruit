@@ -3,8 +3,12 @@ import MarketingNav from "../landing/MarketingNav";
 import MarketingFooter from "../landing/MarketingFooter";
 import { useSEO } from "../../hooks/useSEO";
 import { HOME_JSON_LD } from "./data";
-import { BONE, NOIR } from "./theme";
-import { GrainOverlay, PageStyle, useMarketingNoir } from "./PageChrome";
+import { Grain, KitStyles } from "../../components/marketing/kit/Chrome";
+import { useMarketingBoard } from "../../components/marketing/kit/hooks";
+import { BODY, INK, PAPER } from "../../components/marketing/kit/theme";
+// PageStyle still carries the instruments' keyframes and the hero's
+// landscape rules.
+import { PageStyle } from "./PageChrome";
 import { Hero } from "./Hero";
 import { ShowcaseSection } from "./ShowcaseSection";
 import { ProductIndex } from "./ProductIndex";
@@ -28,7 +32,7 @@ export default function Home() {
     setIsPricingOpen(true);
   };
 
-  useMarketingNoir();
+  useMarketingBoard();
 
   useSEO({
     title: "Matcha — Full-Service HR: Platform, Lite, Compliance & Consulting",
@@ -40,11 +44,12 @@ export default function Home() {
 
   return (
     <div
-      style={{ backgroundColor: NOIR, color: BONE }}
-      className="home-root min-h-screen overflow-x-hidden"
+      style={{ backgroundColor: PAPER, color: INK, fontFamily: BODY }}
+      className="home-root sched-root min-h-screen overflow-x-clip"
     >
+      <KitStyles />
       <PageStyle />
-      <GrainOverlay />
+      <Grain />
 
       {/* Latched, not `isPricingOpen &&`: the modal owns an <AnimatePresence>
           keyed on isOpen, so unmounting the moment it closes would cut its exit
@@ -87,9 +92,7 @@ export default function Home() {
       <Manifesto />
       <CTABand onDemoClick={openPricing} />
 
-      <div style={{ backgroundColor: BONE, color: "var(--color-ivory-ink)" }}>
-        <MarketingFooter />
-      </div>
+      <MarketingFooter />
     </div>
   );
 }

@@ -1,6 +1,8 @@
 import { HERO_PROOF, type ProofItem } from "./data";
-import { ASH, BONE, LEAF } from "./theme";
-import { EYEBROW } from "./layout";
+import { display, mono } from "../../components/marketing/kit/styles";
+import { BOARD, PAPER, hexA } from "../../components/marketing/kit/theme";
+
+const LABEL = mono("10.5px", { color: hexA(PAPER, 0.58) });
 
 /**
  * Above-the-fold credibility strip.
@@ -42,12 +44,12 @@ function ProofEntry({ item }: { item: ProofItem }) {
     return (
       <>
         <span
-          className="text-[1.6rem] leading-none tracking-[-0.02em] tabular-nums"
-          style={{ fontFamily: "var(--font-lite)", fontWeight: 400, color: BONE }}
+          className="text-[1.6rem] leading-none tabular-nums"
+          style={{ ...display, fontWeight: 400, color: PAPER }}
         >
           {item.value}
         </span>
-        <span className={EYEBROW} style={{ color: ASH }}>
+        <span style={LABEL}>
           {item.label}
         </span>
       </>
@@ -72,9 +74,9 @@ function ProofEntry({ item }: { item: ProofItem }) {
       <span
         aria-hidden
         className="w-1 h-1 rounded-full shrink-0 mt-[0.5em]"
-        style={{ backgroundColor: LEAF }}
+        style={{ backgroundColor: BOARD.STAMP }}
       />
-      <span className={EYEBROW} style={{ color: ASH }}>
+      <span style={LABEL}>
         {item.text}
       </span>
     </>

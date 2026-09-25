@@ -1,7 +1,9 @@
 import { lazy, Suspense } from "react";
-import { ASH } from "./theme";
-import { CONTAINER, EYEBROW, EYEBROW_END } from "./layout";
-import { Reveal } from "./PageChrome";
+import { CellLabel } from "../../components/marketing/kit/Chrome";
+import { Reveal } from "../../components/marketing/kit/motion";
+import { mono } from "../../components/marketing/kit/styles";
+import { BOARD, PAPER, hexA } from "../../components/marketing/kit/theme";
+import { CONTAINER } from "./layout";
 
 // The carousel and its four instruments are the ONLY framer-motion importers on
 // the apex route (~60-110 KB gz). Lazy-loading keeps framer out of the eager `/`
@@ -28,17 +30,18 @@ const ProductCarousel = lazy(() =>
  * (py-20 sm:py-28 md:py-32) would push the carousel back off the fold.
  */
 export function ShowcaseSection() {
+  // Same dark band as the hero: the instruments are dark-surface mocks.
   return (
-    <section id="showcase" className="scroll-mt-16 pt-9 sm:pt-11 md:pt-12">
-      <div className={CONTAINER}>
+    <section id="showcase" className="sched-dark scroll-mt-16" style={{ backgroundColor: BOARD.PAPER, color: PAPER }}>
+      <div className={`${CONTAINER} pb-20 pt-9 sm:pb-28 sm:pt-11 md:pt-12`}>
         <Reveal>
-          <div className="flex items-baseline justify-between mb-6">
-            <h2 className={EYEBROW} style={{ color: ASH }}>
-              What it looks like
+          <div className="mb-6 flex items-baseline justify-between pt-4" style={{ borderTop: `1px solid ${hexA(PAPER, 0.1)}` }}>
+            <h2>
+              <CellLabel n="01" dark>
+                What it looks like
+              </CellLabel>
             </h2>
-            <span className={EYEBROW_END} style={{ color: ASH }}>
-              Showcase
-            </span>
+            <span style={mono("10px", { color: hexA(PAPER, 0.55) })}>Showcase</span>
           </div>
           {/* No spinner: the slot is blank during the reveal transition anyway,
               and a fallback would flash where nothing was shown. */}

@@ -1,8 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
-import { AMBER, ASH, BONE, LEAF, LINE_D, NOIR, SURFACE } from "./theme";
-import { EYEBROW } from "./layout";
+import { mono } from "../../components/marketing/kit/styles";
+import { BOARD, PAPER, hexA } from "../../components/marketing/kit/theme";
+
+const MUTED = hexA(PAPER, 0.58);
 import { QUALIFY_EMAIL_KEY, validateWorkEmail } from "./qualify";
 
 /**
@@ -40,16 +42,16 @@ export function StartCapture() {
     // `relative` is load-bearing: the honeypot below is absolutely positioned
     // and would otherwise escape to the nearest positioned ancestor.
     <form onSubmit={submit} noValidate className="relative w-full">
-      <span className={`block mb-3 ${EYEBROW}`} style={{ color: ASH }}>
+      <span className="mb-3 block" style={mono("11px", { color: MUTED })}>
         Find your starting line
       </span>
 
       <div
-        className="flex items-center gap-2 rounded-full border pl-5 pr-1.5 transition-colors duration-200 focus-within:border-[#A3C57D]"
+        className="flex items-center gap-2 rounded-full border pl-5 pr-1.5 transition-colors duration-200 focus-within:border-[#8FC46B]"
         style={{
           height: 56,
-          backgroundColor: SURFACE,
-          borderColor: error ? AMBER : LINE_D,
+          backgroundColor: hexA(PAPER, 0.06),
+          borderColor: error ? BOARD.RED_PEN : hexA(PAPER, 0.14),
         }}
       >
         <input
@@ -76,12 +78,11 @@ export function StartCapture() {
           aria-label="Work email"
           aria-invalid={!!error}
           className="flex-1 min-w-0 bg-transparent text-base outline-none placeholder:opacity-40"
-          style={{ color: BONE }}
+          style={{ color: PAPER }}
         />
         <button
           type="submit"
-          className="group inline-flex items-center gap-2 shrink-0 h-11 pl-5 pr-4 rounded-full text-[14px] font-medium cursor-pointer transition-all duration-200 hover:brightness-110 active:brightness-95"
-          style={{ backgroundColor: LEAF, color: NOIR }}
+          className="group sched-btn sched-btn-paper sched-focus inline-flex items-center gap-2 shrink-0 h-11 pl-5 pr-4 rounded-full text-[14px] font-medium cursor-pointer"
         >
           {/* The long label only fits once the deck row has real width. At the
               `md:` two-column step the capture is 360px, and the full label
@@ -111,11 +112,11 @@ export function StartCapture() {
           reflow the fold by one line. */}
       <div className="mt-3 min-h-[1.25rem]">
         {error ? (
-          <p role="alert" className="text-xs" style={{ color: AMBER }}>
+          <p role="alert" className="text-xs" style={{ color: BOARD.RED_PEN }}>
             {error}
           </p>
         ) : (
-          <p className="text-xs" style={{ color: ASH }}>
+          <p className="text-xs" style={{ color: MUTED }}>
             Work email only. Three questions, no sales call.
           </p>
         )}
