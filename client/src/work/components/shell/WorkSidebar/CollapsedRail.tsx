@@ -1,4 +1,4 @@
-import { Hash, FolderOpen, MessageSquare, PanelLeftClose, Mail, MailOpen, Home, Users, ClipboardList, BookOpenCheck, Package } from 'lucide-react'
+import { Hash, FolderOpen, MessageSquare, PanelLeftClose, Mail, MailOpen, Home, Users, ClipboardList, BookOpenCheck, Package, NotebookPen } from 'lucide-react'
 import type { NavigateFunction } from 'react-router-dom'
 import { formatEventsBadge } from '../../../hooks/useLoggedEventsCount'
 
@@ -53,6 +53,7 @@ export default function CollapsedRail({
       >
         <PanelLeftClose size={16} className="rotate-180" />
       </button>
+
       <div className="w-6 border-t border-w-line/40 mb-1" />
 
       <button
@@ -61,6 +62,14 @@ export default function CollapsedRail({
         title="Home"
       >
         <Home size={16} />
+      </button>
+
+      <button
+        onClick={() => navigate(`${base}/journals`)}
+        className={`p-2 rounded-lg transition-colors ${pathname.startsWith(`${base}/journals`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
+        title="Journals"
+      >
+        <NotebookPen size={16} />
       </button>
 
       <button

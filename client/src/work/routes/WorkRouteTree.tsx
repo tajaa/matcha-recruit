@@ -3,6 +3,7 @@ import WorkLayout from '../layout/WorkLayout'
 import MatchaWorkList from '../pages/MatchaWorkList'
 import MatchaWorkThread from '../pages/MatchaWorkThread'
 import ProjectView from '../pages/ProjectView'
+import Journals from '../pages/Journals'
 import ChannelView from '../pages/ChannelView'
 import LegacyChannelRedirect, { LegacySurfacePrefixRedirect } from '../pages/LegacySurfaceRedirect'
 import WorkEmail from '../pages/WorkEmail'
@@ -83,8 +84,10 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
             }
           >
             <Route path="assets" element={<AssetsHub />} />
-            <Route path="assets/:assetId" element={<AssetsHub />} />
+          <Route path="assets/:assetId" element={<AssetsHub />} />
           </Route>
+          <Route path="journals" element={<Journals />} />
+          <Route path="journals/:journalId" element={<Journals />} />
           <Route path=":threadId" element={<MatchaWorkThread />} />
           <Route path="projects/:projectId" element={<ProjectView />} />
         </Route>

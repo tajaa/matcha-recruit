@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive } from 'lucide-react'
+import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen } from 'lucide-react'
 import { logoutSession } from '../../../api/client'
 import type { ChannelSummary } from '../../api/channels'
 import { createProjectNew, createThread, archiveThread, notifyThreadsChanged } from '../../api/matchaWork'
@@ -225,6 +225,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           >
             <PanelLeftClose size={16} />
           </button>
+
         </div>
 
         <nav className="flex-1 overflow-y-auto px-2 space-y-1 pb-3">
@@ -239,6 +240,18 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           >
             <Home size={14} strokeWidth={1.6} />
             Home
+          </button>
+
+          <button
+            onClick={() => navigate(`${base}/journals`)}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+              location.pathname.startsWith(`${base}/journals`)
+                ? 'bg-w-surface2 text-white font-medium'
+                : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
+            }`}
+          >
+            <NotebookPen size={14} strokeWidth={1.6} />
+            Journals
           </button>
 
           {/* Events (HR admin review of @huume-logged events) */}
