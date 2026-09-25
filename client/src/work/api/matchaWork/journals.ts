@@ -1,5 +1,7 @@
 import { api } from '../../../api/client'
 
+export const JOURNALS_CHANGED_EVENT = 'mw-journals-changed'
+
 export type JournalKind = 'note' | 'blog' | 'todo' | 'novel' | 'screenplay' | 'journal'
 
 export interface Journal {

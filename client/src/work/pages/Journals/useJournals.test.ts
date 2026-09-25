@@ -14,6 +14,7 @@ vi.mock('../../hooks/useEntitlements', () => ({
 }))
 vi.mock('../../utils/paywall', () => ({ showPaywall: mock.showPaywall }))
 vi.mock('../../api/matchaWork/journals', () => ({
+  JOURNALS_CHANGED_EVENT: 'mw-journals-changed',
   listJournals: mock.listJournals,
   listJournalFolders: mock.listFolders,
   createJournal: mock.createJournal,

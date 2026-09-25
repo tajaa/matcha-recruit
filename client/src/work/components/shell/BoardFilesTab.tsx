@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, FileText, Trash2, Upload } from 'lucide-react'
+import { Loader2, FileText, Trash2, Upload, Star } from 'lucide-react'
 import { listProjectFiles, uploadProjectFile, deleteProjectFile, type ProjectFile } from '../../api/matchaWork'
+import { useMe } from '../../../hooks/useMe'
+import { toggleStar, useStars } from '../../hooks/useStars'
+import { clearSearchSource, publishSearchSource } from '../../utils/searchIndex'
+import { openProjectFile } from '../../utils/openProjectFile'
 
 interface BoardFilesTabProps {
   projectId: string
@@ -15,6 +19,9 @@ function formatBytes(bytes: number): string {
 }
 
 export default function BoardFilesTab({ projectId }: BoardFilesTabProps) {
+  const { me } = useMe()
+  const userId = me?.user?.id
+  const starred = useStars(userId, 'files')
   const [files, setFiles] = useState<ProjectFile[]>([])
   const [loading, setLoading] = useState(true)
   const [uploadingNames, setUploadingNames] = useState<string[]>([])
@@ -23,9 +30,16 @@ export default function BoardFilesTab({ projectId }: BoardFilesTabProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    publishSearchSource(userId, `files:${projectId}`, files.map((file) => ({ kind: 'file', id: file.id, title: file.filename, projectId, url: file.storage_url, updatedAt: file.created_at })))
+  }, [userId, projectId, files])
+  useEffect(() => () => clearSearchSource(userId, `files:${projectId}`), [userId, projectId])
+
+  useEffect(() => {
     let active = true
-    setLoading(true)
-    listProjectFiles(projectId)
+    const timer = window.setTimeout(() => {
+      setLoading(true)
+      setFiles([])
+      listProjectFiles(projectId)
       .then((rows) => {
         if (active) setFiles(rows)
       })
@@ -35,8 +49,10 @@ export default function BoardFilesTab({ projectId }: BoardFilesTabProps) {
       .finally(() => {
         if (active) setLoading(false)
       })
+    }, 0)
     return () => {
       active = false
+      window.clearTimeout(timer)
     }
   }, [projectId])
 
@@ -60,6 +76,7 @@ export default function BoardFilesTab({ projectId }: BoardFilesTabProps) {
     setFiles((p) => p.filter((f) => f.id !== fileId))
     try {
       await deleteProjectFile(projectId, fileId)
+      if (starred.includes(fileId)) toggleStar(userId, 'files', fileId)
     } catch {
       setFiles(prev)
       setError('Failed to delete file')
@@ -144,15 +161,14 @@ export default function BoardFilesTab({ projectId }: BoardFilesTabProps) {
           files.map((f) => (
             <div key={f.id} className="group flex items-center gap-2 border-b border-w-line px-3 py-2 last:border-b-0">
               <FileText className="h-3.5 w-3.5 shrink-0 text-w-dim" />
-              <a
-                href={f.storage_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 truncate text-sm text-w-text hover:underline"
+              <button
+                onClick={() => { void openProjectFile(projectId, f.id).then((opened) => { if (!opened) setError('File unavailable') }) }}
+                className="flex-1 truncate text-left text-sm text-w-text hover:underline"
               >
                 {f.filename}
-              </a>
+              </button>
               <span className="shrink-0 text-[10px] text-w-dim">{formatBytes(f.file_size)}</span>
+              <button onClick={() => toggleStar(userId, 'files', f.id, { id: f.id, projectId, name: f.filename, url: f.storage_url })} aria-label={`${starred.includes(f.id) ? 'Unstar' : 'Star'} ${f.filename}`} className={starred.includes(f.id) ? 'text-w-accent' : 'text-w-faint sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100'}><Star size={13} fill={starred.includes(f.id) ? 'currentColor' : 'none'} /></button>
               <button
                 onClick={() => handleDelete(f.id)}
                 className="shrink-0 text-w-faint opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"

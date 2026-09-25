@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare } from 'lucide-react'
+import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare, Star } from 'lucide-react'
 import { logoutSession } from '../../../api/client'
 import type { ChannelSummary } from '../../api/channels'
 import { createProjectNew, createThread, archiveThread, notifyThreadsChanged } from '../../api/matchaWork'
@@ -19,6 +19,8 @@ import { useSectionState } from './WorkSidebar/useSectionState'
 import { useSidebarRename } from './WorkSidebar/useSidebarRename'
 import { useEntitlements } from '../../hooks/useEntitlements'
 import { showPaywall } from '../../utils/paywall'
+import { getStarredFileMeta, useStars } from '../../hooks/useStars'
+import { openProjectFile } from '../../utils/openProjectFile'
 import CollapsedRail from './WorkSidebar/CollapsedRail'
 import { SidebarNavButton } from './WorkSidebar/SidebarNavButton'
 import ChannelsSection from './WorkSidebar/ChannelsSection'
@@ -35,6 +37,11 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const surface = useWorkSurface()
   const showChannels = surface !== 'matcha-work'
   const { me, isPersonal, hasFeature } = useMe()
+  const userId = me?.user?.id
+  const starredChannels = useStars(userId, 'channels')
+  const starredJournals = useStars(userId, 'journals')
+  const starredFiles = useStars(userId, 'files')
+  const [starredFileError, setStarredFileError] = useState(false)
   const { plan, can } = useEntitlements()
   const showProjects = can('projects_solo')
   const canCreate = surface !== 'matcha-work' && canCreateChannel(me?.user?.role)
@@ -47,10 +54,11 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     channels, setChannels,
     projects, setProjects,
     threads, setThreads,
+    journals,
     inboxUnread,
     pendingConnections,
     loggedEventsCount,
-  } = useSidebarData(base, location.pathname, showEvents, showChannels)
+  } = useSidebarData(base, location.pathname, showEvents, showChannels, userId)
 
   const [showCreateChannel, setShowCreateChannel] = useState(false)
   const [showProjectTypePicker, setShowProjectTypePicker] = useState(false)
@@ -181,6 +189,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const visibleChannels = surface === 'matcha-work'
     ? channels.filter((channel) => channel.channel_scope === 'project_discussion' || !channel.channel_scope)
     : channels
+  const pinnedChannels = visibleChannels.filter((channel) => starredChannels.includes(channel.id))
+  const pinnedJournals = journals.filter((journal) => starredJournals.includes(journal.id))
+  const pinnedFiles = getStarredFileMeta(userId).filter((file) => starredFiles.includes(file.id))
   const totalChannelUnread = visibleChannels.reduce((sum, ch) => sum + ch.unread_count, 0)
   const userName = me?.profile?.name || me?.user?.email?.split('@')[0] || 'User'
   const userEmail = me?.user?.email || ''
@@ -231,6 +242,15 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
         <nav className="flex-1 overflow-y-auto px-2 space-y-1 pb-3">
           <SidebarNavButton icon={Home} label="Home" active={location.pathname === base} onClick={() => navigate(base)} />
+
+          {(pinnedChannels.length > 0 || pinnedJournals.length > 0 || pinnedFiles.length > 0) && <div className="mt-3 border-t border-w-line pt-2">
+            <p className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-w-faint"><Star size={11} /> Starred</p>
+            {pinnedChannels.map((channel) => <button key={`channel:${channel.id}`} onClick={() => navigate(`${base}/channels/${channel.id}`)} className="block w-full truncate rounded px-2.5 py-1 text-left text-xs text-w-dim hover:bg-w-surface2"># {channel.name}</button>)}
+            {pinnedJournals.map((journal) => <button key={`journal:${journal.id}`} onClick={() => navigate(`${base}/journals/${journal.id}`)} className="block w-full truncate rounded px-2.5 py-1 text-left text-xs text-w-dim hover:bg-w-surface2">{journal.title}</button>)}
+            {pinnedFiles.map((file) => <button key={`file:${file.id}`} onClick={() => { setStarredFileError(false); void openProjectFile(file.projectId, file.id).then((opened) => { if (!opened) setStarredFileError(true) }) }} className="block w-full truncate rounded px-2.5 py-1 text-left text-xs text-w-dim hover:bg-w-surface2">{file.name}</button>)}
+            {starredFileError && <p role="alert" className="px-2.5 py-1 text-xs text-red-400">File unavailable. Open its project to check access.</p>}
+          </div>}
+
           <SidebarNavButton icon={NotebookPen} label="Journals" active={location.pathname.startsWith(`${base}/journals`)} onClick={() => navigate(`${base}/journals`)} />
           <SidebarNavButton icon={CheckSquare} label="To-dos" active={location.pathname.startsWith(`${base}/productivity`)} onClick={() => navigate(`${base}/productivity`)} />
 
@@ -298,6 +318,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
               isActive={isActive}
               setShowCreateChannel={setShowCreateChannel}
               rename={rename}
+              userId={userId}
             />
           )}
 
