@@ -12,7 +12,12 @@ import RequireScOnboardingComplete from "./components/auth/RequireScOnboardingCo
 const AppRoutes = lazy(() => import("./routes/AppRoutes"));
 const BrokerRoutes = lazy(() => import("./routes/BrokerRoutes"));
 const WorkRoutes = lazy(() => import("./work/routes/WorkRoutes"));
-const WerkRoutes = lazy(() => import("./work/routes/WerkRoutes"));
+const EspressoRoutes = lazy(() => import("./work/routes/EspressoRoutes"));
+const LegacySurfacePrefixRedirect = lazy(() =>
+  import("./work/pages/LegacySurfaceRedirect").then(({ LegacySurfacePrefixRedirect }) => ({
+    default: LegacySurfacePrefixRedirect,
+  })),
+);
 const WerkLiteRoutes = lazy(() => import("./work/routes/WerkLiteRoutes"));
 const OpsRoutes = lazy(() => import("./ops/routes/OpsRoutes"));
 const PortalRoutes = lazy(() => import("./routes/PortalRoutes"));
@@ -274,7 +279,8 @@ export default function App() {
             Guarding only /app/* left /ops/schedule (the product's own core
             page, gated on employee_schedule alone) reachable before setup. */}
         <Route path="/work/*" element={<RequireScOnboardingComplete><WorkRoutes /></RequireScOnboardingComplete>} />
-        <Route path="/werk/*" element={<WerkRoutes />} />
+        <Route path="/werk/*" element={<LegacySurfacePrefixRedirect fromPrefix="/werk" toPrefix="/espresso" />} />
+        <Route path="/espresso/*" element={<EspressoRoutes />} />
         <Route path="/werk-lite/*" element={<WerkLiteRoutes />} />
         <Route path="/ops/*" element={<RequireScOnboardingComplete><OpsRoutes /></RequireScOnboardingComplete>} />
         <Route path="/admin/*" element={<AdminRoutes />} />

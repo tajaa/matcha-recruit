@@ -50,7 +50,7 @@ import CBADetail from '../pages/app/labor/CBADetail'
 import GrievanceDetail from '../pages/app/labor/GrievanceDetail'
 import Training from '../pages/app/training/Training'
 import TrainingDetail from '../pages/app/training/TrainingDetail'
-import { LegacyOpsRedirect } from '../work/pages/LegacySurfaceRedirect'
+import { LegacySurfacePrefixRedirect } from '../work/pages/LegacySurfaceRedirect'
 import SafetyMeetings from '../pages/app/safety-meetings/SafetyMeetings'
 import SafetyMeetingRecord from '../pages/app/safety-meetings/SafetyMeetingRecord'
 import SafetyMeetingDetail from '../pages/app/safety-meetings/SafetyMeetingDetail'
@@ -71,8 +71,8 @@ export default function AppRoutes() {
         <Route path="employees" element={<FeatureGate feature="employees" label="Employees"><Employees /></FeatureGate>} />
         <Route path="employees/:employeeId" element={<FeatureGate feature="employees" label="Employees"><EmployeeDetail /></FeatureGate>} />
         <Route path="onboarding" element={<Onboarding />} />
-        <Route path="employee-schedule" element={<LegacyOpsRedirect fromPrefix="/app/employee-schedule" toPrefix="/ops/schedule" />} />
-        <Route path="schedule-intelligence" element={<LegacyOpsRedirect fromPrefix="/app/schedule-intelligence" toPrefix="/ops/schedule?tab=intelligence" />} />
+        <Route path="employee-schedule" element={<LegacySurfacePrefixRedirect fromPrefix="/app/employee-schedule" toPrefix="/ops/schedule" />} />
+        <Route path="schedule-intelligence" element={<LegacySurfacePrefixRedirect fromPrefix="/app/schedule-intelligence" toPrefix="/ops/schedule?tab=intelligence" />} />
         <Route path="er-copilot" element={<FeatureGate feature="er_copilot" label="ER Copilot"><ERCopilot /></FeatureGate>} />
         <Route path="er-copilot/:caseId" element={<FeatureGate feature="er_copilot" label="ER Copilot"><ERCaseDetail /></FeatureGate>} />
         <Route path="compliance" element={<FeatureGate anyOf={['compliance', 'compliance_lite']} label="Compliance"><Compliance /></FeatureGate>} />

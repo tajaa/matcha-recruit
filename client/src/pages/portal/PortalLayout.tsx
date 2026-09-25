@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { Menu, X, Loader2 } from 'lucide-react'
 import PortalSidebar from '../../components/portal/PortalSidebar'
@@ -8,10 +8,12 @@ export default function PortalLayout() {
   const { me, loading, authFailed } = useMe()
   const { pathname } = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [menuPath, setMenuPath] = useState(pathname)
 
-  useEffect(() => {
+  if (pathname !== menuPath) {
+    setMenuPath(pathname)
     setMobileMenuOpen(false)
-  }, [pathname])
+  }
 
   if (loading) {
     return (
@@ -46,7 +48,7 @@ export default function PortalLayout() {
     const fallback =
       role === 'admin' ? '/admin' :
       role === 'broker' ? '/broker' :
-      role === 'individual' ? '/werk' :
+      role === 'individual' ? '/espresso' :
       '/app'
     return <Navigate to={fallback} replace />
   }

@@ -9,7 +9,7 @@ export default function BetaRegister() {
   const navigate = useNavigate()
   const token = params.get('token') ?? ''
 
-  const [validating, setValidating] = useState(true)
+  const [validating, setValidating] = useState(!!token)
   const [valid, setValid] = useState(false)
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
@@ -18,7 +18,7 @@ export default function BetaRegister() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!token) { setValidating(false); return }
+    if (!token) return
     fetch(`${API_BASE}/auth/beta-invite/${token}`)
       .then((r) => r.json())
       .then((data) => {
@@ -48,7 +48,7 @@ export default function BetaRegister() {
       setAuthTokens(data.access_token, data.refresh_token)
       // Drop any cached /auth/me from a previous session.
       invalidateMeCache()
-      navigate('/werk')
+      navigate('/espresso')
     } catch {
       setError('Something went wrong. Please try again.')
     } finally {
@@ -56,7 +56,7 @@ export default function BetaRegister() {
     }
   }
 
-  if (validating) {
+  if (token && validating) {
     return (
       <div className="min-h-screen bg-[#0c0c0e] flex items-center justify-center">
         <Loader2 className="w-6 h-6 text-zinc-500 animate-spin" />
@@ -81,7 +81,7 @@ export default function BetaRegister() {
     <div className="min-h-screen bg-[#0c0c0e] flex items-center justify-center px-4">
       <div className="max-w-sm w-full">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-semibold text-zinc-100">Werk</h1>
+          <h1 className="text-2xl font-semibold text-zinc-100">Espresso</h1>
           <p className="text-sm text-zinc-500 mt-1">Private Beta</p>
         </div>
 

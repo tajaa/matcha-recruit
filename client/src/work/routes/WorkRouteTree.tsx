@@ -4,7 +4,7 @@ import MatchaWorkList from '../pages/MatchaWorkList'
 import MatchaWorkThread from '../pages/MatchaWorkThread'
 import ProjectView from '../pages/ProjectView'
 import ChannelView from '../pages/ChannelView'
-import LegacyChannelRedirect, { LegacyOpsRedirect } from '../pages/LegacySurfaceRedirect'
+import LegacyChannelRedirect, { LegacySurfacePrefixRedirect } from '../pages/LegacySurfaceRedirect'
 import WorkEmail from '../pages/WorkEmail'
 import ChannelBrowse from '../pages/ChannelBrowse'
 import ChannelJoinByInvite from '../pages/ChannelJoinByInvite'
@@ -25,7 +25,7 @@ import { WorkSurfaceProvider, type WorkSurface } from './WorkSurfaceContext'
 // The route tree shared by the two full work surfaces:
 //
 //   /work  → matcha-work, the business product (role='client', inside a company)
-//   /werk  → werk, the personal product (role='individual')
+//   /espresso → Espresso, the personal product (role='individual')
 //
 // These were two files that differed only in the WorkSurfaceProvider value, so
 // every new route had to be added twice — a two-place edit with no compiler
@@ -52,7 +52,7 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           <Route path="channels/:channelId" element={businessWork ? <LegacyChannelRedirect communityElement={<ChannelView />} /> : <ChannelView />} />
           <Route
             element={
-              businessWork ? <LegacyOpsRedirect fromPrefix="/work" toPrefix="/ops" /> : <FeatureGate feature="ems" label="Ops — Events">
+              businessWork ? <LegacySurfacePrefixRedirect fromPrefix="/work" toPrefix="/ops" /> : <FeatureGate feature="ems" label="Ops — Events">
                 <Outlet />
               </FeatureGate>
             }
@@ -63,7 +63,7 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           </Route>
           <Route
             element={
-              businessWork ? <LegacyOpsRedirect fromPrefix="/work" toPrefix="/ops" /> : <FeatureGate feature="inventory" label="Ops — Inventory">
+              businessWork ? <LegacySurfacePrefixRedirect fromPrefix="/work" toPrefix="/ops" /> : <FeatureGate feature="inventory" label="Ops — Inventory">
                 <Outlet />
               </FeatureGate>
             }

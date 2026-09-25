@@ -98,12 +98,12 @@ const nav: (NavItem | NavGroup)[] = [
 // backend `lite_router` gate) — kept here since NavItem only supports one.
 const COMPLIANCE_CALENDAR_FEATURES = ['compliance', 'compliance_lite', 'incidents']
 
-// Personal accounts only see Werk — no platform/HR items
+// Personal accounts only see Espresso — no platform/HR items
 const personalNav: (NavItem | NavGroup)[] = [
   {
     label: 'AI',
     items: [
-      { to: '/werk', icon: Sparkles, label: 'Werk' },
+      { to: '/espresso', icon: Sparkles, label: 'Espresso' },
     ],
   },
 ]
@@ -193,7 +193,7 @@ export default function ClientSidebar() {
   return (
     <SidebarShell
       workspaceSwitch
-      logoTo={isPersonal ? '/werk' : '/app'}
+      logoTo={isPersonal ? '/espresso' : '/app'}
       logoLabel="Matcha"
       nav={loading ? [] : isPersonal ? personalNav : withBadges(withBrokerChat(filterByFeatures(nav)))}
       user={footerName ? {

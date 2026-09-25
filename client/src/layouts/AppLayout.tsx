@@ -12,6 +12,7 @@ export default function AppLayout({ sidebar, variant }: { sidebar: ReactNode; lo
   const { loading, authFailed, isPersonal } = useMe()
   const { pathname, search } = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [menuPath, setMenuPath] = useState(pathname)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
     localStorage.getItem('sidebar_collapsed') === 'true'
   )
@@ -22,9 +23,10 @@ export default function AppLayout({ sidebar, variant }: { sidebar: ReactNode; lo
     return () => document.documentElement.removeAttribute('data-app-shell-bg')
   }, [isAdmin])
 
-  useEffect(() => {
+  if (pathname !== menuPath) {
+    setMenuPath(pathname)
     setMobileMenuOpen(false)
-  }, [pathname])
+  }
 
   useEffect(() => {
     localStorage.setItem('sidebar_collapsed', String(sidebarCollapsed))
@@ -46,7 +48,7 @@ export default function AppLayout({ sidebar, variant }: { sidebar: ReactNode; lo
   }
 
   if (!loading && isPersonal && !PERSONAL_ALLOWED.has(pathname)) {
-    return <Navigate to="/werk" replace />
+    return <Navigate to="/espresso" replace />
   }
 
   return (
