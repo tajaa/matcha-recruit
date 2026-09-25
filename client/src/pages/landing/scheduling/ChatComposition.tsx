@@ -9,7 +9,7 @@
  */
 import type { CSSProperties } from 'react'
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion'
-import { AMBER, BOARD, BODY, INK, INK_SOFT, MONO, PAPER, STAMP, hexA } from './theme'
+import { AMBER, BOARD, BODY, INK, INK_SOFT, MONO, PAPER, STAMP, hexA } from '../../../components/marketing/kit/theme'
 import { C, CHAT_DURATION, CHAT_SIZES, type Variant } from './timeline'
 
 const MESSAGE = '@huume give Dev’s Tuesday open to Jonah'

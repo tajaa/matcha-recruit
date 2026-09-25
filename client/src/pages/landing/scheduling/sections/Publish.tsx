@@ -1,6 +1,6 @@
-import { Reveal } from '../motion'
-import { WRAP, glassPane, mono } from '../styles'
-import { AMBER, CARD, INK, INK_SOFT, PAPER, STAMP, hexA } from '../theme'
+import { Reveal } from '../../../../components/marketing/kit/motion'
+import { WRAP, glassPane, mono } from '../../../../components/marketing/kit/styles'
+import { AMBER, CARD, INK, INK_SOFT, PAPER, STAMP, hexA } from '../../../../components/marketing/kit/theme'
 import { CellLabel, Glows, StepHead } from './Chrome'
 
 // Jonah's week after both of the page's edits: the hero moved Dev's Friday

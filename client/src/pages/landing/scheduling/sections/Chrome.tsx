@@ -1,58 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowRight } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { Reveal } from '../motion'
-import { STEPS, WRAP, display, mono, type StepId } from '../styles'
-import { AMBER, BOARD, GRAIN, INK, INK_SOFT, PAPER, SERIF, STAMP, hexA } from '../theme'
+import { KitStyles } from '../../../../components/marketing/kit/Chrome'
+import { Reveal } from '../../../../components/marketing/kit/motion'
+import { WRAP, display, mono } from '../../../../components/marketing/kit/styles'
+import { STEPS, type StepId } from '../styles'
+import { AMBER, BOARD, INK, INK_SOFT, PAPER, STAMP, hexA } from '../../../../components/marketing/kit/theme'
 
-export function PrimaryButton({ onClick, children, tone = 'ink' }: { onClick: () => void; children: ReactNode; tone?: 'ink' | 'paper' }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`group sched-btn sched-btn-${tone} sched-focus inline-flex h-12 items-center gap-2 rounded-full px-6 text-[15px] font-medium`}
-    >
-      {children}
-      <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5" />
-    </button>
-  )
-}
-
-/** The one italic serif word in a headline, in matcha green — lifted on dark. */
-export function Accent({ children, dark }: { children: ReactNode; dark?: boolean }) {
-  return (
-    <em style={{ fontFamily: SERIF, fontStyle: 'italic', fontWeight: 400, letterSpacing: '-0.01em', color: dark ? BOARD.STAMP : STAMP }}>{children}</em>
-  )
-}
-
-/** Two soft glows — matcha and amber — for frosted glass to catch. Positions
- *  are kept inside the box so they fade out before its edge. */
-export function Glows({ green, amber, className = '' }: { green: string; amber: string; className?: string }) {
-  return (
-    <div
-      aria-hidden
-      className={`pointer-events-none absolute inset-0 ${className}`}
-      style={{
-        background: [
-          `radial-gradient(30% 40% at ${green}, ${hexA(STAMP, 0.16)}, transparent 70%)`,
-          `radial-gradient(28% 36% at ${amber}, ${hexA(AMBER, 0.14)}, transparent 70%)`,
-        ].join(', '),
-      }}
-    />
-  )
-}
-
-/** A grid cell's label: "01 —— Sales". Shared by every hairline grid. */
-export function CellLabel({ n, children, dark }: { n: string; children: ReactNode; dark?: boolean }) {
-  const ink = dark ? PAPER : INK
-  return (
-    <div className="flex items-center gap-3" style={mono('10px', { color: dark ? hexA(PAPER, 0.55) : INK_SOFT })}>
-      <span style={{ color: ink }}>{n}</span>
-      <span aria-hidden className="h-px w-6" style={{ backgroundColor: hexA(ink, 0.25) }} />
-      {children}
-    </div>
-  )
-}
+export { Accent, CellLabel, Glows, Grain, PrimaryButton } from '../../../../components/marketing/kit/Chrome'
 
 /** Section opener: the step's Sunday timestamp, then the headline. `split`
  *  puts the copy (and `aside`) in a right-hand column level with the
@@ -269,49 +223,15 @@ export function Footer() {
   )
 }
 
-export function Grain() {
-  return <div aria-hidden className="pointer-events-none fixed inset-0 z-[60]" style={{ backgroundImage: GRAIN, opacity: 0.08, mixBlendMode: 'multiply' }} />
-}
-
 export function LandingStyles() {
   return (
+    <>
+    <KitStyles />
     <style>{`
-      .sched-root { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
-      .sched-root ::selection { background: ${hexA(STAMP, 0.25)}; color: ${INK}; }
-      html:has(.sched-root) { scroll-behavior: smooth; scroll-padding-top: 80px; }
-
-      .cut-fade { animation: schedFade .8s ease var(--d, 0ms) both; }
-      @keyframes schedFade { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-
-      .sr { opacity: 0; transform: translateY(22px); transition: opacity .8s cubic-bezier(.2,.7,.2,1) var(--d, 0ms), transform .9s cubic-bezier(.2,.7,.2,1) var(--d, 0ms); }
-      .sr.is-in { opacity: 1; transform: none; }
-
-      .pen-draw { stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset 1.1s cubic-bezier(.6,.05,.25,1) var(--d, 0ms); }
-      .is-in .pen-draw { stroke-dashoffset: 0; }
-
-      .sched-btn { transition: background-size .45s cubic-bezier(.6,.05,.25,1), color .25s, transform .25s; background-repeat: no-repeat; background-position: 0 0; background-size: 0% 100%; }
-      .sched-btn:hover { background-size: 100% 100%; }
-      .sched-btn:active { transform: translateY(1px); }
-      /* hover wipes in matcha green, left to right */
-      .sched-btn-ink { background-image: linear-gradient(${STAMP}, ${STAMP}); background-color: ${INK}; color: ${PAPER}; }
-      .sched-btn-paper { background-image: linear-gradient(${BOARD.STAMP}, ${BOARD.STAMP}); background-color: ${PAPER}; color: ${INK}; }
-
-      .sched-link { background-image: linear-gradient(currentColor, currentColor); background-repeat: no-repeat; background-position: 0 100%; background-size: 0% 1.5px; transition: background-size .35s cubic-bezier(.6,.05,.25,1); padding-bottom: 2px; }
-      .sched-link:hover { background-size: 100% 1.5px; }
-
-      .sched-focus:focus-visible { outline: 2px solid ${INK}; outline-offset: 3px; }
-      .sched-dark .sched-focus:focus-visible, footer .sched-focus:focus-visible { outline-color: ${PAPER}; }
-
-      .grow-bar { transform-box: fill-box; transform-origin: 50% 100%; transform: scaleY(0); transition: transform .8s cubic-bezier(.2,.7,.2,1) var(--d, 0ms); }
-      .is-in .grow-bar { transform: scaleY(1); }
-      .grow-x { transform-origin: 0 50%; transform: scaleX(0); transition: transform 1.1s cubic-bezier(.6,.05,.25,1) var(--d, 0ms); }
-      .is-in .grow-x { transform: scaleX(1); }
-
       .sent-in { opacity: 0; transform: translateY(10px); transition: opacity .7s cubic-bezier(.2,.7,.2,1) .4s, transform .8s cubic-bezier(.2,.7,.2,1) .4s; }
       .is-in .sent-in { opacity: 1; transform: none; }
       .sent-dot { background-color: ${hexA(INK, 0.08)}; color: ${INK_SOFT}; transition: background-color .3s ease var(--d, 0ms), color .3s ease var(--d, 0ms); }
       .is-in .sent-dot { background-color: ${STAMP}; color: ${PAPER}; }
-
       /* Draft inputs: availability cells pop in, cert rows slide in, the pending request breathes */
       .cell-in { opacity: 0; transform: scale(.85); transition: opacity .45s ease var(--d, 0ms), transform .55s cubic-bezier(.2,.9,.3,1.2) var(--d, 0ms); }
       .is-in .cell-in { opacity: 1; transform: none; }
@@ -321,20 +241,13 @@ export function LandingStyles() {
       @keyframes schedRing { 0%, 100% { box-shadow: 0 0 0 1.5px ${AMBER}; } 50% { box-shadow: 0 0 0 1.5px ${AMBER}, 0 0 0 6px ${hexA(AMBER, 0.18)}; } }
       .pulse-dot { animation: schedDot 1.8s ease-in-out infinite; }
       @keyframes schedDot { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
-
       /* check report: each result dot fills in its outcome colour as its row lands */
       .check-dot { background-color: ${hexA(INK, 0.15)}; transition: background-color .3s ease var(--d, 0ms); }
       .is-in .check-dot { background-color: var(--dot); }
-
       .toast-in { opacity: 0; transform: translateY(-12px) scale(.97); transition: opacity .6s ease .7s, transform .7s cubic-bezier(.2,.9,.3,1.2) .7s; }
       .is-in .toast-in { opacity: 1; transform: none; }
 
       @media (prefers-reduced-motion: reduce) {
-        html:has(.sched-root) { scroll-behavior: auto; }
-        .sr, .sr.is-in { opacity: 1; transform: none; transition: none; }
-        .pen-draw { stroke-dashoffset: 0; transition: none; }
-        .cut-fade { animation: none; }
-        .grow-bar, .grow-x { transform: none; transition: none; }
         .sent-in, .is-in .sent-in { opacity: 1; transform: none; transition: none; }
         .sent-dot { transition: none; }
         .check-dot { transition: none; }
@@ -342,8 +255,8 @@ export function LandingStyles() {
         .pulse-ring { animation: none; box-shadow: 0 0 0 1.5px ${AMBER}; }
         .pulse-dot { animation: none; }
         .toast-in { opacity: 1; transform: none; transition: none; }
-        .sched-btn { transition: none; }
       }
     `}</style>
+    </>
   )
 }

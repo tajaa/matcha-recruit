@@ -1,6 +1,7 @@
 /**
- * Tokens for the /matcha-scheduling landing — its own surface, not the
- * NOIR home (pages/home/theme.ts) or the ivory simpler-pages.
+ * Marketing kit tokens: the /matcha-scheduling landing, the home page, and the
+ * shared marketing nav + footer. (The product pages under simpler-pages still
+ * use the NOIR tokens in pages/home/theme.ts.) Fonts load from index.html.
  *
  * Designed minimalism: paper and ink in a few alphas (and the same inverted to
  * a dark gray, BOARD), hairline grids, mono labels. Colour carries meaning
@@ -28,9 +29,6 @@ export const MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, mono
 /** Paper tooth: fractal-noise SVG tile, multiplied over the page at low opacity. */
 export const GRAIN =
   "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.09  0 0 0 0 0.13  0 0 0 0 0.1  0 0 0 .55 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")"
-
-export const FONT_HREF =
-  'https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;700&display=swap'
 
 /** `#RRGGBB` + alpha → `rgba()`. */
 export function hexA(hex: string, alpha: number): string {

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { useInView, useReducedMotion } from '../hooks'
-import { CountUp, Reveal } from '../motion'
-import { WRAP, mono } from '../styles'
-import { AMBER, CARD, INK, INK_SOFT, RED_PEN, STAMP, hexA } from '../theme'
+import { useInView, useReducedMotion } from '../../../../components/marketing/kit/hooks'
+import { CountUp, Reveal } from '../../../../components/marketing/kit/motion'
+import { WRAP, mono } from '../../../../components/marketing/kit/styles'
+import { AMBER, CARD, INK, INK_SOFT, RED_PEN, STAMP, hexA } from '../../../../components/marketing/kit/theme'
 import { Accent, CellLabel, StepHead } from './Chrome'
 
 /** Saturday, 6a–11p: committed sales per hour (relative) and the people the

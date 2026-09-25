@@ -1,6 +1,6 @@
-import { Reveal } from '../motion'
-import { WRAP, display, mono } from '../styles'
-import { CARD, INK, INK_SOFT, PAPER, STAMP, hexA } from '../theme'
+import { Reveal } from '../../../../components/marketing/kit/motion'
+import { WRAP, display, mono } from '../../../../components/marketing/kit/styles'
+import { CARD, INK, INK_SOFT, PAPER, STAMP, hexA } from '../../../../components/marketing/kit/theme'
 import { CREW, initials } from '../weekData'
 import { Accent, PrimaryButton } from './Chrome'
 

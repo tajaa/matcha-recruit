@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Player, type PlayerRef } from '@remotion/player'
 import { Pause, Play } from 'lucide-react'
-import { useReducedMotion } from './hooks'
+import { useReducedMotion } from '../../../components/marketing/kit/hooks'
 import type { StageProps } from './Stage'
 import { Poster, StageLayout } from './StageFrame'
 import { FPS, type Variant } from './timeline'

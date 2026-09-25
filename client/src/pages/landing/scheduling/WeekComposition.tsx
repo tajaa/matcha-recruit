@@ -12,7 +12,7 @@
  */
 import type { CSSProperties } from 'react'
 import { AbsoluteFill, Easing, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion'
-import { BOARD, BODY, MONO, hexA } from './theme'
+import { BOARD, BODY, MONO, hexA } from '../../../components/marketing/kit/theme'
 import {
   CREW,
   DATES,

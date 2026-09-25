@@ -1,6 +1,6 @@
-import { Reveal } from '../motion'
-import { WRAP, glassChip, glassPane, mono } from '../styles'
-import { AMBER, INK, INK_SOFT, STAMP, hexA } from '../theme'
+import { Reveal } from '../../../../components/marketing/kit/motion'
+import { WRAP, glassChip, glassPane, mono } from '../../../../components/marketing/kit/styles'
+import { AMBER, INK, INK_SOFT, STAMP, hexA } from '../../../../components/marketing/kit/theme'
 import { Accent, Glows, StepHead } from './Chrome'
 
 type Outcome = 'stops' | 'draft' | 'priced'

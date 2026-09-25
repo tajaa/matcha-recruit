@@ -1,6 +1,6 @@
-import { CountUp, Reveal } from '../motion'
-import { WRAP, mono } from '../styles'
-import { BOARD, PAPER, hexA } from '../theme'
+import { CountUp, Reveal } from '../../../../components/marketing/kit/motion'
+import { WRAP, mono } from '../../../../components/marketing/kit/styles'
+import { BOARD, PAPER, hexA } from '../../../../components/marketing/kit/theme'
 import { FORECAST_TOTAL, laborByRole, laborCost } from '../weekData'
 import { CellLabel, StepHead } from './Chrome'
 
