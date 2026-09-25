@@ -57,7 +57,7 @@ Every endpoint Espresso calls already exists → closing gaps is frontend work.
 
 ## Resolved (2026-09-25)
 
-Execution plan: `docs/plans/ESPRESSO_WEB_PLAN.md` — phase order, endpoint tables, test cases.
+Execution plan: `ESPRESSO_WEB_PLAN.md` (repo root) — phase order, endpoint tables, test cases.
 
 - The whole gap is **frontend-only**. Prod has zero pending migrations and every
   backing table (`mw_journals`, `mw_journal_folders`, `mw_productivity_boards`,
