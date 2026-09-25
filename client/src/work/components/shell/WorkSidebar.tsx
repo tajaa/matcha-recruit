@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive } from 'lucide-react'
 import { logoutSession } from '../../../api/client'
 import type { ChannelSummary } from '../../api/channels'
-import { createProjectNew, createThread, archiveThread, notifyThreadsChanged, startPersonalCheckout } from '../../api/matchaWork'
+import { createProjectNew, createThread, archiveThread, notifyThreadsChanged } from '../../api/matchaWork'
 import { useMe } from '../../../hooks/useMe'
 import CreateChannelModal from '../channels/CreateChannelModal'
 import HiringClientPickerModal from '../panels/HiringClientPickerModal'
@@ -17,6 +17,8 @@ import type { Props } from './WorkSidebar/types'
 import { useSidebarData } from './WorkSidebar/useSidebarData'
 import { useSectionState } from './WorkSidebar/useSectionState'
 import { useSidebarRename } from './WorkSidebar/useSidebarRename'
+import { useEntitlements } from '../../hooks/useEntitlements'
+import { showPaywall } from '../../utils/paywall'
 import CollapsedRail from './WorkSidebar/CollapsedRail'
 import ChannelsSection from './WorkSidebar/ChannelsSection'
 import ProjectsSection from './WorkSidebar/ProjectsSection'
@@ -32,6 +34,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const surface = useWorkSurface()
   const showChannels = surface !== 'matcha-work'
   const { me, isPersonal, mwBetaLite, hasFeature } = useMe()
+  const { plan } = useEntitlements()
   const canCreate = surface !== 'matcha-work' && canCreateChannel(me?.user?.role)
   const opsAccess = me?.ops_access ?? me?.work_access
   const showEvents = surface !== 'matcha-work' && canReviewEvents(opsAccess) && hasFeature('ems')
@@ -44,9 +47,8 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     threads, setThreads,
     inboxUnread,
     pendingConnections,
-    plusActive,
     loggedEventsCount,
-  } = useSidebarData(isPersonal, base, location.pathname, showEvents, showChannels)
+  } = useSidebarData(base, location.pathname, showEvents, showChannels)
 
   const [showCreateChannel, setShowCreateChannel] = useState(false)
   const [showProjectTypePicker, setShowProjectTypePicker] = useState(false)
@@ -54,7 +56,6 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
 
   const sections = useSectionState(base)
-  const [upgrading, setUpgrading] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
   const [filter, setFilter] = useState('')
 
@@ -68,7 +69,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
       setThreads((prev) => prev.filter((x) => x.id !== t.id))
       notifyThreadsChanged()
       if (location.pathname === `${base}/${t.id}`) navigate(base)
-    } catch {}
+    } catch {
+      // The current list remains usable if archiving fails.
+    }
   }
 
   async function handleNewChat() {
@@ -98,7 +101,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         ...prev,
       ])
       navigate(`${base}/${res.id}`)
-    } catch {}
+    } catch {
+      // The user can retry from the sidebar.
+    }
   }
 
   async function handleCreateProject(type: 'general' | 'presentation' | 'recruiting' = 'general') {
@@ -123,7 +128,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
       const project = await createProjectNew(titles[type], type)
       setProjects((prev) => [project, ...prev])
       navigate(`${base}/projects/${project.id}`)
-    } catch {}
+    } catch {
+      // The API layer surfaces plan requirements when applicable.
+    }
   }
 
   async function handlePickTemplate(templateId: string | null) {
@@ -140,17 +147,8 @@ export default function WorkSidebar({ open, onToggle }: Props) {
       const project = await createProjectNew(title, 'general', null, templateId)
       setProjects((prev) => [project, ...prev])
       navigate(`${base}/projects/${project.id}`)
-    } catch {}
-  }
-
-  async function handleUpgradeToPlus() {
-    if (upgrading) return
-    setUpgrading(true)
-    try {
-      const { checkout_url } = await startPersonalCheckout()
-      window.location.href = checkout_url
     } catch {
-      setUpgrading(false)
+      // The API layer surfaces plan requirements when applicable.
     }
   }
 
@@ -162,7 +160,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
       const enriched = { ...project, hiring_client_name: client?.name ?? null }
       setProjects((prev) => [enriched, ...prev])
       navigate(`${base}/projects/${project.id}`)
-    } catch {}
+    } catch {
+      // The API layer surfaces plan requirements when applicable.
+    }
   }
 
   function handleLogout() {
@@ -368,9 +368,12 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         {/* Footer: Inbox + User profile + Logout */}
         <SidebarFooter
           isPersonal={isPersonal}
-          plusActive={plusActive}
-          upgrading={upgrading}
-          onUpgrade={handleUpgradeToPlus}
+          plan={plan}
+          onUpgrade={() => {
+            if (plan === 'free' || plan === 'lite') {
+              showPaywall('', plan === 'free' ? 'lite' : 'pro', plan)
+            }
+          }}
           base={base}
           navigate={navigate}
           isActive={isActive}

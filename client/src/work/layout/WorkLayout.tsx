@@ -10,9 +10,11 @@ import WerkLiteSidebar from '../components/shell/WerkLiteSidebar'
 import OpsWorkspaceSidebar from '../../ops/components/OpsWorkspaceSidebar'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMe } from '../../hooks/useMe'
-import { api } from '../../api/client'
+import { api, PLAN_REQUIRED_EVENT, type PlanRequiredDetail } from '../../api/client'
 import { fetchUsageMeter, USAGE_CHANGED_EVENT, type UsageMeter } from '../api/matchaWork'
 import { useWorkSurface, useWorkBrand, useWorkBase } from '../routes/WorkSurfaceContext'
+import { useEntitlements } from '../hooks/useEntitlements'
+import PaywallModal from '../components/shared/PaywallModal'
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -202,6 +204,7 @@ export default function WorkLayout() {
   usePresenceHeartbeat()
   useChannelNotifications()
   const { isPersonal, loading, hasFeature } = useMe()
+  useEntitlements()
   const { pathname, search } = useLocation()
   const surface = useWorkSurface()
   const brand = useWorkBrand()
@@ -216,6 +219,16 @@ export default function WorkLayout() {
     return saved !== 'closed'
   })
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [paywall, setPaywall] = useState<PlanRequiredDetail | null>(null)
+
+  useEffect(() => {
+    if (!isPersonal) return
+    const onPlanRequired = (event: Event) => {
+      setPaywall((event as CustomEvent<PlanRequiredDetail>).detail)
+    }
+    window.addEventListener(PLAN_REQUIRED_EVENT, onPlanRequired)
+    return () => window.removeEventListener(PLAN_REQUIRED_EVENT, onPlanRequired)
+  }, [isPersonal])
 
   // Close mobile menu on route change
   const [menuPath, setMenuPath] = useState(pathname)
@@ -399,6 +412,7 @@ export default function WorkLayout() {
           <Outlet />
         </main>
       </div>
+      {paywall && <PaywallModal detail={paywall} onClose={() => setPaywall(null)} />}
     </div>
   )
 }

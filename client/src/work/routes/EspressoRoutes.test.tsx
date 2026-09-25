@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import EspressoRoutes from './EspressoRoutes'
 import WorkRoutes from './WorkRoutes'
 import { WorkSurfaceProvider, useWorkBase } from './WorkSurfaceContext'
 import { LegacySurfacePrefixRedirect } from '../pages/LegacySurfaceRedirect'
+import { api } from '../../api/client'
 
 const identity = vi.hoisted(() => ({ personal: true }))
 
@@ -51,6 +52,8 @@ beforeEach(() => {
   localStorage.clear()
 })
 
+afterEach(() => vi.unstubAllGlobals())
+
 describe('Espresso routes', () => {
   it('renders the personal work shell with Espresso branding', async () => {
     renderAt('/espresso')
@@ -88,5 +91,23 @@ describe('Espresso routes', () => {
     }
     render(<WorkSurfaceProvider value="espresso"><BaseProbe /></WorkSurfaceProvider>)
     expect(screen.getByTestId('base')).toHaveTextContent('/espresso')
+  })
+
+  it('opens the required plan paywall when a gated request returns 403', async () => {
+    renderAt('/espresso')
+    await screen.findByTestId('home')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      detail: { code: 'plan_required', required_plan: 'pro', current_plan: 'free', feature: 'projects_collab' },
+    }), { status: 403, headers: { 'Content-Type': 'application/json' } })))
+    let error: unknown
+    await act(async () => {
+      try {
+        await api.get('/matcha-work/projects')
+      } catch (cause) {
+        error = cause
+      }
+    })
+    expect(error).toMatchObject({ status: 403 })
+    expect(screen.getByRole('dialog')).toHaveTextContent('Collab workspaces need Pro')
   })
 })
