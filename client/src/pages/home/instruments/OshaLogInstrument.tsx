@@ -1,20 +1,20 @@
 import { motion } from "framer-motion";
 import { FileText, Lock } from "lucide-react";
-import { ASH, BONE, DISPLAY, LINE_D } from "../theme";
+import { ASH, BONE, DISPLAY, LINE_D } from "./tones";
 import { InstrumentFrame, useReducedMotion } from "./shared";
 
 export const OSHA_300A_TILES = [
   { label: "Total Cases", value: "4", color: BONE },
-  { label: "Deaths", value: "0", color: "#ce5a4f" },
-  { label: "Days Away", value: "2", sub: "cases", color: "#F2C14E" },
-  { label: "Restricted", value: "1", sub: "cases", color: "#c98a3e" },
+  { label: "Deaths", value: "0", color: "var(--mk-CE5A4F, #CE5A4F)" },
+  { label: "Days Away", value: "2", sub: "cases", color: "var(--mk-F2C14E, #F2C14E)" },
+  { label: "Restricted", value: "1", sub: "cases", color: "var(--mk-C98A3E, #C98A3E)" },
 ];
 export const OSHA_ROWS = [
   {
     caseNo: "IR-2041-1",
     name: "A. Rivera",
     cls: "Days Away",
-    clsColor: "#F2C14E",
+    clsColor: "var(--mk-F2C14E, #F2C14E)",
     days: "3",
     privacy: false,
   },
@@ -22,7 +22,7 @@ export const OSHA_ROWS = [
     caseNo: "IR-2033-1",
     name: "J. Okafor",
     cls: "Restricted Duty",
-    clsColor: "#c98a3e",
+    clsColor: "var(--mk-C98A3E, #C98A3E)",
     days: "5",
     privacy: false,
   },
@@ -40,7 +40,7 @@ export const OSHA_EXPORTS = ["300 CSV", "300A CSV", "300A PDF", "ITA Export"];
 export function OshaLogInstrument({ numberFont = DISPLAY }: { numberFont?: string } = {}) {
   const reduce = useReducedMotion();
   return (
-    <InstrumentFrame label="OSHA 300 Log" accent="#F2C14E">
+    <InstrumentFrame label="OSHA 300 Log" accent="var(--mk-F2C14E, #F2C14E)">
       {/* Two-column: left = headline + 300A roll-up + exports, right = the
           Form 300 log itself. Stacks to one column below sm. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 items-stretch">
@@ -55,7 +55,7 @@ export function OshaLogInstrument({ numberFont = DISPLAY }: { numberFont?: strin
               fontFamily: numberFont,
               fontWeight: 300,
               fontSize: "3rem",
-              color: "#F2C14E",
+              color: "var(--mk-F2C14E, #F2C14E)",
             }}
           >
             4
@@ -88,7 +88,7 @@ export function OshaLogInstrument({ numberFont = DISPLAY }: { numberFont?: strin
             className="rounded-lg border px-2.5 py-2"
             style={{
               borderColor: LINE_D,
-              backgroundColor: "rgba(245,242,237,0.02)",
+              backgroundColor: "color-mix(in srgb, var(--mk-F5F2ED, #F5F2ED) 2%, transparent)",
             }}
           >
             <div
@@ -122,7 +122,7 @@ export function OshaLogInstrument({ numberFont = DISPLAY }: { numberFont?: strin
             className="inline-flex items-center gap-1.5 text-[8px] font-mono uppercase tracking-wider px-2 py-1 rounded"
             style={{ border: `1px solid ${LINE_D}`, color: ASH }}
           >
-            <FileText className="w-2.5 h-2.5" style={{ color: "#F2C14E" }} />
+            <FileText className="w-2.5 h-2.5" style={{ color: "var(--mk-F2C14E, #F2C14E)" }} />
             {e}
           </span>
         ))}
@@ -145,7 +145,7 @@ export function OshaLogInstrument({ numberFont = DISPLAY }: { numberFont?: strin
           </span>
           <span
             className="text-[8px] font-mono uppercase tracking-[0.16em]"
-            style={{ color: "#86efac" }}
+            style={{ color: "var(--mk-86EFAC, #86EFAC)" }}
           >
             ● Recordable
           </span>
@@ -173,7 +173,7 @@ export function OshaLogInstrument({ numberFont = DISPLAY }: { numberFont?: strin
             className="grid items-center gap-2 py-1.5 border-t first:border-t-0"
             style={{
               gridTemplateColumns: "auto 1fr auto auto",
-              borderColor: "rgba(245,242,237,0.06)",
+              borderColor: "color-mix(in srgb, var(--mk-F5F2ED, #F5F2ED) 6%, transparent)",
             }}
           >
             <span
@@ -198,7 +198,7 @@ export function OshaLogInstrument({ numberFont = DISPLAY }: { numberFont?: strin
             </span>
             <span
               className="shrink-0 text-[8px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded"
-              style={{ color: r.clsColor, backgroundColor: `${r.clsColor}1a` }}
+              style={{ color: r.clsColor, backgroundColor: `color-mix(in srgb, ${r.clsColor} 10%, transparent)` }}
             >
               {r.cls}
             </span>
@@ -221,7 +221,7 @@ export function OshaLogInstrument({ numberFont = DISPLAY }: { numberFont?: strin
       >
         <span
           className="text-[9px] font-mono uppercase tracking-[0.16em]"
-          style={{ color: "#86efac" }}
+          style={{ color: "var(--mk-86EFAC, #86EFAC)" }}
         >
           300A ready for Feb 1 posting
         </span>

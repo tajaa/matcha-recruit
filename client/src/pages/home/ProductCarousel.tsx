@@ -2,7 +2,33 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import { CAROUSEL_PRODUCTS } from "./data";
-import { ASH, BONE, DISPLAY, LINE_D } from "./theme";
+import { display, mono } from "../../components/marketing/kit/styles";
+import { BOARD, BODY, PAPER, hexA } from "../../components/marketing/kit/theme";
+
+/**
+ * Re-tones the shared instruments (see instruments/tones.ts) to the marketing
+ * kit on home only: chalk text, the kit's soft gray, and colour cut to its three
+ * meanings — green for the product accent and "ok", amber for attention, red
+ * for a problem. Product pages set none of these and keep the NOIR cards.
+ */
+const HOME_CARD_TONES = {
+  "--mk-F5F2ED": BOARD.INK,
+  "--mk-8F8B80": BOARD.INK_SOFT,
+  "--mk-F2C14E": BOARD.STAMP,
+  "--mk-86EFAC": BOARD.STAMP,
+  "--mk-D9B65F": BOARD.AMBER,
+  "--mk-D98C4F": BOARD.AMBER,
+  "--mk-C98A3E": BOARD.AMBER,
+  "--mk-E2725B": BOARD.AMBER,
+  "--mk-CE5A4F": BOARD.RED_PEN,
+  "--mk-7FB2C9": BOARD.INK_SOFT,
+  "--mk-sev-med": BOARD.AMBER,
+} as React.CSSProperties;
+
+/** A data.ts accent through the same tones. */
+const tone = (hex: string) => `var(--mk-${hex.slice(1).toUpperCase()}, ${hex})`;
+
+const MUTED = hexA(PAPER, 0.58);
 import { useReducedMotion } from "./instruments/shared";
 import { ComplianceInstrument } from "./instruments/ComplianceInstrument";
 import { DailyInstrument } from "./instruments/DailyInstrument";
@@ -120,6 +146,8 @@ export function ProductCarousel() {
   return (
     <div
       ref={rootRef}
+      style={HOME_CARD_TONES}
+      className="[&_.font-mono]:font-['JetBrains_Mono',ui-monospace,monospace]"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
@@ -138,28 +166,27 @@ export function ProductCarousel() {
                 className="flex items-start gap-3 min-w-0"
               >
                 <span
-                  className="font-mk-mono text-sm shrink-0 pt-1"
-                  style={{ color: slide.accent }}
+                  className="shrink-0 pt-1"
+                  style={mono("12px", { letterSpacing: "0.04em", color: tone(slide.accent) })}
                 >
                   {slide.n}
                 </span>
                 <div className="min-w-0">
                   <h3
-                    className="tracking-[-0.02em]"
                     style={{
-                      fontFamily: DISPLAY,
-                      fontWeight: 400,
+                      ...display,
+                      lineHeight: 1.05,
                       fontSize:
                         slide.nameSize ?? "clamp(1.75rem, 2.4vw, 2.75rem)",
-                      color: BONE,
+                      color: PAPER,
                     }}
                   >
                     {slide.name}
                   </h3>
                   {slide.subheader && (
                     <p
-                      className="text-[11px] sm:text-[12px] font-mk-mono uppercase tracking-[0.14em] mt-1"
-                      style={{ color: ASH }}
+                      className="mt-1.5"
+                      style={mono("10.5px", { color: MUTED })}
                     >
                       {slide.subheader}
                     </p>
@@ -170,8 +197,8 @@ export function ProductCarousel() {
           </div>
           <Link
             to={slide.to}
-            className="text-[13px] font-mk-mono uppercase tracking-[0.18em] shrink-0 transition-opacity hover:opacity-60 mt-4 self-start"
-            style={{ color: ASH }}
+            className="sched-link sched-focus rounded shrink-0 mt-4 self-start"
+            style={mono("10.5px", { color: hexA(PAPER, 0.7) })}
           >
             View →
           </Link>
@@ -196,7 +223,7 @@ export function ProductCarousel() {
                     exit="exit"
                     transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
                   >
-                    <Instrument numberFont="var(--font-lite)" />
+                    <Instrument numberFont={BODY} />
                   </motion.div>
                 </AnimatePresence>
               </div>
@@ -225,7 +252,7 @@ export function ProductCarousel() {
             className="relative h-1.5 rounded-full transition-all duration-300 cursor-pointer after:absolute after:content-[''] after:-inset-x-1 after:-inset-y-5"
             style={{
               width: i === index ? 28 : 8,
-              backgroundColor: i === index ? "rgba(245,242,237,0.18)" : LINE_D,
+              backgroundColor: i === index ? hexA(PAPER, 0.3) : hexA(PAPER, 0.12),
             }}
           >
             <span className="absolute inset-0 rounded-full overflow-hidden">
@@ -234,7 +261,7 @@ export function ProductCarousel() {
                   key={index}
                   className="absolute inset-0 origin-left"
                   style={{
-                    backgroundColor: s.accent,
+                    backgroundColor: tone(s.accent),
                     animation: `showcaseProgress ${SHOWCASE_INTERVAL}ms linear`,
                   }}
                 />
@@ -242,7 +269,7 @@ export function ProductCarousel() {
               {i === index && !autoplay && (
                 <span
                   className="absolute inset-0"
-                  style={{ backgroundColor: s.accent }}
+                  style={{ backgroundColor: tone(s.accent) }}
                 />
               )}
             </span>

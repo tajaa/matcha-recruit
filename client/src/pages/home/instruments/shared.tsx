@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { ASH, LINE_D } from "../theme";
+import { ASH, LINE_D } from "./tones";
 
 export const RISK_BANDS = [
-  { max: 39, label: "Exposed", color: "#ce5a4f" },
-  { max: 59, label: "Developing", color: "#d98c4f" },
-  { max: 79, label: "Adequate", color: "#d9b65f" },
-  { max: 100, label: "Strong", color: "#86efac" },
+  { max: 39, label: "Exposed", color: "var(--mk-CE5A4F, #CE5A4F)" },
+  { max: 59, label: "Developing", color: "var(--mk-D98C4F, #D98C4F)" },
+  { max: 79, label: "Adequate", color: "var(--mk-D9B65F, #D9B65F)" },
+  { max: 100, label: "Strong", color: "var(--mk-86EFAC, #86EFAC)" },
 ] as const;
 
 export function riskBand(score: number) {
@@ -89,22 +89,22 @@ export function InstrumentFrame({
         aria-hidden
         className="absolute -inset-x-6 -inset-y-4 pointer-events-none"
         style={{
-          background: `radial-gradient(58% 60% at 50% 42%, ${accent}1f 0%, transparent 72%)`,
+          background: `radial-gradient(58% 60% at 50% 42%, color-mix(in srgb, ${accent} 12%, transparent) 0%, transparent 72%)`,
           filter: "blur(30px)",
         }}
       />
       <div
         className="relative w-full rounded-2xl backdrop-blur-sm"
         style={{
-          border: "1px solid rgba(245,242,237,0.06)",
-          backgroundColor: "rgba(245,242,237,0.025)",
+          border: "1px solid color-mix(in srgb, var(--mk-F5F2ED, #F5F2ED) 6%, transparent)",
+          backgroundColor: "color-mix(in srgb, var(--mk-F5F2ED, #F5F2ED) 2.5%, transparent)",
           boxShadow:
             "inset 0 1px 0 rgba(255,255,255,0.05), 0 34px 64px -24px rgba(0,0,0,0.8), 0 12px 28px -14px rgba(0,0,0,0.55)",
         }}
       >
         <div
           className="flex items-center justify-between px-5 pt-4 pb-3 border-b"
-          style={{ borderColor: "rgba(245,242,237,0.06)" }}
+          style={{ borderColor: "color-mix(in srgb, var(--mk-F5F2ED, #F5F2ED) 6%, transparent)" }}
         >
           <span
             className="text-[10px] font-mono uppercase tracking-[0.22em]"
