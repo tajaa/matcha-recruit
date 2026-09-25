@@ -48,4 +48,23 @@ describe('JournalEditor', () => {
     expect(editor).toHaveAttribute('readonly')
     expect(screen.getByRole('button', { name: 'Write my own entry' })).toBeInTheDocument()
   })
+
+  it('coalesces edits inside the save delay into one PATCH', async () => {
+    render(<JournalEditor journal={journal} folders={[]} userId="owner" onRename={vi.fn()} onMove={vi.fn()} onChanged={vi.fn()} />)
+    const editor = await screen.findByRole('textbox', { name: 'Journal content' })
+    await waitFor(() => expect(editor).toHaveValue('Old text'))
+    fireEvent.change(editor, { target: { value: 'First draft' } })
+    fireEvent.change(editor, { target: { value: 'Final draft' } })
+    await waitFor(() => expect(mock.updateEntry).toHaveBeenCalledTimes(1), { timeout: 2_000 })
+    expect(mock.updateEntry).toHaveBeenCalledWith('journal-one', 'entry-one', { content: 'Final draft' })
+  })
+
+  it('flushes a pending edit when leaving the journal', async () => {
+    const view = render(<JournalEditor journal={journal} folders={[]} userId="owner" onRename={vi.fn()} onMove={vi.fn()} onChanged={vi.fn()} />)
+    const editor = await screen.findByRole('textbox', { name: 'Journal content' })
+    await waitFor(() => expect(editor).toHaveValue('Old text'))
+    fireEvent.change(editor, { target: { value: 'Saved on leave' } })
+    view.unmount()
+    await waitFor(() => expect(mock.updateEntry).toHaveBeenCalledWith('journal-one', 'entry-one', { content: 'Saved on leave' }))
+  })
 })
