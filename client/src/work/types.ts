@@ -196,6 +196,9 @@ export interface MWProjectTask {
   review_note?: string | null
   pr_url?: string | null
   pr_number?: number | null
+  autopr_model?: string | null
+  autopr_effort?: string | null
+  autopr_runtime_source?: string | null
   // List-query-only aggregates (undefined on create/update/reject responses).
   last_moved_at?: string | null
   review_cycle_count?: number | null
@@ -252,6 +255,9 @@ export type MWProjectTaskPatch = Partial<{
   progress_note: string | null
   pr_url: string | null
   pr_number: number | null
+  autopr_model: string | null
+  autopr_effort: string | null
+  autopr_runtime_source: string | null
 }>
 
 /** A checklist item under a kanban task (`mw_subtasks`). */

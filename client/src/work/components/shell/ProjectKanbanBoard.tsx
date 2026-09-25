@@ -9,6 +9,8 @@ import { useKanbanBoard } from './ProjectKanbanBoard/useKanbanBoard'
 import KanbanColumn from './ProjectKanbanBoard/KanbanColumn'
 import TaskDetailPanel from './ProjectKanbanBoard/TaskDetailPanel'
 import TaskActionSheet from './ProjectKanbanBoard/TaskActionSheet'
+import AgentDraftBar from './ProjectKanbanBoard/AgentDraftBar'
+import { useAgentTaskDraft } from './ProjectKanbanBoard/useAgentTaskDraft'
 import { useIsDesktop } from '../../hooks/useMediaQuery'
 
 interface ProjectKanbanBoardProps {
@@ -37,7 +39,9 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
     showList,
     setShowList,
     doneExpanded,
-    setDoneExpanded,
+    doneTotal,
+    doneLoading,
+    expandDone,
     hoveredEmptyColumn,
     setHoveredEmptyColumn,
     menuColumn,
@@ -72,6 +76,10 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
     duplicateTask,
   } = useKanbanBoard(projectId)
   const isDesktop = useIsDesktop()
+  const agentDraft = useAgentTaskDraft(projectId, (draft) => {
+    ensureCollaborators()
+    setAiDraft(draft)
+  })
 
   if (loading) {
     return (
@@ -140,6 +148,7 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
       </div>
 
       {canAiDraft && <AiDraftBar drafting={aiDrafting} error={aiError} onDraft={handleAiDraft} />}
+      {canAiDraft && <AgentDraftBar busy={agentDraft.busy} error={agentDraft.error} status={agentDraft.status} onDraft={agentDraft.start} />}
 
       {showList ? (
         <KanbanListView
@@ -197,7 +206,9 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
               onCardMenu={setActionTaskId}
               visible={visible}
               doneExpanded={doneExpanded}
-              setDoneExpanded={setDoneExpanded}
+              doneTotal={doneTotal}
+              doneLoading={doneLoading}
+              expandDone={expandDone}
               dragOverColumn={dragOverColumn}
               setDragOverColumn={setDragOverColumn}
               draggingId={draggingId}
@@ -238,6 +249,7 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
 
       {selectedTask && (
         <TaskDetailPanel
+          canEdit={canAiDraft}
           key={selectedTask.id}
           projectId={projectId}
           task={selectedTask}

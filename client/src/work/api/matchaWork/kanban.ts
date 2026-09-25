@@ -17,8 +17,62 @@ import type {
 // (werk) KanbanBoardView does — these are the web equivalents of
 // MatchaWorkService+Tasks.swift.
 
-export function listProjectTasks(projectId: string) {
-  return api.get<MWProjectTask[]>(`/matcha-work/projects/${projectId}/tasks`)
+export function listProjectTasks(projectId: string, doneScope?: 'week' | 'all') {
+  const query = doneScope ? `?done_scope=${doneScope}` : ''
+  return api.get<MWProjectTask[]>(`/matcha-work/projects/${projectId}/tasks${query}`)
+}
+
+export function getDoneTaskCount(projectId: string) {
+  return api.get<{ total: number; this_week: number }>(`/matcha-work/projects/${projectId}/tasks/done-count`)
+}
+
+export function startTaskRound(projectId: string, taskId: string, suggestedFixTitle: string, body?: string, attachmentIds?: string[]) {
+  return api.post<{ ok: boolean; title: string; subtask: MWSubtask; note: MWTaskHistoryEntry | null }>(
+    `/matcha-work/projects/${projectId}/tasks/${taskId}/rounds`,
+    { suggested_fix_title: suggestedFixTitle, body, attachment_ids: attachmentIds ?? [] },
+  )
+}
+
+export function summarizeTask(projectId: string, taskId: string) {
+  return api.post<{ summary: string }>(`/matcha-work/projects/${projectId}/tasks/${taskId}/summarize`, {})
+}
+
+export interface AgentTaskDraftRun {
+  run_id: string
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+  draft?: MWTaskDraft | null
+  error?: string | null
+}
+
+export function startAgentTaskDraft(projectId: string, prompt: string, requestKey: string) {
+  return api.post<AgentTaskDraftRun>(`/matcha-work/projects/${projectId}/tasks/agent-draft`, { prompt, request_key: requestKey })
+}
+
+export function getAgentTaskDraft(projectId: string, runId: string) {
+  return api.get<AgentTaskDraftRun>(`/matcha-work/projects/${projectId}/tasks/agent-draft/${runId}`)
+}
+
+export interface StagedOutreachAction {
+  id: string
+  kind: string
+  to: string | null
+  subject: string | null
+  body: string | null
+  why: string | null
+  state: string
+  detail: string | null
+}
+
+export function getBoardCapabilities(projectId: string) {
+  return api.get<{ capabilities: Record<string, string[]> }>(
+    `/matcha-work/autopr/board-capabilities?project_ids=${encodeURIComponent(projectId)}`,
+  )
+}
+
+export function listStagedOutreach(projectId: string, taskId: string) {
+  return api.get<{ actions: StagedOutreachAction[] }>(
+    `/matcha-work/projects/${projectId}/tasks/${taskId}/autopr/staged-actions`,
+  )
 }
 
 export function createProjectTask(projectId: string, body: MWProjectTaskCreate) {
@@ -115,7 +169,7 @@ export function updateSubtask(
   projectId: string,
   taskId: string,
   subtaskId: string,
-  patch: Partial<{ is_done: boolean; title: string; assigned_to: string | null }>,
+  patch: Partial<{ is_done: boolean; title: string; assigned_to: string | null; reason: string }>,
 ) {
   return api.patch<MWSubtask>(
     `/matcha-work/projects/${projectId}/tasks/${taskId}/subtasks/${subtaskId}`,

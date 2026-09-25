@@ -1,5 +1,5 @@
 import { api } from '../../../api/client'
-import type { MWProject, MWThread, ProjectCollaborator } from '../../types'
+import type { MWProject, MWProjectTask, MWThread, ProjectCollaborator } from '../../types'
 
 // ── Projects (top-level) ──
 
@@ -24,6 +24,21 @@ export function createProjectNew(
 
 export function getProjectDetail(id: string) {
   return api.get<MWProject>(`/matcha-work/projects/${id}`)
+}
+
+export interface ProjectBundle {
+  project: MWProject
+  tasks: MWProjectTask[]
+  files: ProjectFile[]
+  folders: unknown[]
+  links: unknown[]
+  collaborators: ProjectCollaborator[]
+  elements: unknown[]
+  done_total: number
+}
+
+export function getProjectBundle(id: string) {
+  return api.get<ProjectBundle>(`/matcha-work/projects/${id}/bundle`)
 }
 
 export function updateProjectMeta(id: string, updates: Record<string, unknown>) {

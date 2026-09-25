@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   listProjectTasks,
+  getProjectBundle,
   createProjectTask,
   updateProjectTask,
   deleteProjectTask,
@@ -51,6 +52,9 @@ export function useKanbanBoard(projectId: string) {
   const [searchText, setSearchText] = useState('')
   const [showList, setShowList] = useState(() => localStorage.getItem('mw-kanban-list-layout') === '1')
   const [doneExpanded, setDoneExpanded] = useState(false)
+  const [doneTotal, setDoneTotal] = useState(0)
+  const [weekDoneIds, setWeekDoneIds] = useState<Set<string>>(new Set())
+  const [doneLoading, setDoneLoading] = useState(false)
 
   // Dynamic (empty-collapsing) columns + the "+" template menu.
   const [hoveredEmptyColumn, setHoveredEmptyColumn] = useState<BoardColumn | null>(null)
@@ -76,8 +80,12 @@ export function useKanbanBoard(projectId: string) {
     setLoading(true)
     setError(null)
     try {
-      const data = await listProjectTasks(projectId)
-      setTasks(data)
+      const bundle = await getProjectBundle(projectId)
+      setTasks(bundle.tasks)
+      setDoneTotal(bundle.done_total)
+      setWeekDoneIds(new Set(bundle.tasks.filter((task) => task.board_column === 'done').map((task) => task.id)))
+      setCollaborators(bundle.collaborators)
+      collabLoadedRef.current = true
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load board')
     } finally {
@@ -85,8 +93,31 @@ export function useKanbanBoard(projectId: string) {
     }
   }, [projectId])
 
+  async function expandDone() {
+    if (doneExpanded) {
+      setDoneExpanded(false)
+      return
+    }
+    setDoneLoading(true)
+    try {
+      const all = await listProjectTasks(projectId, 'all')
+      setTasks((current) => {
+        const byId = new Map(all.map((task) => [task.id, task]))
+        current.forEach((task) => {
+          if (task.board_column !== 'done') byId.set(task.id, task)
+        })
+        return [...byId.values()]
+      })
+      setDoneExpanded(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load earlier tasks')
+    } finally {
+      setDoneLoading(false)
+    }
+  }
+
   useEffect(() => {
-    load()
+    queueMicrotask(() => { void load() })
   }, [load])
 
   // ── Realtime: another collaborator's create/move/delete shows up live ──
@@ -111,6 +142,7 @@ export function useKanbanBoard(projectId: string) {
       if (actorId && actorId === meIdRef.current) return
       const task = raw as unknown as MWProjectTask
       setTasks((prev) => (prev.some((t) => t.id === task.id) ? prev : [...prev, task]))
+      if (task.board_column === 'done') setWeekDoneIds((prev) => new Set(prev).add(task.id))
       setChangedIds((prev) => {
         const next = new Set(prev)
         next.add(task.id)
@@ -124,6 +156,7 @@ export function useKanbanBoard(projectId: string) {
       const local = tasksRef.current.find((t) => t.id === task.id)
       const columnChanged = !!local && task.board_column !== local.board_column
       setTasks((prev) => prev.map((t) => (t.id === task.id ? mergeTask(t, task) : t)))
+      if (task.board_column === 'done') setWeekDoneIds((prev) => new Set(prev).add(task.id))
       if (!isSelf && columnChanged) {
         setChangedIds((prev) => {
           const next = new Set(prev)
@@ -174,7 +207,7 @@ export function useKanbanBoard(projectId: string) {
       return
     }
     const changed = tasks.filter((t) => map[t.id] === undefined || map[t.id] !== t.board_column).map((t) => t.id)
-    if (changed.length) setChangedIds(new Set(changed))
+    if (changed.length) queueMicrotask(() => setChangedIds(new Set(changed)))
   }, [loading, tasks, me, projectId])
 
   function writeLastSeen(taskId: string, column: BoardColumn) {
@@ -218,8 +251,8 @@ export function useKanbanBoard(projectId: string) {
   // ── Search filter ──
   const tokens = useMemo(() => searchTokens(searchText), [searchText])
   const visible = useMemo(
-    () => (tokens.length ? tasks.filter((t) => taskMatches(t, tokens)) : tasks),
-    [tasks, tokens],
+    () => tasks.filter((task) => (doneExpanded || task.board_column !== 'done' || weekDoneIds.has(task.id)) && (!tokens.length || taskMatches(task, tokens))),
+    [tasks, tokens, doneExpanded, weekDoneIds],
   )
 
   const role = me?.user?.role
@@ -258,6 +291,7 @@ export function useKanbanBoard(projectId: string) {
     try {
       const updated = await updateProjectTask(projectId, taskId, { board_column: toColumn })
       patchLocal(taskId, updated)
+      if (toColumn === 'done') setWeekDoneIds((prev) => new Set(prev).add(taskId))
     } catch (e) {
       // Revert BOTH the column and the optimistic status flip — reverting only
       // the column leaves the card in its lane with the wrong status.
@@ -273,6 +307,7 @@ export function useKanbanBoard(projectId: string) {
     try {
       const created = await createProjectTask(projectId, { title, board_column: column })
       setTasks((prev) => [...prev, created])
+      if (column === 'done') setWeekDoneIds((prev) => new Set(prev).add(created.id))
       setNewTitle('')
       setAddingColumn(null)
     } catch (e) {
@@ -341,6 +376,7 @@ export function useKanbanBoard(projectId: string) {
     const local = tasks.find((t) => t.id === taskId)
     if (local && updated.board_column && updated.board_column !== local.board_column) {
       noteSelfMove(taskId, updated.board_column)
+      if (updated.board_column === 'done') setWeekDoneIds((prev) => new Set(prev).add(taskId))
     }
     setTasks((prev) => prev.map((t) => (t.id === taskId ? mergeTask(t, updated) : t)))
   }
@@ -419,6 +455,9 @@ export function useKanbanBoard(projectId: string) {
     setShowList,
     doneExpanded,
     setDoneExpanded,
+    doneTotal,
+    doneLoading,
+    expandDone,
     hoveredEmptyColumn,
     setHoveredEmptyColumn,
     menuColumn,
