@@ -90,7 +90,7 @@ export default function SimpleLitePage() {
       <CtaBand onContactClick={openPricing} />
 
       <div style={{ backgroundColor: BONE, color: 'var(--color-ivory-ink)' }}>
-        <MarketingFooter newsletterVariant="matcha" />
+        <MarketingFooter />
       </div>
     </div>
   )

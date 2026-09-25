@@ -2,15 +2,19 @@ import { useState } from 'react'
 import { Check, Loader2 } from 'lucide-react'
 import { API_BASE } from '../../api/client'
 import { getAccessToken } from '../../api/authStorage'
-type NewsletterVariant = 'caramel' | 'matcha'
+import { BOARD, BODY, INK, PAPER, SERIF, hexA } from '../marketing/kit/theme'
+
+type NewsletterVariant = 'caramel' | 'matcha' | 'board'
 
 // Default 'caramel' = the ivory product-page theme (gold accent). 'matcha' =
-// the dark editorial brand front-door (lime accent), to match Home.
+// the dark editorial brand front-door (lime accent). 'board' = the marketing
+// kit's dark gray + Hanken / Instrument Serif, to sit on the board footer.
 const PALETTES: Record<NewsletterVariant, {
   bg: string; accent: string; accentSoft: string; accentFaint: string
   glow: string; hairline: string; dot: string; badgeText: string
   gradient: string; btnBg: string; btnText: string; btnShadow: string
   ring: string; display: boolean
+  font?: string; accentFont?: string
 }> = {
   caramel: {
     bg: 'var(--color-ivory-ink)',
@@ -43,6 +47,24 @@ const PALETTES: Record<NewsletterVariant, {
     btnShadow: '0 6px 20px -6px rgba(245,242,237,0.45)',
     ring: 'rgba(245,242,237,0.18)',
     display: true,
+  },
+  board: {
+    bg: BOARD.PAPER,
+    accent: BOARD.INK,
+    accentSoft: hexA(BOARD.INK, 0.3),
+    accentFaint: hexA(BOARD.INK, 0.08),
+    glow: hexA(BOARD.STAMP, 0.14),
+    hairline: hexA(BOARD.INK, 0.45),
+    dot: BOARD.STAMP,
+    badgeText: BOARD.INK,
+    gradient: `linear-gradient(95deg, #FFFFFF, ${BOARD.INK} 55%, ${BOARD.STAMP})`,
+    btnBg: PAPER,
+    btnText: INK,
+    btnShadow: `0 6px 20px -6px ${hexA(BOARD.INK, 0.45)}`,
+    ring: hexA(BOARD.INK, 0.18),
+    display: true,
+    font: BODY,
+    accentFont: SERIF,
   },
 }
 
@@ -149,7 +171,7 @@ export function NewsletterHeroSection({ variant = 'caramel' }: { variant?: Newsl
           style={{
             color: 'rgba(240,236,228,0.98)',
             lineHeight: 1.08,
-            fontFamily: P.display ? 'var(--font-lite)' : undefined,
+            fontFamily: P.font ?? (P.display ? 'var(--font-lite)' : undefined),
             fontWeight: P.display ? 400 : 600,
           }}
         >
@@ -163,6 +185,7 @@ export function NewsletterHeroSection({ variant = 'caramel' }: { variant?: Newsl
               backgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               fontStyle: P.display ? 'italic' : undefined,
+              fontFamily: P.accentFont,
             }}
           >
             HR problems.

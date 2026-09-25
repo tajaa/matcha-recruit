@@ -88,7 +88,7 @@ export default function Home() {
       <CTABand onDemoClick={openPricing} />
 
       <div style={{ backgroundColor: BONE, color: "var(--color-ivory-ink)" }}>
-        <MarketingFooter newsletterVariant="matcha" />
+        <MarketingFooter />
       </div>
     </div>
   );
