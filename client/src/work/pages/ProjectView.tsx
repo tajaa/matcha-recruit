@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeft, Loader2, MessageSquare, KanbanSquare, FileText, Hash, Sparkles, Boxes, Lightbulb, LayoutDashboard } from 'lucide-react'
+import { ChevronLeft, Loader2, MessageSquare, KanbanSquare, FileText, Hash, Sparkles, Boxes, Lightbulb, LayoutDashboard, History } from 'lucide-react'
 import ProjectKanbanBoard from '../components/shell/ProjectKanbanBoard'
 import ChannelViewScreen from './ChannelView/ChannelViewScreen'
 import BoardFilesTab from '../components/shell/BoardFilesTab'
 import ProjectElementsTab from '../components/shell/ProjectElementsTab'
 import ProjectPropsTab from '../components/shell/ProjectPropsTab'
 import CollabOverviewTab from '../components/shell/CollabOverviewTab'
+import WeeklyReplayTab from '../components/shell/WeeklyReplayTab'
 import ProjectTour from '../components/panels/ProjectTour'
 import { useProjectView } from './ProjectView/useProjectView'
 import { ProjectSidebar } from './ProjectView/ProjectSidebar'
@@ -82,6 +83,7 @@ export default function ProjectView() {
         { key: 'chat' as const, icon: Hash, label: 'Chat' },
         { key: 'ai' as const, icon: Sparkles, label: 'AI' },
         { key: 'board' as const, icon: KanbanSquare, label: 'Kanban' },
+        { key: 'history' as const, icon: History, label: 'History' },
         ...(canOpenContext ? [
           { key: 'props' as const, icon: Lightbulb, label: 'Props' },
         ] : []),
@@ -230,6 +232,9 @@ export default function ProjectView() {
       )}
       {isCollab && activeTab === 'overview' && (
         <div className="min-h-0 flex-1 bg-w-bg"><CollabOverviewTab key={projectId} projectId={projectId!} onOpenElements={() => selectTab('elements')} onOpenBoard={() => selectTab('board')} /></div>
+      )}
+      {isCollab && activeTab === 'history' && projectId && (
+        <WeeklyReplayTab key={projectId} projectId={projectId} />
       )}
 
       {/* Mobile bottom tab bar — same tab set as the desktop strip */}

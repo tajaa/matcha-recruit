@@ -130,6 +130,10 @@ export class ChannelSocket extends BaseSocket {
   onCallEnded: ((data: { channel_id: string; call_id: string; reason?: string }) => void) | null = null
   onCallParticipantsChanged: ((data: { channel_id: string; call_id: string; participant_ids: string[]; count: number; max_participants: number }) => void) | null = null
   onCallInvited: ((data: { channel_id: string; call_id: string; invited_by: string }) => void) | null = null
+  onBroadcastStarted: ((data: { channel_id: string; broadcast_id: string; started_by: string; started_at: string; title: string | null; max_duration_seconds: number }) => void) | null = null
+  onBroadcastEnded: ((data: { channel_id: string; broadcast_id: string }) => void) | null = null
+  onBroadcastPublisherChanged: ((data: { channel_id: string; user_id: string; can_publish: boolean }) => void) | null = null
+  onBroadcastTokenGrant: ((data: { channel_id: string; token: string; livekit_url: string; can_publish: boolean }) => void) | null = null
   // Server-side rejection of a join_room/message send (not a member, bad
   // channel id, over 4000 chars, ...) — previously discarded entirely
   // (no 'error' case below), so a message sat as a ghost 'pending' row
@@ -321,6 +325,18 @@ export class ChannelSocket extends BaseSocket {
         break
       case 'call.invited':
         this.onCallInvited?.(data as never)
+        break
+      case 'broadcast.started':
+        this.onBroadcastStarted?.(data as never)
+        break
+      case 'broadcast.ended':
+        this.onBroadcastEnded?.(data as never)
+        break
+      case 'broadcast.publisher_changed':
+        this.onBroadcastPublisherChanged?.(data as never)
+        break
+      case 'broadcast.token_grant':
+        this.onBroadcastTokenGrant?.(data as never)
         break
       case 'error': {
         const cmid = data.client_message_id as string | undefined

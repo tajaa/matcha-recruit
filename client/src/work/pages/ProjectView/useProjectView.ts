@@ -40,7 +40,7 @@ export function useProjectView() {
   // 'chat' is the project's PRIMARY chat: for collab that's the discussion
   // channel, for every other type it's the AI thread. 'ai' is collab-only — the
   // mw_threads list, which used to masquerade as the project's chat.
-  const [activeTab, setActiveTab] = useState<'chat' | 'ai' | 'panel' | 'board' | 'files' | 'elements' | 'props' | 'overview'>('chat')
+  const [activeTab, setActiveTab] = useState<'chat' | 'ai' | 'panel' | 'board' | 'files' | 'elements' | 'props' | 'overview' | 'history'>('chat')
 
   // ── Collab: the project's real chat is a CHANNEL, not an AI thread ──
   // Resolved through the idempotent get-or-create endpoint rather than read off
@@ -107,7 +107,7 @@ export function useProjectView() {
         : type === 'presentation'
         ? ['chat', 'panel', 'board']
         : type === 'collab'
-        ? ['chat', 'ai', 'board', ...(me?.user.role === 'employee' ? [] : ['elements', 'props', 'overview'])]
+        ? ['chat', 'ai', 'board', 'history', ...(me?.user.role === 'employee' ? [] : ['elements', 'props', 'overview'])]
         : ['chat', 'board']
     queueMicrotask(() => setActiveTab((prev) => (allowed.includes(prev) ? prev : 'chat')))
   }, [projectId, loadedProjectType, me?.user.role])
@@ -124,7 +124,7 @@ export function useProjectView() {
    * to the collab 'chat' tab hid the inbox (it answers to 'ai') AND the channel
    * (it requires 'chats'), leaving the centre pane blank.
    */
-  function selectTab(tab: 'chat' | 'ai' | 'panel' | 'board' | 'files' | 'elements' | 'props' | 'overview') {
+  function selectTab(tab: 'chat' | 'ai' | 'panel' | 'board' | 'files' | 'elements' | 'props' | 'overview' | 'history') {
     setActiveTab(tab)
     setSidebarMode('chats')
   }

@@ -433,6 +433,7 @@ async def get_viewer_token(
         "livekit_url": livekit_url,
         "token": token,
         "room": bc["livekit_room"],
+        "can_publish": False,
         "max_duration_seconds": BROADCAST_MAX_DURATION_SECONDS,
         "elapsed_seconds": int(elapsed),
     }
@@ -497,6 +498,7 @@ async def refresh_broadcast_token(
         "livekit_url": livekit_url,
         "token": token,
         "room": bc["livekit_room"],
+        "can_publish": can_publish,
         "max_duration_seconds": BROADCAST_MAX_DURATION_SECONDS,
         "elapsed_seconds": int(elapsed),
     }
@@ -674,8 +676,8 @@ async def get_broadcast_status(
 
     publisher_ids: list[str] = []
     try:
-        from ...core.services.livekit_service import list_participant_identities
-        publisher_ids = await list_participant_identities(bc["livekit_room"])
+        from ...core.services.livekit_service import list_publisher_identities
+        publisher_ids = await list_publisher_identities(bc["livekit_room"])
     except Exception:
         publisher_ids = [str(bc["started_by"])]
 
