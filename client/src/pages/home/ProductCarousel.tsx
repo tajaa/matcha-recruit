@@ -3,7 +3,30 @@ import { Link } from "react-router-dom";
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import { CAROUSEL_PRODUCTS } from "./data";
 import { display, mono } from "../../components/marketing/kit/styles";
-import { BODY, PAPER, hexA } from "../../components/marketing/kit/theme";
+import { BOARD, BODY, PAPER, hexA } from "../../components/marketing/kit/theme";
+
+/**
+ * Re-tones the shared instruments (see instruments/tones.ts) to the marketing
+ * kit on home only: chalk text, the kit's soft gray, and colour cut to its three
+ * meanings — green for the product accent and "ok", amber for attention, red
+ * for a problem. Product pages set none of these and keep the NOIR cards.
+ */
+const HOME_CARD_TONES = {
+  "--mk-F5F2ED": BOARD.INK,
+  "--mk-8F8B80": BOARD.INK_SOFT,
+  "--mk-F2C14E": BOARD.STAMP,
+  "--mk-86EFAC": BOARD.STAMP,
+  "--mk-D9B65F": BOARD.AMBER,
+  "--mk-D98C4F": BOARD.AMBER,
+  "--mk-C98A3E": BOARD.AMBER,
+  "--mk-E2725B": BOARD.AMBER,
+  "--mk-CE5A4F": BOARD.RED_PEN,
+  "--mk-7FB2C9": BOARD.INK_SOFT,
+  "--mk-sev-med": BOARD.AMBER,
+} as React.CSSProperties;
+
+/** A data.ts accent through the same tones. */
+const tone = (hex: string) => `var(--mk-${hex.slice(1).toUpperCase()}, ${hex})`;
 
 const MUTED = hexA(PAPER, 0.58);
 import { useReducedMotion } from "./instruments/shared";
@@ -123,6 +146,8 @@ export function ProductCarousel() {
   return (
     <div
       ref={rootRef}
+      style={HOME_CARD_TONES}
+      className="[&_.font-mono]:font-['JetBrains_Mono',ui-monospace,monospace]"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
@@ -142,7 +167,7 @@ export function ProductCarousel() {
               >
                 <span
                   className="shrink-0 pt-1"
-                  style={mono("12px", { letterSpacing: "0.04em", color: slide.accent })}
+                  style={mono("12px", { letterSpacing: "0.04em", color: tone(slide.accent) })}
                 >
                   {slide.n}
                 </span>
@@ -236,7 +261,7 @@ export function ProductCarousel() {
                   key={index}
                   className="absolute inset-0 origin-left"
                   style={{
-                    backgroundColor: s.accent,
+                    backgroundColor: tone(s.accent),
                     animation: `showcaseProgress ${SHOWCASE_INTERVAL}ms linear`,
                   }}
                 />
@@ -244,7 +269,7 @@ export function ProductCarousel() {
               {i === index && !autoplay && (
                 <span
                   className="absolute inset-0"
-                  style={{ backgroundColor: s.accent }}
+                  style={{ backgroundColor: tone(s.accent) }}
                 />
               )}
             </span>

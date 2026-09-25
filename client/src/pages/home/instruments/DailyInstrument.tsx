@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Lock, Mic, Sparkles } from "lucide-react";
-import { ASH, BONE, DISPLAY, LINE_D } from "../theme";
+import { ASH, BONE, DISPLAY, LINE_D } from "./tones";
 import { InstrumentFrame, useCyclingIndex, useReducedMotion } from "./shared";
 
 export const DAILY_BARS = [3, 5, 2, 6, 4, 1, 4]; // Mon..Sun total — illustrative
@@ -30,15 +30,16 @@ export const RECENT_INCIDENTS = [
     loc: "Atlanta — Store 7",
     type: "Customer escalation",
     sev: "High",
-    color: "#ce5a4f",
+    color: "var(--mk-CE5A4F, #CE5A4F)",
   },
   {
     loc: "Phoenix — Warehouse",
     type: "Slip / fall",
     sev: "Med",
-    color: "#F2C14E",
+    // own variable: on home, medium is amber (attention), not the card accent
+    color: "var(--mk-sev-med, #F2C14E)",
   },
-  { loc: "Dallas — Store 3", type: "Near-miss", sev: "Low", color: "#86efac" },
+  { loc: "Dallas — Store 3", type: "Near-miss", sev: "Low", color: "var(--mk-86EFAC, #86EFAC)" },
 ];
 
 // One report opened with its agentic analysis — the "report itself + its
@@ -74,7 +75,7 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
   const extractPhase = useCyclingIndex(REPORT_ANALYSIS.length, 2400, reduce);
 
   return (
-    <InstrumentFrame label="Daily Intake" accent="#F2C14E">
+    <InstrumentFrame label="Daily Intake" accent="var(--mk-F2C14E, #F2C14E)">
       {/* Two-column layout so the card fills its width instead of stacking
           tall. Left = intake + the log; right = the AI analysis + voice.
           Stacks to one column below sm. */}
@@ -88,7 +89,7 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
               fontFamily: numberFont,
               fontWeight: 300,
               fontSize: "3.35rem",
-              color: "#F2C14E",
+              color: "var(--mk-F2C14E, #F2C14E)",
             }}
           >
             {total}
@@ -99,8 +100,8 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
           <span
             className="text-[10px] font-mono px-1.5 py-0.5 rounded"
             style={{
-              color: "#86efac",
-              backgroundColor: "rgba(134,239,172,0.1)",
+              color: "var(--mk-86EFAC, #86EFAC)",
+              backgroundColor: "color-mix(in srgb, var(--mk-86EFAC, #86EFAC) 10%, transparent)",
             }}
           >
             ▲ 18%
@@ -109,7 +110,7 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
         <div className="text-right">
           <div
             className="text-[11px] font-mono uppercase tracking-[0.2em]"
-            style={{ color: "#F2C14E" }}
+            style={{ color: "var(--mk-F2C14E, #F2C14E)" }}
           >
             Reports
           </div>
@@ -133,7 +134,7 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
               <motion.div
                 className="w-full rounded-t-sm"
                 style={{
-                  background: `linear-gradient(to top, rgba(242,193,78,0.9) ${pct}%, rgba(242,193,78,0.38) ${pct}%)`,
+                  background: `linear-gradient(to top, color-mix(in srgb, var(--mk-F2C14E, #F2C14E) 90%, transparent) ${pct}%, color-mix(in srgb, var(--mk-F2C14E, #F2C14E) 38%, transparent) ${pct}%)`,
                 }}
                 initial={{ height: 4 }}
                 animate={
@@ -165,14 +166,14 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
         <span className="inline-flex items-center gap-1.5">
           <span
             className="w-2 h-2 rounded-sm"
-            style={{ backgroundColor: "rgba(242,193,78,0.9)" }}
+            style={{ backgroundColor: "color-mix(in srgb, var(--mk-F2C14E, #F2C14E) 90%, transparent)" }}
           />
           Behavioral
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span
             className="w-2 h-2 rounded-sm"
-            style={{ backgroundColor: "rgba(242,193,78,0.38)" }}
+            style={{ backgroundColor: "color-mix(in srgb, var(--mk-F2C14E, #F2C14E) 38%, transparent)" }}
           />
           Safety
         </span>
@@ -202,7 +203,7 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
             viewport={{ once: true, margin: "-20px" }}
             transition={{ delay: i * 0.1, duration: 0.4 }}
             className="flex items-center gap-2.5 py-1.5 border-t first:border-t-0"
-            style={{ borderColor: "rgba(245,242,237,0.06)" }}
+            style={{ borderColor: "color-mix(in srgb, var(--mk-F5F2ED, #F5F2ED) 6%, transparent)" }}
           >
             <span
               className="w-1.5 h-1.5 rounded-full shrink-0"
@@ -219,7 +220,7 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
             </span>
             <span
               className="ml-auto shrink-0 text-[8px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded"
-              style={{ color: r.color, backgroundColor: `${r.color}1a` }}
+              style={{ color: r.color, backgroundColor: `color-mix(in srgb, ${r.color} 10%, transparent)` }}
             >
               {r.sev}
             </span>
@@ -248,16 +249,16 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
           <span
             className="ml-auto shrink-0 text-[8px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded"
             style={{
-              color: "#c98a3e",
-              backgroundColor: "rgba(201,138,62,0.12)",
-              border: "1px solid rgba(201,138,62,0.25)",
+              color: "var(--mk-C98A3E, #C98A3E)",
+              backgroundColor: "color-mix(in srgb, var(--mk-C98A3E, #C98A3E) 12%, transparent)",
+              border: "1px solid color-mix(in srgb, var(--mk-C98A3E, #C98A3E) 25%, transparent)",
             }}
           >
             OSHA recordable
           </span>
         </div>
         <div className="flex items-center gap-1.5 mb-2.5">
-          <Sparkles className="w-3 h-3 shrink-0" style={{ color: "#F2C14E" }} />
+          <Sparkles className="w-3 h-3 shrink-0" style={{ color: "var(--mk-F2C14E, #F2C14E)" }} />
           <span
             className="text-[8px] font-mono uppercase tracking-[0.16em]"
             style={{ color: ASH }}
@@ -266,7 +267,7 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
           </span>
           <span
             className="home-pulse w-1 h-1 rounded-full"
-            style={{ backgroundColor: "#F2C14E" }}
+            style={{ backgroundColor: "var(--mk-F2C14E, #F2C14E)" }}
           />
         </div>
         {/* The raw report, with the phrase behind the current fact lit up
@@ -287,9 +288,9 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
                   t.field === undefined
                     ? undefined
                     : {
-                        color: active ? "#F2C14E" : ASH,
+                        color: active ? "var(--mk-F2C14E, #F2C14E)" : ASH,
                         backgroundColor: active
-                          ? "rgba(242,193,78,0.12)"
+                          ? "color-mix(in srgb, var(--mk-F2C14E, #F2C14E) 12%, transparent)"
                           : "transparent",
                         borderRadius: 3,
                         padding: active ? "0 3px" : undefined,
@@ -303,7 +304,7 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
           ”
         </p>
         <div className="flex items-center gap-2 mt-2.5">
-          <span className="text-[10px] shrink-0" style={{ color: "#F2C14E" }}>
+          <span className="text-[10px] shrink-0" style={{ color: "var(--mk-F2C14E, #F2C14E)" }}>
             ↳
           </span>
           <AnimatePresence mode="wait">
@@ -332,13 +333,13 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
         </div>
         <div
           className="flex items-center gap-3 mt-3 pt-2.5 border-t text-[8px] font-mono uppercase tracking-[0.12em]"
-          style={{ borderColor: "rgba(245,242,237,0.06)", color: ASH }}
+          style={{ borderColor: "color-mix(in srgb, var(--mk-F5F2ED, #F5F2ED) 6%, transparent)", color: ASH }}
         >
           <span>2 witnesses</span>
           <span style={{ color: LINE_D }}>·</span>
           <span>3 photos</span>
           <span style={{ color: LINE_D }}>·</span>
-          <span style={{ color: "#86efac" }}>Routed to manager</span>
+          <span style={{ color: "var(--mk-86EFAC, #86EFAC)" }}>Routed to manager</span>
         </div>
       </div>
       {/* Voice intake demo — same mockup as the dedicated section on
@@ -347,7 +348,7 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
           one above it — same card, no inner box. */}
       <div
         className="px-5 pt-3 pb-4 border-t transition-colors duration-300"
-        style={{ borderColor: listening ? "rgba(242,193,78,0.4)" : LINE_D }}
+        style={{ borderColor: listening ? "color-mix(in srgb, var(--mk-F2C14E, #F2C14E) 40%, transparent)" : LINE_D }}
       >
         <div className="flex items-center gap-2 mb-3">
           <Lock className="w-2.5 h-2.5 shrink-0" style={{ color: ASH }} />
@@ -376,20 +377,20 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
             className="relative w-11 h-11 rounded-full flex items-center justify-center mb-2.5 transition-colors duration-300"
             style={{
               backgroundColor: listening
-                ? "rgba(242,193,78,0.15)"
-                : "rgba(245,242,237,0.05)",
-              border: `1px solid ${listening ? "rgba(242,193,78,0.5)" : LINE_D}`,
+                ? "color-mix(in srgb, var(--mk-F2C14E, #F2C14E) 15%, transparent)"
+                : "color-mix(in srgb, var(--mk-F5F2ED, #F5F2ED) 5%, transparent)",
+              border: `1px solid ${listening ? "color-mix(in srgb, var(--mk-F2C14E, #F2C14E) 50%, transparent)" : LINE_D}`,
             }}
           >
             {listening && (
               <span
                 className="absolute inset-0 rounded-full animate-ping"
-                style={{ backgroundColor: "rgba(242,193,78,0.2)" }}
+                style={{ backgroundColor: "color-mix(in srgb, var(--mk-F2C14E, #F2C14E) 20%, transparent)" }}
               />
             )}
             <Mic
               className="w-5 h-5 relative"
-              style={{ color: listening ? "#F2C14E" : ASH }}
+              style={{ color: listening ? "var(--mk-F2C14E, #F2C14E)" : ASH }}
             />
           </div>
           <div className="flex items-end gap-[2.5px] h-4 mb-2.5">
@@ -398,7 +399,7 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
                 key={i}
                 className="w-[2.5px] rounded-full"
                 style={{
-                  backgroundColor: listening ? "rgba(242,193,78,0.8)" : LINE_D,
+                  backgroundColor: listening ? "color-mix(in srgb, var(--mk-F2C14E, #F2C14E) 80%, transparent)" : LINE_D,
                 }}
                 animate={
                   reduce
@@ -433,9 +434,9 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
               style={{
                 color:
                   voicePhase === 1
-                    ? "#F2C14E"
+                    ? "var(--mk-F2C14E, #F2C14E)"
                     : voicePhase === 3
-                      ? "#86efac"
+                      ? "var(--mk-86EFAC, #86EFAC)"
                       : ASH,
               }}
             >
@@ -449,7 +450,7 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
         <div
           className="grid grid-cols-2 gap-2.5 mt-3 pt-3 border-t transition-opacity duration-500"
           style={{
-            borderColor: "rgba(245,242,237,0.06)",
+            borderColor: "color-mix(in srgb, var(--mk-F5F2ED, #F5F2ED) 6%, transparent)",
             opacity: voicePhase === 3 ? 1 : 0.25,
           }}
         >
@@ -473,7 +474,7 @@ export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string 
             </div>
             <div
               className="text-[10px] font-medium"
-              style={{ color: "#F2C14E" }}
+              style={{ color: "var(--mk-sev-med, #F2C14E)" }}
             >
               Medium
             </div>
