@@ -7,6 +7,7 @@ import {
   type Journal, type JournalEntry, type JournalFolder,
 } from '../../api/matchaWork/journals'
 import CollaboratorsModal from './CollaboratorsModal'
+import { createQuickTodo } from '../../api/matchaWork/productivity'
 
 const slashActions = [
   { label: 'Heading 1', marker: '# ' }, { label: 'Heading 2', marker: '## ' },
@@ -41,6 +42,7 @@ export default function JournalEditor({ journal, folders, userId, onRename, onMo
   const [preview, setPreview] = useState(false)
   const [showCollaborators, setShowCollaborators] = useState(false)
   const [slashMenu, setSlashMenu] = useState(false)
+  const [selectionMenu, setSelectionMenu] = useState<{ excerpt: string; x: number; y: number } | null>(null)
   const textArea = useRef<HTMLTextAreaElement>(null)
   const imageInput = useRef<HTMLInputElement>(null)
   const draft = useRef<Draft>({ entryId: null, content: '', saved: '' })
@@ -93,6 +95,7 @@ export default function JournalEditor({ journal, folders, userId, onRename, onMo
   }, [journal.id, journal.created_by, userId, flush])
 
   function change(next: string) {
+    setSelectionMenu(null)
     draft.current.content = next
     setContent(next)
     setStatus('Unsaved')
@@ -170,6 +173,17 @@ export default function JournalEditor({ journal, folders, userId, onRename, onMo
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not create entry') }
   }
 
+  async function captureTodo() {
+    if (!selectionMenu) return
+    const excerpt = selectionMenu.excerpt
+    setSelectionMenu(null)
+    try {
+      await createQuickTodo({ title: excerpt.split('\n')[0].slice(0, 120), source_journal_id: journal.id, source_excerpt: excerpt })
+      setStatus('To-do added')
+      setError('')
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not create to-do') }
+  }
+
   return (
     <div className="flex min-h-80 min-w-0 flex-1 flex-col overflow-hidden bg-w-bg md:min-h-0">
       <header className="flex flex-wrap items-center gap-2 border-b border-w-line px-4 py-3">
@@ -195,11 +209,18 @@ export default function JournalEditor({ journal, folders, userId, onRename, onMo
           <details className="relative"><summary className="cursor-pointer">Editor help</summary><div className="absolute left-0 top-full z-10 w-64 rounded border border-w-line bg-w-surface p-3 shadow-xl">Type / at the start of a line for blocks. Alt+Shift+1–3 adds headings; Alt+Shift+T adds a to-do. Tab and Shift+Tab indent list items. Paste or drop images to upload.</div></details>
         </div>
         {slashMenu && <div className="flex flex-wrap gap-1 border-b border-w-line px-4 py-2">{slashActions.map((action) => <button key={action.label} onMouseDown={(event) => event.preventDefault()} onClick={() => replaceLine(action.marker)} className="rounded bg-w-surface2 px-2 py-1 text-xs text-w-text hover:bg-w-line">{action.label}</button>)}</div>}
-        <textarea ref={textArea} aria-label="Journal content" value={content} readOnly={!editable} onChange={(event) => change(event.target.value)} onBlur={() => void flush()} onKeyDown={onKeyDown} onPaste={(event) => {
+        <textarea ref={textArea} aria-label="Journal content" value={content} readOnly={!editable} onChange={(event) => change(event.target.value)} onBlur={() => void flush()} onKeyDown={onKeyDown} onContextMenu={(event) => {
+          const input = event.currentTarget
+          const excerpt = input.value.slice(input.selectionStart, input.selectionEnd).trim().slice(0, 1_000)
+          if (!excerpt) return
+          event.preventDefault()
+          setSelectionMenu({ excerpt, x: event.clientX, y: event.clientY })
+        }} onPaste={(event) => {
           if (!editable) return
           const file = [...event.clipboardData.files].find((candidate) => candidate.type.startsWith('image/'))
           if (file) { event.preventDefault(); void upload(file) }
         }} onDragOver={(event) => { if (editable) event.preventDefault() }} onDrop={(event) => { if (!editable) return; event.preventDefault(); const file = [...event.dataTransfer.files].find((candidate) => candidate.type.startsWith('image/')); if (file) void upload(file) }} spellCheck className="min-h-0 flex-1 resize-none bg-transparent p-6 font-mono text-sm leading-7 text-w-text outline-none placeholder:text-w-faint" placeholder="Start writing…" />
+        {selectionMenu && <button onMouseDown={(event) => event.preventDefault()} onClick={() => void captureTodo()} style={{ position: 'fixed', left: selectionMenu.x, top: selectionMenu.y }} className="z-50 rounded-md border border-w-line bg-w-surface px-3 py-2 text-xs text-w-text shadow-xl">Add selection to to-dos</button>}
       </>}
       {showCollaborators && <CollaboratorsModal journal={journal} userId={userId} onClose={() => setShowCollaborators(false)} onChanged={onChanged} />}
     </div>

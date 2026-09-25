@@ -4,7 +4,7 @@ import JournalEditor from './JournalEditor'
 import type { Journal } from '../../api/matchaWork/journals'
 
 const mock = vi.hoisted(() => ({
-  listEntries: vi.fn(), createEntry: vi.fn(), updateEntry: vi.fn(),
+  listEntries: vi.fn(), createEntry: vi.fn(), updateEntry: vi.fn(), quickTodo: vi.fn(),
 }))
 vi.mock('../../api/matchaWork/journals', () => ({
   listJournalEntries: mock.listEntries,
@@ -12,6 +12,7 @@ vi.mock('../../api/matchaWork/journals', () => ({
   updateJournalEntry: mock.updateEntry,
 }))
 vi.mock('./CollaboratorsModal', () => ({ default: () => null }))
+vi.mock('../../api/matchaWork/productivity', () => ({ createQuickTodo: mock.quickTodo }))
 
 const journal: Journal = {
   id: 'journal-one', title: 'Note', description: null, color: null, icon: null,
@@ -27,6 +28,7 @@ beforeEach(() => {
     content: 'Old text', entry_date: null, created_at: '', updated_at: '',
   }])
   mock.updateEntry.mockResolvedValue({})
+  mock.quickTodo.mockResolvedValue({})
 })
 
 describe('JournalEditor', () => {
@@ -78,5 +80,17 @@ describe('JournalEditor', () => {
     expect(editor).toHaveValue('# Old text')
     fireEvent.keyDown(editor, { key: 'ˇ', code: 'KeyT', altKey: true, shiftKey: true })
     expect(editor).toHaveValue('- [ ] Old text')
+  })
+
+  it('creates a quick to-do with the selected journal excerpt', async () => {
+    render(<JournalEditor journal={journal} folders={[]} userId="owner" onRename={vi.fn()} onMove={vi.fn()} onChanged={vi.fn()} />)
+    const editor = await screen.findByRole('textbox', { name: 'Journal content' }) as HTMLTextAreaElement
+    await waitFor(() => expect(editor).toHaveValue('Old text'))
+    editor.setSelectionRange(0, 8)
+    fireEvent.contextMenu(editor, { clientX: 12, clientY: 12 })
+    fireEvent.click(screen.getByRole('button', { name: 'Add selection to to-dos' }))
+    await waitFor(() => expect(mock.quickTodo).toHaveBeenCalledWith({
+      title: 'Old text', source_journal_id: 'journal-one', source_excerpt: 'Old text',
+    }))
   })
 })
