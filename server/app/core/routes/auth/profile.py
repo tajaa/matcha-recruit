@@ -509,13 +509,13 @@ async def update_profile(
                     "UPDATE admins SET name = $1 WHERE user_id = $2",
                     request.name, current_user.id
                 )
-        elif current_user.role == "client":
+        elif current_user.role in ("client", "individual"):
             updates = []
             values = []
             if request.name:
                 updates.append("name = $" + str(len(values) + 1))
                 values.append(request.name)
-            if request.phone:
+            if request.phone is not None:
                 updates.append("phone = $" + str(len(values) + 1))
                 values.append(request.phone)
             if updates:

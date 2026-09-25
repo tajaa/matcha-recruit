@@ -1,4 +1,4 @@
-import { Mail, MailOpen, LogOut, Users, CreditCard, Sparkles } from 'lucide-react'
+import { Mail, MailOpen, LogOut, Users, CreditCard, Sparkles, Settings2 } from 'lucide-react'
 import type { NavigateFunction } from 'react-router-dom'
 import type { WorkPlan } from '../../../api/matchaWork/entitlements'
 
@@ -100,6 +100,8 @@ export default function SidebarFooter({
           Email
         </button>
       </div>
+
+      <button onClick={() => navigate(`${base}/settings`)} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-xs ${isActive(`${base}/settings`) ? 'bg-w-surface2 text-w-text' : 'text-w-dim hover:bg-w-surface2/50 hover:text-w-text'}`}><Settings2 size={14} /> Settings</button>
 
       {/* User profile */}
       <div className="flex items-center gap-2 px-2.5 py-2 mt-1">

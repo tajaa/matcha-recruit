@@ -8,6 +8,7 @@ import Productivity from '../pages/Productivity'
 import ChannelView from '../pages/ChannelView'
 import LegacyChannelRedirect, { LegacySurfacePrefixRedirect } from '../pages/LegacySurfaceRedirect'
 import WorkEmail from '../pages/WorkEmail'
+import WorkSettings from '../pages/WorkSettings'
 import ChannelBrowse from '../pages/ChannelBrowse'
 import ChannelJoinByInvite from '../pages/ChannelJoinByInvite'
 import ChannelBilling from '../pages/ChannelBilling'
@@ -47,6 +48,7 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           <Route index element={<MatchaWorkList />} />
           <Route path="inbox" element={<Inbox />} />
           <Route path="email" element={<WorkEmail />} />
+          <Route path="settings" element={<WorkSettings />} />
           <Route path="billing" element={<ChannelBilling />} />
           <Route path="connections" element={<ConnectionsPanel />} />
           <Route path="channels" element={<ChannelBrowse />} />

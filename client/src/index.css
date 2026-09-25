@@ -44,6 +44,7 @@
   --color-w-faint: #5A5A60;
   --color-w-accent: #F26A21;
   --color-w-accent-hi: #FF7E3A;
+  --color-w-on-accent: #FFFFFF;
 
   /* Marketing/landing palette — ivory paper with ink text */
   --color-ivory-bg: #F5F2ED;
@@ -90,6 +91,87 @@ html[data-app-shell-bg="werk"] {
    depth, not as a visible gradient band. */
 .werk-radial {
   background-image: radial-gradient(115% 75% at 50% 0%, #17171A 0%, var(--color-w-bg) 58%);
+}
+
+/* Espresso owns its five workspace themes; the other Work surfaces retain
+   their existing palette. Values track the two native Espresso color files. */
+.espresso-work[data-theme="platinum"] {
+  color-scheme: light;
+  --color-w-bg: #D8DDE5;
+  --color-w-surface: #F4F6F8;
+  --color-w-surface2: #E7EAF0;
+  --color-w-line: #B7BEC8;
+  --color-w-text: #1B1D22;
+  --color-w-dim: #555D6B;
+  --color-w-faint: #6A6E78;
+  --color-w-accent: #B45309;
+  --color-w-accent-hi: #92400E;
+  --color-w-radial-center: #F8F9FB;
+  --color-w-radial-edge: #BAC2CD;
+  --color-white: #1B1D22;
+}
+.espresso-work[data-theme="dark"] {
+  color-scheme: dark;
+  --color-w-bg: #0A0A0B;
+  --color-w-surface: #141416;
+  --color-w-surface2: #1C1C20;
+  --color-w-line: #262629;
+  --color-w-text: #F5F5F7;
+  --color-w-dim: #A1A1AA;
+  --color-w-faint: #8A8A90;
+  --color-w-accent: #D9770F;
+  --color-w-accent-hi: #B45309;
+  --color-w-radial-center: #1C1C1F;
+  --color-w-radial-edge: #09090C;
+  --color-white: #FFFFFF;
+}
+.espresso-work[data-theme="light"] {
+  color-scheme: light;
+  --color-w-bg: #F4F4F5;
+  --color-w-surface: #FFFFFF;
+  --color-w-surface2: #EDEDEF;
+  --color-w-line: #E4E4E7;
+  --color-w-text: #18181B;
+  --color-w-dim: #61616B;
+  --color-w-faint: #71717A;
+  --color-w-accent: #B45309;
+  --color-w-accent-hi: #92400E;
+  --color-w-radial-center: #FDFDFE;
+  --color-w-radial-edge: #E9E9EC;
+  --color-white: #18181B;
+}
+.espresso-work[data-theme="cappuchin"] {
+  color-scheme: dark;
+  --color-w-bg: #211913;
+  --color-w-surface: #34281F;
+  --color-w-surface2: #443429;
+  --color-w-line: #4A3B2E;
+  --color-w-text: #F5ECE3;
+  --color-w-dim: #C4B5A6;
+  --color-w-faint: #AC9784;
+  --color-w-accent: #D9770F;
+  --color-w-accent-hi: #B45309;
+  --color-w-radial-center: #2D231B;
+  --color-w-radial-edge: #1A130E;
+  --color-white: #FFFFFF;
+}
+.espresso-work[data-theme="graphite"] {
+  color-scheme: dark;
+  --color-w-bg: #1C1C1E;
+  --color-w-surface: #262629;
+  --color-w-surface2: #2D2D30;
+  --color-w-line: #3C3C40;
+  --color-w-text: #E4E4E8;
+  --color-w-dim: #A0A0A8;
+  --color-w-faint: #8E8E95;
+  --color-w-accent: #D9770F;
+  --color-w-accent-hi: #B45309;
+  --color-w-radial-center: #2D2D30;
+  --color-w-radial-edge: #161618;
+  --color-white: #FFFFFF;
+}
+.espresso-work .werk-radial {
+  background-image: radial-gradient(115% 75% at 50% 0%, var(--color-w-radial-center) 0%, var(--color-w-bg) 58%, var(--color-w-radial-edge) 120%);
 }
 
 /* Thread-page-local light mode — independent of the app-wide `data-theme`

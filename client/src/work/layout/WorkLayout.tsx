@@ -8,7 +8,7 @@ import NotificationSettingsMenu from '../components/shell/NotificationSettingsMe
 import WorkSidebar from '../components/shell/WorkSidebar'
 import WerkLiteSidebar from '../components/shell/WerkLiteSidebar'
 import OpsWorkspaceSidebar from '../../ops/components/OpsWorkspaceSidebar'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useMe } from '../../hooks/useMe'
 import { api, PLAN_REQUIRED_EVENT, type PlanRequiredDetail } from '../../api/client'
 import { fetchUsageMeter, USAGE_CHANGED_EVENT, type UsageMeter } from '../api/matchaWork'
@@ -16,6 +16,7 @@ import { useWorkSurface, useWorkBrand, useWorkBase } from '../routes/WorkSurface
 import { useEntitlements } from '../hooks/useEntitlements'
 import PaywallModal from '../components/shared/PaywallModal'
 import FindPalette from '../components/shell/FindPalette'
+import { themeOnAccent, useEspressoTheme } from '../utils/espressoTheme'
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -208,6 +209,7 @@ export default function WorkLayout() {
   useEntitlements()
   const { pathname, search } = useLocation()
   const surface = useWorkSurface()
+  const espressoTheme = useEspressoTheme()
   const brand = useWorkBrand()
   const base = useWorkBase()
   // Inside an open channel, offer a close (X) inline with the mobile hamburger
@@ -222,6 +224,7 @@ export default function WorkLayout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [paywall, setPaywall] = useState<PlanRequiredDetail | null>(null)
   const closePaywall = useCallback(() => setPaywall(null), [])
+  const shellRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!isPersonal) return
@@ -242,9 +245,15 @@ export default function WorkLayout() {
   // Paint <html> in the workspace black so overscroll bounce (and the iOS keyboard
   // resize) shows app chrome instead of a flash of white.
   useEffect(() => {
-    document.documentElement.setAttribute('data-app-shell-bg', 'werk')
-    return () => document.documentElement.removeAttribute('data-app-shell-bg')
-  }, [])
+    const html = document.documentElement
+    const previousBg = html.style.backgroundColor
+    html.setAttribute('data-app-shell-bg', 'werk')
+    if (surface === 'espresso' && shellRef.current) html.style.backgroundColor = getComputedStyle(shellRef.current).backgroundColor
+    return () => {
+      html.style.backgroundColor = previousBg
+      html.removeAttribute('data-app-shell-bg')
+    }
+  }, [surface, espressoTheme])
 
   // iOS-like keyboard behavior: pin the app to the *visual* viewport. When the
   // on-screen keyboard opens, `100vh`/`100dvh` don't shrink on iOS Safari, so
@@ -305,8 +314,10 @@ export default function WorkLayout() {
 
   return (
     <div
-      className="bg-w-bg text-w-text flex flex-col overflow-hidden"
-      style={{ height: viewportHeight ? `${viewportHeight}px` : '100dvh' }}
+      ref={shellRef}
+      className={`bg-w-bg text-w-text flex flex-col overflow-hidden ${surface === 'espresso' ? 'espresso-work' : ''}`}
+      data-theme={surface === 'espresso' ? espressoTheme : undefined}
+      style={{ height: viewportHeight ? `${viewportHeight}px` : '100dvh', '--color-w-on-accent': themeOnAccent(espressoTheme) } as CSSProperties}
     >
       <header inert={paywall !== null} aria-hidden={paywall !== null} className="flex items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2.5 border-b border-w-line shrink-0">
         <button
