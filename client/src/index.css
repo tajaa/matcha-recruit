@@ -120,6 +120,12 @@ html[data-marketing-noir] {
   }
 }
 
+/* Board marketing surface (home + /matcha-scheduling) — see useMarketingBoard
+   in components/marketing/kit/hooks.ts. */
+html[data-marketing-board] {
+  background-color: #161817;
+}
+
 @keyframes ticker {
   0%   { transform: translateX(0); }
   100% { transform: translateX(-50%); }

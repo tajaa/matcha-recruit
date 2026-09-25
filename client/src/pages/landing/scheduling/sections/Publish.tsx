@@ -1,7 +1,7 @@
-import { Reveal } from '../motion'
-import { WRAP, mono } from '../styles'
-import { CARD, INK, INK_SOFT, PAPER, RED_PEN, STAMP, hexA } from '../theme'
-import { CellLabel, StepHead } from './Chrome'
+import { Reveal } from '../../../../components/marketing/kit/motion'
+import { WRAP, glassPane, mono } from '../../../../components/marketing/kit/styles'
+import { AMBER, CARD, INK, INK_SOFT, PAPER, STAMP, hexA } from '../../../../components/marketing/kit/theme'
+import { CellLabel, Glows, StepHead } from './Chrome'
 
 // Jonah's week after both of the page's edits: the hero moved Dev's Friday
 // open to him, the chat moved Dev's Tuesday open to him — 40h, no overtime.
@@ -26,8 +26,8 @@ function Phone() {
     <div className="relative mx-auto w-full max-w-[300px]">
       {/* push notification, arriving over the phone */}
       <div
-        className="toast-in absolute -left-4 -right-4 -top-10 z-10 rounded-2xl px-4 py-3 sm:-left-12 sm:-right-12"
-        style={{ backgroundColor: hexA(CARD, 0.94), backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', boxShadow: `0 0 0 1px ${hexA(INK, 0.08)}, 0 24px 40px -20px ${hexA(INK, 0.5)}` }}
+        className="toast-in absolute -left-4 -right-4 -top-10 z-10 rounded-[20px] px-4 py-3 sm:-left-12 sm:-right-12"
+        style={{ ...glassPane, backgroundColor: 'rgba(255, 255, 255, 0.62)' }}
       >
         <div className="flex items-center justify-between" style={mono('9px', { color: INK_SOFT })}>
           <span className="inline-flex items-center gap-1.5">
@@ -47,7 +47,7 @@ function Phone() {
       </div>
 
       <div className="rounded-[46px] p-[10px]" style={{ backgroundColor: INK, boxShadow: `0 40px 70px -40px ${hexA(INK, 0.4)}` }}>
-        <div className="relative overflow-hidden rounded-[37px]" style={{ backgroundColor: CARD, aspectRatio: '9 / 18.5' }}>
+        <div className="relative overflow-hidden rounded-[37px]" style={{ backgroundColor: CARD, aspectRatio: '9 / 16' }}>
           <div className="absolute left-1/2 top-2.5 h-[22px] w-[88px] -translate-x-1/2 rounded-full" style={{ backgroundColor: INK }} />
           <div className="flex h-full flex-col px-5 pb-5 pt-12">
             <div className="flex items-baseline justify-between" style={mono('9px', { color: INK_SOFT })}>
@@ -66,13 +66,13 @@ function Phone() {
                     </span>
                     {s.isNew && (
                       <span className="inline-flex items-center gap-1.5" style={mono('8.5px', { color: INK })}>
-                        <span className="h-1 w-1 rounded-full" style={{ backgroundColor: INK }} />
+                        <span className="h-1 w-1 rounded-full" style={{ backgroundColor: STAMP }} />
                         New
                       </span>
                     )}
                     {s.swap && (
-                      <span className="inline-flex items-center gap-1.5" style={mono('8.5px', { color: RED_PEN })}>
-                        <span className="h-1 w-1 rounded-full" style={{ backgroundColor: RED_PEN }} />
+                      <span className="inline-flex items-center gap-1.5" style={mono('8.5px', { color: AMBER })}>
+                        <span className="h-1 w-1 rounded-full" style={{ backgroundColor: AMBER }} />
                         Swap asked
                       </span>
                     )}
@@ -104,44 +104,61 @@ export function Publish() {
         requests — approve one and the schedule updates, deny it and nothing moves.
       </StepHead>
 
-      <div className="mt-16 grid grid-cols-1 lg:grid-cols-2" style={{ borderTop: `1px solid ${RULE}` }}>
-        <Reveal className="flex flex-col py-12 lg:border-r lg:pr-14" style={{ borderColor: RULE }}>
+      {/* no grid rules here: the phone floats and the queue is a pane of glass, as in Check */}
+      <div className="relative mt-16 grid grid-cols-1 gap-16 lg:grid-cols-2 lg:gap-14">
+        {/* desktop only: in one tall column the glows stretch into streaks */}
+        <Glows green="24% 40%" amber="76% 62%" className="hidden lg:block" />
+        <Reveal className="relative flex flex-col">
           <CellLabel n="01">What Jonah sees</CellLabel>
           <div className="mt-20">
             <Phone />
           </div>
         </Reveal>
 
-        <Reveal delay={120} className="flex flex-col border-t py-12 lg:border-t-0 lg:pl-14" style={{ borderColor: RULE }}>
+        <Reveal delay={120} className="relative flex flex-col">
           <CellLabel n="02">What comes back to you</CellLabel>
-          <div className="mt-8 flex items-baseline justify-between pb-3" style={{ ...mono('10px', { color: INK_SOFT }), borderBottom: `1px solid ${RULE}` }}>
-            <span>Waiting on you</span>
-            <span style={{ color: INK }}>3</span>
+          {/* the pane sits level with the phone, not pinned under its label */}
+          <div className="mt-8 flex flex-1 flex-col justify-center">
+            <div className="rounded-[28px] p-2 sm:p-3" style={glassPane}>
+              <div className="flex items-baseline justify-between px-4 pb-3 pt-3" style={mono('9.5px', { color: INK_SOFT })}>
+                <span>
+                  <span style={{ color: INK }}>Waiting on you</span> · Sun 4:20 PM
+                </span>
+                <span className="inline-flex items-center gap-2" style={{ color: INK }}>
+                  <span className="pulse-dot h-1.5 w-1.5 rounded-full" style={{ backgroundColor: AMBER }} />
+                  {REQUESTS.length}
+                </span>
+              </div>
+              <ul className="space-y-0.5">
+                {REQUESTS.map((r, i) => (
+                  <li
+                    key={r.kind}
+                    className="flex items-center justify-between gap-4 rounded-2xl px-4 py-3.5"
+                    style={{ backgroundColor: i % 2 ? 'transparent' : 'rgba(255, 255, 255, 0.4)' }}
+                  >
+                    <span className="min-w-0">
+                      <span style={mono('9px', { color: INK_SOFT })}>{r.kind}</span>
+                      <span className="mt-0.5 block text-[15px] font-medium tracking-[-0.01em]" style={{ color: INK }}>
+                        {r.who} <span style={{ fontWeight: 400, color: INK_SOFT }}>{r.what}</span>
+                      </span>
+                      <span className="mt-1 flex items-center gap-2" style={mono('9px', { color: INK_SOFT })}>
+                        <span className="h-1 w-1 rounded-full" style={{ backgroundColor: STAMP }} />
+                        {r.note}
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <span className="hidden rounded-full px-3 py-1.5 text-[13px] sm:inline" style={{ color: INK_SOFT }}>
+                        Deny
+                      </span>
+                      <span className="rounded-full px-3.5 py-1.5 text-[13px] font-medium" style={{ backgroundColor: STAMP, color: PAPER }}>
+                        Approve
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
-          <ul>
-            {REQUESTS.map((r) => (
-              <li key={r.kind} className="flex items-center justify-between gap-4 py-5" style={{ borderBottom: `1px solid ${RULE}` }}>
-                <span className="min-w-0">
-                  <span style={mono('9.5px', { color: INK_SOFT })}>{r.kind}</span>
-                  <span className="mt-1 block text-[16px] font-medium tracking-[-0.01em]" style={{ color: INK }}>
-                    {r.who} <span style={{ fontWeight: 400, color: INK_SOFT }}>{r.what}</span>
-                  </span>
-                  <span className="mt-1.5 flex items-center gap-2" style={mono('9.5px', { color: INK_SOFT })}>
-                    <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: STAMP }} />
-                    {r.note}
-                  </span>
-                </span>
-                <span className="flex shrink-0 gap-2">
-                  <span className="hidden rounded-full px-3.5 py-1.5 text-[13px] sm:inline" style={{ boxShadow: `inset 0 0 0 1px ${hexA(INK, 0.2)}`, color: INK }}>
-                    Deny
-                  </span>
-                  <span className="rounded-full px-3.5 py-1.5 text-[13px] font-medium" style={{ backgroundColor: INK, color: PAPER }}>
-                    Approve
-                  </span>
-                </span>
-              </li>
-            ))}
-          </ul>
         </Reveal>
       </div>
     </section>

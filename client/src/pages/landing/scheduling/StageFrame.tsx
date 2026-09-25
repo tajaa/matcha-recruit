@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react'
-import { PAPER } from './theme'
+import { PAPER } from '../../../components/marketing/kit/theme'
 
 /** Shared chrome for an animation: the media box, then a control + caption
  *  row. Used both by the live stage and by its loading fallback, so swapping
@@ -26,7 +26,7 @@ export function StageLayout({
         {decor}
       </div>
       <div className="mt-4 flex items-start gap-4">
-        <div className="h-8 w-8 shrink-0">{control}</div>
+        {control && <div className="h-8 w-8 shrink-0">{control}</div>}
         <div className="min-w-0 flex-1">{caption}</div>
       </div>
     </div>

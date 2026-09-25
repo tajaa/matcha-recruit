@@ -1,5 +1,5 @@
 import { lazy, Suspense, useRef, type ComponentType, type CSSProperties, type ReactNode } from 'react'
-import { useIdle, useInView, useNarrow } from './hooks'
+import { useIdle, useInView, useNarrow } from '../../../components/marketing/kit/hooks'
 import { Poster, StageLayout } from './StageFrame'
 import type { Variant } from './timeline'
 
