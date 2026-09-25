@@ -95,6 +95,7 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
   const imageAttachments = attachments.filter((a) => (a.content_type ?? '').startsWith('image/')).slice(0, 3)
   const reviewNote = task.review_note?.trim()
   const autoPRBanner = autoPRProgressBanner(task.progress_note, task.pr_number)
+  const pendingCommitSubtasks = task.pending_commit_subtask_count ?? 0
 
   // Left-edge accent — critical/high only. Medium is the default priority, so
   // marking it would put an accent on nearly every card; absence = normal.
@@ -195,7 +196,7 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
       {/* Tag chip + churn. Priority is the left-edge accent above (critical/high
           only) — no dot/label here, it read as noise on every card since medium
           (the default) would otherwise tag along too. */}
-      {(cycles > 0 || tag || task.element_name || safePrUrl) && (
+      {(cycles > 0 || tag || task.element_name || safePrUrl || pendingCommitSubtasks > 0) && (
         <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1.5 pl-6">
           {tag && (
             <span className={`rounded bg-current/10 px-1.5 py-0.5 text-[10px] font-semibold ${tag.colorClass}`}>
@@ -225,6 +226,8 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
               <RefreshCw className="h-2.5 w-2.5" />×{cycles}
             </span>
           )}
+
+          {pendingCommitSubtasks > 0 && <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300" title="Checklist items with pending commit suggestions">{pendingCommitSubtasks} commit suggestion{pendingCommitSubtasks === 1 ? '' : 's'}</span>}
 
           {task.element_name && (
             <span className="rounded bg-w-accent/12 px-1.5 py-0.5 text-[10px] font-medium text-w-accent">

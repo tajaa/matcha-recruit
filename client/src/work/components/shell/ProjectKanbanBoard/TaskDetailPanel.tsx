@@ -7,6 +7,7 @@ import { PRIORITIES } from './constants'
 import { useTaskDetailPanel } from './useTaskDetailPanel'
 import { autoPRProgressBanner } from '../../../utils/autoprProgress'
 import TaskViewerExtras from './TaskViewerExtras'
+import TaskCommitSuggestions from './TaskCommitSuggestions'
 
 interface TaskDetailPanelProps {
   projectId: string
@@ -65,6 +66,7 @@ export default function TaskDetailPanel({
     toggleSubtask,
     rejectSubtask,
     addRoundSubtask,
+    refreshSubtasks,
     removeSubtask,
   } = useTaskDetailPanel({ projectId, task, onPatched, onSubtaskCountChange })
 
@@ -339,6 +341,14 @@ export default function TaskDetailPanel({
           </div>
 
           {/* Attachments */}
+          <TaskCommitSuggestions
+            projectId={projectId}
+            taskId={task.id}
+            canEdit={canEdit}
+            onAccepted={() => { void refreshSubtasks() }}
+            onResolved={() => onPatched({ ...task, pending_commit_subtask_count: Math.max(0, (task.pending_commit_subtask_count ?? 1) - 1) })}
+          />
+
           <TaskAttachments
             projectId={projectId}
             taskId={task.id}

@@ -2,8 +2,8 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useKanbanBoard } from './useKanbanBoard'
 
-const mock = vi.hoisted(() => ({ bundle: vi.fn(), tasks: vi.fn() }))
-vi.mock('../../../api/matchaWork', () => ({ getProjectBundle: mock.bundle, listProjectTasks: mock.tasks }))
+const mock = vi.hoisted(() => ({ bundle: vi.fn(), tasks: vi.fn(), connection: vi.fn(), suggestions: vi.fn() }))
+vi.mock('../../../api/matchaWork', () => ({ getProjectBundle: mock.bundle, listProjectTasks: mock.tasks, getGithubConnection: mock.connection, listCommitSuggestions: mock.suggestions }))
 vi.mock('../../../../hooks/useMe', () => ({ useMe: () => ({ me: null }) }))
 vi.mock('../../../api/projectSocket', () => ({
   ProjectSocket: class {
@@ -16,6 +16,8 @@ vi.mock('../../../api/projectSocket', () => ({
 beforeEach(() => {
   vi.clearAllMocks()
   mock.bundle.mockResolvedValue({ tasks: [], collaborators: [], done_total: 0 })
+  mock.connection.mockResolvedValue({ connected: false })
+  mock.suggestions.mockResolvedValue([])
 })
 
 describe('board project open', () => {

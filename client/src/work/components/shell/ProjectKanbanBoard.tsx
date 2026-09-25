@@ -15,9 +15,10 @@ import { useIsDesktop } from '../../hooks/useMediaQuery'
 
 interface ProjectKanbanBoardProps {
   projectId: string
+  openTaskId?: string | null
 }
 
-export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProps) {
+export default function ProjectKanbanBoard({ projectId, openTaskId }: ProjectKanbanBoardProps) {
   const {
     tasks,
     setTasks,
@@ -74,7 +75,7 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
     mobileColumn,
     setMobileColumn,
     duplicateTask,
-  } = useKanbanBoard(projectId)
+  } = useKanbanBoard(projectId, openTaskId)
   const isDesktop = useIsDesktop()
   const agentDraft = useAgentTaskDraft(projectId, (draft) => {
     ensureCollaborators()
