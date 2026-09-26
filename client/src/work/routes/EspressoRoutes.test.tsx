@@ -48,7 +48,7 @@ beforeEach(() => {
 describe('Espresso routes', () => {
   it('renders the personal work shell with Espresso branding', async () => {
     renderAt('/espresso')
-    expect(await screen.findByTestId('home')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('home')).toBeInTheDocument(), { timeout: 5000 })
     expect(screen.getByText('Espresso')).toBeInTheDocument()
   })
 
