@@ -111,12 +111,12 @@ jobs:
 
       - name: Resolve this run's image digests
         id: images
+        env:
+          TARGET: ${{ inputs.target }}
         run: |
           tag="$(git rev-parse --short HEAD)"
           for name in backend frontend; do
-            case "${{ inputs.target }}:$name" in
-              backend:frontend|frontend:backend) continue ;;
-            esac
+            if [ "$TARGET" != matcha ] && [ "$TARGET" != "$name" ]; then continue; fi
             digest="$(aws ecr batch-get-image --repository-name "matcha-$name" \
               --image-ids "imageTag=$tag" --query 'images[0].imageId.imageDigest' --output text)"
             if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
