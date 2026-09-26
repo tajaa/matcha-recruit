@@ -80,4 +80,7 @@ def test_undo_is_limited_to_fixed_demo_ids_and_email_addresses():
     assert "demo-matcha-schedule@example.com" in sql
     assert "coworker-matcha-schedule@example.com" in sql
     assert "DELETE FROM inbox_messages" in sql
+    # Undo never removes a conversation that includes a non-demo participant.
+    assert "DELETE FROM inbox_conversations WHERE created_by IN" in sql
+    assert "p.user_id NOT IN" in sql
     assert sql.index("DELETE FROM companies") < sql.index("DELETE FROM users")

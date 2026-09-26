@@ -139,4 +139,10 @@ def test_recovery_reclaims_only_stale_unsent_delivery_claims():
     worker = Path(__file__).parents[2] / "app/workers/tasks/schedule_request_notifications.py"
     assert "sent_at IS NULL" in service.read_text()
     assert "INTERVAL '5 minutes'" in service.read_text()
-    assert "NOT EXISTS" not in worker.read_text()
+    # The sweep only selects requests some active reviewer has not been told
+    # about on BOTH channels; otherwise the whole backlog is re-scanned every
+    # run and, past the LIMIT, the newest requests are never reached.
+    sweep = worker.read_text()
+    assert "d.event_type = 'manager_ready' AND d.sent_at IS NOT NULL" in sweep
+    assert "d.event_type = 'manager_ready_in_app' AND d.sent_at IS NOT NULL" in sweep
+    assert "u.is_active = true" in sweep

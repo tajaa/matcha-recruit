@@ -922,6 +922,48 @@ while Edit published is enabled, and voice has no path to `publishWeek`.
 Every proposal executor locks and re-checks the proposal row in its write
 transaction, so editor, channel, and thread confirmations cannot apply it twice.
 
+### Open-seat claims + employee notifications (migrations `empsched25`, `empsched26`; 2026-09-26)
+
+Employees see published open seats (`GET /me/schedule/open-seats`) and file a
+`claim` request a manager approves through the ordinary review endpoint, which
+writes via `apply_assignment_core` after `_check_recipient`. Employee-facing
+events (offer received / accepted / withdrawn / decided / published) are staged
+as `schedule_employee_notification_deliveries` rows **inside the schedule-write
+transaction** and delivered post-commit by the pool-free worker to one bell row
+plus Matcha Schedule APNs.
+
+- **Every "has this shift started" gate is wall clock, not real `NOW()`.** Shift
+  timestamps are the location's clock face tagged UTC, so the feed, claim
+  create, and approval compare against `shift_requests.schedule_wall_clock_now`
+  (`WALL_CLOCK_NOW_SQL` in SQL). Real `NOW()` hid a Pacific 5 PM seat from
+  10 AM local.
+- **The feed only offers what approval could accept.** Store scoping
+  (`assert_employee_schedulable_at`; a locationless shift is open to anyone),
+  the one-shift-per-day rule (`find_same_day_assignments` — the same hard
+  block pickups and swaps enforce, not forceable), qualification, capacity,
+  and no pending claim. Claim create re-checks all of them so a manager never
+  lands on an unforceable 422.
+- **Approval recounts seats after the row lock.** The count embedded in the
+  `FOR UPDATE` statement is from the pre-lock snapshot under READ COMMITTED.
+- **Drop / time-off requests are idempotent.** 409 on a pending duplicate plus
+  partial unique indexes (`uq_schedule_requests_open_{claim,drop,unavailable}`);
+  each one fans out to every manager, so a repeat click must not re-send.
+- **Manager-ready recovery sweep anti-joins delivered rows** on both channels;
+  `empsched25` backfilled deliveries for requests already waiting when the sweep
+  was widened, so the first run does not replay the backlog.
+- **Employee dedupe keys name the transition, not the target state**
+  (`{request_id}:accepted:<counterparty_confirmed_at>`,
+  `{request_id}:withdrawn:<updated_at>`). `ON CONFLICT DO NOTHING` on a
+  state-only key silently dropped the second round of an accept → withdraw →
+  accept cycle.
+- **Deliveries dead-letter.** `attempts` / `failed_at`: an unrenderable row
+  (unknown event type) parks on first failure, a transient one after
+  `MAX_DELIVERY_ATTEMPTS`; the sweep skips parked rows instead of raising on
+  them forever.
+- **Push tokens are session-bound** (`device_tokens.device_session_id`,
+  `devicetok03`): mobile logout, a failed mobile refresh, and the send query's
+  revoked/inactive filter all stop pushes to a phone whose session ended.
+
 ## `schedule_intelligence` (default ❌)
 
 **Schedule Intelligence** — analytics over the `employee_schedule` data that no competing scheduler offers, because it cross-joins scheduling against data only Matcha holds. Four read-time, deterministic (no LLM) modules: (1) **incident × schedule correlation** (`services/scheduling/schedule_intelligence.py:build_incident_correlation`) — incident rate on understaffed vs adequately staffed shifts, by location and day/night window, plus fatigue flags (short rest gap or long consecutive-day streak for a named `involved_employee_id`); suppressed to counts-only below 10 incidents / 50 shifts (`schedule_intelligence_stats.small_n_guard`) — directional, never causal. (2) **Fair Workweek / predictive-scheduling $ exposure** (`services/scheduling/fair_workweek.py`) — a curated, individually-cited ordinance table (same idiom as `discipline_compliance`/`schedule_compliance`: partial by design, unmapped jurisdiction ⇒ `applicability: "unmapped"`, never "no exposure") priced against the tenant's OWN `schedule_audit_log` history; **only NYC and Los Angeles are populated** (verified via the `compliance_evals` golden fixtures) — the other ~8 US Fair Workweek cities are real ordinances but unverified here, so they ship absent rather than guessed. Employee-initiated churn (an approved swap/drop/unavailability request) is excluded before any dollar math; a change with no `pay_rate` on file or predating the audit enrichment degrades to a count-only line item, never zero-priced. (3) **Discipline pretext shield** (module 3 of the same service) — attendance discipline records (`discipline_compliance.ATTENDANCE_INFRACTION_TYPES`) flagged when the employee's own schedule shows elevated employer-initiated churn/short-notice changes/hour volatility beforehand — an advisory pattern, not a verdict; **report-only in v1** (no discipline-gate integration — the metric depends on audit history that only accumulates after this feature ships). (4) **Qualified coverage** — per upcoming published shift, qualified-vs-assigned headcount from `employee_credential_requirements` / `employee_credentials` expirations / `training_records`, three-state gated on `credential_templates`/`training` (`None`=module off, `[]`=on-but-clean, matching the `hr_pilot_corpus` idiom). Gates `/schedule-intelligence/*` (mounted on this flag ALONE — each endpoint checks `employee_schedule` itself and returns `{"available": false}` rather than double-gating the mount, so the FE can render "turn on Scheduling first") + the `/app/schedule-intelligence` page. **Grounds three pilots** (the 2026-07-20 pilot-grounding review's own rule: a new analytics engine ships wired into whatever pilots ground on its domain) — HR Pilot corpus `schedint:` group (supervisor-only, stripped by `hr_pilot_corpus.redact_for_employee` since it names understaffed shifts/discipline/lapsed individuals), Broker Pilot `platform:schedule` headline cid (`_tenant_context(..., include_schedule_intel=True)`, gated on the CLIENT's own flag), and the Analysis Pilot `schedule_weekly` platform source (26-week scheduled-hours/understaffing/employer-change series). No new tables — read-time compute only. Default off; admin-toggle; NOT bundled.

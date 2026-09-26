@@ -94,6 +94,12 @@ async def test_acceptance_notifies_requester_after_commit(monkeypatch):
             return {"status": "awaiting_manager"}
 
         async def fetchval(self, query, *_args):
+            if "RETURNING" in query:
+                # The state-changing UPDATE now RETURNs its transition stamp,
+                # which becomes the notification dedupe nonce.
+                events.append("update")
+                from datetime import datetime, timezone
+                return datetime.now(timezone.utc)
             return "active" if "employment_status" in query else 1
 
         async def execute(self, *_args):
@@ -116,6 +122,10 @@ async def test_acceptance_notifies_requester_after_commit(monkeypatch):
     async def stage(*_args, **kwargs):
         assert kwargs["recipient_employee_ids"] == [owner_id]
         assert kwargs["event_type"] == "schedule_request_accepted"
+        # Keyed on the transition stamp, not the target state, so an
+        # accept → withdraw → accept cycle notifies every time.
+        assert kwargs["dedupe_key"].startswith(f"{request_id}:accepted:")
+        assert not kwargs["dedupe_key"].endswith(":accepted:")
         events.append("stage")
         return 1
 
@@ -156,6 +166,14 @@ async def test_counterparty_withdrawal_notifies_requester(monkeypatch):
         async def execute(self, *_args):
             events.append("update")
 
+        async def fetchval(self, query, *_args):
+            # The state-changing UPDATE now RETURNs its transition stamp, which
+            # becomes the notification dedupe nonce.
+            assert "RETURNING" in query
+            events.append("update")
+            from datetime import datetime, timezone
+            return datetime.now(timezone.utc)
+
     @asynccontextmanager
     async def connection():
         yield Conn()
@@ -169,6 +187,7 @@ async def test_counterparty_withdrawal_notifies_requester(monkeypatch):
     async def stage(*_args, **kwargs):
         assert kwargs["recipient_employee_ids"] == [owner_id]
         assert kwargs["event_type"] == "schedule_request_withdrawn"
+        assert kwargs["dedupe_key"].startswith(f"{request_id}:withdrawn:")
         events.append("stage")
         return 1
 

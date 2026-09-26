@@ -438,6 +438,40 @@ async def create_conversation(
         if missing:
             raise HTTPException(status_code=400, detail=f"Users not found: {[str(m) for m in missing]}")
 
+        if current_user.role == "employee":
+            # Hourly employees (Matcha Schedule) stay inside their own company:
+            # this endpoint accepts any active user id, and search allows an
+            # exact-email cross-company match that business users rely on.
+            outside = await conn.fetchval(
+                """
+                WITH caller AS (
+                    SELECT COALESCE(c.company_id, e.org_id) AS company_id
+                    FROM users u
+                    LEFT JOIN clients c ON c.user_id = u.id
+                    LEFT JOIN employees e ON e.user_id = u.id
+                    WHERE u.id = $1
+                    LIMIT 1
+                )
+                SELECT count(*)
+                FROM unnest($2::uuid[]) AS p(id), caller
+                WHERE caller.company_id IS NULL
+                   OR NOT EXISTS (
+                        SELECT 1
+                        FROM users u
+                        LEFT JOIN clients c ON c.user_id = u.id
+                        LEFT JOIN employees e ON e.user_id = u.id
+                        WHERE u.id = p.id
+                          AND COALESCE(c.company_id, e.org_id) = caller.company_id
+                   )
+                """,
+                current_user.id, all_participant_ids,
+            )
+            if outside:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You can only message people in your company",
+                )
+
         is_group = len(all_participant_ids) > 1
         conversation_id: Optional[UUID] = None
 
@@ -818,9 +852,11 @@ async def search_users(
     """Search for users to start a conversation with.
 
     Same-company users are matched by name or email substring.
-    Cross-company users are only matched by exact email address.
+    Cross-company users are only matched by exact email address — except for
+    employees (Matcha Schedule), who stay inside their own company.
     Platform admins keep the old global substring search.
     """
+    same_company_only = current_user.role == "employee"
     async with get_connection() as conn:
         search_pattern = f"%{q}%"
 
@@ -873,7 +909,10 @@ async def search_users(
                 WHERE u.id != $1
                   AND u.is_active = true
                   AND (
-                    lower(u.email) = lower($3)
+                    (
+                      lower(u.email) = lower($3)
+                      AND (NOT $5::bool OR ($4::uuid IS NOT NULL AND COALESCE(c.company_id, e.org_id) = $4))
+                    )
                     OR (
                       $4::uuid IS NOT NULL
                       AND COALESCE(c.company_id, e.org_id) = $4
@@ -892,6 +931,7 @@ async def search_users(
                 search_pattern,
                 q,
                 caller_company_id,
+                same_company_only,
             )
 
         return [

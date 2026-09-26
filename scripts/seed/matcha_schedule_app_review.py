@@ -102,7 +102,12 @@ def undo_sql() -> str:
             [
                 f"DELETE FROM inbox_email_batches WHERE sender_id IN ({user_ids}) OR recipient_id IN ({user_ids});",
                 f"DELETE FROM inbox_messages WHERE sender_id IN ({user_ids});",
-                f"DELETE FROM inbox_conversations WHERE created_by IN ({user_ids});",
+                # Only conversations made of demo users: a DM the reviewer
+                # started with a real account by exact email must survive undo.
+                f"DELETE FROM inbox_conversations WHERE created_by IN ({user_ids}) "
+                "AND NOT EXISTS (SELECT 1 FROM inbox_participants p "
+                "WHERE p.conversation_id = inbox_conversations.id "
+                f"AND p.user_id NOT IN ({user_ids}));",
                 f"DELETE FROM inbox_participants WHERE user_id IN ({user_ids});",
                 f"DELETE FROM schedule_audit_log WHERE company_id = '{COMPANY}';",
                 f"DELETE FROM companies WHERE id = '{COMPANY}' AND name = '{TAG} Review Cafe' AND is_test = TRUE;",

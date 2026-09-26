@@ -7,10 +7,19 @@ processes those rows after commit; its recovery sweep finds broker misses.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
 from app.core.services import apns_service
+
+logger = logging.getLogger(__name__)
+
+# A row that keeps failing (transient DB/APNs trouble) is parked after this
+# many sweeps; a row that can never render (unknown event type) is parked on
+# the first. Either way the queue behind it keeps moving and the sweep stops
+# raising on it forever.
+MAX_DELIVERY_ATTEMPTS = 5
 
 
 def wall_time(value: datetime | str | None) -> str | None:
@@ -149,10 +158,26 @@ async def deliver_one(conn, delivery_id: UUID) -> bool:
         return True
 
 
+async def _record_failure(conn, delivery_id: UUID, exc: Exception) -> None:
+    """Bump the attempt counter outside deliver_one's rolled-back transaction;
+    park the row once it is hopeless."""
+    permanent = isinstance(exc, ValueError)  # unknown event / unrenderable payload
+    await conn.execute(
+        """UPDATE schedule_employee_notification_deliveries
+           SET attempts = attempts + 1,
+               failed_at = CASE WHEN $3 OR attempts + 1 >= $2 THEN NOW() ELSE failed_at END
+           WHERE id = $1""",
+        delivery_id, MAX_DELIVERY_ATTEMPTS, permanent,
+    )
+    logger.warning("employee schedule delivery %s failed (%s): %s",
+                   delivery_id, "parked" if permanent else "will retry", exc)
+
+
 async def deliver_pending(conn, *, limit: int = 500) -> dict[str, int]:
     rows = await conn.fetch(
         """SELECT id FROM schedule_employee_notification_deliveries
-           WHERE sent_at IS NULL ORDER BY created_at, id LIMIT $1""",
+           WHERE sent_at IS NULL AND failed_at IS NULL
+           ORDER BY created_at, id LIMIT $1""",
         limit,
     )
     sent = 0
@@ -162,6 +187,7 @@ async def deliver_pending(conn, *, limit: int = 500) -> dict[str, int]:
             sent += int(await deliver_one(conn, row["id"]))
         except Exception as exc:
             # One bad delivery must not hold the entire queue behind it.
+            await _record_failure(conn, row["id"], exc)
             if first_error is None:
                 first_error = exc
     if first_error is not None:

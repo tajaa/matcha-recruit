@@ -20,6 +20,10 @@ final class AppState {
     var pendingConversationID: String?
     private var pendingURL: URL?
 
+    /// Keychain items outlive an uninstall. Without this a reinstall would
+    /// silently restore the previous user's session on a shared phone.
+    static let hasLaunchedKey = "schedule.hasLaunched"
+
     init() {
         APIClient.shared.onUnauthorized = { [weak self] in
             AuthService.shared.clearLocalSession()
@@ -27,7 +31,17 @@ final class AppState {
         }
     }
 
+    static func purgeKeychainOnFirstLaunch(defaults: UserDefaults = .standard) -> Bool {
+        guard !defaults.bool(forKey: hasLaunchedKey) else { return false }
+        KeychainHelper.Keys.all.forEach { KeychainHelper.delete(key: $0) }
+        APIClient.shared.accessToken = nil
+        defaults.set(true, forKey: hasLaunchedKey)
+        return true
+    }
+
     func restore() async {
+        _ = Self.purgeKeychainOnFirstLaunch()
+        await AuthService.shared.flushPendingRevoke()
         guard AuthService.shared.hasStoredSession else {
             phase = .signedOut
             return
@@ -53,15 +67,15 @@ final class AppState {
         try await loadProfile()
     }
 
-    func signOut() async throws {
-        do {
-            try await PushService.shared.unregister()
-            try await AuthService.shared.logout()
-            clearUserState()
-        } catch {
-            await PushService.shared.register()
-            throw error
-        }
+    /// Never fails. Unregister the push token first (it needs the live access
+    /// token), then revoke the device session — the server also drops every
+    /// token bound to that session, and receives ours explicitly in case it
+    /// was registered before the binding existed. Offline: local state is
+    /// cleared anyway and the revoke is queued (see AuthService.logout).
+    func signOut() async {
+        try? await PushService.shared.unregister()
+        await AuthService.shared.logout(pushToken: PushService.shared.currentToken)
+        clearUserState()
     }
 
     func handlePush(_ payload: [AnyHashable: Any]) {
@@ -94,12 +108,16 @@ final class AppState {
         if let count = try? await notices { unreadNotifications = count }
     }
 
-    private func clearUserState() {
+    /// Everything tied to the signed-in person, including a push or link
+    /// tapped while signed out: it must not route whoever signs in next.
+    func clearUserState() {
         phase = .signedOut
         currentUserID = nil
         unreadMessages = 0
         unreadNotifications = 0
         pendingConversationID = nil
+        pendingURL = nil
+        AppDelegate.pendingNotification = nil
     }
 
     private func loadProfile() async throws {

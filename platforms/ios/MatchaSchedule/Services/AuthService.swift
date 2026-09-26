@@ -12,16 +12,23 @@ private struct RefreshBody: Encodable {
     let refresh_token: String
 }
 
+private struct LogoutBody: Encodable {
+    let refresh_token: String
+    let push_token: String?
+}
+
 enum SessionError: LocalizedError {
     case noStoredSession
     case storageFailed
     case employeeOnly
+    case invalidCredentials(String)
 
     var errorDescription: String? {
         switch self {
         case .noStoredSession: "Please sign in again."
         case .storageFailed: "Could not save the session securely. Please try again."
         case .employeeOnly: "This app is for employees. Use Matcha on the web for other roles."
+        case .invalidCredentials(let message): message
         }
     }
 }
@@ -37,11 +44,18 @@ final class AuthService {
     }
 
     func login(email: String, password: String) async throws -> AuthUser {
-        let response: TokenResponse = try await APIClient.shared.request(
-            method: "POST", path: "/auth/login",
-            body: LoginBody(email: email, password: password, device_name: UIDevice.current.name),
-            retryOnUnauthorized: false
-        )
+        let response: TokenResponse
+        do {
+            response = try await APIClient.shared.request(
+                method: "POST", path: "/auth/login",
+                body: LoginBody(email: email, password: password, device_name: UIDevice.current.name),
+                retryOnUnauthorized: false, credentialExchange: true
+            )
+        } catch APIError.httpError(401, let message) {
+            // The server's own wording ("Invalid email or password"), not the
+            // session-expired copy.
+            throw SessionError.invalidCredentials(message)
+        }
         guard response.user.role == "employee" else { throw SessionError.employeeOnly }
         try store(response)
         return response.user
@@ -62,17 +76,46 @@ final class AuthService {
         }
     }
 
-    func logout() async throws {
+    /// Sign out always succeeds locally. On a shared or handed-off phone with
+    /// no signal the employee must still be able to leave; the server-side
+    /// revoke is queued and flushed on the next launch (`flushPendingRevoke`).
+    /// Any non-network failure means the session is already dead server-side.
+    func logout(pushToken: String? = nil) async {
         guard let token = KeychainHelper.load(key: KeychainHelper.Keys.refreshToken) else {
             clearLocalSession()
             return
         }
-        // Keep credentials if the revoke request fails: the user can retry.
-        _ = try await APIClient.shared.requestData(
-            method: "POST", path: "/auth/mobile/logout",
-            body: RefreshBody(refresh_token: token)
-        )
+        do {
+            _ = try await APIClient.shared.requestData(
+                method: "POST", path: "/auth/mobile/logout",
+                body: LogoutBody(refresh_token: token, push_token: pushToken), retryOnUnauthorized: false
+            )
+        } catch {
+            if Self.isNetworkFailure(error) {
+                KeychainHelper.save(key: KeychainHelper.Keys.pendingRevoke, value: token)
+            }
+        }
         clearLocalSession()
+    }
+
+    /// Best-effort delivery of a revoke that could not be sent at sign-out.
+    func flushPendingRevoke() async {
+        guard let token = KeychainHelper.load(key: KeychainHelper.Keys.pendingRevoke) else { return }
+        do {
+            _ = try await APIClient.shared.requestData(
+                method: "POST", path: "/auth/mobile/logout",
+                body: LogoutBody(refresh_token: token, push_token: nil), retryOnUnauthorized: false
+            )
+        } catch {
+            if Self.isNetworkFailure(error) { return }  // keep it for next time
+        }
+        KeychainHelper.delete(key: KeychainHelper.Keys.pendingRevoke)
+    }
+
+    nonisolated static func isNetworkFailure(_ error: Error) -> Bool {
+        if case APIError.networkUnavailable = error { return true }
+        if case APIError.serviceUnavailable = error { return true }
+        return error is URLError
     }
 
     func clearLocalSession() {

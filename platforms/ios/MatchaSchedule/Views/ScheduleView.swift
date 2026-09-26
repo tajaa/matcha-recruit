@@ -8,6 +8,8 @@ private enum SchedulePage: String, CaseIterable {
 struct ScheduleView: View {
     let profile: EmployeeProfile
     @State private var week = WallClock.weekStart(containing: WallClock.today())
+    /// Learned from the store on first load; until then Sunday.
+    @State private var weekStartWeekday = 0
     @State private var page: SchedulePage = .mine
     @State private var snapshot: ScheduleSnapshot?
     @State private var selectedShift: ScheduleShift?
@@ -86,7 +88,7 @@ struct ScheduleView: View {
         .navigationTitle("Schedule")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Today") { week = WallClock.weekStart(containing: WallClock.today()) }
+                Button("Today") { week = WallClock.weekStart(containing: WallClock.today(), weekStartWeekday: weekStartWeekday) }
             }
         }
         .refreshable { await reload() }
@@ -107,7 +109,16 @@ struct ScheduleView: View {
     private func reload() async {
         loading = true
         error = nil
-        do { snapshot = try await ScheduleService.load(week: week) }
+        do {
+            let loaded = try await ScheduleService.load(week: week)
+            snapshot = loaded
+            if loaded.weekStartWeekday != weekStartWeekday {
+                // A Monday-start store: realign the page so a week is not
+                // split across two screens. Changing `week` re-runs the task.
+                weekStartWeekday = loaded.weekStartWeekday
+                week = WallClock.weekStart(containing: week, weekStartWeekday: loaded.weekStartWeekday)
+            }
+        }
         catch { self.error = error.localizedDescription }
         loading = false
     }

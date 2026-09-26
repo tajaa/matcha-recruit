@@ -11,6 +11,8 @@ final class PushService {
     private(set) var lastError: String?
     private(set) var isRegistered = false
     private var deviceToken: String? = KeychainHelper.load(key: KeychainHelper.Keys.pushToken)
+    /// The APNs token this device last registered, if any.
+    var currentToken: String? { deviceToken }
 
     private struct RegisterBody: Encodable {
         let token: String

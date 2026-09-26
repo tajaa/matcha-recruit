@@ -61,7 +61,72 @@ async def test_non_admin_search_scopes_to_company_and_exact_cross_tenant_email()
     assert "COALESCE(c.company_id, e.org_id) = $4" in sql
     # Exact-email cross-tenant branch present
     assert "lower(u.email) = lower($3)" in sql
-    assert params == [user.id, "%jane%", "jane", caller_company_id]
+    assert params == [user.id, "%jane%", "jane", caller_company_id, False]
+
+
+@pytest.mark.asyncio
+async def test_employee_search_never_leaves_its_company():
+    """Matcha Schedule employees get no cross-company exact-email match."""
+    from app.werk.routes.inbox import search_users
+
+    user = _user(role="employee")
+    caller_company_id = uuid4()
+    conn = AsyncMock()
+    conn.fetchval.return_value = caller_company_id
+    conn.fetch.return_value = []
+
+    with patch(f"{MOD}.get_connection", _conn_ctx(conn)):
+        await search_users(q="someone@example.com", current_user=user)
+
+    sql, *params = conn.fetch.await_args.args
+    assert "NOT $5::bool OR ($4::uuid IS NOT NULL AND COALESCE(c.company_id, e.org_id) = $4)" in sql
+    assert params[-1] is True
+
+
+@pytest.mark.asyncio
+async def test_employee_cannot_open_a_conversation_outside_its_company():
+    from app.werk.routes.inbox import create_conversation
+    from fastapi import HTTPException
+
+    user = _user(role="employee")
+    stranger = uuid4()
+    conn = AsyncMock()
+    conn.fetch.return_value = [{"id": stranger}]      # the user exists and is active
+    conn.fetchval.return_value = 1                    # …but not in the caller's company
+    conn.transaction = MagicMock()
+
+    with patch(f"{MOD}.get_connection", _conn_ctx(conn)):
+        with pytest.raises(HTTPException) as exc:
+            await create_conversation(
+                participant_ids=f'["{stranger}"]', message="hi", title=None, files=[],
+                current_user=user,
+            )
+    assert exc.value.status_code == 403
+    sql, *params = conn.fetchval.await_args.args
+    assert "COALESCE(c.company_id, e.org_id) = caller.company_id" in sql
+    assert params == [user.id, [stranger]]
+    conn.transaction.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_business_user_conversation_skips_the_employee_company_gate():
+    from app.werk.routes.inbox import create_conversation
+
+    user = _user(role="client")
+    other = uuid4()
+    conn = AsyncMock()
+    conn.fetch.return_value = [{"id": other}]
+    conn.fetchval.return_value = None
+    # Stop at the transaction: the gate under test runs before it.
+    conn.transaction = MagicMock(side_effect=RuntimeError("stop"))
+
+    with patch(f"{MOD}.get_connection", _conn_ctx(conn)):
+        with pytest.raises(RuntimeError, match="stop"):
+            await create_conversation(
+                participant_ids=f'["{other}"]', message="hi", title=None, files=[],
+                current_user=user,
+            )
+    conn.fetchval.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -102,4 +167,4 @@ async def test_non_admin_with_no_company_still_matches_exact_email_only():
 
     sql, *params = conn.fetch.await_args.args
     assert "$4::uuid IS NOT NULL" in sql
-    assert params[-1] is None
+    assert params[-2] is None  # caller company; params[-1] is the employee-only flag

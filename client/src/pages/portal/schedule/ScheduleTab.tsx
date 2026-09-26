@@ -76,6 +76,9 @@ export default function ScheduleTab({
       onChanged()
     } catch (err) {
       toast(errorMessage(err), 'error')
+      // A 409 means the seat changed under us (filled, started, already
+      // claimed): reload so the stale card does not stay claimable.
+      onChanged()
     } finally {
       setClaiming(null)
     }
