@@ -22,7 +22,46 @@ def _load(name: str):
 
 backup = _load("backup-integrity")
 schema = _load("schema-drift")
+schema_watchdog = _load("schema-run-watchdog")
 NOW = datetime(2026, 8, 25, 21, 17, tzinfo=UTC)
+
+
+def _schema_run(age_hours: int, status: str = "completed", conclusion: str | None = "success") -> dict:
+    return {
+        "created_at": (NOW - timedelta(hours=age_hours)).isoformat(),
+        "status": status,
+        "conclusion": conclusion,
+        "html_url": "https://github.com/tajaa/matcha-recruit/actions/runs/123",
+    }
+
+
+def test_schema_watchdog_accepts_recent_success():
+    report = schema_watchdog.assess_runs({"workflow_runs": [_schema_run(16)]}, NOW)
+    assert report["status"] == "healthy"
+
+
+def test_schema_watchdog_detects_stuck_queue_even_after_previous_success():
+    report = schema_watchdog.assess_runs(
+        {"workflow_runs": [_schema_run(5, "queued", None), _schema_run(20)]}, NOW
+    )
+    assert report["status"] == "unhealthy"
+    assert "queued after 5.0 hours" in report["reason"]
+
+
+def test_schema_watchdog_detects_missing_scheduled_run():
+    report = schema_watchdog.assess_runs({"workflow_runs": [_schema_run(28)]}, NOW)
+    assert report["status"] == "unhealthy"
+    assert "28.0 hours old" in report["reason"]
+
+
+def test_schema_watchdog_detects_failed_run():
+    report = schema_watchdog.assess_runs({"workflow_runs": [_schema_run(1, conclusion="failure")]}, NOW)
+    assert report["status"] == "unhealthy"
+
+
+def test_schema_watchdog_allows_newly_queued_run():
+    report = schema_watchdog.assess_runs({"workflow_runs": [_schema_run(1, "queued", None)]}, NOW)
+    assert report["status"] == "healthy"
 
 
 def _backup(age_hours: int = 1, size: int = 2 * 1024**2) -> dict:

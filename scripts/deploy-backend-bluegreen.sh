@@ -30,7 +30,7 @@ set -u
 set +a
 
 AWS_REGION="${AWS_REGION:-us-west-1}"
-IMAGE="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/matcha-backend:latest"
+IMAGE="${1:-${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/matcha-backend:latest}"
 ACTIVE_CONF=/etc/nginx/upstream/matcha-backend-active.conf
 # Stable anchor for network name — never blue-green'd, name never changes.
 NETWORK=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' matcha-redis)

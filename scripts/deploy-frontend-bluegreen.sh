@@ -28,7 +28,7 @@ set -u
 set +a
 
 AWS_REGION="${AWS_REGION:-us-west-1}"
-IMAGE="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/matcha-frontend:latest"
+IMAGE="${1:-${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/matcha-frontend:latest}"
 ACTIVE_CONF=/etc/nginx/upstream/matcha-frontend-active.conf
 # Derive the compose network name from a container that's never blue-greened
 # (so its name never changes) rather than guessing the "<project>_<network>"
