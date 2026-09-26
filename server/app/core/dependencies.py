@@ -83,7 +83,7 @@ async def get_token_payload(
     from .services.auth import decode_token
 
     token = credentials.credentials
-    payload = decode_token(token, expected_type="access")
+    payload = decode_token(token, expected_type="access", allow_mobile_access=True)
 
     if payload is None:
         raise HTTPException(
@@ -91,6 +91,23 @@ async def get_token_payload(
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    if payload.sid:
+        async with get_connection() as conn:
+            active = await conn.fetchval(
+                """SELECT EXISTS (
+                       SELECT 1 FROM auth_device_sessions
+                        WHERE id = $1 AND user_id = $2
+                          AND client = 'ios_schedule' AND revoked_at IS NULL
+                   )""",
+                UUID(payload.sid), UUID(payload.sub),
+            )
+        if not active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Mobile session has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
     return payload
 

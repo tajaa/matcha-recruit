@@ -116,8 +116,6 @@ class Settings:
     jwt_refresh_token_expire_days: int = 7
     jwt_refresh_idle_expire_minutes: int = 30
     jwt_session_absolute_expire_hours: int = 12
-    mobile_refresh_idle_days: int = 30
-    mobile_refresh_absolute_days: int = 90
 
     # Chat System Auth (separate from main app)
     chat_jwt_secret_key: str = ""
@@ -407,8 +405,6 @@ def load_settings() -> Settings:
         jwt_refresh_token_expire_days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7")),
         jwt_refresh_idle_expire_minutes=int(os.getenv("JWT_REFRESH_IDLE_EXPIRE_MINUTES", "30")),
         jwt_session_absolute_expire_hours=int(os.getenv("JWT_SESSION_ABSOLUTE_EXPIRE_HOURS", "12")),
-        mobile_refresh_idle_days=int(os.getenv("MOBILE_REFRESH_IDLE_DAYS", "30")),
-        mobile_refresh_absolute_days=int(os.getenv("MOBILE_REFRESH_ABSOLUTE_DAYS", "90")),
         chat_jwt_secret_key=chat_jwt_secret_key,
         chat_jwt_access_token_expire_minutes=int(os.getenv("CHAT_JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440")),
         chat_jwt_refresh_token_expire_days=int(os.getenv("CHAT_JWT_REFRESH_TOKEN_EXPIRE_DAYS", "30")),

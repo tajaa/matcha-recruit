@@ -1,18 +1,19 @@
 """Matcha Schedule device sessions stay separate from ordinary web sessions."""
 
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
 from starlette.requests import Request
 
+from app.core import dependencies
 from app.core.models.auth import LoginRequest, RefreshTokenRequest
 from app.core.routes.auth import login as login_routes
 from app.core.services import auth, session_tokens
-from app.core.services.session_tokens import SessionLifetimes
 
 
 def _settings():
@@ -23,8 +24,6 @@ def _settings():
         jwt_refresh_token_expire_days=7,
         jwt_refresh_idle_expire_minutes=30,
         jwt_session_absolute_expire_hours=12,
-        mobile_refresh_idle_days=30,
-        mobile_refresh_absolute_days=90,
     )
 
 
@@ -63,6 +62,8 @@ class _Connection:
         raise AssertionError(query)
 
     async def fetchval(self, query, *args):
+        if "SELECT EXISTS" in query and "auth_device_sessions" in query:
+            return args == (self.sid, self.user_id) and not self.revoked
         assert "UPDATE auth_device_sessions" in query
         self.device_updates += 1
         return self.sid if args[0] == self.sid and not self.revoked \
@@ -96,6 +97,7 @@ def route_env(monkeypatch):
         return False
 
     monkeypatch.setattr(login_routes, "get_connection", get_connection)
+    monkeypatch.setattr(dependencies, "get_connection", get_connection)
     monkeypatch.setattr(login_routes, "verify_password_async", verify_password)
     monkeypatch.setattr(login_routes, "_touch_user_last_login", touch)
     monkeypatch.setattr(login_routes, "session_revoked", not_revoked)
@@ -103,22 +105,6 @@ def route_env(monkeypatch):
     for module in (login_routes, auth, session_tokens):
         monkeypatch.setattr(module, "get_settings", _settings)
     return conn
-
-
-def test_mobile_lifetime_allows_29_days_but_not_31_or_91():
-    lifetime = SessionLifetimes(30 * 1440, 90 * 1440)
-    now = datetime(2026, 9, 23, tzinfo=timezone.utc)
-    start = int((now - timedelta(days=89)).timestamp())
-    assert not session_tokens.refresh_session_expired(
-        int((now - timedelta(days=29)).timestamp()), start, now=now, lifetimes=lifetime
-    )
-    assert session_tokens.refresh_session_expired(
-        int((now - timedelta(days=31)).timestamp()), start, now=now, lifetimes=lifetime
-    )
-    assert session_tokens.refresh_session_expired(
-        int((now - timedelta(days=1)).timestamp()),
-        int((now - timedelta(days=91)).timestamp()), now=now, lifetimes=lifetime,
-    )
 
 
 @pytest.mark.asyncio
@@ -131,15 +117,28 @@ async def test_mobile_login_refresh_and_device_only_logout(route_env):
     payload = auth.decode_token(result.refresh_token, expected_type="refresh")
     assert payload.sid == str(conn.sid)
     assert payload.cl == "ios_schedule"
+    assert payload.exp - payload.session_started_at <= 12 * 3600
     assert conn.device_updates == 0
+    access = HTTPAuthorizationCredentials(scheme="Bearer", credentials=result.access_token)
+    assert auth.decode_token(result.access_token, expected_type="access") is None
+    assert (await dependencies.get_token_payload(access)).sid == str(conn.sid)
 
     rotated = await login_routes.refresh_token(RefreshTokenRequest(refresh_token=result.refresh_token))
     rotated_payload = auth.decode_token(rotated.refresh_token, expected_type="refresh")
     assert rotated_payload.sid == payload.sid
     assert rotated_payload.session_started_at == payload.session_started_at
+    assert rotated_payload.exp - payload.session_started_at <= 12 * 3600
     assert conn.device_updates == 1
+    rotated_access = HTTPAuthorizationCredentials(scheme="Bearer", credentials=rotated.access_token)
+    assert (await dependencies.get_token_payload(rotated_access)).sid == str(conn.sid)
 
     await login_routes.mobile_logout(RefreshTokenRequest(refresh_token=rotated.refresh_token))
+    with pytest.raises(HTTPException) as access_error:
+        await dependencies.get_token_payload(access)
+    assert access_error.value.status_code == 401
+    with pytest.raises(HTTPException) as access_error:
+        await dependencies.get_token_payload(rotated_access)
+    assert access_error.value.status_code == 401
     with pytest.raises(HTTPException) as error:
         await login_routes.refresh_token(RefreshTokenRequest(refresh_token=rotated.refresh_token))
     assert error.value.status_code == 401
@@ -153,6 +152,26 @@ async def test_mobile_login_refresh_and_device_only_logout(route_env):
 
 
 @pytest.mark.asyncio
+async def test_refresh_locks_user_row_before_revocation_check(route_env):
+    conn = route_env
+    result = await login_routes.login(
+        LoginRequest(email="employee@example.com", password="password", client="ios_schedule"),
+        _request(),
+    )
+    original_fetchrow = conn.fetchrow
+
+    async def fetchrow(query, *args):
+        if "FROM users WHERE id = $1" in query:
+            assert "FOR UPDATE OF users" in query
+        return await original_fetchrow(query, *args)
+
+    conn.fetchrow = fetchrow
+    assert (await login_routes.refresh_token(
+        RefreshTokenRequest(refresh_token=result.refresh_token)
+    )).refresh_token
+
+
+@pytest.mark.asyncio
 async def test_mobile_login_rejects_business_user_and_inactive_employee(route_env):
     conn = route_env
     request = LoginRequest(email="employee@example.com", password="password", client="ios_schedule")
@@ -162,6 +181,7 @@ async def test_mobile_login_rejects_business_user_and_inactive_employee(route_en
     assert error.value.status_code == 403
     assert conn.sid is None
 
+    conn.role = "employee"
     conn.employment_status = "active"
     conn.employee_missing = True
     with pytest.raises(HTTPException) as error:
@@ -169,7 +189,7 @@ async def test_mobile_login_rejects_business_user_and_inactive_employee(route_en
     assert error.value.status_code == 403
     assert conn.sid is None
 
-    conn.role = "employee"
+    conn.employee_missing = False
     conn.employment_status = "terminated"
     with pytest.raises(HTTPException) as error:
         await login_routes.login(request, _request())

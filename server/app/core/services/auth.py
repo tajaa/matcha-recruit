@@ -40,10 +40,15 @@ def create_access_token(
     user_id: UUID,
     email: str,
     role: UserRole,
-    expires_delta: Optional[timedelta] = None
+    expires_delta: Optional[timedelta] = None,
+    *,
+    extra_claims: Optional[dict[str, str]] = None,
 ) -> str:
     """Create a JWT access token."""
     settings = get_settings()
+    extra_claims = extra_claims or {}
+    if set(extra_claims) - {"sid", "cl"}:
+        raise ValueError("Unrecognized access token claims")
 
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
@@ -60,7 +65,8 @@ def create_access_token(
         # Whole-second `iat` cannot distinguish a token minted just before a
         # logout from one minted just after it. See token_predates_watermark.
         "iat_ms": issue_stamp_ms(issued_at),
-        "type": "access"
+        "type": "access",
+        **extra_claims,
     }
 
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
@@ -169,7 +175,12 @@ def decode_email_verify_token(token: str) -> Optional[dict]:
         return None
 
 
-def decode_token(token: str, expected_type: Optional[str] = None) -> Optional[TokenPayload]:
+def decode_token(
+    token: str,
+    expected_type: Optional[str] = None,
+    *,
+    allow_mobile_access: bool = False,
+) -> Optional[TokenPayload]:
     """Decode and validate a JWT token.
 
     Args:
@@ -193,6 +204,15 @@ def decode_token(token: str, expected_type: Optional[str] = None) -> Optional[To
             return None
         if token_type == "access" and access_token_stale(payload.get("iat")):
             return None
+        if token_type == "access" and ("sid" in payload or "cl" in payload):
+            # Callers that only decode a JWT (WebSockets, telemetry) cannot
+            # check device revocation. Only the bearer dependency does that.
+            if not allow_mobile_access or payload.get("cl") != "ios_schedule" or payload.get("role") != "employee":
+                return None
+            try:
+                UUID(payload["sid"])
+            except (KeyError, TypeError, ValueError):
+                return None
 
         return TokenPayload(
             sub=payload["sub"],

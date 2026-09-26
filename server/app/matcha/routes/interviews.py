@@ -393,7 +393,7 @@ async def interview_websocket(
                 return
         else:
             is_practice = False
-            user_payload = decode_token(token)
+            user_payload = decode_token(token, expected_type="access")
             if not user_payload:
                 await websocket.close(code=4001, reason="Invalid or expired token")
                 return

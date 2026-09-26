@@ -45,7 +45,7 @@ from app.core.feature_flags import (
 )
 from app.core.services.platform_settings import get_visible_features
 from app.core.services.redis_cache import check_rate_limit, client_ip
-from app.core.services.session_tokens import SessionLifetimes, refresh_session_expired
+from app.core.services.session_tokens import refresh_session_expired
 from app.matcha.services.scheduling.schedule_rules import INACTIVE_EMPLOYMENT_STATUSES
 from app.config import get_settings
 
@@ -58,13 +58,6 @@ _LOGIN_MINUTE_WINDOW = 60  # seconds
 _LOGIN_HOUR_LIMIT = 40
 _LOGIN_HOUR_WINDOW = 3600  # seconds
 _login_attempts: dict[str, list[float]] = defaultdict(list)
-
-
-def _mobile_lifetimes(settings) -> SessionLifetimes:
-    return SessionLifetimes(
-        settings.mobile_refresh_idle_days * 1440,
-        settings.mobile_refresh_absolute_days * 1440,
-    )
 
 
 def _mobile_session_id(payload: TokenPayload) -> UUID:
@@ -187,12 +180,14 @@ async def login(request: LoginRequest, req: Request):
         asyncio.create_task(_touch_user_last_login(user["id"]))
 
         settings = get_settings()
-        access_token = create_access_token(user["id"], user["email"], user["role"])
+        access_token = create_access_token(
+            user["id"], user["email"], user["role"],
+            extra_claims={"sid": str(mobile_sid), "cl": "ios_schedule"} if mobile_sid else None,
+        )
         if mobile_sid:
             refresh_token = create_refresh_token(
                 user["id"], user["email"], user["role"],
                 extra_claims={"sid": str(mobile_sid), "cl": "ios_schedule"},
-                lifetimes=_mobile_lifetimes(settings),
             )
         else:
             refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
@@ -237,7 +232,8 @@ async def refresh_token(request: RefreshTokenRequest):
                                AND comp.is_personal = false
                              LIMIT 1
                           ) AS company_name
-                     FROM users WHERE id = $1""",
+                     FROM users WHERE id = $1
+                     FOR UPDATE OF users""",
                 payload.sub
             )
 
@@ -251,10 +247,7 @@ async def refresh_token(request: RefreshTokenRequest):
             if mobile_sid and (user["role"] != "employee" or user["is_suspended"]):
                 raise HTTPException(status_code=401, detail="Invalid mobile session")
             settings = get_settings()
-            if refresh_session_expired(
-                payload.iat, payload.session_started_at,
-                lifetimes=_mobile_lifetimes(settings) if mobile_sid else None,
-            ):
+            if refresh_session_expired(payload.iat, payload.session_started_at):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Session expired. Please log in again.",
@@ -286,12 +279,14 @@ async def refresh_token(request: RefreshTokenRequest):
                 if not active_sid:
                     raise HTTPException(status_code=401, detail="Mobile session revoked or employee inactive")
 
-            access_token = create_access_token(user["id"], user["email"], user["role"])
+            access_token = create_access_token(
+                user["id"], user["email"], user["role"],
+                extra_claims={"sid": str(mobile_sid), "cl": "ios_schedule"} if mobile_sid else None,
+            )
             new_refresh_token = create_refresh_token(
                 user["id"], user["email"], user["role"],
                 session_started_at=payload.session_started_at or payload.iat,
                 extra_claims={"sid": str(mobile_sid), "cl": "ios_schedule"} if mobile_sid else None,
-                lifetimes=_mobile_lifetimes(settings) if mobile_sid else None,
             )
 
             return TokenResponse(
