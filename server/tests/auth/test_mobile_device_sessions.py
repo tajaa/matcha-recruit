@@ -42,17 +42,31 @@ class _Connection:
         self.sid = None
         self.revoked = False
         self.device_updates = 0
+        self.generation = 0
+        self.company_deleted_at = None
+        self.executed: list[tuple[str, tuple]] = []
 
     @asynccontextmanager
     async def transaction(self):
         yield self
 
     async def fetchrow(self, query, *args):
+        if "UPDATE auth_device_sessions" in query:
+            # Compare-and-swap rotation: the presented generation must match.
+            assert "refresh_generation = $4" in query
+            sid, user_id, _inactive, presented = args
+            self.device_updates += 1
+            if sid != self.sid or user_id != self.user_id or self.revoked \
+                    or self.employment_status in ("terminated", "offboarded") \
+                    or presented != self.generation:
+                return None
+            self.generation += 1
+            return {"id": self.sid, "refresh_generation": self.generation}
         if "FROM users" in query or "FROM users u" in query:
             return {
                 "id": self.user_id, "email": "employee@example.com", "password_hash": "unused",
                 "role": self.role, "is_active": True, "is_suspended": self.suspended,
-                "company_deleted_at": None, "company_name": None,
+                "company_deleted_at": self.company_deleted_at, "company_name": None,
                 "created_at": datetime.now(timezone.utc), "last_login": None,
             }
         if "FROM employees" in query:
@@ -64,17 +78,23 @@ class _Connection:
     async def fetchval(self, query, *args):
         if "SELECT EXISTS" in query and "auth_device_sessions" in query:
             return args == (self.sid, self.user_id) and not self.revoked
-        assert "UPDATE auth_device_sessions" in query
-        self.device_updates += 1
-        return self.sid if args[0] == self.sid and not self.revoked \
-            and self.employment_status not in ("terminated", "offboarded") else None
+        raise AssertionError(query)
 
     async def execute(self, query, *args):
+        self.executed.append((query, args))
         if "INSERT INTO auth_device_sessions" in query:
             self.sid = args[0]
         elif "UPDATE auth_device_sessions SET revoked_at" in query:
-            assert args == (self.sid, self.user_id)
-            self.revoked = True
+            if "refresh_generation <> $3" in query:
+                # Replay revoke: only fires when the generation really moved on.
+                assert args[:2] == (self.sid, self.user_id)
+                if args[2] != self.generation:
+                    self.revoked = True
+            else:
+                assert args == (self.sid, self.user_id)
+                self.revoked = True
+        elif "UPDATE users SET tokens_valid_after" in query:
+            return None
         else:
             raise AssertionError(query)
 
@@ -237,3 +257,78 @@ async def test_web_refresh_has_no_device_session_dependency(route_env):
     with pytest.raises(HTTPException) as error:
         await login_routes.mobile_logout(RefreshTokenRequest(refresh_token=rotated.refresh_token))
     assert error.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_replayed_mobile_refresh_token_revokes_the_device(route_env):
+    conn = route_env
+    result = await login_routes.login(
+        LoginRequest(email="employee@example.com", password="password", client="ios_schedule"),
+        _request(),
+    )
+    first = auth.decode_token(result.refresh_token, expected_type="refresh")
+    assert first.gen == 0
+    rotated = await login_routes.refresh_token(RefreshTokenRequest(refresh_token=result.refresh_token))
+    assert auth.decode_token(rotated.refresh_token, expected_type="refresh").gen == 1
+    assert not conn.revoked
+
+    # Presenting the superseded token again is a replay: reject it AND revoke
+    # the session so the holder of the rotated token is cut off too.
+    with pytest.raises(HTTPException) as error:
+        await login_routes.refresh_token(RefreshTokenRequest(refresh_token=result.refresh_token))
+    assert error.value.status_code == 401
+    assert conn.revoked
+    assert any("refresh_generation <> $3" in q for q, _ in conn.executed)
+    with pytest.raises(HTTPException) as error:
+        await login_routes.refresh_token(RefreshTokenRequest(refresh_token=rotated.refresh_token))
+    assert error.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_mobile_refresh_token_without_generation_is_rejected(route_env):
+    conn = route_env
+    await login_routes.login(
+        LoginRequest(email="employee@example.com", password="password", client="ios_schedule"),
+        _request(),
+    )
+    legacy = auth.create_refresh_token(
+        conn.user_id, "employee@example.com", "employee",
+        extra_claims={"sid": str(conn.sid), "cl": "ios_schedule"},
+    )
+    with pytest.raises(HTTPException) as error:
+        await login_routes.refresh_token(RefreshTokenRequest(refresh_token=legacy))
+    assert error.value.status_code == 401
+    assert conn.device_updates == 0
+
+
+@pytest.mark.asyncio
+async def test_deactivated_company_blocks_employee_login_and_refresh(route_env):
+    conn = route_env
+    result = await login_routes.login(
+        LoginRequest(email="employee@example.com", password="password", client="ios_schedule"),
+        _request(),
+    )
+    conn.company_deleted_at = datetime.now(timezone.utc)
+    with pytest.raises(HTTPException) as error:
+        await login_routes.refresh_token(RefreshTokenRequest(refresh_token=result.refresh_token))
+    assert error.value.status_code == 401
+    assert conn.device_updates == 0
+    with pytest.raises(HTTPException) as error:
+        await login_routes.login(
+            LoginRequest(email="employee@example.com", password="password", client="ios_schedule"),
+            _request(),
+        )
+    assert error.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_global_revocation_watermark_is_stamped_at_write_time(route_env):
+    """NOW() is frozen at transaction start — before this UPDATE waits on the
+    row lock a concurrent refresh holds — so a refresh committing during the
+    wait would outlive the logout. The watermark must use clock_timestamp()."""
+    conn = route_env
+    await dependencies.revoke_user_sessions(conn, conn.user_id)
+    query, args = conn.executed[-1]
+    assert "tokens_valid_after = clock_timestamp()" in query
+    assert "NOW()" not in query
+    assert args == (conn.user_id,)

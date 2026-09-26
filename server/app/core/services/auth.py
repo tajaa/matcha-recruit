@@ -84,7 +84,7 @@ def create_refresh_token(
     """Create a JWT refresh token."""
     settings = get_settings()
     extra_claims = extra_claims or {}
-    if set(extra_claims) - {"sid", "cl"}:
+    if set(extra_claims) - {"sid", "cl", "gen"}:
         raise ValueError("Unrecognized refresh token claims")
     issued_at, started_at, expire = refresh_token_times(session_started_at, lifetimes=lifetimes)
 
@@ -225,6 +225,7 @@ def decode_token(
             token_type=token_type,
             sid=payload.get("sid"),
             cl=payload.get("cl"),
+            gen=payload.get("gen"),
         )
     except (JWTError, KeyError, TypeError, ValueError):
         return None

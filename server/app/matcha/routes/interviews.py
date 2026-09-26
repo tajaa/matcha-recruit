@@ -623,8 +623,6 @@ async def interview_websocket(
             await gemini_session.send_text(f"Please start the interview now. Say hello to {interviewer_name} and begin.")
 
         # Start response forwarding task
-        import asyncio
-
         async def forward_responses():
             async for response in gemini_session.receive_responses():
                 if response.type == "audio" and response.audio_data:

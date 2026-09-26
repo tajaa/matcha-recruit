@@ -55,6 +55,7 @@ class TokenPayload(BaseModel):
     token_type: Optional[str] = None  # "access" or "refresh"
     sid: Optional[str] = None  # mobile device session id
     cl: Optional[str] = None  # mobile client identifier
+    gen: Optional[int] = None  # mobile refresh generation; rotation is compare-and-swap
 
 
 class RefreshTokenRequest(BaseModel):

@@ -40,5 +40,5 @@ async def _prune_device_sessions() -> dict[str, int | bool]:
 
 @celery_app.task(name="auth.prune_device_sessions")
 def prune_device_sessions() -> dict[str, int | bool]:
-    """Run one bounded cleanup batch on each 15-minute worker restart."""
+    """Run one bounded cleanup batch on each hourly worker restart."""
     return asyncio.run(_prune_device_sessions())
