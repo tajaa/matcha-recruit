@@ -1,10 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
-import EspressoRoutes from './EspressoRoutes'
-import WorkRoutes from './WorkRoutes'
+import { MemoryRouter, useLocation } from 'react-router-dom'
+import App from '../../App'
 import { WorkSurfaceProvider, useWorkBase } from './WorkSurfaceContext'
-import { LegacySurfacePrefixRedirect } from '../pages/LegacySurfaceRedirect'
 
 const identity = vi.hoisted(() => ({ personal: true }))
 
@@ -36,11 +34,7 @@ function LocationMarker() {
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/werk/*" element={<LegacySurfacePrefixRedirect fromPrefix="/werk" toPrefix="/espresso" />} />
-        <Route path="/espresso/*" element={<EspressoRoutes />} />
-        <Route path="/work/*" element={<WorkRoutes />} />
-      </Routes>
+      <App />
       <LocationMarker />
     </MemoryRouter>,
   )

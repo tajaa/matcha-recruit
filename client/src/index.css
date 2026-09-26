@@ -31,10 +31,10 @@
   --color-sev-row-via: #2e2015;
   --color-sev-row-to: transparent;
 
-  /* Werk palette — black theme with a single warm-orange accent.
-     Mirrors the desktop Werk app's premium-minimal look (one restrained accent,
-     hairline borders, soft-elevated cards) in a near-black skin. Used across the
-     /work + /werk surface only; the rest of the app keeps its zinc palette. */
+  /* Workspace palette — black theme with a single warm-orange accent.
+     Mirrors the desktop Espresso app's premium-minimal look (one restrained
+     accent, hairline borders, soft-elevated cards) in a near-black skin. Used
+     across workspace surfaces; the rest of the app keeps its zinc palette. */
   --color-w-bg: #0A0A0B;
   --color-w-surface: #141416;
   --color-w-surface2: #1C1C20;
@@ -85,7 +85,7 @@ html[data-app-shell-bg="werk"] {
   background-color: var(--color-w-bg);
 }
 
-/* Soft top-anchored depth behind the Werk main pane — the web echo of the
+/* Soft top-anchored depth behind the workspace main pane — the web echo of the
    desktop app's ThemeRadialBackground. Deliberately subtle: it should read as
    depth, not as a visible gradient band. */
 .werk-radial {
@@ -95,7 +95,7 @@ html[data-app-shell-bg="werk"] {
 /* Thread-page-local light mode — independent of the app-wide `data-theme`
    toggle below. Thread light/dark is a separate per-thread preference (see
    `mw-chat-theme` in useThreadController.ts), applied as this class on the
-   chat pane root rather than on <html>, so it composes with the werk `w-*`
+   chat pane root rather than on <html>, so it composes with the workspace `w-*`
    tokens the thread interior consumes without touching the rest of the app. */
 .mw-light {
   --color-w-bg: #f7f7f8;
