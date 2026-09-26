@@ -64,10 +64,17 @@ async def session_revoked(
 
 async def revoke_user_sessions(conn, user_id) -> None:
     """Invalidate all of a user's existing access + refresh tokens by advancing
-    the watermark. Best-effort no-op (logged) until authsess01 is applied."""
+    the watermark. Best-effort no-op (logged) until authsess01 is applied.
+
+    ``clock_timestamp()`` (not ``NOW()``): ``NOW()`` is frozen at transaction
+    start, before this UPDATE waits on a row lock a concurrent refresh holds
+    (``FOR UPDATE OF users``). A refresh that commits during that wait would
+    mint tokens newer than a start-of-transaction watermark and survive the
+    logout. The wall clock at write time is always later than the lock holder's
+    mint time."""
     try:
         await conn.execute(
-            "UPDATE users SET tokens_valid_after = NOW() WHERE id = $1", user_id
+            "UPDATE users SET tokens_valid_after = clock_timestamp() WHERE id = $1", user_id
         )
     except asyncpg.UndefinedColumnError:
         logger.warning(
@@ -83,7 +90,7 @@ async def get_token_payload(
     from .services.auth import decode_token
 
     token = credentials.credentials
-    payload = decode_token(token, expected_type="access")
+    payload = decode_token(token, expected_type="access", allow_mobile_access=True)
 
     if payload is None:
         raise HTTPException(
@@ -91,6 +98,23 @@ async def get_token_payload(
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    if payload.sid:
+        async with get_connection() as conn:
+            active = await conn.fetchval(
+                """SELECT EXISTS (
+                       SELECT 1 FROM auth_device_sessions
+                        WHERE id = $1 AND user_id = $2
+                          AND client = 'ios_schedule' AND revoked_at IS NULL
+                   )""",
+                UUID(payload.sid), UUID(payload.sub),
+            )
+        if not active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Mobile session has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
     return payload
 
@@ -113,11 +137,18 @@ async def get_current_user(
                       COALESCE(u.interview_prep_tokens, 0) as interview_prep_tokens,
                       COALESCE(u.allowed_interview_roles, '[]'::jsonb) as allowed_interview_roles,
                       (
-                        SELECT MIN(c.deleted_at)
-                          FROM clients cl
-                          JOIN companies c ON c.id = cl.company_id
-                         WHERE cl.user_id = u.id
-                           AND c.deleted_at IS NOT NULL
+                        SELECT MIN(m.deleted_at) FROM (
+                          SELECT c.deleted_at
+                            FROM clients cl
+                            JOIN companies c ON c.id = cl.company_id
+                           WHERE cl.user_id = u.id
+                          UNION ALL
+                          SELECT c.deleted_at
+                            FROM employees e
+                            JOIN companies c ON c.id = e.org_id
+                           WHERE e.user_id = u.id
+                        ) AS m
+                         WHERE m.deleted_at IS NOT NULL
                       ) AS company_deleted_at
                  FROM users u
                 WHERE u.id = $1""",
@@ -176,7 +207,8 @@ async def get_current_user(
             profile=None,  # Profile loaded on demand
             beta_features=beta_features,
             interview_prep_tokens=user_row["interview_prep_tokens"],
-            allowed_interview_roles=allowed_roles
+            allowed_interview_roles=allowed_roles,
+            device_session_id=UUID(payload.sid) if payload.sid else None,
         )
 
 

@@ -111,9 +111,16 @@ async def test_failed_delivery_does_not_block_later_rows(monkeypatch):
     first, second = uuid4(), uuid4()
     seen = []
 
+    failures = []
+
     class Conn:
-        async def fetch(self, *_args):
+        async def fetch(self, query, *_args):
+            assert "failed_at IS NULL" in query
             return [{"id": first}, {"id": second}]
+
+        async def execute(self, query, *args):
+            assert "attempts = attempts + 1" in query
+            failures.append(args)
 
     async def deliver(_conn, delivery_id):
         seen.append(delivery_id)
@@ -125,6 +132,31 @@ async def test_failed_delivery_does_not_block_later_rows(monkeypatch):
     with pytest.raises(RuntimeError, match="push temporarily unavailable"):
         await notifications.deliver_pending(Conn())
     assert seen == [first, second]
+    # Transient: counted, parked only once attempts reach the cap.
+    assert failures == [(first, notifications.MAX_DELIVERY_ATTEMPTS, False)]
+
+
+@pytest.mark.asyncio
+async def test_unrenderable_delivery_is_parked_on_first_failure(monkeypatch):
+    """An unknown event type can never succeed; without parking it the sweep
+    would raise on it forever and hold every retry behind it."""
+    dead = uuid4()
+    failures = []
+
+    class Conn:
+        async def fetch(self, *_args):
+            return [{"id": dead}]
+
+        async def execute(self, query, *args):
+            failures.append(args)
+
+    async def deliver(_conn, _delivery_id):
+        raise ValueError("Unknown schedule notification event: bogus")
+
+    monkeypatch.setattr(notifications, "deliver_one", deliver)
+    with pytest.raises(ValueError):
+        await notifications.deliver_pending(Conn())
+    assert failures == [(dead, notifications.MAX_DELIVERY_ATTEMPTS, True)]
 
 
 @pytest.mark.asyncio

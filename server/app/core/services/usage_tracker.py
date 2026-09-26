@@ -57,7 +57,7 @@ def resolve_token(authorization: Optional[str]) -> tuple[Optional[str], Optional
         return None, None
     token = authorization[7:].strip()
     try:
-        payload = decode_token(token, expected_type="access")
+        payload = decode_token(token, expected_type="access", allow_mobile_access=True)
         if not payload:
             return None, None
         return payload.sub, getattr(payload, "role", None)

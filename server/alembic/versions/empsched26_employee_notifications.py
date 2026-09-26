@@ -24,13 +24,15 @@ def upgrade() -> None:
             payload JSONB NOT NULL DEFAULT '{}'::jsonb,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             sent_at TIMESTAMPTZ,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            failed_at TIMESTAMPTZ,
             UNIQUE (recipient_user_id, event_type, dedupe_key)
         )
     """)
     op.execute("""
         CREATE INDEX ix_schedule_employee_notifications_pending
         ON schedule_employee_notification_deliveries(created_at)
-        WHERE sent_at IS NULL
+        WHERE sent_at IS NULL AND failed_at IS NULL
     """)
     op.execute("""
         INSERT INTO scheduler_settings(task_key, display_name, description, enabled, max_per_cycle)
