@@ -12,6 +12,11 @@ private struct RefreshBody: Encodable {
     let refresh_token: String
 }
 
+private struct LogoutBody: Encodable {
+    let refresh_token: String
+    let push_token: String?
+}
+
 enum SessionError: LocalizedError {
     case noStoredSession
     case storageFailed
@@ -75,7 +80,7 @@ final class AuthService {
     /// no signal the employee must still be able to leave; the server-side
     /// revoke is queued and flushed on the next launch (`flushPendingRevoke`).
     /// Any non-network failure means the session is already dead server-side.
-    func logout() async {
+    func logout(pushToken: String? = nil) async {
         guard let token = KeychainHelper.load(key: KeychainHelper.Keys.refreshToken) else {
             clearLocalSession()
             return
@@ -83,7 +88,7 @@ final class AuthService {
         do {
             _ = try await APIClient.shared.requestData(
                 method: "POST", path: "/auth/mobile/logout",
-                body: RefreshBody(refresh_token: token), retryOnUnauthorized: false
+                body: LogoutBody(refresh_token: token, push_token: pushToken), retryOnUnauthorized: false
             )
         } catch {
             if Self.isNetworkFailure(error) {
@@ -99,7 +104,7 @@ final class AuthService {
         do {
             _ = try await APIClient.shared.requestData(
                 method: "POST", path: "/auth/mobile/logout",
-                body: RefreshBody(refresh_token: token), retryOnUnauthorized: false
+                body: LogoutBody(refresh_token: token, push_token: nil), retryOnUnauthorized: false
             )
         } catch {
             if Self.isNetworkFailure(error) { return }  // keep it for next time
