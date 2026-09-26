@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -419,7 +420,6 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                     if old_sub_id and old_sub_id != stripe_sub_id:
                         await billing_service.cancel_subscription_record(old_sub_id)
                         try:
-                            from app.core.services.stripe_service import StripeService
                             await StripeService().cancel_subscription(old_sub_id, at_period_end=False)
                         except Exception as cancel_exc:
                             # Bounded double-billing until manually resolved —
@@ -478,7 +478,6 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                     # nothing.
                     if old_subscription_id and old_subscription_id != stripe_sub_id:
                         try:
-                            from app.core.services.stripe_service import StripeService
                             await StripeService().cancel_subscription(old_subscription_id, at_period_end=False)
                         except Exception as cancel_exc:
                             logger.error(
@@ -680,6 +679,19 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
             if company_id_str and pack_id and stripe_sub_id:
                 try:
                     company_id = UUID(company_id_str)
+                    from app.matcha.services.billing import entitlements_service
+                    personal_pack = pack_id in (
+                        entitlements_service.LITE_PACK_ID,
+                        entitlements_service.PRO_PACK_ID,
+                    )
+                    stripe_service = StripeService() if personal_pack else None
+                    period_end = (
+                        datetime.fromtimestamp(
+                            await stripe_service.get_subscription_period_end(stripe_sub_id),
+                            tz=timezone.utc,
+                        )
+                        if stripe_service else None
+                    )
 
                     # Price comes from the session metadata (set at checkout
                     # creation). Fallback map covers sessions created before
@@ -703,16 +715,37 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                         pack_id=pack_id,
                         credits_per_cycle=0,
                         amount_cents=amount_cents,
+                        current_period_end=period_end,
                     )
 
+                    # The old Lite renewal is stopped only after Pro is paid
+                    # and recorded. A canceled/failed Checkout leaves Lite alone.
+                    upgrade_from = str(meta.get("upgrade_from_subscription_id") or "")
+                    if pack_id == entitlements_service.PRO_PACK_ID and upgrade_from:
+                        old = await billing_service.get_subscription_by_stripe_id(upgrade_from)
+                        if (
+                            old
+                            and old["company_id"] == company_id
+                            and old["pack_id"] == entitlements_service.LITE_PACK_ID
+                            and old["status"] in ("active", "past_due")
+                        ):
+                            old_period_end = datetime.fromtimestamp(
+                                await stripe_service.get_subscription_period_end(upgrade_from),
+                                tz=timezone.utc,
+                            )
+                            await stripe_service.cancel_subscription(upgrade_from)
+                            await billing_service.cancel_subscription_record(
+                                upgrade_from, current_period_end=old_period_end,
+                            )
+
                     # New subscription changes the user's resolved plan.
-                    from app.matcha.services.billing import entitlements_service
                     entitlements_service.invalidate_plan_cache()
 
                     # Activate token budget
                     if billing_type == "token_budget" and tokens_per_cycle > 0:
                         await token_budget_service.reset_subscription_tokens(
                             company_id, token_limit=tokens_per_cycle,
+                            stripe_invoice_id=stripe_session_id if personal_pack else None,
                         )
                         logger.info(
                             "Token subscription activated for company %s: %d tokens/month",
@@ -723,6 +756,10 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
 
                 except Exception as exc:
                     logger.error("Failed to record subscription %s: %s", stripe_sub_id, exc)
+                    if pack_id in ("matcha_work_lite", "matcha_work_personal"):
+                        # Paid personal checkout must retry until the new plan
+                        # is recorded and an old Lite renewal is canceled.
+                        raise
 
     # ── Checkout expired ──────────────────────────────────────────────────────
     elif event_type == "checkout.session.expired":
@@ -978,7 +1015,6 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                                     if s["pack_id"].startswith(ADDON_PACK_PREFIX)
                                 ]
                                 if addon_subs:
-                                    from app.core.services.stripe_service import StripeService
                                     _stripe = StripeService()
                                     for addon_sub in addon_subs:
                                         try:

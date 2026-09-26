@@ -15,6 +15,10 @@ export function getMWSubscription() {
   return api.get<MWSubscription>('/matcha-work/billing/subscription')
 }
 
+export function cancelPersonalSubscription() {
+  return api.delete<{ canceled: boolean; message: string }>('/matcha-work/billing/subscription')
+}
+
 export function startPersonalCheckout(plan: 'lite' | 'pro' = 'pro') {
   const successUrl = `${window.location.origin}/espresso?upgraded=1`
   const cancelUrl = `${window.location.origin}/espresso?canceled=1`

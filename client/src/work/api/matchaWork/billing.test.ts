@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { api } from '../../../api/client'
-import { startPersonalCheckout } from './billing'
+import { cancelPersonalSubscription, startPersonalCheckout } from './billing'
 
 vi.mock('../../../api/client', () => ({
-  api: { post: vi.fn() },
+  api: { post: vi.fn(), delete: vi.fn() },
 }))
 
 describe('startPersonalCheckout', () => {
@@ -17,5 +17,10 @@ describe('startPersonalCheckout', () => {
         cancel_url: `${window.location.origin}/espresso?canceled=1`,
       },
     )
+  })
+
+  it('cancels the current personal subscription', () => {
+    cancelPersonalSubscription()
+    expect(api.delete).toHaveBeenCalledWith('/matcha-work/billing/subscription')
   })
 })

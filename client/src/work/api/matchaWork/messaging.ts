@@ -2,7 +2,16 @@ import { api } from '../../../api/client'
 import { postSSE, SSEHttpError } from '../../../api/sse'
 import { reportApiError } from '../../../api/errorReporter'
 import type { MWStreamEvent, MWThreadAttachment } from '../../types'
+import { showPaywall } from '../../utils/paywall'
 import { uploadFilesStream, type UploadStreamCallbacks } from './_base'
+
+function quotaPaywallPlan(body: unknown): 'free' | 'lite' | null {
+  if (!body || typeof body !== 'object' || !('detail' in body)) return null
+  const detail = body.detail
+  if (!detail || typeof detail !== 'object' || !('code' in detail) || detail.code !== 'quota_exhausted') return null
+  if (!('plan' in detail)) return null
+  return detail.plan === 'free' || detail.plan === 'lite' ? detail.plan : null
+}
 
 // ── Generic thread-file attach (no analysis — plain attachment until sent) ──
 
@@ -117,7 +126,12 @@ export function sendMessageStream(
       }
       if (e instanceof SSEHttpError) {
         const msg = `${e.status}: ${e.message}`
-        reportApiError({ endpoint, status: e.status, message: msg })
+        const quotaPlan = e.status === 429 ? quotaPaywallPlan(e.body) : null
+        if (quotaPlan) {
+          showPaywall('ai_quota', quotaPlan === 'free' ? 'lite' : 'pro', quotaPlan)
+        } else {
+          reportApiError({ endpoint, status: e.status, message: msg })
+        }
         callbacks.onError(msg)
         return
       }

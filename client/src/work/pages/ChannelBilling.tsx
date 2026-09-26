@@ -4,6 +4,8 @@ import { Hash, Loader2, AlertTriangle, ExternalLink, XCircle, Clock, CreditCard 
 import { getMyChannelBilling, getMyPaymentHistory, cancelChannelSubscription } from '../api/channels'
 import type { ChannelSubscription, PaymentEvent } from '../api/channels'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
+import { useMe } from '../../hooks/useMe'
+import PersonalPlanCard from '../components/billing/PersonalPlanCard'
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
   active: { bg: 'bg-w-accent/30', text: 'text-w-accent', label: 'Active' },
@@ -27,6 +29,7 @@ function formatDate(iso: string): string {
 export default function ChannelBilling() {
   const navigate = useNavigate()
   const base = useWorkBase()
+  const { isPersonal } = useMe()
   const [subs, setSubs] = useState<ChannelSubscription[]>([])
   const [history, setHistory] = useState<PaymentEvent[]>([])
   const [loading, setLoading] = useState(true)
@@ -41,7 +44,12 @@ export default function ChannelBilling() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(load, [])
+  useEffect(() => {
+    Promise.all([getMyChannelBilling(), getMyPaymentHistory()])
+      .then(([s, h]) => { setSubs(s); setHistory(h) })
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
+      .finally(() => setLoading(false))
+  }, [])
 
   const handleCancel = async (channelId: string, channelName: string) => {
     if (!window.confirm(`Cancel your subscription to #${channelName}? You'll keep access until the end of the billing period.`)) return
@@ -59,14 +67,6 @@ export default function ChannelBilling() {
   const active = subs.filter((s) => !s.removed_for_inactivity)
   const removed = subs.filter((s) => s.removed_for_inactivity)
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="animate-spin text-w-dim" size={24} />
-      </div>
-    )
-  }
-
   return (
     <div className="max-w-3xl mx-auto px-3 sm:px-6 py-4 sm:py-8">
       <div className="flex items-center gap-3 mb-6">
@@ -74,11 +74,17 @@ export default function ChannelBilling() {
         <h1 className="text-xl font-semibold text-white">Subscriptions & Billing</h1>
       </div>
 
+      {isPersonal && <PersonalPlanCard />}
+
       {error && (
         <div className="mb-4 p-3 bg-red-900/30 border border-red-800 rounded-lg text-red-300 text-sm">{error}</div>
       )}
 
-      {subs.length === 0 ? (
+      {loading ? (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="animate-spin text-w-dim" size={24} />
+        </div>
+      ) : subs.length === 0 ? (
         <div className="text-center py-16 text-w-dim">
           <p>No paid channel subscriptions.</p>
           <button onClick={() => navigate(`${base}/channels`)} className="mt-3 text-w-accent hover:text-w-accent text-sm">

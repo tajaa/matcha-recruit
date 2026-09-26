@@ -33,8 +33,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const brand = useWorkBrand()
   const surface = useWorkSurface()
   const showChannels = surface !== 'matcha-work'
-  const { me, isPersonal, mwBetaLite, hasFeature } = useMe()
-  const { plan } = useEntitlements()
+  const { me, isPersonal, hasFeature } = useMe()
+  const { plan, can } = useEntitlements()
+  const showProjects = can('projects_solo')
   const canCreate = surface !== 'matcha-work' && canCreateChannel(me?.user?.role)
   const opsAccess = me?.ops_access ?? me?.work_access
   const showEvents = surface !== 'matcha-work' && canReviewEvents(opsAccess) && hasFeature('ems')
@@ -193,7 +194,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         pathname={location.pathname}
         navigate={navigate}
         isActive={isActive}
-        mwBetaLite={mwBetaLite}
+        showProjects={showProjects}
         totalChannelUnread={totalChannelUnread}
         pendingConnections={pendingConnections}
         inboxUnread={inboxUnread}
@@ -349,7 +350,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           )}
 
           {/* Projects */}
-          {mwBetaLite && (
+          {showProjects && (
             <ProjectsSection
               projects={projects}
               projectsOpen={sections.projects}

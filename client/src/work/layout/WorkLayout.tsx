@@ -220,6 +220,7 @@ export default function WorkLayout() {
   })
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [paywall, setPaywall] = useState<PlanRequiredDetail | null>(null)
+  const closePaywall = useCallback(() => setPaywall(null), [])
 
   useEffect(() => {
     if (!isPersonal) return
@@ -306,7 +307,7 @@ export default function WorkLayout() {
       className="bg-w-bg text-w-text flex flex-col overflow-hidden"
       style={{ height: viewportHeight ? `${viewportHeight}px` : '100dvh' }}
     >
-      <header className="flex items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2.5 border-b border-w-line shrink-0">
+      <header inert={paywall !== null} aria-hidden={paywall !== null} className="flex items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2.5 border-b border-w-line shrink-0">
         <button
           onClick={() => setMobileMenuOpen(true)}
           className="md:hidden text-w-dim hover:text-w-text p-1 rounded-md hover:bg-w-surface2 transition-colors"
@@ -368,7 +369,7 @@ export default function WorkLayout() {
         </div>
       </header>
 
-      <div className="flex flex-1 min-h-0 relative">
+      <div inert={paywall !== null} aria-hidden={paywall !== null} className="flex flex-1 min-h-0 relative">
         {/* Mobile Sidebar Overlay */}
         {mobileMenuOpen && (
           <div 
@@ -412,7 +413,7 @@ export default function WorkLayout() {
           <Outlet />
         </main>
       </div>
-      {paywall && <PaywallModal detail={paywall} onClose={() => setPaywall(null)} />}
+      {paywall && <PaywallModal detail={paywall} onClose={closePaywall} />}
     </div>
   )
 }

@@ -253,6 +253,7 @@ class StripeService:
         success_url: Optional[str] = None,
         cancel_url: Optional[str] = None,
         plan: str = "pro",
+        upgrade_from_subscription_id: Optional[str] = None,
     ):
         """Create a personal Werk plan checkout (Lite $9 / Pro $20) for an
         individual user.
@@ -279,6 +280,8 @@ class StripeService:
             "amount_cents": str(plan_cfg["amount_cents"]),
             "mode": "subscription",
         }
+        if upgrade_from_subscription_id:
+            metadata["upgrade_from_subscription_id"] = upgrade_from_subscription_id
 
         def _create():
             return stripe.checkout.Session.create(
@@ -308,6 +311,18 @@ class StripeService:
             return await asyncio.to_thread(_create)
         except Exception as exc:
             raise StripeServiceError(f"Failed to create Personal subscription session: {exc}") from exc
+
+    async def get_subscription_period_end(self, stripe_subscription_id: str) -> int:
+        """Read the paid-through timestamp before changing a subscription."""
+        self._ensure_secret_key()
+
+        def _retrieve():
+            return extract_current_period_end(stripe.Subscription.retrieve(stripe_subscription_id))
+
+        try:
+            return await asyncio.to_thread(_retrieve)
+        except Exception as exc:
+            raise StripeServiceError(f"Failed to read subscription period: {exc}") from exc
 
     async def create_ir_upgrade_checkout(
         self,
