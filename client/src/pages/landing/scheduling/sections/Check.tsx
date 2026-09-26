@@ -1,19 +1,17 @@
-import { Reveal } from '../motion'
-import { WRAP, mono } from '../styles'
-import { INK, INK_SOFT, RED_PEN, STAMP, hexA } from '../theme'
-import { Accent, CellLabel, StepHead } from './Chrome'
+import { Reveal } from '../../../../components/marketing/kit/motion'
+import { WRAP, glassChip, glassPane, mono } from '../../../../components/marketing/kit/styles'
+import { AMBER, INK, INK_SOFT, STAMP, hexA } from '../../../../components/marketing/kit/theme'
+import { Accent, Glows, StepHead } from './Chrome'
 
 type Outcome = 'stops' | 'draft' | 'priced'
 
-// One dot colour per outcome, same vocabulary as the hero sheet: red is the
-// thing that stops you, ink is handled for you, green is money on the week.
+// One dot colour per outcome: amber waits on you, ink is handled for you,
+// green is money on the week.
 const OUTCOME: Record<Outcome, { label: string; means: string; dot: string }> = {
-  stops: { label: 'Stops & asks you', means: 'Won’t save until you override it on purpose.', dot: RED_PEN },
+  stops: { label: 'Stops & asks you', means: 'Won’t save until you override it on purpose.', dot: AMBER },
   draft: { label: 'Fixed in the draft', means: 'The draft is built around it before you see it.', dot: INK },
   priced: { label: 'Priced in', means: 'Shows up in the week’s labor cost.', dot: STAMP },
 }
-
-const RULE = hexA(INK, 0.1)
 
 // Examples are the illustrative café's own week (hero + chat), so the page
 // tells one story.
@@ -32,21 +30,101 @@ function Dot({ color }: { color: string }) {
   return <span aria-hidden className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
 }
 
-function Key() {
+const STEP = 70 // ms between rows ticking in
+
+/** A result: dot + label on a pill tinted with the outcome's colour. The dot
+ *  fills in as its row lands. */
+function Result({ outcome, i }: { outcome: Outcome; i: number }) {
+  const o = OUTCOME[outcome]
   return (
-    <dl className="mt-8 space-y-3">
-      {(Object.keys(OUTCOME) as Outcome[]).map((o) => (
-        <div key={o} className="grid grid-cols-[10rem_1fr] items-baseline gap-4">
-          <dt className="flex items-center gap-2" style={mono('10px', { color: INK })}>
-            <Dot color={OUTCOME[o].dot} />
-            {OUTCOME[o].label}
-          </dt>
-          <dd className="text-[0.92rem] leading-snug" style={{ color: INK_SOFT }}>
-            {OUTCOME[o].means}
-          </dd>
+    <span
+      className="inline-flex shrink-0 items-center gap-2 rounded-full px-2.5 py-1"
+      style={{ ...mono('9px', { color: INK }), backgroundColor: hexA(o.dot, 0.09) }}
+    >
+      <span
+        aria-hidden
+        className="check-dot inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+        style={{ ['--dot' as string]: o.dot, ['--d' as string]: `${i * STEP + 350}ms` }}
+      />
+      {o.label}
+    </span>
+  )
+}
+
+/** One rule's line in the report: the rule, what it found on the demo week,
+ *  and the result. No dividers — alternate rows carry a whisper of white. */
+function Row({ rule, i }: { rule: (typeof RULES)[number]; i: number }) {
+  const found = <span style={mono('10px', { color: INK_SOFT })}>{rule.example}</span>
+  return (
+    <Reveal
+      as="li"
+      delay={i * STEP}
+      className="rounded-2xl px-4 py-3.5 lg:grid lg:grid-cols-12 lg:items-center lg:gap-x-6"
+      style={{ backgroundColor: i % 2 ? 'transparent' : 'rgba(255, 255, 255, 0.4)' }}
+    >
+      <div className="lg:col-span-5">
+        {/* phone: the result rides next to the rule's name */}
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-[0.98rem] font-medium leading-snug tracking-[-0.015em]" style={{ color: INK }}>
+            {rule.name}
+          </h3>
+          <span className="lg:hidden">
+            <Result outcome={rule.outcome} i={i} />
+          </span>
         </div>
-      ))}
-    </dl>
+        <p className="mt-0.5 text-[0.85rem] leading-[1.5]" style={{ color: INK_SOFT }}>
+          {rule.detail}
+        </p>
+      </div>
+      <div className="mt-2 lg:col-span-4 lg:mt-0">{found}</div>
+      <div className="hidden lg:col-span-3 lg:flex lg:justify-end">
+        <Result outcome={rule.outcome} i={i} />
+      </div>
+    </Reveal>
+  )
+}
+
+/** The report the rule check produced on the demo week — output, like every
+ *  other section, rather than a list of bullet points. */
+function Report() {
+  const counts = (Object.keys(OUTCOME) as Outcome[]).map((o) => ({ o, n: RULES.filter((r) => r.outcome === o).length }))
+  return (
+    <div className="relative mt-16">
+      <Glows green="18% 22%" amber="82% 78%" />
+      <div className="relative rounded-[28px] p-2 sm:p-3" style={glassPane}>
+        <div className="flex items-baseline justify-between gap-6 px-4 pb-3 pt-3" style={mono('9.5px', { color: INK_SOFT })}>
+          <span>
+            <span style={{ color: INK }}>Check report</span> · Sun 3:40 PM
+          </span>
+          <span>
+            Week of Oct 5 · {RULES.length} rules
+          </span>
+        </div>
+        <ol className="space-y-0.5">
+          {RULES.map((rule, i) => (
+            <Row key={rule.name} rule={rule} i={i} />
+          ))}
+        </ol>
+        {/* the tally: three brighter panes */}
+        <Reveal delay={RULES.length * STEP} className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {counts.map(({ o, n }) => (
+            <div
+              key={o}
+              className="rounded-2xl px-4 py-3.5"
+              style={glassChip}
+            >
+              <div className="flex items-center gap-2" style={mono('9.5px', { color: INK })}>
+                <Dot color={OUTCOME[o].dot} />
+                {n} {OUTCOME[o].label}
+              </div>
+              <p className="mt-1.5 text-[0.85rem] leading-snug" style={{ color: INK_SOFT }}>
+                {OUTCOME[o].means}
+              </p>
+            </div>
+          ))}
+        </Reveal>
+      </div>
+    </div>
   )
 }
 
@@ -61,42 +139,10 @@ export function Check() {
             Checked <Accent>before</Accent> it reaches you.
           </>
         }
-        aside={<Key />}
       >
         Every rule below runs on the draft. The hard ones also stop a manual edit — drag a shift somewhere it shouldn’t go and Matcha asks first.
       </StepHead>
-
-      {/* the Draft grid's hairline cells, two across */}
-      <ol className="mt-16 grid grid-cols-1 lg:grid-cols-2" style={{ borderTop: `1px solid ${RULE}` }}>
-        {RULES.map((rule, i) => {
-          const left = i % 2 === 0
-          return (
-            <Reveal
-              as="li"
-              key={rule.name}
-              delay={left ? 0 : 100}
-              className={`flex flex-col py-10 ${i ? 'border-t' : ''} ${i === 1 ? 'lg:border-t-0' : ''} ${left ? 'lg:border-r lg:pr-14' : 'lg:pl-14'}`}
-              style={{ borderColor: RULE }}
-            >
-              <CellLabel n={String(i + 1).padStart(2, '0')}>
-                <span className="inline-flex items-center gap-2">
-                  <Dot color={OUTCOME[rule.outcome].dot} />
-                  {OUTCOME[rule.outcome].label}
-                </span>
-              </CellLabel>
-              <h3 className="mt-5 text-[1.45rem] font-medium leading-tight tracking-[-0.025em]" style={{ color: INK }}>
-                {rule.name}
-              </h3>
-              <p className="mt-2 max-w-[26rem] text-[0.97rem] leading-[1.6]" style={{ color: INK_SOFT }}>
-                {rule.detail}
-              </p>
-              <div className="mt-5" style={mono('10px', { color: INK_SOFT })}>
-                e.g. <span style={{ color: INK }}>{rule.example}</span>
-              </div>
-            </Reveal>
-          )
-        })}
-      </ol>
+      <Report />
     </section>
   )
 }

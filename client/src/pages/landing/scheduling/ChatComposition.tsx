@@ -9,7 +9,7 @@
  */
 import type { CSSProperties } from 'react'
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion'
-import { BOARD, BODY, CARD, INK, INK_SOFT, MONO, PAPER, STAMP, hexA } from './theme'
+import { AMBER, BOARD, BODY, INK, INK_SOFT, MONO, PAPER, STAMP, hexA } from '../../../components/marketing/kit/theme'
 import { C, CHAT_DURATION, CHAT_SIZES, type Variant } from './timeline'
 
 const MESSAGE = '@huume give Dev’s Tuesday open to Jonah'
@@ -51,114 +51,136 @@ export default function ChatComposition({ variant }: { variant: Variant }) {
   const pulse = frame >= C.pulse && frame < C.press ? (Math.sin(((frame - C.pulse) / 30) * Math.PI * 2) + 1) / 2 : 0
   const move = spring({ frame: frame - C.confirmed - 6, fps, config: { damping: 15, stiffness: 110 } })
 
+  // Frosted glass: the window is translucent white over two soft glows, one
+  // matcha, one amber, so the blur has colour to catch.
+  const glass = 'rgba(255, 255, 255, 0.5)'
+  const rim = 'rgba(255, 255, 255, 0.85)'
+
   return (
     <AbsoluteFill style={{ backgroundColor: PAPER }}>
+      <AbsoluteFill
+        style={{
+          background: [
+            // kept well inside the canvas so they fade out before its edge
+            `radial-gradient(26% 34% at ${wide ? '22%' : '30%'} ${wide ? '34%' : '26%'}, ${hexA(STAMP, 0.2)}, transparent 70%)`,
+            `radial-gradient(24% 30% at ${wide ? '50%' : '70%'} ${wide ? '70%' : '56%'}, ${hexA(AMBER, 0.18)}, transparent 70%)`,
+          ].join(', '),
+          opacity: out,
+        }}
+      />
       <AbsoluteFill
         style={{
           opacity: out,
           padding: (wide ? 34 : 28) * s,
           display: 'flex',
           flexDirection: wide ? 'row' : 'column',
-          gap: (wide ? 34 : 26) * s,
+          gap: (wide ? 40 : 26) * s,
           alignItems: 'stretch',
         }}
       >
         {/* ── channel window ───────────────────────────────────────────── */}
         <div
           style={{
-            flex: wide ? '0 0 58%' : '1 1 auto',
+            flex: wide ? '0 0 56%' : '1 1 auto',
             display: 'flex',
             flexDirection: 'column',
-            backgroundColor: CARD,
-            borderRadius: 14 * s,
-            boxShadow: `0 0 0 1px ${RULE}, 0 1px 2px ${hexA(INK, 0.04)}, 0 30px 60px -36px ${hexA(INK, 0.3)}`,
+            backgroundColor: glass,
+            backdropFilter: 'blur(28px) saturate(1.5)',
+            WebkitBackdropFilter: 'blur(28px) saturate(1.5)',
+            borderRadius: 22 * s,
+            boxShadow: `inset 0 0 0 1px ${rim}, 0 0 0 1px ${hexA(INK, 0.05)}, 0 30px 70px -36px ${hexA(INK, 0.3)}`,
             overflow: 'hidden',
             opacity: interpolate(frame, [0, 8], [0, 1], clamp),
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: `${16 * s}px ${22 * s}px`, borderBottom: `1px solid ${RULE}` }}>
-            <span style={{ fontFamily: BODY, fontWeight: 500, fontSize: 20 * s, color: INK, letterSpacing: '-0.02em', lineHeight: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${16 * s}px ${20 * s}px ${8 * s}px` }}>
+            <span style={{ fontFamily: BODY, fontWeight: 500, fontSize: 16 * s, color: INK, letterSpacing: '-0.015em', lineHeight: 1 }}>
               <span style={{ color: INK_SOFT }}>#</span> mission-st
             </span>
-            <span style={mono(11, { color: INK_SOFT })}>8 members</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8 * s }}>
+              <span style={{ display: 'flex' }}>
+                {[0.14, 0.24, 0.34].map((a, i) => (
+                  <span key={a} style={{ width: 16 * s, height: 16 * s, borderRadius: 99, marginLeft: i ? -5 * s : 0, backgroundColor: hexA(INK, a), boxShadow: `0 0 0 ${1.5 * s}px ${rim}` }} />
+                ))}
+              </span>
+              <span style={mono(9.5, { color: INK_SOFT })}>8</span>
+            </span>
           </div>
 
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16 * s, padding: `${20 * s}px ${22 * s}px`, fontFamily: BODY, color: INK }}>
+          {/* anchored to the composer like a real chat: any spare room reads as scrollback above */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 12 * s, padding: `${6 * s}px ${20 * s}px ${12 * s}px`, fontFamily: BODY, color: INK }}>
             {/* Ana */}
-            <div style={{ display: 'flex', gap: 12 * s, ...appear(C.ana) }}>
-              <Avatar s={s} bg={hexA(INK, 0.08)} fg={INK} text="AR" />
+            <div style={{ display: 'flex', gap: 10 * s, ...appear(C.ana) }}>
+              <Avatar s={s} size={26} bg={hexA(INK, 0.07)} fg={INK} text="AR" />
               <div>
-                <div style={mono(10.5, { color: INK_SOFT })}>Ana R. · shift lead</div>
-                <div style={{ fontSize: 17 * s, lineHeight: 1.4, marginTop: 4 * s }}>Dev’s at the dentist Tuesday morning. Can someone take his open?</div>
+                <div style={mono(9, { color: INK_SOFT })}>Ana R. · shift lead</div>
+                <div style={{ fontSize: 15 * s, lineHeight: 1.45, marginTop: 3 * s }}>Dev’s at the dentist Tuesday morning. Can someone take his open?</div>
               </div>
             </div>
 
             {/* manager */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', ...(sent ? appear(C.send) : { opacity: 0 }) }}>
-              <div style={{ maxWidth: '86%', backgroundColor: INK, color: PAPER, borderRadius: `${18 * s}px ${18 * s}px ${4 * s}px ${18 * s}px`, padding: `${10 * s}px ${16 * s}px`, fontSize: 17 * s, lineHeight: 1.35 }}>
+              <div style={{ maxWidth: '86%', backgroundColor: INK, color: PAPER, borderRadius: `${16 * s}px ${16 * s}px ${5 * s}px ${16 * s}px`, padding: `${8 * s}px ${14 * s}px`, fontSize: 15 * s, lineHeight: 1.4 }}>
                 <span style={{ color: BOARD.STAMP, fontWeight: 500 }}>{MENTION}</span>
                 {MESSAGE.slice(MENTION.length)}
               </div>
             </div>
 
             {/* huume */}
-            <div style={{ display: 'flex', gap: 12 * s, position: 'relative' }}>
-              <Avatar s={s} bg={INK} fg={PAPER} text="h" square style={{ opacity: interpolate(frame, [C.dots, C.dots + 6], [0, 1], clamp) }} />
+            <div style={{ display: 'flex', gap: 10 * s, position: 'relative' }}>
+              <Avatar s={s} size={26} bg={INK} fg={PAPER} text="h" square style={{ opacity: interpolate(frame, [C.dots, C.dots + 6], [0, 1], clamp) }} />
               <div style={{ flex: 1, position: 'relative' }}>
                 {frame >= C.dots && frame < C.card + 4 && (
-                  <div style={{ position: 'absolute', top: 8 * s, display: 'flex', gap: 5 * s, opacity: interpolate(frame, [C.card, C.card + 4], [1, 0], clamp) }}>
+                  <div style={{ position: 'absolute', top: 9 * s, display: 'flex', gap: 4 * s, opacity: interpolate(frame, [C.card, C.card + 4], [1, 0], clamp) }}>
                     {[0, 1, 2].map((i) => (
-                      <span key={i} style={{ width: 8 * s, height: 8 * s, borderRadius: 99, backgroundColor: INK, opacity: 0.25 + 0.75 * Math.max(0, Math.sin((frame - C.dots) / 4 - i * 0.9)) }} />
+                      <span key={i} style={{ width: 6 * s, height: 6 * s, borderRadius: 99, backgroundColor: INK, opacity: 0.25 + 0.75 * Math.max(0, Math.sin((frame - C.dots) / 4 - i * 0.9)) }} />
                     ))}
                   </div>
                 )}
+                {/* the proposal: a second, brighter pane of glass */}
                 <div
                   style={{
                     ...appear(C.card),
-                    backgroundColor: '#fff',
-                    boxShadow: `0 0 0 ${1 * s}px ${confirmed ? hexA(STAMP, 0.6) : RULE}`,
-                    borderRadius: 12 * s,
-                    padding: `${14 * s}px ${16 * s}px`,
+                    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+                    boxShadow: `inset 0 0 0 1px ${rim}, 0 0 0 1px ${confirmed ? hexA(STAMP, 0.4) : hexA(INK, 0.05)}, 0 12px 30px -20px ${hexA(INK, 0.35)}`,
+                    borderRadius: 16 * s,
+                    padding: `${12 * s}px ${14 * s}px`,
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 * s, flexWrap: 'wrap' }}>
-                    <span style={mono(10.5, { color: INK, display: 'flex', alignItems: 'center', gap: 7 * s })}>
-                      <span style={{ width: 6 * s, height: 6 * s, borderRadius: 99, backgroundColor: confirmed ? STAMP : INK }} />
+                    <span style={mono(9, { color: INK, display: 'flex', alignItems: 'center', gap: 6 * s })}>
+                      <span style={{ width: 5 * s, height: 5 * s, borderRadius: 99, backgroundColor: confirmed ? STAMP : AMBER }} />
                       {confirmed ? 'Confirmed · reassign' : 'Proposed · reassign'}
                     </span>
-                    <span style={mono(10.5, { color: INK_SOFT })}>Tue Oct 6 · 7a–3p · Barista</span>
+                    <span style={mono(9, { color: INK_SOFT })}>Tue Oct 6 · 7a–3p</span>
                   </div>
-                  <div style={{ fontSize: 21 * s, fontWeight: 500, letterSpacing: '-0.02em', marginTop: 10 * s }}>Dev P. → Jonah B.</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 14 * s, rowGap: 4 * s, marginTop: 10 * s, fontSize: 15 * s }}>
-                    <span style={{ color: INK_SOFT }}>Jonah</span>
-                    <span style={{ fontFamily: MONO }}>
-                      32h → {jonah}h{' '}
-                      <span style={{ color: INK_SOFT, opacity: interpolate(frame, [C.rows + 22, C.rows + 30], [0, 1], clamp) }}>· no overtime</span>
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 * s, marginTop: 8 * s, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 18 * s, fontWeight: 500, letterSpacing: '-0.02em' }}>Dev P. → Jonah B.</span>
+                    <span style={{ fontFamily: MONO, fontSize: 12 * s, color: INK_SOFT }}>
+                      Jonah <span style={{ color: INK }}>32→{jonah}h</span> · Dev <span style={{ color: INK }}>32→{dev}h</span>
                     </span>
-                    <span style={{ color: INK_SOFT }}>Dev</span>
-                    <span style={{ fontFamily: MONO }}>32h → {dev}h</span>
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: `${6 * s}px ${16 * s}px`, marginTop: 14 * s }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: `${5 * s}px ${14 * s}px`, marginTop: 10 * s }}>
                     {CHECKS.map((c, i) => (
                       <span
                         key={c}
-                        style={mono(10, {
+                        style={mono(9, {
                           color: INK_SOFT,
                           display: 'flex',
                           alignItems: 'center',
-                          gap: 6 * s,
+                          gap: 5 * s,
                           opacity: interpolate(frame, [C.checks + i * 8, C.checks + i * 8 + 6], [0, 1], clamp),
                         })}
                       >
-                        <span style={{ width: 5 * s, height: 5 * s, borderRadius: 99, backgroundColor: STAMP }} />
+                        <span style={{ width: 4 * s, height: 4 * s, borderRadius: 99, backgroundColor: STAMP }} />
                         {c}
                       </span>
                     ))}
                   </div>
-                  <div style={{ marginTop: 14 * s, minHeight: 38 * s, display: 'flex', alignItems: 'center', gap: 8 * s }}>
+                  <div style={{ marginTop: 12 * s, minHeight: 30 * s, display: 'flex', alignItems: 'center', gap: 6 * s }}>
                     {confirmed ? (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 * s, fontSize: 15 * s, fontWeight: 500, color: INK, ...appear(C.confirmed) }}>
-                        <span style={{ width: 6 * s, height: 6 * s, borderRadius: 99, backgroundColor: STAMP }} />
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 7 * s, fontSize: 13 * s, fontWeight: 500, color: INK, ...appear(C.confirmed) }}>
+                        <span style={{ width: 5 * s, height: 5 * s, borderRadius: 99, backgroundColor: STAMP }} />
                         Confirmed by you · Jonah notified
                       </span>
                     ) : (
@@ -167,20 +189,20 @@ export default function ChatComposition({ variant }: { variant: Variant }) {
                           style={{
                             display: 'inline-flex',
                             alignItems: 'center',
-                            height: 36 * s,
-                            padding: `0 ${16 * s}px`,
+                            height: 30 * s,
+                            padding: `0 ${14 * s}px`,
                             borderRadius: 99,
                             backgroundColor: INK,
                             color: PAPER,
                             fontWeight: 500,
-                            fontSize: 15 * s,
+                            fontSize: 13 * s,
                             transform: `scale(${pressScale})`,
-                            boxShadow: `0 0 0 ${pulse * 6 * s}px ${hexA(INK, 0.12 * (1 - pulse * 0.5))}`,
+                            boxShadow: `0 0 0 ${pulse * 5 * s}px ${hexA(INK, 0.1 * (1 - pulse * 0.5))}`,
                           }}
                         >
                           Confirm
                         </span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', height: 36 * s, padding: `0 ${16 * s}px`, borderRadius: 99, boxShadow: `inset 0 0 0 1px ${hexA(INK, 0.2)}`, fontSize: 15 * s }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', height: 30 * s, padding: `0 ${12 * s}px`, borderRadius: 99, fontSize: 13 * s, color: INK_SOFT }}>
                           Cancel
                         </span>
                       </>
@@ -190,12 +212,24 @@ export default function ChatComposition({ variant }: { variant: Variant }) {
               </div>
             </div>
 
-            <div style={{ textAlign: 'center', ...mono(10, { color: INK_SOFT }), ...appear(C.system) }}>— schedule updated · Tue Oct 6 —</div>
+            <div style={{ textAlign: 'center', ...mono(9, { color: INK_SOFT }), ...appear(C.system) }}>schedule updated · Tue Oct 6</div>
           </div>
 
-          {/* composer */}
-          <div style={{ padding: `${14 * s}px ${22 * s}px`, borderTop: `1px solid ${RULE}` }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 * s, border: `1px solid ${hexA(INK, 0.16)}`, borderRadius: 99, padding: `${9 * s}px ${14 * s}px`, fontSize: 16 * s, fontFamily: BODY }}>
+          {/* composer: a frosted pill floating in the window, no divider */}
+          <div style={{ padding: `0 ${12 * s}px ${12 * s}px` }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10 * s,
+                backgroundColor: 'rgba(255, 255, 255, 0.62)',
+                boxShadow: `inset 0 0 0 1px ${rim}, 0 0 0 1px ${hexA(INK, 0.05)}`,
+                borderRadius: 99,
+                padding: `${6 * s}px ${6 * s}px ${6 * s}px ${16 * s}px`,
+                fontSize: 14 * s,
+                fontFamily: BODY,
+              }}
+            >
               <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', color: sent || typedLen === 0 ? hexA(INK, 0.4) : INK }}>
                 {sent || typedLen === 0 ? (
                   'Message #mission-st'
@@ -206,20 +240,20 @@ export default function ChatComposition({ variant }: { variant: Variant }) {
                   </>
                 )}
                 {!sent && frame >= C.type - 10 && Math.floor(frame / 8) % 2 === 0 && (
-                  <span style={{ display: 'inline-block', width: 2 * s, height: 18 * s, marginLeft: 1, verticalAlign: 'text-bottom', backgroundColor: INK }} />
+                  <span style={{ display: 'inline-block', width: 1.5 * s, height: 16 * s, marginLeft: 1, verticalAlign: 'text-bottom', backgroundColor: INK }} />
                 )}
               </span>
               <span
                 style={{
-                  width: 28 * s,
-                  height: 28 * s,
+                  width: 26 * s,
+                  height: 26 * s,
                   borderRadius: 99,
-                  backgroundColor: typedLen > 0 && !sent ? INK : hexA(INK, 0.15),
+                  backgroundColor: typedLen > 0 && !sent ? INK : hexA(INK, 0.12),
                   color: PAPER,
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: 14 * s,
+                  fontSize: 13 * s,
                 }}
               >
                 ↑
@@ -235,14 +269,14 @@ export default function ChatComposition({ variant }: { variant: Variant }) {
   )
 }
 
-function Avatar({ s, bg, fg, text, square, style }: { s: number; bg: string; fg: string; text: string; square?: boolean; style?: CSSProperties }) {
+function Avatar({ s, size = 36, bg, fg, text, square, style }: { s: number; size?: number; bg: string; fg: string; text: string; square?: boolean; style?: CSSProperties }) {
   return (
     <span
       style={{
         flexShrink: 0,
-        width: 36 * s,
-        height: 36 * s,
-        borderRadius: square ? 9 * s : 99,
+        width: size * s,
+        height: size * s,
+        borderRadius: square ? size * 0.28 * s : 99,
         backgroundColor: bg,
         color: fg,
         display: 'inline-flex',
@@ -250,7 +284,7 @@ function Avatar({ s, bg, fg, text, square, style }: { s: number; bg: string; fg:
         justifyContent: 'center',
         fontFamily: square ? BODY : MONO,
         fontWeight: square ? 600 : 500,
-        fontSize: (square ? 18 : 11) * s,
+        fontSize: (square ? size * 0.5 : size * 0.33) * s,
         ...style,
       }}
     >
@@ -287,7 +321,8 @@ function TuesdayStrip({
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'center',
+        justifyContent: 'flex-start',
+        paddingTop: wide ? 18 * s : 0,
         opacity: interpolate(frame, [4, 16], [0, 1], clamp),
       }}
     >

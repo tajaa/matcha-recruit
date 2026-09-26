@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import Stage from '../Stage'
-import { WRAP, display, mono } from '../styles'
-import { BOARD, PAPER, hexA } from '../theme'
+import { WRAP, display, mono } from '../../../../components/marketing/kit/styles'
+import { BOARD, PAPER, hexA } from '../../../../components/marketing/kit/theme'
 import { DURATION, LAYOUTS, STILL_FRAME } from '../timeline'
 import { Accent, PrimaryButton } from './Chrome'
 

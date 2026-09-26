@@ -57,3 +57,12 @@ export function useIdle(enabled: boolean): boolean {
   }, [enabled, idle])
   return idle
 }
+
+/** Board-dark page chrome while mounted: overscroll past the dark top and
+ *  bottom bands shows board gray instead of white. */
+export function useMarketingBoard() {
+  useEffect(() => {
+    document.documentElement.setAttribute('data-marketing-board', '')
+    return () => document.documentElement.removeAttribute('data-marketing-board')
+  }, [])
+}

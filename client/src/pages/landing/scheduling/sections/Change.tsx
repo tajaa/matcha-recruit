@@ -1,7 +1,7 @@
-import { Reveal } from '../motion'
+import { Reveal } from '../../../../components/marketing/kit/motion'
 import Stage from '../Stage'
-import { WRAP, mono } from '../styles'
-import { INK, INK_SOFT, hexA } from '../theme'
+import { WRAP, mono } from '../../../../components/marketing/kit/styles'
+import { INK, INK_SOFT, hexA } from '../../../../components/marketing/kit/theme'
 import { CHAT_DURATION, CHAT_SIZES, CHAT_STILL } from '../timeline'
 import { Accent, StepHead } from './Chrome'
 
