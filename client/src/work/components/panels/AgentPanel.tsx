@@ -7,6 +7,14 @@ import { useEntitlements } from '../../hooks/useEntitlements'
 import { showPaywall } from '../../utils/paywall'
 import EmailSnapshotWizard from './EmailSnapshotWizard'
 
+// Prefill for the hand-written reply only. Send passes the subject through
+// as typed, so this mirrors the server's _reply_subject rule; AI drafts still
+// render the subject the server saved, never this.
+function replySubject(subject: string): string {
+  const clean = subject.replace(/[\r\n]+/g, ' ').trim()
+  return /^re:/i.test(clean) ? clean : `Re: ${clean}`
+}
+
 const validEmailId = (id: string) => /^[A-Za-z0-9_-]{1,128}$/.test(id)
 
 export default function AgentPanel({ showSnapshot = false }: { showSnapshot?: boolean }) {
@@ -160,7 +168,7 @@ export default function AgentPanel({ showSnapshot = false }: { showSnapshot?: bo
     setSending(true)
     setActionError('')
     try {
-      const result = await agentSendEmail({ to: manualTo.trim(), subject: manualSubject.trim(), body: manualBody.trim(), reply_to_id: selectedEmail.id, draft_id: draft?.draft_id })
+      const result = await agentSendEmail({ to: manualTo.trim(), subject: manualSubject.trim(), body: manualBody.trim(), reply_to_id: selectedEmail.id })
       setSentMessage(`Email sent: ${result.subject}`)
       setManualBody('')
       setDraft(null)
@@ -372,7 +380,7 @@ export default function AgentPanel({ showSnapshot = false }: { showSnapshot?: bo
         {emails.map((email) => (
           <div
             key={email.id}
-            onClick={() => { setSelectedEmail(email); setSummary(null); setDraft(null); setManualTo(email.from); setManualSubject(email.subject); setManualBody(''); setActionError('') }}
+            onClick={() => { setSelectedEmail(email); setSummary(null); setDraft(null); setManualTo(email.from); setManualSubject(replySubject(email.subject)); setManualBody(''); setActionError('') }}
             className="flex cursor-pointer items-start gap-2 px-4 py-3 transition-colors"
             style={{ borderBottom: `1px solid ${c.border}` }}
             onMouseEnter={(e) => (e.currentTarget.style.background = c.hoverBg)}

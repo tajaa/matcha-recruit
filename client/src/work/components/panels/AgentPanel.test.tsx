@@ -69,6 +69,17 @@ describe('email AI', () => {
     await waitFor(() => expect(mock.send).toHaveBeenCalledWith({ to: 'sender@test.com', subject: 'Re: Server subject', body: 'Reply', reply_to_id: 'mail-1', thread_id: 'thread-1', in_reply_to: '<message@test.com>', draft_id: 'draft-1' }))
   })
 
+  it('does not spend the AI draft when the user sends their own reply', async () => {
+    mock.draft.mockResolvedValue({ draft_id: 'draft-1', to: 'sender@test.com', subject: 'Re: Server subject', body: 'Reply', thread_id: 'thread-1', in_reply_to: '<message@test.com>' })
+    await openEmail()
+    fireEvent.click(screen.getByLabelText('Draft AI reply'))
+    await screen.findByText(/Draft Reply · Re: Server subject/)
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'My own reply' } })
+    fireEvent.click(screen.getByText('Send my reply'))
+    await waitFor(() => expect(mock.send).toHaveBeenCalled())
+    expect(mock.send.mock.calls[0][0]).not.toHaveProperty('draft_id')
+  })
+
   it('shows an empty selection without making a triage request', async () => {
     render(<AgentPanel />)
     fireEvent.click(await screen.findByText('Triage selected'))
@@ -81,7 +92,7 @@ describe('email AI', () => {
     await openEmail()
     fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'My own reply' } })
     fireEvent.click(screen.getByText('Send my reply'))
-    await waitFor(() => expect(mock.send).toHaveBeenCalledWith({ to: 'sender@test.com', subject: 'Project launch', body: 'My own reply', reply_to_id: 'mail-1', draft_id: undefined }))
+    await waitFor(() => expect(mock.send).toHaveBeenCalledWith({ to: 'sender@test.com', subject: 'Re: Project launch', body: 'My own reply', reply_to_id: 'mail-1' }))
     expect(mock.draft).not.toHaveBeenCalled()
   })
 
