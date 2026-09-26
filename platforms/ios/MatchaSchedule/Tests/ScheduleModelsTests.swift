@@ -79,8 +79,8 @@ final class ScheduleModelsTests: XCTestCase {
         ]}
         """
         let shifts = try JSONDecoder().decode(ShiftListResponse.self, from: Data(json.utf8)).shifts
-        XCTAssertEqual(ScheduleService.teamShifts(shifts, locationIDs: ["mine"]).map(\.id), ["here", "anywhere"])
-        XCTAssertEqual(ScheduleService.teamShifts(shifts, locationIDs: []).count, 3)
+        XCTAssertEqual(ScheduleService.storeScoped(shifts, locationIDs: ["mine"]).map(\.id), ["here", "anywhere"])
+        XCTAssertEqual(ScheduleService.storeScoped(shifts, locationIDs: []).count, 3)
     }
 
     func testServerErrorMessagesAreUnwrapped() {

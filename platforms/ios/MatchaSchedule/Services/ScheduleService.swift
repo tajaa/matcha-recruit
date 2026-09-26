@@ -10,11 +10,26 @@ struct ScheduleSnapshot {
 }
 
 enum ScheduleService {
+    static func teamShifts(from start: Date, through end: Date) async throws -> [ScheduleShift] {
+        let from = WallClock.range(starting: start).0
+        let until = WallClock.range(starting: end).0
+        var components = URLComponents()
+        components.queryItems = [
+            URLQueryItem(name: "start", value: from),
+            URLQueryItem(name: "end", value: until),
+            URLQueryItem(name: "team", value: "true")
+        ]
+        let response: ShiftListResponse = try await APIClient.shared.request(
+            method: "GET", path: "/v1/portal/me/schedule?\(components.percentEncodedQuery ?? "")"
+        )
+        return response.shifts
+    }
+
     /// `team=true` is company-wide, but `/locations` only returns the
     /// employee's own store: keep the Team tab to shifts at that store (or
     /// locationless ones) so a multi-store company does not mix stores with
     /// no way to tell them apart. No known store ⇒ nothing to filter by.
-    static func teamShifts(_ shifts: [ScheduleShift], locationIDs: Set<String>) -> [ScheduleShift] {
+    static func storeScoped(_ shifts: [ScheduleShift], locationIDs: Set<String>) -> [ScheduleShift] {
         guard !locationIDs.isEmpty else { return shifts }
         return shifts.filter { $0.location_id == nil || locationIDs.contains($0.location_id!) }
     }
@@ -35,7 +50,7 @@ enum ScheduleService {
         let locationIDs = Set(placeResult.locations.map(\.id))
         return ScheduleSnapshot(
             mine: myResult.shifts,
-            team: teamShifts(teamResult.shifts, locationIDs: locationIDs),
+            team: storeScoped(teamResult.shifts, locationIDs: locationIDs),
             open: openResult.shifts,
             locations: Dictionary(uniqueKeysWithValues: placeResult.locations.map { ($0.id, $0.name) }),
             weekStartWeekday: placeResult.locations.first?.week_start_weekday ?? 0

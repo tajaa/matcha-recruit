@@ -95,7 +95,13 @@ struct ScheduleView: View {
         .task(id: week) { await reload() }
         .sheet(item: $selectedShift) { shift in
             NavigationStack {
-                ShiftDetailView(shift: shift, location: snapshot?.locations[shift.location_id ?? ""], employeeID: profile.id)
+                ShiftDetailView(
+                    shift: shift, location: snapshot?.locations[shift.location_id ?? ""],
+                    employeeID: profile.id,
+                    mode: openShifts.contains(where: { $0.id == shift.id }) ? .open :
+                        ((snapshot?.mine.contains(where: { $0.id == shift.id }) ?? false) ? .mine : .team),
+                    onChanged: { await reload() }
+                )
             }
         }
     }
@@ -148,11 +154,17 @@ private struct ShiftRow: View {
     }
 }
 
+enum ShiftDetailMode: Equatable { case mine, team, open }
+
 struct ShiftDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let shift: ScheduleShift
     let location: String?
     let employeeID: String
+    let mode: ShiftDetailMode
+    let onChanged: () async -> Void
+    @State private var action: ShiftAction?
+    @State private var submitted = false
 
     private var myAssignment: ShiftAssignment? {
         shift.assignments.first { $0.employee_id == employeeID }
@@ -183,9 +195,29 @@ struct ShiftDetailView: View {
                 }
             }
             if let notes = shift.notes, !notes.isEmpty { Section("Shift notes") { Text(notes) } }
+            if submitted { Section { Label("Request sent for review", systemImage: "checkmark.circle") } }
+            if mode == .mine {
+                Section("Request a change") {
+                    Button("Swap shift") { action = .swap }
+                    Button("Offer for pickup") { action = .pickup }
+                    Button("Request to drop") { action = .drop }
+                }
+            } else if mode == .open {
+                Section {
+                    Button("Claim open shift") { action = .claim }
+                }
+            }
         }
         .navigationTitle("Shift details")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+        .sheet(item: $action) { selection in
+            NavigationStack {
+                RequestComposerView(action: selection, shift: shift) {
+                    submitted = true
+                    Task { await onChanged() }
+                }
+            }
+        }
     }
 }

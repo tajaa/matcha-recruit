@@ -54,7 +54,7 @@ enum APIError: Error, LocalizedError {
                     return APIError.serviceUnavailable(code).errorDescription
                 }
             }
-            return "HTTP \(code): \(message)"
+            return message
         case .serviceUnavailable(let code):
             if code == 502 || code == 503 || code == 504 {
                 return "Server is updating. Try again in 30 seconds."
