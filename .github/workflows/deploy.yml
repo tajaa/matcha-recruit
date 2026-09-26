@@ -119,6 +119,16 @@ jobs:
             if [ "$TARGET" != matcha ] && [ "$TARGET" != "$name" ]; then continue; fi
             digest="$(aws ecr batch-get-image --repository-name "matcha-$name" \
               --image-ids "imageTag=$tag" --query 'images[0].imageId.imageDigest' --output text)"
+            # A no-flag (matcha) build skips an image whose source is unchanged
+            # since :latest was pushed, so no :$tag exists for it. Pin the
+            # current :latest digest instead — that is the image the build
+            # judged up to date. Explicit backend/frontend builds always push
+            # :$tag, so a miss there is still an error.
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] && [ "$TARGET" = matcha ]; then
+              digest="$(aws ecr batch-get-image --repository-name "matcha-$name" \
+                --image-ids "imageTag=latest" --query 'images[0].imageId.imageDigest' --output text)"
+              echo "::notice::matcha-$name unchanged in this build; deploying current :latest ($digest)"
+            fi
             if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
               echo "::error::Could not resolve matcha-$name:$tag to a digest"
               exit 1

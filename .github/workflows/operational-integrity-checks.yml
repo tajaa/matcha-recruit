@@ -130,7 +130,7 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api "repos/$GITHUB_REPOSITORY/actions/workflows/schema-drift-checks.yml/runs?per_page=10" > "$RUNNER_TEMP/schema-runs.json"
+        run: gh api "repos/$GITHUB_REPOSITORY/actions/workflows/schema-drift-checks.yml/runs?event=schedule&branch=main&per_page=10" > "$RUNNER_TEMP/schema-runs.json"
 
       - name: Assess schema run freshness
         id: assess
