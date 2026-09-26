@@ -199,6 +199,9 @@ async def create_my_schedule_request(
     from app.matcha.routes.employee_schedule._shared import (
         INACTIVE_EMPLOYMENT_STATUSES, REQUEST_SELECT, log_audit, serialize_request,
     )
+    from app.matcha.services.scheduling.employee_schedule_notifications import (
+        dispatch_events, stage_request_event,
+    )
 
     company_id = employee["org_id"]
     async with get_connection() as conn:
@@ -347,11 +350,20 @@ async def create_my_schedule_request(
                 conn, company_id, "request", request_id, employee.get("user_id"),
                 "request.create", {"request_type": body.request_type},
             )
+            if body.request_type == "swap" and body.target_employee_id:
+                await stage_request_event(
+                    conn, company_id=company_id, request_id=request_id,
+                    event_type="schedule_offer_received",
+                    recipient_employee_ids=[body.target_employee_id],
+                    dedupe_key=str(request_id),
+                )
         row = await conn.fetchrow(
             f"{REQUEST_SELECT} WHERE r.id = $1", request_id,
         )
     if body.request_type in ("drop", "unavailable", "claim"):
         _dispatch_manager_ready(request_id)
+    if body.request_type == "swap":
+        dispatch_events()
     return serialize_request(dict(row))
 
 
@@ -371,6 +383,9 @@ async def accept_schedule_request(
     )
     from app.matcha.services.scheduling.shift_requests import (
         find_same_day_assignments, same_day_conflict_detail,
+    )
+    from app.matcha.services.scheduling.employee_schedule_notifications import (
+        dispatch_events, stage_request_event,
     )
 
     company_id = employee["org_id"]
@@ -461,13 +476,14 @@ async def accept_schedule_request(
                         detail=same_day_conflict_detail(request["employee_id"], reverse_conflicts),
                     )
 
-            await conn.execute(
+            confirmed_at = await conn.fetchval(
                 """UPDATE schedule_requests
                    SET target_employee_id = CASE WHEN request_type = 'pickup'
                                                  THEN $2 ELSE target_employee_id END,
                        counter_shift_id = $3, counterparty_confirmed_at = NOW(),
                        status = 'awaiting_manager', updated_at = NOW()
-                   WHERE id = $1""",
+                   WHERE id = $1
+                   RETURNING counterparty_confirmed_at""",
                 request_id, employee["id"], counter_shift_id,
             )
             await log_audit(
@@ -475,6 +491,16 @@ async def accept_schedule_request(
                 "request.counterparty_confirmed",
                 {"counterparty_employee_id": str(employee["id"]),
                  "counter_shift_id": str(counter_shift_id) if counter_shift_id else None},
+            )
+            await stage_request_event(
+                conn, company_id=company_id, request_id=request_id,
+                event_type="schedule_request_accepted",
+                recipient_employee_ids=[request["employee_id"]],
+                # Keyed on the transition, not the target state: an accept →
+                # withdraw → accept-again cycle must notify the requester each
+                # time, and ON CONFLICT DO NOTHING would swallow the second round
+                # under a state-only key.
+                dedupe_key=f"{request_id}:accepted:{_nonce(confirmed_at)}",
             )
         row = await conn.fetchrow(f"{REQUEST_SELECT} WHERE r.id = $1", request_id)
     # Queue after the transaction commits: delivery can retry, but cannot
@@ -487,7 +513,13 @@ async def accept_schedule_request(
         # because the broker is momentarily unavailable. The pool-free worker
         # recovery sweep discovers the manager-ready request later.
         pass
+    dispatch_events()
     return serialize_request(dict(row))
+
+
+def _nonce(value) -> str:
+    """Transition stamp for employee-notification dedupe keys."""
+    return value.isoformat() if isinstance(value, datetime) else str(value)
 
 
 def _dispatch_manager_ready(request_id: UUID) -> None:
@@ -509,8 +541,12 @@ async def withdraw_schedule_request(
     from app.matcha.services.scheduling.schedule_request_notifications import (
         mark_manager_ready_notifications_resolved,
     )
+    from app.matcha.services.scheduling.employee_schedule_notifications import (
+        dispatch_events, stage_request_event,
+    )
 
     company_id = employee["org_id"]
+    counterparty_withdrew = False
     async with get_connection() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
@@ -528,15 +564,17 @@ async def withdraw_schedule_request(
                     request_id,
                 )
             elif row["status"] == "awaiting_manager" and row["target_employee_id"] == employee["id"]:
-                await conn.execute(
+                withdrawn_at = await conn.fetchval(
                     """UPDATE schedule_requests
                        SET target_employee_id = CASE WHEN request_type = 'pickup' THEN NULL ELSE target_employee_id END,
                            counter_shift_id = CASE WHEN request_type = 'pickup' THEN NULL ELSE counter_shift_id END,
                            counterparty_confirmed_at = NULL,
                            status = 'awaiting_counterparty', updated_at = NOW()
-                       WHERE id = $1""",
+                       WHERE id = $1
+                       RETURNING updated_at""",
                     request_id,
                 )
+                counterparty_withdrew = True
             else:
                 raise HTTPException(status_code=403, detail="You cannot withdraw this request")
             if row["status"] == "awaiting_manager":
@@ -547,6 +585,15 @@ async def withdraw_schedule_request(
                 conn, company_id, "request", request_id, employee.get("user_id"),
                 "request.withdraw", {"employee_id": str(employee["id"])},
             )
+            if counterparty_withdrew:
+                await stage_request_event(
+                    conn, company_id=company_id, request_id=request_id,
+                    event_type="schedule_request_withdrawn",
+                    recipient_employee_ids=[row["employee_id"]],
+                    dedupe_key=f"{request_id}:withdrawn:{_nonce(withdrawn_at)}",
+                )
+    if counterparty_withdrew:
+        dispatch_events()
     return {"status": "withdrawn", "request_id": str(request_id)}
 
 

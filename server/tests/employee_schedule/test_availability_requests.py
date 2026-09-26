@@ -306,6 +306,8 @@ def _patch_review(monkeypatch, conn):
         review_routes, "mark_manager_ready_notifications_resolved",
         lambda *a, **k: _async_value(0),
     )
+    monkeypatch.setattr(review_routes, "stage_request_event", lambda *a, **k: _async_value(0))
+    monkeypatch.setattr(review_routes, "dispatch_events", lambda: None)
 
 
 def _async_value(value):

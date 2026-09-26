@@ -336,6 +336,8 @@ def _manager_env(monkeypatch, *, company_id, employee_id, shift_id, request_id, 
     monkeypatch.setattr(manager, "mark_manager_ready_notifications_resolved", noop)
     monkeypatch.setattr(manager, "log_audit", noop)
     monkeypatch.setattr(manager, "reconcile_warning_events", noop)
+    monkeypatch.setattr(manager, "stage_request_event", noop)
+    monkeypatch.setattr(manager, "dispatch_events", lambda: None)
     monkeypatch.setattr(manager, "serialize_request", lambda row: row)
 
 

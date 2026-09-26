@@ -6,7 +6,7 @@ routers in __init__.py. Business-facing (admin/client), tenant-isolated.
 
 import logging
 from datetime import date, datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -29,6 +29,9 @@ from ...services.scheduling.schedule_location_readiness import (
 )
 from ...services.scheduling.labor_cost_service import labor_cost_visible_from, load_week_cost
 from ...services.scheduling.schedule_guidance import refresh_assignment_break_guidance
+from ...services.scheduling.employee_schedule_notifications import (
+    dispatch_events, stage_publish_events,
+)
 from ...services.scheduling.schedule_breaks import minimum_meal_break_minutes
 from ...services.scheduling.schedule_guidance import (
     resolve_shift_break_plan, resolve_shift_break_plans, resolve_shift_stagger_plan,
@@ -1146,11 +1149,12 @@ async def delete_shift(shift_id: UUID,
 @router.post("/shifts/{shift_id}/publish")
 async def publish_shift(shift_id: UUID, current_user=Depends(require_admin_or_client)):
     company_id = await require_company_id(current_user)
+    notify_employees = False
     async with get_connection() as conn:
         async with conn.transaction():
             shift = await conn.fetchrow(
                 """
-                SELECT id, location_id, job_id, starts_at, ends_at, break_minutes,
+                SELECT id, status, location_id, job_id, starts_at, ends_at, break_minutes,
                        kind, training_requirement_id
                 FROM schedule_shifts
                 WHERE id = $1 AND company_id = $2 AND status <> 'cancelled'
@@ -1181,8 +1185,15 @@ async def publish_shift(shift_id: UUID, current_user=Depends(require_admin_or_cl
                 raise HTTPException(status_code=404, detail="Shift not found")
             await log_audit(conn, company_id, "shift", shift_id, current_user.id,
                             "shift.publish", {})
+            if shift["status"] != "published":
+                notify_employees = bool(await stage_publish_events(
+                    conn, company_id=company_id, shift_ids=[shift_id], batch_id=uuid4(),
+                ))
         await reconcile_warning_events(conn, company_id, [shift_id])
-        return await fetch_shift_by_id(conn, company_id, shift_id)
+        result = await fetch_shift_by_id(conn, company_id, shift_id)
+    if notify_employees:
+        dispatch_events()
+    return result
 
 
 @router.post("/shifts/publish")
@@ -1195,6 +1206,7 @@ async def publish_range(body: PublishRange, current_user=Depends(require_admin_o
     locations' drafts too.
     """
     company_id = await require_company_id(current_user)
+    notify_employees = False
     async with get_connection() as conn:
         await assert_location_in_company(conn, company_id, body.location_id)
         async with conn.transaction():
@@ -1242,9 +1254,16 @@ async def publish_range(body: PublishRange, current_user=Depends(require_admin_o
                 )
             await log_audit(conn, company_id, "shift", None, current_user.id,
                             "shift.publish_range", {"count": count, "location_id": str(body.location_id) if body.location_id else None})
+            if candidate_ids:
+                notify_employees = bool(await stage_publish_events(
+                    conn, company_id=company_id, shift_ids=candidate_ids,
+                    batch_id=uuid4(),
+                ))
         await reconcile_warning_events(conn, company_id)
         # Same window semantics as the UPDATE above, so the returned summary
         # counts exactly the shifts this call could have published.
         shifts = await fetch_shifts(conn, company_id, body.start, body.end,
                                     location_id=body.location_id, starts_within=True)
+    if notify_employees:
+        dispatch_events()
     return {"published": count, "shifts": shifts, "summary": _summarize(shifts)}

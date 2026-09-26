@@ -21,6 +21,9 @@ from ...services.scheduling.shift_requests import (
 from ...services.scheduling.schedule_request_notifications import (
     mark_manager_ready_notifications_resolved,
 )
+from ...services.scheduling.employee_schedule_notifications import (
+    dispatch_events, stage_request_event,
+)
 from ...services.scheduling.schedule_breaks import minimum_meal_break_minutes
 from ...services.scheduling.schedule_guidance import resolve_shift_break_plan
 from ._shared import (
@@ -343,7 +346,17 @@ async def review_request(request_id: UUID, body: RequestReview,
                      "availability_applied": availability_applied}
                     if req["request_type"] == "availability" else {})},
             )
+            recipients = [req["employee_id"]]
+            if req["request_type"] == "swap" and req["target_employee_id"]:
+                recipients.append(req["target_employee_id"])
+            await stage_request_event(
+                conn, company_id=company_id, request_id=request_id,
+                event_type="schedule_request_decided",
+                recipient_employee_ids=recipients,
+                dedupe_key=f"{request_id}:{new_status}", decision=new_status,
+            )
         if changed_shift_ids:
             await reconcile_warning_events(conn, company_id, changed_shift_ids)
         row = await conn.fetchrow(f"{REQUEST_SELECT} WHERE r.id = $1 AND r.company_id = $2", request_id, company_id)
+    dispatch_events()
     return serialize_request(dict(row))

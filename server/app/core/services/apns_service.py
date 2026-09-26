@@ -7,6 +7,7 @@ APNS_USE_SANDBOX setting.
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
@@ -28,6 +29,16 @@ APP_BUNDLES = {"werk": None, "schedule": ("schedule_*", "inbox_message")}
 _clients: dict[tuple[str, str], tuple[asyncio.AbstractEventLoop, object]] = {}
 _disabled_logged = False
 _PERMANENT_TOKEN_ERRORS = {"Unregistered", "BadDeviceToken", "DeviceTokenNotForTopic"}
+
+
+@asynccontextmanager
+async def _db(conn=None):
+    """The caller's connection (worker paths pass one) or a pool/direct one."""
+    if conn is not None:
+        yield conn
+        return
+    async with connection_or_direct() as own:
+        yield own
 
 
 def configured_bundles() -> dict[str, str]:
@@ -144,6 +155,7 @@ async def send_to_many(
     *,
     kind: str,
     suppress_werk_users: Optional[set[UUID]] = None,
+    conn=None,
 ) -> None:
     """Send one batched lookup to every eligible device, pruning dead tokens."""
     if not user_ids:
@@ -153,7 +165,7 @@ async def send_to_many(
         return
     # Session-bound (Matcha Schedule) tokens only while their device session is
     # live and the employee is still employed; legacy rows have no session.
-    async with connection_or_direct() as conn:
+    async with _db(conn) as conn:
         rows = await conn.fetch(
             """SELECT dt.user_id, dt.token, dt.bundle_id, dt.environment
                  FROM device_tokens dt
@@ -203,7 +215,7 @@ async def send_to_many(
             logger.warning("APNs send failed token=%s…: %s", token[:8], exc)
 
     if dead:
-        async with connection_or_direct() as conn:
+        async with _db(conn) as conn:
             await conn.execute("DELETE FROM device_tokens WHERE token = ANY($1::text[])", dead)
 
 
@@ -215,9 +227,11 @@ async def send_to_user(
     *,
     kind: str,
     suppress_werk: bool = False,
+    conn=None,
 ) -> None:
     """Send to a user's eligible devices across both apps."""
     await send_to_many(
         [user_id], title, body, payload, kind=kind,
         suppress_werk_users={user_id} if suppress_werk else None,
+        conn=conn,
     )
