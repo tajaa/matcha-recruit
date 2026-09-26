@@ -231,7 +231,10 @@ async def lifespan(app: FastAPI):
     start_usage_flusher()
     print("[Matcha] Usage-event flusher started")
 
-    yield
+    # MCP connector: the SDK's session manager owns the task group every
+    # /api/mcp request runs in, so it must be live before the first call.
+    async with _mcp_session_manager.run():
+        yield
 
     # Cancel background tasks
     if inactivity_task:
@@ -633,6 +636,16 @@ app.include_router(oceanlab_router, prefix="/api/oceanlab")
 # Webhook router under /api so prod nginx proxy_pass /api/ → backend works.
 # Stripe dashboard endpoint must be https://hey-matcha.com/api/webhooks/stripe.
 app.include_router(stripe_webhook_router, prefix="/api")
+
+# Matcha as a remote MCP connector (Claude / ChatGPT run on the person's own
+# plan; see app/matcha/routes/mcp_connector/). Plain Starlette routes: the MCP
+# endpoint and the OAuth handlers come from the MCP SDK. Registered before the
+# root-level Cappe renderer so /.well-known/oauth-* is never shadowed by it.
+from .matcha.routes.mcp_connector.server import (
+    connector_routes as _mcp_connector_routes,
+    session_manager as _mcp_session_manager,
+)
+app.router.routes.extend(_mcp_connector_routes())
 
 # WebSocket routes (separate prefix)
 app.include_router(chat_ws_router, prefix="/ws/chat", tags=["chat-websocket"])

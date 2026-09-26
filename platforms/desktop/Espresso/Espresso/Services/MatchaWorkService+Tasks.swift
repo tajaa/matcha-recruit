@@ -319,6 +319,31 @@ extension MatchaWorkService {
         )
     }
 
+    // MARK: - AI connectors (research on the person's own Claude / ChatGPT plan)
+
+    /// Assistants connected to Matcha, plus the connector URL to add one.
+    func listConnectors() async throws -> MWConnectorsState {
+        try await client.request(method: "GET", path: "\(basePath)/connectors")
+    }
+
+    /// Revoke every token this assistant holds for the signed-in person.
+    func disconnectConnector(clientId: String) async throws {
+        struct Resp: Decodable { let disconnected: Bool }
+        let encoded = clientId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? clientId
+        let _: Resp = try await client.request(method: "DELETE", path: "\(basePath)/connectors/\(encoded)")
+    }
+
+    /// Build the prefilled chat that works this research card through the
+    /// Matcha connector. `client` is `claude`, `chatgpt`, `claude_code` or `codex`.
+    func launchResearch(projectId: String, taskId: String, client assistant: String) async throws -> MWResearchLaunch {
+        struct Req: Encodable { let client: String }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/research-launch",
+            body: Req(client: assistant)
+        )
+    }
+
     // MARK: - AutoPR board capabilities
 
     /// What the AutoPR harness may do on a board, as granted in Admin →

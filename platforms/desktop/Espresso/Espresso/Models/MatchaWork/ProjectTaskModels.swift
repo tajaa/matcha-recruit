@@ -469,3 +469,53 @@ struct MWSubtask: Codable, Identifiable, Hashable {
         case updatedAt = "updated_at"
     }
 }
+
+// MARK: - AI connectors (Claude / ChatGPT → Matcha)
+
+/// Which assistants the person has connected to Matcha through the MCP
+/// connector. The assistant runs on the person's own Claude / ChatGPT plan;
+/// Matcha never holds that account's credentials.
+struct MWConnectorsState: Decodable {
+    struct Grant: Decodable, Identifiable {
+        let clientId: String
+        let clientName: String
+        let kind: String
+        let lastUsedAt: String?
+        var id: String { clientId }
+
+        enum CodingKeys: String, CodingKey {
+            case clientId = "client_id"
+            case clientName = "client_name"
+            case kind
+            case lastUsedAt = "last_used_at"
+        }
+    }
+
+    let mcpUrl: String
+    let grants: [Grant]
+    let connected: [String: Bool]
+    let claudeCodeCommand: String
+    /// Shell lines, in order: add Matcha to the Codex CLI, then sign in.
+    let codexCommands: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case mcpUrl = "mcp_url"
+        case grants
+        case connected
+        case claudeCodeCommand = "claude_code_command"
+        case codexCommands = "codex_commands"
+    }
+
+    var anyConnected: Bool { connected.values.contains(true) }
+
+    func isConnected(_ kind: String) -> Bool { connected[kind] == true }
+}
+
+/// A prefilled chat for a research card: `url` opens in the browser (Claude /
+/// ChatGPT); `command` is a `claude` shell line for Claude Code.
+struct MWResearchLaunch: Decodable {
+    let client: String
+    let url: String?
+    let prompt: String
+    let command: String?
+}

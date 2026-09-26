@@ -44,6 +44,7 @@ from app.core.feature_flags import (
     merge_company_features,
 )
 from app.core.services.platform_settings import get_visible_features
+from app.core.services.mcp_oauth import revoke_user_grants
 from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.config import get_settings
 
@@ -83,6 +84,8 @@ async def change_password(
         )
         # Invalidate all other sessions after a password change.
         await revoke_user_sessions(conn, current_user.id)
+        # ...and unplug any AI connector (Claude / ChatGPT) the old password let in.
+        await revoke_user_grants(conn, current_user.id)
 
     # Security notification — fire after connection is released
     try:
@@ -280,6 +283,7 @@ async def reset_password(request: ResetPasswordRequest, http_request: Request):
         )
         # Invalidate all existing sessions after a password reset.
         await revoke_user_sessions(conn, row["user_id"])
+        await revoke_user_grants(conn, row["user_id"])
         # Mark token as used
         await conn.execute(
             "UPDATE password_reset_tokens SET used_at = NOW() WHERE token = $1",

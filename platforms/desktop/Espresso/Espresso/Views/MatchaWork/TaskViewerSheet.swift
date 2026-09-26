@@ -60,6 +60,12 @@ struct TaskViewerSheet: View {
     /// that share the busy flag never show each other's progress verb.
     @State var autoPRPendingAction: String? = nil
     @State var autoPRRunError: String?
+    /// "Research with Claude / ChatGPT": which assistant launch is in flight,
+    /// the connectors snapshot (loaded once for research cards), and feedback.
+    @State var connectorLaunching: String?
+    @State var connectorsState: MWConnectorsState?
+    @State var connectorError: String?
+    @State var connectorCopied: String?
     /// Runtime pin (model / effort) write in flight, and its last failure.
     /// Separate from the run controls: pinning a runtime and queueing a run
     /// are different writes and either can fail on its own.
@@ -298,6 +304,7 @@ struct TaskViewerSheet: View {
                 // graph mode, along with the first-class research deliverable.
                 autoSetupBanner
                 autoPRRunNowControl
+                researchWithAssistantControl
                 autoPRRuntimeControl
                 researchReportSection
 
