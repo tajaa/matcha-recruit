@@ -342,6 +342,101 @@ extension TaskViewerSheet {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    // MARK: - Research with the person's own assistant
+
+    /// A research card still waiting for (or in) research can be worked by the
+    /// person's own Claude / ChatGPT through the Matcha connector, as an
+    /// alternative to queueing it for AutoPR. The model runs on their plan.
+    var researchWithAssistantEligible: Bool {
+        let live = liveAutoPRTask
+        return live.category == "research"
+            && ["todo", "changes_requested", "in_progress"].contains(live.boardColumn)
+    }
+
+    @ViewBuilder
+    var researchWithAssistantControl: some View {
+        if researchWithAssistantEligible {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 10) {
+                    Label("Research with", systemImage: "sparkles")
+                        .font(.ticket(size: 10))
+                        .foregroundColor(.secondary)
+                    ForEach([("claude", "Claude"), ("chatgpt", "ChatGPT"), ("claude_code", "Claude Code")], id: \.0) { kind, label in
+                        Button {
+                            Task { await launchConnectorResearch(kind) }
+                        } label: {
+                            HStack(spacing: 3) {
+                                Text(connectorLaunching == kind ? "Opening…" : (connectorCopied == kind ? "Copied" : label))
+                                if connectorsState?.isConnected(kind) == true {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 9))
+                                }
+                            }
+                            .font(.ticket(size: 10))
+                            .foregroundColor(.mwInkStrong)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(connectorLaunching != nil)
+                        .help(kind == "claude_code"
+                              ? "Copy a `claude` command that works this card from your terminal"
+                              : "Open a prefilled chat that works this card on your own \(label) plan")
+                    }
+                }
+                if let state = connectorsState,
+                   !state.isConnected("claude"), !state.isConnected("chatgpt"), !state.isConnected("claude_code") {
+                    Button {
+                        copyToPasteboard(state.mcpUrl)
+                        connectorCopied = "url"
+                    } label: {
+                        Text(connectorCopied == "url"
+                             ? "Copied — add it as a custom connector in Claude or ChatGPT"
+                             : "First time? Copy the Matcha connector URL: \(state.mcpUrl)")
+                            .font(.ticket(size: 10))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                }
+                if let error = connectorError {
+                    Text(Self.stripHTTPPrefix(error))
+                        .font(.ticket(size: 10))
+                        .foregroundColor(.red)
+                        .lineLimit(2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .task(id: task.id) {
+                connectorsState = try? await MatchaWorkService.shared.listConnectors()
+            }
+        }
+    }
+
+    func launchConnectorResearch(_ kind: String) async {
+        guard let pid = viewModel.project?.id, connectorLaunching == nil else { return }
+        connectorLaunching = kind
+        connectorError = nil
+        defer { connectorLaunching = nil }
+        do {
+            let launch = try await MatchaWorkService.shared.launchResearch(
+                projectId: pid, taskId: task.id, client: kind
+            )
+            if let raw = launch.url, let url = URL(string: raw) {
+                NSWorkspace.shared.open(url)
+            } else if let command = launch.command {
+                copyToPasteboard(command)
+                connectorCopied = kind
+            }
+        } catch {
+            connectorError = error.localizedDescription
+        }
+    }
+
+    func copyToPasteboard(_ text: String) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+    }
+
     @ViewBuilder
     var autoPRRunNowControl: some View {
         let hasActiveClaim = liveAutoPRTask.autoprClaimedAt != nil

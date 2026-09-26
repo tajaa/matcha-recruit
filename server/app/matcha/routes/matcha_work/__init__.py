@@ -120,4 +120,8 @@ from .permissions import router as _permissions_router
 
 router.include_router(_permissions_router)
 
+from .connectors import router as _connectors_router
+
+router.include_router(_connectors_router)
+
 __all__ = ["router", "oauth_callback_router", "public_router", "presence_router"]

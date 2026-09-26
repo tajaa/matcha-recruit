@@ -99,11 +99,31 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Dependency to get the current authenticated user."""
-    from .models.auth import CurrentUser
-
     payload = await get_token_payload(credentials)
+    return await load_current_user(
+        UUID(payload.sub),
+        token_iat=payload.iat,
+        token_iat_ms=payload.iat_ms,
+    )
 
-    user_id = UUID(payload.sub)
+
+async def load_current_user(
+    user_id: UUID,
+    *,
+    token_iat: Optional[int] = None,
+    token_iat_ms: Optional[int] = None,
+    check_session_revocation: bool = True,
+):
+    """Load and gate the user a verified credential names.
+
+    Split out of `get_current_user` so a credential that is not an app JWT —
+    the MCP connector's OAuth access token — lands on the same active /
+    suspended / deleted-company checks and the same RLS context. The connector
+    passes `check_session_revocation=False`: its grants are revoked on their
+    own (disconnect, password change) rather than by the browser-session
+    watermark, which a plain logout also advances.
+    """
+    from .models.auth import CurrentUser
 
     async with get_connection() as conn:
         # Verify user exists and is active
@@ -144,7 +164,9 @@ async def get_current_user(
 
         # Session revocation: reject tokens issued before the user logged out or
         # changed their password.
-        if await session_revoked(conn, user_row["id"], payload.iat, payload.iat_ms):
+        if check_session_revocation and await session_revoked(
+            conn, user_row["id"], token_iat, token_iat_ms
+        ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Session has been revoked. Please log in again.",

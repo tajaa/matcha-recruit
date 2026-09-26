@@ -356,3 +356,13 @@ host, so fail2ban skips them at startup. Do not count them as protection.
   `AWSManagedRulesCommonRuleSet` needs a count-mode soak first — its SQLi/LFI
   body rules have a history of flagging legitimate prose, which is exactly what
   an incident narrative is.
+
+## MCP connector paths (2026-09-26)
+
+`/.well-known/oauth-authorization-server*` and `/.well-known/oauth-protected-resource*` now proxy
+to the backend (`deploy/nginx/matcha.conf`), and `/api/mcp` + `/api/oauth/*` ride the `/api/`
+block. Claude and ChatGPT reach them server-to-server through CloudFront, so the origin gate
+covers them unchanged. `/api/oauth/register` and `/token` are unauthenticated by design (OAuth
+dynamic registration / code exchange) and are rate-limited per IP (register 20/h, token 60/min; `_OAuthRateLimit` in
+`routes/mcp_connector/server.py`) — see `docs/ops/MCP_CONNECTOR.md`.
+

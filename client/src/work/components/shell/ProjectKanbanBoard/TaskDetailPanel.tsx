@@ -8,6 +8,7 @@ import { useTaskDetailPanel } from './useTaskDetailPanel'
 import { autoPRProgressBanner } from '../../../utils/autoprProgress'
 import TaskViewerExtras from './TaskViewerExtras'
 import TaskCommitSuggestions from './TaskCommitSuggestions'
+import ResearchWithAssistant from './ResearchWithAssistant'
 
 interface TaskDetailPanelProps {
   projectId: string
@@ -159,6 +160,8 @@ export default function TaskDetailPanel({
               <p className="mt-1 text-sm text-w-text">{task.progress_note}</p>
             </div>
           ) : null}
+
+          {canEdit && <ResearchWithAssistant projectId={projectId} task={task} />}
 
           {/* Review send-back / approve — only while sitting in Review */}
           {task.board_column === 'review' && (

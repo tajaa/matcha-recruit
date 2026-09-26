@@ -19,6 +19,7 @@ const LegacySurfacePrefixRedirect = lazy(() =>
   })),
 );
 const WerkLiteRoutes = lazy(() => import("./work/routes/WerkLiteRoutes"));
+const ConnectorConsent = lazy(() => import("./work/pages/ConnectorConsent"));
 const OpsRoutes = lazy(() => import("./ops/routes/OpsRoutes"));
 const PortalRoutes = lazy(() => import("./routes/PortalRoutes"));
 const CappeRoutes = lazy(() => import("./cappe/routes")); // Cappe — website builder (separate product)
@@ -231,6 +232,8 @@ export default function App() {
           element={<BusinessInviteRegister />}
         />
         <Route path="/join-channel/:code" element={<ChannelInviteLanding />} />
+        {/* OAuth consent for the Matcha AI connector (Claude / ChatGPT). */}
+        <Route path="/oauth/consent" element={<ConnectorConsent />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/s/:token" element={<ERExportDownload />} />
         <Route path="/hb/:token" element={<PublicHandbook />} />
