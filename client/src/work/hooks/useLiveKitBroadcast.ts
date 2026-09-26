@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Room, RoomEvent, Track } from 'livekit-client'
+import { DisconnectReason, Room, RoomEvent, Track } from 'livekit-client'
 import { getSharedChannelSocket } from '../api/channelSocket'
 import {
   getBroadcastStatus, getBroadcastToken, refreshBroadcastToken, setBroadcastPublisher,
@@ -8,6 +8,13 @@ import {
 import type { CallParticipant } from './useLiveKitCall'
 
 type ConnectionState = 'idle' | 'connecting' | 'connected'
+
+// Disconnects that are deliberate or final. Anything else (server restart,
+// signal loss) gets one reconnect with a freshly minted token.
+const FINAL_DISCONNECTS = new Set<DisconnectReason | undefined>([
+  DisconnectReason.CLIENT_INITIATED, DisconnectReason.DUPLICATE_IDENTITY,
+  DisconnectReason.PARTICIPANT_REMOVED, DisconnectReason.ROOM_DELETED,
+])
 
 function mediaStream(tracks: MediaStreamTrack[]): MediaStream | null {
   if (!tracks.length) return null
@@ -34,6 +41,8 @@ export function useLiveKitBroadcast(channelId: string | null, userId: string | n
   const endedRef = useRef(new Set<string>())
   const namesRef = useRef(new Map<string, string>())
   const grantRef = useRef<{ token: string; livekit_url: string; can_publish: boolean } | null>(null)
+  const mutedRef = useRef(false)
+  const recoverRef = useRef<(reason?: DisconnectReason) => void>(() => {})
 
   useEffect(() => {
     namesRef.current = new Map(members.map((member) => [member.user_id, member.name]))
@@ -55,7 +64,6 @@ export function useLiveKitBroadcast(channelId: string | null, userId: string | n
     publishingRef.current = false
     setConnectionState('idle')
     setIsPublishing(false)
-    setIsMuted(false)
     setIsVideoEnabled(false)
     setParticipants([])
     setLocalStream(null)
@@ -87,7 +95,10 @@ export function useLiveKitBroadcast(channelId: string | null, userId: string | n
     setLocalStream(mediaStream(localVideo))
   }, [])
 
-  const connect = useCallback(async (url: string, token: string, canPublish: boolean) => {
+  // Reconnects (a promotion grant, or recovery after a drop) keep the
+  // publisher's mute choice; only a fresh join starts unmuted.
+  const connect = useCallback(async (url: string, token: string, canPublish: boolean, keepMute = false) => {
+    if (!keepMute) { mutedRef.current = false; setIsMuted(false) }
     disconnect()
     const serial = serialRef.current
     const room = new Room({ dynacast: true })
@@ -98,14 +109,16 @@ export function useLiveKitBroadcast(channelId: string | null, userId: string | n
       RoomEvent.LocalTrackPublished, RoomEvent.LocalTrackUnpublished]) {
       room.on(event, rebuild)
     }
-    room.on(RoomEvent.Disconnected, () => {
-      if (serial === serialRef.current) disconnect()
+    room.on(RoomEvent.Disconnected, (reason?: DisconnectReason) => {
+      if (serial !== serialRef.current) return
+      disconnect()
+      if (!FINAL_DISCONNECTS.has(reason)) recoverRef.current(reason)
     })
     try {
       await room.connect(url, token)
       if (serial !== serialRef.current) { void room.disconnect(); return }
       if (canPublish) {
-        await room.localParticipant.setMicrophoneEnabled(true)
+        await room.localParticipant.setMicrophoneEnabled(!mutedRef.current)
         let camera = true
         try { await room.localParticipant.setCameraEnabled(true) } catch { camera = false }
         setIsVideoEnabled(camera)
@@ -174,7 +187,7 @@ export function useLiveKitBroadcast(channelId: string | null, userId: string | n
       if (!roomRef.current) return
       // The new token carries the changed grant. Reconnect to apply it even
       // if the server's best-effort live permission update was missed.
-      void connect(data.livekit_url, data.token, data.can_publish)
+      void connect(data.livekit_url, data.token, data.can_publish, true)
     }
     queueMicrotask(() => { void hydrate() })
     return () => {
@@ -189,22 +202,25 @@ export function useLiveKitBroadcast(channelId: string | null, userId: string | n
     }
   }, [channelId, connect, disconnect, hydrate, saveStatus])
 
-  // Tokens expire near the ten-minute cap. Re-mint once during longer streams,
-  // preserving the server's current permission grant across reconnect.
+  // Every broadcast token outlives the ten-minute cap (viewer TTL is the cap
+  // plus grace; publisher TTL runs to the cap), and LiveKit keeps a connected
+  // session alive past token expiry. So no periodic re-mint: a timer here only
+  // dropped the stream for everyone every few minutes. Mint a fresh token only
+  // to recover from an unexpected disconnect while the broadcast is still live.
   useEffect(() => {
-    if (connectionState !== 'connected' || !channelId) return
-    const timer = window.setInterval(async () => {
-      try {
-        const token = await refreshBroadcastToken(channelId)
-        await connect(token.livekit_url, token.token, token.can_publish ?? false)
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'Broadcast token expired')
-        disconnect()
-        void hydrate()
-      }
-    }, 5 * 60 * 1000)
-    return () => window.clearInterval(timer)
-  }, [channelId, connect, connectionState, disconnect, hydrate])
+    recoverRef.current = () => {
+      if (!channelId || !statusRef.current?.active) return
+      void (async () => {
+        try {
+          const token = await refreshBroadcastToken(channelId)
+          await connect(token.livekit_url, token.token, token.can_publish ?? false, true)
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : 'Lost the broadcast connection')
+          void hydrate()
+        }
+      })()
+    }
+  }, [channelId, connect, hydrate])
 
   const start = useCallback(async (title: string) => {
     if (!channelId) return
@@ -252,6 +268,7 @@ export function useLiveKitBroadcast(channelId: string | null, userId: string | n
     const room = roomRef.current
     if (!room || !publishingRef.current) return
     await room.localParticipant.setMicrophoneEnabled(isMuted)
+    mutedRef.current = !isMuted
     setIsMuted(!isMuted)
   }, [isMuted])
 
