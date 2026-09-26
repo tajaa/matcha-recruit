@@ -19,7 +19,7 @@ describe('repository task drafting', () => {
 
   it('stops polling after a terminal result', async () => {
     mock.get.mockResolvedValueOnce({ run_id: 'run-1', status: 'running' })
-      .mockResolvedValueOnce({ run_id: 'run-1', status: 'completed', draft: { title: 'Fix' } })
+      .mockResolvedValueOnce({ run_id: 'run-1', status: 'done', draft: { title: 'Fix' } })
     const onDraft = vi.fn()
     const { result } = renderHook(() => useAgentTaskDraft('project-1', onDraft))
     await act(async () => { await result.current.start('fix the task') })
@@ -27,6 +27,18 @@ describe('repository task drafting', () => {
     expect(onDraft).toHaveBeenCalledOnce()
     await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
     expect(mock.get).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops polling and shows the server error when the run fails', async () => {
+    mock.get.mockResolvedValueOnce({ run_id: 'run-1', status: 'failed', error: 'Repository guide missing' })
+    const onDraft = vi.fn()
+    const { result } = renderHook(() => useAgentTaskDraft('project-1', onDraft))
+    await act(async () => { await result.current.start('fix the task') })
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
+    expect(result.current.error).toBe('Repository guide missing')
+    expect(result.current.busy).toBe(false)
+    expect(mock.get).toHaveBeenCalledOnce()
+    expect(onDraft).not.toHaveBeenCalled()
   })
 
   it('stops polling when the board unmounts', async () => {

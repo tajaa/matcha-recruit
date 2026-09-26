@@ -22,10 +22,6 @@ export function listProjectTasks(projectId: string, doneScope?: 'week' | 'all') 
   return api.get<MWProjectTask[]>(`/matcha-work/projects/${projectId}/tasks${query}`)
 }
 
-export function getDoneTaskCount(projectId: string) {
-  return api.get<{ total: number; this_week: number }>(`/matcha-work/projects/${projectId}/tasks/done-count`)
-}
-
 export function startTaskRound(projectId: string, taskId: string, suggestedFixTitle: string, body?: string, attachmentIds?: string[]) {
   return api.post<{ ok: boolean; title: string; subtask: MWSubtask; note: MWTaskHistoryEntry | null }>(
     `/matcha-work/projects/${projectId}/tasks/${taskId}/rounds`,
@@ -39,7 +35,8 @@ export function summarizeTask(projectId: string, taskId: string) {
 
 export interface AgentTaskDraftRun {
   run_id: string
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+  // Mirrors the mw_project_agent_runs CHECK constraint; a finished run is 'done'.
+  status: 'queued' | 'running' | 'done' | 'failed'
   draft?: MWTaskDraft | null
   error?: string | null
 }

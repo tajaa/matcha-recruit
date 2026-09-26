@@ -36,11 +36,11 @@ export function useAgentTaskDraft(projectId: string, onDraft: (draft: MWTaskDraf
           const result = await getAgentTaskDraft(projectId, run.run_id)
           if (current !== generation.current) return
           setStatus(result.status)
-          if (result.status === 'completed') {
+          if (result.status === 'done') {
             setBusy(false)
             if (result.draft) onDraftRef.current(result.draft)
             else setError('The run completed without a ticket draft.')
-          } else if (result.status === 'failed' || result.status === 'cancelled') {
+          } else if (result.status === 'failed') {
             setBusy(false)
             setError(result.error ?? 'Could not draft a ticket from this repository.')
           } else {
