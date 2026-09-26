@@ -14,6 +14,7 @@
 #   tellus       platforms/ios/TellUs/TellUs.xcodeproj
 #   gummfit      platforms/ios/Gummfit/Gummfit.xcodeproj
 #   storefront   platforms/ios/Storefront/Storefront.xcodeproj
+#   matchaschedule platforms/ios/MatchaSchedule/MatchaSchedule.xcodeproj
 #
 # Every run first lints project.pbxproj (`plutil -lint`) — a hand-edited
 # pbxproj that's gone invalid is the most common failure mode after an agent
@@ -78,6 +79,13 @@ case "$TARGET" in
         GENERATE_PROJECT=true
         VERIFY_STOREFRONT=true
         ;;
+    matchaschedule)
+        PROJECT_DIR="$REPO_ROOT/platforms/ios/MatchaSchedule"
+        PROJECT="$PROJECT_DIR/MatchaSchedule.xcodeproj"
+        SCHEME="MatchaSchedule"
+        DESTINATION="generic/platform=iOS Simulator"
+        GENERATE_PROJECT=true
+        ;;
     -h|--help|"")
         usage
         exit 0
@@ -89,9 +97,13 @@ case "$TARGET" in
         ;;
 esac
 
-if [[ "$TARGET" == "storefront" && "$ACTION" == "test" ]]; then
+if [[ ( "$TARGET" == "storefront" || "$TARGET" == "matchaschedule" ) && "$ACTION" == "test" ]]; then
     if [[ -z "${XCODE_DESTINATION:-}" || "${XCODE_DESTINATION:-}" == generic/* ]]; then
-        echo "Storefront test requires XCODE_DESTINATION to name a concrete iOS Simulator." >&2
+        if [[ "$TARGET" == "storefront" ]]; then
+            echo "Storefront test requires XCODE_DESTINATION to name a concrete iOS Simulator." >&2
+        else
+            echo "Matcha Schedule test requires XCODE_DESTINATION to name a concrete iOS Simulator." >&2
+        fi
         exit 1
     fi
 fi
@@ -162,7 +174,7 @@ fi
 # NB: expanded as ${ARR[@]+"${ARR[@]}"} below — macOS ships bash 3.2, where a
 # plain "${ARR[@]}" on an EMPTY array trips `set -u` with "unbound variable".
 XCODEBUILD_SETTINGS=()
-if [[ "${CI:-}" == "true" && ( "$TARGET" == "espresso" || "$TARGET" == "storefront" ) ]]; then
+if [[ "${CI:-}" == "true" && ( "$TARGET" == "espresso" || "$TARGET" == "storefront" || "$TARGET" == "matchaschedule" ) ]]; then
     XCODEBUILD_SETTINGS+=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO)
 fi
 

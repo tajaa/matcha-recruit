@@ -1,4 +1,4 @@
-"""Location-picker access for the scheduling eligibility manager queue."""
+"""Location-picker access for employees and company operators."""
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
@@ -37,7 +37,7 @@ def _row(location_id, *, week_start_weekday=0):
     }
 
 
-def test_location_manager_gets_only_their_managed_location(monkeypatch):
+def test_employee_gets_only_their_own_work_location(monkeypatch):
     company_id, user_id, location_id = uuid4(), uuid4(), uuid4()
     conn = _Conn([_row(location_id)])
 
@@ -53,6 +53,10 @@ def test_location_manager_gets_only_their_managed_location(monkeypatch):
     assert result["locations"][0]["id"] == str(location_id)
     query, args = conn.calls[0]
     assert "e.user_id = $2" in query
+    assert "e.work_location_id = l.id" in query
+    assert "l.company_id = $1 AND e.org_id = $1" in query
+    assert "e.employment_status" in query
+    assert "is_manager" not in query
     assert args == (company_id, user_id)
 
 
