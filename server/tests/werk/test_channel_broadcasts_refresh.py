@@ -85,6 +85,7 @@ async def test_promoted_guest_keeps_publish_on_refresh():
         resp = await refresh_broadcast_token(uuid4(), current_user=guest)
 
     assert resp["token"] == "jwt"
+    assert resp["can_publish"] is True
     assert mt.call_args.kwargs["can_publish"] is True
 
 
@@ -106,6 +107,7 @@ async def test_non_promoted_member_gets_viewer_token():
         resp = await refresh_broadcast_token(uuid4(), current_user=viewer)
 
     assert resp["token"] == "jwt"
+    assert resp["can_publish"] is False
     assert mt.call_args.kwargs["can_publish"] is False
 
 
@@ -150,3 +152,24 @@ async def test_promoted_guest_falls_back_to_viewer_when_livekit_lookup_fails():
 
     assert resp["token"] == "jwt"
     assert mt.call_args.kwargs["can_publish"] is False
+
+
+@pytest.mark.asyncio
+async def test_status_lists_only_publishers_not_all_room_participants():
+    from app.werk.routes.channel_broadcasts import get_broadcast_status
+
+    owner = _user("owner@example.com")
+    bc = {**_broadcast_row(owner.id), "id": uuid4(), "title": "Update"}
+    conn = AsyncMock()
+    conn.fetchrow.side_effect = [_access_row(), bc]
+    conn.fetchval.return_value = 1
+
+    with patch(f"{MOD}.get_connection", _conn_ctx(conn)), \
+         patch(f"{MOD}._assert_member", AsyncMock()), \
+         patch(f"{LK}.list_publisher_identities", AsyncMock(return_value=[str(owner.id)])) as publishers, \
+         patch(f"{LK}.list_participant_identities", AsyncMock(return_value=[str(owner.id), "viewer"])) as everyone:
+        resp = await get_broadcast_status(uuid4(), current_user=owner)
+
+    assert resp["publisher_user_ids"] == [str(owner.id)]
+    publishers.assert_awaited_once_with("channel-abc")
+    everyone.assert_not_awaited()

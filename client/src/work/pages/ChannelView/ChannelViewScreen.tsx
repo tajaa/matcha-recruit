@@ -1,5 +1,6 @@
 import InactivityWarningBanner from '../../components/channels/InactivityWarningBanner'
 import VoiceCallBar from '../../components/channels/VoiceCallBar'
+import BroadcastBar from '../../components/channels/BroadcastBar'
 import JobInviteBanner from '../../components/channels/JobInviteBanner'
 import ChannelOpenRoleBanner from '../../components/channels/ChannelOpenRoleBanner'
 import { useChannelView } from './useChannelView'
@@ -13,6 +14,9 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import ChannelActionsDrawer from '../../components/channels/actions/ChannelActionsDrawer'
 import { useChannelActions } from '../../components/channels/actions/useChannelActions'
+import { useLiveKitBroadcast } from '../../hooks/useLiveKitBroadcast'
+import { useEntitlements } from '../../hooks/useEntitlements'
+import { showPaywall } from '../../utils/paywall'
 
 interface ChannelViewScreenProps {
   /** Render this channel instead of the route's `:channelId`. See useChannelView. */
@@ -24,6 +28,7 @@ interface ChannelViewScreenProps {
 
 export default function ChannelViewScreen({ channelId: channelIdOverride, embedded = false }: ChannelViewScreenProps = {}) {
   const [showActions, setShowActions] = useState(false)
+  const [showBroadcast, setShowBroadcast] = useState(false)
   const [searchParams] = useSearchParams()
   const {
     channelId,
@@ -90,6 +95,9 @@ export default function ChannelViewScreen({ channelId: channelIdOverride, embedd
     secondaryActions,
   } = useChannelView(channelIdOverride, embedded)
   const channelActions = useChannelActions(channelId, isMember)
+  const broadcast = useLiveKitBroadcast(isMember ? channelId ?? null : null, userId ?? null, channel?.members ?? [])
+  const entitlements = useEntitlements()
+  const callActive = voice.callState !== 'idle' || voice.participants.length > 0
 
   const highlightedMessageId = searchParams.get('message')
   useEffect(() => {
@@ -131,12 +139,27 @@ export default function ChannelViewScreen({ channelId: channelIdOverride, embedd
         setShowMembers={setShowMembers}
         isMember={isMember}
         voice={voice}
+        broadcastActive={broadcast.status?.active ?? false}
+        onOpenBroadcast={() => setShowBroadcast(true)}
         secondaryActions={secondaryActions}
         showMobileActions={showMobileActions}
         setShowMobileActions={setShowMobileActions}
         actionCount={channelActions.actions.length}
         onOpenActions={() => setShowActions(true)}
       />
+
+      {isMember && showBroadcast && <BroadcastBar
+        broadcast={broadcast}
+        members={channel?.members ?? []}
+        isOwner={channel?.my_role === 'owner'}
+        canGoLive={entitlements.can('go_live')}
+        callActive={callActive}
+        onUpgrade={() => showPaywall('go_live', 'pro', entitlements.plan ?? 'free')}
+        onClose={() => { broadcast.leave(); setShowBroadcast(false) }}
+      />}
+      {isMember && !showBroadcast && broadcast.status?.active && <button onClick={() => setShowBroadcast(true)} className="border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-left text-xs text-red-300">
+        Live now: {broadcast.status.title || 'Broadcast'} · Watch
+      </button>}
 
       {paymentInfo?.days_until_removal != null && paymentInfo.days_until_removal <= (paymentInfo.inactivity_warning_days ?? 3) && !warningDismissed && (
         <InactivityWarningBanner
@@ -161,7 +184,7 @@ export default function ChannelViewScreen({ channelId: channelIdOverride, embedd
         </div>
       )}
 
-      {(voice.callState !== 'idle' || voice.participants.length > 0) && (
+      {!broadcast.status?.active && (voice.callState !== 'idle' || voice.participants.length > 0) && (
         <VoiceCallBar
           callState={voice.callState}
           participants={voice.participants}

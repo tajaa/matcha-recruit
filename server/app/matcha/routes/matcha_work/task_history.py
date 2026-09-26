@@ -120,6 +120,7 @@ async def get_project_history_replay_endpoint(
             f"""
             SELECT DISTINCT ON ({_task_key})
                    {_task_key} AS task_key, h.to_value AS column_key,
+                   h.event_type AS last_event,
                    COALESCE(t.title, h.metadata->>'title') AS title,
                    COALESCE(ac.name, CONCAT(ae.first_name, ' ', ae.last_name), aa.name) AS assignee_name,
                    au.avatar_url AS assignee_avatar_url
@@ -131,7 +132,7 @@ async def get_project_history_replay_endpoint(
             LEFT JOIN admins aa ON aa.user_id = t.assigned_to
             WHERE h.project_id = $1
               AND h.created_at < $2
-              AND h.event_type IN ({_COLUMN_EVENTS})
+              AND h.event_type IN ({_COLUMN_EVENTS}, 'deleted')
               AND {_task_key} IS NOT NULL
             ORDER BY {_task_key}, h.created_at DESC
             """,
@@ -167,10 +168,11 @@ async def get_project_history_replay_endpoint(
             "assignee_avatar_url": r["assignee_avatar_url"],
         }
         for r in starting_rows
-        # A task whose latest pre-week event was 'deleted' shouldn't seed the
-        # board — but 'deleted' isn't in _COLUMN_EVENTS so it never wins the
-        # DISTINCT ON in the first place; this filter is a no-op safeguard.
-        if r["column_key"] is not None
+        # A task deleted before the week must not reappear from an older
+        # column event. The DISTINCT ON query includes deleted events so the
+        # last one wins, even after the task row and its FK are gone.
+        if r["last_event"] != "deleted"
+        and r["column_key"] is not None
         # The Done column resets every week. Seeding it with everything ever
         # finished makes it the all-time completed list — it only grows, dwarfs
         # the other columns, and buries the week's actual finishes. A replayed

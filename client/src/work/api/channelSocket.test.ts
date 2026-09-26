@@ -17,6 +17,8 @@ class FakeWebSocket {
   onerror: (() => void) | null = null
 
   constructor(_url: string, _protocols?: string[]) {
+    void _url
+    void _protocols
     FakeWebSocket.instances.push(this)
   }
   send(data: string) { this.sent.push(data) }
@@ -154,6 +156,23 @@ describe('ChannelSocket outbox', () => {
       notification: { id: 'notification-2' },
     })
     expect(received).toEqual(['notification-1'])
+  })
+
+  it('dispatches broadcast lifecycle and per-user token grants', () => {
+    const s = new ChannelSocket()
+    const started = vi.fn()
+    const grant = vi.fn()
+    const ended = vi.fn()
+    s.onBroadcastStarted = started
+    s.onBroadcastTokenGrant = grant
+    s.onBroadcastEnded = ended
+    s.connect()
+    latest().receive({ type: 'broadcast.started', channel_id: 'ch-1', broadcast_id: 'bc-1' })
+    latest().receive({ type: 'broadcast.token_grant', channel_id: 'ch-1', token: 'publisher', livekit_url: 'ws://test', can_publish: true })
+    latest().receive({ type: 'broadcast.ended', channel_id: 'ch-1', broadcast_id: 'bc-1' })
+    expect(started).toHaveBeenCalledWith(expect.objectContaining({ broadcast_id: 'bc-1' }))
+    expect(grant).toHaveBeenCalledWith(expect.objectContaining({ token: 'publisher', can_publish: true }))
+    expect(ended).toHaveBeenCalledWith(expect.objectContaining({ broadcast_id: 'bc-1' }))
   })
 
   it('scopes the outbox to the current user, so a different login does not replay it', () => {

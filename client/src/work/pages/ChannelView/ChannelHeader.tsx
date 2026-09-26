@@ -1,4 +1,4 @@
-import { ClipboardList, Hash, Users, Phone, MoreHorizontal, MapPin } from 'lucide-react'
+import { ClipboardList, Hash, Users, Phone, MoreHorizontal, MapPin, Radio } from 'lucide-react'
 import type { ChannelDetail, ChannelPaymentInfo } from '../../api/channels'
 import type { useLiveKitCall } from '../../hooks/useLiveKitCall'
 import type { HeaderAction } from './types'
@@ -14,6 +14,8 @@ interface ChannelHeaderProps {
   setShowMembers: (v: boolean) => void
   isMember: boolean
   voice: VoiceCall
+  broadcastActive: boolean
+  onOpenBroadcast: () => void
   secondaryActions: HeaderAction[]
   showMobileActions: boolean
   setShowMobileActions: React.Dispatch<React.SetStateAction<boolean>>
@@ -29,6 +31,8 @@ export default function ChannelHeader({
   setShowMembers,
   isMember,
   voice,
+  broadcastActive,
+  onOpenBroadcast,
   secondaryActions,
   showMobileActions,
   setShowMobileActions,
@@ -69,7 +73,7 @@ export default function ChannelHeader({
         >
           <Users size={16} />
         </button>
-        {isMember && (
+        {isMember && !broadcastActive && (
           <button
             onClick={voice.callState === 'idle' ? voice.joinCall : undefined}
             className="p-1.5 rounded hover:bg-w-surface2 text-w-dim hover:text-w-accent"
@@ -78,6 +82,9 @@ export default function ChannelHeader({
             <Phone size={16} />
           </button>
         )}
+        {isMember && <button onClick={onOpenBroadcast} className={`rounded p-1.5 hover:bg-w-surface2 ${broadcastActive ? 'text-red-400' : 'text-w-dim hover:text-w-accent'}`} title={broadcastActive ? 'Watch live broadcast' : 'Broadcast'} aria-label={broadcastActive ? 'Watch live broadcast' : 'Broadcast'}>
+          <Radio size={16} />
+        </button>}
         {isMember && (
           <button
             onClick={onOpenActions}
