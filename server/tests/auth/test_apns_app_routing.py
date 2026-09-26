@@ -108,7 +108,7 @@ def device_env(monkeypatch):
         return senders.setdefault((bundle, environment), Sender(bundle, environment))
 
     monkeypatch.setattr(apns_service, "get_settings", _settings)
-    monkeypatch.setattr(apns_service, "get_connection", get_connection)
+    monkeypatch.setattr(apns_service, "connection_or_direct", get_connection)
     monkeypatch.setattr(apns_service, "_get_client", get_client)
     return conn, senders
 
@@ -188,7 +188,77 @@ async def test_register_persists_environment(monkeypatch):
     )
     query, args = conn.queries[0]
     assert "environment" in query
-    assert args == (user_id, "b" * 64, "ios", "com.heymatcha.schedule", "production")
+    assert args == (user_id, "b" * 64, "ios", "com.heymatcha.schedule", "production", None)
+
+
+@pytest.mark.asyncio
+async def test_register_binds_token_to_mobile_device_session(monkeypatch):
+    conn = _Connection()
+
+    @asynccontextmanager
+    async def get_connection():
+        yield conn
+
+    monkeypatch.setattr(apns_service, "get_settings", _settings)
+    monkeypatch.setattr(push_routes, "get_connection", get_connection)
+    user_id, sid = uuid4(), uuid4()
+    await push_routes.register_device(
+        push_routes.DeviceTokenBody(
+            token="c" * 64, bundle_id="com.heymatcha.schedule", environment="sandbox"
+        ),
+        current_user=SimpleNamespace(id=user_id, device_session_id=sid),
+    )
+    query, args = conn.queries[0]
+    assert "device_session_id = EXCLUDED.device_session_id" in query
+    assert args[-1] == sid
+
+
+@pytest.mark.asyncio
+async def test_send_skips_tokens_whose_device_session_is_dead(device_env):
+    """The SELECT itself must exclude revoked sessions and inactive employees;
+    legacy (unbound) Werk rows are untouched."""
+    conn, _senders = device_env
+    await apns_service.send_to_user(uuid4(), "Open shift", kind="schedule_published")
+    query, args = conn.queries[0]
+    assert "LEFT JOIN auth_device_sessions" in query
+    assert "dt.device_session_id IS NULL" in query
+    assert "ds.revoked_at IS NULL" in query
+    assert "employment_status" in query
+    assert args[1] == ["terminated", "offboarded"]
+
+
+def test_apns_client_is_rebuilt_for_a_new_event_loop(monkeypatch):
+    """Each Celery task runs asyncio.run(); a client cached from the previous
+    task's (now closed) loop must not be reused."""
+    import asyncio
+
+    import aioapns
+
+    created = []
+
+    def make_client(**kwargs):
+        client = SimpleNamespace(**kwargs)
+        created.append(client)
+        return client
+
+    monkeypatch.setattr(apns_service, "get_settings", _settings)
+    monkeypatch.setattr(apns_service.Path, "read_text", lambda _path: "test-key")
+    monkeypatch.setattr(aioapns, "APNs", make_client)
+    apns_service._clients.clear()
+    try:
+        async def twice():
+            a = await apns_service._get_client("com.heymatcha.schedule", "sandbox")
+            b = await apns_service._get_client("com.heymatcha.schedule", "sandbox")
+            return a, b
+
+        first_a, first_b = asyncio.run(twice())
+        second_a, _ = asyncio.run(twice())
+        assert first_a is first_b
+        assert second_a is not first_a
+        assert len(created) == 2
+        assert len(apns_service._clients) == 1
+    finally:
+        apns_service._clients.clear()
 
 
 @pytest.mark.asyncio
