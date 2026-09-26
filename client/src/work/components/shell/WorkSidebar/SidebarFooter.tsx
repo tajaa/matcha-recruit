@@ -1,10 +1,10 @@
 import { Mail, MailOpen, LogOut, Users, CreditCard, Sparkles } from 'lucide-react'
 import type { NavigateFunction } from 'react-router-dom'
+import type { WorkPlan } from '../../../api/matchaWork/entitlements'
 
 interface Props {
   isPersonal: boolean
-  plusActive: boolean | null
-  upgrading: boolean
+  plan: WorkPlan | null
   onUpgrade: () => void
   base: string
   navigate: NavigateFunction
@@ -21,8 +21,7 @@ interface Props {
 // Footer: Inbox + User profile + Logout
 export default function SidebarFooter({
   isPersonal,
-  plusActive,
-  upgrading,
+  plan,
   onUpgrade,
   base,
   navigate,
@@ -37,20 +36,19 @@ export default function SidebarFooter({
 }: Props) {
   return (
     <div className="px-2 py-2 border-t border-w-line space-y-1">
-      {isPersonal && plusActive === false && (
+      {isPersonal && (plan === 'free' || plan === 'lite') && (
         <button
           onClick={onUpgrade}
-          disabled={upgrading}
           className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
         >
           <Sparkles size={14} strokeWidth={1.8} />
-          {upgrading ? 'Opening checkout…' : 'Upgrade to Plus'}
+          {plan === 'free' ? 'Explore Lite & Pro' : 'Upgrade to Pro'}
         </button>
       )}
-      {isPersonal && plusActive === true && (
+      {isPersonal && plan === 'pro' && (
         <div className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] text-amber-400/80">
           <Sparkles size={14} strokeWidth={1.8} />
-          Plus active
+          Pro active
         </div>
       )}
       {/* Footer nav row — Inbox / People / Billing as compact icon+label buttons */}

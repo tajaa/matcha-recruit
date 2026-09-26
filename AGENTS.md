@@ -4,6 +4,18 @@
 repo-wide safety, architecture, validation, and operational rules in addition
 to any more-specific `AGENTS.md` found below the files being inspected.
 
+## Existing work described by the user
+
+If the user says a phase, branch, or worktree already has uncommitted or
+unpushed work, verify that the expected branch and changes are present before
+editing. A clean or detached session checkout, an inaccessible local path, or
+a missing remote branch is an environment mismatch, not permission to recreate
+the work. Tell the user exactly what is missing and ask for the existing
+worktree or patch. Do not rebuild that phase, commit or push a substitute,
+open its PR, or start a dependent phase until the original work is available
+or the user explicitly authorizes reconstruction. Preserve the user's
+uncommitted files when the worktree becomes available.
+
 ## OpenAI pull-request review directive
 
 Apply this directive whenever an OpenAI model is asked to review a pull

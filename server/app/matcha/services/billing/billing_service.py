@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from datetime import datetime
 from typing import Any, Optional, Sequence
 from uuid import UUID
 
@@ -544,6 +545,28 @@ async def get_active_subscription(
     return dict(row)
 
 
+async def get_current_personal_subscription(company_id: UUID) -> Optional[dict[str, Any]]:
+    """Return an active personal plan, or one canceled during its paid period."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, company_id, stripe_subscription_id, stripe_customer_id,
+                   pack_id, credits_per_cycle, amount_cents, status,
+                   current_period_end, created_at, canceled_at
+            FROM mw_subscriptions
+            WHERE company_id = $1
+              AND pack_id IN ('matcha_work_lite', 'matcha_work_personal')
+              AND (status IN ('active', 'past_due')
+                   OR (status = 'canceled' AND current_period_end > NOW()))
+            ORDER BY CASE WHEN status IN ('active', 'past_due') THEN 0 ELSE 1 END,
+                     created_at DESC
+            LIMIT 1
+            """,
+            company_id,
+        )
+    return dict(row) if row is not None else None
+
+
 async def list_active_subscriptions(company_id: UUID) -> list[dict[str, Any]]:
     """Return every active/past_due subscription row for a company."""
     async with get_connection() as conn:
@@ -616,17 +639,22 @@ async def upsert_subscription(
     return dict(row)
 
 
-async def cancel_subscription_record(stripe_subscription_id: str) -> bool:
+async def cancel_subscription_record(
+    stripe_subscription_id: str,
+    current_period_end: Optional[datetime] = None,
+) -> bool:
     """Mark a subscription as canceled."""
     async with get_connection() as conn:
         result = await conn.execute(
             """
             UPDATE mw_subscriptions
-            SET status = 'canceled', canceled_at = NOW()
+            SET status = 'canceled', canceled_at = NOW(),
+                current_period_end = COALESCE($2, current_period_end)
             WHERE stripe_subscription_id = $1
               AND status != 'canceled'
             """,
             stripe_subscription_id,
+            current_period_end,
         )
     return result.endswith("1")
 

@@ -197,6 +197,42 @@ export class ApiError extends Error {
   }
 }
 
+export type PlanRequiredDetail = {
+  code: 'plan_required'
+  required_plan: 'lite' | 'pro'
+  current_plan: 'free' | 'lite' | 'pro' | 'business'
+  feature: string
+}
+
+export const PLAN_REQUIRED_EVENT = 'matcha-work:plan-required'
+
+export function parsePlanRequired(body: unknown): PlanRequiredDetail | null {
+  if (!body || typeof body !== 'object' || !('detail' in body)) return null
+  const detail = body.detail
+  if (!detail || typeof detail !== 'object') return null
+  if (!('code' in detail) || detail.code !== 'plan_required') return null
+  if (!('required_plan' in detail) || (detail.required_plan !== 'lite' && detail.required_plan !== 'pro')) return null
+  if (!('current_plan' in detail) || typeof detail.current_plan !== 'string'
+    || !['free', 'lite', 'pro', 'business'].includes(detail.current_plan)) return null
+  if (!('feature' in detail) || typeof detail.feature !== 'string') return null
+  return detail as PlanRequiredDetail
+}
+
+function apiError(message: string, status: number, body: unknown): ApiError {
+  const detail = status === 403 ? parsePlanRequired(body) : null
+  if (detail && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent<PlanRequiredDetail>(PLAN_REQUIRED_EVENT, { detail }))
+  }
+  return new ApiError(message, status, body)
+}
+
+async function throwPlanRequiredIfPresent(res: Response): Promise<void> {
+  if (res.status !== 403) return
+  const body: unknown = await res.json().catch(() => null)
+  const detail = parsePlanRequired(body)
+  if (detail) throw apiError(JSON.stringify(detail), res.status, body)
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getAccessToken()
   const res = await fetch(`${API_BASE}${path}`, {
@@ -234,7 +270,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         if (path !== '/client-errors' && _shouldReportStatus(retry.status)) {
           reportApiError({ endpoint: path, status: retry.status, message: msg, body: retryBody })
         }
-        throw new ApiError(msg, retry.status, retryBody)
+        throw apiError(msg, retry.status, retryBody)
       }
       return retry.json()
     }
@@ -266,7 +302,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (path !== '/client-errors' && _shouldReportStatus(res.status)) {
       reportApiError({ endpoint: path, status: res.status, message: msg, body: errBody })
     }
-    throw new ApiError(msg, res.status, errBody)
+    throw apiError(msg, res.status, errBody)
   }
   if (res.status === 204) return null as T
   return res.json()
@@ -335,7 +371,10 @@ export const api = {
   // GET returning raw text (e.g. the admin traffic report HTML).
   getText: async (path: string) => {
     const res = await _fetchWithRefresh(`${API_BASE}${path}`)
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    if (!res.ok) {
+      await throwPlanRequiredIfPresent(res)
+      throw new Error(`${res.status} ${res.statusText}`)
+    }
     return res.text()
   },
   download: async (path: string, filename?: string) => {
@@ -345,7 +384,7 @@ export const api = {
       const msg = errBody?.detail
         ? typeof errBody.detail === 'string' ? errBody.detail : JSON.stringify(errBody.detail)
         : `${res.status} ${res.statusText}`
-      throw new ApiError(msg, res.status, errBody)
+      throw apiError(msg, res.status, errBody)
     }
     await _saveBlobResponse(res, path, filename)
   },
@@ -356,7 +395,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    if (!res.ok) {
+      await throwPlanRequiredIfPresent(res)
+      throw new Error(`${res.status} ${res.statusText}`)
+    }
     await _saveBlobResponse(res, path, filename)
   },
 }

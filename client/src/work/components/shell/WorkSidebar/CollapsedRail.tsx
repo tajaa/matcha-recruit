@@ -8,7 +8,7 @@ interface Props {
   pathname: string
   navigate: NavigateFunction
   isActive: (path: string) => boolean
-  mwBetaLite: boolean
+  showProjects: boolean
   totalChannelUnread: number
   pendingConnections: number
   inboxUnread: number
@@ -30,7 +30,7 @@ export default function CollapsedRail({
   pathname,
   navigate,
   isActive,
-  mwBetaLite,
+  showProjects,
   totalChannelUnread,
   pendingConnections,
   inboxUnread,
@@ -129,7 +129,7 @@ export default function CollapsedRail({
         )}
       </button>}
 
-      {mwBetaLite && (
+      {showProjects && (
         <button
           onClick={() => { onToggle(); openProjects() }}
           className={`p-2 rounded-lg transition-colors ${pathname.includes('/projects/') ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}

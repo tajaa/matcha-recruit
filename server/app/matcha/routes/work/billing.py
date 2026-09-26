@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -174,9 +174,8 @@ async def create_personal_checkout_session(
     """Start a personal Werk plan checkout — Lite ($9/mo) or Pro ($20/mo).
 
     Only individual accounts (or admins for testing) can subscribe — business
-    users get Werk through their company. Upgrading Lite→Pro cancels the Lite
-    subscription before opening the Pro checkout (simplest path; revisit with
-    Stripe price objects + proration if churn warrants).
+    users get Werk through their company. A Lite→Pro upgrade keeps Lite active
+    until Pro checkout succeeds; the Stripe webhook then cancels Lite.
     """
     if current_user.role not in ("individual", "admin"):
         raise HTTPException(
@@ -201,18 +200,14 @@ async def create_personal_checkout_session(
 
     stripe_service = StripeService()
 
-    # Lite→Pro upgrade: drop the Lite sub first so the user isn't double-billed.
-    if (
-        body.plan == "pro"
-        and existing
-        and existing.get("pack_id") == entitlements_service.LITE_PACK_ID
-    ):
-        try:
-            await stripe_service.cancel_subscription(existing["stripe_subscription_id"])
-        except StripeServiceError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        await billing_service.cancel_subscription_record(existing["stripe_subscription_id"])
-        entitlements_service.invalidate_plan_cache(current_user.id)
+    upgrade_from_subscription_id = (
+        existing["stripe_subscription_id"]
+        if (
+            body.plan == "pro"
+            and existing
+            and existing.get("pack_id") == entitlements_service.LITE_PACK_ID
+        ) else None
+    )
 
     try:
         session = await stripe_service.create_personal_subscription_checkout(
@@ -221,6 +216,7 @@ async def create_personal_checkout_session(
             success_url=body.success_url,
             cancel_url=body.cancel_url,
             plan=body.plan,
+            upgrade_from_subscription_id=upgrade_from_subscription_id,
         )
     except StripeServiceError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -252,14 +248,18 @@ async def get_subscription(
     if company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No company associated with this account")
 
-    sub = await billing_service.get_active_subscription(
-        company_id, pack_ids=billing_service.WERK_PACK_IDS
+    sub = (
+        await billing_service.get_current_personal_subscription(company_id)
+        if current_user.role == "individual"
+        else await billing_service.get_active_subscription(
+            company_id, pack_ids=billing_service.WERK_PACK_IDS
+        )
     )
     if sub is None:
         return SubscriptionResponse(active=False)
 
     return SubscriptionResponse(
-        active=True,
+        active=sub["status"] in ("active", "past_due"),
         pack_id=sub["pack_id"],
         tokens_per_cycle=SUBSCRIPTION_TOKENS,
         amount_cents=int(sub["amount_cents"]),
@@ -285,12 +285,19 @@ async def cancel_subscription(
 
     stripe_service = StripeService()
     try:
+        period_end = datetime.fromtimestamp(
+            await stripe_service.get_subscription_period_end(sub["stripe_subscription_id"]),
+            tz=timezone.utc,
+        )
         await stripe_service.cancel_subscription(sub["stripe_subscription_id"])
     except StripeServiceError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    await billing_service.cancel_subscription_record(sub["stripe_subscription_id"])
-    await token_budget_service.cancel_subscription_budget(company_id)
+    await billing_service.cancel_subscription_record(
+        sub["stripe_subscription_id"], current_period_end=period_end,
+    )
+    if sub["pack_id"] == token_budget_service.SUBSCRIPTION_PACK_ID:
+        await token_budget_service.cancel_subscription_budget(company_id)
     entitlements_service.invalidate_plan_cache(current_user.id)
     return {"canceled": True, "message": "Subscription will not renew at the end of the current period."}
 
