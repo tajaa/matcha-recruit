@@ -363,7 +363,7 @@ export default function WorkLayout() {
         <span className="hidden sm:inline text-sm font-medium tracking-tight text-w-text">{brand}</span>
 
         <div className="ml-auto flex items-center gap-3 sm:gap-4">
-          {surface === 'espresso' && <FindPalette userId={me?.user?.id} base={base} />}
+          {isPersonal && <FindPalette userId={me?.user?.id} base={base} />}
           <TokenIndicator />
           <NotificationSettingsMenu />
           <NotificationBell />

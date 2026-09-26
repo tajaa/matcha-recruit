@@ -27,3 +27,22 @@ async def test_project_file_list_signs_storage_paths(monkeypatch):
     assert raw["storage_url"] == "s3://private-bucket/file.pdf"
     access.assert_awaited_once()
     list_files.assert_awaited_once_with(project_id)
+
+
+@pytest.mark.asyncio
+async def test_project_file_upload_returns_signed_url(monkeypatch):
+    project_id = uuid4()
+    user = SimpleNamespace(id=uuid4())
+    raw = {"id": str(uuid4()), "storage_url": "s3://private-bucket/new.pdf", "filename": "new.pdf"}
+    store = AsyncMock(return_value=raw)
+    presign = lambda _url, expires_in: f"https://files.example.test/new.pdf?expires={expires_in}"
+    monkeypatch.setattr(projects, "_verify_project_access", AsyncMock(return_value=({"company_id": "co-1"}, "owner")))
+    monkeypatch.setattr(project_file_service, "validate_and_store_project_upload", store)
+    monkeypatch.setattr(_shared, "get_storage", lambda: SimpleNamespace(get_presigned_download_url=presign))
+
+    upload = SimpleNamespace(filename="new.pdf")
+    result = await projects.upload_project_file(project_id, upload, None, None, user)
+
+    assert result["storage_url"] == "https://files.example.test/new.pdf?expires=3600"
+    assert raw["storage_url"] == "s3://private-bucket/new.pdf"
+    assert store.await_args.kwargs["prefix"] == f"matcha-work/co-1/{project_id}/files"
