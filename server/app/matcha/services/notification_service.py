@@ -125,10 +125,11 @@ async def create_notification(
         # Only push when the user has no live socket — if their app is open
         # they get the in-app WS notification above, so a phone push would
         # double up. Backgrounded iOS drops the socket, so push reaches them.
-        if not await apns_service.is_user_online(user_id):
+        if type.startswith("schedule_") or not await apns_service.is_user_online(user_id):
             await apns_service.send_to_user(
                 user_id, title, body,
                 {"type": type, "link": link, "metadata": metadata or {}},
+                kind=type,
             )
     except Exception as e:
         logger.warning("Failed to push APNs to %s: %s", user_id, e)
@@ -222,11 +223,12 @@ async def create_notifications_bulk(
     # APNs only for users with no live socket, resolved in ONE presence pass.
     try:
         from ...core.services import apns_service
-        offline = await apns_service.get_offline_users(user_ids)
+        offline = user_ids if type.startswith("schedule_") else await apns_service.get_offline_users(user_ids)
         if offline:
             await apns_service.send_to_many(
                 offline, title, body,
                 {"type": type, "link": link, "metadata": metadata or {}},
+                kind=type,
             )
     except Exception as e:
         logger.warning("Bulk APNs push failed: %s", e)

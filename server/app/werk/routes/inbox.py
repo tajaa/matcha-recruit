@@ -218,15 +218,14 @@ async def _send_message_notification(
     sender_name: str,
     preview: str,
 ) -> None:
-    """Best-effort email notification to other participants (batched, 15-min cooldown).
+    """Best-effort DM push and batched email notification to other participants.
 
     Opens its own DB connection so the caller's connection isn't held during email I/O.
     """
     try:
         from ...core.services.email import get_email_service
         email_svc = get_email_service()
-        if not email_svc.is_configured():
-            return
+        email_configured = email_svc.is_configured()
 
         from ...config import get_settings
         base_url = get_settings().app_base_url.rstrip("/")
@@ -252,6 +251,8 @@ async def _send_message_notification(
             to_notify: list[dict] = []
             now = datetime.now(timezone.utc)
             for p in participants:
+                if not email_configured:
+                    continue
                 batch = await conn.fetchrow(
                     "SELECT last_sent_at FROM inbox_email_batches WHERE recipient_id = $1 AND sender_id = $2",
                     p["user_id"],
@@ -265,18 +266,19 @@ async def _send_message_notification(
                         continue
                 to_notify.append({"user_id": p["user_id"], "email": p["email"], "name": p["name"]})
 
-        # Immediate APNs push (no email cooldown) to offline, non-muted
-        # participants. DMs aren't on the channels socket, so push is the only
-        # realtime signal once the recipient's app is backgrounded.
+        # Immediate APNs push (no email cooldown) to non-muted participants.
+        # Werk presence suppresses only the Werk topic; Matcha Schedule still
+        # receives Inbox DMs while a desktop socket is open.
         try:
             from ...core.services import apns_service
             for p in participants:
-                if not await apns_service.is_user_online(p["user_id"]):
-                    await apns_service.send_to_user(
-                        p["user_id"], sender_name, preview[:200],
-                        {"type": "inbox_message",
-                         "metadata": {"conversation_id": str(conversation_id)}},
-                    )
+                await apns_service.send_to_user(
+                    p["user_id"], sender_name, preview[:200],
+                    {"type": "inbox_message",
+                     "metadata": {"conversation_id": str(conversation_id)}},
+                    kind="inbox_message",
+                    suppress_werk=await apns_service.is_user_online(p["user_id"]),
+                )
         except Exception:
             logger.warning("Inbox APNs push failed", exc_info=True)
 

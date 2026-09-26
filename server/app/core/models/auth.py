@@ -62,6 +62,10 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 
+class MobileLogoutRequest(RefreshTokenRequest):
+    push_token: Optional[str] = None  # APNs token to drop alongside the session
+
+
 # Registration models for each user type
 class AdminRegister(BaseModel):
     email: EmailStr
@@ -249,6 +253,7 @@ class CurrentUser(BaseModel):
     beta_features: dict = {}
     interview_prep_tokens: int = 0
     allowed_interview_roles: list[str] = []
+    device_session_id: Optional[UUID] = None  # set for Matcha Schedule mobile bearers
 
 
 class ChangePasswordRequest(BaseModel):

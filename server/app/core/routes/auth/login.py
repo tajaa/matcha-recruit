@@ -17,7 +17,7 @@ from app.database import get_connection
 from uuid import UUID, uuid4
 
 from app.core.models.auth import (
-    LoginRequest, TokenResponse, RefreshTokenRequest, UserResponse,
+    LoginRequest, TokenResponse, MobileLogoutRequest, RefreshTokenRequest, UserResponse,
     AdminRegister, ClientRegister, CandidateRegister,
     BusinessRegister, TestAccountRegister, TestAccountProvisionResponse,
     AdminProfile, ClientProfile, CandidateProfile, EmployeeProfile,
@@ -361,6 +361,12 @@ async def refresh_token(request: RefreshTokenRequest):
                 "AND revoked_at IS NULL AND refresh_generation <> $3",
                 replay.sid, replay.user_id, replay.generation,
             )
+            # Whatever ended this session (logout elsewhere, termination,
+            # replay), the device must stop receiving this user's pushes.
+            await conn.execute(
+                "DELETE FROM device_tokens WHERE device_session_id = $1 AND user_id = $2",
+                replay.sid, replay.user_id,
+            )
             raise HTTPException(status_code=401, detail="Mobile session revoked or employee inactive")
 
 
@@ -373,8 +379,9 @@ async def logout(current_user: CurrentUser = Depends(get_current_user)):
 
 
 @router.post("/mobile/logout")
-async def mobile_logout(request: RefreshTokenRequest):
-    """Revoke only the Matcha Schedule device identified by this refresh token."""
+async def mobile_logout(request: MobileLogoutRequest):
+    """Revoke only the Matcha Schedule device identified by this refresh token,
+    and drop its push tokens so the phone stops receiving this user's pushes."""
     payload = decode_token(request.refresh_token, expected_type="refresh")
     if payload is None:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
@@ -389,5 +396,12 @@ async def mobile_logout(request: RefreshTokenRequest):
             "WHERE id = $1 AND user_id = $2 AND client = 'ios_schedule' "
             "AND revoked_at IS NULL",
             sid, user_id,
+        )
+        # Session-bound tokens, plus the client's own token in case it was
+        # registered before the binding existed.
+        await conn.execute(
+            "DELETE FROM device_tokens WHERE user_id = $1 "
+            "AND (device_session_id = $2 OR ($3::text IS NOT NULL AND token = $3::text))",
+            user_id, sid, request.push_token,
         )
     return {"status": "logged_out"}
