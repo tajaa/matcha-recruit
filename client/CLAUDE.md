@@ -26,8 +26,8 @@ client/src/
 │   ├── host.ts              isCappeHost / cappeSiteHost (host detection)
 │   ├── types.ts, data/      cappe types + cappeThemes/cappePagePresets/timezones
 │
-├── work/                    ← WORK app (matcha-work / werk / werk-lite — one product, 3 URL surfaces)
-│   ├── routes/              WorkRoutes, WerkRoutes, WerkLiteRoutes, WorkSurfaceContext
+├── work/                    ← WORK app (matcha-work / espresso / werk-lite — one product, 3 URL surfaces)
+│   ├── routes/              WorkRoutes, EspressoRoutes, WerkLiteRoutes, WorkSurfaceContext
 │   ├── layout/              WorkLayout
 │   ├── pages/               incl. Inbox (also surfaced by matcha at /app/inbox — see boundary rules)
 │   ├── components/shell/    Surface chrome: sidebars, kanban, notifications, connections

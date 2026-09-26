@@ -52,7 +52,7 @@ function WerkLiteAuthGuard() {
 
 // Werk Lite — a stripped business work-chat surface (channels + calls + boards
 // only), served at /werk-lite with its own login. Shares page components with
-// the /work + /werk trees; the surface value flips branding + nav base paths.
+// the /work + /espresso trees; the surface value flips branding + nav base paths.
 // Company-wide (not admin-only); Boards additionally need `matcha_work`.
 export default function WerkLiteRoutes() {
   return (

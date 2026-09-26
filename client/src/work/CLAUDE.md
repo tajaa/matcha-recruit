@@ -1,10 +1,10 @@
-# Work app (matcha-work / werk / werk-lite frontend)
+# Work app (matcha-work / espresso / werk-lite frontend)
 
-One product, three URL surfaces sharing this tree: `/work` (business, inside a Matcha company), `/werk` (personal), `/werk-lite` (standalone business work-chat). Dispatch is via `WorkSurfaceContext` — gate on identity, brand/paths on surface; **never hardcode `/work` in a shared page**. See root `CLAUDE.md`'s Matcha-work / Werk / Werk-Lite sections and `client/CLAUDE.md`'s app-first layout table for the product-level picture.
+One product, three URL surfaces sharing this tree: `/work` (business, inside a Matcha company), `/espresso` (personal; legacy `/werk` redirects here), `/werk-lite` (standalone business work-chat). Dispatch is via `WorkSurfaceContext` — gate on identity, brand/paths on surface; **never hardcode `/work` in a shared page**. See root `CLAUDE.md` and `client/CLAUDE.md` for the product-level picture.
 
 ## Layout
 
-- `routes/` — `WorkRoutes`, `WerkRoutes`, `WerkLiteRoutes`, `WorkSurfaceContext`
+- `routes/` — `WorkRoutes`, `EspressoRoutes`, `WerkLiteRoutes`, `WorkSurfaceContext`
 - `layout/WorkLayout.tsx` — shared surface shell
 - `pages/` — incl. `Inbox` (also surfaced by Matcha at `/app/inbox`)
 - `components/shell/` — sidebars, kanban, notifications, connections chrome

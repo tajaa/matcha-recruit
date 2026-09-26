@@ -11,7 +11,7 @@ const CreateChannelModal = lazy(() => import('../components/channels/CreateChann
 
 type Tab = 'all' | 'free' | 'paid' | 'mine' | 'discover'
 
-function formatPrice(cents: number | null | undefined, _currency?: string): string {
+function formatPrice(cents: number | null | undefined): string {
   if (!cents) return ''
   return `$${(cents / 100).toFixed(2)}/mo`
 }
@@ -31,7 +31,7 @@ export default function ChannelBrowse() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
   useEffect(() => {
-    listChannels(surface === 'matcha-ops' ? { scope: 'operations' } : surface === 'werk' ? { scope: 'community' } : undefined)
+    listChannels(surface === 'matcha-ops' ? { scope: 'operations' } : surface === 'espresso' ? { scope: 'community' } : undefined)
       .then(setChannels)
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -39,7 +39,6 @@ export default function ChannelBrowse() {
 
   useEffect(() => {
     if (tab !== 'discover') return
-    setDiscoverLoading(true)
     discoverChannels({ q: search || undefined })
       .then(setDiscoverList)
       .catch(() => {})
@@ -80,7 +79,7 @@ export default function ChannelBrowse() {
     setActionLoading(ch.id)
     try {
       const { checkout_url } = await createChannelCheckout(ch.id)
-      window.location.href = checkout_url
+      window.location.assign(checkout_url)
     } catch {
       setActionLoading(null)
     }
@@ -117,7 +116,10 @@ export default function ChannelBrowse() {
             type="text"
             placeholder="Search channels..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value)
+              if (tab === 'discover') setDiscoverLoading(true)
+            }}
             className="w-full rounded-lg border border-w-line bg-w-surface py-2.5 pl-10 pr-4 text-sm text-w-text placeholder-w-faint outline-none focus:border-w-line transition-colors"
           />
         </div>
@@ -127,7 +129,10 @@ export default function ChannelBrowse() {
           {tabs.map((t) => (
             <button
               key={t.key}
-              onClick={() => setTab(t.key)}
+              onClick={() => {
+                setTab(t.key)
+                if (t.key === 'discover' && tab !== 'discover') setDiscoverLoading(true)
+              }}
               className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                 tab === t.key
                   ? 'bg-w-surface2 text-white'
@@ -156,7 +161,7 @@ export default function ChannelBrowse() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((ch) => {
               const isLoading = actionLoading === ch.id
-              const price = formatPrice(ch.price_cents, ch.currency)
+              const price = formatPrice(ch.price_cents)
 
               return (
                 <div

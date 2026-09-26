@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveLegacyChannelTarget } from './LegacySurfaceRedirect'
+import { resolveLegacyChannelTarget } from './legacyChannelTarget'
 
 describe('resolveLegacyChannelTarget', () => {
   it('routes Operations channels to the Ops shell', () => {

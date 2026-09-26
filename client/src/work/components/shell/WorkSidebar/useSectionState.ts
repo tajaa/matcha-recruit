@@ -7,7 +7,7 @@ type SectionState = Record<SidebarSectionKey, boolean>
 const DEFAULTS: SectionState = { chats: true, channels: true, projects: true }
 
 /** Persisted open/closed state for the sidebar's collapsible sections, keyed
- * per work surface (/work vs /werk) so they don't bleed into each other.
+ * per work surface (/work vs /espresso) so they don't bleed into each other.
  * Defaults to all-open — the old per-section `useState(false)` meant every
  * reload showed three collapsed headers and nothing else. */
 export function useSectionState(base: string) {
@@ -24,7 +24,9 @@ export function useSectionState(base: string) {
   useEffect(() => {
     try {
       localStorage.setItem(storageKey, JSON.stringify(state))
-    } catch {}
+    } catch {
+      // Storage may be unavailable; the in-memory section state still works.
+    }
   }, [storageKey, state])
 
   function toggle(key: SidebarSectionKey) {

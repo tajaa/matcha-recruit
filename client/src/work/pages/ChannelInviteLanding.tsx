@@ -14,18 +14,20 @@ import { setAuthTokens } from '../../api/authStorage'
  *
  * Thin gate around the two existing paths:
  *  - Already signed in → bounce into the in-surface join page
- *    (`/werk` or `/work` → `channels/join/:code`), which redeems the invite
+ *    (`/espresso` or `/work` → `channels/join/:code`), which redeems the invite
  *    and routes into the channel. Reuses ChannelJoinByInvite untouched.
  *  - Signed out → create a free personal account bound to the invite, then
- *    drop straight into the channel on the personal (/werk) surface.
+ *    drop straight into the channel on the personal (/espresso) surface.
  */
 export default function ChannelInviteLanding() {
   const { code } = useParams<{ code: string }>()
   const navigate = useNavigate()
   const { me, loading: meLoading, isPersonal, hasFeature } = useMe()
 
-  const [info, setInfo] = useState<ChannelInviteInfo | null>(null)
-  const [infoLoading, setInfoLoading] = useState(true)
+  const [info, setInfo] = useState<ChannelInviteInfo | null>(
+    code ? null : { channel_name: '', is_paid: false, valid: false },
+  )
+  const [infoLoading, setInfoLoading] = useState(!!code)
 
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -43,7 +45,7 @@ export default function ChannelInviteLanding() {
   useEffect(() => {
     if (!meLoading && me && code) {
       const base = isPersonal
-        ? '/werk'
+        ? '/espresso'
         : hasFeature('werk_lite')
           ? '/werk-lite'
           : '/work'
@@ -54,8 +56,6 @@ export default function ChannelInviteLanding() {
   // Load invite context for the signup form (only matters when signed out).
   useEffect(() => {
     if (!code) {
-      setInfo({ channel_name: '', is_paid: false, valid: false })
-      setInfoLoading(false)
       return
     }
     getChannelInviteInfo(code)
@@ -82,7 +82,7 @@ export default function ChannelInviteLanding() {
       })
       setAuthTokens(res.access_token, res.refresh_token)
       invalidateMeCache()
-      navigate(`/werk/channels/${res.channel_id}`, { replace: true })
+      navigate(`/espresso/channels/${res.channel_id}`, { replace: true })
     } catch (err) {
       const status = (err as { status?: number })?.status
       if (status === 409) {

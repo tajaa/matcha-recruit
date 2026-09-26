@@ -15,7 +15,7 @@ import { useWorkBase, useWorkSurface } from '../routes/WorkSurfaceContext'
  *   broadcasts messages for all of them, not just the one being viewed)
  * - Dispatching a sound + toast when a new message arrives, unless:
  *     - The message was sent by the current user
- *     - The user is actively viewing that channel (`<base>/channels/<id>`, /work or /werk)
+ *     - The user is actively viewing that channel (`<base>/channels/<id>`, /work or /espresso)
  *     - The corresponding setting is disabled
  * - Clicking the toast navigates to the channel
  *
@@ -31,7 +31,7 @@ export function useChannelNotifications() {
   const surface = useWorkSurface()
   const channelScope = surface === 'matcha-work'
     ? 'project_discussion'
-    : surface === 'werk'
+    : surface === 'espresso'
       ? 'community'
       : 'operations'
 
