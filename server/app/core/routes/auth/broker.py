@@ -18,7 +18,7 @@ from uuid import UUID
 
 from app.core.models.auth import (
     LoginRequest, TokenResponse, RefreshTokenRequest, UserResponse,
-    AdminRegister, ClientRegister, CandidateRegister, EmployeeRegister,
+    AdminRegister, ClientRegister, CandidateRegister,
     BusinessRegister, TestAccountRegister, TestAccountProvisionResponse,
     AdminProfile, ClientProfile, CandidateProfile, EmployeeProfile,
     BrokerTermsAcceptanceRequest, BrokerTermsAcceptanceResponse,
@@ -406,4 +406,3 @@ async def accept_broker_terms(
         terms_version=terms_version,
         accepted_at=accepted_at,
     )
-

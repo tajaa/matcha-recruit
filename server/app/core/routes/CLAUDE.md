@@ -35,7 +35,7 @@ Split from the pre-2026-07-25 `auth.py` monolith along route-group lines, not 1:
 | `google.py` | `/google` (Google OAuth) |
 | `register_business.py` | `/register/business` + business-invite validation |
 | `verify_email.py` | `/verify-email` (completes deferred business signup) |
-| `register_users.py` | `/register/{admin,client,employee,candidate,individual}` |
+| `register_users.py` | `/register/{admin,client,candidate,individual}` |
 | `broker.py` | broker branding + broker-client invites + broker terms acceptance |
 | `test_accounts.py` | `/register/test-account` + the ~790-line demo-data seeder |
 | `profile.py` | `/me`, `/profile`, `/avatar`, `/work-onboarded` |

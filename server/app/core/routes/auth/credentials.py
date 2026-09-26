@@ -18,7 +18,7 @@ from uuid import UUID
 
 from app.core.models.auth import (
     LoginRequest, TokenResponse, RefreshTokenRequest, UserResponse,
-    AdminRegister, ClientRegister, CandidateRegister, EmployeeRegister,
+    AdminRegister, ClientRegister, CandidateRegister,
     BusinessRegister, TestAccountRegister, TestAccountProvisionResponse,
     AdminProfile, ClientProfile, CandidateProfile, EmployeeProfile,
     BrokerTermsAcceptanceRequest, BrokerTermsAcceptanceResponse,
@@ -287,4 +287,3 @@ async def reset_password(request: ResetPasswordRequest, http_request: Request):
         )
 
     return {"status": "password_reset"}
-

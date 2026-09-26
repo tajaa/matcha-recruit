@@ -18,7 +18,7 @@ from uuid import UUID
 
 from app.core.models.auth import (
     LoginRequest, TokenResponse, RefreshTokenRequest, UserResponse,
-    AdminRegister, ClientRegister, CandidateRegister, EmployeeRegister,
+    AdminRegister, ClientRegister, CandidateRegister,
     BusinessRegister, TestAccountRegister, TestAccountProvisionResponse,
     AdminProfile, ClientProfile, CandidateProfile, EmployeeProfile,
     BrokerTermsAcceptanceRequest, BrokerTermsAcceptanceResponse,
@@ -119,4 +119,3 @@ async def google_auth(request: GoogleAuthRequest, http_request: Request):
     access_token = create_access_token(user["id"], user["email"], user["role"])
     refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
     return TokenResponse(access_token=access_token, refresh_token=refresh_token, token_type="bearer")
-
