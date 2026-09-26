@@ -168,7 +168,7 @@ async def test_worker_can_send_with_its_own_connection(device_env, monkeypatch):
     def no_pool():
         raise AssertionError("worker delivery must reuse its raw connection")
 
-    monkeypatch.setattr(apns_service, "get_connection", no_pool)
+    monkeypatch.setattr(apns_service, "connection_or_direct", no_pool)
     await apns_service.send_to_user(user_id, "Schedule published", kind="schedule_published", conn=conn)
     assert len(senders[("com.heymatcha.schedule", "sandbox")].sent) == 1
 

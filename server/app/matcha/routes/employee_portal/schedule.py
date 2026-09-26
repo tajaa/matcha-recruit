@@ -476,13 +476,14 @@ async def accept_schedule_request(
                         detail=same_day_conflict_detail(request["employee_id"], reverse_conflicts),
                     )
 
-            await conn.execute(
+            confirmed_at = await conn.fetchval(
                 """UPDATE schedule_requests
                    SET target_employee_id = CASE WHEN request_type = 'pickup'
                                                  THEN $2 ELSE target_employee_id END,
                        counter_shift_id = $3, counterparty_confirmed_at = NOW(),
                        status = 'awaiting_manager', updated_at = NOW()
-                   WHERE id = $1""",
+                   WHERE id = $1
+                   RETURNING counterparty_confirmed_at""",
                 request_id, employee["id"], counter_shift_id,
             )
             await log_audit(
@@ -495,7 +496,11 @@ async def accept_schedule_request(
                 conn, company_id=company_id, request_id=request_id,
                 event_type="schedule_request_accepted",
                 recipient_employee_ids=[request["employee_id"]],
-                dedupe_key=f"{request_id}:awaiting_manager",
+                # Keyed on the transition, not the target state: an accept →
+                # withdraw → accept-again cycle must notify the requester each
+                # time, and ON CONFLICT DO NOTHING would swallow the second round
+                # under a state-only key.
+                dedupe_key=f"{request_id}:accepted:{_nonce(confirmed_at)}",
             )
         row = await conn.fetchrow(f"{REQUEST_SELECT} WHERE r.id = $1", request_id)
     # Queue after the transaction commits: delivery can retry, but cannot
@@ -510,6 +515,11 @@ async def accept_schedule_request(
         pass
     dispatch_events()
     return serialize_request(dict(row))
+
+
+def _nonce(value) -> str:
+    """Transition stamp for employee-notification dedupe keys."""
+    return value.isoformat() if isinstance(value, datetime) else str(value)
 
 
 def _dispatch_manager_ready(request_id: UUID) -> None:
@@ -554,13 +564,14 @@ async def withdraw_schedule_request(
                     request_id,
                 )
             elif row["status"] == "awaiting_manager" and row["target_employee_id"] == employee["id"]:
-                await conn.execute(
+                withdrawn_at = await conn.fetchval(
                     """UPDATE schedule_requests
                        SET target_employee_id = CASE WHEN request_type = 'pickup' THEN NULL ELSE target_employee_id END,
                            counter_shift_id = CASE WHEN request_type = 'pickup' THEN NULL ELSE counter_shift_id END,
                            counterparty_confirmed_at = NULL,
                            status = 'awaiting_counterparty', updated_at = NOW()
-                       WHERE id = $1""",
+                       WHERE id = $1
+                       RETURNING updated_at""",
                     request_id,
                 )
                 counterparty_withdrew = True
@@ -579,7 +590,7 @@ async def withdraw_schedule_request(
                     conn, company_id=company_id, request_id=request_id,
                     event_type="schedule_request_withdrawn",
                     recipient_employee_ids=[row["employee_id"]],
-                    dedupe_key=f"{request_id}:awaiting_counterparty",
+                    dedupe_key=f"{request_id}:withdrawn:{_nonce(withdrawn_at)}",
                 )
     if counterparty_withdrew:
         dispatch_events()
