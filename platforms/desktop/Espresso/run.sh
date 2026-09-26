@@ -20,10 +20,22 @@ if [[ "$CMD" == "clean" ]]; then
     xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIG" clean >/dev/null
 fi
 
+# Apple Development certs expire yearly, and minting a new one needs an
+# interactive Xcode login. Without a valid one, fall back to ad-hoc signing so
+# a local Debug build still runs (entitlement-backed features like keychain
+# sharing / push may misbehave until the cert is renewed in Xcode → Settings →
+# Accounts → Manage Certificates).
+SIGN_ARGS=()
+if ! security find-identity -v -p codesigning 2>/dev/null | grep -q '"Apple Development:'; then
+    echo "${YELLOW}no valid Apple Development certificate — building ad-hoc signed${NC}"
+    echo "${DIM}  renew: Xcode → Settings → Accounts → Manage Certificates → + Apple Development${NC}"
+    SIGN_ARGS=(CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER=)
+fi
+
 echo "${DIM}building $SCHEME ($CONFIG)...${NC}"
 LOG="$(mktemp -t matcha-build.XXXXXX)"
 set +e
-xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIG" -destination "$DEST" build >"$LOG" 2>&1
+xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIG" -destination "$DEST" ${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"} build >"$LOG" 2>&1
 STATUS=$?
 set -e
 
