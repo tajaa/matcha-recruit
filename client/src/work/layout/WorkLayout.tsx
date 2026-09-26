@@ -317,7 +317,11 @@ export default function WorkLayout() {
       ref={shellRef}
       className={`bg-w-bg text-w-text flex flex-col overflow-hidden ${surface === 'espresso' ? 'espresso-work' : ''}`}
       data-theme={surface === 'espresso' ? espressoTheme : undefined}
-      style={{ height: viewportHeight ? `${viewportHeight}px` : '100dvh', '--color-w-on-accent': themeOnAccent(espressoTheme) } as CSSProperties}
+      style={{
+        height: viewportHeight ? `${viewportHeight}px` : '100dvh',
+        // Only Espresso has themes; /work, /ops and /werk-lite keep their own accent ink.
+        ...(surface === 'espresso' ? { '--color-w-on-accent': themeOnAccent(espressoTheme) } : {}),
+      } as CSSProperties}
     >
       <header inert={paywall !== null} aria-hidden={paywall !== null} className="flex items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2.5 border-b border-w-line shrink-0">
         <button

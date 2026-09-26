@@ -15,6 +15,7 @@ export function themeOnAccent(theme: EspressoTheme): string {
   return (1.05 / (luminance + 0.05)) >= ((luminance + 0.05) / 0.05) ? '#FFFFFF' : '#1B1D22'
 }
 
+export const DEFAULT_THEME: EspressoTheme = 'dark'
 const KEY = 'mw-theme'
 const CHANGED = 'mw-theme-changed'
 
@@ -23,7 +24,9 @@ export function getEspressoTheme(): EspressoTheme {
     const saved = localStorage.getItem(KEY)
     if (ESPRESSO_THEMES.some((theme) => theme === saved)) return saved as EspressoTheme
   } catch { /* Storage may be unavailable. */ }
-  return 'platinum'
+  // Dark, not native Espresso's Platinum: web users with no saved choice keep
+  // the dark workspace they already had. Platinum is one click away in Settings.
+  return DEFAULT_THEME
 }
 
 export function setEspressoTheme(theme: EspressoTheme): void {
@@ -42,7 +45,7 @@ function subscribe(listener: () => void) {
 }
 
 export function useEspressoTheme(): EspressoTheme {
-  return useSyncExternalStore(subscribe, snapshot, () => 'platinum')
+  return useSyncExternalStore(subscribe, snapshot, () => DEFAULT_THEME)
 }
 
 export function resetEspressoThemeForTests() { current = null }

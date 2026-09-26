@@ -13,9 +13,14 @@ describe('Espresso themes', () => {
     }
   })
 
-  it('falls back to Platinum for an unknown stored value', () => {
+  it('falls back to Dark for an unknown stored value', () => {
     localStorage.setItem('mw-theme', 'unknown')
-    expect(getEspressoTheme()).toBe('platinum')
+    expect(getEspressoTheme()).toBe('dark')
+  })
+
+  it('defaults to Dark when nothing is stored so existing users keep their look', () => {
+    localStorage.removeItem('mw-theme')
+    expect(getEspressoTheme()).toBe('dark')
   })
 
   it('chooses light or dark label ink from the accent contrast', () => {
