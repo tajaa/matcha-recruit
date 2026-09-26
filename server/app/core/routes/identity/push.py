@@ -36,19 +36,25 @@ async def register_device(
     """Upsert a device token for the current user (idempotent on token)."""
     if body.bundle_id is not None and body.bundle_id not in configured_bundles():
         raise HTTPException(status_code=422, detail="Unknown app bundle ID")
+    # A Matcha Schedule bearer carries its device session; binding the token to
+    # it lets logout / revocation / session expiry take the push token with them.
+    device_session_id = getattr(current_user, "device_session_id", None)
     async with get_connection() as conn:
         await conn.execute(
             """
-            INSERT INTO device_tokens (user_id, token, platform, bundle_id, environment, last_seen_at)
-            VALUES ($1, $2, $3, $4, $5, NOW())
+            INSERT INTO device_tokens
+                (user_id, token, platform, bundle_id, environment, device_session_id, last_seen_at)
+            VALUES ($1, $2, $3, $4, $5, $6, NOW())
             ON CONFLICT (token) DO UPDATE
               SET user_id = EXCLUDED.user_id,
                   platform = EXCLUDED.platform,
                   bundle_id = EXCLUDED.bundle_id,
                   environment = EXCLUDED.environment,
+                  device_session_id = EXCLUDED.device_session_id,
                   last_seen_at = NOW()
             """,
             current_user.id, body.token, body.platform, body.bundle_id, body.environment,
+            device_session_id,
         )
     return {"ok": True}
 

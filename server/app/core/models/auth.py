@@ -55,10 +55,15 @@ class TokenPayload(BaseModel):
     token_type: Optional[str] = None  # "access" or "refresh"
     sid: Optional[str] = None  # mobile device session id
     cl: Optional[str] = None  # mobile client identifier
+    gen: Optional[int] = None  # mobile refresh generation; rotation is compare-and-swap
 
 
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
+
+
+class MobileLogoutRequest(RefreshTokenRequest):
+    push_token: Optional[str] = None  # APNs token to drop alongside the session
 
 
 # Registration models for each user type
@@ -248,6 +253,7 @@ class CurrentUser(BaseModel):
     beta_features: dict = {}
     interview_prep_tokens: int = 0
     allowed_interview_roles: list[str] = []
+    device_session_id: Optional[UUID] = None  # set for Matcha Schedule mobile bearers
 
 
 class ChangePasswordRequest(BaseModel):

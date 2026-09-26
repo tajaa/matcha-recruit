@@ -7,6 +7,10 @@ enum KeychainHelper {
     enum Keys {
         static let accessToken = "schedule.accessToken"
         static let refreshToken = "schedule.refreshToken"
+        /// Refresh token of a session signed out while offline; revoked on
+        /// the next launch.
+        static let pendingRevoke = "schedule.pendingRevoke"
+        static let all = [accessToken, refreshToken, pendingRevoke]
     }
 
     // Use the data-protection keychain (kSecUseDataProtectionKeychain) rather

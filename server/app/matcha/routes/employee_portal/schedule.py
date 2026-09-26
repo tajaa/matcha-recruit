@@ -2,6 +2,7 @@
 from datetime import datetime
 from uuid import UUID
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
@@ -9,6 +10,10 @@ from app.matcha.models.scheduling.employee_schedule import (
     AvailabilityChangeRequestCreate, CounterpartyAccept, ScheduleRequestCreate,
 )
 from app.matcha.dependencies import require_employee_record
+from app.matcha.services.scheduling.shift_requests import (
+    WALL_CLOCK_NOW_SQL, find_same_day_assignments, same_day_conflict_detail,
+    schedule_wall_clock_now,
+)
 from app.matcha.services.scheduling.time_off_guard import (
     PUBLISHED_WEEK_AVAILABILITY_DETAIL, PUBLISHED_WEEK_TIME_OFF_DETAIL,
     has_published_schedule_week,
@@ -60,9 +65,16 @@ async def list_my_open_seats(
     if end <= start:
         raise HTTPException(status_code=422, detail="end must be after start")
     company_id, employee_id = employee["org_id"], employee["id"]
+    # Seats are only offered where a manager could actually approve them:
+    # the employee's own store (a locationless shift is open to anyone, matching
+    # assert_employee_schedulable_at), no other assignment that calendar day
+    # (the same hard rule pickups and swaps enforce), and not yet started by the
+    # store's clock — shift times are wall clock tagged UTC, so real NOW() would
+    # hide a Pacific 5 PM seat from 10 AM local onwards.
+    wall_now = WALL_CLOCK_NOW_SQL.format(tz="bl.timezone")
     async with get_connection() as conn:
         candidates = await conn.fetch(
-            """
+            f"""
             SELECT s.id, s.job_id, s.starts_at,
                    EXISTS (
                        SELECT 1 FROM schedule_shift_assignments mine
@@ -73,8 +85,18 @@ async def list_my_open_seats(
                          AND other.starts_at < s.ends_at AND other.ends_at > s.starts_at
                    ) AS has_conflict
             FROM schedule_shifts s
+            LEFT JOIN business_locations bl ON bl.id = s.location_id
             WHERE s.company_id = $1 AND s.status = 'published'
-              AND s.starts_at >= NOW() AND s.starts_at >= $3 AND s.starts_at < $4
+              AND s.starts_at >= {wall_now} AND s.starts_at >= $3 AND s.starts_at < $4
+              AND (s.location_id IS NULL OR s.location_id = (
+                    SELECT e.work_location_id FROM employees e WHERE e.id = $2))
+              AND NOT EXISTS (
+                    SELECT 1 FROM schedule_shift_assignments mine
+                    JOIN schedule_shifts other ON other.id = mine.shift_id
+                    WHERE mine.employee_id = $2 AND mine.status <> 'declined'
+                      AND other.status <> 'cancelled' AND other.id <> s.id
+                      AND other.starts_at < (date_trunc('day', s.starts_at AT TIME ZONE 'UTC') + INTERVAL '1 day') AT TIME ZONE 'UTC'
+                      AND other.ends_at > date_trunc('day', s.starts_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
               AND (SELECT count(*) FROM schedule_shift_assignments a
                    WHERE a.shift_id = s.id) < s.required_staff
               AND NOT EXISTS (SELECT 1 FROM schedule_shift_assignments a
@@ -247,17 +269,27 @@ async def create_my_schedule_request(
 
         async with conn.transaction():
             if body.request_type == "claim":
+                from app.matcha.routes.employee_schedule._shared import assert_employee_schedulable_at
                 from app.matcha.services.scheduling.schedule_profiles import fetch_effective_job_employee_ids
 
                 shift = await conn.fetchrow(
-                    """SELECT id, status, starts_at, required_staff, job_id
-                       FROM schedule_shifts WHERE id=$1 AND company_id=$2 FOR UPDATE""",
+                    """SELECT s.id, s.status, s.starts_at, s.required_staff, s.job_id,
+                              s.location_id, bl.timezone
+                       FROM schedule_shifts s
+                       LEFT JOIN business_locations bl ON bl.id = s.location_id
+                       WHERE s.id=$1 AND s.company_id=$2 FOR UPDATE OF s""",
                     body.shift_id, company_id,
                 )
                 if not shift or shift["status"] != "published":
                     raise HTTPException(status_code=404, detail="Open shift not found")
-                if shift["starts_at"] <= await conn.fetchval("SELECT NOW()"):
+                if shift["starts_at"] <= schedule_wall_clock_now(shift["timezone"]):
                     raise HTTPException(status_code=409, detail="This shift has already started")
+                # Same gates approval will apply — reject now rather than let a
+                # manager hit an unforceable 422 later.
+                await assert_employee_schedulable_at(conn, company_id, employee["id"], shift["location_id"])
+                same_day = await find_same_day_assignments(conn, company_id, employee["id"], shift["starts_at"])
+                if same_day:
+                    raise HTTPException(status_code=409, detail=same_day_conflict_detail(employee["id"], same_day))
                 assigned = await conn.fetchval(
                     """SELECT count(*) FROM schedule_shift_assignments
                        WHERE shift_id=$1""", body.shift_id,
@@ -281,20 +313,39 @@ async def create_my_schedule_request(
                     employee["id"], body.shift_id,
                 ):
                     raise HTTPException(status_code=409, detail="You already claimed this shift")
-            request_id = await conn.fetchval(
-                """
-                INSERT INTO schedule_requests
-                    (company_id, employee_id, request_type, shift_id, target_employee_id, counter_shift_id,
-                     unavailable_start, unavailable_end, reason, status)
-                VALUES ($1,$2,$3::text,$4,$5,$6,$7,$8,$9,
-                        CASE WHEN $3::text IN ('pickup', 'swap')
-                              THEN 'awaiting_counterparty' ELSE 'awaiting_manager' END)
-                RETURNING id
-                """,
-                company_id, employee["id"], body.request_type, body.shift_id,
-                body.target_employee_id, body.counter_shift_id, body.unavailable_start,
-                body.unavailable_end, body.reason,
-            )
+            # Each drop / time-off submission emails and bells every manager, so a
+            # repeat click must not fan out again. The partial unique indexes in
+            # empsched25 back this up under concurrency.
+            if body.request_type == "drop" and await conn.fetchval(
+                """SELECT 1 FROM schedule_requests WHERE employee_id=$1 AND shift_id=$2
+                   AND request_type='drop' AND status IN ('pending', 'awaiting_manager')""",
+                employee["id"], body.shift_id,
+            ):
+                raise HTTPException(status_code=409, detail="You already asked to drop this shift")
+            if body.request_type == "unavailable" and await conn.fetchval(
+                """SELECT 1 FROM schedule_requests WHERE employee_id=$1
+                   AND unavailable_start=$2 AND unavailable_end=$3
+                   AND request_type='unavailable' AND status IN ('pending', 'awaiting_manager')""",
+                employee["id"], body.unavailable_start, body.unavailable_end,
+            ):
+                raise HTTPException(status_code=409, detail="You already have this time-off request pending")
+            try:
+                request_id = await conn.fetchval(
+                    """
+                    INSERT INTO schedule_requests
+                        (company_id, employee_id, request_type, shift_id, target_employee_id, counter_shift_id,
+                         unavailable_start, unavailable_end, reason, status)
+                    VALUES ($1,$2,$3::text,$4,$5,$6,$7,$8,$9,
+                            CASE WHEN $3::text IN ('pickup', 'swap')
+                                  THEN 'awaiting_counterparty' ELSE 'awaiting_manager' END)
+                    RETURNING id
+                    """,
+                    company_id, employee["id"], body.request_type, body.shift_id,
+                    body.target_employee_id, body.counter_shift_id, body.unavailable_start,
+                    body.unavailable_end, body.reason,
+                )
+            except asyncpg.UniqueViolationError:
+                raise HTTPException(status_code=409, detail="You already have this request pending") from None
             await log_audit(
                 conn, company_id, "request", request_id, employee.get("user_id"),
                 "request.create", {"request_type": body.request_type},
@@ -425,13 +476,14 @@ async def accept_schedule_request(
                         detail=same_day_conflict_detail(request["employee_id"], reverse_conflicts),
                     )
 
-            await conn.execute(
+            confirmed_at = await conn.fetchval(
                 """UPDATE schedule_requests
                    SET target_employee_id = CASE WHEN request_type = 'pickup'
                                                  THEN $2 ELSE target_employee_id END,
                        counter_shift_id = $3, counterparty_confirmed_at = NOW(),
                        status = 'awaiting_manager', updated_at = NOW()
-                   WHERE id = $1""",
+                   WHERE id = $1
+                   RETURNING counterparty_confirmed_at""",
                 request_id, employee["id"], counter_shift_id,
             )
             await log_audit(
@@ -444,7 +496,11 @@ async def accept_schedule_request(
                 conn, company_id=company_id, request_id=request_id,
                 event_type="schedule_request_accepted",
                 recipient_employee_ids=[request["employee_id"]],
-                dedupe_key=f"{request_id}:awaiting_manager",
+                # Keyed on the transition, not the target state: an accept →
+                # withdraw → accept-again cycle must notify the requester each
+                # time, and ON CONFLICT DO NOTHING would swallow the second round
+                # under a state-only key.
+                dedupe_key=f"{request_id}:accepted:{_nonce(confirmed_at)}",
             )
         row = await conn.fetchrow(f"{REQUEST_SELECT} WHERE r.id = $1", request_id)
     # Queue after the transaction commits: delivery can retry, but cannot
@@ -459,6 +515,11 @@ async def accept_schedule_request(
         pass
     dispatch_events()
     return serialize_request(dict(row))
+
+
+def _nonce(value) -> str:
+    """Transition stamp for employee-notification dedupe keys."""
+    return value.isoformat() if isinstance(value, datetime) else str(value)
 
 
 def _dispatch_manager_ready(request_id: UUID) -> None:
@@ -503,13 +564,14 @@ async def withdraw_schedule_request(
                     request_id,
                 )
             elif row["status"] == "awaiting_manager" and row["target_employee_id"] == employee["id"]:
-                await conn.execute(
+                withdrawn_at = await conn.fetchval(
                     """UPDATE schedule_requests
                        SET target_employee_id = CASE WHEN request_type = 'pickup' THEN NULL ELSE target_employee_id END,
                            counter_shift_id = CASE WHEN request_type = 'pickup' THEN NULL ELSE counter_shift_id END,
                            counterparty_confirmed_at = NULL,
                            status = 'awaiting_counterparty', updated_at = NOW()
-                       WHERE id = $1""",
+                       WHERE id = $1
+                       RETURNING updated_at""",
                     request_id,
                 )
                 counterparty_withdrew = True
@@ -528,7 +590,7 @@ async def withdraw_schedule_request(
                     conn, company_id=company_id, request_id=request_id,
                     event_type="schedule_request_withdrawn",
                     recipient_employee_ids=[row["employee_id"]],
-                    dedupe_key=f"{request_id}:awaiting_counterparty",
+                    dedupe_key=f"{request_id}:withdrawn:{_nonce(withdrawn_at)}",
                 )
     if counterparty_withdrew:
         dispatch_events()

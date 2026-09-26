@@ -90,6 +90,7 @@ celery_app = Celery(
         "app.workers.tasks.schedule_auto_generation",
         "app.workers.tasks.inventory_waste_sweeps",
         "app.workers.tasks.tellus_shoutout_scan",
+        "app.workers.tasks.auth_device_sessions",
     ],
 )
 
@@ -267,6 +268,11 @@ def on_worker_ready(**kwargs):
         recover_stale_employee_schedule_breaks.delay()
     except Exception:
         logger.exception("[Worker] Failed to enqueue schedule-break recovery")
+    try:
+        from app.workers.tasks.auth_device_sessions import prune_device_sessions
+        prune_device_sessions.delay()
+    except Exception:
+        logger.exception("[Worker] Failed to enqueue mobile-session cleanup")
 
     task_keys = [key for key, _, _ in _SCHEDULED_TASKS]
     flags = _scheduler_flags(task_keys)

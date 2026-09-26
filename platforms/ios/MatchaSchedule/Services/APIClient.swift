@@ -244,12 +244,17 @@ class APIClient {
         return snippet.hasPrefix("<!doctype") || snippet.hasPrefix("<html")
     }
 
+    /// `credentialExchange`: the call IS the sign-in (login). A 401 there means
+    /// "wrong email or password", not "your session ended" — it must surface the
+    /// server's message and must not fire `onUnauthorized` (which would wipe a
+    /// session that never existed and show "please log in again" for a typo).
     func request<T: Decodable>(
         method: String,
         path: String,
         body: (any Encodable)? = nil,
         retryOnUnauthorized: Bool = true,
-        retryOnMaintenance: Bool = true
+        retryOnMaintenance: Bool = true,
+        credentialExchange: Bool = false
     ) async throws -> T {
         guard let url = URL(string: baseURL + path) else {
             throw APIError.invalidURL
@@ -299,6 +304,9 @@ class APIClient {
         }
 
         if httpResponse.statusCode == 401 {
+            if credentialExchange {
+                throw APIError.httpError(401, extractErrorMessage(from: data) ?? "Invalid email or password")
+            }
             if retryOnUnauthorized {
                 // Try to refresh
                 do {
@@ -325,7 +333,7 @@ class APIClient {
             // Same unwrapping as `requestData`. Using the raw body here handed
             // callers `{"detail":"Connect your Gmail…"}` verbatim, so every
             // banner that shows an httpError message printed JSON at the user.
-            let message = _extractErrorMessage(from: data) ?? "Unknown error"
+            let message = extractErrorMessage(from: data) ?? "Unknown error"
             throw APIError.httpError(httpResponse.statusCode, message)
         }
 
@@ -342,9 +350,13 @@ class APIClient {
             // actionable instead of opaque. Without this we get the generic
             // "data couldn't be read" Foundation message and have no idea
             // which field/shape mismatched.
+            // Debug builds only: the snippet can carry coworker names or DM
+            // text, which must not land in a release device's console logs.
+            #if DEBUG
             let isSensitive = path.contains("/auth") || path.lowercased().contains("token")
             let snippet = isSensitive ? "<redacted>" : (String(data: data.prefix(500), encoding: .utf8) ?? "<binary>")
             print("[APIClient] decode failed for \(T.self) at \(path): \(error.localizedDescription)\nresponse snippet: \(snippet)")
+            #endif
             throw APIError.decodingError(error)
         }
     }
@@ -420,18 +432,31 @@ class APIClient {
                 }
                 throw APIError.serviceUnavailable(httpResponse.statusCode)
             }
-            let message = _extractErrorMessage(from: data) ?? "HTTP \(httpResponse.statusCode)"
+            let message = extractErrorMessage(from: data) ?? "HTTP \(httpResponse.statusCode)"
             throw APIError.httpError(httpResponse.statusCode, message)
         }
         return data
     }
 
-    /// Extract a human-readable error from a typical FastAPI error response
-    /// (`{"detail": "..."}`) or fall back to the raw body.
-    private func _extractErrorMessage(from data: Data) -> String? {
-        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let detail = json["detail"] as? String {
-            return detail
+    /// Extract a human-readable error from a FastAPI error response: a plain
+    /// `{"detail": "..."}`, a structured `{"detail": {"code": …, "message": …}}`
+    /// (schedule conflicts), or a 422 `{"detail": [{"loc": …, "msg": …}]}`.
+    /// Falls back to the raw body.
+    func extractErrorMessage(from data: Data) -> String? {
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let detail = json["detail"] as? String { return detail }
+            if let detail = json["detail"] as? [String: Any] {
+                if let message = detail["message"] as? String { return message }
+                if let message = detail["detail"] as? String { return message }
+            }
+            if let items = json["detail"] as? [[String: Any]] {
+                let messages = items.compactMap { item -> String? in
+                    guard let msg = item["msg"] as? String else { return nil }
+                    let field = (item["loc"] as? [Any])?.last.map { "\($0)" }
+                    return field.map { "\($0): \(msg)" } ?? msg
+                }
+                if !messages.isEmpty { return messages.joined(separator: "\n") }
+            }
         }
         let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
         return raw?.isEmpty == false ? raw : nil

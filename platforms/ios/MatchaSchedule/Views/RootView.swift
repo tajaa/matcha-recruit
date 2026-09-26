@@ -19,11 +19,11 @@ struct RootView: View {
                 MainTabs(profile: profile)
             case .needsWeb:
                 VStack(spacing: 12) {
-                    StatusView(title: "Use Matcha on the web", message: "This app is for employee accounts with a work profile.", symbol: "person.crop.circle.badge.questionmark", actionTitle: "Sign out", action: { try await appState.signOut() })
+                    StatusView(title: "Use Matcha on the web", message: "This app is for employee accounts with a work profile.", symbol: "person.crop.circle.badge.questionmark", actionTitle: "Sign out", action: { await appState.signOut() })
                     Link("Open hey-matcha.com", destination: URL(string: "https://hey-matcha.com")!)
                 }
             case .disabled:
-                StatusView(title: "Scheduling isn’t enabled", message: "Ask your manager to enable employee scheduling for your company.", symbol: "calendar.badge.exclamationmark", actionTitle: "Sign out", action: { try await appState.signOut() })
+                StatusView(title: "Scheduling isn’t enabled", message: "Ask your manager to enable employee scheduling for your company.", symbol: "calendar.badge.exclamationmark", actionTitle: "Sign out", action: { await appState.signOut() })
             case .retry(let message):
                 StatusView(title: "Couldn’t connect", message: message, symbol: "wifi.exclamationmark", actionTitle: "Try again", action: { await appState.restore() })
             }
@@ -150,8 +150,9 @@ private struct MeView: View {
                     signingOut = true
                     Task {
                         defer { signingOut = false }
-                        do { try await appState.signOut() }
-                        catch { self.error = error.localizedDescription }
+                        // Never fails: offline sign-out clears locally and
+                        // queues the server-side revoke for the next launch.
+                        await appState.signOut()
                     }
                 }
                 .disabled(signingOut)

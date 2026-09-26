@@ -20,6 +20,10 @@ async def _send_pending() -> dict[str, int]:
     """Recover missed dispatches and stale delivery claims after commit."""
     conn = await get_db_connection()
     try:
+        # Only requests some active reviewer has not yet been told about
+        # (either channel). Without the anti-join every unreviewed request is
+        # re-scanned on every sweep, and once the backlog passes the LIMIT the
+        # newest requests are never reached.
         rows = await conn.fetch(
             """
             SELECT r.id
@@ -27,6 +31,23 @@ async def _send_pending() -> dict[str, int]:
             WHERE r.status='awaiting_manager'
               AND (r.counterparty_confirmed_at IS NOT NULL
                    OR r.request_type IN ('drop', 'unavailable', 'availability', 'claim'))
+              AND EXISTS (
+                    SELECT 1
+                    FROM clients c
+                    JOIN users u ON u.id = c.user_id
+                    WHERE c.company_id = r.company_id AND u.role = 'client'
+                      AND u.is_active = true AND u.email IS NOT NULL AND u.email <> ''
+                      AND (
+                        NOT EXISTS (
+                            SELECT 1 FROM schedule_request_notification_deliveries d
+                            WHERE d.request_id = r.id AND d.recipient_user_id = u.id
+                              AND d.event_type = 'manager_ready' AND d.sent_at IS NOT NULL)
+                        OR NOT EXISTS (
+                            SELECT 1 FROM schedule_request_notification_deliveries d
+                            WHERE d.request_id = r.id AND d.recipient_user_id = u.id
+                              AND d.event_type = 'manager_ready_in_app' AND d.sent_at IS NOT NULL)
+                      )
+              )
             ORDER BY r.updated_at ASC
             LIMIT 500
             """

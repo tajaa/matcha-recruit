@@ -31,11 +31,11 @@ Split from the pre-2026-07-25 `auth.py` monolith along route-group lines, not 1:
 | File | Owns |
 |---|---|
 | `_shared.py` | imports, `router`, `logger`, `_json_object`/`_json_list`/`_table_exists`/`_column_exists`/`_upsert_business_headcount_profile` (multi-group helpers — `__all__`-gated since they're underscore-prefixed and every submodule does `from ._shared import *`) |
-| `login.py` | login rate-limiting state + `/login`, `/refresh`, `/logout` |
+| `login.py` | login rate-limiting state + `/login`, `/refresh`, `/logout`, `/mobile/logout` |
 | `google.py` | `/google` (Google OAuth) |
 | `register_business.py` | `/register/business` + business-invite validation |
 | `verify_email.py` | `/verify-email` (completes deferred business signup) |
-| `register_users.py` | `/register/{admin,client,employee,candidate,individual}` |
+| `register_users.py` | `/register/{admin,client,candidate,individual}` |
 | `broker.py` | broker branding + broker-client invites + broker terms acceptance |
 | `test_accounts.py` | `/register/test-account` + the ~790-line demo-data seeder |
 | `profile.py` | `/me`, `/profile`, `/avatar`, `/work-onboarded` |

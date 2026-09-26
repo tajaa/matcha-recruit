@@ -247,9 +247,13 @@ jobs:
             ./scripts/xcode-build.sh storefront build-for-testing
             ran=1
           fi
+          # Matcha Schedule runs its XCTests, not just build-for-testing: the
+          # hosted image is the only place with a usable simulator runtime
+          # (local Xcode 26 ships without one), so this is the test gate.
           if grep -qE '^(platforms/ios/MatchaSchedule/|scripts/xcode-build\.sh$)' <<< "$changed"; then
             command -v xcodegen >/dev/null 2>&1 || brew install xcodegen
-            ./scripts/xcode-build.sh matchaschedule build-for-testing
+            sim="$(xcrun simctl list devices available | grep -m1 -oE 'iPhone [^(]+' | sed 's/ *$//')"
+            XCODE_DESTINATION="platform=iOS Simulator,name=${sim}" ./scripts/xcode-build.sh matchaschedule test
             ran=1
           fi
           if [ "$ran" = 0 ]; then echo "No native project changed."; fi
