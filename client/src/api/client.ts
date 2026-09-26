@@ -218,19 +218,25 @@ export function parsePlanRequired(body: unknown): PlanRequiredDetail | null {
   return detail as PlanRequiredDetail
 }
 
+export function planRequiredMessage(detail: PlanRequiredDetail): string {
+  return `This needs the ${detail.required_plan === 'pro' ? 'Pro' : 'Lite'} plan.`
+}
+
 function apiError(message: string, status: number, body: unknown): ApiError {
   const detail = status === 403 ? parsePlanRequired(body) : null
   if (detail && typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent<PlanRequiredDetail>(PLAN_REQUIRED_EVENT, { detail }))
   }
-  return new ApiError(message, status, body)
+  // The paywall is the real UI for this; page banners that print
+  // `error.message` must show a sentence, not the structured detail.
+  return new ApiError(detail ? planRequiredMessage(detail) : message, status, body)
 }
 
 async function throwPlanRequiredIfPresent(res: Response): Promise<void> {
   if (res.status !== 403) return
   const body: unknown = await res.json().catch(() => null)
   const detail = parsePlanRequired(body)
-  if (detail) throw apiError(JSON.stringify(detail), res.status, body)
+  if (detail) throw apiError(planRequiredMessage(detail), res.status, body)
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

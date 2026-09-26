@@ -17,6 +17,13 @@ const slashActions = [
 
 type Draft = { entryId: string | null; content: string; saved: string }
 
+const SHORTCUT_MARKERS: Record<string, string> = {
+  Digit1: '# ',
+  Digit2: '## ',
+  Digit3: '### ',
+  KeyT: '- [ ] ',
+}
+
 export default function JournalEditor({ journal, folders, userId, onRename, onMove, onChanged }: {
   journal: Journal
   folders: JournalFolder[]
@@ -106,11 +113,29 @@ export default function JournalEditor({ journal, folders, userId, onRename, onMo
     requestAnimationFrame(() => { input.focus(); input.setSelectionRange(start + marker.length, start + marker.length) })
   }
 
+  // Keyboard shortcuts restyle the current line in place: swap any existing
+  // heading/to-do marker for the new one and keep the line's text. (The
+  // slash menu uses replaceLine instead, which also drops the typed "/cmd".)
+  function prefixLine(marker: string) {
+    const input = textArea.current
+    if (!input) return
+    const cursor = input.selectionStart
+    const start = content.lastIndexOf('\n', cursor - 1) + 1
+    const rest = content.slice(start)
+    const existing = /^(?:#{1,6} |- \[[ xX]\] )/.exec(rest)?.[0] ?? ''
+    change(content.slice(0, start) + marker + rest.slice(existing.length))
+    const next = Math.max(start + marker.length, cursor + marker.length - existing.length)
+    requestAnimationFrame(() => { input.focus(); input.setSelectionRange(next, next) })
+  }
+
   function onKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (!editable) return
-    if (event.altKey && event.shiftKey && ['1', '2', '3', 'T'].includes(event.key.toUpperCase())) {
+    // Match on `code`, not `key`: on macOS Option+Shift rewrites `key`
+    // (Option+Shift+1 is "⁄"), so a key-based check never fires there.
+    const marker = event.altKey && event.shiftKey ? SHORTCUT_MARKERS[event.code] : undefined
+    if (marker) {
       event.preventDefault()
-      replaceLine(event.key.toUpperCase() === 'T' ? '- [ ] ' : `${'#'.repeat(Number(event.key))} `)
+      prefixLine(marker)
       return
     }
     if (event.key !== 'Tab') return

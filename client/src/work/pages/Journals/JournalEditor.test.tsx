@@ -67,4 +67,16 @@ describe('JournalEditor', () => {
     view.unmount()
     await waitFor(() => expect(mock.updateEntry).toHaveBeenCalledWith('journal-one', 'entry-one', { content: 'Saved on leave' }))
   })
+
+  it('applies heading shortcuts by physical key so macOS Option layouts work', async () => {
+    render(<JournalEditor journal={journal} folders={[]} userId="owner" onRename={vi.fn()} onMove={vi.fn()} onChanged={vi.fn()} />)
+    const editor = await screen.findByRole('textbox', { name: 'Journal content' }) as HTMLTextAreaElement
+    await waitFor(() => expect(editor).toHaveValue('Old text'))
+    editor.setSelectionRange(3, 3)
+    // macOS reports Option+Shift+1 as key "⁄"; only `code` identifies the key.
+    fireEvent.keyDown(editor, { key: '⁄', code: 'Digit1', altKey: true, shiftKey: true })
+    expect(editor).toHaveValue('# Old text')
+    fireEvent.keyDown(editor, { key: 'ˇ', code: 'KeyT', altKey: true, shiftKey: true })
+    expect(editor).toHaveValue('- [ ] Old text')
+  })
 })

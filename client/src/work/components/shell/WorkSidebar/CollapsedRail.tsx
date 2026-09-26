@@ -1,6 +1,7 @@
 import { Hash, FolderOpen, MessageSquare, PanelLeftClose, Mail, MailOpen, Home, Users, ClipboardList, BookOpenCheck, Package, NotebookPen } from 'lucide-react'
 import type { NavigateFunction } from 'react-router-dom'
 import { formatEventsBadge } from '../../../hooks/useLoggedEventsCount'
+import { RailNavButton } from './SidebarNavButton'
 
 interface Props {
   onToggle: () => void
@@ -56,74 +57,26 @@ export default function CollapsedRail({
 
       <div className="w-6 border-t border-w-line/40 mb-1" />
 
-      <button
-        onClick={() => navigate(base)}
-        className={`p-2 rounded-lg transition-colors ${isActive(base) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
-        title="Home"
-      >
-        <Home size={16} />
-      </button>
-
-      <button
-        onClick={() => navigate(`${base}/journals`)}
-        className={`p-2 rounded-lg transition-colors ${pathname.startsWith(`${base}/journals`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
-        title="Journals"
-      >
-        <NotebookPen size={16} />
-      </button>
-
-      <button
-        onClick={() => navigate(`${base}/email`)}
-        className={`p-2 rounded-lg transition-colors ${isActive(`${base}/email`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
-        title="Email"
-      >
-        <MailOpen size={16} />
-      </button>
+      <RailNavButton icon={Home} label="Home" active={isActive(base)} onClick={() => navigate(base)} />
+      <RailNavButton icon={NotebookPen} label="Journals" active={pathname.startsWith(`${base}/journals`)} onClick={() => navigate(`${base}/journals`)} />
+      <RailNavButton icon={MailOpen} label="Email" active={isActive(`${base}/email`)} onClick={() => navigate(`${base}/email`)} />
 
       {showEvents && (
-        <button
+        <RailNavButton
+          icon={ClipboardList}
+          label="Events"
+          active={isActive(`${base}/events`)}
           onClick={() => navigate(`${base}/events`)}
-          className={`relative p-2 rounded-lg transition-colors ${isActive(`${base}/events`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
-          title="Events"
-        >
-          <ClipboardList size={16} />
-          {loggedEventsCount > 0 && (
+          badge={loggedEventsCount > 0 && (
             <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-w-accent text-[8px] font-bold text-white flex items-center justify-center">
               {formatEventsBadge(loggedEventsCount, true)}
             </span>
           )}
-        </button>
+        />
       )}
-
-      {showEvents && (
-        <button
-          onClick={() => navigate(`${base}/protocol`)}
-          className={`p-2 rounded-lg transition-colors ${isActive(`${base}/protocol`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
-          title="Protocol"
-        >
-          <BookOpenCheck size={16} />
-        </button>
-      )}
-
-      {showInventory && (
-        <button
-          onClick={() => navigate(`${base}/inventory`)}
-          className={`p-2 rounded-lg transition-colors ${isActive(`${base}/inventory`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
-          title="Inventory"
-        >
-          <Package size={16} />
-        </button>
-      )}
-
-      {showWaste && (
-        <button
-          onClick={() => navigate(`${base}/inventory/waste`)}
-          className={`p-2 rounded-lg transition-colors ${isActive(`${base}/inventory/waste`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
-          title="Waste & par"
-        >
-          <Package size={16} />
-        </button>
-      )}
+      {showEvents && <RailNavButton icon={BookOpenCheck} label="Protocol" active={isActive(`${base}/protocol`)} onClick={() => navigate(`${base}/protocol`)} />}
+      {showInventory && <RailNavButton icon={Package} label="Inventory" active={isActive(`${base}/inventory`)} onClick={() => navigate(`${base}/inventory`)} />}
+      {showWaste && <RailNavButton icon={Package} label="Waste & par" active={isActive(`${base}/inventory/waste`)} onClick={() => navigate(`${base}/inventory/waste`)} />}
 
       {showChannels && <button
         onClick={() => { onToggle(); openChannels() }}
