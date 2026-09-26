@@ -67,7 +67,7 @@ async def test_get_current_user_still_applies_the_jwt_watermark(conn, monkeypatc
     from types import SimpleNamespace
 
     stamp = int(datetime.now(timezone.utc).timestamp())
-    payload = SimpleNamespace(sub=str(USER_ID), iat=stamp - 86400, iat_ms=None)
+    payload = SimpleNamespace(sub=str(USER_ID), iat=stamp - 86400, iat_ms=None, sid=None)
 
     async def token_payload(credentials):
         return payload
@@ -81,3 +81,25 @@ async def test_get_current_user_still_applies_the_jwt_watermark(conn, monkeypatc
     conn.set("fetchval", "SELECT tokens_valid_after", datetime.now(timezone.utc) - timedelta(minutes=5))
     user = await deps.get_current_user(credentials=None)
     assert user.id == USER_ID
+    assert user.device_session_id is None
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_carries_the_mobile_device_session(conn, monkeypatch):
+    """A Matcha Schedule bearer's `sid` must reach CurrentUser — push-token
+    registration binds to it — while connector callers get None."""
+    from types import SimpleNamespace
+
+    sid = uuid.UUID("eeeeeeee-5555-4555-8555-555555555555")
+    stamp = int(datetime.now(timezone.utc).timestamp()) + 60
+    payload = SimpleNamespace(sub=str(USER_ID), iat=stamp, iat_ms=None, sid=str(sid))
+
+    async def token_payload(credentials):
+        return payload
+
+    monkeypatch.setattr(deps, "get_token_payload", token_payload)
+    user = await deps.get_current_user(credentials=None)
+    assert user.device_session_id == sid
+
+    connector_user = await deps.load_current_user(USER_ID, check_session_revocation=False)
+    assert connector_user.device_session_id is None
