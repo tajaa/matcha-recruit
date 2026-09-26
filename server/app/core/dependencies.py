@@ -128,6 +128,7 @@ async def get_current_user(
         UUID(payload.sub),
         token_iat=payload.iat,
         token_iat_ms=payload.iat_ms,
+        device_session_id=UUID(payload.sid) if payload.sid else None,
     )
 
 
@@ -137,6 +138,7 @@ async def load_current_user(
     token_iat: Optional[int] = None,
     token_iat_ms: Optional[int] = None,
     check_session_revocation: bool = True,
+    device_session_id: Optional[UUID] = None,
 ):
     """Load and gate the user a verified credential names.
 
@@ -145,7 +147,8 @@ async def load_current_user(
     suspended / deleted-company checks and the same RLS context. The connector
     passes `check_session_revocation=False`: its grants are revoked on their
     own (disconnect, password change) rather than by the browser-session
-    watermark, which a plain logout also advances.
+    watermark, which a plain logout also advances. `device_session_id` is the
+    Matcha Schedule mobile bearer's `sid`; connector tokens carry none.
     """
     from .models.auth import CurrentUser
 
@@ -230,7 +233,7 @@ async def load_current_user(
             beta_features=beta_features,
             interview_prep_tokens=user_row["interview_prep_tokens"],
             allowed_interview_roles=allowed_roles,
-            device_session_id=UUID(payload.sid) if payload.sid else None,
+            device_session_id=device_session_id,
         )
 
 
