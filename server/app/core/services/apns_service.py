@@ -5,22 +5,40 @@ rows without a bundle/environment keep the original Werk topic and global
 APNS_USE_SANDBOX setting.
 """
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
 from app.config import get_settings
-from app.database import get_connection
+from app.database import connection_or_direct
+from app.matcha.services.scheduling.schedule_rules import INACTIVE_EMPLOYMENT_STATUSES
 
 logger = logging.getLogger(__name__)
 
 # None for Werk means every kind except schedule_*. The Schedule app also
 # receives Inbox DMs, which are shared between the two products.
 APP_BUNDLES = {"werk": None, "schedule": ("schedule_*", "inbox_message")}
-_clients: dict[tuple[str, str], object] = {}
+# (bundle, environment) -> (event loop the client was built on, client). An
+# aioapns client captures the running loop when its connection pool is created,
+# so it cannot outlive that loop: the API process has one loop for its lifetime,
+# but every Celery task runs its own asyncio.run() and a client cached from the
+# previous task would try to open connections on a closed loop.
+_clients: dict[tuple[str, str], tuple[asyncio.AbstractEventLoop, object]] = {}
 _disabled_logged = False
 _PERMANENT_TOKEN_ERRORS = {"Unregistered", "BadDeviceToken", "DeviceTokenNotForTopic"}
+
+
+@asynccontextmanager
+async def _db(conn=None):
+    """The caller's connection (worker paths pass one) or a pool/direct one."""
+    if conn is not None:
+        yield conn
+        return
+    async with connection_or_direct() as own:
+        yield own
 
 
 def configured_bundles() -> dict[str, str]:
@@ -59,8 +77,13 @@ async def _get_client(bundle_id: str, environment: str):
     """Cache APNs clients by topic and environment; setup failures are soft."""
     global _disabled_logged
     key = (bundle_id, environment)
-    if key in _clients:
-        return _clients[key]
+    loop = asyncio.get_running_loop()
+    cached = _clients.get(key)
+    if cached is not None:
+        cached_loop, client = cached
+        if cached_loop is loop and not loop.is_closed():
+            return client
+        _clients.pop(key, None)
     settings = get_settings()
     if bundle_id not in configured_bundles() or not all((
         settings.apns_key_id, settings.apns_team_id, settings.apns_auth_key_path,
@@ -76,7 +99,7 @@ async def _get_client(bundle_id: str, environment: str):
             topic=bundle_id,
             use_sandbox=environment == "sandbox",
         )
-        _clients[key] = client
+        _clients[key] = (loop, client)
         return client
     except Exception as exc:  # noqa: BLE001 — push must never fail a request
         if not _disabled_logged:
@@ -140,18 +163,23 @@ async def send_to_many(
     settings = get_settings()
     if not all((settings.apns_key_id, settings.apns_team_id, settings.apns_auth_key_path)):
         return
-    if conn is None:
-        async with get_connection() as read_conn:
-            rows = await read_conn.fetch(
-                "SELECT user_id, token, bundle_id, environment FROM device_tokens "
-                "WHERE user_id = ANY($1::uuid[]) AND platform = 'ios'",
-                user_ids,
-            )
-    else:
+    # Session-bound (Matcha Schedule) tokens only while their device session is
+    # live and the employee is still employed; legacy rows have no session.
+    async with _db(conn) as conn:
         rows = await conn.fetch(
-            "SELECT user_id, token, bundle_id, environment FROM device_tokens "
-            "WHERE user_id = ANY($1::uuid[]) AND platform = 'ios'",
-            user_ids,
+            """SELECT dt.user_id, dt.token, dt.bundle_id, dt.environment
+                 FROM device_tokens dt
+                 LEFT JOIN auth_device_sessions ds ON ds.id = dt.device_session_id
+                WHERE dt.user_id = ANY($1::uuid[]) AND dt.platform = 'ios'
+                  AND (
+                        dt.device_session_id IS NULL
+                     OR (ds.revoked_at IS NULL AND NOT EXISTS (
+                            SELECT 1 FROM employees e
+                             WHERE e.user_id = dt.user_id
+                               AND COALESCE(e.employment_status, 'active') = ANY($2::text[])
+                        ))
+                  )""",
+            user_ids, list(INACTIVE_EMPLOYMENT_STATUSES),
         )
     if not rows:
         return
@@ -187,10 +215,7 @@ async def send_to_many(
             logger.warning("APNs send failed token=%s…: %s", token[:8], exc)
 
     if dead:
-        if conn is None:
-            async with get_connection() as write_conn:
-                await write_conn.execute("DELETE FROM device_tokens WHERE token = ANY($1::text[])", dead)
-        else:
+        async with _db(conn) as conn:
             await conn.execute("DELETE FROM device_tokens WHERE token = ANY($1::text[])", dead)
 
 

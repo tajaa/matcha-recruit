@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, Loader2, LogOut, Repeat } from 'lucide-react'
+import { CalendarX, Check, Loader2, LogOut, Repeat } from 'lucide-react'
 import { useToast } from '../../../components/ui'
 import { createMyRequest } from '../../../api/employees/employeeSchedule'
 import type { Shift, ShiftAssignment } from '../../../types/employeeSchedule'
@@ -69,7 +69,7 @@ export function ShiftCard({
         </div>
         <button onClick={() => { setMode(mode === 'swap' ? null : 'swap'); setCounterShiftId('') }} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100"><Repeat className="h-3.5 w-3.5" /> Swap</button>
         <button onClick={() => setMode(mode === 'pickup' ? null : 'pickup')} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100"><LogOut className="h-3.5 w-3.5" /> Offer pickup</button>
-        <button onClick={() => setMode(mode === 'drop' ? null : 'drop')} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100"><LogOut className="h-3.5 w-3.5" /> Drop</button>
+        <button onClick={() => setMode(mode === 'drop' ? null : 'drop')} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100"><CalendarX className="h-3.5 w-3.5" /> Drop</button>
       </div>
       {mode && (
         <div className="mt-2 flex items-center gap-2 flex-wrap border-t border-zinc-800 pt-2">
