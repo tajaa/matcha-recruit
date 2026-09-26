@@ -1,6 +1,6 @@
 import { api } from '../client'
 import type {
-  Shift, ShiftPayload, WeekResponse, ScheduleSummary,
+  Shift, OpenSeat, ShiftPayload, WeekResponse, ScheduleSummary,
   WeekTemplate, WeekTemplatePayload, TemplateBlock, BlockPayload, ScheduleRequest,
   AssignmentMovePayload, AssignmentMoveResponse,
   ScheduleJob, JobPayload, JobCredentialRequirement, RosterEmployee,
@@ -377,6 +377,12 @@ export function fetchMyTeamSchedule(start: string, end: string) {
   )
 }
 
+export function fetchMyOpenSeats(start: string, end: string) {
+  return api.get<{ shifts: OpenSeat[] }>(
+    `/v1/portal/me/schedule/open-seats?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
+  )
+}
+
 export function fetchMyRequests() {
   return api.get<{ requests: ScheduleRequest[] }>('/v1/portal/me/schedule/requests')
 }
@@ -400,7 +406,7 @@ export function withdrawMyRequest(id: string) {
 }
 
 export interface MyRequestPayload {
-  request_type: 'swap' | 'drop' | 'pickup' | 'unavailable'
+  request_type: 'swap' | 'drop' | 'pickup' | 'unavailable' | 'claim'
   shift_id?: string | null
   target_employee_id?: string | null
   counter_shift_id?: string | null

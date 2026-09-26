@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { PillTabs } from '../../../components/ui'
-import type { Shift } from '../../../types/employeeSchedule'
-import { fmtTime } from '../../../types/employeeSchedule'
+import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
+import { PillTabs, useToast } from '../../../components/ui'
+import { createMyRequest } from '../../../api/employees/employeeSchedule'
+import type { OpenSeat, Shift } from '../../../types/employeeSchedule'
+import { errorMessage, fmtTime } from '../../../types/employeeSchedule'
 import { ShiftCard } from './ShiftCard'
 import {
   WINDOW_COUNT, buildWindows, fmtDayHeading, fmtWindowLabel, groupByDay, inWindow, todayISO,
@@ -20,17 +21,20 @@ const SCOPE_OPTIONS: { value: Scope; label: string }[] = [
  *  time. The section index lives in `?week=` so a refresh or a trip through
  *  another tab lands back on the dates the employee was reading. */
 export default function ScheduleTab({
-  horizonStart, shifts, teamShifts, coworkers, onChanged,
+  horizonStart, shifts, teamShifts, openSeats, coworkers, onChanged,
 }: {
   /** First day of the fetched horizon — the sections partition it exactly. */
   horizonStart: string
   shifts: Shift[]
   teamShifts: Shift[]
+  openSeats: OpenSeat[]
   coworkers: { id: string; name: string }[]
   onChanged: () => void
 }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const [scope, setScope] = useState<Scope>('mine')
+  const [claiming, setClaiming] = useState<string | null>(null)
+  const { toast } = useToast()
   const today = todayISO()
   const windows = useMemo(() => buildWindows(horizonStart), [horizonStart])
 
@@ -62,6 +66,23 @@ export default function ScheduleTab({
   const active = scope === 'mine' ? shifts : teamShifts
   const counts = windows.map((candidate) => active.filter((shift) => inWindow(shift, candidate)).length)
   const days = groupByDay(active, window)
+  const visibleOpenSeats = openSeats.filter((shift) => inWindow(shift, window))
+
+  async function claim(shift: Shift) {
+    setClaiming(shift.id)
+    try {
+      await createMyRequest({ request_type: 'claim', shift_id: shift.id })
+      toast('Claim request sent for manager review', 'success')
+      onChanged()
+    } catch (err) {
+      toast(errorMessage(err), 'error')
+      // A 409 means the seat changed under us (filled, started, already
+      // claimed): reload so the stale card does not stay claimable.
+      onChanged()
+    } finally {
+      setClaiming(null)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -137,6 +158,23 @@ export default function ScheduleTab({
                   </div>
                 ))}
             </div>
+          </div>
+        ))}
+      </section>
+      <section className="space-y-2 border-t border-zinc-800 pt-4">
+        <h2 className="text-sm font-medium text-zinc-200">Open shifts</h2>
+        {visibleOpenSeats.length === 0 ? (
+          <p className="text-sm text-zinc-600">No open shifts for {fmtWindowLabel(window)}.</p>
+        ) : visibleOpenSeats.map((shift) => (
+          <div key={shift.id} className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm text-zinc-100">{fmtDayHeading(shift.starts_at.slice(0, 10), today)} · {fmtTime(shift.starts_at)}–{fmtTime(shift.ends_at)} · {shift.role || 'Shift'}</div>
+              <div className="text-[11px] text-zinc-500">{shift.assignments.length} of {shift.required_staff} seats filled</div>
+              {shift.has_conflict && <div className="text-[11px] text-amber-300">Overlaps one of your shifts. A manager can review the conflict.</div>}
+            </div>
+            <button type="button" disabled={claiming !== null} onClick={() => void claim(shift)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-500 disabled:opacity-50">
+              {claiming === shift.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Claim'}
+            </button>
           </div>
         ))}
       </section>

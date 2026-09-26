@@ -10,7 +10,7 @@ company_id.
 import json
 import logging
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -193,6 +193,7 @@ async def fetch_shifts(
     employee_id: Optional[UUID] = None,
     location_id: Optional[UUID] = None,
     starts_within: bool = False,
+    shift_ids: Optional[Sequence[UUID]] = None,
 ) -> list[dict]:
     """Shifts overlapping [start, end) for a company, each with its assignments.
 
@@ -216,6 +217,9 @@ async def fetch_shifts(
     if status is not None:
         params.append(status)
         where.append(f"s.status = ${len(params)}")
+    if shift_ids is not None:
+        params.append(list(shift_ids))
+        where.append(f"s.id = ANY(${len(params)}::uuid[])")
     if employee_id is not None:
         params.append(employee_id)
         where.append(

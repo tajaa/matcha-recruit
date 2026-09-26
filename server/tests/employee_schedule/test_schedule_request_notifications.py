@@ -75,6 +75,31 @@ async def test_notification_claims_then_marks_delivery_sent(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("request_type", ["drop", "claim"])
+async def test_unilateral_requests_notify_manager_without_counterparty(monkeypatch, request_type):
+    conn = _ReadyConn()
+
+    async def unilateral_request(*_args):
+        return {
+            "id": conn.request_id, "company_id": conn.company_id,
+            "request_type": request_type, "counterparty_confirmed_at": None,
+            "owner_name": "Avery Owner", "target_name": "",
+        }
+
+    class _Email:
+        def is_configured(self):
+            return False
+
+    conn.fetchrow = unilateral_request
+    monkeypatch.setattr(notifications, "get_email_service", lambda: _Email())
+    monkeypatch.setattr(notifications, "get_settings", lambda: SimpleNamespace(app_base_url="https://matcha.example"))
+    result = await notifications.send_manager_ready_notifications(conn, request_id=conn.request_id)
+    assert result["recipients"] == 1
+    bell = next(args for query, args in conn.executed if "WITH notification" in query)
+    assert f"Avery Owner submitted a {request_type} request." in bell[3]
+
+
+@pytest.mark.asyncio
 async def test_resolved_request_marks_every_matching_manager_alert_read():
     company_id = uuid4()
     request_id = uuid4()
@@ -114,4 +139,10 @@ def test_recovery_reclaims_only_stale_unsent_delivery_claims():
     worker = Path(__file__).parents[2] / "app/workers/tasks/schedule_request_notifications.py"
     assert "sent_at IS NULL" in service.read_text()
     assert "INTERVAL '5 minutes'" in service.read_text()
-    assert "NOT EXISTS" not in worker.read_text()
+    # The sweep only selects requests some active reviewer has not been told
+    # about on BOTH channels; otherwise the whole backlog is re-scanned every
+    # run and, past the LIMIT, the newest requests are never reached.
+    sweep = worker.read_text()
+    assert "d.event_type = 'manager_ready' AND d.sent_at IS NOT NULL" in sweep
+    assert "d.event_type = 'manager_ready_in_app' AND d.sent_at IS NOT NULL" in sweep
+    assert "u.is_active = true" in sweep

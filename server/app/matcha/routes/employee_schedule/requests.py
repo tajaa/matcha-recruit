@@ -15,7 +15,9 @@ from ...services.scheduling.shift_writes import (
     apply_assignment_core, log_availability_override, remove_assignment_core,
 )
 from ...services.scheduling.availability_requests import apply_availability_request
-from ...services.scheduling.shift_requests import find_same_day_assignments, same_day_conflict_detail
+from ...services.scheduling.shift_requests import (
+    find_same_day_assignments, same_day_conflict_detail, schedule_wall_clock_now,
+)
 from ...services.scheduling.schedule_request_notifications import (
     mark_manager_ready_notifications_resolved,
 )
@@ -25,6 +27,7 @@ from ._shared import (
     require_company_id, log_audit, serialize_request, REQUEST_SELECT,
     INACTIVE_EMPLOYMENT_STATUSES, assert_employee_schedulable_at,
     check_job_qualification, find_conflicts, raise_conflict, raise_not_qualified,
+    raise_shift_full,
     fetch_availability, availability_violations, raise_outside_availability,
     reconcile_warning_events, fetch_locked_shift_pair, lock_scheduling_employees,
 )
@@ -122,6 +125,67 @@ async def review_request(request_id: UUID, body: RequestReview,
                 raise HTTPException(status_code=404, detail="Request not found")
             if req["status"] not in ("awaiting_manager", "pending"):
                 raise HTTPException(status_code=409, detail={"code": "request_not_manager_ready", "status": req["status"]})
+
+            if new_status == "approved" and req["request_type"] == "claim":
+                if req["shift_id"] is None:
+                    raise HTTPException(status_code=409, detail="Request has no shift")
+                locked = await fetch_locked_shift_pair(conn, company_id, req["shift_id"])
+                shift = locked.get(str(req["shift_id"]))
+                if shift is None or shift["status"] != "published":
+                    raise HTTPException(status_code=409, detail="Open shift is no longer published")
+                # Wall-clock compare (shift times are the store's clock face
+                # tagged UTC), never the real UTC instant.
+                location_tz = await conn.fetchval(
+                    "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
+                    shift["location_id"], company_id,
+                ) if shift["location_id"] else None
+                if shift["starts_at"] <= schedule_wall_clock_now(location_tz):
+                    raise HTTPException(status_code=409, detail="Open shift has already started")
+                await lock_scheduling_employees(conn, company_id, [req["employee_id"]])
+                if await conn.fetchval(
+                    """SELECT 1 FROM schedule_shift_assignments
+                       WHERE shift_id=$1 AND employee_id=$2""",
+                    req["shift_id"], req["employee_id"],
+                ):
+                    raise HTTPException(status_code=409, detail="Employee is already assigned to this shift")
+                # Recount AFTER the row lock: under READ COMMITTED the count
+                # embedded in the FOR UPDATE statement comes from the snapshot
+                # taken before this statement waited on the lock, so two
+                # managers approving the last seat together would both see it
+                # free.
+                assigned_count = await conn.fetchval(
+                    "SELECT count(*) FROM schedule_shift_assignments WHERE shift_id=$1",
+                    req["shift_id"],
+                )
+                if assigned_count >= shift["required_staff"] and not body.force:
+                    raise_shift_full(assigned_count, shift["required_staff"])
+                # Same hard rule pickups and swaps enforce: one shift per day.
+                same_day = await find_same_day_assignments(
+                    conn, company_id, req["employee_id"], shift["starts_at"],
+                )
+                if same_day:
+                    raise HTTPException(status_code=409, detail=same_day_conflict_detail(req["employee_id"], same_day))
+                outside, unqualified = await _check_recipient(
+                    conn, company_id, shift, req["employee_id"],
+                    exclude_shift_id=None, force=body.force,
+                )
+                await apply_assignment_core(
+                    conn, company_id, shift_row=shift, employee_id=req["employee_id"],
+                    actor_user_id=current_user.id,
+                    audit_details={"request_id": str(request_id), "request_type": "claim"},
+                )
+                changed_shift_ids.append(req["shift_id"])
+                if outside:
+                    await log_availability_override(
+                        conn, company_id, req["shift_id"], current_user.id,
+                        req["employee_id"], outside,
+                    )
+                if unqualified:
+                    await log_audit(
+                        conn, company_id, "assignment", req["shift_id"], current_user.id,
+                        "assignment.qualification_override",
+                        {"employee_id": str(req["employee_id"]), **unqualified},
+                    )
 
             if new_status == "approved" and req["request_type"] in ("pickup", "swap", "drop"):
                 if req["shift_id"] is None:

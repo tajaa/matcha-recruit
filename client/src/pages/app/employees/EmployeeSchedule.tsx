@@ -103,7 +103,9 @@ export default function EmployeeSchedule() {
 
   useEffect(() => {
     let cancelled = false
-    setAutomaticSuggestion(null)
+    void Promise.resolve().then(() => {
+      if (!cancelled) setAutomaticSuggestion(null)
+    })
     if (!locationId || tab !== 'schedule') return () => { cancelled = true }
     void getScheduleSuggestionStatus(locationId, weekStart)
       .then((result) => {
@@ -801,7 +803,7 @@ function TemplatesTab({ locationId, onGenerated }: { locationId: string; onGener
     const response = await fetchWeekTemplates(locationId)
     setTemplates(response.week_templates)
   }, [locationId])
-  useEffect(() => { load().finally(() => setLoading(false)) }, [load])
+  useEffect(() => { void Promise.resolve().then(load).finally(() => setLoading(false)) }, [load])
 
   function handleDeleted(templateId: string) {
     if (editing?.id === templateId) {
@@ -931,7 +933,7 @@ function RequestsTab({ locationId, onReviewed }: { locationId: string | null; on
     setRequests(requestResult.requests)
     setEligibilityCases(eligibilityResult.cases.filter((item) => item.status === 'warning_open' || item.status === 'removal_requested'))
   }, [locationId])
-  useEffect(() => { load().finally(() => setLoading(false)) }, [load])
+  useEffect(() => { void Promise.resolve().then(load).finally(() => setLoading(false)) }, [load])
 
   async function review(id: string, decision: 'approved' | 'denied') {
     try {
@@ -1001,7 +1003,7 @@ function RequestsTab({ locationId, onReviewed }: { locationId: string | null; on
           <div className="flex items-center gap-3 flex-wrap">
             <span className={`px-2 py-0.5 rounded-full border text-[10px] font-semibold uppercase ${REQUEST_TONE[r.status]}`}>{r.status}</span>
             <div className="flex-1 min-w-0">
-              <div className="text-sm text-zinc-200">{r.employee_name} · <span className="capitalize">{r.request_type}</span></div>
+              <div className="text-sm text-zinc-200">{r.employee_name} · <span className="capitalize">{r.request_type === 'claim' ? 'Claim open shift' : r.request_type}</span></div>
               <div className="text-[11px] text-zinc-500">
                 {r.request_type === 'unavailable'
                   ? `${r.unavailable_start ?? ''} → ${r.unavailable_end ?? ''}`
