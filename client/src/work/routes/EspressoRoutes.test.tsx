@@ -27,6 +27,7 @@ vi.mock('../pages/ChannelView', () => ({ default: () => <output data-testid="cha
 vi.mock('../pages/Inbox', () => ({ default: () => <output data-testid="inbox">Inbox</output> }))
 vi.mock('../pages/ProjectView', () => ({ default: () => <output data-testid="project">Project view</output> }))
 vi.mock('../pages/Journals', () => ({ default: () => <output data-testid="journals">Journals view</output> }))
+vi.mock('../pages/Productivity', () => ({ default: () => <output data-testid="productivity">Productivity view</output> }))
 
 function LocationMarker() {
   const { pathname, search } = useLocation()
@@ -64,6 +65,11 @@ describe('Espresso routes', () => {
   it('routes journal details before the thread catch-all', async () => {
     renderAt('/espresso/journals/abc')
     expect(await screen.findByTestId('journals')).toBeInTheDocument()
+  })
+
+  it('routes productivity before the thread catch-all', async () => {
+    renderAt('/espresso/productivity')
+    expect(await screen.findByTestId('productivity')).toBeInTheDocument()
   })
 
   it('bounces business users to /work with the path and query', async () => {
