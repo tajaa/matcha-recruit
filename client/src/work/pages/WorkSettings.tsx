@@ -6,6 +6,7 @@ import { updateWorkProfile, uploadWorkAvatar } from '../api/account'
 import { ESPRESSO_THEMES, setEspressoTheme, useEspressoTheme } from '../utils/espressoTheme'
 import { useWorkSurface } from '../routes/WorkSurfaceContext'
 import { avatarValidationError } from '../utils/avatarValidation'
+import AiConnectorsSettings from '../components/shell/AiConnectorsSettings'
 
 export function AccountSettings({ me, refresh }: { me: MeResponse; refresh: () => Promise<void> }) {
   const [name, setName] = useState(me.profile?.name ?? '')
@@ -84,6 +85,7 @@ export default function WorkSettings() {
     <h1 className="text-2xl font-semibold text-w-text">Settings</h1>
     {me && <AccountSettings me={me} refresh={refresh} />}
     {surface === 'espresso' && <AppearanceSettings />}
+    {me && <AiConnectorsSettings />}
     <section className="rounded-xl border border-w-line bg-w-surface p-5"><h2 className="text-sm font-semibold text-w-text">About</h2><p className="mt-2 text-xs text-w-dim">{surface === 'espresso' ? 'Espresso' : 'Matcha Work'} brings your projects, notes, and conversations together.</p></section>
   </div>
 }

@@ -326,8 +326,15 @@ extension MatchaWorkService {
         try await client.request(method: "GET", path: "\(basePath)/connectors")
     }
 
+    /// Revoke every token this assistant holds for the signed-in person.
+    func disconnectConnector(clientId: String) async throws {
+        struct Resp: Decodable { let disconnected: Bool }
+        let encoded = clientId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? clientId
+        let _: Resp = try await client.request(method: "DELETE", path: "\(basePath)/connectors/\(encoded)")
+    }
+
     /// Build the prefilled chat that works this research card through the
-    /// Matcha connector. `client` is `claude`, `chatgpt` or `claude_code`.
+    /// Matcha connector. `client` is `claude`, `chatgpt`, `claude_code` or `codex`.
     func launchResearch(projectId: String, taskId: String, client assistant: String) async throws -> MWResearchLaunch {
         struct Req: Encodable { let client: String }
         return try await client.request(

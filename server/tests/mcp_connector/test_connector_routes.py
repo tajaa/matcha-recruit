@@ -43,8 +43,12 @@ def test_list_connectors_reports_connected_kinds(client, monkeypatch):
     monkeypatch.setattr(mcp_oauth, "list_user_grants", grants)
     body = client.get("/connectors").json()
     assert body["mcp_url"] == "https://matcha.test/api/mcp"
-    assert body["connected"] == {"claude": True, "chatgpt": False, "claude_code": False}
+    assert body["connected"] == {"claude": True, "chatgpt": False, "claude_code": False, "codex": False}
     assert body["claude_code_command"] == "claude mcp add --transport http matcha https://matcha.test/api/mcp"
+    assert body["codex_commands"] == [
+        "codex mcp add matcha --url https://matcha.test/api/mcp",
+        "codex mcp login matcha",
+    ]
 
 
 def test_disconnect(client, monkeypatch):
@@ -117,9 +121,11 @@ def test_launch_deep_links(client, card, kind, host):
     assert str(TASK) in body["prompt"]
 
 
-def test_launch_claude_code_returns_a_shell_command(client, card):
-    body = client.post(f"/projects/{PROJECT}/tasks/{TASK}/research-launch", json={"client": "claude_code"}).json()
-    assert body["url"] is None and body["command"].startswith("claude '")
+@pytest.mark.parametrize("kind, binary", [("claude_code", "claude"), ("codex", "codex")])
+def test_launch_cli_returns_a_shell_command(client, card, kind, binary):
+    body = client.post(f"/projects/{PROJECT}/tasks/{TASK}/research-launch", json={"client": kind}).json()
+    assert body["url"] is None and body["command"].startswith(f"{binary} '")
+    assert str(TASK) in body["command"]
 
 
 def test_launch_refusals(client, card):

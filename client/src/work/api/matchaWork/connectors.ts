@@ -7,7 +7,8 @@ import { api } from '../../../api/client'
 // person-facing pieces: consent, the connected-assistants list, and the
 // "Research with…" deep link for a research card.
 
-export type ConnectorKind = 'claude' | 'chatgpt' | 'claude_code' | 'other'
+export type ConnectorKind = 'claude' | 'chatgpt' | 'claude_code' | 'codex' | 'other'
+export type LaunchClient = 'claude' | 'chatgpt' | 'claude_code' | 'codex'
 
 export type ConnectorGrant = {
   client_id: string
@@ -20,8 +21,10 @@ export type ConnectorGrant = {
 export type ConnectorsState = {
   mcp_url: string
   grants: ConnectorGrant[]
-  connected: Record<'claude' | 'chatgpt' | 'claude_code', boolean>
+  connected: Record<LaunchClient, boolean>
   claude_code_command: string
+  /** Shell lines, in order: add Matcha to the Codex CLI, then sign in. */
+  codex_commands: string[]
 }
 
 export type ConsentDescription = {
@@ -54,7 +57,7 @@ export function decideConnectorConsent(request: string, approve: boolean) {
   return api.post<{ redirect_url: string }>('/matcha-work/connectors/consent', { request, approve })
 }
 
-export function launchResearchWith(projectId: string, taskId: string, client: 'claude' | 'chatgpt' | 'claude_code') {
+export function launchResearchWith(projectId: string, taskId: string, client: LaunchClient) {
   return api.post<ResearchLaunch>(
     `/matcha-work/projects/${projectId}/tasks/${taskId}/research-launch`,
     { client },

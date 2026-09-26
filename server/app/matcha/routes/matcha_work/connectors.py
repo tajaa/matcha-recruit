@@ -8,8 +8,9 @@ Three concerns, all on the gated `/matcha-work` router:
   themselves are the MCP SDK's, mounted at `/api/oauth/*` by main.py.
 - **Grants** (`/connectors`) — which assistants are connected, and disconnect.
 - **Launch** (`/projects/{pid}/tasks/{tid}/research-launch`) — the "Research with
-  Claude / ChatGPT" button: a deep link that opens a prefilled chat. The model
-  then runs on the person's plan and talks back through the connector tools.
+  Claude / ChatGPT / Claude Code / Codex" button: a deep link that opens a
+  prefilled chat, or a shell line for the CLIs. The model then runs on the
+  person's plan and talks back through the connector tools.
 
 Nothing here holds or forwards a Claude / OpenAI credential. See
 docs/ops/MCP_CONNECTOR.md.
@@ -44,8 +45,20 @@ _DEEP_LINKS = {
 }
 
 
+_CONNECTOR_KINDS = ("claude", "chatgpt", "claude_code", "codex")
+# Terminal assistants take the launch prompt as their first argument.
+_CLI_LAUNCHERS = {"claude_code": "claude", "codex": "codex"}
+
+
 def _claude_code_add_command() -> str:
     return f"claude mcp add --transport http matcha {mcp_oauth.mcp_resource_url()}"
+
+
+def _codex_commands() -> list[str]:
+    return [
+        f"codex mcp add matcha --url {mcp_oauth.mcp_resource_url()}",
+        "codex mcp login matcha",
+    ]
 
 
 @router.get("/connectors", response_model=ConnectorsResponse)
@@ -57,8 +70,9 @@ async def list_connectors_endpoint(
     return ConnectorsResponse(
         mcp_url=mcp_oauth.mcp_resource_url(),
         grants=grants,
-        connected={k: k in kinds for k in ("claude", "chatgpt", "claude_code")},
+        connected={k: k in kinds for k in _CONNECTOR_KINDS},
         claude_code_command=_claude_code_add_command(),
+        codex_commands=_codex_commands(),
     )
 
 
@@ -122,9 +136,11 @@ async def research_launch_endpoint(
     if card["project_id"] != project_id:
         raise HTTPException(status_code=404, detail="Task not found")
     prompt = research.launch_prompt(card["id"], card["title"])
-    if body.client == "claude_code":
+    if body.client in _CLI_LAUNCHERS:
         return ResearchLaunchResponse(
-            client=body.client, prompt=prompt, command=f"claude {shlex.quote(prompt)}"
+            client=body.client,
+            prompt=prompt,
+            command=f"{_CLI_LAUNCHERS[body.client]} {shlex.quote(prompt)}",
         )
     url = _DEEP_LINKS[body.client].format(q=quote(prompt, safe=""))
     return ResearchLaunchResponse(client=body.client, url=url, prompt=prompt)

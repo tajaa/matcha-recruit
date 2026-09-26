@@ -189,13 +189,17 @@ def _scopes(value: Optional[str]) -> list[str]:
 
 
 def classify_client(redirect_uris: list[str], client_name: Optional[str] = None) -> str:
-    """'claude' | 'chatgpt' | 'claude_code' | 'other', from where it redirects."""
+    """'claude' | 'chatgpt' | 'claude_code' | 'codex' | 'other', from where it
+    redirects and — for the loopback CLIs, which all redirect to localhost —
+    the name it registered under."""
     for uri in redirect_uris:
         host = (urlparse(uri).hostname or "").lower()
         if host in _KNOWN_CLIENT_HOSTS:
             return _KNOWN_CLIENT_HOSTS[host]
     name = (client_name or "").lower()
     if any((urlparse(u).hostname or "") in ("localhost", "127.0.0.1") for u in redirect_uris):
+        if "codex" in name:
+            return "codex"
         if "claude" in name:
             return "claude_code"
     return "other"

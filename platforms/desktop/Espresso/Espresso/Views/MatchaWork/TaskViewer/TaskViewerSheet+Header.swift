@@ -361,7 +361,7 @@ extension TaskViewerSheet {
                     Label("Research with", systemImage: "sparkles")
                         .font(.ticket(size: 10))
                         .foregroundColor(.secondary)
-                    ForEach([("claude", "Claude"), ("chatgpt", "ChatGPT"), ("claude_code", "Claude Code")], id: \.0) { kind, label in
+                    ForEach([("claude", "Claude"), ("chatgpt", "ChatGPT"), ("claude_code", "Claude Code"), ("codex", "Codex")], id: \.0) { kind, label in
                         Button {
                             Task { await launchConnectorResearch(kind) }
                         } label: {
@@ -377,20 +377,19 @@ extension TaskViewerSheet {
                         }
                         .buttonStyle(.plain)
                         .disabled(connectorLaunching != nil)
-                        .help(kind == "claude_code"
-                              ? "Copy a `claude` command that works this card from your terminal"
+                        .help(kind == "claude_code" || kind == "codex"
+                              ? "Copy a `\(kind == "codex" ? "codex" : "claude")` command that works this card from your terminal"
                               : "Open a prefilled chat that works this card on your own \(label) plan")
                     }
                 }
-                if let state = connectorsState,
-                   !state.isConnected("claude"), !state.isConnected("chatgpt"), !state.isConnected("claude_code") {
+                if let state = connectorsState, !state.anyConnected {
                     Button {
                         copyToPasteboard(state.mcpUrl)
                         connectorCopied = "url"
                     } label: {
                         Text(connectorCopied == "url"
                              ? "Copied — add it as a custom connector in Claude or ChatGPT"
-                             : "First time? Copy the Matcha connector URL: \(state.mcpUrl)")
+                             : "Not connected yet — see Settings → AI Connectors, or copy the URL: \(state.mcpUrl)")
                             .font(.ticket(size: 10))
                             .foregroundColor(.secondary)
                             .lineLimit(1)

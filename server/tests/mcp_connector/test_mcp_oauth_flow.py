@@ -439,6 +439,7 @@ def test_classify_client():
     assert mcp_oauth.classify_client(["https://chatgpt.com/connector_platform_oauth_redirect"]) == "chatgpt"
     assert mcp_oauth.classify_client(["https://claude.ai/api/mcp/auth_callback"]) == "claude"
     assert mcp_oauth.classify_client(["http://localhost:4312/callback"], "Claude Code (matcha)") == "claude_code"
+    assert mcp_oauth.classify_client(["http://127.0.0.1:5555/callback"], "Codex") == "codex"
     assert mcp_oauth.classify_client(["https://cursor.test/cb"], "Cursor") == "other"
 
 

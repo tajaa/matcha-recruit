@@ -17,10 +17,132 @@ struct SettingsView: View {
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
             AccountSettingsTab()
                 .tabItem { Label("Account", systemImage: "person.circle") }
+            ConnectorsSettingsTab()
+                .tabItem { Label("AI Connectors", systemImage: "powerplug") }
             AboutSettingsTab()
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 480, height: 360)
+    }
+}
+
+// MARK: - AI Connectors
+
+/// Where a person hooks their own Claude, ChatGPT, Claude Code or Codex up to
+/// Matcha so research cards run on their plan. Connecting happens *in the
+/// assistant* — it signs in to Matcha through the consent page — so Matcha
+/// never takes a Claude or OpenAI login. This tab shows the steps and lists /
+/// disconnects what is connected.
+private struct ConnectorsSettingsTab: View {
+    @State private var state: MWConnectorsState?
+    @State private var error: String?
+    @State private var busyClientId: String?
+    @State private var copied: String?
+
+    var body: some View {
+        Form {
+            Section {
+                if let state {
+                    if state.grants.isEmpty {
+                        Text("No assistants connected yet.")
+                            .foregroundColor(.secondary)
+                    }
+                    ForEach(state.grants) { grant in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(grant.clientName)
+                                Text(Self.kindLabel(grant.kind))
+                                    .font(.caption).foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Button(busyClientId == grant.clientId ? "Disconnecting…" : "Disconnect") {
+                                Task { await disconnect(grant.clientId) }
+                            }
+                            .disabled(busyClientId != nil)
+                        }
+                    }
+                } else if error == nil {
+                    ProgressView().controlSize(.small)
+                }
+                if let error {
+                    Text(error).font(.caption).foregroundColor(.red)
+                }
+            } header: {
+                Text("Connected").font(.subheadline).bold()
+            } footer: {
+                Text("Research runs on your own plan; Matcha never sees that account. Changing your password disconnects every assistant.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+
+            if let state {
+                Section {
+                    copyRow("Connector URL", state.mcpUrl)
+                    Text("Claude: Settings → Connectors → Add custom connector → paste the URL.")
+                        .font(.caption)
+                    Text("ChatGPT: Settings → Apps & Connectors → Advanced → Developer mode → Create → paste the URL, OAuth.")
+                        .font(.caption)
+                    copyRow("Claude Code (then /mcp to sign in)", state.claudeCodeCommand)
+                    ForEach(Array(state.codexCommands.enumerated()), id: \.offset) { index, command in
+                        copyRow(index == 0 ? "Codex CLI" : "Codex sign-in (opens Matcha to approve)", command)
+                    }
+                } header: {
+                    Text("Connect an assistant").font(.subheadline).bold()
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .task { await load() }
+    }
+
+    @ViewBuilder
+    private func copyRow(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption).foregroundColor(.secondary)
+            HStack {
+                Text(value)
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Button(copied == value ? "Copied" : "Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(value, forType: .string)
+                    copied = value
+                }
+                .controlSize(.small)
+            }
+        }
+    }
+
+    private static func kindLabel(_ kind: String) -> String {
+        switch kind {
+        case "claude": return "Claude"
+        case "chatgpt": return "ChatGPT"
+        case "claude_code": return "Claude Code"
+        case "codex": return "Codex"
+        default: return "Other assistant"
+        }
+    }
+
+    private func load() async {
+        do {
+            state = try await MatchaWorkService.shared.listConnectors()
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func disconnect(_ clientId: String) async {
+        busyClientId = clientId
+        defer { busyClientId = nil }
+        do {
+            try await MatchaWorkService.shared.disconnectConnector(clientId: clientId)
+            await load()
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }
 

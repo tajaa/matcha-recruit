@@ -6,7 +6,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
-ConnectorKind = Literal["claude", "chatgpt", "claude_code", "other"]
+ConnectorKind = Literal["claude", "chatgpt", "claude_code", "codex", "other"]
 
 
 class ConnectorGrant(BaseModel):
@@ -22,6 +22,8 @@ class ConnectorsResponse(BaseModel):
     grants: list[ConnectorGrant]
     connected: dict[str, bool]
     claude_code_command: str
+    # Shell lines, in order, that add Matcha to the Codex CLI and sign in.
+    codex_commands: list[str]
 
 
 class ConsentDescription(BaseModel):
@@ -41,7 +43,7 @@ class ConsentResult(BaseModel):
 
 
 class ResearchLaunchRequest(BaseModel):
-    client: Literal["claude", "chatgpt", "claude_code"]
+    client: Literal["claude", "chatgpt", "claude_code", "codex"]
 
 
 class ResearchLaunchResponse(BaseModel):

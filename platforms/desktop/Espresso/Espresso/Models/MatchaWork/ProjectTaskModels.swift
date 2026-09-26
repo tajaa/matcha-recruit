@@ -480,12 +480,14 @@ struct MWConnectorsState: Decodable {
         let clientId: String
         let clientName: String
         let kind: String
+        let lastUsedAt: String?
         var id: String { clientId }
 
         enum CodingKeys: String, CodingKey {
             case clientId = "client_id"
             case clientName = "client_name"
             case kind
+            case lastUsedAt = "last_used_at"
         }
     }
 
@@ -493,13 +495,18 @@ struct MWConnectorsState: Decodable {
     let grants: [Grant]
     let connected: [String: Bool]
     let claudeCodeCommand: String
+    /// Shell lines, in order: add Matcha to the Codex CLI, then sign in.
+    let codexCommands: [String]
 
     enum CodingKeys: String, CodingKey {
         case mcpUrl = "mcp_url"
         case grants
         case connected
         case claudeCodeCommand = "claude_code_command"
+        case codexCommands = "codex_commands"
     }
+
+    var anyConnected: Bool { connected.values.contains(true) }
 
     func isConnected(_ kind: String) -> Bool { connected[kind] == true }
 }

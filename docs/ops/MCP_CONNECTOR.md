@@ -113,6 +113,12 @@ boards, so claiming (→ In progress) keeps it off.
   the same URL and OAuth.
 - **Claude Code:** `claude mcp add --transport http matcha https://hey-matcha.com/api/mcp`, then
   `/mcp` to log in.
+- **Codex CLI:** `codex mcp add matcha --url https://hey-matcha.com/api/mcp`, then
+  `codex mcp login matcha` (opens the consent page). Runs on the person's ChatGPT plan through
+  OpenAI's own client.
+- **In-app:** Settings → **AI connectors** (web `/work|/espresso/settings`, Espresso ⌘, → AI Connectors)
+  lists every step with copy buttons, shows what is connected, and disconnects. Research cards get
+  Claude / ChatGPT (deep link) and Claude Code / Codex (copied shell line).
 - **Local:**
   1. Run `dev-remote.sh`.
   2. Start a public HTTPS tunnel to the backend (Claude and ChatGPT connect from their own clouds).

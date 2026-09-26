@@ -88,7 +88,7 @@ export default function ConnectorConsent() {
           <>
             <p className="text-sm text-zinc-300 leading-relaxed">
               <span className="font-medium text-zinc-100">{info.client_name}</span> wants to work with
-              your Matcha boards. The assistant runs on your own {info.client_kind === 'chatgpt' ? 'ChatGPT' : info.client_kind === 'other' ? 'assistant' : 'Claude'} plan;
+              your Matcha boards. The assistant runs on your own {info.client_kind === 'chatgpt' || info.client_kind === 'codex' ? 'ChatGPT' : info.client_kind === 'other' ? 'assistant' : 'Claude'} plan;
               Matcha never sees that account.
             </p>
             <p className="mt-3 text-xs text-zinc-400">
