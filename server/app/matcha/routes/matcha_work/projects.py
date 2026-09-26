@@ -164,7 +164,7 @@ async def get_project_bundle_endpoint(
     return {
         "project": project,
         "tasks": tasks,
-        "files": files,
+        "files": _resolve_file_urls(files),
         "folders": folders,
         "links": links,
         "collaborators": collaborators,
@@ -556,7 +556,7 @@ async def upload_project_file(
         async with get_connection() as conn:
             await _verify_element_in_project(conn, project_id, element_id)
 
-    return await project_file_service.validate_and_store_project_upload(
+    stored = await project_file_service.validate_and_store_project_upload(
         file,
         project_id=project_id,
         uploaded_by=current_user.id,
@@ -564,6 +564,7 @@ async def upload_project_file(
         element_id=element_id,
         folder_id=folder_id,
     )
+    return _resolve_file_urls([stored])[0]
 
 @router.get("/projects/{project_id}/files")
 async def list_project_files_endpoint(
@@ -574,7 +575,7 @@ async def list_project_files_endpoint(
     from app.matcha.services.matcha_work import project_file_service
 
     await _verify_project_access(project_id, current_user)
-    return await project_file_service.list_project_files(project_id)
+    return _resolve_file_urls(await project_file_service.list_project_files(project_id))
 
 @router.delete("/projects/{project_id}/files/{file_id}")
 async def delete_project_file_endpoint(

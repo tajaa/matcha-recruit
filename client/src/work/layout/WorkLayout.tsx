@@ -15,6 +15,7 @@ import { fetchUsageMeter, USAGE_CHANGED_EVENT, type UsageMeter } from '../api/ma
 import { useWorkSurface, useWorkBrand, useWorkBase } from '../routes/WorkSurfaceContext'
 import { useEntitlements } from '../hooks/useEntitlements'
 import PaywallModal from '../components/shared/PaywallModal'
+import FindPalette from '../components/shell/FindPalette'
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -203,7 +204,7 @@ function TokenIndicator() {
 export default function WorkLayout() {
   usePresenceHeartbeat()
   useChannelNotifications()
-  const { isPersonal, loading, hasFeature } = useMe()
+  const { me, isPersonal, loading, hasFeature } = useMe()
   useEntitlements()
   const { pathname, search } = useLocation()
   const surface = useWorkSurface()
@@ -362,6 +363,7 @@ export default function WorkLayout() {
         <span className="hidden sm:inline text-sm font-medium tracking-tight text-w-text">{brand}</span>
 
         <div className="ml-auto flex items-center gap-3 sm:gap-4">
+          {isPersonal && <FindPalette userId={me?.user?.id} base={base} />}
           <TokenIndicator />
           <NotificationSettingsMenu />
           <NotificationBell />

@@ -1,8 +1,9 @@
-import { Hash, Plus, ChevronDown, Pencil, Compass } from 'lucide-react'
+import { Hash, Plus, ChevronDown, Pencil, Compass, Star } from 'lucide-react'
 import type { NavigateFunction } from 'react-router-dom'
 import type { ChannelSummary } from '../../../api/channels'
 import type { SidebarRename } from './useSidebarRename'
 import RenameInput from './RenameInput'
+import { toggleStar, useStars } from '../../../hooks/useStars'
 
 interface Props {
   channels: ChannelSummary[]
@@ -16,6 +17,7 @@ interface Props {
   isActive: (path: string) => boolean
   setShowCreateChannel: React.Dispatch<React.SetStateAction<boolean>>
   rename: SidebarRename
+  userId?: string
 }
 
 // Channels
@@ -31,8 +33,10 @@ export default function ChannelsSection({
   isActive,
   setShowCreateChannel,
   rename,
+  userId,
 }: Props) {
   const { renaming, startRename } = rename
+  const starred = useStars(userId, 'channels')
   return (
     <div className="mt-2">
       <button
@@ -97,6 +101,7 @@ export default function ChannelsSection({
                   <span className={`flex-1 min-w-0 truncate ${ch.unread_count > 0 ? 'font-semibold text-white' : ''}`}>
                     {ch.name}
                   </span>
+                  <button onClick={(event) => { event.stopPropagation(); toggleStar(userId, 'channels', ch.id) }} aria-label={`${starred.includes(ch.id) ? 'Unstar' : 'Star'} ${ch.name}`} title={starred.includes(ch.id) ? 'Unstar' : 'Star'} className={starred.includes(ch.id) ? 'text-w-accent' : 'text-w-faint sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100'}><Star size={12} fill={starred.includes(ch.id) ? 'currentColor' : 'none'} /></button>
                   <button
                     onClick={(e) => { e.stopPropagation(); startRename('channel', ch.id, ch.name) }}
                     className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-w-dim hover:text-w-text transition-all"

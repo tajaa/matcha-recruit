@@ -5,6 +5,7 @@ import {
   archiveJournal, createJournal, createJournalFolder, deleteJournalFolder,
   listJournalFolders, listJournals, unarchiveJournal, updateJournal,
   updateJournalFolder,
+  JOURNALS_CHANGED_EVENT,
   type FolderPatch, type Journal, type JournalFolder, type JournalKind, type JournalPatch,
 } from '../../api/matchaWork/journals'
 
@@ -55,17 +56,19 @@ export function useJournals() {
       ...(folderId === undefined ? {} : { folder_id: folderId }) }
     const journal = await createJournal(body)
     await reload()
+    window.dispatchEvent(new Event(JOURNALS_CHANGED_EVENT))
     return journal
   }
 
   const patch = async (id: string, changes: JournalPatch) => {
     const updated = await updateJournal(id, changes)
     setJournals((previous) => previous.map((journal) => journal.id === id ? { ...journal, ...updated } : journal))
+    window.dispatchEvent(new Event(JOURNALS_CHANGED_EVENT))
     return updated
   }
 
-  const archive = async (id: string) => { await archiveJournal(id); await reload() }
-  const restore = async (id: string) => { await unarchiveJournal(id); await reload() }
+  const archive = async (id: string) => { await archiveJournal(id); await reload(); window.dispatchEvent(new Event(JOURNALS_CHANGED_EVENT)) }
+  const restore = async (id: string) => { await unarchiveJournal(id); await reload(); window.dispatchEvent(new Event(JOURNALS_CHANGED_EVENT)) }
   const createFolder = async (name: string, parentId?: string | null) => {
     const folder = await createJournalFolder({ name, ...(parentId === undefined ? {} : { parent_id: parentId }) })
     setFolders((previous) => [...previous, folder])

@@ -49,18 +49,17 @@ export default function ProjectView() {
   }
 
   const isRecruiting = project.project_type === 'recruiting'
-  // Scope for now: a workspace only needs Chat + Kanban (recruiting swaps in its
+  // Scope for now: a workspace needs Chat + Kanban (recruiting swaps in its
   // Pipeline in place of Kanban — it has no board surface anywhere else in the
   // product, so tasks created there would be orphaned). Presentations keep the
   // sections panel as "Notes": those sections ARE the deliverable, and the panel
-  // is their only viewer/exporter on web. Files comes later — its render branch
-  // below stays intact, just unreferenced by this tab set.
+  // is their only viewer/exporter on web. Files are available for all projects.
   //
   // Collab is the exception: its "Chat" is the project's discussion CHANNEL
   // (the thing collaborators actually talk in — previously only reachable via
   // the Channels sidebar), and the AI mw_threads list moves to its own tab
   // instead of impersonating the project chat with "Chat 1", "Chat 2", …
-  const workspaceTabs = isRecruiting
+  const coreTabs = isRecruiting
     ? [
         { key: 'chat' as const, icon: MessageSquare, label: 'Chat' },
         { key: 'panel' as const, icon: FileText, label: 'Pipeline' },
@@ -81,6 +80,7 @@ export default function ProjectView() {
         { key: 'chat' as const, icon: MessageSquare, label: 'Chat' },
         { key: 'board' as const, icon: KanbanSquare, label: 'Kanban' },
       ]
+  const workspaceTabs = [...coreTabs, { key: 'files' as const, icon: FileText, label: 'Files' }]
   // The sections panel is only reachable when a `panel` tab exists. Chat writes
   // into it ("Add to Project"), so that affordance has to follow the tab set —
   // otherwise sections accumulate in a surface the UI can't open.

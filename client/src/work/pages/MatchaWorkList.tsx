@@ -3,6 +3,7 @@ import { THREAD_MODE_TOGGLES } from '../components/panels/constants'
 import { formatDateTimePacific } from '../../utils/dateFormat'
 import OnboardingWizard from '../components/shell/OnboardingWizard'
 import { useMatchaWorkList } from './useMatchaWorkList'
+import HomeInsights from './HomeInsights'
 
 const TASK_LABELS: Record<string, string> = {
   chat: 'Chat',
@@ -95,6 +96,8 @@ export default function MatchaWorkList() {
       </header>
 
       <div className="space-y-3">
+
+      <HomeInsights />
 
       {/* Workspaces — kanban board, notes and files live inside each */}
       {matchedProjects.length > 0 && (
