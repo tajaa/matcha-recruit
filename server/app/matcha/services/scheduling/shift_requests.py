@@ -3,6 +3,27 @@
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+# SQL twin of schedule_wall_clock_now: the current moment as the location's
+# clock face re-tagged UTC. ``{tz}`` is a column or parameter holding the
+# location's IANA name (NULL ⇒ UTC).
+WALL_CLOCK_NOW_SQL = "((NOW() AT TIME ZONE COALESCE({tz}, 'UTC')) AT TIME ZONE 'UTC')"
+
+
+def schedule_wall_clock_now(timezone_name: str | None) -> datetime:
+    """The current moment as the UTC-tagged wall clock the schedule stores.
+
+    Shift timestamps are the location's clock face tagged UTC (see the
+    scheduling CLAUDE.md), so "has this shift started" must compare against the
+    location's clock face, never the real UTC instant: a Pacific 5 PM shift is
+    stored as 17:00Z and would otherwise count as started at 10 AM local.
+    """
+    try:
+        tz = ZoneInfo(timezone_name or "UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        tz = timezone.utc
+    return datetime.now(tz).replace(tzinfo=timezone.utc)
 
 
 def schedule_day_bounds(value: datetime | date) -> tuple[datetime, datetime]:

@@ -15,7 +15,9 @@ from ...services.scheduling.shift_writes import (
     apply_assignment_core, log_availability_override, remove_assignment_core,
 )
 from ...services.scheduling.availability_requests import apply_availability_request
-from ...services.scheduling.shift_requests import find_same_day_assignments, same_day_conflict_detail
+from ...services.scheduling.shift_requests import (
+    find_same_day_assignments, same_day_conflict_detail, schedule_wall_clock_now,
+)
 from ...services.scheduling.schedule_request_notifications import (
     mark_manager_ready_notifications_resolved,
 )
@@ -131,7 +133,13 @@ async def review_request(request_id: UUID, body: RequestReview,
                 shift = locked.get(str(req["shift_id"]))
                 if shift is None or shift["status"] != "published":
                     raise HTTPException(status_code=409, detail="Open shift is no longer published")
-                if shift["starts_at"] <= await conn.fetchval("SELECT NOW()"):
+                # Wall-clock compare (shift times are the store's clock face
+                # tagged UTC), never the real UTC instant.
+                location_tz = await conn.fetchval(
+                    "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
+                    shift["location_id"], company_id,
+                ) if shift["location_id"] else None
+                if shift["starts_at"] <= schedule_wall_clock_now(location_tz):
                     raise HTTPException(status_code=409, detail="Open shift has already started")
                 await lock_scheduling_employees(conn, company_id, [req["employee_id"]])
                 if await conn.fetchval(
@@ -140,8 +148,23 @@ async def review_request(request_id: UUID, body: RequestReview,
                     req["shift_id"], req["employee_id"],
                 ):
                     raise HTTPException(status_code=409, detail="Employee is already assigned to this shift")
-                if shift["assigned_count"] >= shift["required_staff"] and not body.force:
-                    raise_shift_full(shift["assigned_count"], shift["required_staff"])
+                # Recount AFTER the row lock: under READ COMMITTED the count
+                # embedded in the FOR UPDATE statement comes from the snapshot
+                # taken before this statement waited on the lock, so two
+                # managers approving the last seat together would both see it
+                # free.
+                assigned_count = await conn.fetchval(
+                    "SELECT count(*) FROM schedule_shift_assignments WHERE shift_id=$1",
+                    req["shift_id"],
+                )
+                if assigned_count >= shift["required_staff"] and not body.force:
+                    raise_shift_full(assigned_count, shift["required_staff"])
+                # Same hard rule pickups and swaps enforce: one shift per day.
+                same_day = await find_same_day_assignments(
+                    conn, company_id, req["employee_id"], shift["starts_at"],
+                )
+                if same_day:
+                    raise HTTPException(status_code=409, detail=same_day_conflict_detail(req["employee_id"], same_day))
                 outside, unqualified = await _check_recipient(
                     conn, company_id, shift, req["employee_id"],
                     exclude_shift_id=None, force=body.force,
