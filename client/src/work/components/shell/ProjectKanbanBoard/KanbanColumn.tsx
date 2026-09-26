@@ -9,7 +9,9 @@ interface KanbanColumnProps {
   col: { key: BoardColumn; label: string }
   visible: MWProjectTask[]
   doneExpanded: boolean
-  setDoneExpanded: Dispatch<SetStateAction<boolean>>
+  doneTotal: number
+  doneLoading: boolean
+  expandDone: () => void
   dragOverColumn: BoardColumn | null
   setDragOverColumn: Dispatch<SetStateAction<BoardColumn | null>>
   draggingId: string | null
@@ -41,7 +43,9 @@ export default function KanbanColumn({
   col,
   visible,
   doneExpanded,
-  setDoneExpanded,
+  doneTotal,
+  doneLoading,
+  expandDone,
   dragOverColumn,
   setDragOverColumn,
   draggingId,
@@ -71,14 +75,14 @@ export default function KanbanColumn({
     colTasks = [...colTasks].sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''))
   }
   const totalInColumn = colTasks.length
-  const shownTasks = col.key === 'done' && !doneExpanded && totalInColumn > 5 ? colTasks.slice(0, 5) : colTasks
+  const shownTasks = colTasks
   const isEmpty = totalInColumn === 0
   const isDropTarget = dragOverColumn === col.key
   // Empty-column collapse is a horizontal space trick for the multi-column
   // board; in the mobile pager there's only ever one column and collapsing it
   // would hide the "add card" affordance behind a hover the phone can't do.
   const collapsed =
-    !singleColumn && isEmpty && addingColumn !== col.key && hoveredEmptyColumn !== col.key && !isDropTarget
+    !singleColumn && isEmpty && !(col.key === 'done' && doneTotal > 0) && addingColumn !== col.key && hoveredEmptyColumn !== col.key && !isDropTarget
 
   return (
     <div
@@ -114,7 +118,7 @@ export default function KanbanColumn({
             {col.label}
           </span>
           <span className="shrink-0 rounded bg-w-surface2 px-1.5 py-0.5 text-[10px] text-w-dim">
-            {totalInColumn}
+            {col.key === 'done' ? doneTotal : totalInColumn}
           </span>
         </div>
         <button
@@ -202,12 +206,13 @@ export default function KanbanColumn({
             />
           ))}
 
-          {col.key === 'done' && totalInColumn > 5 && (
+          {col.key === 'done' && (doneExpanded || doneTotal > totalInColumn) && (
             <button
-              onClick={() => setDoneExpanded((v) => !v)}
+              onClick={expandDone}
+              disabled={doneLoading}
               className="w-full rounded bg-w-surface2/60 py-1 text-[10px] font-medium text-w-dim transition-colors hover:text-w-text"
             >
-              {doneExpanded ? 'Show less' : `Show ${totalInColumn - 5} more`}
+              {doneLoading ? 'Loading…' : doneExpanded ? 'Show this week' : `Show ${doneTotal - totalInColumn} earlier`}
             </button>
           )}
         </div>

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Loader2, X, Trash2, ListChecks, Undo2, CheckCircle2, Plus, Copy, ClipboardCopy, Check, Bot } from 'lucide-react'
 import type { MWProjectTask, MWTaskAttachment, BoardColumn, TaskPriority } from '../../../types'
 import TaskAttachments from './TaskAttachments'
@@ -5,6 +6,7 @@ import { KANBAN_COLUMNS } from '../../../utils/kanbanColumns'
 import { PRIORITIES } from './constants'
 import { useTaskDetailPanel } from './useTaskDetailPanel'
 import { autoPRProgressBanner } from '../../../utils/autoprProgress'
+import TaskViewerExtras from './TaskViewerExtras'
 
 interface TaskDetailPanelProps {
   projectId: string
@@ -17,6 +19,7 @@ interface TaskDetailPanelProps {
   onSubtaskCountChange: (total: number, done: number) => void
   /** Keeps the board card's paperclip count honest after an upload/delete. */
   onAttachmentsChange?: (files: MWTaskAttachment[]) => void
+  canEdit?: boolean
 }
 
 export default function TaskDetailPanel({
@@ -28,7 +31,11 @@ export default function TaskDetailPanel({
   onDuplicate,
   onSubtaskCountChange,
   onAttachmentsChange,
+  canEdit = false,
 }: TaskDetailPanelProps) {
+  const [rejectSubtaskId, setRejectSubtaskId] = useState<string | null>(null)
+  const [subtaskReason, setSubtaskReason] = useState('')
+  const [subtaskError, setSubtaskError] = useState<string | null>(null)
   const autoPRBanner = autoPRProgressBanner(task.progress_note, task.pr_number)
   const {
     setAttachments,
@@ -46,6 +53,8 @@ export default function TaskDetailPanel({
     rejectNote,
     setRejectNote,
     reviewBusy,
+    reviewError,
+    historyVersion,
     handleApprove,
     handleReject,
     description,
@@ -54,6 +63,8 @@ export default function TaskDetailPanel({
     handleCopyTicket,
     addSubtask,
     toggleSubtask,
+    rejectSubtask,
+    addRoundSubtask,
     removeSubtask,
   } = useTaskDetailPanel({ projectId, task, onPatched, onSubtaskCountChange })
 
@@ -206,6 +217,7 @@ export default function TaskDetailPanel({
               )}
             </div>
           )}
+          {reviewError && <p role="alert" className="text-xs text-orange-400">{reviewError}</p>}
 
           {/* Assignee (read-only — no people-picker on the lite surface yet) */}
           {(task.assigned_name || task.assigned_email) && (
@@ -263,6 +275,12 @@ export default function TaskDetailPanel({
                     >
                       {sub.title}
                     </span>
+                    {sub.is_done && canEdit && (
+                      <button
+                        onClick={() => { setRejectSubtaskId(sub.id); setSubtaskReason(''); setSubtaskError(null) }}
+                        className="text-[10px] text-orange-400 hover:underline"
+                      >Reject with reason</button>
+                    )}
                     <button
                       onClick={() => removeSubtask(sub)}
                       className="shrink-0 text-w-faint opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
@@ -271,6 +289,29 @@ export default function TaskDetailPanel({
                     </button>
                   </div>
                 ))}
+                {rejectSubtaskId && (
+                  <div className="space-y-1 rounded border border-orange-500/30 p-2">
+                    <label className="block text-xs text-w-dim">Reason for rejecting this completed item</label>
+                    <input value={subtaskReason} onChange={(event) => setSubtaskReason(event.target.value)} className="w-full rounded border border-w-line bg-w-surface px-2 py-1 text-xs text-w-text" />
+                    <button
+                      disabled={!subtaskReason.trim()}
+                      onClick={async () => {
+                        const sub = subtasks.find((row) => row.id === rejectSubtaskId)
+                        if (!sub) return
+                        try {
+                          await rejectSubtask(sub, subtaskReason)
+                          setRejectSubtaskId(null)
+                          setSubtaskReason('')
+                        } catch (error) {
+                          setSubtaskError(error instanceof Error ? error.message : 'Could not reject checklist item.')
+                        }
+                      }}
+                      className="rounded bg-orange-600 px-2 py-1 text-xs text-white disabled:opacity-50"
+                    >Reject item</button>
+                    <button onClick={() => setRejectSubtaskId(null)} className="ml-2 text-xs text-w-dim">Cancel</button>
+                    {subtaskError && <p role="alert" className="text-xs text-orange-400">{subtaskError}</p>}
+                  </div>
+                )}
 
                 <div className="flex items-center gap-2 pt-1">
                   <input
@@ -306,6 +347,14 @@ export default function TaskDetailPanel({
               setAttachments(files)
               onAttachmentsChange?.(files)
             }}
+          />
+          <TaskViewerExtras
+            projectId={projectId}
+            task={task}
+            canEdit={canEdit}
+            historyVersion={historyVersion}
+            onPatched={onPatched}
+            onRoundCreated={addRoundSubtask}
           />
         </div>
 

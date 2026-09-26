@@ -10,6 +10,7 @@ import {
 } from '../../../api/matchaWork'
 import type { MWProjectTask, MWSubtask, MWTaskAttachment, BoardColumn, TaskPriority } from '../../../types'
 import { copyTicketToClipboard } from './copyTicket'
+import { ApiError } from '../../../../api/client'
 
 interface UseTaskDetailPanelArgs {
   projectId: string
@@ -39,14 +40,19 @@ export function useTaskDetailPanel({
   const [showRejectNote, setShowRejectNote] = useState(false)
   const [rejectNote, setRejectNote] = useState('')
   const [reviewBusy, setReviewBusy] = useState(false)
+  const [reviewError, setReviewError] = useState<string | null>(null)
+  const [historyVersion, setHistoryVersion] = useState(0)
 
   async function handleApprove() {
     setReviewBusy(true)
+    setReviewError(null)
     try {
       const updated = await approveProjectTask(projectId, task.id)
       onPatched(updated)
-    } catch {
-      /* surfaced via the board's own error path */
+    } catch (error) {
+      setReviewError(error instanceof ApiError && error.status === 400
+        ? 'Move this task to Review first.'
+        : error instanceof Error ? error.message : 'Could not approve the task.')
     } finally {
       setReviewBusy(false)
     }
@@ -56,13 +62,14 @@ export function useTaskDetailPanel({
     const note = rejectNote.trim()
     if (!note || reviewBusy) return
     setReviewBusy(true)
+    setReviewError(null)
     try {
       const updated = await rejectProjectTask(projectId, task.id, note)
       onPatched(updated)
       setShowRejectNote(false)
       setRejectNote('')
-    } catch {
-      /* surfaced via the board's own error path */
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : 'Could not send the task back.')
     } finally {
       setReviewBusy(false)
     }
@@ -70,14 +77,14 @@ export function useTaskDetailPanel({
 
   // Local editable copies of the inline fields.
   const [description, setDescription] = useState(task.description ?? '')
-
-  useEffect(() => {
+  const [sourceDescription, setSourceDescription] = useState(task.description)
+  if (task.description !== sourceDescription) {
+    setSourceDescription(task.description)
     setDescription(task.description ?? '')
-  }, [task.id, task.description])
+  }
 
   useEffect(() => {
     let active = true
-    setSubtasksLoading(true)
     listSubtasks(projectId, task.id)
       .then((rows) => {
         if (active) setSubtasks(rows)
@@ -159,6 +166,22 @@ export function useTaskDetailPanel({
     }
   }
 
+  async function rejectSubtask(sub: MWSubtask, reason: string) {
+    const trimmed = reason.trim()
+    if (!sub.is_done || !trimmed) return
+    const updated = await updateSubtask(projectId, task.id, sub.id, { is_done: false, reason: trimmed })
+    const next = subtasks.map((row) => row.id === sub.id ? updated : row)
+    setSubtasks(next)
+    reportCounts(next)
+    setHistoryVersion((version) => version + 1)
+  }
+
+  function addRoundSubtask(sub: MWSubtask) {
+    const next = [...subtasks, sub]
+    setSubtasks(next)
+    reportCounts(next)
+  }
+
   async function removeSubtask(sub: MWSubtask) {
     const next = subtasks.filter((s) => s.id !== sub.id)
     setSubtasks(next)
@@ -188,6 +211,8 @@ export function useTaskDetailPanel({
     rejectNote,
     setRejectNote,
     reviewBusy,
+    reviewError,
+    historyVersion,
     handleApprove,
     handleReject,
     description,
@@ -196,6 +221,8 @@ export function useTaskDetailPanel({
     handleCopyTicket,
     addSubtask,
     toggleSubtask,
+    rejectSubtask,
+    addRoundSubtask,
     removeSubtask,
   }
 }
