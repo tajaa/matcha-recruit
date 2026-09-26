@@ -5,7 +5,9 @@ import {
 } from '../../../api/matchaWork'
 import type { CommitSuggestion } from '../../../api/matchaWork'
 
-interface Props { projectId: string; taskId: string; canEdit: boolean; onAccepted: () => void; onResolved: () => void }
+// onResolved reports the task's remaining pending count as distinct subtasks,
+// matching the board badge (several suggestions can target one subtask).
+interface Props { projectId: string; taskId: string; canEdit: boolean; onAccepted: () => void; onResolved: (pendingSubtasks: number) => void }
 
 export default function TaskCommitSuggestions({ projectId, taskId, canEdit, onAccepted, onResolved }: Props) {
   const [pending, setPending] = useState<CommitSuggestion[]>([])
@@ -18,6 +20,7 @@ export default function TaskCommitSuggestions({ projectId, taskId, canEdit, onAc
     ])
     setPending(pendingRows)
     setAccepted(acceptedRows)
+    return pendingRows
   }, [projectId, taskId])
 
   useEffect(() => { queueMicrotask(() => { void refresh().catch(() => { /* commit suggestions are optional for board readers */ }) }) }, [refresh])
@@ -29,8 +32,8 @@ export default function TaskCommitSuggestions({ projectId, taskId, canEdit, onAc
         await acceptCommitSuggestion(projectId, suggestion.id)
         onAccepted()
       } else await dismissCommitSuggestion(projectId, suggestion.id)
-      onResolved()
-      await refresh()
+      const rows = await refresh()
+      onResolved(new Set(rows.map((row) => row.subtask_id)).size)
     } catch (cause) {
       await refresh().catch(() => {})
       if (!(cause instanceof ApiError && cause.status === 404)) setError(cause instanceof Error ? cause.message : 'Could not resolve suggestion.')

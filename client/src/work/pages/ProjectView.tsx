@@ -37,6 +37,11 @@ export default function ProjectView() {
     me,
   } = vm
 
+  // The board reads openTaskId once on mount and unmounts off-tab, so drop the
+  // promoted task as soon as the user leaves the board; otherwise every later
+  // return to the board would reopen it.
+  if (promotedTask && activeTab !== 'board') setPromotedTask(null)
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-[calc(100vh-49px)]">

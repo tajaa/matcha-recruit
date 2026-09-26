@@ -107,6 +107,24 @@ export default function ProjectElementsTab({ projectId, canEdit }: Props) {
     }}
   />
 
+  // Disconnecting clears only the hidden repository snapshot server-side; the
+  // user's own elements stay, so re-read them rather than emptying the list.
+  async function disconnect() {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      setConnection(await putGithubConnection(projectId, ''))
+      setRepo('')
+      setBranch('')
+      await refresh()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not disconnect the repository.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const wizard = ['Connect a GitHub repository', 'Create a code element', 'Set its file globs', 'Scan commits for ticket suggestions']
   return (
     <div className="h-full space-y-4 overflow-y-auto p-4 text-sm text-w-text">
@@ -124,7 +142,7 @@ export default function ProjectElementsTab({ projectId, canEdit }: Props) {
           <input value={repo} onChange={(event) => setRepo(event.target.value)} placeholder="owner/repository" className="min-w-0 flex-1 rounded border border-w-line bg-w-surface p-1.5" />
           <input value={branch} onChange={(event) => setBranch(event.target.value)} placeholder="Branch" className="w-28 rounded border border-w-line bg-w-surface p-1.5" />
           <button disabled={busy || (!repo.trim() && !connection?.connected)} onClick={() => void connect()} className="rounded bg-w-accent px-2 text-white disabled:opacity-50">Save connection</button>
-          {connection?.connected && <button disabled={busy} onClick={() => { setRepo(''); void putGithubConnection(projectId, '').then((result) => { setConnection(result); setElements([]); setSuggestions([]) }).catch((cause) => setError(String(cause))) }} className="text-red-400">Disconnect</button>}
+          {connection?.connected && <button disabled={busy} onClick={() => void disconnect()} className="text-red-400">Disconnect</button>}
           {connection?.connected && <button disabled={busy} onClick={() => void scan()} className="rounded border border-w-line px-2">Scan commits</button>}
           {connection?.connected && <button disabled={busy} onClick={() => void syncGithubNow(projectId).then(refresh).catch((cause) => setError(String(cause)))} className="rounded border border-w-line px-2">Sync code</button>}
         </div>}

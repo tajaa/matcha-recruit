@@ -43,10 +43,15 @@ describe('Elements tab', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('sends an empty repo to disconnect', async () => {
+  it('sends an empty repo to disconnect and keeps the user elements', async () => {
     mock.connection.mockResolvedValue({ connected: true, repo: 'org/repo', branch: 'main' })
+    mock.elements.mockResolvedValue([{ id: 'custom', name: 'Checkout flow', kind: 'component' }])
     render(<ProjectElementsTab projectId="project-3" canEdit />)
-    fireEvent.click(await screen.findByText('Disconnect'))
+    expect(await screen.findByText('Checkout flow')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Disconnect'))
     await waitFor(() => expect(mock.put).toHaveBeenCalledWith('project-3', ''))
+    expect(await screen.findByText('No repository connected.')).toBeInTheDocument()
+    expect(screen.getByText('Checkout flow')).toBeInTheDocument()
+    expect(screen.queryByText('Disconnect')).toBeNull()
   })
 })

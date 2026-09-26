@@ -346,7 +346,7 @@ export default function TaskDetailPanel({
             taskId={task.id}
             canEdit={canEdit}
             onAccepted={() => { void refreshSubtasks() }}
-            onResolved={() => onPatched({ ...task, pending_commit_subtask_count: Math.max(0, (task.pending_commit_subtask_count ?? 1) - 1) })}
+            onResolved={(pendingSubtasks) => onPatched({ ...task, pending_commit_subtask_count: pendingSubtasks })}
           />
 
           <TaskAttachments
