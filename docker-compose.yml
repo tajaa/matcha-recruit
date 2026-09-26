@@ -41,7 +41,7 @@ services:
   # `docker-compose up -d` on a fresh host — see matcha-frontend's note above,
   # same caveat applies (don't run it against a live host mid-blue/green-deploy).
   matcha-backend:
-    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-backend:latest
+    image: ${MATCHA_BACKEND_IMAGE:-${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-backend:latest}
     container_name: matcha-backend
     ports:
       - "127.0.0.1:8002:8002"
@@ -76,7 +76,7 @@ services:
   # Start with: docker-compose --profile worker up -d
   # Or set COMPOSE_PROFILES=worker in .env
   matcha-worker:
-    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-backend:latest
+    image: ${MATCHA_BACKEND_IMAGE:-${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-backend:latest}
     container_name: matcha-worker
     profiles:
       - worker

@@ -2,7 +2,7 @@
 
 ################################################################################
 # Update EC2 Deployment Script
-# Pulls latest images and restarts containers for specified app(s)
+# Pulls the requested images and restarts containers for specified app(s)
 ################################################################################
 
 set -e
@@ -31,6 +31,8 @@ EC2_USER="ec2-user"
 SSH_KEY="${SSH_KEY:-secrets/roonMT-arm.pem}"
 AWS_REGION="us-west-1"
 AWS_ACCOUNT_ID="010438494410"
+BACKEND_IMAGE="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/matcha-backend:latest"
+FRONTEND_IMAGE="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/matcha-frontend:latest"
 
 # Color codes
 RED='\033[0;31m'
@@ -48,7 +50,7 @@ usage() {
     cat << EOF
 Usage: $0 [OPTIONS]
 
-Update EC2 deployments by pulling latest images and restarting containers.
+Update EC2 deployments by pulling selected images and restarting containers.
 
 OPTIONS:
     --matcha         Update Matcha-Recruit backend + frontend + worker (ports 8002/8082)
@@ -61,6 +63,11 @@ OPTIONS:
                      covers every migration in this checkout. Backend deploys
                      otherwise refuse to swap while migrations are pending
                      (interactively they offer to run migrate-prod.sh first).
+    --preflight-only Run the read-only production migration check, then exit.
+    --backend-image IMAGE
+                     Use the specified backend ECR digest for API and worker.
+    --frontend-image IMAGE
+                     Use the specified frontend ECR digest.
     --agent          Deploy/update agent (Gemini API)
     --all            Update matcha + agent
     --status         Show status of all containers
@@ -277,7 +284,31 @@ install_worker_timer() {
 }
 
 pre_cleanup() {
+    if [ "$HOTFIX" = false ]; then
+        # Remove stopped containers only. The aggressive `image prune -a` that
+        # used to run HERE deleted cached layers before the pull. Image and
+        # builder pruning now happen after the swap in cleanup().
+        ssh_cmd "docker container prune -f" || true
+        # At <4GB free, prune images before the pull. Malformed disk output
+        # must not abort the deploy or trigger a prune on every run.
+        local avail_kb
+        avail_kb=$(ssh_cmd "df -k / | tail -1 | awk '{print \$4}'" 2>/dev/null | tr -dc '0-9' || true)
+        if [[ "$avail_kb" =~ ^[0-9]+$ ]]; then
+            if [ "$avail_kb" -lt 4194304 ]; then
+                log_warn "Low disk (<4GB) — pruning images before pull"
+                ssh_cmd "docker image prune -a -f" || true
+                ssh_cmd "docker builder prune -f" || true
+            fi
+        else
+            log_warn "Could not read remote disk space — skipping low-disk prune check"
+        fi
+        ssh_cmd "df -h / | tail -1 | awk '{print \"Available disk space: \" \$4}'"
+    fi
+
     if [ "$UPDATE_BACKEND" = true ]; then
+        # Pull before stopping the worker so a missing digest or ECR failure
+        # leaves the existing worker running.
+        ssh_cmd "docker pull '$BACKEND_IMAGE'"
         # Gracefully stop workers to let them finish current job.
         # 60s normally; 5s on --hotfix (an emergency patch outranks an
         # in-flight research task, which retries anyway via acks_late).
@@ -287,32 +318,6 @@ pre_cleanup() {
         ssh_cmd "docker stop -t $stop_timeout matcha-worker 2>/dev/null || true"
         ssh_cmd "docker rm matcha-worker 2>/dev/null || true"
     fi
-    if [ "$HOTFIX" = true ]; then
-        return 0
-    fi
-    # Remove stopped containers only. The aggressive `image prune -a` that
-    # used to run HERE was the single biggest deploy-time cost: it deleted
-    # every cached layer BEFORE the pull, forcing a cold full-image pull on
-    # every single deploy. Image/builder pruning now happens post-swap in
-    # cleanup(), where it doesn't sit between you and the new code.
-    ssh_cmd "docker container prune -f" || true
-    # Safety valve: if disk is critically low (<4GB), prune images pre-pull
-    # anyway — a failed pull from ENOSPC is worse than a slow one. Sanitized:
-    # non-numeric output (ssh banner/warning) must neither abort the deploy
-    # (set -e + integer-test error) nor collapse to 0 and silently prune on
-    # every deploy (which restores the cold-pull cost this exists to remove).
-    local avail_kb
-    avail_kb=$(ssh_cmd "df -k / | tail -1 | awk '{print \$4}'" 2>/dev/null | tr -dc '0-9' || true)
-    if [[ "$avail_kb" =~ ^[0-9]+$ ]]; then
-        if [ "$avail_kb" -lt 4194304 ]; then
-            log_warn "Low disk (<4GB) — pruning images before pull"
-            ssh_cmd "docker image prune -a -f" || true
-            ssh_cmd "docker builder prune -f" || true
-        fi
-    else
-        log_warn "Could not read remote disk space — skipping low-disk prune check"
-    fi
-    ssh_cmd "df -h / | tail -1 | awk '{print \"Available disk space: \" \$4}'"
 }
 
 update_matcha() {
@@ -341,7 +346,7 @@ update_matcha() {
         # pre_cleanup() already stops it gracefully (60s) before this runs.
         # The compose_files list picks up the awslogs override only when the
         # host opted in; otherwise the worker stays on json-file.
-        ssh_cmd "cd ~/matcha && compose_files='-f docker-compose.yml' && grep -qs '^MATCHA_LOG_DRIVER=awslogs' .env && compose_files=\"\$compose_files -f docker-compose.logging.yml\"; docker-compose \$compose_files --profile worker pull matcha-worker && docker-compose \$compose_files --profile worker up -d --no-deps matcha-worker"
+        ssh_cmd "cd ~/matcha && compose_files='-f docker-compose.yml' && grep -qs '^MATCHA_LOG_DRIVER=awslogs' .env && compose_files=\"\$compose_files -f docker-compose.logging.yml\"; MATCHA_BACKEND_IMAGE='$BACKEND_IMAGE' docker-compose \$compose_files --profile worker pull matcha-worker && MATCHA_BACKEND_IMAGE='$BACKEND_IMAGE' docker-compose \$compose_files --profile worker up -d --no-deps matcha-worker"
         deploy_backend_zero_downtime
     fi
 
@@ -356,7 +361,7 @@ deploy_backend_zero_downtime() {
     log_info "Deploying backend (blue/green — no downtime)..."
     scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new scripts/deploy-backend-bluegreen.sh \
         "$EC2_USER@$EC2_HOST:~/matcha/deploy-backend-bluegreen.sh"
-    ssh_cmd "chmod +x ~/matcha/deploy-backend-bluegreen.sh && bash ~/matcha/deploy-backend-bluegreen.sh"
+    ssh_cmd "chmod +x ~/matcha/deploy-backend-bluegreen.sh && bash ~/matcha/deploy-backend-bluegreen.sh '$BACKEND_IMAGE'"
     log_success "Backend swapped with zero downtime!"
 }
 
@@ -364,7 +369,7 @@ deploy_frontend_zero_downtime() {
     log_info "Deploying frontend (blue/green — no downtime)..."
     scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new scripts/deploy-frontend-bluegreen.sh \
         "$EC2_USER@$EC2_HOST:~/matcha/deploy-frontend-bluegreen.sh"
-    ssh_cmd "chmod +x ~/matcha/deploy-frontend-bluegreen.sh && bash ~/matcha/deploy-frontend-bluegreen.sh"
+    ssh_cmd "chmod +x ~/matcha/deploy-frontend-bluegreen.sh && bash ~/matcha/deploy-frontend-bluegreen.sh '$FRONTEND_IMAGE'"
     log_success "Frontend swapped with zero downtime!"
 }
 
@@ -455,6 +460,7 @@ UPDATE_AGENT=false
 SHOW_STATUS=false
 HOTFIX=false
 ALLOW_PENDING_MIGRATIONS=false
+PREFLIGHT_ONLY=false
 
 if [ $# -eq 0 ]; then
     usage
@@ -484,6 +490,18 @@ while [[ $# -gt 0 ]]; do
             ALLOW_PENDING_MIGRATIONS=true
             shift
             ;;
+        --preflight-only)
+            PREFLIGHT_ONLY=true
+            shift
+            ;;
+        --backend-image)
+            BACKEND_IMAGE="${2:?--backend-image requires an image}"
+            shift 2
+            ;;
+        --frontend-image)
+            FRONTEND_IMAGE="${2:?--frontend-image requires an image}"
+            shift 2
+            ;;
         --agent)
             UPDATE_AGENT=true
             shift
@@ -510,6 +528,20 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# The image refs enter remote shell commands. Accept only this account's exact
+# repositories and a digest (or the existing :latest default for laptop use).
+for image_spec in "backend:$BACKEND_IMAGE" "frontend:$FRONTEND_IMAGE"; do
+    image_name="${image_spec%%:*}"
+    image_ref="${image_spec#*:}"
+    image_prefix="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/matcha-${image_name}"
+    image_digest="${image_ref#"${image_prefix}@sha256:"}"
+    if [ "$image_ref" != "${image_prefix}:latest" ] &&
+       { [ "$image_digest" = "$image_ref" ] || [[ ! "$image_digest" =~ ^[0-9a-f]{64}$ ]]; }; then
+        log_error "Invalid ${image_name} image: expected ${image_prefix}@sha256:<64 hex characters>"
+        exit 1
+    fi
+done
+
 # Execute
 UPDATE_MATCHA=false
 if [ "$UPDATE_BACKEND" = true ] || [ "$UPDATE_FRONTEND" = true ]; then
@@ -532,6 +564,12 @@ fi
 if [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_AGENT" = false ]; then
     log_error "No app specified. Use --matcha, --frontend, --backend, --agent, or --all"
     exit 1
+fi
+
+if [ "$PREFLIGHT_ONLY" = true ]; then
+    check_pending_migrations
+    log_success "Deployment preflight passed"
+    exit 0
 fi
 
 # Before anything touches prod: a backend swap with unapplied migrations is

@@ -6,6 +6,8 @@ Moved from root `CLAUDE.md`'s Deploying section. Read root `CLAUDE.md` first for
 
 **Or dispatch from the Actions tab / GitHub mobile app** (`.github/workflows/deploy.yml`, `workflow_dispatch` — no `git push`/laptop needed once the branch carrying the workflow file is merged): pick `target` (`matcha`/`backend`/`frontend`) + optional `hotfix` toggle, same `update-ec2.sh` underneath ("verbatim laptop path" per the workflow's own step name). Build job (`build`) runs on the free `ubuntu-24.04-arm` runner via OIDC (`AWS_ROLE_ARN`, no long-lived AWS keys — trust + ECR-push policy in `deploy/github-oidc/`); deploy job (`deploy`) SSHs in with `EC2_SSH_KEY` (`secrets/roonMT-arm.pem`, the same key used from the laptop). All third-party actions are SHA-pinned — the deploy job writes the prod key to runner disk, so a mutable-tag action is a real risk there, not a hypothetical one. Landing-page build-version marker derives from `GITHUB_RUN_NUMBER + 500` under CI instead of the laptop's gitignored counter file (`scripts/build-and-push.sh:bump_landing_build_version` — CI has no persisted state to increment).
 
+Actions releases require `main`. A hosted preflight checks production migration state before the ARM build and ECR push; frontend-only releases skip the database read. After pushing, the build resolves the short-SHA tag to an ECR digest, and the deploy passes that exact digest to the blue/green script and worker Compose service. A later release can update `:latest` without changing the image selected by an already-running release. The deployment concurrency group permits one active and one pending run; a newer dispatch replaces an older pending one. The source trust policy now limits the ECR role to `main`, but an existing IAM role must be updated separately with the command in `deploy/github-oidc/README.md`.
+
 ## Change-detected builds (2026-09-07)
 
 `build-and-push.sh` with no target flag no longer builds both images. `detect_changed_targets` asks ECR for the tags on each repo's `:latest` (`aws ecr describe-images --image-ids imageTag=latest`); the script always pushes `<short-sha>` alongside `:latest`, so that tag is "the commit this image was built from". It then runs `git diff --quiet <sha> HEAD -- <paths>` plus `git status --porcelain -- <paths>` (uncommitted edits count as changed):
@@ -34,6 +36,8 @@ The per-branch `--cache-from …:buildcache-<branch>` read was dropped at the sa
 
 `update-ec2.sh` calls `check_pending_migrations` before `ecr_login` on any backend deploy (including `--hotfix`). It reads prod's `alembic_version` via `scripts/ops-health/prod-query.sh alembic` — `docker exec` into the live backend container on the app host, the same read-only path the ops-health workflows use, reachable from GitHub runners — and diffs it against the checkout with `scripts/alembic_graph.py pending <revs...>` (stdlib-only; parses `revision`/`down_revision` with `ast`, verified to match `alembic_pending.py` output).
 
+`--preflight-only` performs this read-only check and exits before ECR login or production mutation. Backend deploys also pull the selected image before stopping the worker, so an ECR error leaves the current worker running.
+
 - Nothing pending ⇒ continue.
 - Pending + interactive TTY ⇒ lists them and asks to run `./scripts/migrate-prod.sh` (all of its gates still apply, including typing `migrate prod`); success continues the deploy, anything else aborts.
 - Pending + CI/non-TTY ⇒ exit 1 with the list in `$GITHUB_STEP_SUMMARY`. Re-dispatch with `allow_pending_migrations=true` only if the code genuinely doesn't need them.
@@ -42,11 +46,13 @@ The per-branch `--cache-from …:buildcache-<branch>` read was dropped at the sa
 
 ## PR checks added 2026-09-07 (`ci.yml`, `codeql.yml`)
 
+- `checks` runs on PRs and pushes to `main`; its Python/operations and msandbox shell steps are separate so failures identify the affected suite. PR-only jobs retain their path and diff filters.
 - `lint` job — changed-files-only: `ruff --select E9,F63,F7,F82` on touched `.py` (main has 16 real `F821` undefined-name errors; whole-tree gating would be permanently red), `eslint` on touched `client/src/**/*.ts(x)` (~490 findings on main), `actionlint` via `rhysd/actionlint:1.7.12` when a workflow changed, and an **Alembic head guard**: `alembic_graph.py heads` on base vs PR; the count may not grow (the repo intentionally has 15 heads — a new migration must chain off an existing one).
 - `docker-build` job — build-only `docker buildx build` of `server/Dockerfile` and `client/Dockerfile` on the arm runner with `type=gha` cache, path-filtered, no registry/push/creds. It exists so a broken Dockerfile/lockfile fails the PR, not the deploy runner.
-- `codeql.yml` — Python + JS/TS, PRs touching `server/`/`client/` and weekly on main.
+- `codeql.yml` — Python + JS/TS, PRs touching `server/`/`client/`/`apps/msandbox/` and weekly on main.
 - `.github/dependabot.yml` — weekly grouped minor/patch for actions, pip (`playwright` ignored: its pin must move with `server/Dockerfile`'s `ARG PLAYWRIGHT_VERSION`), and the four npm trees. `.github/CODEOWNERS` requests review from the repo owner on every PR, bot-opened ones included.
 - `backup-restore-drill.yml` — weekly full `pg_restore` of the newest S3 dump into a throwaway `--memory 1g` `pgvector/pgvector:pg15` (digest-pinned) container on the app EC2; unhealthy ⇒ `ops-health` issue like the other monitors.
+- `operational-integrity-checks.yml` also runs a hosted schema-run watchdog. It reads the Mac-hosted `schema-drift-checks.yml` run history; a run queued/running for four hours, a failed latest run, or no successful run for 27 hours opens a deduplicated ops issue. This catches a sleeping or disconnected self-hosted runner without depending on that runner to report its own failure.
 - `prune-bot-branches.yml` — weekly delete of `bot/*` / `codex/*` branches whose PRs have all been closed ≥7 days (`scripts/ops-health/prune-merged-bot-branches.sh`, `--dry-run` supported; branches with no PR are never touched). Repo setting `delete_branch_on_merge` is still off — turning it on would make this mostly moot.
 
 ## Gitlink footgun

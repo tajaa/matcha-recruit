@@ -15,12 +15,17 @@ aws iam create-open-id-connect-provider \
   --client-id-list sts.amazonaws.com \
   --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1
 
-# 2. Role, trust-scoped to this repo (any ref — tighten to refs/heads/main
-#    in trust-policy.json's `sub` condition if you want deploys gated to main)
+# 2. Role, trust-scoped to this repo's main branch
 aws iam create-role \
   --role-name github-actions-matcha \
   --assume-role-policy-document file://deploy/github-oidc/trust-policy.json \
   --description "GitHub Actions OIDC role for tajaa/matcha-recruit deploy workflow (ECR push only)"
+
+# Existing role: apply the narrowed trust policy after this change is merged.
+# Review the current role policy and active deploys first.
+aws iam update-assume-role-policy \
+  --role-name github-actions-matcha \
+  --policy-document file://deploy/github-oidc/trust-policy.json
 
 # 3. Inline policy — ECR push/pull on matcha-backend + matcha-frontend only
 aws iam put-role-policy \
@@ -37,6 +42,12 @@ gh secret set EC2_SSH_KEY < secrets/roonMT-arm.pem
 ```
 
 `AWS_ACCOUNT_ID` is not a secret — it's already hardcoded in `scripts/update-ec2.sh`. `EC2_INSTANCE_ID` isn't needed (deploy job uses SSH, not SSM).
+
+Restrict production workflow dispatches to trusted operators in GitHub settings.
+The main-ref check in each workflow and this IAM policy protect the ECR push;
+`EC2_SSH_KEY` is a repository secret, so repository administrators should also
+review who can edit workflows and trigger production deploys. This file changes
+the policy template only: updating the live IAM role is a separate operator step.
 
 ## Rotating the PEM
 

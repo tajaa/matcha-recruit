@@ -23,7 +23,8 @@ on:
         type: boolean
         default: false
 
-# Never two deploys at once; a second dispatch queues instead of racing the swap.
+# One run can wait behind the active release. A newer dispatch replaces that
+# pending run; each surviving run deploys the digest it built itself.
 concurrency:
   group: prod-deploy
   cancel-in-progress: false
@@ -33,12 +34,57 @@ env:
   AWS_ACCOUNT_ID: "010438494410"
 
 jobs:
+  preflight:
+    name: Check production release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Require main ref
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo '::error::Production Actions deploys must run from main.'
+            exit 1
+          fi
+
+      - name: Write SSH key for migration preflight
+        if: inputs.target != 'frontend'
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/ec2.pem"
+          printf '%s\n' "$EC2_SSH_KEY" > "$RUNNER_TEMP/ec2.pem"
+
+      - name: Check production migrations before image push
+        if: inputs.target != 'frontend'
+        env:
+          SSH_KEY: ${{ runner.temp }}/ec2.pem
+        run: |
+          flags=(--backend --preflight-only)
+          if [ "${{ inputs.allow_pending_migrations }}" = true ]; then
+            flags+=(--allow-pending-migrations)
+          fi
+          ./scripts/update-ec2.sh "${flags[@]}"
+
+      - name: Delete preflight SSH key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/ec2.pem"
+
   build:
     name: Build and Push Images
     # Public repo => arm64-native runner is free. No QEMU: images are linux/arm64
     # and so is this machine.
     runs-on: ubuntu-24.04-arm
+    needs: preflight
     timeout-minutes: 30
+    outputs:
+      backend_image: ${{ steps.images.outputs.backend_image }}
+      frontend_image: ${{ steps.images.outputs.frontend_image }}
     permissions:
       id-token: write   # OIDC -> AWS_ROLE_ARN (ECR push only)
       contents: read
@@ -62,6 +108,23 @@ jobs:
             frontend) ./scripts/build-and-push.sh --frontend-only ;;
             *)        ./scripts/build-and-push.sh ;;
           esac
+
+      - name: Resolve this run's image digests
+        id: images
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          tag="$(git rev-parse --short HEAD)"
+          for name in backend frontend; do
+            if [ "$TARGET" != matcha ] && [ "$TARGET" != "$name" ]; then continue; fi
+            digest="$(aws ecr batch-get-image --repository-name "matcha-$name" \
+              --image-ids "imageTag=$tag" --query 'images[0].imageId.imageDigest' --output text)"
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::Could not resolve matcha-$name:$tag to a digest"
+              exit 1
+            fi
+            echo "${name}_image=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/matcha-$name@$digest" >> "$GITHUB_OUTPUT"
+          done
 
   deploy:
     name: Blue-green deploy to EC2
@@ -97,6 +160,8 @@ jobs:
         env:
           SSH_KEY: ${{ runner.temp }}/ec2.pem
           GH_TOKEN: ${{ github.token }}
+          BACKEND_IMAGE: ${{ needs.build.outputs.backend_image }}
+          FRONTEND_IMAGE: ${{ needs.build.outputs.frontend_image }}
         run: |
           chmod +x ./scripts/update-ec2.sh
           flags=("--${{ inputs.target }}")
@@ -106,4 +171,6 @@ jobs:
           if [ "${{ inputs.allow_pending_migrations }}" = "true" ]; then
             flags+=(--allow-pending-migrations)
           fi
+          if [ -n "$BACKEND_IMAGE" ]; then flags+=(--backend-image "$BACKEND_IMAGE"); fi
+          if [ -n "$FRONTEND_IMAGE" ]; then flags+=(--frontend-image "$FRONTEND_IMAGE"); fi
           ./scripts/update-ec2.sh "${flags[@]}"
