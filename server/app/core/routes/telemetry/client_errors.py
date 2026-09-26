@@ -88,7 +88,7 @@ async def _resolve_user(authorization: Optional[str]) -> tuple[Optional[str], Op
         return None, None
     token = authorization[7:].strip()
     try:
-        payload = decode_token(token, expected_type="access")
+        payload = decode_token(token, expected_type="access", allow_mobile_access=True)
         if not payload:
             return None, None
         return payload.sub, getattr(payload, "email", None)
