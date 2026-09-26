@@ -1,10 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
-import EspressoRoutes from './EspressoRoutes'
-import WorkRoutes from './WorkRoutes'
+import { MemoryRouter, useLocation } from 'react-router-dom'
+import App from '../../App'
 import { WorkSurfaceProvider, useWorkBase } from './WorkSurfaceContext'
-import { LegacySurfacePrefixRedirect } from '../pages/LegacySurfaceRedirect'
 import { api } from '../../api/client'
 
 const identity = vi.hoisted(() => ({ personal: true }))
@@ -37,11 +35,7 @@ function LocationMarker() {
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/werk/*" element={<LegacySurfacePrefixRedirect fromPrefix="/werk" toPrefix="/espresso" />} />
-        <Route path="/espresso/*" element={<EspressoRoutes />} />
-        <Route path="/work/*" element={<WorkRoutes />} />
-      </Routes>
+      <App />
       <LocationMarker />
     </MemoryRouter>,
   )
@@ -57,7 +51,7 @@ afterEach(() => vi.unstubAllGlobals())
 describe('Espresso routes', () => {
   it('renders the personal work shell with Espresso branding', async () => {
     renderAt('/espresso')
-    expect(await screen.findByTestId('home')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('home')).toBeInTheDocument(), { timeout: 5000 })
     expect(screen.getByText('Espresso')).toBeInTheDocument()
   })
 

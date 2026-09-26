@@ -20,7 +20,7 @@ Differentiated at signup via `companies.signup_source` and routed in the UI by `
 | **Matcha-lite** | `pages/auth/MatchaLiteSignup.tsx` | `matcha_lite` | `matcha_lite` | `IrSidebar` once paid; `MatchaLitePendingSidebar` while pending | `/ir/*` | Stripe sub, headcount-based |
 | **Matcha Compliance** | `pages/auth/ComplianceSignup.tsx` | `matcha_compliance` | `matcha_compliance` | `ComplianceSidebar` once paid; `CompliancePendingSidebar` while pending | `/app/compliance*` | Stripe sub, headcount + jurisdictions |
 | **Matcha (platform)** | `pages/BetaRegister.tsx` (token) or admin-created post-sale | n/a | `bespoke` (default) / `invite` | `ClientSidebar` (full nav) | `/app/*` | Contract / invoice |
-| **Matcha-work** | `pages/BetaRegister.tsx` (personal token) → `/work`; or inside Matcha company | n/a | `bespoke` (personal: `is_personal=true`) | `ClientSidebar` AI group; macOS app | `/work/*` | Stripe `matcha_work_personal` $20/mo or business token packs |
+| **Matcha-work** | `pages/BetaRegister.tsx` (personal token) → `/espresso`; or inside Matcha company | n/a | `bespoke` (personal: `is_personal=true`) | `ClientSidebar` AI group; macOS app | `/espresso/*` personal; `/work/*` business | Stripe `matcha_work_personal` $20/mo or business token packs |
 
 Sidebar dispatch in `client/src/components/sidebars/TenantSidebar.tsx`. Tier-check helpers (`isIrOnlyTier`, `isMatchaLitePending`, `isResourcesFreeTier`) in `client/src/utils/tier.ts`.
 
@@ -37,7 +37,7 @@ Stripe headcount + jurisdiction-count pricing; grants only `compliance`. Reuses 
 `signup_source='bespoke'` (default) or invite token. `ClientSidebar` full nav, `/app/*` routes.
 
 ### Matcha-work — collaborative AI workspace
-Web `/work/*` + macOS **Espresso** (`platforms/desktop/Espresso/`) share one backend (`routes/matcha_work/`) and `mw_*` tables — confirm which surface before editing. Personal ($20/mo Stripe) or business (token-pack) mode.
+Web `/work/*` (business) + `/espresso/*` (personal) and macOS **Espresso** (`platforms/desktop/Espresso/`) share one backend (`routes/matcha_work/`) and `mw_*` tables — confirm which surface before editing. Personal ($20/mo Stripe) or business (token-pack) mode.
 
 ### Custom products — the admin product builder (`/admin/products`)
 Data-driven alternative to the ~10-touchpoint hardcoded products above — composed at `/admin/products`, live at `/p/<slug>/signup`. Materialized (not overlaid) grants, `product:<slug>` signup_source namespacing, per-seat/block/flat/free/contact-sales pricing.

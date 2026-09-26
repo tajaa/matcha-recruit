@@ -32,12 +32,12 @@ Moved verbatim from root `CLAUDE.md`'s Products section. Root keeps the signup/t
 - Per-company access via `companies.enabled_features` JSONB. When a user URL-hops to a feature they don't have, `<FeatureGate>` (`client/src/components/shared/FeatureGate.tsx`) renders `<UpgradeUpsellCard>` instead of a 403.
 
 ### Matcha-work — collaborative AI workspace
-**Naming convention**: the **web** workspace surface (this section) is referred to as **matcha-work**; the **macOS desktop** workspace is referred to as **Espresso** (formerly "Werk" — renamed to avoid confusion with matcha-work; `platforms/desktop/Espresso/`). Both share the same backend (`server/app/matcha/routes/matcha_work/` package) and `mw_*` tables — only the client differs. When asked to ship a feature, confirm which surface is meant before editing files.
+**Naming convention**: the shared web workspace has the business **matcha-work** surface at `/work` and the personal **Espresso** surface at `/espresso`; the **macOS desktop** workspace is also **Espresso** (formerly "Werk"; `platforms/desktop/Espresso/`). All surfaces share the same backend (`server/app/matcha/routes/matcha_work/` package) and `mw_*` tables. When asked to ship a feature, confirm which surface is meant before editing files.
 
-- Surface: `client/src/work/pages/*` + `client/src/work/layout/WorkLayout.tsx`. Mounted at `/work/*` in `App.tsx`.
+- Web surfaces: `client/src/work/pages/*` + `client/src/work/layout/WorkLayout.tsx`. Mounted at `/work/*` for business users and `/espresso/*` for personal users in `App.tsx`; legacy `/werk/*` links redirect to `/espresso/*`.
 - Backend: `server/app/matcha/routes/matcha_work/` (package, split 2026-07-03), `server/app/matcha/services/matcha_work/project_service/`. Tables prefixed `mw_*`.
 - macOS desktop client (**Espresso**): `platforms/desktop/Espresso/` (SwiftUI). Xcode project name is still `Matcha.xcodeproj` and bundle ID `com.ahnimal.matcha` — App Store identity is unchanged; only the working directory and conceptual product name differ. `AppState.isPlusActive` from `Subscription.isPersonalPlus` controls Plus features.
-- **Personal mode**: user `role='individual'`. Signup via `BetaRegister.tsx` (`/auth/beta?token=…`) → redirected to `/work`. Stripe sub `matcha_work_personal` ($20/mo) via `POST /api/checkout/personal` (`server/app/matcha/routes/work/billing.py`).
+- **Personal mode**: user `role='individual'`. Signup via `BetaRegister.tsx` (`/auth/beta?token=…`) → redirected to `/espresso`. Stripe sub `matcha_work_personal` ($20/mo) via `POST /api/checkout/personal` (`server/app/matcha/routes/work/billing.py`).
 - **Business mode**: user `role='client'` inside a Matcha company. Token packs purchased via `POST /api/checkout`. Sidebar entry in `ClientSidebar.tsx` AI group → `/work`.
 - Surfaces inside: projects, threads, channels (real-time WebSocket), inbox (DMs), people/connections, anonymous incident report intake.
 - Stripe-gated sub-features: `paid_channel_creator`, `channel_job_postings` in `server/app/core/feature_flags.py`.

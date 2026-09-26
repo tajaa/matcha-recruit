@@ -131,7 +131,7 @@ export default function ChannelBrowse() {
               key={t.key}
               onClick={() => {
                 setTab(t.key)
-                if (t.key === 'discover') setDiscoverLoading(true)
+                if (t.key === 'discover' && tab !== 'discover') setDiscoverLoading(true)
               }}
               className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                 tab === t.key

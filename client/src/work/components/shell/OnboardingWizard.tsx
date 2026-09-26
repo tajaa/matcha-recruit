@@ -33,7 +33,7 @@ interface Step {
 
 const steps: Step[] = [
   {
-    title: 'Welcome to Werk',
+    title: 'Welcome to Espresso',
     description:
       'Your AI-powered workspace for research, documents, and collaboration.',
     icon: <Sparkles size={48} className="text-w-accent" />,

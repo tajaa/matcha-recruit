@@ -237,7 +237,7 @@ export default function WorkLayout() {
     setMobileMenuOpen(false)
   }
 
-  // Paint <html> in the Werk black so overscroll bounce (and the iOS keyboard
+  // Paint <html> in the workspace black so overscroll bounce (and the iOS keyboard
   // resize) shows app chrome instead of a flash of white.
   useEffect(() => {
     document.documentElement.setAttribute('data-app-shell-bg', 'werk')

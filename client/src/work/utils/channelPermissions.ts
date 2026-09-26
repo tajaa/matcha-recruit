@@ -17,7 +17,7 @@ export function canCreateChannel(role: string | undefined): boolean {
 }
 
 /**
- * Paid channels are a personal-Werk monetization surface (creator-owned).
+ * Paid channels are a personal Espresso monetization surface (creator-owned).
  * On werk-lite — a business product with no creator economy — only an admin
  * may open the paid wizard, which is the stricter rule the werk-lite pages
  * already intended.
