@@ -3,31 +3,33 @@ import { Link } from 'react-router-dom'
 import { NewsletterHeroSection } from '../../components/landing/NewsletterHeroSection'
 import { PricingContactModal } from '../../components/marketing/PricingContactModal'
 
-const INK = 'var(--color-ivory-ink)'
-const MUTED = 'var(--color-ivory-muted)'
-const LINE = 'var(--color-ivory-line)'
-const DISPLAY = 'var(--font-display)'
+import { BOARD, BODY, MONO, PAPER, hexA } from '../../components/marketing/kit/theme'
+import { display, mono } from '../../components/marketing/kit/styles'
+
+// Board-dark footer in the marketing kit's type (same as /matcha-scheduling).
+const INK = PAPER
+const MUTED = hexA(PAPER, 0.55)
+const LINE = hexA(PAPER, 0.1)
 
 type FooterLink =
   | { label: string; to: string }
   | { label: string; onClick: () => void }
 
 export default function MarketingFooter({
-  newsletterVariant = 'caramel',
-}: { newsletterVariant?: 'caramel' | 'matcha' } = {}) {
+  newsletterVariant = 'board',
+}: { newsletterVariant?: 'caramel' | 'matcha' | 'board' } = {}) {
   const [consultationOpen, setConsultationOpen] = useState(false)
 
   return (
     <>
       {/* Cool newsletter band — renders on every page that uses the footer. */}
       <NewsletterHeroSection variant={newsletterVariant} />
-    <footer className="border-t py-16" style={{ borderColor: LINE }}>
+    <footer className="border-t py-16" style={{ borderColor: LINE, backgroundColor: BOARD.PAPER, color: INK, fontFamily: BODY }}>
       <div className="max-w-[1440px] mx-auto px-6 sm:px-10">
         <div className="grid md:grid-cols-5 gap-10">
           <div>
             <span
-              className="text-2xl tracking-tight"
-              style={{ fontFamily: DISPLAY, fontWeight: 500, color: INK }}
+              style={{ ...display, fontWeight: 600, fontSize: 28, letterSpacing: '-0.03em', color: INK }}
             >
               Matcha
             </span>
@@ -36,7 +38,7 @@ export default function MarketingFooter({
             </p>
           </div>
           <FooterCol title="Products" links={[
-            { label: 'Matcha Ops', to: '/matcha-ops' },
+            { label: 'Scheduling', to: '/matcha-scheduling' },
             { label: 'Matcha Lite', to: '/matcha-lite' },
           ]} />
           <FooterCol title="Explore" links={[
@@ -59,7 +61,7 @@ export default function MarketingFooter({
           <span>
             © {new Date().getFullYear()} Matcha, Inc. All rights reserved.
             {import.meta.env.VITE_LANDING_BUILD_VERSION ? (
-              <span className="ml-2 font-mono opacity-60">build {import.meta.env.VITE_LANDING_BUILD_VERSION}</span>
+              <span className="ml-2 opacity-60" style={{ fontFamily: MONO }}>build {import.meta.env.VITE_LANDING_BUILD_VERSION}</span>
             ) : null}
           </span>
           <span>Made with care.</span>
@@ -78,19 +80,19 @@ export default function MarketingFooter({
 function FooterCol({ title, links }: { title: string; links: FooterLink[] }) {
   return (
     <div>
-      <div className="text-xs uppercase tracking-wider mb-4" style={{ color: MUTED }}>{title}</div>
+      <div className="mb-4" style={mono('10px', { color: MUTED })}>{title}</div>
       <ul className="space-y-3">
         {links.map(link => (
           <li key={link.label}>
             {'to' in link ? (
-              <Link to={link.to} className="text-sm hover:opacity-60 transition-opacity" style={{ color: INK }}>
+              <Link to={link.to} className="text-[14px] hover:opacity-60 transition-opacity" style={{ color: INK }}>
                 {link.label}
               </Link>
             ) : (
               <button
                 type="button"
                 onClick={link.onClick}
-                className="text-sm hover:opacity-60 transition-opacity text-left"
+                className="text-[14px] hover:opacity-60 transition-opacity text-left"
                 style={{ color: INK }}
               >
                 {link.label}

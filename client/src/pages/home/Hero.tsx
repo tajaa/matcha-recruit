@@ -1,4 +1,6 @@
-import { ASH } from "./theme";
+import { Accent } from "../../components/marketing/kit/Chrome";
+import { display } from "../../components/marketing/kit/styles";
+import { BOARD, PAPER, hexA } from "../../components/marketing/kit/theme";
 import { CONTAINER } from "./layout";
 import { StartCapture } from "./StartCapture";
 import { HeroProof } from "./HeroProof";
@@ -33,39 +35,7 @@ export function Hero() {
     // The hero is now exactly as tall as its content (~400px at 1440x800), so
     // the showcase's top ~300px lands above the fold on a 13" laptop. That peek
     // is also the scroll affordance, which is why the chevron cue is gone.
-    <section className="home-hero relative w-full flex flex-col">
-      {/* Atmosphere — two whisper-quiet radial glows (leaf upper-left, amber
-          lower-right, echoing the headline accents) lift the canvas off flat
-          noir. Kept behind the content by DOM order; blur is baked into the
-          gradients (no filter) so it costs nothing to composite. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 overflow-hidden"
-      >
-        <div
-          className="absolute"
-          style={{
-            left: "-12%",
-            top: "-18%",
-            width: "62%",
-            height: "72%",
-            background:
-              "radial-gradient(50% 50% at 50% 50%, rgba(163,197,125,0.075) 0%, transparent 70%)",
-          }}
-        />
-        <div
-          className="absolute"
-          style={{
-            right: "-14%",
-            bottom: "-22%",
-            width: "58%",
-            height: "68%",
-            background:
-              "radial-gradient(50% 50% at 50% 50%, rgba(217,119,6,0.055) 0%, transparent 70%)",
-          }}
-        />
-      </div>
-
+    <section className="home-hero sched-dark relative w-full flex flex-col" style={{ backgroundColor: BOARD.PAPER, color: PAPER }}>
       {/* The masthead row that used to sit here ("Managing your risk" /
           "Volatility · Researchers" / "Vol. 01") is gone. Its left label was
           repeated verbatim in the deck copy 60px below, its centre label meant
@@ -86,11 +56,10 @@ export function Hero() {
             and 3.4rem above it, so dragging the window across 1280px shrank the
             headline by 35% at one pixel of resize. */}
         <h1
-          className="tracking-[-0.02em] text-[clamp(2.4rem,5.6vw,5rem)] max-w-[19ch] sm:max-w-none"
-          style={{ fontFamily: "var(--font-lite)", fontWeight: 300, lineHeight: 1.02 }}
+          className="max-w-[19ch] sm:max-w-none"
+          style={{ ...display, fontSize: "clamp(2.75rem, 6vw, 5.75rem)", lineHeight: 0.98 }}
         >
-          We run the whole <span style={{ fontStyle: "italic" }}>risk</span> &amp;{" "}
-          <span style={{ fontStyle: "italic" }}>people</span> function.
+          We run the whole risk &amp; <Accent dark>people</Accent> function.
         </h1>
 
         {/* Deck row — subhead left, conversion right. `md:` is the band the
@@ -99,33 +68,28 @@ export function Hero() {
             paragraph on a viewport with room for both. */}
         <div className="home-hero-deck mt-8 flex flex-col md:flex-row md:items-end md:justify-between gap-8 md:gap-12 lg:gap-16">
           <p
-            className="home-fade-fast max-w-2xl text-[1.25rem] sm:text-[1.6rem] tracking-[-0.011em]"
-            style={{
-              fontFamily: "var(--font-lite)",
-              fontWeight: 300,
-              lineHeight: 1.42,
-              animationDelay: `${BEAT.subhead}ms`,
-            }}
+            className="cut-fade cut-fade-fast max-w-2xl text-[1.2rem] sm:text-[1.45rem] tracking-[-0.011em]"
+            style={{ lineHeight: 1.45, ["--d" as string]: `${BEAT.subhead}ms` }}
           >
-            <span style={{ color: "#FFFFFF" }}>
+            <span style={{ color: PAPER }}>
               Managing your risk before your risk manages you.
             </span>{" "}
-            <span style={{ color: ASH, fontStyle: "italic" }}>
+            <span style={{ color: hexA(PAPER, 0.58) }}>
               Workplace safety, compliance, and risk analysis.
             </span>
           </p>
 
           <div
-            className="home-hero-capture home-fade-fast w-full md:w-[360px] lg:w-[420px] shrink-0"
-            style={{ animationDelay: `${BEAT.capture}ms` }}
+            className="home-hero-capture cut-fade cut-fade-fast w-full md:w-[360px] lg:w-[420px] shrink-0"
+            style={{ ["--d" as string]: `${BEAT.capture}ms` }}
           >
             <StartCapture />
           </div>
         </div>
 
         <HeroProof
-          className="home-hero-proof home-fade-fast mt-9"
-          style={{ animationDelay: `${BEAT.proof}ms` }}
+          className="home-hero-proof cut-fade cut-fade-fast mt-9"
+          style={{ ["--d" as string]: `${BEAT.proof}ms` }}
         />
       </div>
     </section>

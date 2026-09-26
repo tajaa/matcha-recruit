@@ -112,7 +112,7 @@ export default function MatchaOpsPage() {
       </main>
 
       <div style={{ backgroundColor: BONE, color: 'var(--color-ivory-ink)' }}>
-        <MarketingFooter newsletterVariant="matcha" />
+        <MarketingFooter />
       </div>
     </div>
   )

@@ -9,7 +9,7 @@ import {
   Sparkles,
   Users,
 } from "lucide-react";
-import { ASH, BONE, DISPLAY, LINE_D } from "../theme";
+import { ASH, BONE, DISPLAY, LINE_D } from "./tones";
 import {
   InstrumentFrame,
   VBH,
@@ -32,12 +32,12 @@ export const ER_INSIGHTS = [
 // the point: one brain across every domain, not a single tool. Illustrative
 // live counts.
 export const PLATFORM_DOMAINS = [
-  { icon: Shield, label: "IR · Safety", stat: "24 open", color: "#d9b65f" },
-  { icon: Users, label: "Employee Rel.", stat: "8 cases", color: "#86efac" },
-  { icon: Scale, label: "Compliance", stat: "6 juris.", color: "#E2725B" },
-  { icon: Gavel, label: "Discipline", stat: "3 active", color: "#d9b65f" },
-  { icon: GraduationCap, label: "Training", stat: "92%", color: "#86efac" },
-  { icon: FileText, label: "Claims", stat: "2 open", color: "#7FB2C9" },
+  { icon: Shield, label: "IR · Safety", stat: "24 open", color: "var(--mk-D9B65F, #D9B65F)" },
+  { icon: Users, label: "Employee Rel.", stat: "8 cases", color: "var(--mk-86EFAC, #86EFAC)" },
+  { icon: Scale, label: "Compliance", stat: "6 juris.", color: "var(--mk-E2725B, #E2725B)" },
+  { icon: Gavel, label: "Discipline", stat: "3 active", color: "var(--mk-D9B65F, #D9B65F)" },
+  { icon: GraduationCap, label: "Training", stat: "92%", color: "var(--mk-86EFAC, #86EFAC)" },
+  { icon: FileText, label: "Claims", stat: "2 open", color: "var(--mk-7FB2C9, #7FB2C9)" },
 ] as const;
 
 export function PlatformInstrument({ numberFont = DISPLAY }: { numberFont?: string } = {}) {
@@ -128,13 +128,13 @@ export function PlatformInstrument({ numberFont = DISPLAY }: { numberFont?: stri
         >
           <defs>
             <linearGradient id="homeRiskStroke" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#86efac" />
-              <stop offset="44%" stopColor="#d9b65f" />
-              <stop offset="100%" stopColor="#ce5a4f" />
+              <stop offset="0%" style={{ stopColor: "var(--mk-86EFAC, #86EFAC)" }} />
+              <stop offset="44%" style={{ stopColor: "var(--mk-D9B65F, #D9B65F)" }} />
+              <stop offset="100%" style={{ stopColor: "var(--mk-CE5A4F, #CE5A4F)" }} />
             </linearGradient>
             <linearGradient id="homeRiskFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#d9b65f" stopOpacity="0.38" />
-              <stop offset="100%" stopColor="#ce5a4f" stopOpacity="0" />
+              <stop offset="0%" style={{ stopColor: "var(--mk-D9B65F, #D9B65F)", stopOpacity: 0.38 }} />
+              <stop offset="100%" style={{ stopColor: "var(--mk-CE5A4F, #CE5A4F)", stopOpacity: 0 }} />
             </linearGradient>
           </defs>
           {ticks.map((f) => (
@@ -144,7 +144,7 @@ export function PlatformInstrument({ numberFont = DISPLAY }: { numberFont?: stri
               x2={VBW}
               y1={VBH - f * (VBH - 10)}
               y2={VBH - f * (VBH - 10)}
-              stroke={LINE_D}
+              style={{ stroke: LINE_D }}
               strokeWidth={1}
               strokeDasharray={f === 1 ? "0" : "2 4"}
             />
@@ -165,7 +165,7 @@ export function PlatformInstrument({ numberFont = DISPLAY }: { numberFont?: stri
               x2={scanX * VBW}
               y1={0}
               y2={VBH}
-              stroke={BONE}
+              style={{ stroke: BONE }}
               strokeWidth={1.5}
               opacity={0.45}
             />
@@ -185,7 +185,7 @@ export function PlatformInstrument({ numberFont = DISPLAY }: { numberFont?: stri
           className="rounded-lg px-3.5 py-2.5 flex items-start gap-2.5"
           style={{
             border: `1px solid ${LINE_D}`,
-            backgroundColor: "rgba(245,242,237,0.03)",
+            backgroundColor: "color-mix(in srgb, var(--mk-F5F2ED, #F5F2ED) 3%, transparent)",
           }}
         >
           <Sparkles
@@ -267,7 +267,7 @@ export function PlatformInstrument({ numberFont = DISPLAY }: { numberFont?: stri
           className="grid grid-cols-3 rounded-lg overflow-hidden border"
           style={{
             borderColor: LINE_D,
-            backgroundColor: "rgba(245,242,237,0.02)",
+            backgroundColor: "color-mix(in srgb, var(--mk-F5F2ED, #F5F2ED) 2%, transparent)",
           }}
         >
           {PLATFORM_DOMAINS.map((d, i) => {

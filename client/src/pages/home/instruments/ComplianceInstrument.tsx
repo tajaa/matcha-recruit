@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, CheckCircle2, Loader2, Sparkles } from "lucide-react";
-import { ASH, BONE, DISPLAY, LINE_D } from "../theme";
+import { ASH, BONE, DISPLAY, LINE_D } from "./tones";
 import { InstrumentFrame, gridCellBorderStyle, useCyclingIndex, useReducedMotion } from "./shared";
 
 export const COMPLIANCE_CHIPS = [
@@ -35,12 +35,12 @@ export const COMPLIANCE_COPILOT = [
 // Coverage across compliance areas, not just jurisdictions — the breadth grid,
 // mirroring Platform's domain grid. Illustrative.
 export const COMPLIANCE_CATEGORIES = [
-  { label: "Wage & Hour", status: "Gap", color: "#E2725B" },
-  { label: "Leave & Sick", status: "Clear", color: "#86efac" },
-  { label: "Safety / OSHA", status: "Gap", color: "#E2725B" },
-  { label: "Posting", status: "Scan", color: "#d9b65f" },
-  { label: "Classification", status: "Clear", color: "#86efac" },
-  { label: "Pay Equity", status: "Clear", color: "#86efac" },
+  { label: "Wage & Hour", status: "Gap", color: "var(--mk-E2725B, #E2725B)" },
+  { label: "Leave & Sick", status: "Clear", color: "var(--mk-86EFAC, #86EFAC)" },
+  { label: "Safety / OSHA", status: "Gap", color: "var(--mk-E2725B, #E2725B)" },
+  { label: "Posting", status: "Scan", color: "var(--mk-D9B65F, #D9B65F)" },
+  { label: "Classification", status: "Clear", color: "var(--mk-86EFAC, #86EFAC)" },
+  { label: "Pay Equity", status: "Clear", color: "var(--mk-86EFAC, #86EFAC)" },
 ] as const;
 
 export const FINDING_ICON = {
@@ -49,9 +49,9 @@ export const FINDING_ICON = {
   fixed: CheckCircle2,
 } as const;
 export const FINDING_COLOR = {
-  flagged: "#E2725B",
-  fixing: "#d9b65f",
-  fixed: "#86efac",
+  flagged: "var(--mk-E2725B, #E2725B)",
+  fixing: "var(--mk-D9B65F, #D9B65F)",
+  fixed: "var(--mk-86EFAC, #86EFAC)",
 } as const;
 
 // Mirrors the real flag → fixing → fixed cascade from the actual /compliance
@@ -137,7 +137,7 @@ export function ComplianceInstrument({ numberFont = DISPLAY }: { numberFont?: st
   const resolvedCount = COMPLIANCE_CHIPS.filter((c) => c.resolved).length;
 
   return (
-    <InstrumentFrame label="Compliance Monitor" accent="#E2725B">
+    <InstrumentFrame label="Compliance Monitor" accent="var(--mk-E2725B, #E2725B)">
       {/* Two-column: left = score + jurisdictions + the AI copilot, right =
           the live findings cascade. Coverage grid spans full width below.
           Stacks to one column below sm. */}
@@ -150,7 +150,7 @@ export function ComplianceInstrument({ numberFont = DISPLAY }: { numberFont?: st
             fontFamily: numberFont,
             fontWeight: 300,
             fontSize: "3.5rem",
-            color: "#E2725B",
+            color: "var(--mk-E2725B, #E2725B)",
           }}
         >
           {score}
@@ -161,7 +161,7 @@ export function ComplianceInstrument({ numberFont = DISPLAY }: { numberFont?: st
         <div className="text-right">
           <div
             className="text-[11px] font-mono uppercase tracking-[0.2em]"
-            style={{ color: "#E2725B" }}
+            style={{ color: "var(--mk-E2725B, #E2725B)" }}
           >
             {resolvedCount}/{COMPLIANCE_CHIPS.length} resolved
           </div>
@@ -179,11 +179,11 @@ export function ComplianceInstrument({ numberFont = DISPLAY }: { numberFont?: st
             key={c.code}
             className="px-2.5 py-1 rounded-full text-[10px] font-mono uppercase tracking-wider"
             style={{
-              border: `1px solid ${c.resolved ? "rgba(134,239,172,0.35)" : "rgba(226,114,91,0.35)"}`,
-              color: c.resolved ? "#86efac" : "#E2725B",
+              border: `1px solid ${c.resolved ? "color-mix(in srgb, var(--mk-86EFAC, #86EFAC) 35%, transparent)" : "color-mix(in srgb, var(--mk-E2725B, #E2725B) 35%, transparent)"}`,
+              color: c.resolved ? "var(--mk-86EFAC, #86EFAC)" : "var(--mk-E2725B, #E2725B)",
               backgroundColor: c.resolved
-                ? "rgba(134,239,172,0.08)"
-                : "rgba(226,114,91,0.08)",
+                ? "color-mix(in srgb, var(--mk-86EFAC, #86EFAC) 8%, transparent)"
+                : "color-mix(in srgb, var(--mk-E2725B, #E2725B) 8%, transparent)",
             }}
           >
             {c.code} {c.resolved ? "✓" : "!"}
@@ -195,12 +195,12 @@ export function ComplianceInstrument({ numberFont = DISPLAY }: { numberFont?: st
           className="rounded-lg px-3.5 py-2.5 flex items-start gap-2.5"
           style={{
             border: `1px solid ${LINE_D}`,
-            backgroundColor: "rgba(245,242,237,0.03)",
+            backgroundColor: "color-mix(in srgb, var(--mk-F5F2ED, #F5F2ED) 3%, transparent)",
           }}
         >
           <Sparkles
             className="w-3.5 h-3.5 mt-0.5 shrink-0"
-            style={{ color: "#E2725B" }}
+            style={{ color: "var(--mk-E2725B, #E2725B)" }}
           />
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 mb-1">
@@ -212,7 +212,7 @@ export function ComplianceInstrument({ numberFont = DISPLAY }: { numberFont?: st
               </span>
               <span
                 className="home-pulse w-1 h-1 rounded-full"
-                style={{ backgroundColor: "#E2725B" }}
+                style={{ backgroundColor: "var(--mk-E2725B, #E2725B)" }}
               />
             </div>
             <AnimatePresence mode="wait">
@@ -255,7 +255,7 @@ export function ComplianceInstrument({ numberFont = DISPLAY }: { numberFont?: st
                   color: status === "fixed" ? ASH : BONE,
                   textDecoration:
                     status === "fixed"
-                      ? "line-through rgba(245,242,237,0.4)"
+                      ? "line-through color-mix(in srgb, var(--mk-F5F2ED, #F5F2ED) 40%, transparent)"
                       : "none",
                 }}
               >
@@ -296,7 +296,7 @@ export function ComplianceInstrument({ numberFont = DISPLAY }: { numberFont?: st
           className="grid grid-cols-3 rounded-lg overflow-hidden border"
           style={{
             borderColor: LINE_D,
-            backgroundColor: "rgba(245,242,237,0.02)",
+            backgroundColor: "color-mix(in srgb, var(--mk-F5F2ED, #F5F2ED) 2%, transparent)",
           }}
         >
           {COMPLIANCE_CATEGORIES.map((c, i) => (

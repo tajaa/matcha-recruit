@@ -103,7 +103,7 @@ export default function SimpleBrokersPage() {
       <CtaBand onBookClick={openPricing} />
 
       <div style={{ backgroundColor: BONE, color: 'var(--color-ivory-ink)' }}>
-        <MarketingFooter newsletterVariant="matcha" />
+        <MarketingFooter />
       </div>
     </div>
   )
