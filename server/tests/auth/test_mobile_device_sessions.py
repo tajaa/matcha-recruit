@@ -11,7 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from starlette.requests import Request
 
 from app.core import dependencies
-from app.core.models.auth import LoginRequest, RefreshTokenRequest
+from app.core.models.auth import LoginRequest, MobileLogoutRequest, RefreshTokenRequest
 from app.core.routes.auth import login as login_routes
 from app.core.services import auth, session_tokens
 
@@ -95,6 +95,8 @@ class _Connection:
                 self.revoked = True
         elif "UPDATE users SET tokens_valid_after" in query:
             return None
+        elif "DELETE FROM device_tokens" in query:
+            return None
         else:
             raise AssertionError(query)
 
@@ -152,7 +154,13 @@ async def test_mobile_login_refresh_and_device_only_logout(route_env):
     rotated_access = HTTPAuthorizationCredentials(scheme="Bearer", credentials=rotated.access_token)
     assert (await dependencies.get_token_payload(rotated_access)).sid == str(conn.sid)
 
-    await login_routes.mobile_logout(RefreshTokenRequest(refresh_token=rotated.refresh_token))
+    await login_routes.mobile_logout(
+        MobileLogoutRequest(refresh_token=rotated.refresh_token, push_token="d" * 64)
+    )
+    token_deletes = [(q, a) for q, a in conn.executed if "DELETE FROM device_tokens" in q]
+    assert len(token_deletes) == 1
+    assert "device_session_id = $2" in token_deletes[0][0]
+    assert token_deletes[0][1] == (conn.user_id, conn.sid, "d" * 64)
     with pytest.raises(HTTPException) as access_error:
         await dependencies.get_token_payload(access)
     assert access_error.value.status_code == 401
@@ -255,7 +263,7 @@ async def test_web_refresh_has_no_device_session_dependency(route_env):
     assert rotated.refresh_token
     assert conn.device_updates == 0
     with pytest.raises(HTTPException) as error:
-        await login_routes.mobile_logout(RefreshTokenRequest(refresh_token=rotated.refresh_token))
+        await login_routes.mobile_logout(MobileLogoutRequest(refresh_token=rotated.refresh_token))
     assert error.value.status_code == 401
 
 
@@ -279,6 +287,8 @@ async def test_replayed_mobile_refresh_token_revokes_the_device(route_env):
     assert error.value.status_code == 401
     assert conn.revoked
     assert any("refresh_generation <> $3" in q for q, _ in conn.executed)
+    assert any("DELETE FROM device_tokens WHERE device_session_id = $1" in q
+               for q, _ in conn.executed)
     with pytest.raises(HTTPException) as error:
         await login_routes.refresh_token(RefreshTokenRequest(refresh_token=rotated.refresh_token))
     assert error.value.status_code == 401

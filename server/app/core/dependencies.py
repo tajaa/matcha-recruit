@@ -207,7 +207,8 @@ async def get_current_user(
             profile=None,  # Profile loaded on demand
             beta_features=beta_features,
             interview_prep_tokens=user_row["interview_prep_tokens"],
-            allowed_interview_roles=allowed_roles
+            allowed_interview_roles=allowed_roles,
+            device_session_id=UUID(payload.sid) if payload.sid else None,
         )
 
 
