@@ -1,8 +1,12 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeft, Loader2, MessageSquare, KanbanSquare, FileText, Hash, Sparkles } from 'lucide-react'
+import { ChevronLeft, Loader2, MessageSquare, KanbanSquare, FileText, Hash, Sparkles, Boxes, Lightbulb, LayoutDashboard } from 'lucide-react'
 import ProjectKanbanBoard from '../components/shell/ProjectKanbanBoard'
 import ChannelViewScreen from './ChannelView/ChannelViewScreen'
 import BoardFilesTab from '../components/shell/BoardFilesTab'
+import ProjectElementsTab from '../components/shell/ProjectElementsTab'
+import ProjectPropsTab from '../components/shell/ProjectPropsTab'
+import CollabOverviewTab from '../components/shell/CollabOverviewTab'
 import ProjectTour from '../components/panels/ProjectTour'
 import { useProjectView } from './ProjectView/useProjectView'
 import { ProjectSidebar } from './ProjectView/ProjectSidebar'
@@ -12,6 +16,7 @@ import { WorkspacePanel } from './ProjectView/WorkspacePanel'
 import { TOUR_STEPS } from './ProjectView/tour'
 
 export default function ProjectView() {
+  const [promotedTask, setPromotedTask] = useState<{ projectId: string; taskId: string } | null>(null)
   const vm = useProjectView()
   const {
     base,
@@ -29,7 +34,13 @@ export default function ProjectView() {
     isCollab,
     discussionChannelId,
     channelError,
+    me,
   } = vm
+
+  // The board reads openTaskId once on mount and unmounts off-tab, so drop the
+  // promoted task as soon as the user leaves the board; otherwise every later
+  // return to the board would reopen it.
+  if (promotedTask && activeTab !== 'board') setPromotedTask(null)
 
   if (loading) {
     return (
@@ -49,6 +60,8 @@ export default function ProjectView() {
   }
 
   const isRecruiting = project.project_type === 'recruiting'
+  const canOpenContext = ['admin', 'client', 'individual'].includes(me?.user.role ?? '')
+  const canEditCollab = canOpenContext && !['viewer', 'commenter'].includes(project.collaborator_role ?? '')
   // Scope for now: a workspace needs Chat + Kanban (recruiting swaps in its
   // Pipeline in place of Kanban — it has no board surface anywhere else in the
   // product, so tasks created there would be orphaned). Presentations keep the
@@ -69,6 +82,9 @@ export default function ProjectView() {
         { key: 'chat' as const, icon: Hash, label: 'Chat' },
         { key: 'ai' as const, icon: Sparkles, label: 'AI' },
         { key: 'board' as const, icon: KanbanSquare, label: 'Kanban' },
+        ...(canOpenContext ? [
+          { key: 'props' as const, icon: Lightbulb, label: 'Props' },
+        ] : []),
       ]
     : project.project_type === 'presentation'
     ? [
@@ -80,7 +96,14 @@ export default function ProjectView() {
         { key: 'chat' as const, icon: MessageSquare, label: 'Chat' },
         { key: 'board' as const, icon: KanbanSquare, label: 'Kanban' },
       ]
-  const workspaceTabs = [...coreTabs, { key: 'files' as const, icon: FileText, label: 'Files' }]
+  const workspaceTabs = [
+    ...coreTabs,
+    { key: 'files' as const, icon: FileText, label: 'Files' },
+    ...(isCollab && canOpenContext ? [
+      { key: 'elements' as const, icon: Boxes, label: 'Elements' },
+      { key: 'overview' as const, icon: LayoutDashboard, label: 'Overview' },
+    ] : []),
+  ]
   // The sections panel is only reachable when a `panel` tab exists. Chat writes
   // into it ("Add to Project"), so that affordance has to follow the tab set —
   // otherwise sections accumulate in a surface the UI can't open.
@@ -188,7 +211,7 @@ export default function ProjectView() {
       {/* Kanban board */}
       {activeTab === 'board' && !isRecruiting && (
         <div className="flex-1 min-h-0 flex flex-col bg-w-bg">
-          <ProjectKanbanBoard projectId={projectId!} />
+          <ProjectKanbanBoard key={projectId} projectId={projectId!} openTaskId={promotedTask?.projectId === projectId ? promotedTask?.taskId ?? null : null} />
         </div>
       )}
 
@@ -197,6 +220,16 @@ export default function ProjectView() {
         <div className="flex-1 min-h-0 flex flex-col bg-w-bg">
           <BoardFilesTab projectId={projectId!} />
         </div>
+      )}
+
+      {isCollab && activeTab === 'elements' && (
+        <div className="min-h-0 flex-1 bg-w-bg"><ProjectElementsTab key={projectId} projectId={projectId!} canEdit={canEditCollab} /></div>
+      )}
+      {isCollab && activeTab === 'props' && (
+        <div className="min-h-0 flex-1 bg-w-bg"><ProjectPropsTab key={projectId} projectId={projectId!} canEdit={canEditCollab} onPromoted={(taskId) => { setPromotedTask({ projectId: projectId!, taskId }); selectTab('board') }} /></div>
+      )}
+      {isCollab && activeTab === 'overview' && (
+        <div className="min-h-0 flex-1 bg-w-bg"><CollabOverviewTab key={projectId} projectId={projectId!} onOpenElements={() => selectTab('elements')} onOpenBoard={() => selectTab('board')} /></div>
       )}
 
       {/* Mobile bottom tab bar — same tab set as the desktop strip */}
@@ -210,6 +243,7 @@ export default function ProjectView() {
             <button
               key={t.key}
               onClick={() => selectTab(t.key)}
+              aria-label={t.label}
               className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors ${
                 active ? 'text-w-accent' : 'text-w-dim'
               }`}
@@ -221,7 +255,7 @@ export default function ProjectView() {
               >
                 <t.icon size={18} />
               </span>
-              <span className="text-[10px] font-medium">{t.label}</span>
+              <span className={isCollab ? 'sr-only' : 'text-[10px] font-medium'}>{t.label}</span>
             </button>
           )
         })}

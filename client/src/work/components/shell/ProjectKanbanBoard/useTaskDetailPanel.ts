@@ -182,6 +182,12 @@ export function useTaskDetailPanel({
     reportCounts(next)
   }
 
+  async function refreshSubtasks() {
+    const rows = await listSubtasks(projectId, task.id)
+    setSubtasks(rows)
+    reportCounts(rows)
+  }
+
   async function removeSubtask(sub: MWSubtask) {
     const next = subtasks.filter((s) => s.id !== sub.id)
     setSubtasks(next)
@@ -223,6 +229,7 @@ export function useTaskDetailPanel({
     toggleSubtask,
     rejectSubtask,
     addRoundSubtask,
+    refreshSubtasks,
     removeSubtask,
   }
 }

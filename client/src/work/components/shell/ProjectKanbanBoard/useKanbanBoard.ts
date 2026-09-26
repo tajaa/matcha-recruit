@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   listProjectTasks,
   getProjectBundle,
+  getGithubConnection,
+  listCommitSuggestions,
   createProjectTask,
   updateProjectTask,
   deleteProjectTask,
@@ -22,8 +24,9 @@ import { searchTokens, taskMatches } from '../../../utils/kanbanSearch'
 import type { KanbanTemplate } from '../../../utils/kanbanTemplates'
 import { mergeTask } from './mergeTask'
 import { lastSeenKey } from './constants'
+import { autoScanGithubIfStale } from '../../../utils/githubAutoSync'
 
-export function useKanbanBoard(projectId: string) {
+export function useKanbanBoard(projectId: string, openTaskId?: string | null) {
   const [tasks, setTasks] = useState<MWProjectTask[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -38,7 +41,7 @@ export function useKanbanBoard(projectId: string) {
   const [creating, setCreating] = useState(false)
 
   // Card detail side panel.
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(openTaskId ?? null)
 
   // Per-card action sheet (Move to / Duplicate / Delete) — the touch path for
   // moving a card, since drag-and-drop is HTML5-only.
@@ -76,6 +79,22 @@ export function useKanbanBoard(projectId: string) {
   const [changedIds, setChangedIds] = useState<Set<string>>(new Set())
   const didBaselineRef = useRef(false)
 
+  const loadAfterScan = useCallback(async (id: string) => {
+    const [bundle, pending] = await Promise.all([getProjectBundle(id), listCommitSuggestions(id)])
+    const counts = new Map<string, Set<string>>()
+    pending.forEach((item) => {
+      const ids = counts.get(item.task_id) ?? new Set<string>()
+      ids.add(item.subtask_id)
+      counts.set(item.task_id, ids)
+    })
+    setTasks((current) => {
+      const freshIds = new Set(bundle.tasks.map((task) => task.id))
+      const earlierDone = current.filter((task) => task.board_column === 'done' && !freshIds.has(task.id))
+      return [...bundle.tasks.map((task) => ({ ...task, pending_commit_subtask_count: counts.get(task.id)?.size ?? 0 })), ...earlierDone]
+    })
+    setDoneTotal(bundle.done_total)
+  }, [])
+
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -86,12 +105,27 @@ export function useKanbanBoard(projectId: string) {
       setWeekDoneIds(new Set(bundle.tasks.filter((task) => task.board_column === 'done').map((task) => task.id)))
       setCollaborators(bundle.collaborators)
       collabLoadedRef.current = true
+      // Suggestions are not part of the bundle. Keep this secondary read out of
+      // the board's critical path and dedupe per subtask for the card badge.
+      void listCommitSuggestions(projectId).then((pending) => {
+        const counts = new Map<string, Set<string>>()
+        pending.forEach((item) => {
+          const ids = counts.get(item.task_id) ?? new Set<string>()
+          ids.add(item.subtask_id)
+          counts.set(item.task_id, ids)
+        })
+        setTasks((rows) => rows.map((task) => ({ ...task, pending_commit_subtask_count: counts.get(task.id)?.size ?? 0 })))
+      }).catch(() => { /* task reads may be allowed when suggestions are not */ })
+      void getGithubConnection(projectId)
+        .then((connection) => autoScanGithubIfStale(projectId, connection.connected))
+        .then((scan) => scan && scan.scanned > 0 ? loadAfterScan(projectId) : undefined)
+        .catch(() => { /* a disconnected or inaccessible repo does not block the board */ })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load board')
     } finally {
       setLoading(false)
     }
-  }, [projectId])
+  }, [projectId, loadAfterScan])
 
   async function expandDone() {
     if (doneExpanded) {

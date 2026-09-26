@@ -40,7 +40,7 @@ export function useProjectView() {
   // 'chat' is the project's PRIMARY chat: for collab that's the discussion
   // channel, for every other type it's the AI thread. 'ai' is collab-only — the
   // mw_threads list, which used to masquerade as the project's chat.
-  const [activeTab, setActiveTab] = useState<'chat' | 'ai' | 'panel' | 'board' | 'files'>('chat')
+  const [activeTab, setActiveTab] = useState<'chat' | 'ai' | 'panel' | 'board' | 'files' | 'elements' | 'props' | 'overview'>('chat')
 
   // ── Collab: the project's real chat is a CHANNEL, not an AI thread ──
   // Resolved through the idempotent get-or-create endpoint rather than read off
@@ -70,13 +70,15 @@ export function useProjectView() {
   // first time the user lands on a project, until they hit Skip / Done. Open
   // again from the "?" button on the project header.
   const [showTour, setShowTour] = useState(false)
+  const loadedProjectId = project?.id
   useEffect(() => {
-    if (!project) return
+    if (!loadedProjectId) return
     const dismissed = localStorage.getItem(TOUR_DISMISSED_KEY) === 'true'
-    if (!dismissed) setShowTour(true)
-  }, [project?.id])
+    if (!dismissed) queueMicrotask(() => setShowTour(true))
+  }, [loadedProjectId])
 
   function dismissTour(_dismissed: boolean) {
+    void _dismissed
     setShowTour(false)
     // Persist regardless of whether the user clicked Skip or finished — both
     // signal "I've seen this." Re-open via the "?" button if they want a
@@ -86,28 +88,29 @@ export function useProjectView() {
 
   // Switch the page_key when the project type loads so the recruiting view
   // shows the "Pipeline" pill state and the project view shows "Sections".
+  const loadedProjectType = project?.project_type
   useEffect(() => {
-    if (!project) return
-    setActivePageKey(project.project_type === 'recruiting' ? 'pipeline' : 'sections')
-  }, [project?.project_type])
+    if (!loadedProjectType) return
+    queueMicrotask(() => setActivePageKey(loadedProjectType === 'recruiting' ? 'pipeline' : 'sections'))
+  }, [loadedProjectType])
 
   // Clamp the active tab to one the *current* project actually offers. This
   // component stays mounted across `projects/:projectId` changes, so without
   // this a user on Kanban who opens a recruiting workspace (no board tab) would
   // land on a pane that renders nothing at all.
   useEffect(() => {
-    if (!project) return
-    const type = project.project_type
+    if (!loadedProjectType) return
+    const type = loadedProjectType
     const allowed =
       type === 'recruiting'
         ? ['chat', 'panel']
         : type === 'presentation'
         ? ['chat', 'panel', 'board']
         : type === 'collab'
-        ? ['chat', 'ai', 'board']
+        ? ['chat', 'ai', 'board', ...(me?.user.role === 'employee' ? [] : ['elements', 'props', 'overview'])]
         : ['chat', 'board']
-    setActiveTab((prev) => (allowed.includes(prev) ? prev : 'chat'))
-  }, [projectId, project?.project_type])
+    queueMicrotask(() => setActiveTab((prev) => (allowed.includes(prev) ? prev : 'chat')))
+  }, [projectId, loadedProjectType, me?.user.role])
 
   // Which tab owns the pane the AI chat and the inbox share. Derived once here
   // rather than re-spelled in each pane: for collab the 'chat' tab is the
@@ -121,7 +124,7 @@ export function useProjectView() {
    * to the collab 'chat' tab hid the inbox (it answers to 'ai') AND the channel
    * (it requires 'chats'), leaving the centre pane blank.
    */
-  function selectTab(tab: 'chat' | 'ai' | 'panel' | 'board' | 'files') {
+  function selectTab(tab: 'chat' | 'ai' | 'panel' | 'board' | 'files' | 'elements' | 'props' | 'overview') {
     setActiveTab(tab)
     setSidebarMode('chats')
   }
@@ -162,7 +165,7 @@ export function useProjectView() {
         ...prev,
         chats: prev.chats?.map((c) => c.id === chatId ? { ...c, title: renameDraft.trim() } : c),
       } : prev)
-    } catch {}
+    } catch { /* retain the current title for retry */ }
     setRenamingChatId(null)
   }
 
@@ -173,7 +176,7 @@ export function useProjectView() {
         ...prev,
         chats: prev.chats?.map((c) => c.id === chatId ? { ...c, is_pinned: !currentlyPinned } : c),
       } : prev)
-    } catch {}
+    } catch { /* retain the current pin state for retry */ }
   }
 
   // Offer letter PDF panel (for recruiting projects)
@@ -192,7 +195,7 @@ export function useProjectView() {
   // Load project
   useEffect(() => {
     if (!projectId) return
-    setLoading(true)
+    queueMicrotask(() => setLoading(true))
     getProjectDetail(projectId)
       .then(async (p) => {
         setProject(p)
@@ -391,7 +394,7 @@ export function useProjectView() {
       const chat = await createProjectChat(projectId)
       setProject((prev) => prev ? { ...prev, chats: [...(prev.chats || []), chat], chat_count: (prev.chat_count || 0) + 1 } : prev)
       setActiveChatId(chat.id)
-    } catch {}
+    } catch { /* the new-chat action can be retried */ }
   }
 
   const isPostingFinalized = project?.project_type === 'recruiting'

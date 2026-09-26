@@ -206,6 +206,7 @@ export interface MWProjectTask {
   subtask_done?: number | null
   update_count?: number | null
   recent_event_ids?: string[] | null
+  pending_commit_subtask_count?: number
   attachments?: MWTaskAttachment[]
 }
 
