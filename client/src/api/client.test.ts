@@ -1,6 +1,6 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import { clearAuthTokens, setAuthTokens } from './authStorage'
-import { API_BASE, ApiError, logoutSession, _shouldReportStatus } from './client'
+import { API_BASE, ApiError, logoutSession, planRequiredMessage, _shouldReportStatus } from './client'
 
 function tokenWithExpiry(exp: number): string {
   return `header.${btoa(JSON.stringify({ exp }))}.signature`
@@ -53,5 +53,14 @@ describe('logoutSession', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_BASE}/auth/refresh`)
+  })
+})
+
+describe('planRequiredMessage', () => {
+  it('turns the structured 403 detail into a readable sentence', () => {
+    expect(planRequiredMessage({ code: 'plan_required', required_plan: 'lite', current_plan: 'free', feature: 'journals_full' }))
+      .toBe('This needs the Lite plan.')
+    expect(planRequiredMessage({ code: 'plan_required', required_plan: 'pro', current_plan: 'lite', feature: 'go_live' }))
+      .toBe('This needs the Pro plan.')
   })
 })

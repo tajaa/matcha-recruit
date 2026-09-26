@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive } from 'lucide-react'
+import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen } from 'lucide-react'
 import { logoutSession } from '../../../api/client'
 import type { ChannelSummary } from '../../api/channels'
 import { createProjectNew, createThread, archiveThread, notifyThreadsChanged } from '../../api/matchaWork'
@@ -20,6 +20,7 @@ import { useSidebarRename } from './WorkSidebar/useSidebarRename'
 import { useEntitlements } from '../../hooks/useEntitlements'
 import { showPaywall } from '../../utils/paywall'
 import CollapsedRail from './WorkSidebar/CollapsedRail'
+import { SidebarNavButton } from './WorkSidebar/SidebarNavButton'
 import ChannelsSection from './WorkSidebar/ChannelsSection'
 import ProjectsSection from './WorkSidebar/ProjectsSection'
 import ChatsSection from './WorkSidebar/ChatsSection'
@@ -225,87 +226,37 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           >
             <PanelLeftClose size={16} />
           </button>
+
         </div>
 
         <nav className="flex-1 overflow-y-auto px-2 space-y-1 pb-3">
-          {/* Home */}
-          <button
-            onClick={() => navigate(base)}
-            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-              location.pathname === base
-                ? 'bg-w-surface2 text-white font-medium'
-                : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
-            }`}
-          >
-            <Home size={14} strokeWidth={1.6} />
-            Home
-          </button>
+          <SidebarNavButton icon={Home} label="Home" active={location.pathname === base} onClick={() => navigate(base)} />
+          <SidebarNavButton icon={NotebookPen} label="Journals" active={location.pathname.startsWith(`${base}/journals`)} onClick={() => navigate(`${base}/journals`)} />
 
           {/* Events (HR admin review of @huume-logged events) */}
           {showEvents && (
-            <button
+            <SidebarNavButton
+              icon={ClipboardList}
+              label="Events"
+              active={location.pathname.startsWith(`${base}/events`)}
               onClick={() => navigate(`${base}/events`)}
-              className={`relative w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-                location.pathname.startsWith(`${base}/events`)
-                  ? 'bg-w-surface2 text-white font-medium'
-                  : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
-              }`}
-            >
-              <ClipboardList size={14} strokeWidth={1.6} />
-              Events
-              {loggedEventsCount > 0 && (
+              badge={loggedEventsCount > 0 && (
                 <span className="ml-auto w-4 h-4 rounded-full bg-w-accent text-[9px] font-bold text-white flex items-center justify-center shrink-0">
                   {formatEventsBadge(loggedEventsCount)}
                 </span>
               )}
-            </button>
+            />
           )}
 
           {/* Protocol (admin-editable event protocol Huume grounds on) */}
-          {showEvents && (
-            <button
-              onClick={() => navigate(`${base}/protocol`)}
-              className={`relative w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-                location.pathname.startsWith(`${base}/protocol`)
-                  ? 'bg-w-surface2 text-white font-medium'
-                  : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
-              }`}
-            >
-              <BookOpenCheck size={14} strokeWidth={1.6} />
-              Protocol
-            </button>
-          )}
+          {showEvents && <SidebarNavButton icon={BookOpenCheck} label="Protocol" active={location.pathname.startsWith(`${base}/protocol`)} onClick={() => navigate(`${base}/protocol`)} />}
 
           {/* Inventory (channel-driven stock tracking via @huume) */}
-          {showInventory && (
-            <button
-              onClick={() => navigate(`${base}/inventory`)}
-              className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-                location.pathname.startsWith(`${base}/inventory`)
-                  ? 'bg-w-surface2 text-white font-medium'
-                  : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
-              }`}
-            >
-              <Package size={14} strokeWidth={1.6} />
-              Inventory
-            </button>
-          )}
-          {showInventory && hasFeature('inventory_waste') && <button onClick={() => navigate(`${base}/inventory/waste`)} className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] ${location.pathname.startsWith(`${base}/inventory/waste`) ? 'bg-w-surface2 text-white font-medium' : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'}`}><Package size={14} strokeWidth={1.6} /> Waste & par</button>}
+          {showInventory && <SidebarNavButton icon={Package} label="Inventory" active={location.pathname.startsWith(`${base}/inventory`)} onClick={() => navigate(`${base}/inventory`)} />}
+          {showInventory && hasFeature('inventory_waste') && <SidebarNavButton icon={Package} label="Waste & par" active={location.pathname.startsWith(`${base}/inventory/waste`)} onClick={() => navigate(`${base}/inventory/waste`)} />}
 
           {/* Assets (company-wide feed of everything Huume has created) */}
-          {showAssets && (
-            <button
-              onClick={() => navigate(`${base}/assets`)}
-              className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-                location.pathname.startsWith(`${base}/assets`)
-                  ? 'bg-w-surface2 text-white font-medium'
-                  : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
-              }`}
-            >
-              <Archive size={14} strokeWidth={1.6} />
-              Assets
-            </button>
-          )}
+          {showAssets && <SidebarNavButton icon={Archive} label="Assets" active={location.pathname.startsWith(`${base}/assets`)} onClick={() => navigate(`${base}/assets`)} />}
 
           {/* Filter sidebar */}
           <div className="relative mt-1 mb-1.5">
