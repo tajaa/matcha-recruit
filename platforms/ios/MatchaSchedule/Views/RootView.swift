@@ -139,8 +139,9 @@ private struct MeView: View {
                     signingOut = true
                     Task {
                         defer { signingOut = false }
-                        do { try await appState.signOut() }
-                        catch { self.error = error.localizedDescription }
+                        // Never fails: offline sign-out clears locally and
+                        // queues the server-side revoke for the next launch.
+                        await appState.signOut()
                     }
                 }
                 .disabled(signingOut)

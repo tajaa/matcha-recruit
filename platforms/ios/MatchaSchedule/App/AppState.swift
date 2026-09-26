@@ -15,6 +15,10 @@ final class AppState {
     var phase: AppPhase = .restoring
     var selectedTab = 0
 
+    /// Keychain items outlive an uninstall. Without this a reinstall would
+    /// silently restore the previous user's session on a shared phone.
+    static let hasLaunchedKey = "schedule.hasLaunched"
+
     init() {
         APIClient.shared.onUnauthorized = { [weak self] in
             AuthService.shared.clearLocalSession()
@@ -22,7 +26,17 @@ final class AppState {
         }
     }
 
+    static func purgeKeychainOnFirstLaunch(defaults: UserDefaults = .standard) -> Bool {
+        guard !defaults.bool(forKey: hasLaunchedKey) else { return false }
+        KeychainHelper.Keys.all.forEach { KeychainHelper.delete(key: $0) }
+        APIClient.shared.accessToken = nil
+        defaults.set(true, forKey: hasLaunchedKey)
+        return true
+    }
+
     func restore() async {
+        _ = Self.purgeKeychainOnFirstLaunch()
+        await AuthService.shared.flushPendingRevoke()
         guard AuthService.shared.hasStoredSession else {
             phase = .signedOut
             return
@@ -48,8 +62,8 @@ final class AppState {
         try await loadProfile()
     }
 
-    func signOut() async throws {
-        try await AuthService.shared.logout()
+    func signOut() async {
+        await AuthService.shared.logout()
         phase = .signedOut
     }
 

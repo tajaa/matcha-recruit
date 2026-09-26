@@ -82,4 +82,6 @@ struct LocationsResponse: Decodable {
 struct ScheduleLocation: Decodable, Identifiable {
     let id: String
     let name: String
+    /// 0 = Sunday … 6 = Saturday; the store's configured week start.
+    let week_start_weekday: Int?
 }

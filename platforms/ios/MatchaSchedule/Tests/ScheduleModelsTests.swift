@@ -58,6 +58,55 @@ final class ScheduleModelsTests: XCTestCase {
         XCTAssertEqual(WallClock.weekLabel(day), "Sep 23, 2026")
     }
 
+    func testMondayStoreWeekStartsOnMonday() {
+        // Wednesday 2026-09-23
+        let day = ISO8601DateFormatter().date(from: "2026-09-23T15:00:00Z")!
+        XCTAssertEqual(WallClock.weekLabel(WallClock.weekStart(containing: day, weekStartWeekday: 1)), "Sep 21, 2026")
+        XCTAssertEqual(WallClock.weekLabel(WallClock.weekStart(containing: day, weekStartWeekday: 0)), "Sep 20, 2026")
+        let json = """
+        {"locations":[{"id":"a","name":"Mission","week_start_weekday":1}]}
+        """
+        let places = try! JSONDecoder().decode(LocationsResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(places.locations[0].week_start_weekday, 1)
+    }
+
+    func testTeamTabIsScopedToTheEmployeesStore() throws {
+        let json = """
+        {"shifts":[
+          {"id":"here","location_id":"mine","role":null,"department":null,"starts_at":"2026-09-23T09:00:00+00:00","ends_at":"2026-09-23T17:00:00+00:00","break_minutes":null,"notes":null,"status":"published","assignments":[]},
+          {"id":"elsewhere","location_id":"other","role":null,"department":null,"starts_at":"2026-09-23T09:00:00+00:00","ends_at":"2026-09-23T17:00:00+00:00","break_minutes":null,"notes":null,"status":"published","assignments":[]},
+          {"id":"anywhere","location_id":null,"role":null,"department":null,"starts_at":"2026-09-23T09:00:00+00:00","ends_at":"2026-09-23T17:00:00+00:00","break_minutes":null,"notes":null,"status":"published","assignments":[]}
+        ]}
+        """
+        let shifts = try JSONDecoder().decode(ShiftListResponse.self, from: Data(json.utf8)).shifts
+        XCTAssertEqual(ScheduleService.teamShifts(shifts, locationIDs: ["mine"]).map(\.id), ["here", "anywhere"])
+        XCTAssertEqual(ScheduleService.teamShifts(shifts, locationIDs: []).count, 3)
+    }
+
+    func testServerErrorMessagesAreUnwrapped() {
+        let client = APIClient.shared
+        XCTAssertEqual(client.extractErrorMessage(from: Data(#"{"detail":"Invalid email or password"}"#.utf8)),
+                       "Invalid email or password")
+        XCTAssertEqual(client.extractErrorMessage(from: Data(#"{"detail":{"code":"same_day_assignment","message":"Employee already has a shift on this day"}}"#.utf8)),
+                       "Employee already has a shift on this day")
+        XCTAssertEqual(client.extractErrorMessage(from: Data(#"{"detail":[{"loc":["body","unavailable_end"],"msg":"field required","type":"missing"}]}"#.utf8)),
+                       "unavailable_end: field required")
+    }
+
+    func testWrongPasswordIsNotASessionExpiry() {
+        let error = SessionError.invalidCredentials("Invalid email or password")
+        XCTAssertEqual(error.errorDescription, "Invalid email or password")
+        XCTAssertFalse(AuthService.isNetworkFailure(error))
+        XCTAssertTrue(AuthService.isNetworkFailure(APIError.networkUnavailable(URLError(.notConnectedToInternet))))
+    }
+
+    @MainActor
+    func testFirstLaunchPurgesLeftoverKeychainSession() {
+        let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
+        XCTAssertTrue(AppState.purgeKeychainOnFirstLaunch(defaults: defaults))
+        XCTAssertFalse(AppState.purgeKeychainOnFirstLaunch(defaults: defaults))
+    }
+
     func testWeekRangeUsesCalendarDays() {
         let day = ISO8601DateFormatter().date(from: "2026-09-23T15:00:00Z")!
         let week = WallClock.weekStart(containing: day)
