@@ -20,13 +20,15 @@ import shlex
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.core.models.auth import CurrentUser
 from app.core.services import mcp_oauth
 from app.matcha.dependencies import require_company_member
 from app.matcha.models.matcha_work.connectors import (
     ConnectorGrant,
+    LocalConnectorTokenRequest,
+    LocalConnectorTokenResponse,
     ConnectorsResponse,
     ConsentDecision,
     ConsentDescription,
@@ -144,3 +146,43 @@ async def research_launch_endpoint(
         )
     url = _DEEP_LINKS[body.client].format(q=quote(prompt, safe=""))
     return ResearchLaunchResponse(client=body.client, url=url, prompt=prompt)
+
+
+@router.post("/connectors/local-token", response_model=LocalConnectorTokenResponse)
+async def local_connector_token_endpoint(
+    body: LocalConnectorTokenRequest,
+    response: Response,
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    from app.core.services import mcp_local_tokens
+    from app.core.services.redis_cache import check_rate_limit
+    from app.matcha.routes.matcha_work._shared import _can_edit_project
+
+    await check_rate_limit(str(current_user.id), "mcp_local_token", 10, 60)
+    try:
+        card, _project, role = await research._authorized_card(current_user, body.task_id)
+    except research.ConnectorError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    if card["project_id"] != body.project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not _can_edit_project(role):
+        raise HTTPException(status_code=403, detail="You can view this board but not research its cards.")
+    if card.get("status") == "cancelled" or card["board_column"] not in research._OPEN_COLUMNS:
+        raise HTTPException(status_code=409, detail="This card is not waiting for research.")
+    if card["autopr_run_requested_at"] is not None:
+        raise HTTPException(status_code=409, detail="Unqueue this card from AutoPR before starting Codex.")
+    if card.get("autopr_claimed_at") is not None:
+        raise HTTPException(status_code=409, detail="AutoPR is already researching this card.")
+    result = await mcp_local_tokens.issue_token(current_user.id)
+    response.headers["Cache-Control"] = "no-store"
+    return LocalConnectorTokenResponse(**result)
+
+
+@router.delete("/connectors/local-tokens/{grant_id}", status_code=204)
+async def revoke_local_connector_token_endpoint(
+    grant_id: UUID,
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    from app.core.services import mcp_local_tokens
+
+    await mcp_local_tokens.revoke_token(current_user.id, grant_id)

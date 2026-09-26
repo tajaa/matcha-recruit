@@ -53,6 +53,7 @@ class AuthService {
     }
 
     func logout() async throws {
+        await CodexResearchCoordinator.shared.shutdown()
         if let refreshToken = KeychainHelper.load(key: KeychainHelper.Keys.refreshToken) {
             let body = LogoutRequest(refresh_token: refreshToken)
             _ = try? await client.requestData(method: "POST", path: "/auth/logout", body: body)

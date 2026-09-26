@@ -1,6 +1,8 @@
 """Request/response shapes for the AI-connector routes
 (`app/matcha/routes/matcha_work/connectors.py`)."""
 
+from datetime import datetime
+from uuid import UUID
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -51,3 +53,17 @@ class ResearchLaunchResponse(BaseModel):
     url: Optional[str] = None
     prompt: str
     command: Optional[str] = None
+
+
+class LocalConnectorTokenRequest(BaseModel):
+    project_id: UUID
+    task_id: UUID
+
+
+class LocalConnectorTokenResponse(BaseModel):
+    access_token: str
+    token_type: Literal["Bearer"] = "Bearer"
+    expires_at: datetime
+    resource: str
+    client_id: str
+    grant_id: UUID

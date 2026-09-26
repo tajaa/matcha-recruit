@@ -314,3 +314,26 @@ def test_launch_prompt_names_the_card_and_tools():
     assert str(TASK) in prompt and '"Which MacBook Pro?"' in prompt
     for tool in ("get_research_card", "claim_research_card", "attach_research_report"):
         assert tool in prompt
+
+
+@pytest.mark.asyncio
+async def test_card_lookup_derives_pending_run_from_history(env):
+    await research._load_card(TASK)
+    sql = env.conn.sql_for("fetchrow")[0]
+    assert "t.autopr_run_requested_at" not in sql
+    assert project_task_service.AUTOPR_PENDING_REQUEST_QUERY in sql
+    assert "autopr_run.created_at AS autopr_run_requested_at" in sql
+
+
+@pytest.mark.asyncio
+async def test_list_derives_pending_run_from_history(monkeypatch):
+    conn = QueryConn(fetch={"FROM mw_tasks t": []})
+    monkeypatch.setattr(research, "get_connection", lambda: conn)
+    await research.list_research_cards(SimpleNamespace(id=USER.id, role="admin"))
+    sql = conn.sql_for("fetch")[0]
+    assert "t.autopr_run_requested_at" not in sql
+    assert project_task_service.AUTOPR_PENDING_REQUEST_QUERY in sql
+    query = project_task_service.AUTOPR_PENDING_REQUEST_QUERY
+    assert "mw_task_history" in query
+    assert "autopr_run_request" in query and "autopr_run_claim" in query and "autopr_run_cancel" in query
+    assert project_task_service._AUTOPR_RUN_REQUEST_TTL in query

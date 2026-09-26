@@ -5,15 +5,16 @@
 The goal: when a person has Claude or ChatGPT, their kanban **research** cards run on *their* plan
 instead of AutoPR's `gpt-5.6-luna` on our API key. AutoPR stays available as it was.
 
-The only shape both vendors sanction for this is **Matcha as a remote MCP connector**:
+External assistants use **Matcha as a remote MCP connector**. Espresso also has
+a native Codex client that uses OpenAI's documented app-server:
 
 - **Anthropic.** Consumer (Free/Pro/Max) OAuth tokens are for Claude Code and claude.ai only.
   Using them in any other product, the Agent SDK included, violates the consumer terms. So we
   must never spawn a user's `claude -p` from our app or hold their token.
   ([Claude Code authentication](https://code.claude.com/docs/en/authentication))
-- **OpenAI.** Programmatic Codex use should authenticate with an API key. ChatGPT sign-in is
-  documented for OpenAI's own clients, and third-party use of a user's plan through
-  `codex app-server` is unconfirmed. ([Codex auth](https://learn.chatgpt.com/docs/auth))
+- **OpenAI.** Espresso drives the bundled `codex app-server` for ChatGPT sign-in
+  and research. Codex owns the credentials; Espresso does not implement OAuth or
+  forward vendor tokens. ([App-server](https://learn.chatgpt.com/docs/app-server))
 - **Remote MCP connectors** are the sanctioned path on both sides:
   - claude.ai custom connectors run on every plan (Free is limited to one connector).
   - ChatGPT developer-mode apps run on Plus, Pro, Business, Enterprise and Education.
@@ -38,6 +39,8 @@ All routes live on one origin: `MCP_PUBLIC_ORIGIN`, falling back to `APP_BASE_UR
 | `/api/oauth/authorize`, `/token`, `/register`, `/revoke` | MCP SDK handlers over `MatchaOAuthProvider` |
 | `/oauth/consent?request=…` (SPA) | Consent page. Sends a logged-out visitor through `/login?next=` |
 | `/api/matcha-work/connectors*` | Consent API, grants list and disconnect |
+| `POST /api/matcha-work/connectors/local-token` | Session-authenticated native run grant; body `{project_id, task_id}`; response `{access_token, token_type, expires_at, resource, client_id, grant_id}`; `Cache-Control: no-store` |
+| `DELETE /api/matcha-work/connectors/local-tokens/{grant_id}` | Idempotent, caller-scoped native grant revocation (204) |
 | `POST /api/matcha-work/projects/{p}/tasks/{t}/research-launch` | Returns the deep link (claude.ai / chatgpt.com `?q=`) or a `claude` command |
 
 Code:
@@ -52,6 +55,14 @@ Code:
 
 **Mounting.** `main.py` appends the connector routes before the root-level Cappe renderer, and
 enters `session_manager.run()` inside the lifespan.
+
+**Native grants.** `mcp_local_tokens.py` transactionally registers the fixed
+`espresso-local-codex` client and stores a hashed, access-only token in the existing
+OAuth tables. Issuance rechecks the Matcha session, feature gate, project edit
+access and research eligibility, including pending/active AutoPR work. Each run
+has a separate revocable family and a 30-minute TTL with no refresh token. The
+token is user/resource/scope-bound, not task-bound; tools still authorize every
+requested card. No migration is added by the native integration.
 
 **nginx.** `/.well-known/oauth-*` is proxied to the backend. `/api/mcp` and `/api/oauth/*` ride
 the ordinary `/api/` block.
@@ -118,7 +129,9 @@ boards, so claiming (→ In progress) keeps it off.
   OpenAI's own client.
 - **In-app:** Settings → **AI connectors** (web `/work|/espresso/settings`, Espresso ⌘, → AI Connectors)
   lists every step with copy buttons, shows what is connected, and disconnects. Research cards get
-  Claude / ChatGPT (deep link) and Claude Code / Codex (copied shell line).
+  Claude / ChatGPT deep links and Claude Code commands. Web retains the Codex shell
+  command; native Espresso offers ChatGPT sign-in and **Research with Codex**.
+  Native build/validation details: [Codex runtime](../../platforms/desktop/Espresso/CodexRuntime/README.md).
 - **Local:**
   1. Run `dev-remote.sh`.
   2. Start a public HTTPS tunnel to the backend (Claude and ChatGPT connect from their own clouds).

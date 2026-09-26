@@ -28,11 +28,8 @@ struct SettingsView: View {
 
 // MARK: - AI Connectors
 
-/// Where a person hooks their own Claude, ChatGPT, Claude Code or Codex up to
-/// Matcha so research cards run on their plan. Connecting happens *in the
-/// assistant* — it signs in to Matcha through the consent page — so Matcha
-/// never takes a Claude or OpenAI login. This tab shows the steps and lists /
-/// disconnects what is connected.
+/// Local Codex owns ChatGPT sign-in. External assistants connect through
+/// Matcha's consent page. Vendor credentials never pass through Matcha's API.
 private struct ConnectorsSettingsTab: View {
     @State private var state: MWConnectorsState?
     @State private var error: String?
@@ -41,6 +38,14 @@ private struct ConnectorsSettingsTab: View {
 
     var body: some View {
         Form {
+            Section {
+                CodexAccountControls()
+            } header: {
+                Text("Codex in Espresso").font(.subheadline).bold()
+            } footer: {
+                Text("Research runs on your ChatGPT plan while Espresso is open.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section {
                 if let state {
                     if state.grants.isEmpty {

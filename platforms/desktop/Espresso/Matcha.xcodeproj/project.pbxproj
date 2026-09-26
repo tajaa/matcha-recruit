@@ -399,6 +399,11 @@
 		PRDV000000000000000000B1 /* ProductivityModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = PRDV000000000000000000B2 /* ProductivityModels.swift */; };
 		PRDV000000000000000000B3 /* MatchaWorkService+Productivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = PRDV000000000000000000B4 /* MatchaWorkService+Productivity.swift */; };
 		PRDV000000000000000000B5 /* ProductivityWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = PRDV000000000000000000B6 /* ProductivityWorkspace.swift */; };
+		CD260926000000000000B001 /* CodexProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD260926000000000000F001 /* CodexProtocol.swift */; };
+		CD260926000000000000B002 /* CodexBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD260926000000000000F002 /* CodexBridge.swift */; };
+		CD260926000000000000B003 /* CodexResearchCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD260926000000000000F003 /* CodexResearchCoordinator.swift */; };
+		CD260926000000000000B004 /* CodexControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD260926000000000000F004 /* CodexControls.swift */; };
+		CD260926000000000000B005 /* CodexProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD260926000000000000F005 /* CodexProtocolTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -701,6 +706,11 @@
 		PRDV000000000000000000B2 /* ProductivityModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ProductivityModels.swift; path = Espresso/Models/MatchaWork/ProductivityModels.swift; sourceTree = SOURCE_ROOT; };
 		PRDV000000000000000000B4 /* MatchaWorkService+Productivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "MatchaWorkService+Productivity.swift"; path = "Espresso/Services/MatchaWorkService+Productivity.swift"; sourceTree = SOURCE_ROOT; };
 		PRDV000000000000000000B6 /* ProductivityWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ProductivityWorkspace.swift; path = Espresso/Views/Productivity/ProductivityWorkspace.swift; sourceTree = SOURCE_ROOT; };
+		CD260926000000000000F001 /* CodexProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexProtocol.swift; sourceTree = "<group>"; };
+		CD260926000000000000F002 /* CodexBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexBridge.swift; sourceTree = "<group>"; };
+		CD260926000000000000F003 /* CodexResearchCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexResearchCoordinator.swift; sourceTree = "<group>"; };
+		CD260926000000000000F004 /* CodexControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexControls.swift; sourceTree = "<group>"; };
+		CD260926000000000000F005 /* CodexProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexProtocolTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -805,6 +815,9 @@
 		3CA3F4A0C1D5129426EB4FCB /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				CD260926000000000000F003 /* CodexResearchCoordinator.swift */,
+				CD260926000000000000F002 /* CodexBridge.swift */,
+				CD260926000000000000F001 /* CodexProtocol.swift */,
 				87CD3FA8F0164D2F29731B2D /* KeychainHelper.swift */,
 				15F1E6446AC5C08F85073A51 /* APIClient.swift */,
 				696FF167B14C8BBD12958A10 /* AuthService.swift */,
@@ -1142,6 +1155,7 @@
 		BC01DD22EE33FF44551100A0 /* MatchaTests */ = {
 			isa = PBXGroup;
 			children = (
+				CD260926000000000000F005 /* CodexProtocolTests.swift */,
 				BC01DD22EE33FF44551100B0 /* ServiceCacheTests.swift */,
 				BC01DD22EE33FF44551100B1 /* WorkDetailVMStoreTests.swift */,
 				BC01DD22EE33FF44551100B2 /* APIErrorTests.swift */,
@@ -1250,6 +1264,7 @@
 		D4D70C04C5C45B4D7F098D3A /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				CD260926000000000000F004 /* CodexControls.swift */,
 				CB1861633F56B0B081A83870 /* Login */,
 				3F39F7E6D963F82CA7F10D0F /* MatchaWork */,
 				AA11BB22CC33DD44EE770001 /* Inbox */,
@@ -1418,6 +1433,7 @@
 				9FC1F8270AA213F596F5FE3D /* Frameworks */,
 				05AE05B62C255B9A1ABCA2D7 /* Resources */,
 				BC01DD22EE33FF445566FF01 /* Embed LiveKit XCFrameworks */,
+				CD2609260000000000000001 /* Embed Codex */,
 			);
 			buildRules = (
 			);
@@ -1507,6 +1523,18 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
 			shellScript = "set -e\n# SwiftPM auto-embeds LiveKit binary XCFrameworks now that the package\n# product is in the target's Frameworks build phase. We only need to\n# extract stub dSYMs (LiveKit XCFrameworks ship without them) so that\n# App Store Connect's symbol upload doesn't warn.\nDST=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\"\nDSYM_DST=\"${DWARF_DSYM_FOLDER_PATH:-$BUILT_PRODUCTS_DIR}\"\nmkdir -p \"$DSYM_DST\"\nfor fw in LiveKitWebRTC RustLiveKitUniFFI LiveKitUniFFI; do\n  BIN=\"$DST/$fw.framework/Versions/A/$fw\"\n  [ -f \"$BIN\" ] || BIN=\"$DST/$fw.framework/$fw\"\n  if [ -f \"$BIN\" ]; then\n    dsymutil \"$BIN\" -o \"$DSYM_DST/$fw.framework.dSYM\" 2>/dev/null || true\n  fi\ndone\n";
+		};
+		CD2609260000000000000001 /* Embed Codex */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputPaths = ();
+			name = "Embed Codex";
+			outputPaths = ();
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "python3 \"$SRCROOT/scripts/codex-runtime.py\" embed\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -1601,6 +1629,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CD260926000000000000B005 /* CodexProtocolTests.swift in Sources */,
 				BC01DD22EE33FF44551100C0 /* ServiceCacheTests.swift in Sources */,
 				BC01DD22EE33FF44551100C1 /* WorkDetailVMStoreTests.swift in Sources */,
 				BC01DD22EE33FF44551100C2 /* APIErrorTests.swift in Sources */,
@@ -1613,6 +1642,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CD260926000000000000B004 /* CodexControls.swift in Sources */,
+				CD260926000000000000B003 /* CodexResearchCoordinator.swift in Sources */,
+				CD260926000000000000B002 /* CodexBridge.swift in Sources */,
+				CD260926000000000000B001 /* CodexProtocol.swift in Sources */,
 				7A5C0000000000000000B001 /* TaskRound.swift in Sources */,
 				7A5C0000000000000000B002 /* RoundView.swift in Sources */,
 				7A5C0000000000000000B003 /* EventRow.swift in Sources */,
@@ -1989,6 +2022,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.matchawork.app;
 				PRODUCT_NAME = Espresso;
+				PRODUCT_MODULE_NAME = Matcha;
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -2009,7 +2043,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.matchawork.app.tests;
-				PRODUCT_NAME = Espresso;
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
@@ -2080,6 +2114,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.matchawork.app;
 				PRODUCT_NAME = Espresso;
+				PRODUCT_MODULE_NAME = Matcha;
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;

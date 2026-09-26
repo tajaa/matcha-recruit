@@ -355,13 +355,13 @@ extension TaskViewerSheet {
 
     @ViewBuilder
     var researchWithAssistantControl: some View {
-        if researchWithAssistantEligible {
+        if researchWithAssistantEligible || CodexResearchCoordinator.shared.taskID == task.id {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 10) {
                     Label("Research with", systemImage: "sparkles")
                         .font(.ticket(size: 10))
                         .foregroundColor(.secondary)
-                    ForEach([("claude", "Claude"), ("chatgpt", "ChatGPT"), ("claude_code", "Claude Code"), ("codex", "Codex")], id: \.0) { kind, label in
+                    ForEach([("claude", "Claude"), ("chatgpt", "ChatGPT"), ("claude_code", "Claude Code")], id: \.0) { kind, label in
                         Button {
                             Task { await launchConnectorResearch(kind) }
                         } label: {
@@ -376,11 +376,16 @@ extension TaskViewerSheet {
                             .foregroundColor(.mwInkStrong)
                         }
                         .buttonStyle(.plain)
-                        .disabled(connectorLaunching != nil)
+                        .disabled(connectorLaunching != nil || !researchWithAssistantEligible || CodexResearchCoordinator.shared.running)
                         .help(kind == "claude_code" || kind == "codex"
                               ? "Copy a `\(kind == "codex" ? "codex" : "claude")` command that works this card from your terminal"
                               : "Open a prefilled chat that works this card on your own \(label) plan")
                     }
+                }
+                if let projectID = viewModel.project?.id {
+                    CodexResearchControls(projectID: projectID, taskID: task.id,
+                                          eligible: researchWithAssistantEligible && liveAutoPRTask.status != "cancelled"
+                                          && liveAutoPRTask.autoprClaimedAt == nil && liveAutoPRTask.autoprRunRequestedAt == nil)
                 }
                 if let state = connectorsState, !state.anyConnected {
                     Button {
@@ -406,6 +411,14 @@ extension TaskViewerSheet {
             .frame(maxWidth: .infinity, alignment: .leading)
             .task(id: task.id) {
                 connectorsState = try? await MatchaWorkService.shared.listConnectors()
+            }
+            .onChange(of: CodexResearchCoordinator.shared.refreshTick) { _, _ in
+                guard CodexResearchCoordinator.shared.taskID == task.id else { return }
+                Task {
+                    await viewModel.loadTasks()
+                    await viewModel.loadTaskFiles(taskId: task.id)
+                    await loadHistory()
+                }
             }
         }
     }

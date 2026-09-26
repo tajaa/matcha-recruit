@@ -30,6 +30,10 @@ from uuid import UUID
 from fastapi import HTTPException
 
 from app.database import get_connection
+from app.matcha.services.matcha_work.project_task_service import (
+    AUTOPR_PENDING_REQUEST_QUERY,
+    _AUTOPR_ACTIVE_CLAIM_QUERY,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,13 +94,15 @@ def _parse_uuid(value: str, label: str) -> UUID:
 async def _load_card(task_id: UUID) -> Optional[dict]:
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """
+            f"""
             SELECT t.id, t.project_id, t.title, t.description, t.category,
                    t.board_column, t.status, t.priority, t.progress_note,
-                   t.review_note, t.updated_at, t.autopr_run_requested_at,
-                   p.title AS project_title
+                   t.review_note, t.updated_at, autopr_run.created_at AS autopr_run_requested_at,
+                   p.title AS project_title, autopr_claim.created_at AS autopr_claimed_at
               FROM mw_tasks t
               JOIN mw_projects p ON p.id = t.project_id
+              LEFT JOIN LATERAL ({AUTOPR_PENDING_REQUEST_QUERY}) autopr_run ON TRUE
+              LEFT JOIN LATERAL ({_AUTOPR_ACTIVE_CLAIM_QUERY}) autopr_claim ON TRUE
              WHERE t.id = $1
             """,
             task_id,
@@ -163,9 +169,10 @@ async def list_research_cards(
             f"""
             SELECT t.id, t.project_id, p.title AS project_title, t.title,
                    t.board_column, t.priority, t.updated_at,
-                   t.autopr_run_requested_at
+                   autopr_run.created_at AS autopr_run_requested_at
               FROM mw_tasks t
               JOIN mw_projects p ON p.id = t.project_id
+              LEFT JOIN LATERAL ({AUTOPR_PENDING_REQUEST_QUERY}) autopr_run ON TRUE
              WHERE {' AND '.join(filters)}
              ORDER BY t.updated_at DESC NULLS LAST
              LIMIT ${len(args)}
