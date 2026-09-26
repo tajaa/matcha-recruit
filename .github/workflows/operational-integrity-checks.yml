@@ -10,6 +10,7 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: read
 
 jobs:
   backup-integrity:
@@ -114,7 +115,56 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP"/backup-* "$RUNNER_TEMP/matcha-prod.pem"
 
-# schema-drift moved to schema-drift-checks.yml (2026-08-26) — it needs the
-# self-hosted Mac runner awake and has no dependency on the pg-backup.timer
-# window this workflow's cron is built around; on the old shared 9/21 UTC
-# cron it sat queued for hours while the Mac slept.
+  schema-run-watchdog:
+    # Hosted runner: this must still run when the Mac runner is asleep or lost.
+    # The 21:17 UTC pass is four hours after the daily schema comparison cron.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Collect schema comparison runs
+        id: collect
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/$GITHUB_REPOSITORY/actions/workflows/schema-drift-checks.yml/runs?per_page=10" > "$RUNNER_TEMP/schema-runs.json"
+
+      - name: Assess schema run freshness
+        id: assess
+        if: steps.collect.outcome == 'success'
+        continue-on-error: true
+        run: |
+          python3 scripts/ops-health/schema-run-watchdog.py \
+            --runs "$RUNNER_TEMP/schema-runs.json" \
+            --output "$RUNNER_TEMP/schema-run-report.json" \
+            --markdown "$RUNNER_TEMP/schema-run-report.md"
+
+      - name: Publish runner alert or recovery
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          body="$RUNNER_TEMP/schema-run-alert.md"
+          if [ "${{ steps.collect.outcome }}" != success ] || [ "${{ steps.assess.outcome }}" != success ]; then
+            printf 'Could not check whether the self-hosted schema monitor ran.\n\nWorkflow: %s\n' \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > "$body"
+          elif [ "$(jq -r .status "$RUNNER_TEMP/schema-run-report.json")" != healthy ]; then
+            cp "$RUNNER_TEMP/schema-run-report.md" "$body"
+          else
+            printf 'Schema monitor completed successfully again.\n' > "$body"
+            ./scripts/ops-health/publish-issue.sh ops-health:schema-run-watchdog \
+              'ops: schema monitor stalled' "$body" ops-health --recover
+            exit 0
+          fi
+          ./scripts/ops-health/publish-issue.sh ops-health:schema-run-watchdog \
+            'ops: schema monitor stalled' "$body" ops-health
+
+      - name: Mark watchdog failure
+        if: always() && (steps.collect.outcome != 'success' || steps.assess.outcome != 'success')
+        run: exit 1
+      - name: Mark stale schema comparison
+        if: steps.assess.outcome == 'success'
+        run: test "$(jq -r .status "$RUNNER_TEMP/schema-run-report.json")" = healthy

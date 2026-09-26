@@ -10,6 +10,7 @@ on:
       - "server/**"
       - "client/**"
       - "scripts/**/*.py"
+      - "apps/msandbox/**"
       - ".github/workflows/codeql.yml"
   schedule:
     # Weekly full scan of main regardless of PR activity.

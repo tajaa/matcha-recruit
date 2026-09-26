@@ -6,12 +6,14 @@ name: PR checks
 # job below is a build-only smoke test (no registry login, no --push).
 on:
   pull_request:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.head_ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -37,11 +39,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Backend/scripts syntax check
+      - name: Python syntax and operations unit tests
         run: |
           python -m pip install pytest 'asyncpg>=0.29.0'
           python -m compileall -q server/app server/alembic scripts apps
           python -m pytest -q scripts/tests/test_ops_health.py scripts/tests/test_operational_integrity.py apps/msandbox/tests/test_error_autofix_query.py scripts/tests/test_admin_updates.py
+
+      - name: Shell syntax
+        run: |
           # `bash -n f1 f2 f3` parses ONLY f1 — the rest become $1, $2 … — so
           # the hand-maintained list this replaces syntax-checked exactly one
           # file (update-ec2.sh) and silently waved through everything after
@@ -52,8 +57,16 @@ jobs:
           find scripts apps/msandbox -type f \( -name '*.sh' -o -path '*/hooks/*' \) \
             -not -path 'scripts/oldscripts/*' -print0 \
             | xargs -0 -n1 bash -n
+
+      - name: Operations shell tests
+        run: |
           bash scripts/tests/test_admin_updates_collect.sh
           bash scripts/tests/test_ci_guards.sh
+          bash scripts/tests/test_operational_integrity.sh
+          bash scripts/tests/test_publish_issue.sh
+
+      - name: Msandbox shell tests
+        run: |
           bash apps/msandbox/tests/test_agent_sandbox_networking.sh
           bash apps/msandbox/tests/test_msandbox_attachments.sh
           bash apps/msandbox/tests/test_msandbox_sessions.sh
@@ -62,8 +75,6 @@ jobs:
           bash apps/msandbox/tests/test_kanban_autopr_publish.sh
           bash apps/msandbox/tests/test_autopr_progress_e2e.sh
           bash apps/msandbox/tests/test_error_autofix.sh
-          bash scripts/tests/test_operational_integrity.sh
-          bash scripts/tests/test_publish_issue.sh
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
@@ -178,6 +189,7 @@ jobs:
           } >>"$GITHUB_STEP_SUMMARY" || true
         working-directory: server
       - name: Diff coverage
+        if: github.event_name == 'pull_request'
         # Incremental on purpose, mirroring the lint job below: lines this PR
         # adds or changes must be covered; the untested backlog stays as it is
         # rather than blocking every PR forever.
@@ -202,6 +214,7 @@ jobs:
           if-no-files-found: ignore
 
   native-builds:
+    if: github.event_name == 'pull_request'
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -250,6 +263,7 @@ jobs:
           if [ "$ran" = 0 ]; then echo "No native project changed."; fi
 
   lint:
+    if: github.event_name == 'pull_request'
     # Incremental on purpose: main carries ~490 eslint findings and 16 real
     # ruff undefined-name errors, so a whole-tree gate would be red forever.
     # Files touched by the PR must be clean; untouched debt stays untouched.
@@ -335,6 +349,7 @@ jobs:
           docker run --rm -e SHELLCHECK_OPTS='-S warning' -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
 
   docker-build:
+    if: github.event_name == 'pull_request'
     # Build-only smoke test of the two images build-and-push.sh ships. No
     # registry, no push, no credentials — it exists so a Dockerfile / lockfile
     # / requirements break surfaces on the PR instead of on the deploy runner.
