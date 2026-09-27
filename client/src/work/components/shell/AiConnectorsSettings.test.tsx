@@ -34,4 +34,38 @@ describe('AI connectors settings', () => {
     await waitFor(() => expect(mock.disconnect).toHaveBeenCalledWith('c1'))
     await waitFor(() => expect(mock.list).toHaveBeenCalledTimes(2))
   })
+
+  it('copies the connector URL as it opens ChatGPT', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    render(<AiConnectorsSettings />)
+    const link = (await screen.findByText(/Copy URL & open ChatGPT/)).closest('a')!
+    expect(link.getAttribute('href')).toBe('https://chatgpt.com/plugins')
+    expect(link.getAttribute('target')).toBe('_blank')
+    link.addEventListener('click', (e) => e.preventDefault()) // jsdom can't open tabs
+    fireEvent.click(link)
+    expect(writeText).toHaveBeenCalledWith(state.mcp_url)
+    expect(await screen.findByText('URL copied')).toBeTruthy()
+  })
+
+  it('re-checks connections when the tab becomes visible again', async () => {
+    render(<AiConnectorsSettings />)
+    await screen.findByText('codex mcp login matcha')
+    expect(mock.list).toHaveBeenCalledTimes(1)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await waitFor(() => expect(mock.list).toHaveBeenCalledTimes(2))
+  })
+
+  it('points Mac users at Espresso and no one else', async () => {
+    const ua = vi.spyOn(navigator, 'userAgent', 'get')
+    ua.mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)')
+    const { unmount } = render(<AiConnectorsSettings />)
+    expect(await screen.findByText(/Espresso app signs in to ChatGPT/)).toBeTruthy()
+    unmount()
+    ua.mockReturnValue('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
+    render(<AiConnectorsSettings />)
+    await screen.findByText('codex mcp login matcha')
+    expect(screen.queryByText(/Espresso app signs in to ChatGPT/)).toBeNull()
+    ua.mockRestore()
+  })
 })

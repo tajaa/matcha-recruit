@@ -38,6 +38,59 @@ function CopyLine({ text }: { text: string }) {
   )
 }
 
+// ChatGPT has no link that pre-fills a custom app, so its Plugins page (where
+// "+ → Create MCP App" lives) is as close as one click gets.
+const CHATGPT_PLUGINS_URL = 'https://chatgpt.com/plugins'
+
+/** Desktop macOS, where Espresso's own ChatGPT sign-in is one click. iPadOS
+ *  also reports "Macintosh" but has a touchscreen. */
+function onMacDesktop() {
+  return /Macintosh/.test(navigator.userAgent) && !(navigator.maxTouchPoints > 1)
+}
+
+function ChatGptSteps({ mcpUrl }: { mcpUrl: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <>
+      <a
+        href={CHATGPT_PLUGINS_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={() => {
+          // Before the new tab takes focus: the Clipboard API needs a focused document.
+          void navigator.clipboard?.writeText(mcpUrl).then(
+            () => setCopied(true),
+            () => {
+              /* clipboard blocked — the URL above has its own copy button */
+            },
+          )
+        }}
+        className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg bg-w-accent px-3 py-1.5 text-xs font-semibold text-w-on-accent hover:opacity-90"
+      >
+        Copy URL &amp; open ChatGPT <ExternalLink className="h-3 w-3" />
+      </a>
+      {copied && (
+        <span role="status" className="ml-2 text-[11px] text-w-accent">
+          URL copied
+        </span>
+      )}
+      <ol className="mt-2 list-decimal space-y-0.5 pl-4">
+        <li>First time only: ChatGPT Settings → Security and login → turn on Developer mode.</li>
+        <li>On the Plugins page: + → Create MCP App → name it Matcha, paste the URL, choose OAuth.</li>
+        <li>Approve Matcha when it asks. This page marks ChatGPT connected when you come back.</li>
+      </ol>
+      <p className="mt-1">
+        Needs Plus, Pro, Business or Enterprise. On a work account, an admin may need to allow Developer mode.
+      </p>
+      {onMacDesktop() && (
+        <p className="mt-1">
+          On a Mac? The Espresso app signs in to ChatGPT in one click: Espresso Settings → AI Connectors.
+        </p>
+      )}
+    </>
+  )
+}
+
 /**
  * Settings → AI connectors. Where a person hooks their own Claude, ChatGPT,
  * Claude Code or Codex up to Matcha so research cards run on their plan.
@@ -61,6 +114,16 @@ export default function AiConnectorsSettings() {
   }, [])
 
   useEffect(load, [load])
+
+  // Connecting happens in the assistant's tab; re-check on return so the
+  // "Connected" badge appears without a reload.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') load()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [load])
 
   async function disconnect(clientId: string) {
     setDisconnecting(clientId)
@@ -143,10 +206,7 @@ export default function AiConnectorsSettings() {
 
             <div>
               <p className="font-medium text-w-text">ChatGPT{badge('chatgpt')}</p>
-              <p className="mt-0.5">
-                Settings → Apps &amp; Connectors → Advanced → turn on Developer mode → Create → paste the URL, choose
-                OAuth. Needs Plus, Pro, Business or Enterprise.
-              </p>
+              <ChatGptSteps mcpUrl={state.mcp_url} />
             </div>
 
             <div>

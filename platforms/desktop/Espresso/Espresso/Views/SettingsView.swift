@@ -84,7 +84,7 @@ private struct ConnectorsSettingsTab: View {
                     copyRow("Connector URL", state.mcpUrl)
                     Text("Claude: Settings → Connectors → Add custom connector → paste the URL.")
                         .font(.caption)
-                    Text("ChatGPT: Settings → Apps & Connectors → Advanced → Developer mode → Create → paste the URL, OAuth.")
+                    Text("ChatGPT: Settings → Security and login → Developer mode (once), then chatgpt.com/plugins → + → Create MCP App → paste the URL, OAuth.")
                         .font(.caption)
                     copyRow("Claude Code (then /mcp to sign in)", state.claudeCodeCommand)
                     ForEach(Array(state.codexCommands.enumerated()), id: \.offset) { index, command in
