@@ -152,6 +152,12 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
     }
   }
 
+  // ISO dates compare correctly as strings. Judged against this browser's
+  // clock; the server makes the authoritative call on the location's clock.
+  const targetWeekPassed = form.cadence === 'once'
+    && !!form.targetWeekStart
+    && form.targetWeekStart < toISODate(startOfWeek(new Date(), weekStartWeekday))
+
   if (!locationId) {
     return <div className="py-20 text-center text-sm text-zinc-500">Select a location to configure its auto schedule.</div>
   }
@@ -233,6 +239,14 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
               <Field label="Run date"><input aria-label="Run date" type="date" className={inputCls} value={form.runDate} onChange={(e) => setForm({ ...form, runDate: e.target.value })} /></Field>
               <Field label="Run time"><input aria-label="Run time" type="time" className={inputCls} value={form.runTime} onChange={(e) => setForm({ ...form, runTime: e.target.value })} /></Field>
               <Field label="Week starting"><input aria-label="Week starting" type="date" className={inputCls} value={form.targetWeekStart} onChange={(e) => setForm({ ...form, targetWeekStart: e.target.value })} /></Field>
+              {targetWeekPassed && (
+                // A one-time rule's week never moves, so an old rule quietly
+                // targets a week that is over — the server refuses Run now on
+                // it; say so before the click rather than after.
+                <p role="status" className="text-xs text-amber-400 sm:col-span-3">
+                  The week of {form.targetWeekStart} has already passed. Run now will refuse it until you pick a later week and save.
+                </p>
+              )}
             </div>
           )}
 

@@ -15,6 +15,7 @@ from app.matcha.models.scheduling.employee_schedule import ScheduleAutomationRul
 from app.matcha.services.scheduling.schedule_automation import (
     generate_review_suggestion,
     next_run_at,
+    past_week_refusal,
     target_week_start as automation_target_week_start,
 )
 
@@ -207,7 +208,13 @@ async def run_auto_schedule_now(
         one_time_week_start=row["target_week_start"],
         week_start_weekday=location_week_start_weekday,
     )
-    result = await generate_review_suggestion(
+    # A one-time rule's target week never moves, so Run now on an old rule
+    # would rebuild a week that already passed (and be refused by its old
+    # approved run under a message that named no week).
+    result = past_week_refusal(
+        week_start=target, timezone_name=row["timezone"],
+        week_start_weekday=location_week_start_weekday,
+    ) or await generate_review_suggestion(
         company_id=company_id,
         location_id=location_id,
         week_start=target,

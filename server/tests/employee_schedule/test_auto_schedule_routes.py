@@ -7,7 +7,7 @@ premium-flag gate and the run-now pass-through are real.
 """
 
 import asyncio
-from datetime import time
+from datetime import date, time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -125,3 +125,59 @@ def test_run_now_passes_the_rule_mode(monkeypatch):
     assert generate.await_args.kwargs["mode"] == "autopilot"
     assert generate.await_args.kwargs["week_template_id"] is None
     assert conn.updates[0][0] == "not_ready"
+
+
+class _RunConn:
+    def __init__(self):
+        self.updates = []
+
+    async def execute(self, query, *args):
+        self.updates.append(args)
+        return "UPDATE 1"
+
+
+def _wire_run(monkeypatch, row):
+    conn = _RunConn()
+    _wire(monkeypatch, conn, features={})
+    monkeypatch.setattr(auto_schedules, "_fetch_rule", AsyncMock(return_value=row))
+    monkeypatch.setattr(auto_schedules, "resolve_week_start_weekday", AsyncMock(return_value=0))
+    generate = AsyncMock(return_value={
+        "status": "generated", "message": "ok", "generation_run_id": str(uuid4()),
+    })
+    monkeypatch.setattr(auto_schedules, "generate_review_suggestion", generate)
+    return conn, generate
+
+
+def test_run_now_refuses_a_one_time_rule_whose_week_has_passed(monkeypatch):
+    """The reported Po Coffee sequence: a one-time rule saved for 2026-09-06
+    was run on 2026-09-27 while the manager looked at the week of 2026-10-04.
+    It rebuilt September 6 and was refused by that week's old approved run under
+    a message that named no week. Now it never reaches the generator, and the
+    refusal names the week it targeted."""
+    conn, generate = _wire_run(monkeypatch, _rule_row(
+        cadence="once", run_weekday=None, target_weeks_ahead=None,
+        run_date=date(2026, 9, 5), target_week_start=date(2026, 9, 6),
+    ))
+
+    result = _run(auto_schedules.run_auto_schedule_now(LOCATION, current_user=SimpleNamespace(id=uuid4())))
+
+    generate.assert_not_awaited()
+    assert result["status"] == "not_ready"
+    assert result["week_start"] == "2026-09-06"
+    assert "2026-09-06" in result["message"] and "already passed" in result["message"]
+    # The rule's status line carries the same explanation.
+    assert conn.updates[0][:2] == ("not_ready", result["message"])
+
+
+def test_run_now_builds_the_one_time_rules_own_future_week(monkeypatch):
+    target = date(2099, 1, 4)  # a Sunday, well in the future
+    _conn, generate = _wire_run(monkeypatch, _rule_row(
+        cadence="once", run_weekday=None, target_weeks_ahead=None,
+        run_date=date(2099, 1, 1), target_week_start=target,
+    ))
+
+    result = _run(auto_schedules.run_auto_schedule_now(LOCATION, current_user=SimpleNamespace(id=uuid4())))
+
+    assert result["status"] == "generated"
+    assert result["week_start"] == target.isoformat()
+    assert generate.await_args.kwargs["week_start"] == target

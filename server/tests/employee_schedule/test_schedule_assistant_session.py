@@ -522,6 +522,33 @@ async def test_archiving_hides_the_chat_without_deleting_its_audit_trail(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_archiving_cancels_the_week_drafts_only_that_chat_could_confirm(monkeypatch):
+    """An archived chat refuses turns, so its unapproved week draft is dead —
+    left 'proposed' it would keep blocking generation for that week. Only this
+    thread's rows: an automatic run (no thread) is re-adopted by the next chat."""
+    company_id, thread_id = uuid4(), uuid4()
+    conn = _ArchiveConn({"id": uuid4(), "thread_id": thread_id, "location_id": uuid4()})
+    monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
+    monkeypatch.setattr(session, "resolve_eligibility_manager_scope", lambda *a, **k: _allow_scope())
+
+    await session.archive_schedule_assistant_session(
+        company_id=company_id, user_id=uuid4(), actor_role="manager", session_id=uuid4(),
+    )
+
+    cancels = [
+        (query, params) for query, params in conn.execute_calls
+        if "schedule_generation_runs" in query
+    ]
+    assert len(cancels) == 1
+    query, params = cancels[0]
+    assert "status='cancelled'" in query
+    assert "thread_id=$1" in query and "company_id=$2" in query
+    assert "status='proposed'" in query
+    assert "origin" not in query
+    assert params == (thread_id, company_id)
+
+
+@pytest.mark.asyncio
 async def test_archiving_a_session_that_is_not_yours_is_not_found(monkeypatch):
     conn = _ArchiveConn(None)
     monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))

@@ -356,3 +356,184 @@ async def test_rebuild_does_not_supersede_when_setup_is_not_ready(monkeypatch):
         week_template_id=None, mode="autopilot", supersede_proposed=True,
     )
     assert result == {"status": "not_ready", "message": "This week already has draft shifts."}
+
+
+# ── Po Coffee, 2026-09-27: "a schedule is already waiting for review" ─────────
+# The manager deleted every shift in the week of 2026-10-04 and retried. The
+# guard was never wrong about that week — Run now had targeted a PAST week
+# (the rule's frozen one-time 2026-09-06) and the refusal named no week.
+
+
+class _GuardConn:
+    """Scripted generation-runs guard: what the stale sweep matched and what
+    the existing-row lookup finds, with every bound argument captured."""
+
+    def __init__(self, existing=None, swept="UPDATE 0"):
+        self.existing = existing
+        self.swept = swept
+        self.sweep_args = None
+        self.lookup = None
+
+    async def execute(self, query, *args):
+        assert "SET status='stale'" in query, query
+        self.sweep_args = args
+        return self.swept
+
+    async def fetchrow(self, query, *args):
+        assert "FROM schedule_generation_runs" in query, query
+        self.lookup = (query, args)
+        return self.existing
+
+
+def _wire_guard(monkeypatch, conn, *, propose=None):
+    monkeypatch.setattr(schedule_automation, "connection_or_direct", lambda: _AsyncContext(conn))
+    monkeypatch.setattr(week_builder, "get_week_build_readiness", AsyncMock(
+        return_value={"status": "ok", "ready": True},
+    ))
+    propose = propose or AsyncMock(return_value={"status": "ready", "generation_run_id": "new-run"})
+    monkeypatch.setattr(week_builder, "propose_week_draft", propose)
+    return propose
+
+
+@pytest.mark.asyncio
+async def test_deleted_week_regenerates_for_the_reported_october_4_sequence(monkeypatch):
+    """Autopilot applied 2026-10-04, then every shift was deleted. The stale
+    sweep retires that applied run (nothing live left in the week), the lookup
+    finds nothing to block on, and a new review-only proposal is built."""
+    company_id, location_id = uuid4(), uuid4()
+    conn = _GuardConn(existing=None, swept="UPDATE 1")
+    propose = _wire_guard(monkeypatch, conn)
+
+    result = await schedule_automation.generate_review_suggestion(
+        company_id=company_id, location_id=location_id, week_start=date(2026, 10, 4),
+        week_template_id=None, mode="autopilot", supersede_proposed=True,
+    )
+
+    assert result["status"] == "generated"
+    assert conn.sweep_args == (
+        company_id, location_id, date(2026, 10, 4),
+        datetime(2026, 10, 4, tzinfo=timezone.utc), datetime(2026, 10, 11, tzinfo=timezone.utc),
+    )
+    # Scoped to this tenant, this store, this week — never another's run.
+    query, args = conn.lookup
+    assert "company_id=$1 AND location_id=$2 AND week_start=$3" in query
+    assert args == (company_id, location_id, date(2026, 10, 4))
+    # Still review-only: a proposal, never an apply or a publish.
+    assert propose.await_args.kwargs["origin"] == "automatic"
+    assert propose.await_args.kwargs["week_start"] == date(2026, 10, 4)
+
+
+@pytest.mark.asyncio
+async def test_an_applied_week_with_live_shifts_still_blocks_and_says_which_week(monkeypatch):
+    run_id = uuid4()
+    conn = _GuardConn(existing={"id": run_id, "status": "applied"})
+    propose = _wire_guard(monkeypatch, conn)
+
+    result = await schedule_automation.generate_review_suggestion(
+        company_id=uuid4(), location_id=uuid4(), week_start=date(2026, 10, 4),
+        week_template_id=None, mode="autopilot", supersede_proposed=True,
+    )
+
+    propose.assert_not_awaited()
+    assert result["status"] == "already_present"
+    assert result["week_start"] == "2026-10-04"
+    assert result["blocking_status"] == "applied"
+    assert result["generation_run_id"] == str(run_id)
+    assert "2026-10-04" in result["message"] and "approved schedule" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_a_suggestion_waiting_for_review_blocks_the_scheduled_run_by_name(monkeypatch):
+    conn = _GuardConn(existing={"id": uuid4(), "status": "proposed"})
+    propose = _wire_guard(monkeypatch, conn)
+
+    result = await schedule_automation.generate_review_suggestion(
+        company_id=uuid4(), location_id=uuid4(), week_start=date(2026, 10, 4),
+        week_template_id=uuid4(),
+    )
+
+    propose.assert_not_awaited()
+    assert "status IN ('proposed', 'applied')" in conn.lookup[0]
+    assert result["blocking_status"] == "proposed"
+    assert result["message"] == (
+        "A schedule suggestion for the week of 2026-10-04 is already waiting for review."
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_lost_insert_race_names_the_week_too(monkeypatch):
+    conn = _GuardConn(existing=None)
+    _wire_guard(monkeypatch, conn, propose=AsyncMock(return_value={
+        "status": "skipped", "message": "A schedule suggestion already exists.",
+    }))
+
+    result = await schedule_automation.generate_review_suggestion(
+        company_id=uuid4(), location_id=uuid4(), week_start=date(2026, 10, 4),
+        week_template_id=uuid4(),
+    )
+
+    assert result == {
+        "status": "already_present",
+        "message": "A schedule suggestion already exists for the week of 2026-10-04.",
+        "week_start": "2026-10-04",
+        "blocking_status": None,
+    }
+
+
+def test_past_week_refusal_is_judged_on_the_locations_own_week():
+    # Sunday 2026-09-27, 20:19 UTC — the moment of the report.
+    now = datetime(2026, 9, 27, 20, 19, tzinfo=timezone.utc)
+    kwargs = {"timezone_name": "America/Los_Angeles", "now": now}
+
+    refused = schedule_automation.past_week_refusal(week_start=date(2026, 9, 6), **kwargs)
+    assert refused["status"] == "not_ready"
+    assert refused["week_start"] == "2026-09-06"
+    assert "2026-09-06" in refused["message"]
+
+    assert schedule_automation.past_week_refusal(week_start=date(2026, 9, 27), **kwargs) is None
+    assert schedule_automation.past_week_refusal(week_start=date(2026, 10, 4), **kwargs) is None
+
+    # A Monday-start store: the current week began 2026-09-21, so it is open.
+    assert schedule_automation.past_week_refusal(
+        week_start=date(2026, 9, 21), week_start_weekday=1, **kwargs,
+    ) is None
+
+
+def test_past_week_refusal_uses_the_location_clock_not_utc():
+    # 02:00 UTC Sunday is still Saturday evening in Los Angeles, so the
+    # Sunday-start week that began 2026-09-20 has not ended there yet.
+    now = datetime(2026, 9, 27, 2, tzinfo=timezone.utc)
+    assert schedule_automation.past_week_refusal(
+        week_start=date(2026, 9, 20), timezone_name="America/Los_Angeles", now=now,
+    ) is None
+    assert schedule_automation.past_week_refusal(
+        week_start=date(2026, 9, 20), timezone_name="UTC", now=now,
+    ) is not None
+
+
+@pytest.mark.asyncio
+async def test_worker_refuses_a_one_time_rule_whose_week_has_passed(monkeypatch):
+    rule_id, company_id, location_id = uuid4(), uuid4(), uuid4()
+    scheduled_for = datetime(2026, 9, 27, 16, tzinfo=timezone.utc)
+    conn = _Conn({
+        "id": rule_id, "company_id": company_id, "location_id": location_id,
+        "week_template_id": uuid4(), "enabled": True, "cadence": "once",
+        "run_weekday": None, "run_time": time(9), "target_weeks_ahead": None,
+        "target_week_start": date(2026, 9, 6), "next_run_at": scheduled_for,
+        "schedule_version": 1, "timezone": "America/Los_Angeles",
+        "enabled_features": {"employee_schedule": True, "huume": True, "matcha_work": True},
+        "signup_source": None, "company_status": "approved",
+    })
+    monkeypatch.setattr(worker, "get_db_connection", AsyncMock(return_value=conn))
+    generate = AsyncMock()
+    monkeypatch.setattr(worker, "generate_review_suggestion", generate)
+    monkeypatch.setattr(worker, "enqueue_schedule_automation", Mock())
+
+    result = await worker._run(str(rule_id), 1, scheduled_for.isoformat())
+
+    generate.assert_not_awaited()
+    assert result["status"] == "not_ready"
+    assert result["week_start"] == "2026-09-06"
+    persisted = [args for query, args in conn.execute_calls if "last_completed_at" in query]
+    assert persisted and persisted[-1][0] == "not_ready"
+    assert "2026-09-06" in persisted[-1][1]

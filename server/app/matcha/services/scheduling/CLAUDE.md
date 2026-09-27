@@ -655,6 +655,22 @@ and is idempotent per company/location/week. Existing manual proposals and
 applied plans suppress it; cancelling an automatic proposal suppresses it for
 the rest of that week rather than recreating it on the next worker restart.
 
+**The duplicate guard's refusal names the week and what holds it**
+(`schedule_automation.already_present_result`): "waiting for review" for a
+`proposed` run, "approved schedule … clear its shifts" for an `applied` one,
+plus `week_start`/`blocking_status` on the result. **Rule-driven runs refuse a
+past target week** (`past_week_refusal`, on the location's clock and week start)
+in both Run now and the worker: a one-time rule's `target_week_start` never
+moves, so an old rule silently rebuilt a week that had ended. That is what the
+2026-09-27 Po Coffee report was — the manager cleared the week of 2026-10-04
+and hit Run now on a rule still frozen at 2026-09-06, whose old applied run
+correctly blocked it under a message that named no week. The guard's
+tenant/location/week scoping and the applied→stale sweep were never at fault.
+`/autopilot/run` takes an explicit week from the manager and is not gated.
+**Archiving a schedule chat cancels the `proposed` week drafts on that thread**
+— an archived thread refuses turns, so they could never be confirmed and would
+only block the week; automatic runs (no thread) are left for the next session.
+
 An automatic run has no manager thread up front. The authorized
 `schedule_assistant_session` adopts it into that manager's durable
 location/week session when opened, minting the normal confirmation token. The

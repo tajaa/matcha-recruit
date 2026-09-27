@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ToastProvider } from '../ui'
 import AutoSchedulesTab from './AutoSchedulesTab'
@@ -137,5 +137,40 @@ describe('AutoSchedulesTab', () => {
     }))
 
     expect(screen.queryByRole('link', { name: /Review the generated week/ })).not.toBeInTheDocument()
+  })
+
+  describe('one-time rule target week', () => {
+    // Only Date is faked, so the component's promises and waitFor still run.
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-09-27T20:19:00Z'))
+    })
+    afterEach(() => { vi.useRealTimers() })
+
+    const onceRule = (targetWeekStart: string) => ({
+      rule: {
+        id: 'rule-1', location_id: 'loc-1', location_name: 'Downtown', timezone: 'America/Los_Angeles',
+        enabled: false, cadence: 'once', week_template_id: 'template-1', week_template_name: 'Standard Week',
+        run_weekday: null, run_date: '2026-09-05', run_time: '09:00', target_weeks_ahead: null,
+        target_week_start: targetWeekStart, next_run_at: null, last_attempt_at: null, last_completed_at: null,
+        last_status: null, last_message: null, last_generation_run_id: null,
+      },
+    })
+
+    it('warns before Run now when the saved week has already passed', async () => {
+      // The Po Coffee rule: saved for 2026-09-06, run on 2026-09-27.
+      mocks.fetchRule.mockResolvedValue(onceRule('2026-09-06'))
+      render(<MemoryRouter><ToastProvider><AutoSchedulesTab locationId="loc-1" /></ToastProvider></MemoryRouter>)
+
+      expect(await screen.findByText(/The week of 2026-09-06 has already passed/)).toBeInTheDocument()
+    })
+
+    it('stays quiet for the current or a future week', async () => {
+      mocks.fetchRule.mockResolvedValue(onceRule('2026-10-04'))
+      render(<MemoryRouter><ToastProvider><AutoSchedulesTab locationId="loc-1" /></ToastProvider></MemoryRouter>)
+
+      await screen.findByRole('button', { name: 'Run now' })
+      expect(screen.queryByText(/has already passed/)).not.toBeInTheDocument()
+    })
   })
 })
