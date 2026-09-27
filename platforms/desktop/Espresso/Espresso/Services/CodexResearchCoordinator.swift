@@ -166,6 +166,8 @@ final class CodexResearchCoordinator {
                 grant = try await MatchaWorkService.shared.mintLocalCodexToken(projectId: projectID, taskId: selected)
                 try Task.checkCancellation()
                 guard let grant else { throw CodexFailure(message: "Matcha did not return a research grant.") }
+                // Reports already on the card; success means a new one appears.
+                let priorReports = Set(try await MatchaWorkService.shared.listTaskFiles(projectId: projectID, taskId: selected).map(\.filename))
                 try await connect(token: grant.access_token)
                 try await readAccount()
                 guard email != nil else { throw CodexFailure(message: "Sign in with ChatGPT to start research.") }
@@ -181,6 +183,10 @@ final class CodexResearchCoordinator {
                         "apps": .bool(false), "shell_tool": .bool(false), "shell_snapshot": .bool(false), "multi_agent": .bool(false)]),
                         "mcp_servers": .object(["matcha": .object([
                             "url": .string(grant.resource), "bearer_token_env_var": .string("MATCHA_MCP_TOKEN"),
+                            // attach_research_report is annotated destructive; under
+                            // approvalPolicy "never" Codex silently declines it
+                            // unless pre-approved. Scope: only the enabled tools below.
+                            "default_tools_approval_mode": .string("approve"),
                             "enabled_tools": .array(["get_research_card", "claim_research_card", "attach_research_report"].map(CodexJSON.string))])])])
                 ]), timeout: 60)
                 guard let id = thread["thread"]["id"].string else { throw CodexFailure(message: "Codex did not start a research thread.") }
@@ -189,15 +195,17 @@ final class CodexResearchCoordinator {
                     "threadId": .string(id), "input": .array([.object(["type": .string("text"), "text": .string(launch.prompt)])])
                 ]), timeout: 60)
                 turnID = turn["turn"]["id"].string
-                let result = try await awaitTurn()
+                _ = try await awaitTurn()
                 try Task.checkCancellation()
-                guard result["status"].string == "completed", let filename = publication else {
-                    throw CodexFailure(message: "Research ended without a confirmed report. Check the card and ChatGPT usage before retrying.")
-                }
+                // The card itself is the evidence. Codex may route the attach
+                // through code-mode `exec`, so no `mcpToolCall` item is
+                // guaranteed; `publication` is only a hint for the filename.
                 let cards = try await MatchaWorkService.shared.listProjectTasks(projectId: projectID, forceRefresh: true)
                 let files = try await MatchaWorkService.shared.listTaskFiles(projectId: projectID, taskId: selected)
-                guard cards.contains(where: { $0.id == selected && $0.boardColumn == "review" }), files.contains(where: { $0.filename == filename }) else {
-                    throw CodexFailure(message: "Codex reported publication, but the refreshed card could not confirm it. Check its attachments.")
+                let newReport = files.first { $0.filename == publication }
+                    ?? files.first { $0.filename.hasPrefix("research-report-") && !priorReports.contains($0.filename) }
+                guard cards.contains(where: { $0.id == selected && $0.boardColumn == "review" }), newReport != nil else {
+                    throw CodexFailure(message: "Research ended without a confirmed report. Check the card and ChatGPT usage before retrying.")
                 }
                 confirmed = true
                 if userID == owner { progress = "Report attached — ready for review." }
