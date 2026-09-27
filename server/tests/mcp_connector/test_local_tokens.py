@@ -137,3 +137,54 @@ def test_local_revoke_is_idempotent_and_caller_scoped(local_api):
     grant = uuid4()
     assert client.delete(f"/connectors/local-tokens/{grant}").status_code == 204
     revoke.assert_awaited_once_with(user.id, grant)
+
+
+@pytest.mark.asyncio
+async def test_grant_issued_at_is_caller_and_client_scoped(monkeypatch):
+    issued = datetime.now(timezone.utc)
+    fetchval = AsyncMock(return_value=issued)
+
+    @asynccontextmanager
+    async def connection():
+        yield SimpleNamespace(fetchval=fetchval)
+
+    monkeypatch.setattr(tokens, "get_connection", connection)
+    user, grant = uuid4(), uuid4()
+    assert await tokens.grant_issued_at(user, grant) == issued
+    sql, *args = fetchval.call_args.args
+    assert "user_id = $1 AND family_id = $2 AND client_id = $3" in sql
+    assert "revoked_at" not in sql  # release still works after cleanup revoked it
+    assert args == [user, grant, tokens.CLIENT_ID]
+
+
+def test_local_release_hands_the_run_window_to_the_service(local_api, monkeypatch):
+    client, _, user, _, _, body = local_api
+    issued = datetime.now(timezone.utc)
+    lookup = AsyncMock(return_value=issued)
+    release = AsyncMock(return_value={"released": True, "column": "todo"})
+    monkeypatch.setattr(tokens, "grant_issued_at", lookup)
+    monkeypatch.setattr(research, "release_unfinished_claim", release)
+    grant = uuid4()
+    r = client.post(f"/connectors/local-tokens/{grant}/release", json=body)
+    assert r.status_code == 200 and r.json() == {"released": True, "column": "todo", "reason": None}
+    lookup.assert_awaited_once_with(user.id, grant)
+    kwargs = release.await_args.kwargs
+    assert kwargs["since"] == issued
+    assert str(kwargs["project_id"]) == body["project_id"] and str(kwargs["task_id"]) == body["task_id"]
+
+
+def test_local_release_refuses_an_unknown_run(local_api, monkeypatch):
+    client, _, _, _, _, body = local_api
+    release = AsyncMock()
+    monkeypatch.setattr(tokens, "grant_issued_at", AsyncMock(return_value=None))
+    monkeypatch.setattr(research, "release_unfinished_claim", release)
+    assert client.post(f"/connectors/local-tokens/{uuid4()}/release", json=body).status_code == 404
+    release.assert_not_called()
+
+
+def test_local_release_maps_connector_errors(local_api, monkeypatch):
+    client, _, _, _, _, body = local_api
+    monkeypatch.setattr(tokens, "grant_issued_at", AsyncMock(return_value=datetime.now(timezone.utc)))
+    monkeypatch.setattr(research, "release_unfinished_claim",
+                        AsyncMock(side_effect=research.ConnectorError("no", 403)))
+    assert client.post(f"/connectors/local-tokens/{uuid4()}/release", json=body).status_code == 403

@@ -67,3 +67,9 @@ class LocalConnectorTokenResponse(BaseModel):
     resource: str
     client_id: str
     grant_id: UUID
+
+
+class LocalResearchReleaseResponse(BaseModel):
+    released: bool
+    column: Optional[str] = None
+    reason: Optional[str] = None

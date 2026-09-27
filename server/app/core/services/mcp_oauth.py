@@ -77,6 +77,11 @@ SCOPE_READ = "kanban:read"
 SCOPE_WRITE = "kanban:write"
 SUPPORTED_SCOPES = [SCOPE_READ, SCOPE_WRITE]
 
+# Espresso's bundled Codex gets per-run grants under this first-party client
+# (`mcp_local_tokens.py`). It is not an assistant the person connected, so the
+# connectors list leaves it out; password changes still revoke it by user_id.
+LOCAL_CODEX_CLIENT_ID = "espresso-local-codex"
+
 ACCESS_TOKEN_TTL = timedelta(hours=1)
 REFRESH_TOKEN_TTL = timedelta(days=30)
 AUTHORIZATION_CODE_TTL = timedelta(minutes=10)
@@ -359,12 +364,13 @@ async def list_user_grants(user_id: uuid.UUID) -> list[dict[str, Any]]:
               FROM oauth_tokens t
               JOIN oauth_clients c ON c.client_id = t.client_id
              WHERE t.user_id = $1
+               AND t.client_id <> $2
                AND t.revoked_at IS NULL
                AND t.expires_at > NOW()
              GROUP BY c.client_id, c.client_name, c.redirect_uris
              ORDER BY MIN(t.created_at) DESC
             """,
-            user_id,
+            user_id, LOCAL_CODEX_CLIENT_ID,
         )
     grants = []
     for row in rows:

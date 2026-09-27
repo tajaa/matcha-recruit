@@ -29,6 +29,7 @@ from app.matcha.models.matcha_work.connectors import (
     ConnectorGrant,
     LocalConnectorTokenRequest,
     LocalConnectorTokenResponse,
+    LocalResearchReleaseResponse,
     ConnectorsResponse,
     ConsentDecision,
     ConsentDescription,
@@ -186,3 +187,28 @@ async def revoke_local_connector_token_endpoint(
     from app.core.services import mcp_local_tokens
 
     await mcp_local_tokens.revoke_token(current_user.id, grant_id)
+
+
+@router.post(
+    "/connectors/local-tokens/{grant_id}/release",
+    response_model=LocalResearchReleaseResponse,
+)
+async def release_local_research_endpoint(
+    grant_id: UUID,
+    body: LocalConnectorTokenRequest,
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    """A cancelled/failed Espresso Codex run hands its claimed card back to the
+    queue — only if that run's claim is still the last thing that happened."""
+    from app.core.services import mcp_local_tokens
+
+    issued_at = await mcp_local_tokens.grant_issued_at(current_user.id, grant_id)
+    if issued_at is None:
+        raise HTTPException(status_code=404, detail="Research run not found")
+    try:
+        result = await research.release_unfinished_claim(
+            current_user, project_id=body.project_id, task_id=body.task_id, since=issued_at,
+        )
+    except research.ConnectorError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    return LocalResearchReleaseResponse(**result)

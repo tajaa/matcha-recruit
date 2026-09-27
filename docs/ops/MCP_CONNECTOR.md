@@ -41,6 +41,7 @@ All routes live on one origin: `MCP_PUBLIC_ORIGIN`, falling back to `APP_BASE_UR
 | `/api/matcha-work/connectors*` | Consent API, grants list and disconnect |
 | `POST /api/matcha-work/connectors/local-token` | Session-authenticated native run grant; body `{project_id, task_id}`; response `{access_token, token_type, expires_at, resource, client_id, grant_id}`; `Cache-Control: no-store` |
 | `DELETE /api/matcha-work/connectors/local-tokens/{grant_id}` | Idempotent, caller-scoped native grant revocation (204) |
+| `POST /api/matcha-work/connectors/local-tokens/{grant_id}/release` | Body `{project_id, task_id}`. Returns an unfinished run's claimed card to `todo`/`changes_requested`; `{released, column?, reason?}` |
 | `POST /api/matcha-work/projects/{p}/tasks/{t}/research-launch` | Returns the deep link (claude.ai / chatgpt.com `?q=`) or a `claude` command |
 
 Code:
@@ -62,7 +63,17 @@ OAuth tables. Issuance rechecks the Matcha session, feature gate, project edit
 access and research eligibility, including pending/active AutoPR work. Each run
 has a separate revocable family and a 30-minute TTL with no refresh token. The
 token is user/resource/scope-bound, not task-bound; tools still authorize every
-requested card. No migration is added by the native integration.
+requested card. No migration is added by the native integration. These grants
+are not listed under the person's connected assistants (`list_user_grants`
+filters `LOCAL_CODEX_CLIENT_ID`); password changes still revoke them.
+
+**Releasing an unfinished run.** A cancelled or failed run asks the server to
+put its card back. `release_unfinished_claim` only moves it when the card's
+latest column change is this caller's claim, made after the run grant was
+issued, from `todo`/`changes_requested`; nobody else has written history on the
+card since; and no `research-report-*` file was stored after the claim. Otherwise
+it answers `released: false` with a reason and changes nothing, so a partial
+publication or a teammate's edit is never undone.
 
 **nginx.** `/.well-known/oauth-*` is proxied to the backend. `/api/mcp` and `/api/oauth/*` ride
 the ordinary `/api/` block.

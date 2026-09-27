@@ -14,12 +14,21 @@ final class CodexProtocolTests: XCTestCase {
             _ = try await bridge.start(userID: user)
             let first = try await bridge.request("account/read")
             XCTAssertEqual(first["account"], .null)
+            let serving = await bridge.isServing(userID: user)
+            let servingOther = await bridge.isServing(userID: UUID().uuidString)
+            XCTAssertTrue(serving, "an idle token-less child is reusable for account checks")
+            XCTAssertFalse(servingOther, "never another Matcha user's credential home")
+            _ = try await bridge.start(userID: user, token: "mat_at_test")
+            let servingWithToken = await bridge.isServing(userID: user)
+            XCTAssertFalse(servingWithToken, "a run's bearer-carrying child is never reused")
             _ = try await bridge.start(userID: user)
             async let one = bridge.request("account/read")
             async let two = bridge.request("account/read")
             let results = try await [one, two]
             XCTAssertTrue(results.allSatisfy { $0["account"] == .null })
             await bridge.stop()
+            let servingAfterStop = await bridge.isServing(userID: user)
+            XCTAssertFalse(servingAfterStop)
             do {
                 _ = try await bridge.request("account/read")
                 XCTFail("Stopped bridge must fail immediately")
@@ -65,6 +74,41 @@ final class CodexProtocolTests: XCTestCase {
         XCTAssertNil(CodexPublication.filename(item: item(attached: false), taskID: "abc"))
         XCTAssertNil(CodexPublication.filename(item: item(column: "in_progress"), taskID: "abc"))
         XCTAssertNil(CodexPublication.filename(item: .object(["status": .string("completed")]), taskID: "abc"))
+    }
+
+    private func delta(_ text: String, thread: String = "t1") -> CodexJSON {
+        .object(["threadId": .string(thread), "itemId": .string("i"), "delta": .string(text)])
+    }
+
+    func testDeltasCoalesceIntoOneEventPerFlush() {
+        var buffer = CodexDeltaCoalescer()
+        for piece in ["Res", "ear", "ch ☕️"] { XCTAssertNil(buffer.append(delta(piece))) }
+        let batch = buffer.take()
+        XCTAssertEqual(batch?["method"].string, CodexDeltaCoalescer.method)
+        XCTAssertEqual(batch?["params"]["delta"].string, "Research ☕️")
+        XCTAssertEqual(batch?["params"]["threadId"].string, "t1")
+        XCTAssertNil(buffer.take(), "a flush empties the batch")
+        XCTAssertNil(buffer.append(.object(["threadId": .string("t1")])), "no delta text is ignored")
+        XCTAssertNil(buffer.take())
+    }
+
+    func testThreadSwitchFlushesThePreviousThreadFirst() {
+        var buffer = CodexDeltaCoalescer()
+        _ = buffer.append(delta("old", thread: "a"))
+        let flushed = buffer.append(delta("new", thread: "b"))
+        XCTAssertEqual(flushed?["params"]["threadId"].string, "a")
+        XCTAssertEqual(flushed?["params"]["delta"].string, "old")
+        XCTAssertEqual(buffer.take()?["params"]["threadId"].string, "b")
+    }
+
+    func testOnlyEventsTheCoordinatorHandlesAreForwarded() {
+        let forwarded = CodexBridge.forwardedMethods
+        for method in ["account/login/completed", "item/started", "item/completed", "turn/completed", CodexDeltaCoalescer.method] {
+            XCTAssertTrue(forwarded.contains(method), method)
+        }
+        for noisy in ["item/reasoning/textDelta", "item/commandExecution/outputDelta", "thread/tokenUsage/updated"] {
+            XCTAssertFalse(forwarded.contains(noisy), noisy)
+        }
     }
 
     func testTextEncodedMCPResult() {

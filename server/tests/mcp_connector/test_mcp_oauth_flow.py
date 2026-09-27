@@ -91,7 +91,9 @@ class FakeOAuthDB:
 
     async def fetch(self, sql, *args):
         if "GROUP BY c.client_id" in sql:
-            live = [t for t in self.tokens if t["user_id"] == args[0] and t["revoked_at"] is None]
+            assert "t.client_id <> $2" in sql
+            live = [t for t in self.tokens if t["user_id"] == args[0] and t["client_id"] != args[1]
+                    and t["revoked_at"] is None]
             out = {}
             for t in live:
                 c = self.clients[t["client_id"]]
@@ -104,6 +106,11 @@ class FakeOAuthDB:
         raise AssertionError(f"unexpected fetch: {sql[:120]}")
 
     async def execute(self, sql, *args):
+        if "INSERT INTO oauth_clients" in sql and "ON CONFLICT (client_id) DO NOTHING" in sql:
+            # mcp_local_tokens' fixed first-party client row.
+            self.clients.setdefault(args[0], {"client_id": args[0], "client_name": "Espresso local Codex",
+                                              "redirect_uris": "[]", "scope": args[1]})
+            return "INSERT 0 1"
         if "INSERT INTO oauth_clients" in sql:
             keys = ["client_id", "client_name", "client_uri", "logo_uri", "redirect_uris",
                     "grant_types", "scope", "token_endpoint_auth_method", "client_secret",
@@ -121,7 +128,9 @@ class FakeOAuthDB:
             for t in self.tokens:
                 if t["revoked_at"] is not None:
                     continue
-                if "family_id = $1 AND kind = 'access'" in sql:
+                if "user_id = $1 AND family_id = $2 AND client_id = $3" in sql:
+                    hit = (t["user_id"], t["family_id"], t["client_id"]) == tuple(args)
+                elif "family_id = $1 AND kind = 'access'" in sql:
                     hit = t["family_id"] == args[0] and t["kind"] == "access"
                 elif "family_id = $1" in sql:
                     hit = t["family_id"] == args[0]
@@ -135,6 +144,10 @@ class FakeOAuthDB:
                     t["revoked_at"] = self._now()
                     n += 1
             return f"UPDATE {n}"
+        if "INSERT INTO oauth_tokens" in sql:
+            assert "VALUES ($1, 'access'," in sql  # the local grant's literal kind
+            await self.executemany(sql, [(args[0], "access", *args[1:])])
+            return "INSERT 0 1"
         if "SET last_used_at" in sql:
             return "UPDATE 1"
         raise AssertionError(f"unexpected execute: {sql[:120]}")
@@ -405,6 +418,20 @@ async def test_grants_list_and_disconnect(client, db):
     assert await mcp_oauth.revoke_client_grants(USER_ID, reg["client_id"]) == 2
     assert await mcp_oauth.list_user_grants(USER_ID) == []
     assert await mcp_oauth.MatchaTokenVerifier().verify_token(tokens["access_token"]) is None
+
+
+@pytest.mark.asyncio
+async def test_local_codex_grant_verifies_but_is_not_a_listed_connection(db, monkeypatch):
+    from app.core.services import mcp_local_tokens
+
+    monkeypatch.setattr(mcp_local_tokens, "get_connection", lambda *a, **k: db)
+    grant = await mcp_local_tokens.issue_token(USER_ID)
+    verifier = mcp_oauth.MatchaTokenVerifier()
+    assert await verifier.verify_token(grant["access_token"]) is not None
+    # A run in flight is not "an assistant you connected".
+    assert await mcp_oauth.list_user_grants(USER_ID) == []
+    await mcp_local_tokens.revoke_token(USER_ID, grant["grant_id"])
+    assert await verifier.verify_token(grant["access_token"]) is None
 
 
 @pytest.mark.asyncio

@@ -57,6 +57,9 @@ final class CodexResearchCoordinator {
         await reset?.value
         try Task.checkCancellation()
         guard let userID else { throw CodexFailure(message: "Sign in to Matcha first.") }
+        // Account checks reuse an idle, token-less child. A research run
+        // always gets a fresh one: its bearer lives in the environment.
+        if token == nil, events != nil, await bridge.isServing(userID: userID) { return }
         let current = UUID(); connection = current
         events?.cancel()
         let stream = try await bridge.start(userID: userID, token: token)
@@ -151,6 +154,7 @@ final class CodexResearchCoordinator {
         publication = nil; terminal = nil; terminalFailure = nil; threadID = nil; turnID = nil
         operation = Task {
             var grant: MWLocalCodexToken?
+            var confirmed = false
             let sessionToken = APIClient.shared.accessToken
             let deadline = Task {
                 do { try await Task.sleep(nanoseconds: 25 * 60 * 1_000_000_000) } catch { return }
@@ -195,6 +199,7 @@ final class CodexResearchCoordinator {
                 guard cards.contains(where: { $0.id == selected && $0.boardColumn == "review" }), files.contains(where: { $0.filename == filename }) else {
                     throw CodexFailure(message: "Codex reported publication, but the refreshed card could not confirm it. Check its attachments.")
                 }
+                confirmed = true
                 if userID == owner { progress = "Report attached — ready for review." }
             } catch {
                 if userID == owner, !Task.isCancelled { progress = error.localizedDescription }
@@ -202,20 +207,65 @@ final class CodexResearchCoordinator {
             deadline.cancel()
             await bridge.stop()
             if let grant {
-                let cleanupToken = userID == owner ? APIClient.shared.accessToken : sessionToken
-                if let cleanupToken {
-                    // Logout/identity changes must not use the next user's JWT.
-                    var request = URLRequest(url: URL(string: APIClient.shared.baseURL + "/matcha-work/connectors/local-tokens/" + grant.grant_id)!)
-                    request.httpMethod = "DELETE"
-                    request.setValue("Bearer \(cleanupToken)", forHTTPHeaderField: "Authorization")
-                    request.timeoutInterval = 5
-                    // Cleanup must run even when the research task was cancelled.
-                    _ = await Task { try? await URLSession.shared.data(for: request) }.value
+                // An unstructured task: cleanup must run even when the research
+                // task itself was cancelled.
+                let release = !confirmed, sameUser = userID == owner
+                let released = await Task {
+                    await Self.finish(grant: grant, projectID: projectID, taskID: selected,
+                                      release: release, sameUser: sameUser, sessionToken: sessionToken)
+                }.value
+                if released, userID == owner {
+                    progress += " The card went back to the queue."
                 }
             }
             running = false; operation = nil; threadID = nil; turnID = nil
             if userID == owner { refreshTick += 1 }
         }
+    }
+
+    /// Hands back an unfinished claim (the server refuses unless this run's
+    /// claim is still the last thing that happened to the card) and revokes
+    /// the run grant. For the same Matcha user this goes through APIClient,
+    /// whose 401 path refreshes an access token that expired during a long run.
+    /// After an identity change the next user's JWT must never be used, so the
+    /// run's own token is sent once without refresh; if that fails the grant
+    /// still expires on its own. Returns whether the card went back.
+    private static func finish(grant: MWLocalCodexToken, projectID: String, taskID: String,
+                               release: Bool, sameUser: Bool, sessionToken: String?) async -> Bool {
+        let service = MatchaWorkService.shared
+        if sameUser {
+            var released = false
+            if release {
+                released = (try? await service.releaseLocalCodexResearch(
+                    grantId: grant.grant_id, projectId: projectID, taskId: taskID))?.released ?? false
+            }
+            try? await service.revokeLocalCodexToken(grantId: grant.grant_id)
+            return released
+        }
+        guard let sessionToken else { return false }
+        let path = service.basePath + "/connectors/local-tokens/" + grant.grant_id
+        var released = false
+        if release, let data = await sendOnce("POST", path: path + "/release", token: sessionToken,
+                                             body: ["project_id": projectID, "task_id": taskID]) {
+            released = (try? JSONDecoder().decode(MWLocalCodexRelease.self, from: data))?.released ?? false
+        }
+        _ = await sendOnce("DELETE", path: path, token: sessionToken)
+        return released
+    }
+
+    private static func sendOnce(_ method: String, path: String, token: String, body: [String: String]? = nil) async -> Data? {
+        guard let url = URL(string: APIClient.shared.baseURL + path) else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = 5
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONEncoder().encode(body)
+        }
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) else { return nil }
+        return data
     }
 
     private func awaitTurn() async throws -> CodexJSON {

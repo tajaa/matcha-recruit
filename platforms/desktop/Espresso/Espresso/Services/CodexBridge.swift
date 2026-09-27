@@ -3,16 +3,35 @@ import Foundation
 /// Owns one bundled child. It never reads Codex's credential files or inherits
 /// the terminal's environment/config. A new Matcha bearer requires a new child.
 actor CodexBridge {
+    /// The only notifications the coordinator acts on. Everything else (reasoning
+    /// and command-output deltas, token counts, …) is dropped here, so the event
+    /// stream carries a bounded trickle and never needs a lossy buffer.
+    static let forwardedMethods: Set<String> = [
+        "account/login/completed", "item/started", "item/completed", "turn/completed", CodexDeltaCoalescer.method,
+    ]
+    /// Streamed answer text arrives a few characters per message; the UI gets
+    /// it batched at most this often.
+    static let deltaInterval: UInt64 = 100_000_000
+
     private var process: Process?
+    private var launchedUser: String?
+    private var launchedWithToken = false
     private var stopping: Process?
     private var input: FileHandle?
     private var reader: Task<Void, Never>?
-    private var errors: Task<Void, Never>?
     private var framer = CodexLineFramer()
     private var generation = UUID()
     private var pending: [String: CheckedContinuation<CodexJSON, Error>] = [:]
     private var timeouts: [String: Task<Void, Never>] = [:]
     private var sink: AsyncStream<CodexJSON>.Continuation?
+    private var deltas = CodexDeltaCoalescer()
+    private var deltaFlush: Task<Void, Never>?
+
+    /// A running, token-less child for this user — reused for account checks
+    /// instead of paying another process launch and model-catalog refresh.
+    func isServing(userID: String) -> Bool {
+        process?.isRunning == true && launchedUser == userID && !launchedWithToken
+    }
 
     func start(userID: String, token: String? = nil) async throws -> AsyncStream<CodexJSON> {
         let previous = process ?? stopping
@@ -45,25 +64,24 @@ actor CodexBridge {
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
         child.standardInput = stdin; child.standardOutput = stdout; child.standardError = stderr
         let current = generation
-        let stream = AsyncStream<CodexJSON>(bufferingPolicy: .bufferingOldest(256)) { sink = $0 }
+        // Unbounded is safe: only `forwardedMethods` reach it and agent text
+        // is coalesced, so volume is a handful of events per second at most.
+        let stream = AsyncStream<CodexJSON>(bufferingPolicy: .unbounded) { sink = $0 }
         process = child; input = stdin.fileHandleForWriting
+        launchedUser = userID; launchedWithToken = token != nil
         do { try child.run() } catch { stop(); throw CodexFailure(message: "The bundled Codex process could not start.") }
-        // A single ordered reader: independent readabilityHandler tasks can
-        // reorder chunks or leave a pipe undrained during an actor suspension.
+        // Blocking pipe reads get their own threads, never the Swift
+        // concurrency pool. One ordered stream per pipe: independent
+        // readabilityHandler callbacks can reorder chunks.
+        let chunks = Self.drain(stdout.fileHandleForReading)
+        // Drain without persisting stderr: upstream diagnostics can contain
+        // URLs, account details, and tool arguments.
+        _ = Self.drain(stderr.fileHandleForReading, keep: false)
         reader = Task.detached { [weak self] in
-            while !Task.isCancelled {
-                let bytes = stdout.fileHandleForReading.availableData
-                if bytes.isEmpty { break }
+            for await bytes in chunks {
                 await self?.receive(bytes, generation: current)
             }
             await self?.ended(generation: current)
-        }
-        errors = Task.detached {
-            // Drain without persisting stderr: upstream diagnostics can contain
-            // URLs, account details, and tool arguments.
-            while !Task.isCancelled {
-                if stderr.fileHandleForReading.availableData.isEmpty { break }
-            }
         }
         do {
             _ = try await request("initialize", .object(["clientInfo": .object([
@@ -100,6 +118,24 @@ actor CodexBridge {
         try input.write(contentsOf: data)
     }
 
+    /// Reads `handle` to EOF on a dedicated thread, discarding the bytes unless
+    /// `keep`. The child's exit (or termination in `stop`) closes the pipe and
+    /// ends both the thread and the stream.
+    private nonisolated static func drain(_ handle: FileHandle, keep: Bool = true) -> AsyncStream<Data> {
+        let (chunks, sink) = AsyncStream<Data>.makeStream(bufferingPolicy: .unbounded)
+        let thread = Thread {
+            while true {
+                let bytes = handle.availableData
+                if bytes.isEmpty { break }
+                if keep { sink.yield(bytes) }
+            }
+            sink.finish()
+        }
+        thread.name = "espresso.codex.pipe"
+        thread.start()
+        return chunks
+    }
+
     private func receive(_ data: Data, generation current: UUID) {
         guard generation == current else { return }
         do {
@@ -110,8 +146,14 @@ actor CodexBridge {
                         // credential forwarding. Never approve server requests.
                         try send(.object(["id": message["id"], "error": .object([
                             "code": .number(-32601), "message": .string("Espresso does not support this request.")])]))
-                    } else if case .dropped = sink?.yield(message) {
-                        throw CodexFailure(message: "Codex progress overflowed. Check the card before retrying.")
+                    } else if let method = message["method"].string, Self.forwardedMethods.contains(method) {
+                        if method == CodexDeltaCoalescer.method { bufferDelta(message["params"], generation: current) }
+                        else {
+                            // Text streamed before an item completes must reach
+                            // the UI before that item's completion does.
+                            flushDeltas()
+                            sink?.yield(message)
+                        }
                     }
                 } else if let id = message["id"].string, let continuation = pending.removeValue(forKey: id) {
                     timeouts.removeValue(forKey: id)?.cancel()
@@ -122,6 +164,21 @@ actor CodexBridge {
                 }
             }
         } catch { stop(error: CodexFailure(message: "Codex sent invalid progress. Check the card before retrying.")) }
+    }
+
+    private func bufferDelta(_ params: CodexJSON, generation current: UUID) {
+        if let previous = deltas.append(params) { sink?.yield(previous) }
+        guard deltaFlush == nil else { return }
+        deltaFlush = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: Self.deltaInterval) } catch { return }
+            await self?.flushDeltas(generation: current)
+        }
+    }
+
+    private func flushDeltas(generation current: UUID? = nil) {
+        if let current, current != generation { return }
+        deltaFlush?.cancel(); deltaFlush = nil
+        if let batch = deltas.take() { sink?.yield(batch) }
     }
 
     private func fail(_ id: String, error: Error) {
@@ -148,8 +205,9 @@ actor CodexBridge {
                 if child.isRunning { kill(child.processIdentifier, SIGKILL) }
             }
         }
-        process = nil
-        reader?.cancel(); reader = nil; errors?.cancel(); errors = nil
+        process = nil; launchedUser = nil; launchedWithToken = false
+        reader?.cancel(); reader = nil
+        deltaFlush?.cancel(); deltaFlush = nil; deltas = CodexDeltaCoalescer()
         framer = CodexLineFramer()
     }
 

@@ -35,13 +35,23 @@ resource; this is separate from ChatGPT authentication. It has the user's
 research permissions, not a card-specific authorization scope. The run enables
 only get/claim/attach research tools and live web search. A successful attach
 result plus a refreshed card in Review with the named attachment is required
-before displaying success. Cancellation never rewinds the card. Publication is
-not retried automatically because attachment/note/card writes are not atomic.
+before displaying success. A cancelled or failed run asks Matcha to put the card
+back in its queue; the server only does so when the run's own claim is still
+the last thing that happened and no report was stored, so partial publication
+and teammates' edits are left alone. Publication is not retried automatically
+because attachment/note/card writes are not atomic.
 
-Every run attempts to revoke its grant on exit, including cancellation. Cleanup
-after an invalidated session or network failure may fail; the token expires
-without renewal. Password changes and connector disconnect revoke it through
-the existing grant machinery. No vendor token goes to Matcha's server.
+Every run attempts the release and grant revocation on exit, including
+cancellation, through the normal API client so an access token that expired
+during a long run is refreshed first. After a Matcha account switch the run's
+own session token is sent once instead (never the next user's); if that fails
+the grant expires on its own. Password changes revoke it through the existing
+grant machinery. No vendor token goes to Matcha's server.
+
+The bridge forwards only the notifications the coordinator uses and batches
+streamed answer text (at most 10 UI updates a second), so a burst of progress
+can't overflow its event stream and kill a run mid-publish. Pipe reads run on
+dedicated threads, and an idle signed-in child is reused for account checks.
 
 ## Validation and manual acceptance
 

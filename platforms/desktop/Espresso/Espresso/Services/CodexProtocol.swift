@@ -59,6 +59,30 @@ struct CodexLineFramer {
     }
 }
 
+/// Batches `item/agentMessage/delta` text so the UI sees one event per flush
+/// interval instead of one per few characters. A thread switch flushes first,
+/// so text is never attributed to the wrong thread.
+struct CodexDeltaCoalescer {
+    static let method = "item/agentMessage/delta"
+    private var text = ""
+    private var thread: CodexJSON = .null
+
+    /// The pending batch for the previous thread, when `params` starts another.
+    mutating func append(_ params: CodexJSON) -> CodexJSON? {
+        guard let delta = params["delta"].string else { return nil }
+        let flushed = params["threadId"] != thread ? take() : nil
+        thread = params["threadId"]
+        text += delta
+        return flushed
+    }
+
+    mutating func take() -> CodexJSON? {
+        guard !text.isEmpty else { return nil }
+        defer { text = "" }
+        return .object(["method": .string(Self.method), "params": .object(["threadId": thread, "delta": .string(text)])])
+    }
+}
+
 /// A completed turn alone is not publication evidence. MCP may have failed.
 enum CodexPublication {
     static func filename(item: CodexJSON, taskID: String) -> String? {
@@ -82,4 +106,9 @@ struct MWLocalCodexToken: Decodable {
     let expires_at: String
     let resource: String
     let grant_id: String
+}
+
+struct MWLocalCodexRelease: Decodable {
+    let released: Bool
+    let column: String?
 }

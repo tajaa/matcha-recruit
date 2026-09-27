@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
+from typing import Optional
 
 from app.core.services import mcp_oauth
 from app.database import get_connection
 
-CLIENT_ID = "espresso-local-codex"
+CLIENT_ID = mcp_oauth.LOCAL_CODEX_CLIENT_ID
 TOKEN_TTL = timedelta(minutes=30)
 
 
@@ -55,5 +56,16 @@ async def revoke_token(user_id: uuid.UUID, grant_id: uuid.UUID) -> None:
             """UPDATE oauth_tokens SET revoked_at = NOW()
                WHERE user_id = $1 AND family_id = $2 AND client_id = $3
                  AND revoked_at IS NULL""",
+            user_id, grant_id, CLIENT_ID,
+        )
+
+
+async def grant_issued_at(user_id: uuid.UUID, grant_id: uuid.UUID) -> Optional[datetime]:
+    """When the caller's own run grant was minted, revoked or not; None if the
+    grant is someone else's or never existed. Bounds which claim a run owns."""
+    async with get_connection() as conn:
+        return await conn.fetchval(
+            """SELECT MIN(created_at) FROM oauth_tokens
+               WHERE user_id = $1 AND family_id = $2 AND client_id = $3""",
             user_id, grant_id, CLIENT_ID,
         )

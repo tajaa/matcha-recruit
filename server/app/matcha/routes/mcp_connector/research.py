@@ -316,6 +316,85 @@ async def claim_research_card(current_user, *, task_id: str, client_name: str) -
     return {"claimed": True, "already_in_progress": False, "task_id": str(card["id"])}
 
 
+# ── release (Espresso's local Codex run ended without a report) ─────────────
+
+
+async def release_unfinished_claim(
+    current_user, *, project_id: UUID, task_id: UUID, since: datetime,
+) -> dict[str, Any]:
+    """Put a card this caller's run claimed back where it came from.
+
+    Only when nothing else happened to it: the latest column move is this
+    caller's claim (made after `since`, the run grant's issue time), nobody
+    else has touched the card since, and no research report was stored after
+    the claim — a partially published report is left for a person to judge.
+    Anything else is reported, not undone."""
+    from app.matcha.routes.matcha_work._shared import _can_edit_project
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+
+    card, project, role = await _authorized_card(current_user, task_id)
+    if card["project_id"] != project_id:
+        raise ConnectorError(_NOT_VISIBLE, 404)
+    if not _can_edit_project(role):
+        raise ConnectorError("You can view this board but not move its cards.", 403)
+    if card["board_column"] != "in_progress":
+        return {"released": False, "reason": "not_in_progress"}
+    async with get_connection() as conn:
+        claim = await conn.fetchrow(
+            """
+            SELECT created_at, from_value, to_value, actor_user_id
+              FROM mw_task_history
+             WHERE task_id = $1 AND event_type = 'column_change'
+             ORDER BY created_at DESC
+             LIMIT 1
+            """,
+            card["id"],
+        )
+        if (
+            not claim
+            or claim["to_value"] != "in_progress"
+            or claim["from_value"] not in _CLAIMABLE_COLUMNS
+            or claim["actor_user_id"] != current_user.id
+            or claim["created_at"] < since
+        ):
+            return {"released": False, "reason": "claim_not_owned"}
+        touched = await conn.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM mw_task_history
+                 WHERE task_id = $1 AND created_at > $2
+                   AND actor_user_id IS DISTINCT FROM $3
+            ) OR EXISTS (
+                SELECT 1 FROM mw_project_files
+                 WHERE task_id = $1 AND created_at >= $2
+                   AND filename LIKE 'research-report-%'
+            )
+            """,
+            card["id"], claim["created_at"], current_user.id,
+        )
+    if touched:
+        return {"released": False, "reason": "changed_since_claim"}
+    try:
+        await pt_svc.update_project_task(
+            card["project_id"],
+            card["id"],
+            {"board_column": claim["from_value"]},
+            actor_user_id=current_user.id,
+            project_title=project.get("title"),
+        )
+    except ValueError as exc:
+        raise ConnectorError(str(exc))
+    await pt_svc.log_task_activity(
+        project_id=card["project_id"],
+        task_id=card["id"],
+        actor_user_id=current_user.id,
+        kind="note",
+        body="Codex research stopped before a report was attached, so the card went back to the queue.",
+    )
+    logger.info("[mcp] local research released task=%s user=%s", card["id"], current_user.id)
+    return {"released": True, "column": claim["from_value"]}
+
+
 # ── attach ───────────────────────────────────────────────────────────────────
 
 

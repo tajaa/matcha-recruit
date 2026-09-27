@@ -377,8 +377,8 @@ extension TaskViewerSheet {
                         }
                         .buttonStyle(.plain)
                         .disabled(connectorLaunching != nil || !researchWithAssistantEligible || CodexResearchCoordinator.shared.running)
-                        .help(kind == "claude_code" || kind == "codex"
-                              ? "Copy a `\(kind == "codex" ? "codex" : "claude")` command that works this card from your terminal"
+                        .help(kind == "claude_code"
+                              ? "Copy a `claude` command that works this card from your terminal"
                               : "Open a prefilled chat that works this card on your own \(label) plan")
                     }
                 }
