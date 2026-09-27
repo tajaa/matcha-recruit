@@ -10,6 +10,8 @@ final class CodexProtocolTests: XCTestCase {
         let bridge = CodexBridge()
         // Fresh credential namespace: never read or modify a person's sign-in.
         let user = UUID().uuidString
+        // The namespace lives in the real app container; don't leave one per run.
+        defer { try? FileManager.default.removeItem(at: CodexBridge.home(for: user)) }
         do {
             _ = try await bridge.start(userID: user)
             let first = try await bridge.request("account/read")

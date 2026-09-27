@@ -27,6 +27,12 @@ actor CodexBridge {
     private var deltas = CodexDeltaCoalescer()
     private var deltaFlush: Task<Void, Never>?
 
+    /// Codex's own home for one Matcha user, inside the sandbox container.
+    /// Only the child reads or writes the credential file here.
+    nonisolated static func home(for userID: String) -> URL {
+        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support/EspressoCodex/\(userID)")
+    }
+
     /// A running, token-less child for this user — reused for account checks
     /// instead of paying another process launch and model-catalog refresh.
     func isServing(userID: String) -> Bool {
@@ -51,7 +57,7 @@ actor CodexBridge {
               FileManager.default.isExecutableFile(atPath: root.appendingPathComponent("codex-code-mode-host").path) else {
             throw CodexFailure(message: "This Espresso build does not include the Codex runtime.")
         }
-        let home = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support/EspressoCodex/\(userID)")
+        let home = Self.home(for: userID)
         let work = home.appendingPathComponent("work")
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let child = Process()
@@ -63,6 +69,18 @@ actor CodexBridge {
         if let token { child.environment?["MATCHA_MCP_TOKEN"] = token }
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
         child.standardInput = stdin; child.standardOutput = stdout; child.standardError = stderr
+        #if DEBUG
+        // Diagnostics for sandbox-only behaviour (e.g. the model-catalog
+        // refresh stall): `open -n --env ESPRESSO_CODEX_STDERR=<path in the
+        // container> Espresso.app`. Debug builds only — the log can hold URLs
+        // and account details, so release builds always discard stderr.
+        if let path = ProcessInfo.processInfo.environment["ESPRESSO_CODEX_STDERR"],
+           FileManager.default.createFile(atPath: path, contents: nil),
+           let log = FileHandle(forWritingAtPath: path) {
+            child.standardError = log
+            child.environment?["RUST_LOG"] = "info"
+        }
+        #endif
         let current = generation
         // Unbounded is safe: only `forwardedMethods` reach it and agent text
         // is coalesced, so volume is a handful of events per second at most.
@@ -76,7 +94,7 @@ actor CodexBridge {
         let chunks = Self.drain(stdout.fileHandleForReading)
         // Drain without persisting stderr: upstream diagnostics can contain
         // URLs, account details, and tool arguments.
-        _ = Self.drain(stderr.fileHandleForReading, keep: false)
+        if child.standardError as? Pipe === stderr { _ = Self.drain(stderr.fileHandleForReading, keep: false) }
         reader = Task.detached { [weak self] in
             for await bytes in chunks {
                 await self?.receive(bytes, generation: current)

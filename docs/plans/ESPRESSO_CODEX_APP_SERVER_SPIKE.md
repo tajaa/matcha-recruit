@@ -234,3 +234,45 @@ not add transactionality, task-scoped grants or cross-device research leases.
 Revocation is best effort on process/app/session shutdown, bounded by token expiry.
 The pre-existing model-catalog timeout has not been isolated. Keep the PR draft
 until these acceptance checks and review are complete.
+
+## Review follow-up — 2026-09-27
+
+Review fixes (`f57b8d1` and the commit after it): the bridge forwards only the
+events the coordinator handles and batches agent text, so a progress burst can
+no longer overflow the stream mid-publish; pipe reads moved to dedicated
+threads; an idle signed-in child is reused for account checks; cleanup refreshes
+an expired Matcha access token; a cancelled/failed run releases its own claim
+(`POST /connectors/local-tokens/{grant}/release`, only when the claim is still
+the latest change and no report was stored); local grants are hidden from the
+connections list; the real-child test removes its credential namespace. An
+opt-in `RUN_DB_TESTS` suite PREPAREs the connector SQL against a real schema.
+
+Acceptance checks run against local dev (disposable project "Codex acceptance
+(disposable)" on the `maria.chen@example.com` account, cards A/B/C):
+
+| Check | Result |
+|---|---|
+| Grant response headers | `Cache-Control: no-store`; resource `http://localhost:8001/api/mcp` |
+| Server tool inventory (`tools/list`) | list/get/claim/attach |
+| Codex tool inventory, research thread config | Exactly get/claim/attach (`enabled_tools` filters list); `runtimeStatus: connected`, `authStatus: bearerToken` |
+| Invalid bearer in Codex | `authenticationRequired`, zero tools |
+| Claim via MCP, then release | Card B back to `todo`; history `todo→in_progress→todo` plus both notes |
+| Release of an unclaimed card / repeat release | `released:false, reason:not_in_progress` |
+| Release with another user's grant id | 404 |
+| Revoke, then reuse bearer | 204, then HTTP 401 |
+| Local grant in connections list | Absent |
+| Server suite | 10,170 passed, 50 skipped, 9 xfailed; diff coverage 100% (107 lines) |
+| Native tests | 76 passed, including 9 Codex tests |
+
+Model-catalog stall: `timeout waiting for child process to exit` is the display
+text of Codex's generic timeout error (same enum as `RequestTimeout`), so the
+stall is most likely a timed-out catalog *request*, not a stuck subprocess.
+Signed out and outside the sandbox there is no stall (initialize 0.21 s,
+`model/list` 0.03 s). Debug builds can now log the child's stderr in the
+sandbox: `open -n --env ESPRESSO_CODEX_STDERR=<path inside the container>
+Espresso.app`.
+
+Still needs a person: a ChatGPT sign-in in the app (browser and device code),
+a real write run on card A, a cancel-after-claim on card B, the hostile-input
+card C, the in-sandbox stall log, and Developer ID/notarization/App Store (the
+signing certificate expired 2026-09-22).
