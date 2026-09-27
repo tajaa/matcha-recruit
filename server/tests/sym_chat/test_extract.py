@@ -1,12 +1,14 @@
 """Stance coercion + the flash-lite turn (services/sym_chat/extract.py).
 
-`next_turn` runs against a fake client patched on the DEFINING module, per
-server/CLAUDE.md.
+`next_turn` runs against an httpx.MockTransport behind `_http_client`, patched
+on the DEFINING module, per server/CLAUDE.md.
 """
 import asyncio
 import json
 from datetime import date
+from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from app.matcha.services.sym_chat import extract
@@ -72,24 +74,32 @@ def test_prompt_is_private_and_carries_the_window():
     assert "Quarterly sync" in prompt
 
 
-class _FakeResponse:
-    def __init__(self, text):
-        self.text = text
+def _responses_payload(obj) -> dict:
+    """A minimal OpenAI Responses body whose output text is `obj` (str or JSON-able)."""
+    text = obj if isinstance(obj, str) else json.dumps(obj)
+    return {"id": "resp_1", "output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}]}
 
 
-class _FakeModels:
-    def __init__(self, text=None, exc=None):
-        self.text, self.exc = text, exc
+@pytest.fixture
+def luna(monkeypatch):
+    """Route extract's Responses call to a handler; capture requests + usage records."""
+    seen = {"requests": [], "records": []}
+    state = {"handler": lambda request: httpx.Response(200, json=_responses_payload({"reply": "ok", "stance": {}}))}
 
-    async def generate_content(self, **kwargs):
-        if self.exc:
-            raise self.exc
-        return _FakeResponse(self.text)
+    def factory(timeout):
+        def handle(request):
+            seen["requests"].append(json.loads(request.content))
+            return state["handler"](request)
+        return httpx.AsyncClient(transport=httpx.MockTransport(handle), timeout=timeout)
 
+    async def record(**kwargs):
+        seen["records"].append(kwargs)
 
-class _FakeClient:
-    def __init__(self, models):
-        self.aio = type("Aio", (), {"models": models})()
+    monkeypatch.setattr(extract, "_http_client", factory)
+    monkeypatch.setattr(extract, "record_openai_response", record)
+    monkeypatch.setattr(extract, "get_settings", lambda: SimpleNamespace(openai_api_key="sk-test", openai_luna_model="gpt-5.6-luna"))
+    seen["set"] = lambda handler: state.__setitem__("handler", handler)
+    return seen
 
 
 def _turn(current=None):
@@ -98,31 +108,42 @@ def _turn(current=None):
     ))
 
 
-def test_next_turn_replaces_the_stance(monkeypatch):
-    payload = json.dumps({"reply": "Got it — 2 to 4.", "stance": {"available": [{"start": "14:00", "end": "16:00"}]}})
-    monkeypatch.setattr(extract, "genai_env_client", lambda: _FakeClient(_FakeModels(text=payload)))
+def test_next_turn_calls_luna_in_json_mode_and_replaces_the_stance(luna):
+    luna["set"](lambda r: httpx.Response(200, json=_responses_payload(
+        {"reply": "Got it — 2 to 4.", "stance": {"available": [{"start": "14:00", "end": "16:00"}]}})))
     out = _turn({"available": [{"start": "09:00", "end": "10:00"}], "unavailable": [], "preferred": []})
     assert out["error"] is False
     assert out["reply"] == "Got it — 2 to 4."
     # Re-derived, not merged: the old 09:00-10:00 window is gone.
     assert out["stance"]["available"] == [{"start": "14:00", "end": "16:00"}]
+    body = luna["requests"][0]
+    assert body["model"] == "gpt-5.6-luna"
+    assert body["text"] == {"format": {"type": "json_object"}}
+    assert body["reasoning"] == {"effort": extract.REASONING_EFFORT}
+    assert luna["records"][0]["response"]["id"] == "resp_1"
 
 
-@pytest.mark.parametrize("models", [
-    _FakeModels(exc=RuntimeError("boom")),
-    _FakeModels(text="not json"),
-    _FakeModels(text="[1, 2]"),
+@pytest.mark.parametrize("handler", [
+    lambda r: httpx.Response(401, json={"error": {"message": "bad key"}}),
+    lambda r: httpx.Response(200, json=_responses_payload("not json")),
+    lambda r: httpx.Response(200, json=_responses_payload("[1, 2]")),
 ])
-def test_next_turn_never_raises_and_keeps_the_current_stance(monkeypatch, models):
-    monkeypatch.setattr(extract, "genai_env_client", lambda: _FakeClient(models))
+def test_next_turn_never_raises_and_keeps_the_current_stance(luna, handler):
+    luna["set"](handler)
     current = {"available": [{"start": "09:00", "end": "10:00"}], "unavailable": [], "preferred": []}
     out = _turn(current)
     assert out["error"] is True
     assert out["reply"] == extract.FALLBACK_REPLY
     assert out["stance"] == current
+    assert luna["records"], "usage is recorded on failure too"
 
 
-def test_next_turn_defaults_an_empty_reply(monkeypatch):
-    payload = json.dumps({"reply": "  ", "stance": {}})
-    monkeypatch.setattr(extract, "genai_env_client", lambda: _FakeClient(_FakeModels(text=payload)))
+def test_next_turn_without_a_key_falls_back_without_calling(luna, monkeypatch):
+    monkeypatch.setattr(extract, "get_settings", lambda: SimpleNamespace(openai_api_key=None, openai_luna_model="gpt-5.6-luna"))
+    out = _turn()
+    assert out["error"] is True and luna["requests"] == []
+
+
+def test_next_turn_defaults_an_empty_reply(luna):
+    luna["set"](lambda r: httpx.Response(200, json=_responses_payload({"reply": "  ", "stance": {}})))
     assert _turn()["reply"] == "Got it."

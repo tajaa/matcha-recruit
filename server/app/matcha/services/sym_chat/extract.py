@@ -1,7 +1,9 @@
-"""The sym-chat tunnel turn — one bounded flash-lite call per participant message.
+"""The sym-chat tunnel turn — one bounded OpenAI Luna call per participant message.
 
-Same engine shape as `services/symlink/chat.py`: transcript in, structured
-state out, never raises, never persists. Two differences:
+Same engine shape as `services/symlink/chat.py` (transcript in, structured
+state out, never raises, never persists), but on Luna through the Responses
+API — the same direct-httpx pattern as `services/inventory/insight.py`, with
+usage recorded on every exit. Two differences from the symlink engine:
 
   * The stance is RE-DERIVED from the participant's whole transcript every
     turn (replace, not merge), so "actually 3pm no longer works" overrides the
@@ -14,22 +16,25 @@ to the kind's shape, the organizer's window, and the known option names.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
+import time
 from typing import Any
 
-from google.genai import types
+import httpx
 
-from app.core.services.model_catalog import GEMINI_FLASH_LITE
-from app.matcha.services._shared.gemini import genai_env_client
-from app.matcha.services.ir.ir_voice_parser import _VOICE_PARSE_SAFETY_SETTINGS
+from app.config import get_settings
+from app.core.services.ai_usage import feature_scope, record_openai_response
+from app.core.services.openai_responses import RESPONSES_URL, response_text
 
 from .kinds import clean_option, fmt_hhmm, parse_hhmm, stance_template
 
 logger = logging.getLogger(__name__)
 
-TURN_TIMEOUT = 20
+TURN_TIMEOUT = 30
+# A tunnel turn is a short read of one person's intent, not a hard reasoning
+# task — low effort keeps the reply fast enough for a chat.
+REASONING_EFFORT = "low"
 MAX_PROMPT_MESSAGES = 60
 MAX_WINDOWS = 20
 MAX_PREFERRED = 10
@@ -197,6 +202,11 @@ def build_prompt(
 for them. Only {participant_name} sees this conversation — never claim to have told anyone
 anything, never reveal or guess what other people said, and never say a decision has been
 made. Stay on this one task; ask at most ONE short question when their answer is unclear.
+A separate coordinator tracks the whole group and will follow up with them about the time or
+option everyone is converging on — so keep your reply to a brief acknowledgement of what they
+just said, and never propose a time or option yourself. If the last assistant message asked
+whether a specific time or option works and they said yes, add it to their stance; if they said
+no, record that.
 
 ORGANIZER'S OBJECTIVE: {goal}
 
@@ -209,11 +219,61 @@ CONVERSATION:
 {_render_transcript(transcript, participant_name)}
 
 Return ONLY valid JSON with exactly these keys:
-{{"reply": "<short acknowledgement or one clarifying question, under 50 words>", "stance": {{{schema}}}}}
+{{"reply": "<short acknowledgement or one clarifying question, under 50 words; write times like 3:00 PM, never 15:00>", "stance": {{{schema}}}}}
 Do not include markdown fences."""
 
 
 # ── the turn ───────────────────────────────────────────────────────────────
+
+
+def _http_client(timeout: float) -> httpx.AsyncClient:
+    """Seam for tests (an httpx.MockTransport client)."""
+    return httpx.AsyncClient(timeout=timeout)
+
+
+async def _record(model: str, started: float, **kwargs) -> None:
+    """Usage accounting must never fail a turn."""
+    try:
+        with feature_scope("sym_chat"):
+            await record_openai_response(
+                model=model, latency_ms=int((time.monotonic() - started) * 1000), **kwargs,
+            )
+    except Exception:
+        logger.warning("Sym-chat usage record failed", exc_info=True)
+
+
+async def _call_luna(prompt: str) -> dict:
+    """One Responses call in JSON mode → the parsed object. Raises on any failure."""
+    settings = get_settings()
+    if not settings.openai_api_key or not settings.openai_luna_model:
+        raise RuntimeError("OpenAI Luna is not configured (OPENAI_API_KEY)")
+    model = settings.openai_luna_model
+    started = time.monotonic()
+    try:
+        async with _http_client(TURN_TIMEOUT) as client:
+            response = await client.post(
+                RESPONSES_URL,
+                headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+                json={
+                    "model": model,
+                    "input": prompt,
+                    "reasoning": {"effort": REASONING_EFFORT},
+                    "text": {"format": {"type": "json_object"}},
+                },
+            )
+            response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        await _record(model, started, error=str(exc)[:500],
+                      status="timeout" if isinstance(exc, httpx.TimeoutException) else "error")
+        raise
+    await _record(model, started, response=payload if isinstance(payload, dict) else None)
+    if not isinstance(payload, dict):
+        raise ValueError("OpenAI Responses payload must be an object")
+    parsed = json.loads(response_text(payload).strip())
+    if not isinstance(parsed, dict):
+        raise ValueError("model returned non-object JSON")
+    return parsed
 
 
 async def next_turn(
@@ -225,25 +285,11 @@ async def next_turn(
     known_options: list[str],
     participant_name: str,
 ) -> dict:
-    """One bounded Gemini turn → {reply, stance, error}. Never raises; never persists."""
+    """One bounded Luna turn → {reply, stance, error}. Never raises; never persists."""
     kept = coerce_stance(kind, current_stance or {}, config, known_options)
     prompt = build_prompt(kind, objective, config, transcript, kept, known_options, participant_name)
     try:
-        client = genai_env_client()
-        gen_config = types.GenerateContentConfig(
-            temperature=0.2,
-            response_mime_type="application/json",
-            safety_settings=_VOICE_PARSE_SAFETY_SETTINGS,
-        )
-        response = await asyncio.wait_for(
-            client.aio.models.generate_content(
-                model=GEMINI_FLASH_LITE, contents=[prompt], config=gen_config,
-            ),
-            timeout=TURN_TIMEOUT,
-        )
-        payload = json.loads((getattr(response, "text", None) or "").strip())
-        if not isinstance(payload, dict):
-            raise ValueError("model returned non-object JSON")
+        payload = await _call_luna(prompt)
     except Exception as exc:
         logger.warning("Sym-chat turn failed: %s", exc)
         return {"reply": FALLBACK_REPLY, "stance": kept, "error": True}

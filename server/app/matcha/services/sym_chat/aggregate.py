@@ -7,7 +7,10 @@ in a stable order (the service passes join order), which is what makes
 schedule — enumerate candidate slots from window_start to window_end-duration
 in step_min steps. A participant covers a slot iff one of their `available`
 windows contains it and none of their `unavailable` windows overlaps it. The
-best slot is max coverage → most `preferred` hits → earliest. Consensus: every
+best slot is the one fewest people have explicitly ruled out (an
+`unavailable` overlap) → max coverage → most `preferred` hits → earliest.
+Ruled-out-first matters: a slot someone said they can't do can never reach
+consensus, so the coordinator should chase the slot that still can. Consensus: every
 participant responded and the best slot covers all of them.
 
 decide — options are the organizer's seeds plus every name any participant
@@ -54,6 +57,10 @@ def _schedule_shape(config: dict, stances: list[dict | None]) -> dict:
     while start + duration <= hi:
         end = start + duration
         count = sum(1 for s in responded if _covers(s, start, end))
+        blocked = sum(
+            1 for s in responded
+            if any(u_start < end and start < u_end for u_start, u_end in _spans(s.get("unavailable")))
+        )
         preferred = 0
         for s in responded:
             for p in s.get("preferred") or []:
@@ -61,12 +68,13 @@ def _schedule_shape(config: dict, stances: list[dict | None]) -> dict:
                 # A preference lands on the slot whose start it rounds down to.
                 if minutes is not None and start <= minutes < start + step:
                     preferred += 1
-        slots.append({"start": fmt_hhmm(start), "end": fmt_hhmm(end), "count": count, "preferred": preferred, "_m": start})
+        slots.append({"start": fmt_hhmm(start), "end": fmt_hhmm(end), "count": count, "preferred": preferred,
+                      "blocked": blocked, "_m": start})
         start += step
 
     ranked = sorted(
         (s for s in slots if s["count"] > 0),
-        key=lambda s: (-s["count"], -s["preferred"], s["_m"]),
+        key=lambda s: (s["blocked"], -s["count"], -s["preferred"], s["_m"]),
     )
     for s in slots:
         s.pop("_m")
@@ -166,3 +174,25 @@ def resolution_for(kind: str, config: dict, shape: dict) -> dict | None:
             "timezone": config.get("timezone"),
         }
     return {"kind": "decide", "choice": shape["leading"]["name"]}
+
+
+def fits_candidate(kind: str, stance: dict | None, shape: dict) -> bool:
+    """Does this participant's stance already include the group's candidate?"""
+    if not stance:
+        return False
+    if kind == "schedule":
+        best = shape.get("best")
+        if not best:
+            return False
+        return _covers(stance, parse_hhmm(best["start"]), parse_hhmm(best["end"]))
+    leading = shape.get("leading")
+    if not leading:
+        return False
+    key = leading["name"].casefold()
+    vetoed = {v.casefold() for v in stance.get("vetoes") or [] if isinstance(v, str)}
+    named = {
+        n.casefold()
+        for n in (stance.get("proposals") or []) + (stance.get("ok_with") or []) + [stance.get("top_pick")]
+        if isinstance(n, str) and n
+    }
+    return key in named and key not in vetoed

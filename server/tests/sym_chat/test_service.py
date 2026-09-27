@@ -33,7 +33,7 @@ def _turn_conn(*, locked_status="open", other_stance=AGREE):
         fetchrow={
             "SELECT id, kind, title": {
                 "id": CHAT, "kind": "decide", "title": "Team lunch", "objective": "",
-                "config": json.dumps(DECIDE_CFG), "status": "open",
+                "config": json.dumps(DECIDE_CFG), "status": "open", "created_by": OTHER,
             },
             "SELECT p.stance": {"stance": None, "name": "Dana"},
             "FOR UPDATE": {"status": locked_status, "shape": json.dumps(old_shape)},
@@ -41,14 +41,16 @@ def _turn_conn(*, locked_status="open", other_stance=AGREE):
         fetchval={
             "COUNT(*) FROM mw_sym_chat_messages": 0,
             "COALESCE(MAX(seq)": 3,
+            "INSERT INTO inbox_conversations": "conv-1",
         },
         fetch={
             "SELECT stance FROM mw_sym_chat_participants": [{"stance": None}, {"stance": json.dumps(other_stance)}],
             "SELECT role, content FROM mw_sym_chat_messages": [{"role": "user", "content": "Thai is fine"}],
-            "SELECT user_id, stance FROM mw_sym_chat_participants": [
-                {"user_id": ME, "stance": json.dumps(AGREE)},
-                {"user_id": OTHER, "stance": json.dumps(other_stance)},
+            "SELECT p.user_id, p.stance, COALESCE": [
+                {"user_id": ME, "stance": None, "name": "Dana"},
+                {"user_id": OTHER, "stance": json.dumps(other_stance), "name": "Lee"},
             ],
+            "DISTINCT ON (user_id)": [{"user_id": OTHER, "content": "earlier nudge"}],
         },
     )
 
@@ -90,18 +92,33 @@ def test_turn_that_reaches_consensus_resolves_once_and_invites_everyone(monkeypa
     resolution = json.loads(conn.args_for("status = 'resolved'")[2])
     assert resolution == {"kind": "decide", "choice": "Thai Palace"}
 
-    feed = conn.args_for("INSERT INTO mw_sym_chat_updates")
-    assert feed[1] == 3  # the seq the COALESCE(MAX(seq), 0) + 1 query returned
-    assert feed[2] == "All 2 agree on Thai Palace. Sending invites to everyone."
+    feed = [a[2] for k, s, a in conn.calls if k == "execute" and "INSERT INTO mw_sym_chat_updates" in s]
+    # My structured answer first (never my raw words), then the group line.
+    assert feed == ["Dana is in for Thai Palace.", "All 2 agree on Thai Palace. Sending invites to everyone."]
+
+    # The invite lands in the Matcha inbox: one group conversation, sent by the
+    # organizer (OTHER), with both participants and the settled outcome.
+    assert conn.args_for("INSERT INTO inbox_conversations")[:2] == ("Invite: Team lunch", OTHER)
+    members = [a[1] for k, s, a in conn.calls if "INSERT INTO inbox_participants" in s]
+    assert members == [OTHER, ME]
+    inbox_msg = conn.args_for("INSERT INTO inbox_messages")
+    assert inbox_msg[1] == OTHER and "Decision: **Thai Palace**" in inbox_msg[2]
 
     invites = [n for n in sent["notify"] if n["type"] == "sym_chat_resolved"]
     assert sorted(n["user_id"] for n in invites) == sorted([ME, OTHER])
     assert all(n["send_email"] for n in invites)
     assert sent["push"] == [([ME, OTHER], {"type": "sym_chat.updated", "sym_chat_id": str(CHAT), "status": "resolved"})]
 
-    # The user message was stored before the model call, the reply after.
+    # My message before the model call; then my reply; then "it's confirmed"
+    # into BOTH tunnels.
     inserts = [a for k, s, a in conn.calls if k == "execute" and "INSERT INTO mw_sym_chat_messages" in s]
-    assert [a[-1] for a in inserts] == ["Thai is fine", "Noted — Thai works for you."]
+    confirmed = "It's confirmed: Thai Palace. Everyone's in — invites are on the way, nothing else to do."
+    assert [(a[1], a[-1]) for a in inserts] == [
+        (ME, "Thai is fine"),
+        (ME, "Noted — Thai works for you."),
+        (ME, confirmed),
+        (OTHER, confirmed),
+    ]
 
 
 def test_turn_after_a_concurrent_resolve_never_invites_twice(monkeypatch, sent):
@@ -123,6 +140,44 @@ def test_progress_turn_posts_a_feed_line_without_resolving(monkeypatch, sent):
     assert not any("status = 'resolved'" in s for s in conn.sql_for("execute"))
     assert sent["notify"] == []
     assert len(sent["push"]) == 1
+    # Lee vetoed Thai, so vetoless Burger Barn leads. It doesn't fit me (I only
+    # said Thai), so after my reply the coordinator asks me about it; Lee
+    # already fits and hears nothing.
+    tunnel = [(a[1], a[-1]) for k, s, a in conn.calls if k == "execute" and "'assistant'" in s]
+    assert tunnel == [
+        (ME, "Noted — Thai works for you."),
+        (ME, "The best option so far is Burger Barn — 1 of 2 can make it. Could you make Burger Barn work?"),
+    ]
+
+
+def test_coordinator_nudges_only_people_the_candidate_does_not_fit_and_never_repeats():
+    from app.matcha.services.sym_chat import aggregate
+
+    cfg = {"date": "2030-01-15", "window_start": "13:00", "window_end": "18:00", "duration_min": 30,
+           "step_min": 15, "timezone": "America/Los_Angeles"}
+    a, b, c = uuid4(), uuid4(), uuid4()
+    fits = {"available": [{"start": "16:00", "end": "17:00"}], "unavailable": [], "preferred": []}
+    no = {"available": [{"start": "13:00", "end": "14:00"}], "unavailable": [], "preferred": []}
+    stances = {a: fits, b: fits, c: no}
+    shape = aggregate.compute_shape("schedule", cfg, [{"stance": s} for s in stances.values()])
+    assert shape["best"]["start"] == "16:00"
+
+    out = service.coordinator_messages("schedule", shape, None, stances, {})
+    assert list(out) == [c]
+    assert out[c] == "The best option so far is 4:00 PM on Tue, Jan 15 — 2 of 3 can make it. Could you make 4:00 PM work?"
+    # Same candidate, same text already in c's tunnel → no re-nag.
+    assert service.coordinator_messages("schedule", shape, None, stances, {c: out[c]}) == {}
+    # Same candidate at a different headcount → still no re-nag.
+    earlier = "The group is looking at 4:00 PM on Tue, Jan 15 (1 of 3 so far). Does that work for you? If not, tell me what does."
+    assert service.coordinator_messages("schedule", shape, None, stances, {c: earlier}) == {}
+    # A different candidate DOES re-ask.
+    other = "The group is looking at 3:00 PM on Tue, Jan 15 (1 of 3 so far). Does that work for you? If not, tell me what does."
+    assert list(service.coordinator_messages("schedule", shape, None, stances, {c: other})) == [c]
+
+    silent = {a: fits, b: None}
+    shape2 = aggregate.compute_shape("schedule", cfg, [{"stance": s} for s in silent.values()])
+    out2 = service.coordinator_messages("schedule", shape2, None, silent, {})
+    assert out2 == {b: "The group is looking at 4:00 PM on Tue, Jan 15 (1 of 2 so far). Does that work for you? If not, tell me what does."}
 
 
 def test_closed_chat_and_non_member_are_refused_before_the_model(monkeypatch, sent):
@@ -231,3 +286,23 @@ def test_detail_never_exposes_other_participants_stances_or_tunnels(monkeypatch)
     assert set(detail["participants"][0]) == {"user_id", "name", "responded", "is_organizer", "is_me"}
     # Tunnel query is scoped to the caller.
     assert conn.args_for("FROM mw_sym_chat_messages") == (CHAT, ME)
+
+
+def test_first_nudge_is_not_suppressed_by_the_kickoff_listing_the_option():
+    from app.matcha.services.sym_chat import aggregate, narrate
+
+    cfg = {"options": ["Thai Palace", "Sushi Go"]}
+    maria, jordan = uuid4(), uuid4()
+    stances = {maria: {"proposals": [], "ok_with": ["Thai Palace"], "vetoes": [], "top_pick": "Thai Palace"}, jordan: None}
+    shape = aggregate.compute_shape("decide", cfg, [{"stance": s} for s in stances.values()])
+    kickoff = narrate.kickoff_text("decide", cfg, "Maria")
+    out = service.coordinator_messages("decide", shape, None, stances, {maria: kickoff, jordan: kickoff})
+    assert list(out) == [jordan]
+    assert out[jordan].startswith("The group is looking at Thai Palace (1 of 2 so far).")
+
+
+def test_tunnel_messages_get_per_statement_timestamps():
+    import inspect
+
+    src = inspect.getsource(service._insert_assistant)
+    assert "clock_timestamp()" in src

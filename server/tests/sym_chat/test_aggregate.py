@@ -125,3 +125,16 @@ def test_decide_everything_vetoed_has_no_leader():
         _p(_d(ok_with=["Burger Barn"], vetoes=["Thai Palace"])),
     ])
     assert shape["leading"] is None and not shape["consensus"]
+
+
+def test_schedule_prefers_the_slot_nobody_ruled_out_over_an_earlier_tie():
+    """3:00 and 4:00 both fit two people, but Priya said she can't do 3:00 —
+    so 4:00 is the one that can still reach consensus and becomes the candidate."""
+    shape = aggregate.compute_shape("schedule", SCHED, [
+        _p(_avail(("15:00", "18:00"))),                                        # Maria: 3pm or later
+        _p(_avail(("15:00", "15:30"))),                                        # Jordan: 3pm
+        _p(_avail(("16:00", "18:00"), unavailable=[("15:00", "15:30")])),      # Priya: not 3, 4 works
+    ])
+    assert shape["best"]["start"] == "16:00"
+    assert shape["best"]["count"] == 2 and shape["best"]["blocked"] == 0
+    assert not aggregate.fits_candidate("schedule", _avail(("15:00", "15:30")), shape)  # Jordan gets asked

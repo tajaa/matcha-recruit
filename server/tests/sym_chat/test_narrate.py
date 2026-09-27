@@ -53,7 +53,7 @@ def _dec(responded, leading=None, total=3, consensus=False):
 def test_decide_lines():
     lead = {"name": "Thai Palace", "ok": 2, "top": 1, "vetoes": 0}
     assert narrate.describe_change("decide", _dec(1), _dec(2, lead)) == (
-        "So far Thai Palace is leading — 2 of 3 are in (2/3 responded)."
+        "So far Thai Palace is leading — 2 of 3 in (2/3 responded)."
     )
     assert narrate.describe_change("decide", _dec(2, lead), _dec(3, {**lead, "ok": 3}, consensus=True)) == (
         "All 3 agree on Thai Palace. Sending invites to everyone."
@@ -61,3 +61,46 @@ def test_decide_lines():
     assert narrate.describe_change("decide", _dec(1), _dec(2)) == (
         "Nothing without a veto yet (2/3 responded)."
     )
+
+
+def test_describe_stance_schedule_lines():
+    assert narrate.describe_stance("schedule", "Jordan", {
+        "available": [{"start": "15:00", "end": "17:00"}], "unavailable": [], "preferred": [],
+    }) == "Jordan can do 3:00 PM–5:00 PM."
+    assert narrate.describe_stance("schedule", "Priya", {
+        "available": [{"start": "16:00", "end": "18:00"}],
+        "unavailable": [{"start": "15:00", "end": "15:30"}],
+        "preferred": ["16:00"],
+    }) == "Priya can't do 3:00 PM–3:30 PM. They can do 4:00 PM–6:00 PM. Prefers 4:00 PM."
+    assert narrate.describe_stance("schedule", "Sam", {"available": [], "unavailable": [], "preferred": []}) is None
+
+
+def test_describe_stance_decide_lines():
+    assert narrate.describe_stance("decide", "Lee", {
+        "proposals": ["Sushi Go"], "ok_with": ["Thai Palace"], "vetoes": ["Burger Barn"], "top_pick": "Sushi Go",
+    }) == "Lee is in for Sushi Go and Thai Palace. Top pick: Sushi Go. They won't do Burger Barn."
+
+
+def test_kickoff_and_confirmed_text():
+    cfg = {"date": "2026-09-29", "window_start": "13:00", "window_end": "18:00", "duration_min": 30,
+           "timezone": "America/Los_Angeles"}
+    assert narrate.kickoff_text("schedule", cfg, "Maria", "Q4 sync") == (
+        "Hi! Maria is finding a 30-minute slot on Tue, Sep 29 between 1:00 PM and 6:00 PM "
+        "(America/Los_Angeles) (Q4 sync). When are you free? Just tell me in your own words — "
+        "I'll handle the back-and-forth."
+    )
+    res = {"kind": "schedule", "date": "2026-09-29", "start": "16:00", "end": "16:30", "timezone": "America/Los_Angeles"}
+    assert narrate.confirmed_text(res) == (
+        "It's confirmed: 4:00 PM–4:30 PM on Tue, Sep 29 (America/Los_Angeles). "
+        "Everyone's in — invites are on the way, nothing else to do."
+    )
+
+
+def test_is_nudge_about_matches_nudges_not_the_kickoff_option_list():
+    kickoff = narrate.kickoff_text("decide", {"options": ["Thai Palace", "Sushi Go"]}, "Maria")
+    assert not narrate.is_nudge_about(kickoff, "Thai Palace")
+    shape = {"kind": "decide", "total": 3, "leading": {"name": "Thai Palace", "ok": 1, "top": 1, "vetoes": 0}}
+    silent = narrate.nudge_text("decide", shape, responded=False)
+    asked = narrate.nudge_text("decide", shape, responded=True)
+    assert narrate.is_nudge_about(silent, "Thai Palace") and narrate.is_nudge_about(asked, "Thai Palace")
+    assert not narrate.is_nudge_about(silent, "Sushi Go")

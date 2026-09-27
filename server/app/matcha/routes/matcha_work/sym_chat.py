@@ -22,7 +22,7 @@ from app.matcha.services.sym_chat.kinds import KINDS
 
 router = APIRouter(prefix="/sym-chats", dependencies=[Depends(require_feature("sym_chat"))])
 
-# (limit, window seconds). Turns are the Gemini spend; creates send emails.
+# (limit, window seconds). Turns are the Luna spend; creates send emails.
 TURN_LIMIT_PER_CHAT = (200, 3600)
 TURN_LIMIT_PER_COMPANY = (1000, 3600)
 CREATE_LIMIT_PER_USER = (30, 3600)

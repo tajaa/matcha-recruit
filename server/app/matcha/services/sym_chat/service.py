@@ -1,15 +1,19 @@
 """Sym-chat persistence + the turn orchestration.
 
 `run_turn` is the one write path that involves the model, and it never holds a
-pooled connection across the Gemini call:
+pooled connection across the model call:
 
   1. short read/insert: load the chat, my membership, my transcript and the
      known options; store my message; release the connection.
-  2. `extract.next_turn` (up to 20 s, never raises).
+  2. `extract.next_turn` — one Luna call (up to 30 s, never raises).
   3. one transaction: `SELECT … FOR UPDATE` the chat row, store my new stance,
-     recompute the shape from every participant's stance, append a feed line
-     when `narrate.describe_change` says the change is material, flip to
-     `resolved` on consensus, store the assistant reply.
+     recompute the shape from every participant's stance, append my
+     per-person feed line (when my stance changed) and the group line (when
+     `narrate.describe_change` says the change is material), flip to
+     `resolved` on consensus, store the assistant reply, then post the
+     coordinator's message into every tunnel that needs one: "could you make
+     the candidate work?" to anyone it doesn't fit yet, or "it's confirmed"
+     to everyone on consensus. Nobody coordinates with anybody else.
   4. after commit: invites (only when THIS turn resolved — the row lock plus
      the `status='open'` check make that happen exactly once) and a
      `sym_chat.updated` WS nudge to every participant.
@@ -20,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
 from app.database import decode_jsonb, get_connection
@@ -205,6 +210,47 @@ async def _insert_update(conn, chat_id: UUID, content: str, shape: dict) -> int:
     return seq
 
 
+async def _insert_assistant(conn, chat_id: UUID, user_id: UUID, content: str) -> None:
+    # clock_timestamp(), not the NOW() default: NOW() is the TRANSACTION start,
+    # so a reply and the coordinator message written after it in the same
+    # transaction would tie and the tunnel would order them by random uuid.
+    await conn.execute(
+        """
+        INSERT INTO mw_sym_chat_messages (sym_chat_id, user_id, role, content, created_at)
+        VALUES ($1, $2, 'assistant', $3, clock_timestamp())
+        """,
+        chat_id, user_id, content,
+    )
+
+
+def coordinator_messages(kind: str, shape: dict, resolution: dict | None,
+                         stances: dict, last_assistant: dict) -> dict:
+    """user_id → the coordinator message their tunnel should get now.
+
+    On consensus everyone hears it's confirmed. Otherwise anyone the current
+    candidate doesn't fit yet is asked about it (responders: "could you make
+    it?"; silent people: "does it work?"). Someone whose last assistant
+    message already asked about this same candidate is skipped — only a new
+    candidate re-asks, not a headcount tick."""
+    out: dict = {}
+    candidate = narrate.candidate_text(kind, shape)
+    for user_id, stance in stances.items():
+        last = last_assistant.get(user_id) or ""
+        if resolution:
+            text = narrate.confirmed_text(resolution)
+            if last == text:
+                continue
+        elif aggregate.fits_candidate(kind, stance, shape):
+            continue
+        else:
+            text = narrate.nudge_text(kind, shape, responded=extract.stance_has_content(kind, stance))
+            if narrate.is_nudge_about(last, candidate):
+                continue
+        if text:
+            out[user_id] = text
+    return out
+
+
 async def create_sym_chat(
     *,
     company_id: UUID,
@@ -269,6 +315,9 @@ async def create_sym_chat(
                 f"{organizer_name or 'The organizer'} started this. {narrate.describe_shape(kind, shape)}",
                 shape,
             )
+            kickoff = narrate.kickoff_text(kind, config, organizer_name or "The organizer", objective)
+            for member in members:
+                await _insert_assistant(conn, chat_id, member, kickoff)
 
     for member in others:
         try:
@@ -316,20 +365,62 @@ async def cancel(chat_id: UUID, company_id: UUID, user_id: UUID) -> dict:
     return await get_detail(chat_id, company_id, user_id)
 
 
-def _resolution_text(resolution: dict) -> str:
-    if resolution.get("kind") == "schedule":
-        return (
-            f"{narrate.fmt_time(resolution['start'])}–{narrate.fmt_time(resolution['end'])} "
-            f"on {narrate.fmt_date(resolution.get('date'))} ({resolution.get('timezone')})"
+def inbox_invite_text(title: str, resolution: dict, chat_id: UUID | str) -> str:
+    outcome = narrate.outcome_text(resolution)
+    what = "Meeting" if resolution.get("kind") == "schedule" else "Decision"
+    return (
+        f"**Invite: {title}**\n\n{what}: **{outcome}**\n\n"
+        f"Everyone agreed in sym-chat — nothing else to do. [Open the sym-chat]({chat_link(chat_id)})"
+    )
+
+
+async def post_inbox_invite(
+    conn, *, chat_id: UUID, title: str, organizer_id: UUID, member_ids: list[UUID], resolution: dict,
+) -> UUID:
+    """One group inbox conversation holding the invite, sent as the organizer.
+
+    Same direct-insert shape as the project-invite inbox message
+    (project_service/collaborators.py). The organizer is the sender, so their
+    own copy starts read; everyone else sees it unread in /work/inbox."""
+    content = inbox_invite_text(title, resolution, chat_id)
+    async with conn.transaction():
+        conv_id = await conn.fetchval(
+            """
+            INSERT INTO inbox_conversations (title, is_group, created_by, last_message_at, last_message_preview)
+            VALUES ($1, true, $2, NOW(), $3)
+            RETURNING id
+            """,
+            f"Invite: {title}"[:255], organizer_id,
+            f"Invite: {title} — {narrate.outcome_text(resolution)}"[:100],
         )
-    return str(resolution.get("choice"))
+        for member in dict.fromkeys([organizer_id, *member_ids]):
+            await conn.execute(
+                "INSERT INTO inbox_participants (conversation_id, user_id, last_read_at) VALUES ($1, $2, $3)",
+                conv_id, member, datetime.now(timezone.utc) if member == organizer_id else None,
+            )
+        await conn.execute(
+            "INSERT INTO inbox_messages (conversation_id, sender_id, content) VALUES ($1, $2, $3)",
+            conv_id, organizer_id, content,
+        )
+    return conv_id
 
 
 async def send_invites(
     *, chat_id: UUID, company_id: UUID, title: str, resolution: dict, member_ids: list[UUID],
+    organizer_id: UUID | None = None,
 ) -> None:
-    """Bell + email to every participant. Per-recipient best effort."""
-    outcome = _resolution_text(resolution)
+    """The invite, three ways, each best effort: a group message in the Matcha
+    inbox (from the organizer), plus a bell notification + email per person."""
+    if organizer_id:
+        try:
+            async with get_connection() as conn:
+                await post_inbox_invite(
+                    conn, chat_id=chat_id, title=title, organizer_id=organizer_id,
+                    member_ids=member_ids, resolution=resolution,
+                )
+        except Exception:
+            logger.warning("sym-chat inbox invite failed for %s", chat_id, exc_info=True)
+    outcome = narrate.outcome_text(resolution)
     for member in member_ids:
         try:
             await notification_service.create_notification(
@@ -355,7 +446,7 @@ async def run_turn(chat_id: UUID, company_id: UUID, user_id: UUID, content: str)
     # 1 — load + store my message; no connection is held past this block.
     async with get_connection() as conn:
         chat = await conn.fetchrow(
-            "SELECT id, kind, title, objective, config, status FROM mw_sym_chats WHERE id = $1 AND company_id = $2",
+            "SELECT id, kind, title, objective, config, status, created_by FROM mw_sym_chats WHERE id = $1 AND company_id = $2",
             chat_id, company_id,
         )
         me = await conn.fetchrow(
@@ -417,6 +508,7 @@ async def run_turn(chat_id: UUID, company_id: UUID, user_id: UUID, content: str)
     resolved_now = False
     changed = False
     resolution = None
+    nudges: dict = {}
     async with get_connection() as conn:
         async with conn.transaction():
             locked = await conn.fetchrow(
@@ -426,6 +518,17 @@ async def run_turn(chat_id: UUID, company_id: UUID, user_id: UUID, content: str)
             status = locked["status"]
             shape = decode_jsonb(locked["shape"], {}) or {}
             if status == "open":
+                before = await conn.fetch(
+                    f"""
+                    SELECT p.user_id, p.stance, {_NAME_SQL} AS name
+                      FROM mw_sym_chat_participants p
+                      JOIN users u ON u.id = p.user_id
+                      LEFT JOIN clients c ON c.user_id = p.user_id
+                     WHERE p.sym_chat_id = $1
+                     ORDER BY p.created_at, p.id
+                    """,
+                    chat_id,
+                )
                 await conn.execute(
                     """
                     UPDATE mw_sym_chat_participants
@@ -435,18 +538,25 @@ async def run_turn(chat_id: UUID, company_id: UUID, user_id: UUID, content: str)
                     """,
                     chat_id, user_id, json.dumps(stance), has_content,
                 )
-                rows = await conn.fetch(
-                    "SELECT user_id, stance FROM mw_sym_chat_participants WHERE sym_chat_id = $1 ORDER BY created_at, id",
-                    chat_id,
-                )
-                member_ids = [r["user_id"] for r in rows]
-                new_shape = aggregate.compute_shape(
-                    kind, config, [{"stance": decode_jsonb(r["stance"])} for r in rows],
-                )
+                member_ids = [r["user_id"] for r in before]
+                stances = {
+                    r["user_id"]: (stance if r["user_id"] == user_id else decode_jsonb(r["stance"]))
+                    for r in before
+                }
+                old_mine = next((decode_jsonb(r["stance"]) for r in before if r["user_id"] == user_id), None)
+                new_shape = aggregate.compute_shape(kind, config, [{"stance": stances[m]} for m in member_ids])
+
+                # Shared feed: my structured answer (never my words), then the group line.
+                if has_content and stance != old_mine:
+                    person = narrate.describe_stance(kind, me["name"] or "Someone", stance)
+                    if person:
+                        await _insert_update(conn, chat_id, person, new_shape)
+                        changed = True
                 line = narrate.describe_change(kind, shape, new_shape)
                 if line:
                     await _insert_update(conn, chat_id, line, new_shape)
                     changed = True
+
                 resolution = aggregate.resolution_for(kind, config, new_shape)
                 if resolution:
                     await conn.execute(
@@ -466,16 +576,32 @@ async def run_turn(chat_id: UUID, company_id: UUID, user_id: UUID, content: str)
                         chat_id, json.dumps(new_shape),
                     )
                 shape = new_shape
-            await conn.execute(
-                "INSERT INTO mw_sym_chat_messages (sym_chat_id, user_id, role, content) VALUES ($1, $2, 'assistant', $3)",
-                chat_id, user_id, turn["reply"],
-            )
+
+                last_assistant = {
+                    r["user_id"]: r["content"]
+                    for r in await conn.fetch(
+                        """
+                        SELECT DISTINCT ON (user_id) user_id, content
+                          FROM mw_sym_chat_messages
+                         WHERE sym_chat_id = $1 AND role = 'assistant'
+                         ORDER BY user_id, created_at DESC, id DESC
+                        """,
+                        chat_id,
+                    )
+                }
+                nudges = coordinator_messages(kind, new_shape, resolution, stances, last_assistant)
+            await _insert_assistant(conn, chat_id, user_id, turn["reply"])
+            # Coordinator messages land after my reply, so in my own tunnel the
+            # acknowledgement comes first and the follow-up question second.
+            for member, text in nudges.items():
+                await _insert_assistant(conn, chat_id, member, text)
+                changed = True
 
     # 4 — side effects after commit.
     if resolved_now:
         await send_invites(
             chat_id=chat_id, company_id=company_id, title=chat["title"],
-            resolution=resolution, member_ids=member_ids,
+            resolution=resolution, member_ids=member_ids, organizer_id=chat["created_by"],
         )
     if changed:
         await notification_service.push_to_users(
