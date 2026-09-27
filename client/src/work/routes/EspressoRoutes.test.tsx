@@ -5,10 +5,15 @@ import App from '../../App'
 import { WorkSurfaceProvider, useWorkBase } from './WorkSurfaceContext'
 import { api } from '../../api/client'
 
-const identity = vi.hoisted(() => ({ personal: true }))
+const identity = vi.hoisted(() => ({ personal: true, features: [] as string[] }))
 
 vi.mock('../../hooks/useMe', () => ({
-  useMe: () => ({ isPersonal: identity.personal, loading: false, hasFeature: () => false }),
+  useMe: () => ({
+    isPersonal: identity.personal,
+    loading: false,
+    hasFeature: (f: string) => identity.features.includes(f),
+    refresh: () => Promise.resolve(),
+  }),
 }))
 vi.mock('../hooks/usePresenceHeartbeat', () => ({ usePresenceHeartbeat: () => {} }))
 vi.mock('../hooks/useChannelNotifications', () => ({ useChannelNotifications: () => {} }))
@@ -28,6 +33,8 @@ vi.mock('../pages/Inbox', () => ({ default: () => <output data-testid="inbox">In
 vi.mock('../pages/ProjectView', () => ({ default: () => <output data-testid="project">Project view</output> }))
 vi.mock('../pages/Journals', () => ({ default: () => <output data-testid="journals">Journals view</output> }))
 vi.mock('../pages/Productivity', () => ({ default: () => <output data-testid="productivity">Productivity view</output> }))
+vi.mock('../pages/SymChat/SymChatList', () => ({ default: () => <output data-testid="sym-chat-list">Sym-chats</output> }))
+vi.mock('../pages/SymChat/SymChatDetail', () => ({ default: () => <output data-testid="sym-chat-detail">Sym-chat</output> }))
 
 function LocationMarker() {
   const { pathname, search } = useLocation()
@@ -45,6 +52,7 @@ function renderAt(path: string) {
 
 beforeEach(() => {
   identity.personal = true
+  identity.features = []
   localStorage.clear()
 })
 
@@ -77,6 +85,20 @@ describe('Espresso routes', () => {
     renderAt('/espresso/inbox?filter=unread')
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/work/inbox?filter=unread'))
     expect(screen.getByTestId('inbox')).toBeInTheDocument()
+  })
+
+  it('routes business sym-chat pages before the thread catch-all', async () => {
+    identity.personal = false
+    identity.features = ['sym_chat']
+    renderAt('/work/sym-chat')
+    expect(await screen.findByTestId('sym-chat-list')).toBeInTheDocument()
+  })
+
+  it('routes a sym-chat detail before the thread catch-all', async () => {
+    identity.personal = false
+    identity.features = ['sym_chat']
+    renderAt('/work/sym-chat/abc')
+    expect(await screen.findByTestId('sym-chat-detail')).toBeInTheDocument()
   })
 
   it('bounces personal users from /work and preserves the project path', async () => {

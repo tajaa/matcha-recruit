@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare, Star } from 'lucide-react'
+import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare, Star, MessagesSquare } from 'lucide-react'
 import { logoutSession } from '../../../api/client'
 import type { ChannelSummary } from '../../api/channels'
 import { createProjectNew, createThread, archiveThread, notifyThreadsChanged } from '../../api/matchaWork'
@@ -49,6 +49,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const showEvents = surface !== 'matcha-work' && canReviewEvents(opsAccess) && hasFeature('ems')
   const showInventory = surface !== 'matcha-work' && canReviewEvents(opsAccess) && hasFeature('inventory')
   const showAssets = canReviewEvents(me?.work_access) && hasFeature('huume')
+  const showSymChat = surface === 'matcha-work' && !isPersonal && hasFeature('sym_chat')
 
   const {
     channels, setChannels,
@@ -218,6 +219,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         showInventory={showInventory}
         showWaste={showInventory && hasFeature('inventory_waste')}
         showChannels={showChannels}
+        showSymChat={showSymChat}
         loggedEventsCount={loggedEventsCount}
       />
     )
@@ -253,6 +255,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
           <SidebarNavButton icon={NotebookPen} label="Journals" active={location.pathname.startsWith(`${base}/journals`)} onClick={() => navigate(`${base}/journals`)} />
           <SidebarNavButton icon={CheckSquare} label="To-dos" active={location.pathname.startsWith(`${base}/productivity`)} onClick={() => navigate(`${base}/productivity`)} />
+          {showSymChat && <SidebarNavButton icon={MessagesSquare} label="Sym-chats" active={location.pathname.startsWith(`${base}/sym-chat`)} onClick={() => navigate(`${base}/sym-chat`)} />}
 
           {/* Events (HR admin review of @huume-logged events) */}
           {showEvents && (

@@ -214,3 +214,30 @@ describe('ChannelSocket outbox', () => {
     expect(latest().frames().some((f) => f.client_message_id === 'cmid-logout')).toBe(false)
   })
 })
+
+describe('ChannelSocket sym-chat events', () => {
+  beforeEach(() => {
+    FakeWebSocket.instances = []
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    setAuthTokens(fakeToken('user-1'), 'refresh-1')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    clearAuthTokens()
+  })
+
+  it('dispatches sym_chat.updated to listeners until removed', () => {
+    const s = new ChannelSocket()
+    s.connect()
+    latest().open()
+    const seen: unknown[] = []
+    const handler = (e: unknown) => seen.push(e)
+    s.addSymChatListener(handler)
+    latest().receive({ type: 'sym_chat.updated', sym_chat_id: 'chat-1', status: 'resolved' })
+    latest().receive({ type: 'sym_chat.updated' }) // malformed — ignored
+    s.removeSymChatListener(handler)
+    latest().receive({ type: 'sym_chat.updated', sym_chat_id: 'chat-2' })
+    expect(seen).toEqual([{ sym_chat_id: 'chat-1', status: 'resolved' }])
+  })
+})
