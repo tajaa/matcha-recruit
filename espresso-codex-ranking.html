@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Espresso Codex Expansion</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1b18;--muted:#6b665e;--line:#e4dfd6;--card:#fff;--accent:#b8651b;--code:#f3efe8}
+@media (prefers-color-scheme:dark){:root{--bg:#171512;--fg:#ece7df;--muted:#a39c90;--line:#2f2b26;--card:#1f1c18;--accent:#e08a3c;--code:#26221d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:920px;margin:0 auto;padding:40px 16px 80px}
+h1{font-size:28px;margin:0 0 6px}h2{font-size:20px;margin:40px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}
+h3{font-size:16px;margin:24px 0 8px}
+.sub{color:var(--muted);margin:0 0 24px}
+code{background:var(--code);padding:1px 5px;border-radius:4px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{background:var(--code);padding:12px;border-radius:8px;overflow-x:auto;font:13px/1.45 ui-monospace,Menlo,monospace}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:600}
+.rank{display:grid;gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+.card h3{margin-top:0}.n{color:var(--accent);font-weight:700;margin-right:6px}
+.tag{display:inline-block;font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:1px 8px;margin-right:4px}
+ul{padding-left:20px}li{margin:4px 0}
+.wrap{overflow-x:auto}
+</style>
+</head>
+<body>
+<main>
+<h1>Espresso: more work on the user's own AI plan</h1>
+<p class="sub">Ranking + build plan · 2026-09-27 · follows PR #609 / #610 (Research with Codex)</p>
+
+<h2>Context</h2>
+<p>Espresso now drives a bundled <code>codex app-server</code> on the user's ChatGPT plan. Codex reads, claims and publishes a kanban card through Matcha's MCP connector using a 30-minute local grant. The first real run succeeded after #610 (pre-approve destructive tool; confirm from card state).</p>
+<ul>
+<li><strong>Codex in the App Sandbox has no shell</strong> (nested sandbox exit 71) → only web search + remote MCP tools.</li>
+<li><strong>Claude can't run locally</strong> (proprietary / ToS) → Claude subs are leveraged through the <strong>remote MCP connector</strong> (claude.ai / ChatGPT / Claude Code). Every new MCP tool family serves local Codex <em>and</em> remote Claude/ChatGPT for free.</li>
+</ul>
+
+<h2>Ranking</h2>
+<div class="rank">
+<div class="card">
+<h3><span class="n">#1</span>Email cards → "Triage with Codex"</h3>
+<span class="tag">~80% reuse</span><span class="tag">no repo</span><span class="tag">no web</span>
+<p>Cards created by Email → <em>Send to board</em>. Today: AutoPR <code>email</code> kind, <code>gpt-5.6-luna</code> via <code>codex exec</code> on the single-slot self-hosted runner, gated by a per-board <code>email</code> grant.</p>
+<ul>
+<li>Same shape as research (claim → report → Review); reuses <code>mcp_connector/research.py</code> almost wholesale.</li>
+<li>Privacy win: email bodies go to the user's own plan, not our runner.</li>
+<li>Works on boards that never got the <code>email</code> grant; frees the runner slot.</li>
+</ul>
+</div>
+<div class="card">
+<h3><span class="n">#2</span>"Describe a task to draft…" bar → Codex</h3>
+<span class="tag">most expensive per click</span><span class="tag">needs repo MCP tools</span>
+<p>Today: <code>project_agent/task_draft_agent.py</code>, Luna high effort, ≤3 calls, 50/user/day cap. UX is already async (202 + poll).</p>
+<ul>
+<li>New read-only repo MCP tools wrapping <code>project_agent/tools.py</code> (<code>list_files</code>, <code>search_repo</code>, <code>read_file</code>).</li>
+<li>Codex <code>turn/start</code> supports <code>outputSchema</code> → return the <code>draft_ticket</code> JSON straight to the existing review UI; no write tool.</li>
+</ul>
+</div>
+<div class="card">
+<h3><span class="n">#3</span>@espresso repo questions → Codex</h3>
+<span class="tag">heaviest Luna path</span><span class="tag">builds on #2</span>
+<p>Today: <code>project_agent/agent.py</code>, Luna, ≤18 calls, 240 s. Reuses #2's repo tools, but it's triggered server-side from a channel message and posted as a bot → needs a client intercept + a <code>post_repo_answer</code> MCP write tool.</p>
+</div>
+</div>
+
+<h3>Rejected</h3>
+<div class="wrap"><table>
+<tr><th>Surface</th><th>Why not</th></tr>
+<tr><td>Thread chat / Huume mode</td><td>Streaming + many server-side tools and document edits</td></tr>
+<tr><td>Email triage-on-load, commit scan</td><td>Cheap Flash Lite, background/webhook — little to save</td></tr>
+<tr><td>Huume Code, engineering AutoPR cards</td><td>Need shell + checkout; sandboxed Codex can't</td></tr>
+<tr><td>Resume parsing</td><td>File-heavy, candidate PII</td></tr>
+</table></div>
+
+<h2>Build #1: email cards on local Codex</h2>
+
+<h3>Server — generalize the research connector into card kinds</h3>
+<p><code>server/app/matcha/routes/mcp_connector/research.py</code></p>
+<pre>@dataclass(frozen=True)
+class CardKind:
+    category: str; report_prefix: str; headings: tuple[str, ...]; progress_tag: str
+
+KINDS = {
+  "research": CardKind("research", "research-report", REQUIRED_HEADINGS, "🧠 CONNECTOR"),
+  "email":    CardKind("email", "email-report",
+                       ("### Summary", "### Emails reviewed",
+                        "### Recommended actions", "### Confidence"),
+                       "📧 CONNECTOR"),
+}</pre>
+<ul>
+<li>Email headings = AutoPR <code>_prompt_email.txt:102-120</code>, so reports look the same whichever runner wrote them.</li>
+<li><code>_authorized_card(user, task_id, *, kinds=("research",))</code> rejects other categories.</li>
+<li><code>validate_report(..., *, headings=...)</code>; <code>report_filename(..., *, prefix=...)</code>.</li>
+<li>Extract <code>_publish_report(user, card, project, *, kind, report, note, client_name)</code> (store file → activity note → Review) from <code>attach_research_report</code>.</li>
+<li><code>release_unfinished_claim</code>: file check uses the card kind's prefix.</li>
+<li><code>launch_prompt(task_id, title, *, kind="research")</code> — email variant: read, claim, bucket every snapshot (needs_reply / action / fyi / newsletter), suggested replies inside <code>### Recommended actions</code>, attach once.</li>
+</ul>
+<p>New <code>mcp_connector/email_cards.py</code></p>
+<ul>
+<li><code>get_email_card</code> → <code>{task_id, title, description, review_note, column, snapshots:[{filename, text}], previous_report, report_contract}</code>; snapshots = <code>^email-[0-9a-f]+\.md$</code> task files inline (≤20k chars each).</li>
+<li><code>attach_email_report</code> → <code>_publish_report(kind=email)</code>; returns <code>{attached, filename, column:"review", task_id}</code>.</li>
+</ul>
+<p><code>mcp_connector/server.py</code>: register <code>get_email_card</code> (<code>_READ</code>), <code>claim_email_card</code> (<code>_WRITE</code>), <code>attach_email_report</code> (<code>_PUBLISH</code>) via <code>_run</code>; widen <code>_INSTRUCTIONS</code>.</p>
+<p><code>matcha_work/connectors.py</code>: <code>local-token</code>, <code>release</code>, <code>research-launch</code> accept <code>kinds=("research","email")</code>; generic 409 text; launch passes <code>kind=card["category"]</code>.</p>
+<p>No migration. Staged reply drafts stay AutoPR-only in v1 (<code>stage_autopr_actions</code> requires the bot actor + <code>outreach</code> grant, <code>project_task_service.py:449-466</code>); replies appear as text in the report.</p>
+
+<h3>Espresso (Swift)</h3>
+<ul>
+<li><code>CodexResearchCoordinator.swift</code>: <code>struct CodexRunSpec { tools, webSearch, reportPrefix, instructions, label }</code> + <code>static func forCategory(_:)</code>. Research: research tools + <code>web_search:"live"</code>. Email: email tools + <code>web_search:"disabled"</code>. Success check = Review + new file with <code>spec.reportPrefix</code>.</li>
+<li><code>CodexProtocol.swift</code>: publication detection accepts <code>attach_email_report</code>.</li>
+<li><code>TaskViewerSheet+Header.swift</code> / <code>CodexControls.swift</code>: show Codex control on email cards, label "Triage with Codex". Claude/ChatGPT deep links work too (same launch route).</li>
+</ul>
+
+<h3>Tests</h3>
+<ul>
+<li>Existing <code>test_research_tools.py</code> stays green (research behavior unchanged).</li>
+<li>New <code>test_email_cards.py</code>: headings validation; <code>email-report-&lt;id8&gt;-rN.md</code> naming; snapshots inline, non-snapshot files excluded; cross-kind rejection; release refuses after an <code>email-report-*</code> is stored; publish → Review with 📧 tag.</li>
+<li><code>test_local_tokens.py</code>: local-token accepts email cards, rejects others.</li>
+<li><code>test_connector_sql_realdb.py</code>: prepare any new SQL (opt-in).</li>
+<li>Swift: <code>CodexRunSpec.forCategory</code> (tools, web off for email), publication detection for email.</li>
+</ul>
+
+<h3>Verification</h3>
+<ol>
+<li><code>cd server &amp;&amp; ./venv/bin/python -m pytest tests -q</code> + diff-cover ≥80%; opt-in realdb prepare against dev.</li>
+<li>Native <code>xcodebuild … test</code> + <code>run.sh build</code>.</li>
+<li>Manual on dev: Email → pick 2–3 mails → <em>Send to board</em> → <strong>Triage with Codex</strong> → Review with <code>email-report-&lt;id8&gt;-r1.md</code>; cancel on a second card → back to To do.</li>
+<li>Harness: <code>mcpServerStatus/list</code> shows exactly the three email tools for an email run.</li>
+</ol>
+
+<h2>Follow-ups</h2>
+<ul>
+<li>#2 task-draft via Codex: read-only repo MCP tools + project-scoped local grant + <code>outputSchema</code>.</li>
+<li>#3 @espresso via Codex on top of #2.</li>
+<li>User-run staged replies for email (approval-rule change for non-bot stagers).</li>
+</ul>
+</main>
+</body>
+</html>
