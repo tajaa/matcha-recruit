@@ -314,3 +314,108 @@ def test_launch_prompt_names_the_card_and_tools():
     assert str(TASK) in prompt and '"Which MacBook Pro?"' in prompt
     for tool in ("get_research_card", "claim_research_card", "attach_research_report"):
         assert tool in prompt
+
+
+@pytest.mark.asyncio
+async def test_card_lookup_derives_pending_run_from_history(env):
+    await research._load_card(TASK)
+    sql = env.conn.sql_for("fetchrow")[0]
+    assert "t.autopr_run_requested_at" not in sql
+    assert project_task_service.AUTOPR_PENDING_REQUEST_QUERY in sql
+    assert "autopr_run.created_at AS autopr_run_requested_at" in sql
+
+
+@pytest.mark.asyncio
+async def test_list_derives_pending_run_from_history(monkeypatch):
+    conn = QueryConn(fetch={"FROM mw_tasks t": []})
+    monkeypatch.setattr(research, "get_connection", lambda: conn)
+    await research.list_research_cards(SimpleNamespace(id=USER.id, role="admin"))
+    sql = conn.sql_for("fetch")[0]
+    assert "t.autopr_run_requested_at" not in sql
+    assert project_task_service.AUTOPR_PENDING_REQUEST_QUERY in sql
+    query = project_task_service.AUTOPR_PENDING_REQUEST_QUERY
+    assert "mw_task_history" in query
+    assert "autopr_run_request" in query and "autopr_run_claim" in query and "autopr_run_cancel" in query
+    assert project_task_service._AUTOPR_RUN_REQUEST_TTL in query
+
+
+# ── release (local Codex run ended without a report) ─────────────────────────
+
+GRANT_ISSUED = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
+
+
+def _claim(**over):
+    row = {"created_at": GRANT_ISSUED + timedelta(seconds=30), "from_value": "todo",
+           "to_value": "in_progress", "actor_user_id": USER.id}
+    row.update(over)
+    return row
+
+
+def _release_env(env, *, claim=None, touched=False, column="in_progress"):
+    env.conn = QueryConn(
+        fetchrow={"FROM mw_tasks t": _card(board_column=column),
+                  "event_type = 'column_change'": claim},
+        fetchval={"mw_project_files": touched},
+    )
+    return env
+
+
+async def _release(project=PROJECT):
+    return await research.release_unfinished_claim(USER, project_id=project, task_id=TASK, since=GRANT_ISSUED)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("from_value", ["todo", "changes_requested"])
+async def test_release_returns_an_untouched_claim_to_its_column(env, monkeypatch, from_value):
+    state = _release_env(env, claim=_claim(from_value=from_value))
+    monkeypatch.setattr(research, "get_connection", lambda *a, **k: state.conn)
+    assert await _release() == {"released": True, "column": from_value}
+    assert state.updates == [{"board_column": from_value}]
+    assert "went back to the queue" in state.notes[0]["body"]
+    touched_sql, touched_args = state.conn.sql_for("fetchval")[0], state.conn.calls[-1][2]
+    assert "IS DISTINCT FROM $3" in touched_sql and "research-report-%" in touched_sql
+    assert touched_args[2] == USER.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claim,touched,column,reason", [
+    (_claim(), False, "review", "not_in_progress"),
+    (None, False, "in_progress", "claim_not_owned"),
+    (_claim(actor_user_id=uuid.uuid4()), False, "in_progress", "claim_not_owned"),
+    (_claim(created_at=GRANT_ISSUED - timedelta(minutes=5)), False, "in_progress", "claim_not_owned"),
+    (_claim(to_value="review"), False, "in_progress", "claim_not_owned"),
+    (_claim(from_value="review"), False, "in_progress", "claim_not_owned"),
+    (_claim(), True, "in_progress", "changed_since_claim"),
+])
+async def test_release_leaves_anything_it_does_not_own(env, monkeypatch, claim, touched, column, reason):
+    state = _release_env(env, claim=claim, touched=touched, column=column)
+    monkeypatch.setattr(research, "get_connection", lambda *a, **k: state.conn)
+    assert await _release() == {"released": False, "reason": reason}
+    assert state.updates == [] and state.notes == []
+
+
+@pytest.mark.asyncio
+async def test_release_refuses_viewers_and_other_projects(env, monkeypatch):
+    state = _release_env(env, claim=_claim())
+    monkeypatch.setattr(research, "get_connection", lambda *a, **k: state.conn)
+    with pytest.raises(research.ConnectorError) as wrong_project:
+        await _release(project=uuid.uuid4())
+    assert wrong_project.value.status_code == 404
+    state.role = "viewer"
+    with pytest.raises(research.ConnectorError) as viewer:
+        await _release()
+    assert viewer.value.status_code == 403
+    assert state.updates == []
+
+
+@pytest.mark.asyncio
+async def test_release_surfaces_a_rejected_move(env, monkeypatch):
+    state = _release_env(env, claim=_claim())
+    monkeypatch.setattr(research, "get_connection", lambda *a, **k: state.conn)
+
+    async def reject(*a, **k):
+        raise ValueError("Invalid board_column: todo")
+
+    monkeypatch.setattr(project_task_service, "update_project_task", reject)
+    with pytest.raises(research.ConnectorError, match="Invalid board_column"):
+        await _release()

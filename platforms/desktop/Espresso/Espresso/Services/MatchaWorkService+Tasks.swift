@@ -321,6 +321,24 @@ extension MatchaWorkService {
 
     // MARK: - AI connectors (research on the person's own Claude / ChatGPT plan)
 
+    func mintLocalCodexToken(projectId: String, taskId: String) async throws -> MWLocalCodexToken {
+        struct Body: Encodable { let project_id: String; let task_id: String }
+        return try await client.request(method: "POST", path: "\(basePath)/connectors/local-token",
+                                        body: Body(project_id: projectId, task_id: taskId))
+    }
+
+    /// Puts a card an unfinished local Codex run claimed back in the queue;
+    /// the server declines when anything else has happened to it since.
+    func releaseLocalCodexResearch(grantId: String, projectId: String, taskId: String) async throws -> MWLocalCodexRelease {
+        struct Body: Encodable { let project_id: String; let task_id: String }
+        return try await client.request(method: "POST", path: "\(basePath)/connectors/local-tokens/\(grantId)/release",
+                                        body: Body(project_id: projectId, task_id: taskId))
+    }
+
+    func revokeLocalCodexToken(grantId: String) async throws {
+        _ = try await client.requestData(method: "DELETE", path: "\(basePath)/connectors/local-tokens/\(grantId)")
+    }
+
     /// Assistants connected to Matcha, plus the connector URL to add one.
     func listConnectors() async throws -> MWConnectorsState {
         try await client.request(method: "GET", path: "\(basePath)/connectors")

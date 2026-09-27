@@ -39,6 +39,7 @@ extension AppState {
 
     @MainActor
     func didLogin(user: UserInfo) {
+        CodexResearchCoordinator.shared.bind(userID: user.id)
         currentUser = user
         isAuthenticated = true
         UsageBeaconService.shared.start()
@@ -71,6 +72,7 @@ extension AppState {
         // Every real caller (onUnauthorized, Settings sign-out, ContentView)
         // fires from an authenticated session, so this never skips a first run.
         guard isAuthenticated || currentUser != nil else { return }
+        CodexResearchCoordinator.shared.bind(userID: nil)
         currentUser = nil
         isAuthenticated = false
         UsageBeaconService.shared.stop()

@@ -589,6 +589,28 @@ _AUTOPR_ACTIVE_CLAIM_QUERY = f"""
 """
 
 
+# Shared by the board and MCP connector. This is derived history state, not
+# an mw_tasks column. Keep claim/cancel ordering and the dispatcher TTL equal.
+AUTOPR_PENDING_REQUEST_QUERY = f"""
+    SELECT h6.created_at
+    FROM mw_task_history h6
+    WHERE h6.task_id = t.id
+      AND h6.event_type = 'activity'
+      AND h6.metadata->>'kind' = 'autopr_run_request'
+      -- Same shelf life the dispatcher honours, so the card's
+      -- "Queued for AutoPR" chip can never outlive the request.
+      AND h6.created_at > now() - interval '{_AUTOPR_RUN_REQUEST_TTL}'
+      AND h6.created_at > COALESCE((
+            SELECT MAX(h7.created_at) FROM mw_task_history h7
+            WHERE h7.task_id = t.id
+              AND h7.event_type = 'activity'
+              AND h7.metadata->>'kind' IN ('autopr_run_claim', 'autopr_run_cancel')
+          ), '-infinity'::timestamptz)
+    ORDER BY h6.created_at DESC
+    LIMIT 1
+"""
+
+
 async def defer_autopr_run(
     *, project_id: UUID, task_id: UUID, actor_user_id: UUID,
 ) -> Optional[dict]:
@@ -1825,28 +1847,7 @@ async def list_project_tasks(
                 ORDER BY h5.created_at DESC
                 LIMIT 1
             ) autopr_ctx ON TRUE
-            LEFT JOIN LATERAL (
-                -- A run request outlives nothing but its own claim: the
-                -- harness posts autopr_run_claim when it actually picks the
-                -- card up, which is what stops the request re-firing every
-                -- tick. No column, same shape as the reconsideration join.
-                SELECT h6.created_at
-                FROM mw_task_history h6
-                WHERE h6.task_id = t.id
-                  AND h6.event_type = 'activity'
-                  AND h6.metadata->>'kind' = 'autopr_run_request'
-                  -- Same shelf life the dispatcher honours, so the card's
-                  -- "Queued for AutoPR" chip can never outlive the request.
-                  AND h6.created_at > now() - interval '{_AUTOPR_RUN_REQUEST_TTL}'
-                  AND h6.created_at > COALESCE((
-                        SELECT MAX(h7.created_at) FROM mw_task_history h7
-                        WHERE h7.task_id = t.id
-                          AND h7.event_type = 'activity'
-                          AND h7.metadata->>'kind' IN ('autopr_run_claim', 'autopr_run_cancel')
-                      ), '-infinity'::timestamptz)
-                ORDER BY h6.created_at DESC
-                LIMIT 1
-            ) autopr_run ON TRUE
+            LEFT JOIN LATERAL ({AUTOPR_PENDING_REQUEST_QUERY}) autopr_run ON TRUE
             LEFT JOIN LATERAL ({_AUTOPR_ACTIVE_CLAIM_QUERY}) autopr_claim ON TRUE
             WHERE t.project_id = $1 AND t.status != 'cancelled'
               {_done_clause}
