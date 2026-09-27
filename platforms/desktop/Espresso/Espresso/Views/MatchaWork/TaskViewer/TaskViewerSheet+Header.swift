@@ -394,7 +394,7 @@ extension TaskViewerSheet {
                     } label: {
                         Text(connectorCopied == "url"
                              ? "Copied — add it as a custom connector in Claude or ChatGPT"
-                             : "Not connected yet — see Settings → AI Connectors, or copy the URL: \(state.mcpUrl)")
+                             : "Claude / ChatGPT not connected yet (not needed for Codex) — copy the URL: \(state.mcpUrl)")
                             .font(.ticket(size: 10))
                             .foregroundColor(.secondary)
                             .lineLimit(1)
