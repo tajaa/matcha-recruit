@@ -99,3 +99,12 @@ describe('applyFeatureToggle', () => {
     })
   })
 })
+
+describe('sym-chat feature', () => {
+  it('is togglable in admin and requires matcha_work', () => {
+    const work = FEATURE_GROUPS.find((group) => group.label === 'Matcha Work')
+    expect(work?.features.sym_chat).toContain('Sym-chat')
+    expect(FEATURE_KEYS).toContain('sym_chat')
+    expect(FEATURE_REQUIRES.sym_chat).toEqual(['matcha_work'])
+  })
+})

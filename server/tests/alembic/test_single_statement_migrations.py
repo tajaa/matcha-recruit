@@ -27,6 +27,7 @@ MIGRATIONS = (
     "autopilot01_location_weather.py",
     "autopilot02_autopilot_mode.py",
     "autopilot03_sales_hourly.py",
+    "symchat01_sym_chat.py",
     "zzzzcappe34_shopper_subscriptions.py",
 )
 

@@ -124,4 +124,8 @@ from .connectors import router as _connectors_router
 
 router.include_router(_connectors_router)
 
+from .sym_chat import router as _sym_chat_router
+
+router.include_router(_sym_chat_router)
+
 __all__ = ["router", "oauth_callback_router", "public_router", "presence_router"]

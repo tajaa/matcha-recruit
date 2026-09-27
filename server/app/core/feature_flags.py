@@ -419,6 +419,15 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # RAW stored flag (default False ⇒ a missing key means OFF). Default off;
     # admin-toggle; NOT in any tier overlay; composable in /admin/products.
     "symlink": False,
+    # Sym-chat — intent-shaped micro group chats on the business /work
+    # surface (services/sym_chat/). Each participant types in a private
+    # tunnel; one flash-lite call re-derives their structured stance, a
+    # deterministic per-kind aggregator recomputes the shared consensus
+    # shape, and consensus auto-resolves the chat and sends invites (bell +
+    # email). Kinds: schedule, decide. Gates /matcha-work/sym-chats + the
+    # /work/sym-chat pages. Requires matcha_work; default off; admin-toggle;
+    # NOT in any tier overlay.
+    "sym_chat": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,
@@ -827,6 +836,7 @@ FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "labor_cost": ("employee_schedule",),
     "schedule_autopilot": ("employee_schedule", "huume", "matcha_work"),
     "matcha_ops_calls_all_members": ("matcha_ops",),
+    "sym_chat": ("matcha_work",),
 }
 
 

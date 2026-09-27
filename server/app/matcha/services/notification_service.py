@@ -64,6 +64,10 @@ TYPES = {
     "schedule_request_withdrawn": "Schedule Request Withdrawn",
     "schedule_request_decided": "Schedule Request Reviewed",
     "schedule_published": "Schedule Published",
+    # Sym-chat (services/sym_chat/): added to a chat, and the chat reached
+    # consensus (the "invite" — sent to every participant, with email).
+    "sym_chat_invited": "Sym-chat Invite",
+    "sym_chat_resolved": "Sym-chat Decided",
 }
 
 
@@ -146,6 +150,19 @@ async def create_notification(
             logger.warning("Failed to send notification email to %s: %s", user_id, e)
 
     return dict(row)
+
+
+async def push_to_users(user_ids: list[UUID], payload: dict) -> None:
+    """Best-effort live WS push of one non-bell payload to several users (e.g.
+    `sym_chat.updated`, which tells open pages to refetch). No bell row, no
+    APNs. Same lazy manager import the bell pushes above use."""
+    if not user_ids:
+        return
+    try:
+        from ...werk.routes.channels_ws import manager as _ch_manager
+        await _ch_manager.send_to_users({uid: payload for uid in user_ids})
+    except Exception as e:
+        logger.warning("WS push of %s failed: %s", payload.get("type"), e)
 
 
 async def create_notifications_bulk(

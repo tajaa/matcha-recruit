@@ -10,6 +10,9 @@ type UserEventHandler = (user: { id: string; name: string }) => void
 type ChannelActionUpdate = { channel_id: string; action: { kind: string; id: string; status: string } }
 type ChannelActionHandler = (update: ChannelActionUpdate) => void
 type NotificationHandler = (notification: MWNotification) => void
+/** `sym_chat.updated` — the shared shape of a sym-chat changed; open pages refetch. */
+export type SymChatEvent = { sym_chat_id: string; status?: string }
+type SymChatHandler = (event: SymChatEvent) => void
 
 /** Tab-session outbox for sends attempted while the socket was down. It
  * survives reconnects/reloads but not a closed browser session, so message
@@ -81,6 +84,7 @@ export class ChannelSocket extends BaseSocket {
   private messageListeners = new ListenerSet<ChannelMessage>()
   private channelActionListeners = new ListenerSet<ChannelActionUpdate>()
   private notificationListeners = new ListenerSet<MWNotification>()
+  private symChatListeners = new ListenerSet<SymChatEvent>()
 
   // Deprecated single-handler; kept for backward compat. Setting this adds
   // the handler to the multi-listener set. Prefer addMessageListener.
@@ -113,6 +117,14 @@ export class ChannelSocket extends BaseSocket {
 
   removeNotificationListener(handler: NotificationHandler) {
     this.notificationListeners.remove(handler)
+  }
+
+  addSymChatListener(handler: SymChatHandler) {
+    this.symChatListeners.add(handler)
+  }
+
+  removeSymChatListener(handler: SymChatHandler) {
+    this.symChatListeners.remove(handler)
   }
 
   onTyping: TypingHandler | null = null
@@ -302,6 +314,14 @@ export class ChannelSocket extends BaseSocket {
         if (notification) this.notificationListeners.dispatch(notification)
         break
       }
+      case 'sym_chat.updated':
+        if (typeof data.sym_chat_id === 'string') {
+          this.symChatListeners.dispatch({
+            sym_chat_id: data.sym_chat_id,
+            status: typeof data.status === 'string' ? data.status : undefined,
+          })
+        }
+        break
       case 'typing':
         this.onTyping?.(data.user as { id: string; name: string })
         break

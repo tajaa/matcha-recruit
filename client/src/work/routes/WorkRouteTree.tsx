@@ -22,6 +22,8 @@ import InventoryForecast from '../pages/InventoryForecast'
 import InventoryWaste from '../pages/InventoryWaste'
 import InventoryBuying from '../pages/InventoryBuying'
 import AssetsHub from '../pages/AssetsHub'
+import SymChatList from '../pages/SymChat/SymChatList'
+import SymChatDetail from '../pages/SymChat/SymChatDetail'
 import { FeatureGate } from '../../components/shared/FeatureGate'
 import { WorkSurfaceProvider, type WorkSurface } from './WorkSurfaceContext'
 
@@ -89,6 +91,20 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
             <Route path="assets" element={<AssetsHub />} />
           <Route path="assets/:assetId" element={<AssetsHub />} />
           </Route>
+          {/* Sym-chat is business-only: the backend 403s personal workspaces,
+              so the /espresso tree doesn't mount it at all. */}
+          {businessWork && (
+            <Route
+              element={
+                <FeatureGate feature="sym_chat" label="Sym-chat">
+                  <Outlet />
+                </FeatureGate>
+              }
+            >
+              <Route path="sym-chat" element={<SymChatList />} />
+              <Route path="sym-chat/:chatId" element={<SymChatDetail />} />
+            </Route>
+          )}
           <Route path="journals" element={<Journals />} />
           <Route path="journals/:journalId" element={<Journals />} />
           <Route path="productivity" element={<Productivity />} />
