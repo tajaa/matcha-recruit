@@ -353,15 +353,23 @@ extension TaskViewerSheet {
             && ["todo", "changes_requested", "in_progress"].contains(live.boardColumn)
     }
 
+    /// Same write gate as the server's `_can_edit_project` and the web's
+    /// `canEdit`: only explicit read-only roles are blocked. Viewers would
+    /// otherwise see research buttons whose claim/grant the server refuses.
+    var researchWithAssistantCanEdit: Bool {
+        let role = viewModel.project?.collaboratorRole
+        return role != "viewer" && role != "commenter"
+    }
+
     @ViewBuilder
     var researchWithAssistantControl: some View {
-        if researchWithAssistantEligible || CodexResearchCoordinator.shared.taskID == task.id {
+        if researchWithAssistantCanEdit && (researchWithAssistantEligible || CodexResearchCoordinator.shared.taskID == task.id) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 10) {
                     Label("Research with", systemImage: "sparkles")
                         .font(.ticket(size: 10))
                         .foregroundColor(.secondary)
-                    ForEach([("claude", "Claude"), ("chatgpt", "ChatGPT"), ("claude_code", "Claude Code")], id: \.0) { kind, label in
+                    ForEach([("claude", "Claude"), ("chatgpt", "ChatGPT"), ("claude_code", "Claude Code"), ("codex", "Codex CLI")], id: \.0) { kind, label in
                         Button {
                             Task { await launchConnectorResearch(kind) }
                         } label: {
@@ -377,8 +385,8 @@ extension TaskViewerSheet {
                         }
                         .buttonStyle(.plain)
                         .disabled(connectorLaunching != nil || !researchWithAssistantEligible || CodexResearchCoordinator.shared.running)
-                        .help(kind == "claude_code"
-                              ? "Copy a `claude` command that works this card from your terminal"
+                        .help(kind == "claude_code" || kind == "codex"
+                              ? "Copy a `\(kind == "codex" ? "codex" : "claude")` command that works this card from your terminal"
                               : "Open a prefilled chat that works this card on your own \(label) plan")
                     }
                 }
