@@ -1,19 +1,33 @@
-import { Paperclip, RefreshCw, Calendar, ListChecks, CheckCircle2, Circle, ChevronRight, Clock, MoreHorizontal, GitPullRequest, Bot } from 'lucide-react'
+import { Paperclip, RefreshCw, Calendar, ListChecks, CheckCircle2, Circle, Clock, MoreHorizontal, GitPullRequest, Bot, Layers, Sparkles } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import type { MWProjectTask } from '../../types'
 import Avatar from '../../../components/shared/Avatar'
-import { KANBAN_COLUMNS } from '../../utils/kanbanColumns'
 import { KANBAN_TEMPLATES } from '../../utils/kanbanTemplates'
-import { autoPRProgressBanner } from '../../utils/autoprProgress'
+import { autoPRProgressBanner, type AutoPRProgressKind } from '../../utils/autoprProgress'
 
-/** Chip color for a task's category — reuses the same per-template color the
- *  "+" compose menu uses (KANBAN_TEMPLATES.colorClass), so a "Bug" card and
- *  the Bug template entry always agree. Unrecognized/manual categories fall
- *  back to a neutral chip. */
-function categoryChip(category: string | null | undefined): { label: string; colorClass: string } | null {
+/** Category label — reuses the same per-template color and icon the "+"
+ *  compose menu uses (KANBAN_TEMPLATES), so a "Bug" card and the Bug template
+ *  entry always agree. Unrecognized/manual categories fall back to neutral. */
+function categoryLabel(category: string | null | undefined): { label: string; colorClass: string; icon: LucideIcon | null } | null {
   if (!category || category === 'manual') return null
   const tpl = KANBAN_TEMPLATES.find((t) => t.key === category)
-  return { label: tpl?.displayName ?? category, colorClass: tpl?.colorClass ?? 'text-w-dim' }
+  return { label: tpl?.displayName ?? category, colorClass: tpl?.colorClass ?? 'text-w-dim', icon: tpl?.icon ?? null }
 }
+
+/** AutoPR strip tone: green when a PR is ready, blue for informational, orange when a human must act. */
+function autoPRTone(kind: AutoPRProgressKind): string {
+  if (kind === 'ready') return 'bg-emerald-500/[0.07] text-emerald-400'
+  if (kind === 'already_fixed' || kind === 'status') return 'bg-sky-500/[0.07] text-sky-400'
+  return 'bg-orange-500/[0.07] text-orange-400'
+}
+
+// Mirrors the desktop `elevatedCard`: a hairline highlight on top (only
+// visible on dark themes) plus a tight contact shadow and a soft ambient one,
+// so cards lift off the lane instead of blending into it.
+const CARD_SHADOW =
+  'shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_1px_2px_rgba(0,0,0,0.16),0_4px_12px_-6px_rgba(0,0,0,0.3)]'
+const CARD_SHADOW_HOVER =
+  'hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_2px_4px_rgba(0,0,0,0.18),0_10px_22px_-10px_rgba(0,0,0,0.45)]'
 
 interface KanbanCardProps {
   task: MWProjectTask
@@ -22,8 +36,8 @@ interface KanbanCardProps {
   onDragStart: (e: React.DragEvent) => void
   onDragEnd: () => void
   dragging?: boolean
-  /** Moved or created since this user last looked at the board — draws a gold
-   *  ring, cleared when the card is opened. */
+  /** Moved or created since this user last looked at the board — draws an
+   *  amber dot, cleared when the card is opened. */
   ringed?: boolean
   /** Opens the card's action sheet (Move to / Duplicate / Delete). This is the
    *  ONLY way to move a card on touch — the drag handlers above are HTML5
@@ -71,13 +85,18 @@ function aging(task: MWProjectTask): 'none' | 'warn' | 'overdue' {
   return 'none'
 }
 
+/**
+ * Board card, laid out like the desktop `KanbanCardView`: an optional
+ * one-line AutoPR strip, the title, then at most three quiet 10px lines —
+ * attention (progress / send-back note), category, and one meta row. The lane
+ * is already the card's column, so it isn't repeated on the face.
+ */
 export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, dragging, ringed, onMenu }: KanbanCardProps) {
   const assignee = displayAssignee(task)
   const completed = task.status === 'completed'
 
   const subtaskTotal = task.subtask_total ?? 0
   const subtaskDone = task.subtask_done ?? 0
-  const subtaskFrac = subtaskTotal > 0 ? subtaskDone / subtaskTotal : 0
   const subtasksComplete = subtaskTotal > 0 && subtaskDone >= subtaskTotal
 
   // Defense in depth alongside the server-side scheme check (tasks.py PATCH):
@@ -87,13 +106,9 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
   const safePrUrl = task.pr_url && /^https?:\/\//i.test(task.pr_url) ? task.pr_url : null
 
   const cycles = task.review_cycle_count ?? 0
-  const attachments = task.attachments ?? []
-  const attachmentCount = attachments.length
-  // Thumbnail strip, mirroring the desktop card. Capped at 3 — the card is a
-  // glance surface, and a ticket with a dozen screenshots would push the title
-  // and checklist off the visible height.
-  const imageAttachments = attachments.filter((a) => (a.content_type ?? '').startsWith('image/')).slice(0, 3)
+  const attachmentCount = task.attachments?.length ?? 0
   const reviewNote = task.review_note?.trim()
+  const progressNote = task.progress_note?.trim()
   const autoPRBanner = autoPRProgressBanner(task.progress_note, task.pr_number)
   const pendingCommitSubtasks = task.pending_commit_subtask_count ?? 0
 
@@ -101,9 +116,11 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
   // marking it would put an accent on nearly every card; absence = normal.
   const edgeColor = task.priority === 'critical' ? 'bg-red-500' : task.priority === 'high' ? 'bg-orange-500' : null
   const ageState = aging(task)
-  const ageColor = ageState === 'overdue' ? 'text-red-400' : ageState === 'warn' ? 'text-orange-400' : 'text-w-dim'
-  const columnLabel = KANBAN_COLUMNS.find((c) => c.key === task.board_column)?.label
-  const tag = categoryChip(task.category)
+  const ageColor = ageState === 'overdue' ? 'text-red-400' : ageState === 'warn' ? 'text-orange-400' : 'text-w-faint'
+  const tag = categoryLabel(task.category)
+  const TagIcon = tag?.icon
+
+  const added = new Date(task.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
   return (
     <div
@@ -111,203 +128,175 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onClick}
-      className={`group relative cursor-pointer overflow-hidden rounded-lg border bg-w-surface p-3 transition-all hover:scale-[1.01] ${
-        ringed
-          ? 'border-yellow-400/75 shadow-[0_0_10px_rgba(250,204,21,0.35)]'
-          : 'border-w-line hover:border-w-accent/40'
-      } ${dragging ? 'opacity-40' : ''}`}
+      className={`group relative cursor-pointer overflow-hidden rounded-lg border border-w-line bg-w-surface transition-[transform,box-shadow] duration-150 ease-out hover:scale-[1.006] ${CARD_SHADOW} ${CARD_SHADOW_HOVER} ${
+        dragging ? 'opacity-40' : ''
+      }`}
     >
-      {edgeColor && <span className={`absolute inset-y-1.5 left-0 w-[3px] rounded-full ${edgeColor}`} />}
+      {edgeColor && <span className={`absolute inset-y-[7px] left-[1.5px] w-[2px] rounded-full ${edgeColor}`} />}
 
-      {/* Action menu — always visible on touch (where it replaces dragging),
-          hover-only on pointer devices so the card stays clean. */}
-      {onMenu && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            onMenu()
-          }}
-          title="Task actions"
-          aria-label="Task actions"
-          className="absolute right-1 top-1 z-10 rounded p-1.5 text-w-dim transition-colors hover:bg-w-surface2 hover:text-w-text md:opacity-0 md:group-hover:opacity-100"
-        >
-          <MoreHorizontal className="h-4 w-4" />
-        </button>
+      {ringed && (
+        <span
+          role="img"
+          aria-label="Updated since you last looked"
+          className="absolute right-[7px] top-[7px] h-1.5 w-1.5 rounded-full bg-yellow-400 shadow-[0_0_6px_rgba(250,204,21,0.5)]"
+        />
       )}
 
-      {/* Title row: completion state (left) + title + creator avatar (right).
-          Reserve room on the right for the absolutely-positioned ⋯ button so it
-          never lands on top of the creator avatar. */}
-      <div className={`flex items-start gap-2 ${onMenu ? 'pr-6' : ''}`}>
-        {completed ? (
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-w-accent" />
-        ) : (
-          <Circle className="mt-0.5 h-4 w-4 shrink-0 text-w-faint" />
-        )}
-        <p className={`min-w-0 flex-1 line-clamp-3 text-sm leading-snug text-w-text ${completed ? 'line-through text-w-dim' : ''}`}>
-          {task.title}
-        </p>
-        {task.created_by_name && (
-          <div className="shrink-0" title={`Created by ${task.created_by_name}`}>
-            <Avatar name={task.created_by_name} avatarUrl={task.created_by_avatar_url} size="xs" />
-          </div>
-        )}
-      </div>
-
-      {/* Status row: column + assignee */}
-      <div className="mt-1.5 flex items-center gap-1 pl-6 text-xs text-w-dim">
-        <ChevronRight className="h-3 w-3 shrink-0" />
-        <span className="truncate">{columnLabel}</span>
-        {assignee && (
-          <span className="ml-1.5 flex min-w-0 items-center gap-1 truncate">
-            <Avatar name={assignee} avatarUrl={task.assigned_avatar_url} size="xs" />
-            <span className="truncate">{assignee}</span>
-          </span>
-        )}
-      </div>
-
-      {/* Progress note ("where we're at") */}
-      {autoPRBanner ? (
+      {autoPRBanner && (
         <div
-          className={`mt-2 flex items-start gap-1.5 rounded-md border px-2 py-1.5 text-xs font-medium ${
-            autoPRBanner.kind === 'ready'
-              ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300'
-              : autoPRBanner.kind === 'already_fixed' || autoPRBanner.kind === 'status'
-                ? 'border-sky-500/35 bg-sky-500/10 text-sky-300'
-                : 'border-orange-500/40 bg-orange-500/10 text-orange-300'
-          }`}
+          className={`flex items-center gap-1.5 border-b border-w-line/50 px-2.5 py-1 text-[10px] ${autoPRTone(autoPRBanner.kind)}`}
           title={task.progress_note ?? undefined}
         >
-          <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span className="line-clamp-2"><strong>AUTO SETUP</strong> · {autoPRBanner.message}</span>
-        </div>
-      ) : task.progress_note?.trim() ? (
-        <p className="mt-1.5 truncate pl-6 text-xs italic text-w-dim">{task.progress_note}</p>
-      ) : null}
-
-      {/* Why it bounced — shown while sitting in the rework lane */}
-      {task.board_column === 'changes_requested' && reviewNote && (
-        <div className="mt-1.5 flex items-start gap-1 pl-6 text-xs text-orange-400/90">
-          <RefreshCw className="mt-0.5 h-3 w-3 shrink-0" />
-          <span className="min-w-0 whitespace-pre-wrap break-words">{reviewNote}</span>
+          <Bot className="h-3 w-3 shrink-0" />
+          <span className="truncate">
+            <span className="font-medium">Auto setup</span>
+            <span className="text-w-dim"> · {autoPRBanner.message}</span>
+          </span>
         </div>
       )}
 
-      {/* Tag chip + churn. Priority is the left-edge accent above (critical/high
-          only) — no dot/label here, it read as noise on every card since medium
-          (the default) would otherwise tag along too. */}
-      {(cycles > 0 || tag || task.element_name || safePrUrl || pendingCommitSubtasks > 0) && (
-        <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1.5 pl-6">
-          {tag && (
-            <span className={`rounded bg-current/10 px-1.5 py-0.5 text-[10px] font-semibold ${tag.colorClass}`}>
-              {tag.label}
-            </span>
-          )}
+      {/* Title: completion state + title. Right padding keeps the unread dot clear. */}
+      <div className="flex items-start gap-2 px-2.5 pb-1.5 pr-4 pt-2.5">
+        {completed ? (
+          <CheckCircle2 className="mt-[3px] h-3 w-3 shrink-0 text-w-accent" />
+        ) : (
+          <Circle className="mt-[3px] h-3 w-3 shrink-0 text-w-faint" />
+        )}
+        <p className={`min-w-0 flex-1 line-clamp-3 text-[13px] leading-snug text-w-text ${completed ? 'line-through text-w-dim' : ''}`}>
+          {task.title}
+        </p>
+      </div>
 
-          {safePrUrl && (
-            <a
-              href={safePrUrl}
-              target="_blank"
-              rel="noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              title={task.pr_number ? `PR #${task.pr_number}` : 'Pull request'}
-              className="flex items-center gap-0.5 rounded bg-purple-500/15 px-1.5 py-0.5 text-[10px] font-bold text-purple-400 hover:bg-purple-500/25"
-            >
-              <GitPullRequest className="h-2.5 w-2.5" />
-              {task.pr_number ? `#${task.pr_number}` : 'PR'}
-            </a>
-          )}
+      <div className="space-y-1.5 px-2.5 pb-2 text-[10px]">
+        {/* Where it's at — the AutoPR strip above already says it for automation notes. */}
+        {!autoPRBanner && progressNote && <p className="truncate text-w-dim" title={progressNote}>{progressNote}</p>}
 
+        {/* Why it bounced — shown while sitting in the rework lane */}
+        {task.board_column === 'changes_requested' && reviewNote && (
+          <p className="flex items-start gap-1 text-orange-400/90" title={reviewNote}>
+            <RefreshCw className="mt-px h-2.5 w-2.5 shrink-0" />
+            <span className="min-w-0 line-clamp-2">{reviewNote}</span>
+          </p>
+        )}
+
+        {(tag || task.element_name) && (
+          <div className="flex min-w-0 items-center gap-2">
+            {tag && (
+              <span className={`flex min-w-0 items-center gap-1 font-medium ${tag.colorClass}`}>
+                {TagIcon && <TagIcon className="h-2.5 w-2.5 shrink-0" />}
+                <span className="truncate">{tag.label}</span>
+              </span>
+            )}
+            {task.element_name && (
+              <span className="flex min-w-0 items-center gap-1 text-w-accent">
+                <Layers className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">{task.element_name}</span>
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* One meta row that never wraps — like the desktop card, the assignee
+            name truncates first. Priority is the left-edge accent, not a chip. */}
+        <div className="flex items-center gap-2 overflow-hidden text-w-dim">
           {cycles > 0 && (
             <span
-              className="flex items-center gap-0.5 rounded bg-orange-500/15 px-1.5 py-0.5 text-[10px] font-bold text-orange-400"
+              className="flex shrink-0 items-center gap-0.5 text-orange-400"
               title={`Sent back from review ${cycles} time${cycles === 1 ? '' : 's'}`}
             >
               <RefreshCw className="h-2.5 w-2.5" />×{cycles}
             </span>
           )}
 
-          {pendingCommitSubtasks > 0 && <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300" title="Checklist items with pending commit suggestions">{pendingCommitSubtasks} commit suggestion{pendingCommitSubtasks === 1 ? '' : 's'}</span>}
-
-          {task.element_name && (
-            <span className="rounded bg-w-accent/12 px-1.5 py-0.5 text-[10px] font-medium text-w-accent">
-              {task.element_name}
+          {pendingCommitSubtasks > 0 && (
+            <span
+              className="flex shrink-0 items-center gap-0.5 text-emerald-400"
+              title={`${pendingCommitSubtasks} checklist item${pendingCommitSubtasks === 1 ? '' : 's'} with pending commit suggestions`}
+            >
+              <Sparkles className="h-2.5 w-2.5" />
+              {pendingCommitSubtasks}
             </span>
           )}
-        </div>
-      )}
 
-      {/* Subtask progress bar */}
-      {subtaskTotal > 0 && (
-        <div className="mt-2 flex items-center gap-1.5 pl-6">
-          {subtasksComplete ? (
-            <CheckCircle2 className="h-3 w-3 shrink-0 text-w-accent" />
-          ) : (
-            <ListChecks className="h-3 w-3 shrink-0 text-w-dim" />
-          )}
-          <div className="h-[3px] flex-1 max-w-24 overflow-hidden rounded-full bg-w-surface2">
-            <div className="h-full bg-w-accent" style={{ width: `${subtaskFrac * 100}%` }} />
-          </div>
-          <span className="ml-auto text-[10px] font-medium text-w-dim">
-            {subtaskDone}/{subtaskTotal}
-          </span>
-        </div>
-      )}
-
-      {/* Screenshot strip */}
-      {imageAttachments.length > 0 && (
-        <div className="mt-2 flex gap-1 pl-6">
-          {imageAttachments.map((img) => (
-            <div key={img.id} className="h-10 flex-1 overflow-hidden rounded border border-w-line bg-w-surface2">
-              <img
-                src={img.storage_url}
-                alt={img.filename}
-                loading="lazy"
-                className="h-full w-full object-cover"
-              />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Due date / attachments */}
-      {(task.due_date || attachmentCount > 0) && (
-        <div className="mt-2 flex items-center gap-2.5 pl-6 text-xs text-w-dim">
-          {task.due_date && (
-            <span className="flex shrink-0 items-center gap-1">
-              <Calendar className="h-3 w-3" />
-              {task.due_date.slice(0, 10)}
+          {assignee && (
+            <span className="flex min-w-0 items-center gap-1" title={`Assigned to ${assignee}`}>
+              <span className="shrink-0">
+                <Avatar name={assignee} avatarUrl={task.assigned_avatar_url} size="xs" />
+              </span>
+              <span className="truncate">{assignee}</span>
             </span>
           )}
+
+          {subtaskTotal > 0 && (
+            <span
+              className={`flex shrink-0 items-center gap-0.5 ${subtasksComplete ? 'text-w-accent' : ''}`}
+              title={`${subtaskDone} of ${subtaskTotal} checklist items complete`}
+            >
+              {subtasksComplete ? <CheckCircle2 className="h-2.5 w-2.5" /> : <ListChecks className="h-2.5 w-2.5" />}
+              {subtaskDone}/{subtaskTotal}
+            </span>
+          )}
+
           {attachmentCount > 0 && (
-            <span className="flex shrink-0 items-center gap-1">
-              <Paperclip className="h-3 w-3" />
+            <span className="flex shrink-0 items-center gap-0.5" title={`${attachmentCount} attachment${attachmentCount === 1 ? '' : 's'}`}>
+              <Paperclip className="h-2.5 w-2.5" />
               {attachmentCount}
             </span>
           )}
-        </div>
-      )}
 
-      {/* Timestamps — compact date + aging-tinted elapsed time, full detail
-          in the title attr (matches the desktop card's tooltip convention). */}
-      <div
-        className="mt-2 flex items-center gap-1 pl-6 text-[10px] text-w-faint"
-        title={`Added ${new Date(task.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`}
-      >
-        <span>{shortDate(task.created_at)}</span>
-        {task.last_moved_at ? (
-          <span className={`flex items-center gap-0.5 ${ageColor}`}>
-            {ageState !== 'none' && <Clock className="h-2.5 w-2.5" />}
-            <span>· moved {relative(task.last_moved_at)}</span>
-          </span>
-        ) : (
-          ageState !== 'none' && (
-            <span className={`flex items-center gap-0.5 ${ageColor}`}>
-              <Clock className="h-2.5 w-2.5" />
-              <span>{relative(task.created_at)}</span>
+          {safePrUrl ? (
+            <a
+              href={safePrUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title={task.pr_number ? `PR #${task.pr_number}` : 'Pull request'}
+              className="flex shrink-0 items-center gap-0.5 font-medium text-purple-400 hover:underline"
+            >
+              <GitPullRequest className="h-2.5 w-2.5" />
+              {task.pr_number ? `#${task.pr_number}` : 'PR'}
+            </a>
+          ) : task.pr_number ? (
+            <span className="flex shrink-0 items-center gap-0.5 text-purple-400" title={`PR #${task.pr_number}`}>
+              <GitPullRequest className="h-2.5 w-2.5" />#{task.pr_number}
             </span>
-          )
-        )}
+          ) : null}
+
+          {task.due_date && (
+            <span className="flex shrink-0 items-center gap-0.5" title={`Due ${task.due_date.slice(0, 10)}`}>
+              <Calendar className="h-2.5 w-2.5" />
+              {task.due_date.slice(0, 10)}
+            </span>
+          )}
+
+          <span className="ml-auto flex shrink-0 items-center gap-1">
+            {/* Last move replaces the added date rather than adding a second
+                timestamp; full detail lives in the tooltip. */}
+            <span
+              className={`flex items-center gap-0.5 ${ageColor}`}
+              title={`Added ${added}${task.created_by_name ? ` by ${task.created_by_name}` : ''}`}
+            >
+              {ageState !== 'none' && <Clock className="h-2.5 w-2.5" />}
+              {task.last_moved_at ? relative(task.last_moved_at) : ageState !== 'none' ? relative(task.created_at) : shortDate(task.created_at)}
+            </span>
+
+            {/* Always visible on touch (where it replaces dragging), hover-only
+                on pointer devices so the card stays clean. */}
+            {onMenu && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onMenu()
+                }}
+                title="Task actions"
+                aria-label="Task actions"
+                className="-my-1 -mr-1 shrink-0 rounded p-1 text-w-dim transition-colors hover:bg-w-surface2 hover:text-w-text md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </span>
+        </div>
       </div>
     </div>
   )

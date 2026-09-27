@@ -105,10 +105,12 @@ export default function KanbanColumn({
         setDragOverColumn(null)
         if (draggingId) moveTask(draggingId, col.key)
       }}
-      className={`flex flex-col rounded-lg border bg-w-surface transition-[width] duration-150 ease-out ${
+      // A quiet tint, not a second card around the cards — the cards carry the
+      // elevation (see KanbanCard), same as the desktop lanes.
+      className={`flex flex-col rounded-lg border transition-[width] duration-150 ease-out ${
         singleColumn ? 'min-h-0 w-full flex-1' : 'shrink-0'
       } ${singleColumn ? '' : collapsed ? 'w-[136px]' : 'w-[240px]'} ${
-        isDropTarget ? 'border-w-accent/60 bg-w-accent/10' : 'border-w-line'
+        isDropTarget ? 'border-w-accent/60 bg-w-accent/10' : 'border-w-line/50 bg-w-surface/20'
       }`}
     >
       {/* Column header */}
@@ -168,7 +170,7 @@ export default function KanbanColumn({
 
       {/* Cards — collapsed empty columns show header only */}
       {!collapsed && (
-        <div className="flex flex-1 flex-col gap-2 px-2 pb-2 min-h-0 max-md:overflow-y-auto">
+        <div className="flex flex-1 flex-col gap-1.5 px-1.5 pb-1.5 min-h-0 max-md:overflow-y-auto">
           {addingColumn === col.key && (
             <AddCardInput
               value={newTitle}
