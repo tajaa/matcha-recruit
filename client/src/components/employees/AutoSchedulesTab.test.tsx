@@ -165,6 +165,24 @@ describe('AutoSchedulesTab', () => {
       expect(await screen.findByText(/The week of 2026-09-06 has already passed/)).toBeInTheDocument()
     })
 
+    it('dates the last result so an old refusal does not read as current', async () => {
+      // Po Coffee's rule after the 2026-09-28 06:25 UTC refusal.
+      mocks.fetchRule.mockResolvedValue({
+        rule: {
+          ...onceRule('2026-10-04').rule,
+          last_status: 'already_present',
+          last_attempt_at: '2026-09-28T06:25:12Z',
+          last_message: 'A schedule suggestion or approved schedule already exists for that week.',
+        },
+      })
+      render(<MemoryRouter><ToastProvider><AutoSchedulesTab locationId="loc-1" /></ToastProvider></MemoryRouter>)
+
+      const stamp = new Intl.DateTimeFormat(undefined, {
+        timeZone: 'America/Los_Angeles', dateStyle: 'medium', timeStyle: 'short',
+      }).format(new Date('2026-09-28T06:25:12Z'))
+      expect(await screen.findByText(`already present · ${stamp}`)).toBeInTheDocument()
+    })
+
     it('stays quiet for the current or a future week', async () => {
       mocks.fetchRule.mockResolvedValue(onceRule('2026-10-04'))
       render(<MemoryRouter><ToastProvider><AutoSchedulesTab locationId="loc-1" /></ToastProvider></MemoryRouter>)
