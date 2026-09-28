@@ -608,7 +608,10 @@ async def archive_schedule_assistant_session(
             # staged can never be confirmed — left 'proposed' it would still
             # block generation for that week with nothing on screen to act on.
             # Keyed on the thread: automatic runs (no thread) are re-adopted by
-            # the next session and stay untouched.
+            # the next session and stay untouched. The thread UPDATE above holds
+            # the row lock `propose_week_draft` takes before inserting, so a
+            # build still in flight either lands before this cancel or sees the
+            # archived status and refuses.
             await conn.execute(
                 """UPDATE schedule_generation_runs
                    SET status='cancelled', updated_at=NOW()

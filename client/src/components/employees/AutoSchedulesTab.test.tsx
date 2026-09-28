@@ -172,5 +172,48 @@ describe('AutoSchedulesTab', () => {
       await screen.findByRole('button', { name: 'Run now' })
       expect(screen.queryByText(/has already passed/)).not.toBeInTheDocument()
     })
+
+    it("judges the week on the location's clock, not UTC's", async () => {
+      // 01:00 UTC Sunday 2026-10-04 is still Saturday evening in Los Angeles,
+      // so the week of 2026-09-27 has not ended there.
+      vi.setSystemTime(new Date('2026-10-04T01:00:00Z'))
+      mocks.fetchRule.mockResolvedValue(onceRule('2026-09-27'))
+      render(<MemoryRouter><ToastProvider><AutoSchedulesTab locationId="loc-1" /></ToastProvider></MemoryRouter>)
+
+      await screen.findByRole('button', { name: 'Run now' })
+      expect(screen.queryByText(/has already passed/)).not.toBeInTheDocument()
+    })
+
+    it('warns a store ahead of UTC once its own week has turned', async () => {
+      // 16:00 UTC Saturday 2026-10-03 is already Sunday 01:00 in Tokyo.
+      vi.setSystemTime(new Date('2026-10-03T16:00:00Z'))
+      mocks.fetchRule.mockResolvedValue({
+        rule: { ...onceRule('2026-09-27').rule, timezone: 'Asia/Tokyo' },
+      })
+      render(<MemoryRouter><ToastProvider><AutoSchedulesTab locationId="loc-1" /></ToastProvider></MemoryRouter>)
+
+      expect(await screen.findByText(/The week of 2026-09-27 has already passed/)).toBeInTheDocument()
+    })
+
+    it('follows the saved week Run now builds, not an unsaved edit', async () => {
+      mocks.fetchRule.mockResolvedValue(onceRule('2026-09-06'))
+      render(<MemoryRouter><ToastProvider><AutoSchedulesTab locationId="loc-1" /></ToastProvider></MemoryRouter>)
+
+      await screen.findByText(/The week of 2026-09-06 has already passed/)
+      fireEvent.change(screen.getByLabelText('Week starting'), { target: { value: '2026-10-04' } })
+
+      // Run now would still build 2026-09-06 until the new week is saved.
+      expect(screen.getByText(/The week of 2026-09-06 has already passed/)).toBeInTheDocument()
+    })
+
+    it('stays quiet when only an unsaved edit points at a past week', async () => {
+      mocks.fetchRule.mockResolvedValue(onceRule('2026-10-04'))
+      render(<MemoryRouter><ToastProvider><AutoSchedulesTab locationId="loc-1" /></ToastProvider></MemoryRouter>)
+
+      await screen.findByRole('button', { name: 'Run now' })
+      fireEvent.change(screen.getByLabelText('Week starting'), { target: { value: '2026-09-06' } })
+
+      expect(screen.queryByText(/has already passed/)).not.toBeInTheDocument()
+    })
   })
 })

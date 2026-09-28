@@ -21,6 +21,10 @@ from ..utils import get_db_connection
 logger = logging.getLogger(__name__)
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def enqueue_schedule_automation(rule_id: UUID, schedule_version: int, scheduled_for: datetime) -> None:
     """Publish the exact rule/version occurrence; edited rules make it stale."""
     run_schedule_auto_generation.apply_async(
@@ -113,11 +117,13 @@ async def _run(rule_id: str, schedule_version: int, scheduled_for: str) -> dict:
             one_time_week_start=rule["target_week_start"],
             week_start_weekday=week_start_weekday,
         )
-        # A one-time rule's run date is checked at save time; its target week
-        # is not, so the scheduled run can land after that week has passed.
+        # Save refuses a past week, but weeks keep passing after the save.
+        # Judged at delivery, not at the scheduled occurrence: a task that
+        # ran late (worker down or recycling past its ETA) must not build a
+        # week that ended while it waited.
         stale_target = past_week_refusal(
             week_start=week_start, timezone_name=rule["timezone"],
-            week_start_weekday=week_start_weekday, now=expected_at,
+            week_start_weekday=week_start_weekday, now=max(expected_at, _utcnow()),
         )
         try:
             if stale_target:

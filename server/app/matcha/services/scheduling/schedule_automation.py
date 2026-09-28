@@ -15,6 +15,11 @@ def location_zone(timezone_name: str | None):
         return timezone.utc
 
 
+def location_today(timezone_name: str | None, *, now: datetime | None = None) -> date:
+    """The calendar date on the location's wall clock (UTC if it has no valid zone)."""
+    return (now or datetime.now(timezone.utc)).astimezone(location_zone(timezone_name)).date()
+
+
 def next_run_at(
     *, cadence: str, timezone_name: str | None, run_time: time,
     run_weekday: int | None = None, run_date: date | None = None,
@@ -48,8 +53,9 @@ def target_week_start(
         if one_time_week_start is None:
             raise ValueError("A one-time schedule needs a target week.")
         return one_time_week_start
-    local_day = scheduled_for.astimezone(location_zone(timezone_name)).date()
-    current_week = align_week_start(local_day, week_start_weekday)
+    current_week = align_week_start(
+        location_today(timezone_name, now=scheduled_for), week_start_weekday,
+    )
     return current_week + timedelta(days=7 * int(target_weeks_ahead or 1))
 
 
@@ -65,7 +71,7 @@ def past_week_refusal(
     as their week being blocked (Po Coffee, 2026-09-27). "Past" is judged on
     the location's own clock and week start, never UTC's Sunday.
     """
-    local_today = (now or datetime.now(timezone.utc)).astimezone(location_zone(timezone_name)).date()
+    local_today = location_today(timezone_name, now=now)
     if week_start >= align_week_start(local_today, week_start_weekday):
         return None
     iso = week_start.isoformat()
@@ -86,15 +92,20 @@ def already_present_result(
 
     The message used to say only "…already exists for that week", so a manager
     could not tell WHICH week the rule had targeted or whether it was an
-    unapproved suggestion (review it) or an applied schedule (clear its shifts).
+    unapproved suggestion (review it) or an applied schedule (remove the week's shifts).
     """
     iso = week_start.isoformat()
     if blocking_status == "proposed":
         message = f"A schedule suggestion for the week of {iso} is already waiting for review."
     elif blocking_status == "applied":
+        # The applied run is only released once the location has NO draft or
+        # published shift that week, whoever made them (the stale sweep in
+        # generate_review_suggestion) — "clear its shifts" read as the
+        # generated ones alone.
         message = (
             f"An approved schedule for the week of {iso} already exists. "
-            "Clear its shifts before generating a replacement."
+            "Remove every draft and published shift at this location for that "
+            "week before generating a replacement."
         )
     else:
         message = f"A schedule suggestion already exists for the week of {iso}."

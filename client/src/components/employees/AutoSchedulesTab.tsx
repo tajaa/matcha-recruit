@@ -60,6 +60,21 @@ function fromRule(rule: ScheduleAutomationRule, weekStartWeekday = 0): FormState
   }
 }
 
+/** Start of the current week on the LOCATION's wall clock — the same "today"
+ * the server's past-week refusal uses. The browser's clock and UTC's both
+ * disagree with it for hours around midnight. en-CA formats as YYYY-MM-DD. */
+function locationWeekStart(timezoneName: string, weekStartWeekday = 0, now = new Date()): string {
+  let today: string
+  try {
+    today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezoneName, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(now)
+  } catch {
+    today = toISODate(now) // unknown zone: UTC, as the server falls back
+  }
+  return toISODate(startOfWeek(new Date(`${today}T00:00:00Z`), weekStartWeekday))
+}
+
 function formatTimestamp(value: string, timezoneName: string): string {
   return new Intl.DateTimeFormat(undefined, {
     timeZone: timezoneName,
@@ -152,11 +167,12 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
     }
   }
 
-  // ISO dates compare correctly as strings. Judged against this browser's
-  // clock; the server makes the authoritative call on the location's clock.
-  const targetWeekPassed = form.cadence === 'once'
-    && !!form.targetWeekStart
-    && form.targetWeekStart < toISODate(startOfWeek(new Date(), weekStartWeekday))
+  // Judged on the SAVED rule, because that is the week Run now builds — an
+  // unsaved edit to the field changes nothing until it is saved. ISO dates
+  // compare correctly as strings.
+  const savedWeekPassed = rule?.cadence === 'once'
+    && !!rule.target_week_start
+    && rule.target_week_start < locationWeekStart(rule.timezone, weekStartWeekday)
 
   if (!locationId) {
     return <div className="py-20 text-center text-sm text-zinc-500">Select a location to configure its auto schedule.</div>
@@ -239,14 +255,6 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
               <Field label="Run date"><input aria-label="Run date" type="date" className={inputCls} value={form.runDate} onChange={(e) => setForm({ ...form, runDate: e.target.value })} /></Field>
               <Field label="Run time"><input aria-label="Run time" type="time" className={inputCls} value={form.runTime} onChange={(e) => setForm({ ...form, runTime: e.target.value })} /></Field>
               <Field label="Week starting"><input aria-label="Week starting" type="date" className={inputCls} value={form.targetWeekStart} onChange={(e) => setForm({ ...form, targetWeekStart: e.target.value })} /></Field>
-              {targetWeekPassed && (
-                // A one-time rule's week never moves, so an old rule quietly
-                // targets a week that is over — the server refuses Run now on
-                // it; say so before the click rather than after.
-                <p role="status" className="text-xs text-amber-400 sm:col-span-3">
-                  The week of {form.targetWeekStart} has already passed. Run now will refuse it until you pick a later week and save.
-                </p>
-              )}
             </div>
           )}
 
@@ -258,6 +266,14 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
               {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} Run now
             </button>}
           </div>
+          {savedWeekPassed && (
+            // A one-time rule's week never moves, so an old rule quietly
+            // targets a week that is over — the server refuses Run now on
+            // it; say so before the click rather than after.
+            <p role="status" className="text-xs text-amber-400">
+              The week of {rule.target_week_start} has already passed. Run now will refuse it until you pick a later week and save.
+            </p>
+          )}
           {generatedWeekStart && (
             <Link
               to={`/ops/schedule/editor?week=${generatedWeekStart}&location=${locationId}`}

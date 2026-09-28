@@ -11,6 +11,13 @@ from app.matcha.services.scheduling.schedule_automation import next_run_at, targ
 from app.workers.tasks import schedule_auto_generation as worker
 
 
+@pytest.fixture(autouse=True)
+def _delivered_on_time(monkeypatch):
+    """Every task here runs at its scheduled occurrence unless a test says
+    otherwise: the worker judges a past week at max(occurrence, now)."""
+    monkeypatch.setattr(worker, "_utcnow", lambda: datetime(2000, 1, 1, tzinfo=timezone.utc))
+
+
 class _Conn:
     def __init__(self, rule):
         self.rule = rule
@@ -537,3 +544,57 @@ async def test_worker_refuses_a_one_time_rule_whose_week_has_passed(monkeypatch)
     persisted = [args for query, args in conn.execute_calls if "last_completed_at" in query]
     assert persisted and persisted[-1][0] == "not_ready"
     assert "2026-09-06" in persisted[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_a_late_delivery_does_not_build_a_week_that_ended_while_it_waited(monkeypatch):
+    """Scheduled Saturday night for the week of 2026-09-27, but the worker was
+    down and the task ran Monday 2026-10-05. At the occurrence the week was
+    still open; at delivery it is over."""
+    rule_id, company_id, location_id = uuid4(), uuid4(), uuid4()
+    scheduled_for = datetime(2026, 10, 4, 6, tzinfo=timezone.utc)  # Sat 23:00 in LA
+    conn = _Conn({
+        "id": rule_id, "company_id": company_id, "location_id": location_id,
+        "week_template_id": uuid4(), "enabled": True, "cadence": "once",
+        "run_weekday": None, "run_time": time(23), "target_weeks_ahead": None,
+        "target_week_start": date(2026, 9, 27), "next_run_at": scheduled_for,
+        "schedule_version": 1, "timezone": "America/Los_Angeles",
+        "enabled_features": {"employee_schedule": True, "huume": True, "matcha_work": True},
+        "signup_source": None, "company_status": "approved",
+    })
+    monkeypatch.setattr(worker, "get_db_connection", AsyncMock(return_value=conn))
+    monkeypatch.setattr(worker, "_utcnow", lambda: datetime(2026, 10, 5, 17, tzinfo=timezone.utc))
+    generate = AsyncMock()
+    monkeypatch.setattr(worker, "generate_review_suggestion", generate)
+    monkeypatch.setattr(worker, "enqueue_schedule_automation", Mock())
+
+    result = await worker._run(str(rule_id), 1, scheduled_for.isoformat())
+
+    generate.assert_not_awaited()
+    assert result["status"] == "not_ready"
+    assert result["week_start"] == "2026-09-27"
+
+
+@pytest.mark.asyncio
+async def test_an_on_time_delivery_still_builds_the_current_week(monkeypatch):
+    rule_id = uuid4()
+    scheduled_for = datetime(2026, 10, 4, 6, tzinfo=timezone.utc)  # Sat 23:00 in LA
+    conn = _Conn({
+        "id": rule_id, "company_id": uuid4(), "location_id": uuid4(),
+        "week_template_id": uuid4(), "enabled": True, "cadence": "once",
+        "run_weekday": None, "run_time": time(23), "target_weeks_ahead": None,
+        "target_week_start": date(2026, 9, 27), "next_run_at": scheduled_for,
+        "schedule_version": 1, "timezone": "America/Los_Angeles",
+        "enabled_features": {"employee_schedule": True, "huume": True, "matcha_work": True},
+        "signup_source": None, "company_status": "approved",
+    })
+    monkeypatch.setattr(worker, "get_db_connection", AsyncMock(return_value=conn))
+    monkeypatch.setattr(worker, "_utcnow", lambda: scheduled_for)
+    generate = AsyncMock(return_value={"status": "generated", "message": "ok"})
+    monkeypatch.setattr(worker, "generate_review_suggestion", generate)
+    monkeypatch.setattr(worker, "enqueue_schedule_automation", Mock())
+
+    result = await worker._run(str(rule_id), 1, scheduled_for.isoformat())
+
+    generate.assert_awaited_once()
+    assert result["status"] == "generated"
