@@ -43,7 +43,9 @@ final class AppState {
         _ = Self.purgeKeychainOnFirstLaunch()
         await AuthService.shared.flushPendingRevoke()
         guard AuthService.shared.hasStoredSession else {
-            phase = .signedOut
+            // Also drops a push tapped to launch the app: nobody is signed in
+            // to route it for, and it must not route whoever signs in next.
+            clearUserState()
             return
         }
         phase = .restoring
@@ -55,7 +57,7 @@ final class AppState {
         } catch {
             if case APIError.unauthorized = error {
                 AuthService.shared.clearLocalSession()
-                phase = .signedOut
+                clearUserState()
             } else {
                 phase = .retry(error.localizedDescription)
             }
@@ -67,19 +69,26 @@ final class AppState {
         try await loadProfile()
     }
 
-    /// Never fails. Unregister the push token first (it needs the live access
-    /// token), then revoke the device session — the server also drops every
-    /// token bound to that session, and receives ours explicitly in case it
-    /// was registered before the binding existed. Offline: local state is
-    /// cleared anyway and the revoke is queued (see AuthService.logout).
+    /// Never fails. Revoke the device session FIRST: it needs only the stored
+    /// refresh token, and the server drops every push token bound to that
+    /// session plus ours explicitly. Calling anything that needs an access
+    /// token first let an idle-expired session's 401 → failed refresh wipe the
+    /// refresh token, so the revoke was never sent and the phone kept the
+    /// user's pushes. Offline: local state is cleared anyway and the revoke is
+    /// queued (see AuthService.logout).
     func signOut() async {
-        try? await PushService.shared.unregister()
         await AuthService.shared.logout(pushToken: PushService.shared.currentToken)
+        PushService.shared.markSignedOut()
         clearUserState()
     }
 
     func handlePush(_ payload: [AnyHashable: Any]) {
-        guard case .ready = phase else { return }
+        guard case .ready = phase else {
+            // While restoring, keep it for loadProfile. Signed out: nobody to
+            // route it for — it must not route the next person to sign in.
+            if case .signedOut = phase { AppDelegate.pendingNotification = nil }
+            return
+        }
         AppDelegate.pendingNotification = nil
         if let destination = PushRoute.destination(for: payload) { navigate(to: destination) }
         Task { await refreshBadges() }
@@ -87,7 +96,11 @@ final class AppState {
 
     func handleURL(_ url: URL) {
         guard url.scheme == "matchaschedule" else { return }
-        guard case .ready = phase else { pendingURL = url; return }
+        guard case .ready = phase else {
+            if case .signedOut = phase { return }
+            pendingURL = url
+            return
+        }
         if let destination = PushRoute.destination(for: url) { navigate(to: destination) }
     }
 
@@ -99,6 +112,13 @@ final class AppState {
             pendingConversationID = id
             selectedTab = 2
         }
+    }
+
+    /// Badge refresh for foreground pushes and returning to the app; a no-op
+    /// until someone is signed in.
+    func refreshBadgesIfReady() async {
+        guard case .ready = phase else { return }
+        await refreshBadges()
     }
 
     func refreshBadges() async {

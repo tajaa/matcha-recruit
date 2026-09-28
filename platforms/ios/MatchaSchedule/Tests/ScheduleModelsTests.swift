@@ -31,8 +31,8 @@ final class ScheduleModelsTests: XCTestCase {
            "starts_at":"2026-09-23T09:00:00+00:00","ends_at":"2026-09-23T17:00:00+00:00",
            "break_minutes":30,"notes":null,"status":"published",
            "assignments":[{"employee_id":"me","name":"Ada","status":"assigned",
-             "manager_note":"Front counter","manager_note_visible_to_employee":true,
-             "planned_breaks":[{"kind":"meal","ordinal":1,"start_local":"12:00","duration_minutes":30,"source":"manager"}]}]},
+             "manager_note":"Front counter",
+             "planned_breaks":[{"kind":"meal","ordinal":1,"start_local":"2026-09-23T12:00:00","duration_minutes":30,"source":"manager"}]}]},
           {"id":"two","location_id":"place","role":"Lead","department":null,
            "starts_at":"2026-09-24T09:00:00+00:00","ends_at":"2026-09-24T17:00:00+00:00",
            "break_minutes":null,"notes":null,"status":"published",
@@ -42,7 +42,10 @@ final class ScheduleModelsTests: XCTestCase {
         """
         let shifts = try JSONDecoder().decode(ShiftListResponse.self, from: Data(json.utf8)).shifts
         XCTAssertEqual(shifts.count, 2)
-        XCTAssertEqual(shifts[0].assignments[0].planned_breaks?.first?.start_local, "12:00")
+        // The real portal payload: no visibility flag (managers only), and a
+        // local datetime for the break start.
+        XCTAssertEqual(shifts[0].assignments[0].manager_note, "Front counter")
+        XCTAssertEqual(shifts[0].assignments[0].planned_breaks?.first?.start_local, "2026-09-23T12:00:00")
         XCTAssertNil(shifts[1].assignments[0].manager_note)
         XCTAssertEqual(shifts[1].has_conflict, true)
     }
@@ -105,6 +108,70 @@ final class ScheduleModelsTests: XCTestCase {
         let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
         XCTAssertTrue(AppState.purgeKeychainOnFirstLaunch(defaults: defaults))
         XCTAssertFalse(AppState.purgeKeychainOnFirstLaunch(defaults: defaults))
+    }
+
+    func testRealigningFromTheAnchorDayKeepsTheCurrentWeek() {
+        // Wednesday 2026-09-23; the page opens on Sundays until the store's
+        // week start (Monday) is learned.
+        let wednesday = ISO8601DateFormatter().date(from: "2026-09-23T00:00:00Z")!
+        let firstShown = WallClock.weekStart(containing: wednesday, weekStartWeekday: 0)
+        // The old realign re-aligned the Sunday already on screen: last week.
+        XCTAssertEqual(WallClock.weekLabel(WallClock.weekStart(containing: firstShown, weekStartWeekday: 1)), "Sep 14, 2026")
+        // Deriving from the anchor day lands on this week's Monday.
+        XCTAssertEqual(WallClock.weekLabel(WallClock.weekStart(containing: wednesday, weekStartWeekday: 1)), "Sep 21, 2026")
+        // Navigation moves the anchor by whole weeks, so it stays aligned.
+        let next = WallClock.move(wednesday, by: 1)
+        XCTAssertEqual(WallClock.weekLabel(WallClock.weekStart(containing: next, weekStartWeekday: 1)), "Sep 28, 2026")
+    }
+
+    func testLocationWithNoNameDecodesAndFallsBack() throws {
+        let json = """
+        {"locations":[
+          {"id":"a","name":null,"address":null,"city":"Oakland","state":"CA","zipcode":null,"is_active":true,"week_start_weekday":1},
+          {"id":"b","name":null,"city":null,"week_start_weekday":0},
+          {"id":"c","name":"Mission","city":"San Francisco","week_start_weekday":0}
+        ]}
+        """
+        let places = try JSONDecoder().decode(LocationsResponse.self, from: Data(json.utf8)).locations
+        XCTAssertEqual(places.map(\.displayName), ["Oakland", "Your store", "Mission"])
+    }
+
+    func testPlannedBreakTimeIsTheStoresClockFace() {
+        XCTAssertEqual(WallClock.clockTime("2026-09-23T12:00:00"), "12:00 PM")
+        XCTAssertEqual(WallClock.clockTime("2026-09-23T06:30:00-07:00"), "6:30 AM")
+        XCTAssertEqual(WallClock.clockTime("2026-09-23T00:05:00"), "12:05 AM")
+        XCTAssertEqual(WallClock.clockTime("13:45"), "1:45 PM")
+        XCTAssertEqual(WallClock.clockTime("soon"), "soon")
+    }
+
+    func testInstantsAreShownInTheDeviceZone() {
+        let pacific = TimeZone(identifier: "America/Los_Angeles")!
+        let locale = Locale(identifier: "en_US_POSIX")
+        // Python's microseconds and both UTC spellings parse.
+        XCTAssertNotNil(Instant.date("2026-09-23T17:00:00.123456+00:00"))
+        XCTAssertNotNil(Instant.date("2026-09-23T17:00:00Z"))
+        let label = Instant.label("2026-09-23T17:00:00.123456Z", timeZone: pacific, locale: locale)
+        XCTAssertTrue(label.contains("10:00"), label)
+        XCTAssertTrue(label.contains("Sep 23"), label)
+        // An evening notice must not show tomorrow's date.
+        XCTAssertTrue(Instant.label("2026-09-24T03:00:00Z", timeZone: pacific, locale: locale).contains("Sep 23"))
+    }
+
+    @MainActor
+    func testPushTappedWhileSignedOutRoutesNobody() {
+        let state = AppState()
+        state.phase = .signedOut
+        AppDelegate.pendingNotification = ["type": "schedule_published"]
+        state.handlePush(["type": "schedule_published"])
+        XCTAssertNil(AppDelegate.pendingNotification)
+        XCTAssertEqual(state.selectedTab, 0)
+
+        // While a session is still being restored it is kept for loadProfile.
+        state.phase = .restoring
+        AppDelegate.pendingNotification = ["type": "schedule_request_decided"]
+        state.handlePush(["type": "schedule_request_decided"])
+        XCTAssertNotNil(AppDelegate.pendingNotification)
+        AppDelegate.pendingNotification = nil
     }
 
     func testWeekRangeUsesCalendarDays() {

@@ -85,9 +85,9 @@ final class PushService {
         }
     }
 
-    func unregister() async throws {
-        guard let token = deviceToken else { return }
-        try await unregister(token: token)
+    /// Sign-out ends the device session server-side, which also deletes every
+    /// push token bound to it (`/auth/mobile/logout`); nothing to call here.
+    func markSignedOut() {
         isRegistered = false
     }
 

@@ -9,7 +9,9 @@ struct DMThreadView: View {
     @State private var sending = false
     @State private var error: String?
 
-    private var messages: [MWInboxMessage] { detail?.messages ?? [] }
+    /// Oldest first, newest at the bottom next to the composer. The server
+    /// pages newest-first, so its order is not the reading order.
+    private var messages: [MWInboxMessage] { DMOrder.chronological(detail?.messages ?? []) }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -109,11 +111,26 @@ private struct MessageBubble: View {
                             .font(.caption).lineLimit(1)
                     }
                 }
-                Text(message.createdAt.prefix(16).replacingOccurrences(of: "T", with: " "))
+                Text(Instant.label(message.createdAt))
                     .font(.caption2).foregroundStyle(.tertiary)
             }
             if !isMine { Spacer(minLength: 40) }
         }
         .padding(.horizontal, 12)
+    }
+}
+
+enum DMOrder {
+    /// Ascending by send time; the message id breaks ties so equal timestamps
+    /// never swap places between polls. Unparseable times sort by their text.
+    static func chronological(_ messages: [MWInboxMessage]) -> [MWInboxMessage] {
+        messages.sorted { lhs, rhs in
+            let left = Instant.date(lhs.createdAt), right = Instant.date(rhs.createdAt)
+            if let left, let right, left != right { return left < right }
+            if left == nil || right == nil, lhs.createdAt != rhs.createdAt {
+                return lhs.createdAt < rhs.createdAt
+            }
+            return lhs.id < rhs.id
+        }
     }
 }

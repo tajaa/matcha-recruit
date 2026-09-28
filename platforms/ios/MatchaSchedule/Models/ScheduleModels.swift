@@ -59,8 +59,9 @@ struct ShiftAssignment: Decodable, Identifiable {
     let employee_id: String
     let name: String
     let status: String
+    /// The server already nulls a note the manager did not share, and only
+    /// sends the visibility flag to managers, so presence is the signal.
     let manager_note: String?
-    let manager_note_visible_to_employee: Bool?
     let planned_breaks: [PlannedBreak]?
 
     var id: String { employee_id }
@@ -81,7 +82,15 @@ struct LocationsResponse: Decodable {
 
 struct ScheduleLocation: Decodable, Identifiable {
     let id: String
-    let name: String
+    /// Nullable server-side: a work site can be saved without a name.
+    let name: String?
+    let city: String?
     /// 0 = Sunday … 6 = Saturday; the store's configured week start.
     let week_start_weekday: Int?
+
+    var displayName: String {
+        if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { return name }
+        if let city, !city.trimmingCharacters(in: .whitespaces).isEmpty { return city }
+        return "Your store"
+    }
 }
