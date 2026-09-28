@@ -290,7 +290,15 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
             <Status label="State" value={rule.enabled ? 'Enabled' : 'Paused'} />
             <Status label="Location time zone" value={rule.timezone} />
             <Status label="Next run" value={rule.next_run_at ? formatTimestamp(rule.next_run_at, rule.timezone) : 'Not scheduled'} />
-            <Status label="Last result" value={rule.last_status?.replaceAll('_', ' ') ?? 'Has not run'} />
+            {/* Stamped with when it ran: the stored result is the LAST attempt's
+                and outlives whatever blocked it, so undated it read as a
+                current refusal after the week had been cleared. */}
+            <Status
+              label="Last result"
+              value={rule.last_status
+                ? `${rule.last_status.replaceAll('_', ' ')}${rule.last_attempt_at ? ` · ${formatTimestamp(rule.last_attempt_at, rule.timezone)}` : ''}`
+                : 'Has not run'}
+            />
             {rule.last_message && <p className="rounded-lg bg-zinc-950/60 p-3 text-xs leading-5 text-zinc-400">{rule.last_message}</p>}
           </>}
         </aside>
