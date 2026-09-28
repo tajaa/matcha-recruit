@@ -131,8 +131,11 @@ boards, so claiming (→ In progress) keeps it off.
 
 - **claude.ai:** Settings → Connectors → Add custom connector → `https://hey-matcha.com/api/mcp`,
   then complete the Matcha consent.
-- **ChatGPT:** Settings → Apps & Connectors → Advanced → Developer mode, then create an app with
-  the same URL and OAuth.
+- **ChatGPT:** Settings → Security and login → Developer mode (once), then
+  [chatgpt.com/plugins](https://chatgpt.com/plugins) → + → Create MCP App with the same URL and
+  OAuth. (ChatGPT renamed Connectors to Plugins in July 2026; the toggle used to be under
+  Connectors → Advanced.) There is no link that pre-fills a custom app, so the web settings page's
+  **Copy URL & open ChatGPT** button — copy the URL, open the Plugins page — is the shortest path.
 - **Claude Code:** `claude mcp add --transport http matcha https://hey-matcha.com/api/mcp`, then
   `/mcp` to log in.
 - **Codex CLI:** `codex mcp add matcha --url https://hey-matcha.com/api/mcp`, then
@@ -141,7 +144,9 @@ boards, so claiming (→ In progress) keeps it off.
 - **In-app:** Settings → **AI connectors** (web `/work|/espresso/settings`, Espresso ⌘, → AI Connectors)
   lists every step with copy buttons, shows what is connected, and disconnects. Research cards get
   Claude / ChatGPT deep links and Claude Code commands. Web retains the Codex shell
-  command; native Espresso offers ChatGPT sign-in and **Research with Codex**.
+  command; native Espresso offers ChatGPT sign-in and **Research with Codex**. The web page
+  re-fetches on tab return so "Connected" shows up after the ChatGPT round trip, and tells Mac
+  visitors that Espresso's sign-in is one click.
   Native build/validation details: [Codex runtime](../../platforms/desktop/Espresso/CodexRuntime/README.md).
 - **Local:**
   1. Run `dev-remote.sh`.
