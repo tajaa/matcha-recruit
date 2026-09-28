@@ -21,7 +21,8 @@ async def _send_pending() -> dict[str, int]:
     conn = await get_db_connection()
     try:
         # Only requests some active reviewer has not yet been told about
-        # (either channel). Without the anti-join every unreviewed request is
+        # (either channel). A parked (failed_at) delivery counts as done:
+        # it has used its attempts. Without the anti-join every unreviewed request is
         # re-scanned on every sweep, and once the backlog passes the LIMIT the
         # newest requests are never reached.
         rows = await conn.fetch(
@@ -41,11 +42,13 @@ async def _send_pending() -> dict[str, int]:
                         NOT EXISTS (
                             SELECT 1 FROM schedule_request_notification_deliveries d
                             WHERE d.request_id = r.id AND d.recipient_user_id = u.id
-                              AND d.event_type = 'manager_ready' AND d.sent_at IS NOT NULL)
+                              AND d.event_type = 'manager_ready'
+                              AND (d.sent_at IS NOT NULL OR d.failed_at IS NOT NULL))
                         OR NOT EXISTS (
                             SELECT 1 FROM schedule_request_notification_deliveries d
                             WHERE d.request_id = r.id AND d.recipient_user_id = u.id
-                              AND d.event_type = 'manager_ready_in_app' AND d.sent_at IS NOT NULL)
+                              AND d.event_type = 'manager_ready_in_app'
+                              AND (d.sent_at IS NOT NULL OR d.failed_at IS NOT NULL))
                       )
               )
             ORDER BY r.updated_at ASC
