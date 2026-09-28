@@ -146,10 +146,19 @@ def test_company_fields_and_schedule_blocking_are_validated():
         ScCertificateSetup(name="Card", is_required=False, schedule_blocking=True)
 
 
-def test_a_job_must_carry_at_least_one_certificate():
-    # The wizard enforces the same rule client-side; the contracts must agree.
-    with pytest.raises(ValidationError):
-        ScJobSetup(name="Cook", certificates=[])
+def test_a_job_may_carry_no_certificate_but_the_setup_needs_one_mandatory():
+    # A roster title with no credential requirement (e.g. a shift supervisor)
+    # must still be configurable as a job, or its employees can't import.
+    assert ScJobSetup(name="Shift Supervisor").certificates == []
+
+    no_mandatory = submission().model_copy(update={"jobs": [
+        ScJobSetup(name="Shift Supervisor"),
+        ScJobSetup(name="Barista", certificates=[
+            ScCertificateSetup(name="Food Handler Card", is_required=False, schedule_blocking=False),
+        ]),
+    ]})
+    with pytest.raises(service.ScOnboardingError, match="at least one mandatory certificate"):
+        service.validate_sc_submission(no_mandatory)
 
 
 def test_optional_imports_can_be_skipped():
@@ -178,10 +187,38 @@ def test_employee_email_and_job_title_validation_is_actionable():
     with pytest.raises(service.ScOnboardingError, match="duplicate email"):
         service.validate_sc_submission(submission(employees=employees))
 
-    with pytest.raises(service.ScOnboardingError, match="must match a configured job"):
+    with pytest.raises(service.ScOnboardingError, match="Every employee job title needs a job"):
         service.validate_sc_submission(submission(employees=employees[:1]).model_copy(update={
             "employees": [employees[1]],
         }))
+
+
+def _employee(email: str, job_title: str) -> ScEmployeeImport:
+    return ScEmployeeImport(
+        email=email, first_name="Sam", last_name="Lee",
+        work_state="CA", job_title=job_title, department="Front of house",
+    )
+
+
+def test_unmatched_titles_are_all_named_once_with_the_fix():
+    # Naming only the first unmatched title made the manager fix the roster
+    # one title per attempt (Barista, then Shift Supervisor, ...).
+    body = submission(employees=[
+        _employee("a@example.com", "Shift Supervisor"),
+        _employee("b@example.com", "barista"),
+        _employee("c@example.com", "Barista"),
+        _employee("d@example.com", "Cook"),
+    ])
+    with pytest.raises(service.ScOnboardingError) as caught:
+        service.validate_sc_submission(body)
+    message = str(caught.value)
+    assert message.startswith(service.UNMATCHED_JOB_TITLES_MESSAGE)
+    assert message.endswith("Missing: barista, Shift Supervisor")
+
+
+def test_employee_title_matches_a_job_regardless_of_case_and_spacing():
+    body = submission(employees=[_employee("a@example.com", "  COOK ")])
+    service.validate_sc_submission(body)
 
 
 class _Transaction:
@@ -499,3 +536,133 @@ async def test_existing_company_location_is_rejected_before_mutation(monkeypatch
 
     assert conn.rolled_back is True
     assert not any(method == "execute" for method, _, _ in conn.calls)
+
+
+class _RosterConnection(_Connection):
+    """Hands out a distinct id per employee and per job so assignment is checkable."""
+
+    def __init__(self):
+        super().__init__()
+        self.employee_ids: dict[str, object] = {}
+        self.job_ids: dict[str, object] = {}
+
+    async def fetch(self, query, *args):
+        if "INSERT INTO employees" in query:
+            self.calls.append(("fetch", query, args))
+            assert self.in_transaction
+            rows = []
+            for email in args[1]:
+                self.employee_ids[email] = uuid4()
+                rows.append({"id": self.employee_ids[email], "email": email})
+            return rows
+        return await super().fetch(query, *args)
+
+    async def fetchval(self, query, *args):
+        if "INSERT INTO schedule_jobs" in query:
+            self.calls.append(("fetchval", query, args))
+            self.job_ids[args[1]] = uuid4()
+            return self.job_ids[args[1]]
+        return await super().fetchval(query, *args)
+
+
+def _shift_supervisor_submission(*, jobs) -> ScOnboardingComplete:
+    return submission(employees=[
+        _employee("lead@example.com", "Shift Supervisor"),
+        _employee("barista@example.com", "Barista"),
+    ]).model_copy(update={"jobs": jobs})
+
+
+_CAFE_JOBS = [
+    ScJobSetup(name="Barista", certificates=[ScCertificateSetup(name="Food Handler Card")]),
+    ScJobSetup(name="shift supervisor"),
+]
+
+
+@pytest.mark.asyncio
+async def test_shift_supervisor_without_a_certificate_persists_and_is_assigned(monkeypatch):
+    # The reported case: a company-defined title with no credential rule.
+    _allow_sc_product(monkeypatch)
+    _capture_location_sync(monkeypatch)
+    replacement_calls = []
+
+    async def replace(conn_arg, **kwargs):
+        replacement_calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(service, "replace_job_credential_requirements", replace)
+    conn = _RosterConnection()
+
+    result = await service.complete_sc_onboarding(
+        conn, company_id=uuid4(), actor_user_id=uuid4(),
+        body=_shift_supervisor_submission(jobs=_CAFE_JOBS),
+    )
+
+    assert result["already_completed"] is False
+    assert set(conn.job_ids) == {"Barista", "shift supervisor"}
+    assignments = {
+        args[0]: args[1]
+        for _, query, args in conn.calls
+        if "INSERT INTO schedule_job_employees" in query
+    }
+    assert assignments == {
+        conn.job_ids["Barista"]: [conn.employee_ids["barista@example.com"]],
+        conn.job_ids["shift supervisor"]: [conn.employee_ids["lead@example.com"]],
+    }
+    # Only the job that carries a certificate writes credential rules.
+    assert [call["job_id"] for call in replacement_calls] == [conn.job_ids["Barista"]]
+    assert conn.rolled_back is False
+
+
+def _route_harness(monkeypatch, conn):
+    from contextlib import asynccontextmanager
+
+    from app.matcha.routes.onboarding import sc as sc_route
+
+    @asynccontextmanager
+    async def connection():
+        yield conn
+
+    async def company_id(current_user):
+        return uuid4()
+
+    monkeypatch.setattr(sc_route, "get_connection", connection)
+    monkeypatch.setattr(sc_route, "get_client_company_id", company_id)
+    return sc_route
+
+
+@pytest.mark.asyncio
+async def test_complete_route_accepts_the_shift_supervisor_setup(monkeypatch):
+    _allow_sc_product(monkeypatch)
+    _capture_location_sync(monkeypatch)
+
+    async def replace(conn_arg, **kwargs):
+        return []
+
+    monkeypatch.setattr(service, "replace_job_credential_requirements", replace)
+    conn = _RosterConnection()
+    sc_route = _route_harness(monkeypatch, conn)
+
+    response = await sc_route.complete(
+        _shift_supervisor_submission(jobs=_CAFE_JOBS),
+        current_user=SimpleNamespace(id=uuid4()),
+    )
+
+    assert response == {"already_completed": False, "completed_at": conn.now.isoformat()}
+
+
+@pytest.mark.asyncio
+async def test_complete_route_names_every_missing_title_as_a_422(monkeypatch):
+    _allow_sc_product(monkeypatch)
+    conn = _RosterConnection()
+    sc_route = _route_harness(monkeypatch, conn)
+
+    with pytest.raises(HTTPException) as caught:
+        await sc_route.complete(
+            _shift_supervisor_submission(jobs=_CAFE_JOBS[:1]),
+            current_user=SimpleNamespace(id=uuid4()),
+        )
+
+    assert caught.value.status_code == 422
+    assert caught.value.detail == service.UNMATCHED_JOB_TITLES_MESSAGE + "Shift Supervisor"
+    # Rejected before the transaction opens: nothing was written.
+    assert conn.calls == []
