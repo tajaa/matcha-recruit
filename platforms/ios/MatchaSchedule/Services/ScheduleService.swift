@@ -8,6 +8,8 @@ struct ScheduleSnapshot {
     /// The employee's store week start (0 = Sunday); nil when the store list
     /// could not be read, so the page keeps the week start it already knew.
     let weekStartWeekday: Int?
+    /// The store's clock; nil when unknown (the phone's zone stands in).
+    let storeTimeZone: TimeZone?
 }
 
 enum ScheduleService {
@@ -55,8 +57,31 @@ enum ScheduleService {
             team: storeScoped(teamResult.shifts, locationIDs: locationIDs),
             open: openResult.shifts,
             locations: Dictionary(locations.map { ($0.id, $0.displayName) }, uniquingKeysWith: { first, _ in first }),
-            weekStartWeekday: locations.isEmpty ? nil : (locations.first?.week_start_weekday ?? 0)
+            weekStartWeekday: locations.isEmpty ? nil : (locations.first?.week_start_weekday ?? 0),
+            storeTimeZone: locations.first?.timeZone
         )
+    }
+
+    /// The employee's own published shifts for the next four weeks, soonest
+    /// first — what the "Next shift" card reads, whatever week is on screen.
+    static func upcoming(from day: Date = WallClock.today()) async throws -> [ScheduleShift] {
+        let (start, _) = WallClock.range(starting: day)
+        let (end, _) = WallClock.range(starting: WallClock.move(day, by: 4))
+        var components = URLComponents()
+        components.queryItems = [URLQueryItem(name: "start", value: start), URLQueryItem(name: "end", value: end)]
+        let response: ShiftListResponse = try await APIClient.shared.request(
+            method: "GET", path: "/v1/portal/me/schedule?\(components.percentEncodedQuery ?? "")"
+        )
+        return response.shifts.sorted { $0.starts_at < $1.starts_at }
+    }
+
+    /// The shift in progress, or else the next to start, at a store-clock
+    /// `now`. Shifts are soonest first.
+    static func nextShift(in shifts: [ScheduleShift], now: Date) -> ScheduleShift? {
+        shifts.first { shift in
+            guard let end = WallClock.date(shift.ends_at) else { return false }
+            return end > now
+        }
     }
 
     /// Store names and week start are decoration: a failure here must never

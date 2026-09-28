@@ -87,6 +87,10 @@ struct ScheduleLocation: Decodable, Identifiable {
     let city: String?
     /// 0 = Sunday … 6 = Saturday; the store's configured week start.
     let week_start_weekday: Int?
+    /// IANA zone of the store's clock, which shift times are written in.
+    let timezone: String?
+
+    var timeZone: TimeZone? { timezone.flatMap(TimeZone.init(identifier:)) }
 
     var displayName: String {
         if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { return name }

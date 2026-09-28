@@ -4,6 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
+
 from app.matcha.routes import locations
 
 
@@ -34,6 +36,7 @@ def _row(location_id, *, week_start_weekday=0):
         "city": "Los Angeles", "state": "CA", "zipcode": "90010", "is_active": True,
         # Every location-scoped page derives its own week boundaries from this.
         "week_start_weekday": week_start_weekday,
+        "timezone": "America/Los_Angeles",
     }
 
 
@@ -116,3 +119,22 @@ def test_listing_defaults_a_location_with_no_profile_to_sunday(monkeypatch):
     ))
 
     assert result["locations"][0]["week_start_weekday"] == 0
+
+
+@pytest.mark.parametrize("role", ["client", "employee"])
+def test_listing_carries_the_store_time_zone(monkeypatch, role):
+    """Shift times are the store's clock face, so a phone in another zone
+    needs the store's zone to tell whether a shift has started."""
+    company_id, user_id, location_id = uuid4(), uuid4(), uuid4()
+    conn = _Conn([_row(location_id)])
+    async def company_for_user(_user):
+        return company_id
+
+    monkeypatch.setattr(locations, "get_client_company_id", company_for_user)
+    monkeypatch.setattr(locations, "get_connection", lambda: _ConnectionContext(conn))
+    result = asyncio.run(locations.list_company_locations(
+        current_user=SimpleNamespace(id=user_id, role=role),
+    ))
+
+    assert "l.timezone" in conn.calls[0][0]
+    assert result["locations"][0]["timezone"] == "America/Los_Angeles"

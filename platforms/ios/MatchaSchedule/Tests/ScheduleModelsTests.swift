@@ -58,14 +58,14 @@ final class ScheduleModelsTests: XCTestCase {
         let now = ISO8601DateFormatter().date(from: "2026-09-24T02:00:00Z")!
         let losAngeles = TimeZone(identifier: "America/Los_Angeles")!
         let day = WallClock.today(now: now, timeZone: losAngeles)
-        XCTAssertEqual(WallClock.weekLabel(day), "Sep 23, 2026")
+        XCTAssertEqual(WallClock.format(day, "MMM d, yyyy"), "Sep 23, 2026")
     }
 
     func testMondayStoreWeekStartsOnMonday() {
         // Wednesday 2026-09-23
         let day = ISO8601DateFormatter().date(from: "2026-09-23T15:00:00Z")!
-        XCTAssertEqual(WallClock.weekLabel(WallClock.weekStart(containing: day, weekStartWeekday: 1)), "Sep 21, 2026")
-        XCTAssertEqual(WallClock.weekLabel(WallClock.weekStart(containing: day, weekStartWeekday: 0)), "Sep 20, 2026")
+        XCTAssertEqual(WallClock.format(WallClock.weekStart(containing: day, weekStartWeekday: 1), "MMM d, yyyy"), "Sep 21, 2026")
+        XCTAssertEqual(WallClock.format(WallClock.weekStart(containing: day, weekStartWeekday: 0), "MMM d, yyyy"), "Sep 20, 2026")
         let json = """
         {"locations":[{"id":"a","name":"Mission","week_start_weekday":1}]}
         """
@@ -116,12 +116,12 @@ final class ScheduleModelsTests: XCTestCase {
         let wednesday = ISO8601DateFormatter().date(from: "2026-09-23T00:00:00Z")!
         let firstShown = WallClock.weekStart(containing: wednesday, weekStartWeekday: 0)
         // The old realign re-aligned the Sunday already on screen: last week.
-        XCTAssertEqual(WallClock.weekLabel(WallClock.weekStart(containing: firstShown, weekStartWeekday: 1)), "Sep 14, 2026")
+        XCTAssertEqual(WallClock.format(WallClock.weekStart(containing: firstShown, weekStartWeekday: 1), "MMM d, yyyy"), "Sep 14, 2026")
         // Deriving from the anchor day lands on this week's Monday.
-        XCTAssertEqual(WallClock.weekLabel(WallClock.weekStart(containing: wednesday, weekStartWeekday: 1)), "Sep 21, 2026")
+        XCTAssertEqual(WallClock.format(WallClock.weekStart(containing: wednesday, weekStartWeekday: 1), "MMM d, yyyy"), "Sep 21, 2026")
         // Navigation moves the anchor by whole weeks, so it stays aligned.
         let next = WallClock.move(wednesday, by: 1)
-        XCTAssertEqual(WallClock.weekLabel(WallClock.weekStart(containing: next, weekStartWeekday: 1)), "Sep 28, 2026")
+        XCTAssertEqual(WallClock.format(WallClock.weekStart(containing: next, weekStartWeekday: 1), "MMM d, yyyy"), "Sep 28, 2026")
     }
 
     func testLocationWithNoNameDecodesAndFallsBack() throws {
@@ -172,6 +172,63 @@ final class ScheduleModelsTests: XCTestCase {
         state.handlePush(["type": "schedule_request_decided"])
         XCTAssertNotNil(AppDelegate.pendingNotification)
         AppDelegate.pendingNotification = nil
+    }
+
+    func testAppearancePreferenceMapsToInterfaceStyle() {
+        XCTAssertEqual(AppearancePreference.system.interfaceStyle, .unspecified)
+        XCTAssertEqual(AppearancePreference.light.interfaceStyle, .light)
+        XCTAssertEqual(AppearancePreference.dark.interfaceStyle, .dark)
+        // Persisted by raw value; an unknown stored value falls back to nil
+        // (so @AppStorage keeps its System default).
+        XCTAssertEqual(AppearancePreference(rawValue: "dark"), .dark)
+        XCTAssertNil(AppearancePreference(rawValue: "sepia"))
+        XCTAssertEqual(AppearancePreference.allCases.map(\.label), ["System", "Light", "Dark"])
+    }
+
+    func testCountdownCountsCalendarDaysNotRoundedHours() {
+        func at(_ iso: String) -> Date { ISO8601DateFormatter().date(from: iso)! }
+        // Mon 8 PM → Wed 7 AM is two calendar days, though only 35 hours.
+        XCTAssertEqual(WallClock.countdown(to: at("2026-09-30T07:00:00Z"), from: at("2026-09-28T20:00:00Z")), "in 2 days")
+        // Mon 1 AM → Tue 11 PM is tomorrow, though 46 hours away.
+        XCTAssertEqual(WallClock.countdown(to: at("2026-09-29T23:00:00Z"), from: at("2026-09-28T01:00:00Z")), "tomorrow")
+        // Later today, and under 12 hours across midnight, read in hours.
+        XCTAssertEqual(WallClock.countdown(to: at("2026-09-28T18:30:00Z"), from: at("2026-09-28T15:00:00Z")), "in 3h 30m")
+        XCTAssertEqual(WallClock.countdown(to: at("2026-09-29T06:30:00Z"), from: at("2026-09-28T22:00:00Z")), "in 8h 30m")
+        XCTAssertEqual(WallClock.countdown(to: at("2026-09-28T15:20:00Z"), from: at("2026-09-28T15:00:00Z")), "in 20m")
+        XCTAssertEqual(WallClock.countdown(to: at("2026-09-28T15:00:00Z"), from: at("2026-09-28T15:00:30Z")), "starting now")
+    }
+
+    func testNowIsTheStoresClockFaceNotThePhones() {
+        // 7 PM in New York is 4 PM at a Pacific store: a 5 PM shift has not started.
+        let instant = ISO8601DateFormatter().date(from: "2026-09-28T23:00:00Z")!
+        let store = WallClock.now(instant, timeZone: TimeZone(identifier: "America/Los_Angeles")!)
+        let phone = WallClock.now(instant, timeZone: TimeZone(identifier: "America/New_York")!)
+        XCTAssertEqual(WallClock.format(store, "HH:mm"), "16:00")
+        XCTAssertEqual(WallClock.format(phone, "HH:mm"), "19:00")
+        let json = #"{"locations":[{"id":"a","name":"Downtown","city":null,"week_start_weekday":0,"timezone":"America/Los_Angeles"}]}"#
+        let place = try! JSONDecoder().decode(LocationsResponse.self, from: Data(json.utf8)).locations[0]
+        XCTAssertEqual(place.timeZone?.identifier, "America/Los_Angeles")
+    }
+
+    func testNextShiftSkipsOneThatHasEnded() throws {
+        let json = """
+        {"shifts":[
+          {"id":"done","location_id":null,"role":null,"department":null,"starts_at":"2026-09-28T06:30:00+00:00","ends_at":"2026-09-28T14:30:00+00:00","break_minutes":null,"notes":null,"status":"published","assignments":[]},
+          {"id":"later","location_id":null,"role":null,"department":null,"starts_at":"2026-09-29T15:00:00+00:00","ends_at":"2026-09-29T23:00:00+00:00","break_minutes":null,"notes":null,"status":"published","assignments":[]}
+        ]}
+        """
+        let shifts = try JSONDecoder().decode(ShiftListResponse.self, from: Data(json.utf8)).shifts
+        func at(_ iso: String) -> Date { ISO8601DateFormatter().date(from: iso)! }
+        // During the first shift it is the one shown ("On now")...
+        XCTAssertEqual(ScheduleService.nextShift(in: shifts, now: at("2026-09-28T10:00:00Z"))?.id, "done")
+        // ...and the minute it ends the card moves on.
+        XCTAssertEqual(ScheduleService.nextShift(in: shifts, now: at("2026-09-28T14:30:00Z"))?.id, "later")
+        XCTAssertNil(ScheduleService.nextShift(in: shifts, now: at("2026-09-30T00:00:00Z")))
+    }
+
+    func testFormattersAreBuiltOncePerPattern() {
+        XCTAssertTrue(WallClock.formatter("h:mm a") === WallClock.formatter("h:mm a"))
+        XCTAssertFalse(WallClock.formatter("h:mm a") === WallClock.formatter("EEE"))
     }
 
     func testWeekRangeUsesCalendarDays() {

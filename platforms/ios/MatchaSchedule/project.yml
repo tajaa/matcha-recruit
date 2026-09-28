@@ -45,6 +45,14 @@ targets:
               NSIncludesSubdomains: true
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # Inter 4.1 (SIL OFL, Resources/Fonts/Inter-LICENSE.txt).
+        UIAppFonts:
+          - Inter-Regular.ttf
+          - Inter-Medium.ttf
+          - Inter-SemiBold.ttf
+          - Inter-Bold.ttf
+          - InterDisplay-SemiBold.ttf
+          - InterDisplay-Bold.ttf
     # The ATS exceptions above exist for a Debug build talking to a local
     # backend over http. Release only ever uses the https production API, so
     # they are removed from the built Info.plist before signing.
@@ -82,6 +90,19 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.heymatcha.schedule.tests
         GENERATE_INFOPLIST_FILE: YES
+  # Design-review screen tour; its own scheme so `make test` never launches it.
+  MatchaScheduleUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources: [UITests]
+    dependencies:
+      - target: MatchaSchedule
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.heymatcha.schedule.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: MatchaSchedule
 schemes:
   MatchaSchedule:
     build:
@@ -95,3 +116,11 @@ schemes:
       targets: [MatchaScheduleTests]
     archive:
       config: Release
+  MatchaScheduleScreens:
+    build:
+      targets:
+        MatchaSchedule: all
+        MatchaScheduleUITests: [test]
+    test:
+      config: Debug
+      targets: [MatchaScheduleUITests]

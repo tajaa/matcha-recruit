@@ -20,7 +20,7 @@ async def list_company_locations(current_user=Depends(require_company_member)):
         if current_user.role in {"admin", "client", "individual"}:
             rows = await conn.fetch(
                 """
-                SELECT l.id, l.name, l.address, l.city, l.state, l.zipcode, l.is_active,
+                SELECT l.id, l.name, l.address, l.city, l.state, l.zipcode, l.is_active, l.timezone,
                        COALESCE(p.week_start_weekday, 0) AS week_start_weekday
                 FROM business_locations l
                 LEFT JOIN schedule_location_profiles p
@@ -36,7 +36,7 @@ async def list_company_locations(current_user=Depends(require_company_member)):
             # other company location in shared location pickers.
             rows = await conn.fetch(
                 """
-                SELECT l.id, l.name, l.address, l.city, l.state, l.zipcode, l.is_active,
+                SELECT l.id, l.name, l.address, l.city, l.state, l.zipcode, l.is_active, l.timezone,
                        COALESCE(p.week_start_weekday, 0) AS week_start_weekday
                 FROM business_locations l
                 JOIN employees e ON e.work_location_id = l.id
@@ -54,6 +54,9 @@ async def list_company_locations(current_user=Depends(require_company_member)):
          "is_active": r["is_active"],
          # Every location-scoped page computes its own week boundaries; without
          # this they would all render Sunday weeks for a Monday-start store.
-         "week_start_weekday": int(r["week_start_weekday"] or 0)}
+         "week_start_weekday": int(r["week_start_weekday"] or 0),
+         # Shift times are this store's clock face; clients compare "now"
+         # against it (Matcha Schedule's next-shift countdown), not the phone's.
+         "timezone": r["timezone"]}
         for r in rows
     ]}

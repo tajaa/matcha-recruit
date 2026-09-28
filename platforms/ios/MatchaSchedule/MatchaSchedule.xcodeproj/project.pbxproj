@@ -7,7 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0851C3C39947EADF3385ED73 /* Inter-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4C7ECE6100500F49F552054C /* Inter-LICENSE.txt */; };
 		0B01F896983393BA4D469B64 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58A3F3145F2D4137F9BA74D5 /* KeychainHelper.swift */; };
+		0C8CD7B50BF7B10EFD2CB6CB /* Inter-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = EB277320255AAD980BFF9CB9 /* Inter-Medium.ttf */; };
+		0E3E9B927CF4C9992B50F27E /* Inter-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E945DCDFCA50121104255556 /* Inter-Bold.ttf */; };
 		0E3F1E08A4BA29DA186CDB91 /* MatchaScheduleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1CF8B522EA2D2F2543AF7CB /* MatchaScheduleApp.swift */; };
 		10FBFD916EE62807FD1CF13E /* PushRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6828BF38DB7DFAD1E815F026 /* PushRoute.swift */; };
 		16B07C5C2BD2D9EB82F66267 /* RequestComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3D883AD700B1C04E6318C7C /* RequestComposerView.swift */; };
@@ -20,6 +23,7 @@
 		4183F71C231F5E6D16956B96 /* DMSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15A19AF0CB37E648B38FD85 /* DMSupport.swift */; };
 		4505A1B0E9349C045EF554A8 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0C87701129671EC6F55AD55 /* APIClient.swift */; };
 		455ED0BF69F5F4279DD616EF /* InboxListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F8514F4759EC3E21FA6C55 /* InboxListView.swift */; };
+		491E5850F468AB12F1BB6D97 /* InterDisplay-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 67EC7DA08FE4C15968DFEDD6 /* InterDisplay-SemiBold.ttf */; };
 		4A8AF159E08EB2BAE7C83F14 /* InboxModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEB4B3BFC7FB985B1E9B4CD2 /* InboxModels.swift */; };
 		4BB98E7AB8DE2AFFBDBA9623 /* NotificationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A260A3246CB07905538A7F /* NotificationModels.swift */; };
 		4C1CA17B983939232B71141A /* DMThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F3F236B34A9A17D4B76E97D /* DMThreadView.swift */; };
@@ -30,20 +34,34 @@
 		8F9D2E87E83C03BED201CC9D /* PushService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0213CDEF3C908EC5C3FBB8C /* PushService.swift */; };
 		9215B940EEF70FC8EEC5B636 /* ScheduleService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC0BB06032FCAD9FC2202ABA /* ScheduleService.swift */; };
 		981C7F60BEDFC586688BA89A /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4382AFA453AC7672B4017239 /* AppDelegate.swift */; };
+		9BF39CDE3387D6116DC7730F /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A8DE49ED689FBD823C0DD38 /* Theme.swift */; };
+		A052778B5CE08963BBA127CC /* Inter-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 8A436EE3DA7E76ABB4F60B07 /* Inter-Regular.ttf */; };
 		A9466EA77149AB1CCCB34E5B /* NewConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40DE4DAF05D397345E450CEA /* NewConversationView.swift */; };
 		B2B8313E3EF5AB5591374D68 /* InboxService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900A8043DCA1FD568AECD561 /* InboxService.swift */; };
 		BC8A6342E64275CB57BF539A /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45D7FFF49F81670DBC005528 /* AuthService.swift */; };
+		C25D7B078429006925C52507 /* Inter-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 64E0EDA8523B9835FDFE64F4 /* Inter-SemiBold.ttf */; };
 		C32A9343C946823713E13858 /* WallClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89D97E1931AD74021BCBB5A9 /* WallClock.swift */; };
 		C5E874A6893DBD8607EF5EBF /* NotificationFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 519000652F59BE804BD3DFDE /* NotificationFeedView.swift */; };
 		C73C5C59886A3A437A025FF6 /* RequestModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 621C383164B73E3F0D6E4306 /* RequestModelsTests.swift */; };
 		CC568A10AB551AE913B321B6 /* DateInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2FBF337459CDF9C519C6B65 /* DateInput.swift */; };
 		CD2231972B575F3C73DA45CE /* InboxAndPushTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24FCD97C44641AB8A42A62FF /* InboxAndPushTests.swift */; };
+		CF6238A4450861535B0A1339 /* ScreenTour.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9D796CCAE5B1852408B1F53 /* ScreenTour.swift */; };
+		D21562CFC3F7C519D0663777 /* ShiftDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D512C8263D03A8E936996174 /* ShiftDetailView.swift */; };
 		D6C23E05900725C6BB825E66 /* ScheduleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCAD92D4F503B4BFC8048D64 /* ScheduleModels.swift */; };
+		DAB8570908E704FBBC32F2E3 /* Glass.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB09BE09C143918F4BA116F1 /* Glass.swift */; };
 		DCF052C3F68893672965FD54 /* ScheduleModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E8AE226D519550D820BA32 /* ScheduleModelsTests.swift */; };
+		ED9242915DAE36312C3F9A0D /* InterDisplay-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 154AC9DCE45E3D704D37EE70 /* InterDisplay-Bold.ttf */; };
 		F3F9408C0561F99693A91C8B /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42E8FD722F3100C0B1D0E651 /* RootView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		17E74D5FE0E90298BD8C0C96 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 163F112F9D5D042E93782A2D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 655FADBF87968C12AB3646C9;
+			remoteInfo = MatchaSchedule;
+		};
 		345692CA137E084464D3BD5A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 163F112F9D5D042E93782A2D /* Project object */;
@@ -55,36 +73,48 @@
 
 /* Begin PBXFileReference section */
 		0F3F236B34A9A17D4B76E97D /* DMThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DMThreadView.swift; sourceTree = "<group>"; };
+		154AC9DCE45E3D704D37EE70 /* InterDisplay-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "InterDisplay-Bold.ttf"; sourceTree = "<group>"; };
 		24FCD97C44641AB8A42A62FF /* InboxAndPushTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxAndPushTests.swift; sourceTree = "<group>"; };
 		26E9D449F241F249F5826E0E /* AvailabilityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvailabilityView.swift; sourceTree = "<group>"; };
 		40DE4DAF05D397345E450CEA /* NewConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewConversationView.swift; sourceTree = "<group>"; };
 		42E8FD722F3100C0B1D0E651 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		4382AFA453AC7672B4017239 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		45D7FFF49F81670DBC005528 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		4C7ECE6100500F49F552054C /* Inter-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Inter-LICENSE.txt"; sourceTree = "<group>"; };
 		519000652F59BE804BD3DFDE /* NotificationFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationFeedView.swift; sourceTree = "<group>"; };
 		58A3F3145F2D4137F9BA74D5 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		5A8DE49ED689FBD823C0DD38 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		61233741E1D808A3F43DD962 /* RequestModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestModels.swift; sourceTree = "<group>"; };
 		621C383164B73E3F0D6E4306 /* RequestModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestModelsTests.swift; sourceTree = "<group>"; };
+		64E0EDA8523B9835FDFE64F4 /* Inter-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inter-SemiBold.ttf"; sourceTree = "<group>"; };
+		67EC7DA08FE4C15968DFEDD6 /* InterDisplay-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "InterDisplay-SemiBold.ttf"; sourceTree = "<group>"; };
 		6828BF38DB7DFAD1E815F026 /* PushRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRoute.swift; sourceTree = "<group>"; };
 		79A260A3246CB07905538A7F /* NotificationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationModels.swift; sourceTree = "<group>"; };
 		80E7CCF2D9D4B698052CA3E8 /* ScheduleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleView.swift; sourceTree = "<group>"; };
 		88760CBAFDEAA93D38BD3A49 /* MatchaSchedule.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MatchaSchedule.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		89D97E1931AD74021BCBB5A9 /* WallClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallClock.swift; sourceTree = "<group>"; };
+		8A436EE3DA7E76ABB4F60B07 /* Inter-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inter-Regular.ttf"; sourceTree = "<group>"; };
 		900A8043DCA1FD568AECD561 /* InboxService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxService.swift; sourceTree = "<group>"; };
 		9EC0BE7FC561E4DB5A8AE91F /* MatchaScheduleTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = MatchaScheduleTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A0C87701129671EC6F55AD55 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		A44EF64C867999991140704A /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		A9D796CCAE5B1852408B1F53 /* ScreenTour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTour.swift; sourceTree = "<group>"; };
 		B3D883AD700B1C04E6318C7C /* RequestComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestComposerView.swift; sourceTree = "<group>"; };
 		B48BF7C4B0A46EFE21ABD68A /* RequestService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestService.swift; sourceTree = "<group>"; };
 		B5F8514F4759EC3E21FA6C55 /* InboxListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxListView.swift; sourceTree = "<group>"; };
 		C0213CDEF3C908EC5C3FBB8C /* PushService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushService.swift; sourceTree = "<group>"; };
+		CB09BE09C143918F4BA116F1 /* Glass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Glass.swift; sourceTree = "<group>"; };
 		CB640D4E6F379D709914C1C1 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		CF80A95E56B313401DE5B3D1 /* RequestsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestsView.swift; sourceTree = "<group>"; };
 		D1CF8B522EA2D2F2543AF7CB /* MatchaScheduleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchaScheduleApp.swift; sourceTree = "<group>"; };
 		D2FBF337459CDF9C519C6B65 /* DateInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateInput.swift; sourceTree = "<group>"; };
+		D512C8263D03A8E936996174 /* ShiftDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftDetailView.swift; sourceTree = "<group>"; };
 		DC0BB06032FCAD9FC2202ABA /* ScheduleService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleService.swift; sourceTree = "<group>"; };
 		DCAD92D4F503B4BFC8048D64 /* ScheduleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleModels.swift; sourceTree = "<group>"; };
 		E7B75ECDFA3E24D1DC85A598 /* PTOView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTOView.swift; sourceTree = "<group>"; };
+		E8874AF6ACFAADFACE202DF4 /* MatchaScheduleUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = MatchaScheduleUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E945DCDFCA50121104255556 /* Inter-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inter-Bold.ttf"; sourceTree = "<group>"; };
+		EB277320255AAD980BFF9CB9 /* Inter-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inter-Medium.ttf"; sourceTree = "<group>"; };
 		EC43779BD5750AB6E945923F /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		EEB4B3BFC7FB985B1E9B4CD2 /* InboxModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxModels.swift; sourceTree = "<group>"; };
 		F15A19AF0CB37E648B38FD85 /* DMSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DMSupport.swift; sourceTree = "<group>"; };
@@ -122,7 +152,9 @@
 			isa = PBXGroup;
 			children = (
 				F15A19AF0CB37E648B38FD85 /* DMSupport.swift */,
+				CB09BE09C143918F4BA116F1 /* Glass.swift */,
 				6828BF38DB7DFAD1E815F026 /* PushRoute.swift */,
+				5A8DE49ED689FBD823C0DD38 /* Theme.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -137,6 +169,7 @@
 				CF80A95E56B313401DE5B3D1 /* RequestsView.swift */,
 				42E8FD722F3100C0B1D0E651 /* RootView.swift */,
 				80E7CCF2D9D4B698052CA3E8 /* ScheduleView.swift */,
+				D512C8263D03A8E936996174 /* ShiftDetailView.swift */,
 				1693AA398ED46AAD817D9B32 /* Inbox */,
 			);
 			path = Views;
@@ -151,6 +184,7 @@
 				10E7332AFF7D20A643F45699 /* Services */,
 				2B7A359084FB962747D2FBD9 /* Support */,
 				BBBF92741297CF3BB9CA2747 /* Tests */,
+				A8876B4EB55354B12F0C028A /* UITests */,
 				61D30DB0D438E122CD204939 /* Views */,
 				DC9FF9812BF87AF02B2670A9 /* Products */,
 			);
@@ -164,6 +198,28 @@
 				D1CF8B522EA2D2F2543AF7CB /* MatchaScheduleApp.swift */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		A74D08BAD83CB79A11961740 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				E945DCDFCA50121104255556 /* Inter-Bold.ttf */,
+				4C7ECE6100500F49F552054C /* Inter-LICENSE.txt */,
+				EB277320255AAD980BFF9CB9 /* Inter-Medium.ttf */,
+				8A436EE3DA7E76ABB4F60B07 /* Inter-Regular.ttf */,
+				64E0EDA8523B9835FDFE64F4 /* Inter-SemiBold.ttf */,
+				154AC9DCE45E3D704D37EE70 /* InterDisplay-Bold.ttf */,
+				67EC7DA08FE4C15968DFEDD6 /* InterDisplay-SemiBold.ttf */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
+		A8876B4EB55354B12F0C028A /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				A9D796CCAE5B1852408B1F53 /* ScreenTour.swift */,
+			);
+			path = UITests;
 			sourceTree = "<group>";
 		};
 		BBBF92741297CF3BB9CA2747 /* Tests */ = {
@@ -181,6 +237,7 @@
 			children = (
 				F925A0959D4FA48F5B0026D2 /* Assets.xcassets */,
 				CB640D4E6F379D709914C1C1 /* PrivacyInfo.xcprivacy */,
+				A74D08BAD83CB79A11961740 /* Fonts */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -190,6 +247,7 @@
 			children = (
 				88760CBAFDEAA93D38BD3A49 /* MatchaSchedule.app */,
 				9EC0BE7FC561E4DB5A8AE91F /* MatchaScheduleTests.xctest */,
+				E8874AF6ACFAADFACE202DF4 /* MatchaScheduleUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -229,6 +287,24 @@
 			productReference = 88760CBAFDEAA93D38BD3A49 /* MatchaSchedule.app */;
 			productType = "com.apple.product-type.application";
 		};
+		6DD6FF82E51F2A81773B6639 /* MatchaScheduleUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A40E0546473FB60D148A071B /* Build configuration list for PBXNativeTarget "MatchaScheduleUITests" */;
+			buildPhases = (
+				A69139EEEADEB42F4BF084D2 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				72BB18B198DB4AF7A39AB2FF /* PBXTargetDependency */,
+			);
+			name = MatchaScheduleUITests;
+			packageProductDependencies = (
+			);
+			productName = MatchaScheduleUITests;
+			productReference = E8874AF6ACFAADFACE202DF4 /* MatchaScheduleUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		A6164A905B1BFB97C7226265 /* MatchaScheduleTests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 6683C237C07C45C3D4DC8240 /* Build configuration list for PBXNativeTarget "MatchaScheduleTests" */;
@@ -259,6 +335,11 @@
 					655FADBF87968C12AB3646C9 = {
 						DevelopmentTeam = 5D6TJVCPBK;
 					};
+					6DD6FF82E51F2A81773B6639 = {
+						DevelopmentTeam = 5D6TJVCPBK;
+						ProvisioningStyle = Automatic;
+						TestTargetID = 655FADBF87968C12AB3646C9;
+					};
 					A6164A905B1BFB97C7226265 = {
 						DevelopmentTeam = 5D6TJVCPBK;
 						ProvisioningStyle = Automatic;
@@ -281,6 +362,7 @@
 			targets = (
 				655FADBF87968C12AB3646C9 /* MatchaSchedule */,
 				A6164A905B1BFB97C7226265 /* MatchaScheduleTests */,
+				6DD6FF82E51F2A81773B6639 /* MatchaScheduleUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -291,6 +373,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				8283027B36FC7CA971E5B5A2 /* Assets.xcassets in Resources */,
+				0E3E9B927CF4C9992B50F27E /* Inter-Bold.ttf in Resources */,
+				0851C3C39947EADF3385ED73 /* Inter-LICENSE.txt in Resources */,
+				0C8CD7B50BF7B10EFD2CB6CB /* Inter-Medium.ttf in Resources */,
+				A052778B5CE08963BBA127CC /* Inter-Regular.ttf in Resources */,
+				C25D7B078429006925C52507 /* Inter-SemiBold.ttf in Resources */,
+				ED9242915DAE36312C3F9A0D /* InterDisplay-Bold.ttf in Resources */,
+				491E5850F468AB12F1BB6D97 /* InterDisplay-SemiBold.ttf in Resources */,
 				6C7CA8E10A30F3E497E37E70 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -330,6 +419,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A69139EEEADEB42F4BF084D2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CF6238A4450861535B0A1339 /* ScreenTour.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		CE1B2029FA2C5F0B1F22C819 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -342,6 +439,7 @@
 				4183F71C231F5E6D16956B96 /* DMSupport.swift in Sources */,
 				4C1CA17B983939232B71141A /* DMThreadView.swift in Sources */,
 				CC568A10AB551AE913B321B6 /* DateInput.swift in Sources */,
+				DAB8570908E704FBBC32F2E3 /* Glass.swift in Sources */,
 				455ED0BF69F5F4279DD616EF /* InboxListView.swift in Sources */,
 				4A8AF159E08EB2BAE7C83F14 /* InboxModels.swift in Sources */,
 				B2B8313E3EF5AB5591374D68 /* InboxService.swift in Sources */,
@@ -362,6 +460,8 @@
 				D6C23E05900725C6BB825E66 /* ScheduleModels.swift in Sources */,
 				9215B940EEF70FC8EEC5B636 /* ScheduleService.swift in Sources */,
 				3B00B9371288609C0C886355 /* ScheduleView.swift in Sources */,
+				D21562CFC3F7C519D0663777 /* ShiftDetailView.swift in Sources */,
+				9BF39CDE3387D6116DC7730F /* Theme.swift in Sources */,
 				C32A9343C946823713E13858 /* WallClock.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -369,6 +469,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		72BB18B198DB4AF7A39AB2FF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 655FADBF87968C12AB3646C9 /* MatchaSchedule */;
+			targetProxy = 17E74D5FE0E90298BD8C0C96 /* PBXContainerItemProxy */;
+		};
 		CB5059CA634CE80E4E4324E1 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 655FADBF87968C12AB3646C9 /* MatchaSchedule */;
@@ -411,6 +516,24 @@
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MatchaSchedule.app/MatchaSchedule";
+			};
+			name = Release;
+		};
+		569D71BC32FA5C7561CC8D70 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.heymatcha.schedule.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = MatchaSchedule;
 			};
 			name = Release;
 		};
@@ -581,6 +704,24 @@
 			};
 			name = Release;
 		};
+		DAC1336196869ADB8BC17434 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.heymatcha.schedule.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = MatchaSchedule;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -607,6 +748,15 @@
 			buildConfigurations = (
 				7BB3EC4FF14ACA839644AA64 /* Debug */,
 				CE284F362DCC1BFDE0CD1A0A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A40E0546473FB60D148A071B /* Build configuration list for PBXNativeTarget "MatchaScheduleUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DAC1336196869ADB8BC17434 /* Debug */,
+				569D71BC32FA5C7561CC8D70 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

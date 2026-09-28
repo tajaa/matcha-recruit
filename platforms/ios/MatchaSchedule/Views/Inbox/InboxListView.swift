@@ -10,38 +10,37 @@ struct InboxListView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            Group {
-                if !loaded {
-                    ProgressView("Loading messages…")
-                } else if conversations.isEmpty {
-                    ContentUnavailableView(
-                        "No messages", systemImage: "bubble.left.and.bubble.right",
-                        description: Text(error ?? "Start a conversation with the compose button.")
-                    )
-                } else {
-                    List(conversations) { conversation in
-                        NavigationLink(value: conversation.id) {
-                            VStack(alignment: .leading, spacing: 5) {
-                                HStack {
-                                    Text(DM.title(conversation, myId: appState.currentUserID ?? ""))
-                                        .font(.headline).lineLimit(1)
-                                    Spacer()
-                                    if let unread = conversation.unreadCount, unread > 0 {
-                                        Text("\(min(unread, 99))")
-                                            .font(.caption2.bold()).foregroundStyle(.white)
-                                            .padding(.horizontal, 7).padding(.vertical, 3)
-                                            .background(.tint, in: Capsule())
-                                    }
-                                }
-                                Text(conversation.lastMessagePreview ?? "No messages yet")
-                                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+            ScrollView {
+                VStack(spacing: 10) {
+                    if let error, loaded { ErrorBanner(message: error) }
+                    if !loaded {
+                        ForEach(0..<4, id: \.self) { _ in GlassPlaceholder(leading: .circle(50), lineWidths: [130, 200], label: "Loading messages") }
+                    } else if conversations.isEmpty {
+                        GlassMessage(
+                            symbol: "bubble.left.and.bubble.right.fill",
+                            title: "No messages yet",
+                            message: "Message a coworker or your manager about a shift.",
+                            actionTitle: "New message",
+                            action: { showCompose = true }
+                        )
+                        .rise()
+                    } else {
+                        ForEach(Array(conversations.enumerated()), id: \.element.id) { index, conversation in
+                            NavigationLink(value: conversation.id) {
+                                ConversationRow(conversation: conversation, myID: appState.currentUserID ?? "")
                             }
-                            .padding(.vertical, 4)
+                            .buttonStyle(PressableStyle())
+                            .accessibilityIdentifier("conversation.row")
+                            .rise(delay: min(Double(index) * 0.03, 0.2))
                         }
                     }
-                    .listStyle(.plain)
                 }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.bottom, 32)
+                .animation(.spring(response: 0.45, dampingFraction: 0.86), value: conversations.map(\.id))
             }
+            .scrollIndicators(.hidden)
+            .ambientBackground()
             .navigationTitle("Messages")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -58,6 +57,7 @@ struct InboxListView: View {
                     await load()
                     path.append(id)
                 }
+                .presentationCornerRadius(32)
             }
             .refreshable { await load() }
         }
@@ -79,7 +79,9 @@ struct InboxListView: View {
             async let count = InboxService.shared.unreadCount()
             (conversations, appState.unreadMessages) = try await (list, count)
             error = nil
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            if !error.isCancellation { self.error = error.localizedDescription }
+        }
         loaded = true
     }
 
@@ -92,5 +94,58 @@ struct InboxListView: View {
         guard let id = appState.pendingConversationID, UUID(uuidString: id) != nil else { return }
         if !path.contains(id) { path.append(id) }
         appState.pendingConversationID = nil
+    }
+}
+
+private struct ConversationRow: View {
+    let conversation: MWInboxConversation
+    let myID: String
+
+    private var unread: Int { conversation.unreadCount ?? 0 }
+
+    var body: some View {
+        let name = DM.title(conversation, myId: myID)
+        HStack(spacing: 14) {
+            ZStack(alignment: .topTrailing) {
+                Avatar(name: name, size: 50)
+                if unread > 0 {
+                    Circle().fill(Palette.leaf)
+                        .frame(width: 13, height: 13)
+                        .overlay(Circle().strokeBorder(Palette.surfaceSolid, lineWidth: 2))
+                        .offset(x: 2, y: -2)
+                }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(name)
+                        .font(.inter(16, unread > 0 ? .bold : .semibold, relativeTo: .headline))
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    if let at = conversation.lastMessageAt {
+                        Text(Instant.short(at))
+                            .font(TypeScale.caption)
+                            .foregroundStyle(unread > 0 ? Palette.leaf : Palette.inkFaint)
+                    }
+                }
+                HStack(alignment: .top) {
+                    Text(conversation.lastMessagePreview ?? "No messages yet")
+                        .font(unread > 0 ? .inter(14, .medium, relativeTo: .subheadline) : TypeScale.subhead)
+                        .foregroundStyle(unread > 0 ? Palette.ink : Palette.inkSoft)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 8)
+                    if unread > 0 {
+                        Text("\(min(unread, 99))")
+                            .font(TypeScale.caption).foregroundStyle(.white)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Palette.leaf, in: Capsule())
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .glassSurface(elevated: unread > 0)
+        .contentShape(Rectangle())
     }
 }
