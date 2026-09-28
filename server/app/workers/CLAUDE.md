@@ -32,3 +32,14 @@ to `failed`.
 ## schedule_auto_generation
 
 - `schedule_auto_generation` executes one tenant/location rule from `schedule_automation_rules` at its exact Celery ETA. It is not part of the worker-ready global sweep. Saving a rule enqueues its current `schedule_version`; edits and disables invalidate already-queued jobs, and a weekly execution enqueues its own next occurrence. The task uses the shared deterministic planner through the pool-free path, writes a review proposal only, and never creates or publishes shifts. A manager cancellation remains terminal for that automatic location/week.
+
+## schedule_break_reminders (sub-hourly cadence)
+
+- The one task that needs minutes, not hours. It re-enqueues itself `SWEEP_SECONDS` out
+  (`apply_async(countdown=…)`) after each run, including a failed one. Every hourly restart
+  dispatches another copy, so each run first claims `scheduler_settings.last_run_at`
+  (conditional UPDATE); a run that finds a claim younger than ~¾ of the cadence ends
+  without re-enqueueing, and the surplus chain dies. A disabled row ends the chain; the
+  next restart resumes it. Correctness never rests on the cadence — each break is deduped
+  in `services/scheduling/break_reminders.py`. Copy this shape for any future sub-hourly
+  task rather than adding celery-beat.

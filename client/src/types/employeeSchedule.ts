@@ -186,6 +186,53 @@ export type ScheduleAuditFilters = {
   offset?: number
 }
 
+/** What the provider reported at send time. Never evidence of receipt, of
+ *  reading, or that a break was taken. */
+export type BreakReminderOutcome = 'accepted' | 'failed' | 'unavailable'
+
+export type BreakReminderEvent = {
+  id: string
+  occurred_at: string
+  /** The location's calendar day, YYYY-MM-DD. */
+  event_date: string
+  channel: 'email' | 'push'
+  reminder_type: 'daily_digest' | 'break_start'
+  recipient_type: 'employee' | 'manager'
+  recipient: string | null
+  employee: { id: string; name: string | null } | null
+  covered_employee_count: number
+  location: { id: string; name: string | null; timezone: string | null } | null
+  shift_id: string | null
+  break: { kind: 'meal' | 'rest'; start_local: string | null; duration_minutes: number | null } | null
+  context: {
+    breaks?: Array<{ kind?: string; start_local?: string; duration_minutes?: number }>
+    employees_with_break_content?: number
+    [key: string]: unknown
+  }
+  outcome: BreakReminderOutcome
+  outcome_detail: string | null
+}
+
+export type BreakReminderEventsResponse = {
+  events: BreakReminderEvent[]
+  total: number
+}
+
+export type BreakReminderFilterOptions = {
+  locations: Array<{ id: string; name: string | null }>
+  employees: Array<{ id: string; name: string | null }>
+}
+
+/** `start`/`end` are inclusive YYYY-MM-DD location-local days. */
+export type BreakReminderFilters = {
+  start?: string
+  end?: string
+  locationId?: string
+  employeeId?: string
+  limit?: number
+  offset?: number
+}
+
 export interface ScheduleSummary {
   total_shifts: number
   published: number

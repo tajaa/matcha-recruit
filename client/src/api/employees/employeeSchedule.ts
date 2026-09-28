@@ -9,6 +9,7 @@ import type {
   EmployeeScheduleProfile, EmployeeScheduleProfilePayload,
   ScheduleAutomationRule, ScheduleAutomationPayload, WeekTemplateReplacePayload,
   ScheduleAuditFilters, ScheduleAuditResponse,
+  BreakReminderEventsResponse, BreakReminderFilterOptions, BreakReminderFilters,
   ShiftBreakStagger, PlannedBreak,
   PlanningInputs, FillVacantPreviewRequest, FillVacantPreviewResponse, FillVacantApplyResponse,
   AutopilotReadiness,
@@ -118,6 +119,22 @@ export function exportScheduleAuditLogs(filters: Omit<ScheduleAuditFilters, 'lim
     `/employee-schedule/audit-logs/export${scheduleAuditQuery(filters)}`,
     'published-shift-audit-log.csv',
   )
+}
+
+export function fetchBreakReminderEvents(filters: BreakReminderFilters) {
+  const query = new URLSearchParams()
+  if (filters.start) query.set('start', filters.start)
+  if (filters.end) query.set('end', filters.end)
+  if (filters.locationId) query.set('location_id', filters.locationId)
+  if (filters.employeeId) query.set('employee_id', filters.employeeId)
+  if (filters.limit != null) query.set('limit', String(filters.limit))
+  if (filters.offset != null) query.set('offset', String(filters.offset))
+  const value = query.toString()
+  return api.get<BreakReminderEventsResponse>(`/employee-schedule/break-reminder-events${value ? `?${value}` : ''}`)
+}
+
+export function fetchBreakReminderFilterOptions() {
+  return api.get<BreakReminderFilterOptions>('/employee-schedule/break-reminder-events/filter-options')
 }
 
 export function updateAssignmentNote(shiftId: string, employeeId: string, payload: AssignmentNotePayload) {

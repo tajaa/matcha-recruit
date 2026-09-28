@@ -72,6 +72,13 @@ def configured_bundles() -> dict[str, str]:
     return bundles
 
 
+def is_configured() -> bool:
+    """Whether APNs credentials are present at all — an empty ``PushResult``
+    otherwise cannot tell "push is switched off" from "no eligible device"."""
+    settings = get_settings()
+    return all((settings.apns_key_id, settings.apns_team_id, settings.apns_auth_key_path))
+
+
 def kind_allowed(bundle_id: Optional[str], kind: str) -> bool:
     """Route by the registered bundle; NULL is a legacy Werk device."""
     bundle = bundle_id or get_settings().apns_bundle_id
@@ -186,7 +193,7 @@ async def send_to_many(
     if not user_ids:
         return result
     settings = get_settings()
-    if not all((settings.apns_key_id, settings.apns_team_id, settings.apns_auth_key_path)):
+    if not is_configured():
         return result
     # Never to a deactivated or suspended user. Session-bound (Matcha Schedule)
     # tokens only while their device session is live, inside its absolute
