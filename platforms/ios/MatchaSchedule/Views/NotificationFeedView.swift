@@ -22,7 +22,7 @@ struct NotificationFeedView: View {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(notice.title).font(.headline)
                             if let body = notice.body { Text(body).font(.subheadline) }
-                            Text(notice.created_at.prefix(10))
+                            Text(Instant.label(notice.created_at))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 0)

@@ -31,6 +31,8 @@ async def test_targeted_swap_stages_offer_before_commit_and_dispatches_after(mon
             raise AssertionError(query)
 
         async def fetchval(self, query, *_args):
+            if "SELECT 1 FROM schedule_requests" in query:
+                return None  # no open offer for this shift yet
             assert "INSERT INTO schedule_requests" in query
             events.append("insert")
             return request_id
@@ -110,8 +112,13 @@ async def test_acceptance_notifies_requester_after_commit(monkeypatch):
         yield Conn()
 
     async def locked(_conn, _company, *_ids):
-        from datetime import datetime, timezone
-        return {str(shift_id): {"status": "published", "starts_at": datetime.now(timezone.utc)}}
+        from datetime import datetime, timedelta, timezone
+        return {str(shift_id): {"status": "published", "timezone": None,
+                                "starts_at": datetime.now(timezone.utc) + timedelta(days=1)}}
+
+    async def approvable(_conn, _company, _shift, employee_id, **_kwargs):
+        assert employee_id == accepter_id
+        events.append("approvable")
 
     async def no_conflicts(*_args, **_kwargs):
         return []
@@ -133,6 +140,7 @@ async def test_acceptance_notifies_requester_after_commit(monkeypatch):
     monkeypatch.setattr(portal, "get_connection", connection)
     monkeypatch.setattr("app.matcha.routes.employee_schedule._shared.fetch_locked_shift_pair", locked)
     monkeypatch.setattr("app.matcha.services.scheduling.shift_requests.find_same_day_assignments", no_conflicts)
+    monkeypatch.setattr("app.matcha.routes.employee_schedule.requests.assert_approvable", approvable)
     monkeypatch.setattr("app.matcha.routes.employee_schedule._shared.log_audit", audit)
     monkeypatch.setattr("app.matcha.routes.employee_schedule._shared.serialize_request", lambda row: row)
     monkeypatch.setattr("app.matcha.services.scheduling.employee_schedule_notifications.stage_request_event", stage)
@@ -143,7 +151,7 @@ async def test_acceptance_notifies_requester_after_commit(monkeypatch):
         request_id, CounterpartyAccept(), {"id": accepter_id, "org_id": company_id},
     )
     assert result["status"] == "awaiting_manager"
-    assert events == ["begin", "update", "audit", "stage", "commit", "dispatch_manager", "dispatch_employee"]
+    assert events == ["begin", "approvable", "update", "audit", "stage", "commit", "dispatch_manager", "dispatch_employee"]
 
 
 @pytest.mark.asyncio
@@ -184,6 +192,10 @@ async def test_counterparty_withdrawal_notifies_requester(monkeypatch):
     async def resolved(*_args, **_kwargs):
         events.append("resolve_manager_alert")
 
+    async def reset(*_args, **kwargs):
+        assert kwargs["request_id"] == request_id
+        events.append("reset_manager_deliveries")
+
     async def stage(*_args, **kwargs):
         assert kwargs["recipient_employee_ids"] == [owner_id]
         assert kwargs["event_type"] == "schedule_request_withdrawn"
@@ -194,6 +206,7 @@ async def test_counterparty_withdrawal_notifies_requester(monkeypatch):
     monkeypatch.setattr(portal, "get_connection", connection)
     monkeypatch.setattr("app.matcha.routes.employee_schedule._shared.log_audit", audit)
     monkeypatch.setattr("app.matcha.services.scheduling.schedule_request_notifications.mark_manager_ready_notifications_resolved", resolved)
+    monkeypatch.setattr("app.matcha.services.scheduling.schedule_request_notifications.reset_manager_ready_deliveries", reset)
     monkeypatch.setattr("app.matcha.services.scheduling.employee_schedule_notifications.stage_request_event", stage)
     monkeypatch.setattr("app.matcha.services.scheduling.employee_schedule_notifications.dispatch_events", lambda: events.append("dispatch"))
 
@@ -201,4 +214,7 @@ async def test_counterparty_withdrawal_notifies_requester(monkeypatch):
         request_id, {"id": counterparty_id, "org_id": company_id},
     )
     assert result["status"] == "withdrawn"
-    assert events == ["begin", "update", "resolve_manager_alert", "audit", "stage", "commit", "dispatch"]
+    # The request returns to awaiting a coworker, so the managers' delivery
+    # receipts are cleared: whoever accepts next must reach them again.
+    assert events == ["begin", "update", "reset_manager_deliveries", "resolve_manager_alert",
+                      "audit", "stage", "commit", "dispatch"]

@@ -1,4 +1,5 @@
-"""Best-effort APNs routing for Werk and Matcha Schedule devices.
+"""APNs routing for Werk and Matcha Schedule devices (best-effort unless a
+durable caller asks for ``raise_on_transient``).
 
 Each APNs topic and environment needs its own aioapns client. Legacy device
 rows without a bundle/environment keep the original Werk topic and global
@@ -8,6 +9,7 @@ APNS_USE_SANDBOX setting.
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
@@ -29,6 +31,21 @@ APP_BUNDLES = {"werk": None, "schedule": ("schedule_*", "inbox_message")}
 _clients: dict[tuple[str, str], tuple[asyncio.AbstractEventLoop, object]] = {}
 _disabled_logged = False
 _PERMANENT_TOKEN_ERRORS = {"Unregistered", "BadDeviceToken", "DeviceTokenNotForTopic"}
+
+
+class TransientPushError(RuntimeError):
+    """Every eligible device failed for a reason worth retrying (network,
+    APNs 5xx/429). A RuntimeError, so durable callers count it as a retryable
+    attempt rather than an unrenderable (ValueError) delivery."""
+
+
+@dataclass
+class PushResult:
+    """What one send achieved, per device. ``transient`` failures may succeed
+    on retry; ``dead`` tokens were pruned and never will."""
+    sent: int = 0
+    transient: int = 0
+    dead: list[str] = field(default_factory=list)
 
 
 @asynccontextmanager
@@ -156,44 +173,60 @@ async def send_to_many(
     kind: str,
     suppress_werk_users: Optional[set[UUID]] = None,
     conn=None,
-) -> None:
-    """Send one batched lookup to every eligible device, pruning dead tokens."""
+    raise_on_transient: bool = False,
+) -> PushResult:
+    """Send one batched lookup to every eligible device, pruning dead tokens.
+
+    Best-effort by default. With ``raise_on_transient`` a send where no device
+    succeeded and at least one failed transiently raises
+    ``TransientPushError`` so a durable caller can retry it. One good phone is
+    enough to count as delivered: retrying would re-push that phone.
+    """
+    result = PushResult()
     if not user_ids:
-        return
+        return result
     settings = get_settings()
     if not all((settings.apns_key_id, settings.apns_team_id, settings.apns_auth_key_path)):
-        return
-    # Session-bound (Matcha Schedule) tokens only while their device session is
-    # live and the employee is still employed; legacy rows have no session.
+        return result
+    # Never to a deactivated or suspended user. Session-bound (Matcha Schedule)
+    # tokens only while their device session is live, inside its absolute
+    # lifetime (a session past it can never refresh again, whether or not the
+    # phone got to sign out), and the employee is still employed. Legacy rows
+    # have no session.
     async with _db(conn) as conn:
         rows = await conn.fetch(
             """SELECT dt.user_id, dt.token, dt.bundle_id, dt.environment
                  FROM device_tokens dt
+                 JOIN users u ON u.id = dt.user_id
                  LEFT JOIN auth_device_sessions ds ON ds.id = dt.device_session_id
                 WHERE dt.user_id = ANY($1::uuid[]) AND dt.platform = 'ios'
+                  AND u.is_active AND NOT COALESCE(u.is_suspended, false)
                   AND (
                         dt.device_session_id IS NULL
-                     OR (ds.revoked_at IS NULL AND NOT EXISTS (
+                     OR (ds.revoked_at IS NULL
+                         AND ds.created_at > NOW() - make_interval(hours => $3)
+                         AND NOT EXISTS (
                             SELECT 1 FROM employees e
                              WHERE e.user_id = dt.user_id
                                AND COALESCE(e.employment_status, 'active') = ANY($2::text[])
                         ))
                   )""",
             user_ids, list(INACTIVE_EMPLOYMENT_STATUSES),
+            int(settings.jwt_session_absolute_expire_hours),
         )
     if not rows:
-        return
+        return result
 
     try:
         from aioapns import NotificationRequest, PushType
     except ImportError:
-        return
+        return result
 
     message = {
         "aps": {"alert": {"title": title, "body": body or ""}, "sound": "default"},
         **(payload or {}),
     }
-    dead: list[str] = []
+    dead = result.dead
     for row in rows:
         bundle_id = row["bundle_id"] or settings.apns_bundle_id
         if not kind_allowed(bundle_id, kind):
@@ -209,14 +242,23 @@ async def send_to_many(
             response = await sender.send_notification(NotificationRequest(
                 device_token=token, message=message, push_type=PushType.ALERT,
             ))
-            if not response.is_successful and response.description in _PERMANENT_TOKEN_ERRORS:
+            if response.is_successful:
+                result.sent += 1
+            elif response.description in _PERMANENT_TOKEN_ERRORS:
                 dead.append(token)
+            else:
+                result.transient += 1
+                logger.warning("APNs rejected token=%s…: %s", token[:8], response.description)
         except Exception as exc:  # noqa: BLE001 — one device must not block another
+            result.transient += 1
             logger.warning("APNs send failed token=%s…: %s", token[:8], exc)
 
     if dead:
         async with _db(conn) as conn:
             await conn.execute("DELETE FROM device_tokens WHERE token = ANY($1::text[])", dead)
+    if raise_on_transient and result.sent == 0 and result.transient:
+        raise TransientPushError(f"{result.transient} device(s) failed transiently")
+    return result
 
 
 async def send_to_user(
@@ -228,10 +270,11 @@ async def send_to_user(
     kind: str,
     suppress_werk: bool = False,
     conn=None,
-) -> None:
+    raise_on_transient: bool = False,
+) -> PushResult:
     """Send to a user's eligible devices across both apps."""
-    await send_to_many(
+    return await send_to_many(
         [user_id], title, body, payload, kind=kind,
         suppress_werk_users={user_id} if suppress_werk else None,
-        conn=conn,
+        conn=conn, raise_on_transient=raise_on_transient,
     )

@@ -20,6 +20,7 @@ def _settings(**overrides):
         "apns_key_id": "KEY",
         "apns_team_id": "TEAM",
         "apns_auth_key_path": "/tmp/unused-apns-key.p8",
+        "jwt_session_absolute_expire_hours": 12,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -240,6 +241,11 @@ async def test_send_skips_tokens_whose_device_session_is_dead(device_env):
     assert "ds.revoked_at IS NULL" in query
     assert "employment_status" in query
     assert args[1] == ["terminated", "offboarded"]
+    # Nothing to a deactivated or suspended user, and nothing to a session past
+    # its absolute lifetime even if the phone never signed out.
+    assert "u.is_active AND NOT COALESCE(u.is_suspended, false)" in query
+    assert "ds.created_at > NOW() - make_interval(hours => $3)" in query
+    assert args[2] == 12
 
 
 def test_apns_client_is_rebuilt_for_a_new_event_loop(monkeypatch):
@@ -312,3 +318,77 @@ async def test_inbox_push_does_not_depend_on_email_configuration(monkeypatch):
     assert len(sent) == 1
     assert sent[0][1]["kind"] == "inbox_message"
     assert sent[0][1]["suppress_werk"] is True
+
+
+def _flaky_senders(monkeypatch, outcomes):
+    """One sender per token: an outcome is a description string, or an
+    exception to raise."""
+    class Sender:
+        def __init__(self, outcome):
+            self.outcome = outcome
+
+        async def send_notification(self, _request):
+            if isinstance(self.outcome, Exception):
+                raise self.outcome
+            return SimpleNamespace(is_successful=self.outcome == "Success",
+                                   description=self.outcome)
+
+    queue = iter(outcomes)
+
+    async def get_client(_bundle, _environment):
+        return Sender(next(queue))
+
+    monkeypatch.setattr(apns_service, "_get_client", get_client)
+
+
+def _schedule_rows(user_id, count):
+    return [{"user_id": user_id, "token": chr(ord("a") + i) * 64,
+             "bundle_id": "com.heymatcha.schedule", "environment": "sandbox"}
+            for i in range(count)]
+
+
+@pytest.mark.asyncio
+async def test_send_reports_per_device_outcomes(device_env, monkeypatch):
+    conn, _senders = device_env
+    user_id = uuid4()
+    conn.rows = _schedule_rows(user_id, 3)
+    _flaky_senders(monkeypatch, ["Success", "Unregistered", TimeoutError("apns down")])
+    result = await apns_service.send_to_user(user_id, "Shift", kind="schedule_published")
+    assert (result.sent, result.transient, result.dead) == (1, 1, ["b" * 64])
+    assert conn.deleted == ["b" * 64]
+
+
+@pytest.mark.asyncio
+async def test_transient_failure_on_every_device_raises_only_when_asked(device_env, monkeypatch):
+    conn, _senders = device_env
+    user_id = uuid4()
+    conn.rows = _schedule_rows(user_id, 2)
+    _flaky_senders(monkeypatch, ["ServiceUnavailable", TimeoutError("apns down")])
+    result = await apns_service.send_to_user(user_id, "Shift", kind="schedule_published")
+    assert (result.sent, result.transient) == (0, 2)
+
+    _flaky_senders(monkeypatch, ["ServiceUnavailable", TimeoutError("apns down")])
+    with pytest.raises(apns_service.TransientPushError):
+        await apns_service.send_to_user(
+            user_id, "Shift", kind="schedule_published", raise_on_transient=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_one_delivered_device_is_enough_to_not_retry(device_env, monkeypatch):
+    conn, _senders = device_env
+    user_id = uuid4()
+    conn.rows = _schedule_rows(user_id, 2)
+    _flaky_senders(monkeypatch, ["Success", "InternalServerError"])
+    result = await apns_service.send_to_user(
+        user_id, "Shift", kind="schedule_published", raise_on_transient=True,
+    )
+    assert result.sent == 1 and result.transient == 1
+
+
+@pytest.mark.asyncio
+async def test_no_eligible_device_is_not_a_failure(device_env):
+    result = await apns_service.send_to_user(
+        uuid4(), "Shift", kind="schedule_published", raise_on_transient=True,
+    )
+    assert result.sent == 0 and result.transient == 0

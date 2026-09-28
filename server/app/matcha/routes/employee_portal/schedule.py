@@ -9,14 +9,14 @@ from app.database import get_connection
 from app.matcha.models.scheduling.employee_schedule import (
     AvailabilityChangeRequestCreate, CounterpartyAccept, ScheduleRequestCreate,
 )
-from app.matcha.dependencies import require_employee_record
+from app.matcha.dependencies import require_schedulable_employee_record
 from app.matcha.services.scheduling.shift_requests import (
     WALL_CLOCK_NOW_SQL, find_same_day_assignments, same_day_conflict_detail,
     schedule_wall_clock_now,
 )
 from app.matcha.services.scheduling.time_off_guard import (
     PUBLISHED_WEEK_AVAILABILITY_DETAIL, PUBLISHED_WEEK_TIME_OFF_DETAIL,
-    has_published_schedule_week,
+    employee_local_today, has_published_schedule_week,
 )
 
 from ._shared import _schedule_dep
@@ -29,7 +29,7 @@ async def get_my_schedule(
     start: datetime = Query(...),
     end: datetime = Query(...),
     team: bool = Query(False),
-    employee: dict = Depends(require_employee_record),
+    employee: dict = Depends(require_schedulable_employee_record),
 ):
     """Published shifts for the signed-in employee or their company team."""
     from app.matcha.routes.employee_schedule._shared import fetch_shifts
@@ -56,7 +56,7 @@ async def get_my_schedule(
 async def list_my_open_seats(
     start: datetime = Query(...),
     end: datetime = Query(...),
-    employee: dict = Depends(require_employee_record),
+    employee: dict = Depends(require_schedulable_employee_record),
 ):
     """Published future seats the employee may ask a manager to claim."""
     from app.matcha.routes.employee_schedule._shared import fetch_shifts
@@ -137,7 +137,7 @@ async def list_my_open_seats(
 
 @router.get("/me/schedule/requests", dependencies=_schedule_dep)
 async def list_my_schedule_requests(
-    employee: dict = Depends(require_employee_record),
+    employee: dict = Depends(require_schedulable_employee_record),
 ):
     from app.matcha.routes.employee_schedule._shared import REQUEST_SELECT, serialize_request
 
@@ -154,24 +154,31 @@ async def list_my_schedule_requests(
 
 
 @router.get("/me/schedule/offers", dependencies=_schedule_dep)
-async def list_schedule_offers(employee: dict = Depends(require_employee_record)):
+async def list_schedule_offers(employee: dict = Depends(require_schedulable_employee_record)):
     """Return open pickup offers and swaps addressed to this employee."""
     from app.matcha.routes.employee_schedule._shared import REQUEST_SELECT, serialize_request
 
+    # Only offers this employee could actually take: a pickup at their own
+    # store (or a locationless shift — approval refuses anything else), and
+    # nothing whose shift has already started on the store's clock.
+    wall_now = WALL_CLOCK_NOW_SQL.format(tz="bl.timezone")
     async with get_connection() as conn:
         rows = await conn.fetch(
-            f"{REQUEST_SELECT} WHERE r.company_id = $1 "
+            f"{REQUEST_SELECT} LEFT JOIN business_locations bl ON bl.id = s.location_id "
+            "WHERE r.company_id = $1 "
             "AND r.status = 'awaiting_counterparty' "
-            "AND ((r.request_type = 'pickup' AND r.employee_id <> $2) "
+            f"AND s.starts_at > {wall_now} "
+            "AND ((r.request_type = 'pickup' AND r.employee_id <> $2 "
+            "      AND (s.location_id IS NULL OR s.location_id = $3::uuid)) "
             "OR (r.request_type = 'swap' AND r.target_employee_id = $2)) "
             "ORDER BY r.created_at ASC LIMIT 200",
-            employee["org_id"], employee["id"],
+            employee["org_id"], employee["id"], employee.get("work_location_id"),
         )
     return {"offers": [serialize_request(dict(r)) for r in rows]}
 
 
 @router.get("/me/schedule/coworkers", dependencies=_schedule_dep)
-async def list_schedule_coworkers(employee: dict = Depends(require_employee_record)):
+async def list_schedule_coworkers(employee: dict = Depends(require_schedulable_employee_record)):
     """Active same-company employees available as named swap partners."""
     from app.matcha.routes.employee_schedule._shared import INACTIVE_EMPLOYMENT_STATUSES
 
@@ -193,7 +200,7 @@ async def list_schedule_coworkers(employee: dict = Depends(require_employee_reco
 @router.post("/me/schedule/requests", dependencies=_schedule_dep)
 async def create_my_schedule_request(
     body: ScheduleRequestCreate,
-    employee: dict = Depends(require_employee_record),
+    employee: dict = Depends(require_schedulable_employee_record),
 ):
     """Stage a schedule request; no assignment write occurs."""
     from app.matcha.routes.employee_schedule._shared import (
@@ -209,6 +216,7 @@ async def create_my_schedule_request(
             body.request_type == "unavailable"
             and await has_published_schedule_week(
                 conn, company_id, body.unavailable_start, body.unavailable_end,
+                employee_id=employee["id"],
             )
         ):
             raise HTTPException(status_code=409, detail=PUBLISHED_WEEK_TIME_OFF_DETAIL)
@@ -273,8 +281,9 @@ async def create_my_schedule_request(
                 from app.matcha.services.scheduling.schedule_profiles import fetch_effective_job_employee_ids
 
                 shift = await conn.fetchrow(
-                    """SELECT s.id, s.status, s.starts_at, s.required_staff, s.job_id,
-                              s.location_id, bl.timezone
+                    """SELECT s.id, s.status, s.starts_at, s.ends_at, s.required_staff, s.job_id,
+                              s.location_id, s.break_minutes, s.kind,
+                              s.training_requirement_id, bl.timezone
                        FROM schedule_shifts s
                        LEFT JOIN business_locations bl ON bl.id = s.location_id
                        WHERE s.id=$1 AND s.company_id=$2 FOR UPDATE OF s""",
@@ -313,6 +322,12 @@ async def create_my_schedule_request(
                     employee["id"], body.shift_id,
                 ):
                     raise HTTPException(status_code=409, detail="You already claimed this shift")
+                # Last, because it is the expensive one: a compliance BLOCK
+                # (expired credential, minor hours, work permit) is the one
+                # thing a manager cannot force through at approval.
+                from app.matcha.routes.employee_schedule.requests import assert_no_compliance_block
+
+                await assert_no_compliance_block(conn, company_id, shift, employee["id"])
             # Each drop / time-off submission emails and bells every manager, so a
             # repeat click must not fan out again. The partial unique indexes in
             # empsched25 back this up under concurrency.
@@ -322,6 +337,13 @@ async def create_my_schedule_request(
                 employee["id"], body.shift_id,
             ):
                 raise HTTPException(status_code=409, detail="You already asked to drop this shift")
+            if body.request_type in ("pickup", "swap") and await conn.fetchval(
+                """SELECT 1 FROM schedule_requests WHERE employee_id=$1 AND shift_id=$2
+                   AND request_type=$3::text
+                   AND status IN ('pending', 'awaiting_counterparty', 'awaiting_manager')""",
+                employee["id"], body.shift_id, body.request_type,
+            ):
+                raise HTTPException(status_code=409, detail="You already offered this shift")
             if body.request_type == "unavailable" and await conn.fetchval(
                 """SELECT 1 FROM schedule_requests WHERE employee_id=$1
                    AND unavailable_start=$2 AND unavailable_end=$3
@@ -371,7 +393,7 @@ async def create_my_schedule_request(
 async def accept_schedule_request(
     request_id: UUID,
     body: CounterpartyAccept,
-    employee: dict = Depends(require_employee_record),
+    employee: dict = Depends(require_schedulable_employee_record),
 ):
     """Accept a pickup/swap and move it into the manager approval queue.
 
@@ -381,6 +403,7 @@ async def accept_schedule_request(
     from app.matcha.routes.employee_schedule._shared import (
         log_audit, REQUEST_SELECT, serialize_request, fetch_locked_shift_pair,
     )
+    from app.matcha.routes.employee_schedule.requests import assert_approvable, assert_not_started
     from app.matcha.services.scheduling.shift_requests import (
         find_same_day_assignments, same_day_conflict_detail,
     )
@@ -434,6 +457,7 @@ async def accept_schedule_request(
             offered = locked.get(str(request["shift_id"]))
             if not offered or offered["status"] != "published":
                 raise HTTPException(status_code=409, detail="Offered shift is no longer published")
+            assert_not_started(offered, detail="Offered shift has already started")
             owner_assignment = await conn.fetchval(
                 """SELECT 1 FROM schedule_shift_assignments
                    WHERE company_id = $1 AND shift_id = $2 AND employee_id = $3
@@ -447,6 +471,7 @@ async def accept_schedule_request(
                 counter = locked.get(str(counter_shift_id))
                 if not counter or counter["status"] != "published":
                     raise HTTPException(status_code=409, detail="Counter shift is no longer published")
+                assert_not_started(counter, detail="Counter shift has already started")
                 counter_assignment = await conn.fetchval(
                     """SELECT 1 FROM schedule_shift_assignments
                        WHERE company_id = $1 AND shift_id = $2 AND employee_id = $3
@@ -475,6 +500,17 @@ async def accept_schedule_request(
                         status_code=409,
                         detail=same_day_conflict_detail(request["employee_id"], reverse_conflicts),
                     )
+            # The store and compliance gates approval cannot force: check them
+            # now, for both people who gain a shift, so the manager queue never
+            # holds an acceptance it can only refuse.
+            await assert_approvable(
+                conn, company_id, offered, employee["id"], exclude_shift_id=counter_shift_id,
+            )
+            if request["request_type"] == "swap":
+                await assert_approvable(
+                    conn, company_id, counter, request["employee_id"],
+                    exclude_shift_id=request["shift_id"],
+                )
 
             confirmed_at = await conn.fetchval(
                 """UPDATE schedule_requests
@@ -534,12 +570,12 @@ def _dispatch_manager_ready(request_id: UUID) -> None:
 @router.post("/me/schedule/requests/{request_id}/withdraw", dependencies=_schedule_dep)
 async def withdraw_schedule_request(
     request_id: UUID,
-    employee: dict = Depends(require_employee_record),
+    employee: dict = Depends(require_schedulable_employee_record),
 ):
     """Withdraw an offer or a counterparty acceptance before manager review."""
     from app.matcha.routes.employee_schedule._shared import log_audit
     from app.matcha.services.scheduling.schedule_request_notifications import (
-        mark_manager_ready_notifications_resolved,
+        mark_manager_ready_notifications_resolved, reset_manager_ready_deliveries,
     )
     from app.matcha.services.scheduling.employee_schedule_notifications import (
         dispatch_events, stage_request_event,
@@ -547,6 +583,7 @@ async def withdraw_schedule_request(
 
     company_id = employee["org_id"]
     counterparty_withdrew = False
+    notify_counterparty = False
     async with get_connection() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
@@ -559,9 +596,15 @@ async def withdraw_schedule_request(
             if row["status"] not in ("awaiting_counterparty", "awaiting_manager"):
                 raise HTTPException(status_code=409, detail="Request cannot be withdrawn now")
             if row["employee_id"] == employee["id"]:
-                await conn.execute(
-                    "UPDATE schedule_requests SET status = 'cancelled', updated_at = NOW() WHERE id = $1",
+                withdrawn_at = await conn.fetchval(
+                    "UPDATE schedule_requests SET status = 'cancelled', updated_at = NOW() "
+                    "WHERE id = $1 RETURNING updated_at",
                     request_id,
+                )
+                # A coworker who already accepted is waiting on the manager;
+                # tell them the offer is gone rather than let it vanish.
+                notify_counterparty = (
+                    row["status"] == "awaiting_manager" and row["target_employee_id"] is not None
                 )
             elif row["status"] == "awaiting_manager" and row["target_employee_id"] == employee["id"]:
                 withdrawn_at = await conn.fetchval(
@@ -575,6 +618,11 @@ async def withdraw_schedule_request(
                     request_id,
                 )
                 counterparty_withdrew = True
+                # The request goes back to awaiting a coworker; whoever accepts
+                # next must reach the managers again.
+                await reset_manager_ready_deliveries(
+                    conn, company_id=company_id, request_id=request_id,
+                )
             else:
                 raise HTTPException(status_code=403, detail="You cannot withdraw this request")
             if row["status"] == "awaiting_manager":
@@ -591,14 +639,23 @@ async def withdraw_schedule_request(
                     event_type="schedule_request_withdrawn",
                     recipient_employee_ids=[row["employee_id"]],
                     dedupe_key=f"{request_id}:withdrawn:{_nonce(withdrawn_at)}",
+                    withdrawn_by="counterparty",
                 )
-    if counterparty_withdrew:
+            if notify_counterparty:
+                await stage_request_event(
+                    conn, company_id=company_id, request_id=request_id,
+                    event_type="schedule_request_withdrawn",
+                    recipient_employee_ids=[row["target_employee_id"]],
+                    dedupe_key=f"{request_id}:cancelled:{_nonce(withdrawn_at)}",
+                    withdrawn_by="owner",
+                )
+    if counterparty_withdrew or notify_counterparty:
         dispatch_events()
     return {"status": "withdrawn", "request_id": str(request_id)}
 
 
 @router.get("/me/schedule/availability", dependencies=_schedule_dep)
-async def get_my_availability(employee: dict = Depends(require_employee_record)):
+async def get_my_availability(employee: dict = Depends(require_schedulable_employee_record)):
     """Current availability plus the change the employee is waiting on.
 
     There is no PUT counterpart: an employee's own availability edit is a
@@ -633,7 +690,7 @@ async def get_my_availability(employee: dict = Depends(require_employee_record))
 @router.post("/me/schedule/availability-requests", dependencies=_schedule_dep)
 async def request_my_availability_change(
     body: AvailabilityChangeRequestCreate,
-    employee: dict = Depends(require_employee_record),
+    employee: dict = Depends(require_schedulable_employee_record),
 ):
     """Submit an availability change for manager approval.
 
@@ -656,10 +713,12 @@ async def request_my_availability_change(
         body.availability.availability_state, body.availability.windows,
     )
     async with get_connection() as conn:
-        # CURRENT_DATE, not the server process's clock: every other date rule on
-        # this surface (the published-week guard, promotion) is decided by the
-        # database, and two clocks would disagree at the day boundary.
-        today = await conn.fetchval("SELECT CURRENT_DATE")
+        # The employee's calendar day on their store's clock, read from the
+        # database. Server CURRENT_DATE rolls over at 5 PM Pacific, so "start
+        # today" was refused every evening. Promotion still compares against
+        # CURRENT_DATE; for stores west of UTC that only means an evening
+        # "today" is applied at approval rather than waiting a day.
+        today = await employee_local_today(conn, employee["id"])
         if body.effective_on < today:
             raise HTTPException(
                 status_code=422,
@@ -667,6 +726,7 @@ async def request_my_availability_change(
             )
         if await has_published_schedule_week(
             conn, company_id, body.effective_on, body.effective_on,
+            employee_id=employee["id"],
         ):
             raise HTTPException(
                 status_code=409, detail=PUBLISHED_WEEK_AVAILABILITY_DETAIL,
@@ -688,18 +748,30 @@ async def request_my_availability_change(
                         "Withdraw it before submitting another."
                     ),
                 )
-            request_id = await conn.fetchval(
-                """
-                INSERT INTO schedule_requests
-                    (company_id, employee_id, request_type, reason, status,
-                     proposed_availability, availability_effective_on)
-                VALUES ($1,$2,'availability',$3,'awaiting_manager',$4::jsonb,$5)
-                RETURNING id
-                """,
-                company_id, employee["id"], body.reason,
-                serialize_proposed_availability(resolved_state, body.availability.windows),
-                body.effective_on,
-            )
+            # FOR UPDATE above locks nothing when there is no open request, so
+            # two concurrent submits both reach here; the partial unique index
+            # (empsched22) refuses the second.
+            try:
+                request_id = await conn.fetchval(
+                    """
+                    INSERT INTO schedule_requests
+                        (company_id, employee_id, request_type, reason, status,
+                         proposed_availability, availability_effective_on)
+                    VALUES ($1,$2,'availability',$3,'awaiting_manager',$4::jsonb,$5)
+                    RETURNING id
+                    """,
+                    company_id, employee["id"], body.reason,
+                    serialize_proposed_availability(resolved_state, body.availability.windows),
+                    body.effective_on,
+                )
+            except asyncpg.UniqueViolationError:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "You already have an availability change awaiting review. "
+                        "Withdraw it before submitting another."
+                    ),
+                ) from None
             await log_audit(
                 conn, company_id, "request", request_id, employee.get("user_id"),
                 "request.create",
@@ -716,22 +788,34 @@ async def request_my_availability_change(
 @router.delete("/me/schedule/requests/{request_id}", dependencies=_schedule_dep)
 async def cancel_my_schedule_request(
     request_id: UUID,
-    employee: dict = Depends(require_employee_record),
+    employee: dict = Depends(require_schedulable_employee_record),
 ):
     """Backward-compatible cancellation endpoint for requests I filed."""
     from app.matcha.services.scheduling.schedule_request_notifications import (
         mark_manager_ready_notifications_resolved,
     )
+    from app.matcha.services.scheduling.employee_schedule_notifications import (
+        dispatch_events, stage_request_event,
+    )
 
+    notify_counterparty = False
     async with get_connection() as conn:
         async with conn.transaction():
+            # The CTE reads the pre-update row: only an acceptance already
+            # waiting on the manager has a coworker to tell.
             row = await conn.fetchrow(
                 """
-                UPDATE schedule_requests
+                WITH before AS (
+                    SELECT id, status, target_employee_id FROM schedule_requests
+                    WHERE id = $1 AND employee_id = $2 FOR UPDATE
+                )
+                UPDATE schedule_requests r
                 SET status = 'cancelled', updated_at = NOW()
-                WHERE id = $1 AND employee_id = $2
-                  AND status IN ('pending', 'awaiting_counterparty', 'awaiting_manager')
-                RETURNING id
+                FROM before
+                WHERE r.id = before.id
+                  AND before.status IN ('pending', 'awaiting_counterparty', 'awaiting_manager')
+                RETURNING r.id, r.updated_at, before.status AS prior_status,
+                          before.target_employee_id
                 """,
                 request_id, employee["id"],
             )
@@ -740,4 +824,15 @@ async def cancel_my_schedule_request(
             await mark_manager_ready_notifications_resolved(
                 conn, company_id=employee["org_id"], request_id=request_id,
             )
+            if row["prior_status"] == "awaiting_manager" and row["target_employee_id"] is not None:
+                notify_counterparty = True
+                await stage_request_event(
+                    conn, company_id=employee["org_id"], request_id=request_id,
+                    event_type="schedule_request_withdrawn",
+                    recipient_employee_ids=[row["target_employee_id"]],
+                    dedupe_key=f"{request_id}:cancelled:{_nonce(row['updated_at'])}",
+                    withdrawn_by="owner",
+                )
+    if notify_counterparty:
+        dispatch_events()
     return {"status": "cancelled", "request_id": str(request_id)}

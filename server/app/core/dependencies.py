@@ -62,9 +62,34 @@ async def session_revoked(
     return token_predates_watermark(token_iat, token_iat_ms, valid_after)
 
 
+async def revoke_mobile_devices(conn, user_ids) -> None:
+    """Revoke every Matcha Schedule device session of these users and delete
+    their session-bound push tokens.
+
+    The token watermark already stops a phone refreshing, but the push send
+    only checks ``auth_device_sessions.revoked_at``: without this a lost phone
+    keeps showing DM previews and shift details after a password reset.
+    Legacy (unbound) Werk tokens are left alone.
+    """
+    ids = list(user_ids)
+    if not ids:
+        return
+    await conn.execute(
+        "UPDATE auth_device_sessions SET revoked_at = NOW() "
+        "WHERE user_id = ANY($1::uuid[]) AND revoked_at IS NULL",
+        ids,
+    )
+    await conn.execute(
+        "DELETE FROM device_tokens "
+        "WHERE user_id = ANY($1::uuid[]) AND device_session_id IS NOT NULL",
+        ids,
+    )
+
+
 async def revoke_user_sessions(conn, user_id) -> None:
     """Invalidate all of a user's existing access + refresh tokens by advancing
-    the watermark. Best-effort no-op (logged) until authsess01 is applied.
+    the watermark, and end their mobile devices (``revoke_mobile_devices``).
+    The watermark is a best-effort no-op (logged) until authsess01 is applied.
 
     ``clock_timestamp()`` (not ``NOW()``): ``NOW()`` is frozen at transaction
     start, before this UPDATE waits on a row lock a concurrent refresh holds
@@ -80,6 +105,7 @@ async def revoke_user_sessions(conn, user_id) -> None:
         logger.warning(
             "revoke_user_sessions: tokens_valid_after column missing — apply migration authsess01"
         )
+    await revoke_mobile_devices(conn, [user_id])
 
 
 async def get_token_payload(

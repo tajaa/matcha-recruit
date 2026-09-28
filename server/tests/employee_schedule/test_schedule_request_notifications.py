@@ -142,7 +142,47 @@ def test_recovery_reclaims_only_stale_unsent_delivery_claims():
     # The sweep only selects requests some active reviewer has not been told
     # about on BOTH channels; otherwise the whole backlog is re-scanned every
     # run and, past the LIMIT, the newest requests are never reached.
-    sweep = worker.read_text()
-    assert "d.event_type = 'manager_ready' AND d.sent_at IS NOT NULL" in sweep
-    assert "d.event_type = 'manager_ready_in_app' AND d.sent_at IS NOT NULL" in sweep
+    # A parked delivery (failed_at, empsched27) counts as done so a bouncing
+    # address cannot keep its request in every sweep.
+    sweep = " ".join(worker.read_text().split())
+    done = "AND (d.sent_at IS NOT NULL OR d.failed_at IS NOT NULL))"
+    assert f"d.event_type = 'manager_ready' {done}" in sweep
+    assert f"d.event_type = 'manager_ready_in_app' {done}" in sweep
     assert "u.is_active = true" in sweep
+    # A parked row is never re-claimed.
+    assert service.read_text().count("schedule_request_notification_deliveries.failed_at IS NULL") == 2
+
+
+@pytest.mark.asyncio
+async def test_failed_email_counts_an_attempt_instead_of_releasing_the_claim(monkeypatch):
+    conn = _ReadyConn()
+
+    class _Email:
+        def is_configured(self):
+            return True
+
+        async def send_email(self, *_args):
+            return False
+
+    monkeypatch.setattr(notifications, "get_email_service", lambda: _Email())
+    monkeypatch.setattr(notifications, "get_settings", lambda: SimpleNamespace(app_base_url="https://matcha.example"))
+    monkeypatch.setattr(notifications, "_is_reserved_test_domain", lambda _email: False)
+
+    result = await notifications.send_manager_ready_notifications(conn, request_id=conn.request_id)
+    assert result["sent"] == 0
+    assert not any("DELETE FROM schedule_request_notification_deliveries" in q for q, _ in conn.executed)
+    attempt = next((q, a) for q, a in conn.executed if "attempts = attempts + 1" in q)
+    assert "failed_at = CASE WHEN attempts + 1 >= $2" in attempt[0]
+    assert attempt[1] == (conn.delivery_id, notifications.MAX_MANAGER_DELIVERY_ATTEMPTS)
+
+
+def test_migration_adds_attempts_and_open_offer_indexes():
+    source = (Path(__file__).parents[2] / "alembic/versions/empsched27_manager_delivery_attempts.py").read_text()
+    assert 'down_revision = "empsched26"' in source
+    assert "ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0" in source
+    assert "ADD COLUMN IF NOT EXISTS failed_at TIMESTAMPTZ" in source
+    # Duplicates collapse before the unique index is built, set-based.
+    assert source.index("ROW_NUMBER() OVER") < source.index("CREATE UNIQUE INDEX uq_schedule_requests_open_")
+    assert "ORDER BY created_at DESC, id DESC" in source
+    assert "('pending', 'awaiting_counterparty', 'awaiting_manager')" in source
+    assert "def downgrade" in source and "DROP INDEX IF EXISTS uq_schedule_requests_open_pickup" in source

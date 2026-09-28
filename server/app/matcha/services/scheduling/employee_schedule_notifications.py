@@ -36,7 +36,7 @@ def wall_time(value: datetime | str | None) -> str | None:
 async def stage_request_event(
     conn, *, company_id: UUID, request_id: UUID, event_type: str,
     recipient_employee_ids: list[UUID], dedupe_key: str,
-    decision: str | None = None,
+    decision: str | None = None, withdrawn_by: str | None = None,
 ) -> int:
     """Insert one durable delivery per recipient inside the caller's transaction."""
     if not recipient_employee_ids:
@@ -61,6 +61,9 @@ async def stage_request_event(
         "starts_at": request["starts_at"].isoformat() if request["starts_at"] else None,
         "role": request["role"],
         "decision": decision,
+        # "owner" | "counterparty" — who left a bilateral request, so the
+        # other person's notice says what actually happened.
+        "withdrawn_by": withdrawn_by,
     })
     for row in recipients:
         await conn.execute(
@@ -113,6 +116,8 @@ def _render(event_type: str, payload: dict) -> tuple[str, str, str]:
     if event_type == "schedule_request_accepted":
         return "Shift request accepted", f"Your coworker accepted your request{context}. It is ready for manager review.", f"matchaschedule://requests/{request_id}"
     if event_type == "schedule_request_withdrawn":
+        if payload.get("withdrawn_by") == "owner":
+            return "Shift request cancelled", f"Your coworker cancelled the request you accepted{context}.", f"matchaschedule://requests/{request_id}"
         return "Shift request withdrawn", f"Your coworker withdrew from your request{context}.", f"matchaschedule://requests/{request_id}"
     if event_type == "schedule_request_decided":
         decision = payload.get("decision") or "reviewed"
@@ -146,10 +151,14 @@ async def deliver_one(conn, delivery_id: UUID) -> bool:
             row["recipient_user_id"], row["company_id"], row["event_type"],
             title, body, link, json.dumps(metadata),
         )
+        # A transient APNs failure on every device raises and rolls this whole
+        # transaction back — bell row included, so the retry cannot duplicate
+        # it — and the caller records the attempt (dead-lettered after
+        # MAX_DELIVERY_ATTEMPTS). No APNs config / no device is not a failure.
         await apns_service.send_to_user(
             row["recipient_user_id"], title, body,
             {"type": row["event_type"], "link": link, "metadata": metadata},
-            kind=row["event_type"], conn=conn,
+            kind=row["event_type"], conn=conn, raise_on_transient=True,
         )
         await conn.execute(
             "UPDATE schedule_employee_notification_deliveries SET sent_at=NOW() WHERE id=$1",

@@ -960,9 +960,53 @@ plus Matcha Schedule APNs.
   (unknown event type) parks on first failure, a transient one after
   `MAX_DELIVERY_ATTEMPTS`; the sweep skips parked rows instead of raising on
   them forever.
+- **Nothing reaches the manager queue that approval can only refuse.**
+  Approval's `_check_recipient` raises even with `force=true` for an inactive
+  employee, a store mismatch and a compliance BLOCK (expired credential,
+  minor hours, work permit). Claim create runs `assert_no_compliance_block`;
+  accept runs `assert_approvable` for BOTH people who gain a shift (the
+  acceptor, and on a swap the owner taking the counter shift). The offers feed
+  lists only pickups at the employee's store or locationless shifts. All three
+  helpers live in `routes/employee_schedule/requests.py` so the gate is not
+  forked.
+- **A started shift is never moved.** Accept, approval of pickup/swap/drop, and
+  the offers feed all refuse once the shift has started on its store's wall
+  clock (`assert_not_started`, reading `timezone` from
+  `fetch_locked_shift_pair`). Claims already did.
+- **A request that returns to a coworker re-notifies managers.** A
+  counterparty withdraw calls `reset_manager_ready_deliveries`; without it the
+  sent (request, recipient, event) rows block the next acceptance's bell and
+  email and the sweep counts it as delivered. The owner cancelling an
+  accepted request tells the coworker (`withdrawn_by="owner"`), and a pickup
+  decision notifies the acceptor as well as the owner.
+- **Former employees are refused at the dependency.** Every
+  `employee_portal/schedule.py` route depends on
+  `require_schedulable_employee_record` (403 for terminated/offboarded; also
+  carries `work_location_id`). Termination does not deactivate the user, and
+  only the iOS login checked employment before.
+- **Time-off and availability dates are the employee's.** The published-week
+  guard counts only the employee's store plus locationless shifts
+  (`has_published_schedule_week(employee_id=…)`), and "today" is the store's
+  calendar day (`employee_local_today`), not server `CURRENT_DATE`.
+- **Push is retried, not best-effort, for these deliveries.** `deliver_one`
+  sends with `raise_on_transient=True`: when no device succeeded and one failed
+  transiently, `TransientPushError` rolls the bell row back and the attempt is
+  counted. One successful phone counts as delivered, so a retry never re-pushes
+  it.
 - **Push tokens are session-bound** (`device_tokens.device_session_id`,
   `devicetok03`): mobile logout, a failed mobile refresh, and the send query's
   revoked/inactive filter all stop pushes to a phone whose session ended.
+  Every path that ends a session has to revoke the DEVICE, because the send
+  checks `auth_device_sessions`, not the token watermark:
+  `revoke_user_sessions` (web logout-all, password change/reset) calls
+  `revoke_mobile_devices`; admin suspend and company delete do too; every
+  refused mobile refresh (expired, watermark-revoked, suspended, company gone)
+  ends its device via `_EndedMobileSession`; `/auth/mobile/logout` accepts an
+  expired-but-signed refresh token (`decode_token(verify_exp=False)`) so a
+  sign-out after the 12-hour limit still revokes. The send also skips inactive
+  or suspended users and sessions older than the absolute lifetime. A lost
+  refresh response gets `_MOBILE_REFRESH_GRACE_SECONDS` to re-present the
+  previous generation, which returns the current one without bumping it.
 
 ## `schedule_intelligence` (default ❌)
 

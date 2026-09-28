@@ -7,9 +7,14 @@ private enum SchedulePage: String, CaseIterable {
 
 struct ScheduleView: View {
     let profile: EmployeeProfile
-    @State private var week = WallClock.weekStart(containing: WallClock.today())
+    /// A day inside the week on screen. The week is always derived from it, so
+    /// learning the store's week start re-aligns around the day the employee
+    /// was looking at. Aligning the previously shown Sunday instead put a
+    /// Monday-start store one week back on six days out of seven.
+    @State private var anchorDay = WallClock.today()
     /// Learned from the store on first load; until then Sunday.
     @State private var weekStartWeekday = 0
+    private var week: Date { WallClock.weekStart(containing: anchorDay, weekStartWeekday: weekStartWeekday) }
     @State private var page: SchedulePage = .mine
     @State private var snapshot: ScheduleSnapshot?
     @State private var selectedShift: ScheduleShift?
@@ -32,7 +37,7 @@ struct ScheduleView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Button { week = WallClock.move(week, by: -1) } label: { Image(systemName: "chevron.left") }
+                Button { anchorDay = WallClock.move(anchorDay, by: -1) } label: { Image(systemName: "chevron.left") }
                     .accessibilityLabel("Previous week")
                 Spacer()
                 VStack(spacing: 3) {
@@ -41,7 +46,7 @@ struct ScheduleView: View {
                         .font(.headline)
                 }
                 Spacer()
-                Button { week = WallClock.move(week, by: 1) } label: { Image(systemName: "chevron.right") }
+                Button { anchorDay = WallClock.move(anchorDay, by: 1) } label: { Image(systemName: "chevron.right") }
                     .accessibilityLabel("Next week")
             }
             .padding(.horizontal, 24).padding(.vertical, 14)
@@ -88,7 +93,7 @@ struct ScheduleView: View {
         .navigationTitle("Schedule")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Today") { week = WallClock.weekStart(containing: WallClock.today(), weekStartWeekday: weekStartWeekday) }
+                Button("Today") { anchorDay = WallClock.today() }
             }
         }
         .refreshable { await reload() }
@@ -107,20 +112,28 @@ struct ScheduleView: View {
     }
 
     private func reload() async {
+        let requested = week
         loading = true
         error = nil
+        defer { if requested == week { loading = false } }
         do {
-            let loaded = try await ScheduleService.load(week: week)
+            let loaded = try await ScheduleService.load(week: requested)
+            // Last request wins: a slow load for a week the employee already
+            // navigated away from must not replace what is on screen.
+            guard requested == week else { return }
             snapshot = loaded
-            if loaded.weekStartWeekday != weekStartWeekday {
-                // A Monday-start store: realign the page so a week is not
-                // split across two screens. Changing `week` re-runs the task.
-                weekStartWeekday = loaded.weekStartWeekday
-                week = WallClock.weekStart(containing: week, weekStartWeekday: loaded.weekStartWeekday)
+            error = nil
+            if let learned = loaded.weekStartWeekday, learned != weekStartWeekday {
+                // A Monday-start store: re-derive the week from the anchor day.
+                // `week` changes, which re-runs the task for the aligned week.
+                weekStartWeekday = learned
             }
+        } catch {
+            // A superseded load is cancelled by `.task(id:)`; that is not a
+            // failure the employee should see.
+            guard !error.isCancellation, requested == week else { return }
+            self.error = error.localizedDescription
         }
-        catch { self.error = error.localizedDescription }
-        loading = false
     }
 }
 
@@ -183,26 +196,28 @@ struct ShiftDetailView: View {
                 }
             }
             if let note = myAssignment?.manager_note,
-               myAssignment?.manager_note_visible_to_employee == true,
-               !note.isEmpty {
+               !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Section("Manager note") { Text(note) }
             }
             if let breaks = myAssignment?.planned_breaks, !breaks.isEmpty {
                 Section("Planned breaks") {
                     ForEach(breaks) { item in
-                        LabeledContent(item.kind.capitalized, value: "\(item.start_local) · \(item.duration_minutes) min")
+                        LabeledContent(item.kind.capitalized, value: "\(WallClock.clockTime(item.start_local)) · \(item.duration_minutes) min")
                     }
                 }
             }
             if let notes = shift.notes, !notes.isEmpty { Section("Shift notes") { Text(notes) } }
             if submitted { Section { Label("Request sent for review", systemImage: "checkmark.circle") } }
-            if mode == .mine {
+            // Once a request is sent the actions go away: a second tap would
+            // file a second offer (the server now refuses it, but the button
+            // should not invite it).
+            if mode == .mine && !submitted {
                 Section("Request a change") {
                     Button("Swap shift") { action = .swap }
                     Button("Offer for pickup") { action = .pickup }
                     Button("Request to drop") { action = .drop }
                 }
-            } else if mode == .open {
+            } else if mode == .open && !submitted {
                 Section {
                     Button("Claim open shift") { action = .claim }
                 }

@@ -70,6 +70,42 @@ class _ReplayedRefresh(Exception):
         self.generation = generation
 
 
+class _EndedMobileSession(Exception):
+    """A mobile refresh refused because its session is over (expired, revoked,
+    user gone or suspended). Raised out of the refresh transaction so the
+    device revoke survives that transaction's rollback."""
+
+    def __init__(self, sid: UUID, user_id: UUID, detail: str) -> None:
+        super().__init__(detail)
+        self.sid = sid
+        self.user_id = user_id
+        self.detail = detail
+
+
+# How long after a rotation the previous generation may be presented once more.
+# The server commits the new generation before the client has stored it, so a
+# lost response (timeout, app suspended mid-request, a failed Keychain write)
+# leaves the phone one generation behind. Without the grace, its next refresh
+# reads as a replay and signs the employee out. Re-presenting inside the window
+# returns the CURRENT generation without bumping it, so a real replay is still
+# caught on the next rotation by whichever holder falls behind.
+_MOBILE_REFRESH_GRACE_SECONDS = 60
+
+
+async def _end_mobile_device(conn, sid: UUID, user_id: UUID) -> None:
+    """Revoke one Matcha Schedule device session and drop its push tokens."""
+    await conn.execute(
+        "UPDATE auth_device_sessions SET revoked_at = NOW() "
+        "WHERE id = $1 AND user_id = $2 AND client = 'ios_schedule' "
+        "AND revoked_at IS NULL",
+        sid, user_id,
+    )
+    await conn.execute(
+        "DELETE FROM device_tokens WHERE device_session_id = $1 AND user_id = $2",
+        sid, user_id,
+    )
+
+
 def _mobile_session_id(payload: TokenPayload) -> UUID:
     if payload.cl != "ios_schedule" or not payload.sid or payload.role != "employee":
         raise HTTPException(status_code=401, detail="Invalid mobile session")
@@ -236,6 +272,17 @@ async def refresh_token(request: RefreshTokenRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token"
         )
+    mobile_sid = _mobile_session_id(payload) if payload.sid or payload.cl else None
+
+    def refused(detail: str, user_id=None) -> Exception:
+        # A refused mobile refresh ends that device: its pushes must stop even
+        # though the phone never gets to call /mobile/logout.
+        if mobile_sid:
+            try:
+                return _EndedMobileSession(mobile_sid, UUID(str(user_id or payload.sub)), detail)
+            except (TypeError, ValueError):
+                pass
+        return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
 
     async with get_connection() as conn:
         try:
@@ -270,32 +317,19 @@ async def refresh_token(request: RefreshTokenRequest):
                 )
 
                 if not user or not user["is_active"]:
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="User not found or inactive"
-                    )
+                    raise refused("User not found or inactive")
                 if user["company_deleted_at"]:
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="This account's company has been deactivated.",
-                    )
+                    raise refused("This account's company has been deactivated.", user["id"])
 
-                mobile_sid = _mobile_session_id(payload) if payload.sid or payload.cl else None
                 if mobile_sid and (user["role"] != "employee" or user["is_suspended"]):
-                    raise HTTPException(status_code=401, detail="Invalid mobile session")
+                    raise refused("Invalid mobile session", user["id"])
                 settings = get_settings()
                 if refresh_session_expired(payload.iat, payload.session_started_at):
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Session expired. Please log in again.",
-                    )
+                    raise refused("Session expired. Please log in again.", user["id"])
 
                 # A revoked refresh token (logout / password change) can't mint new tokens.
                 if await session_revoked(conn, user["id"], payload.iat, payload.iat_ms):
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Refresh token has been revoked. Please log in again."
-                    )
+                    raise refused("Refresh token has been revoked. Please log in again.", user["id"])
 
                 refresh_claims = None
                 if mobile_sid:
@@ -320,6 +354,26 @@ async def refresh_token(request: RefreshTokenRequest):
                          RETURNING ds.id, ds.refresh_generation""",
                         mobile_sid, user["id"], list(INACTIVE_EMPLOYMENT_STATUSES), payload.gen,
                     )
+                    if not rotated:
+                        # The generation just before the current one, presented
+                        # again moments after it rotated, is a lost response,
+                        # not a replay: hand back the current generation
+                        # without bumping it (_MOBILE_REFRESH_GRACE_SECONDS).
+                        rotated = await conn.fetchrow(
+                            """SELECT ds.id, ds.refresh_generation
+                                 FROM auth_device_sessions AS ds
+                                WHERE ds.id = $1 AND ds.user_id = $2
+                                  AND ds.client = 'ios_schedule' AND ds.revoked_at IS NULL
+                                  AND ds.refresh_generation = $4 + 1
+                                  AND ds.last_refreshed_at > NOW() - make_interval(secs => $5)
+                                  AND EXISTS (
+                                      SELECT 1 FROM employees e
+                                       WHERE e.user_id = ds.user_id
+                                         AND NOT (COALESCE(e.employment_status, 'active') = ANY($3::text[]))
+                                  )""",
+                            mobile_sid, user["id"], list(INACTIVE_EMPLOYMENT_STATUSES), payload.gen,
+                            _MOBILE_REFRESH_GRACE_SECONDS,
+                        )
                     if not rotated:
                         # A superseded generation on a live session means an old
                         # refresh token was replayed (stolen or duplicated). The
@@ -368,6 +422,9 @@ async def refresh_token(request: RefreshTokenRequest):
                 replay.sid, replay.user_id,
             )
             raise HTTPException(status_code=401, detail="Mobile session revoked or employee inactive")
+        except _EndedMobileSession as ended:
+            await _end_mobile_device(conn, ended.sid, ended.user_id)
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ended.detail)
 
 
 @router.post("/logout")
@@ -381,8 +438,13 @@ async def logout(current_user: CurrentUser = Depends(get_current_user)):
 @router.post("/mobile/logout")
 async def mobile_logout(request: MobileLogoutRequest):
     """Revoke only the Matcha Schedule device identified by this refresh token,
-    and drop its push tokens so the phone stops receiving this user's pushes."""
-    payload = decode_token(request.refresh_token, expected_type="refresh")
+    and drop its push tokens so the phone stops receiving this user's pushes.
+
+    The expiry is deliberately not enforced here (the signature still is): a
+    phone signing out after its 12-hour session lapsed must still be able to
+    end it, or it keeps receiving the previous user's pushes until the session
+    row is pruned. The token is only ever used to revoke, never to mint."""
+    payload = decode_token(request.refresh_token, expected_type="refresh", verify_exp=False)
     if payload is None:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
     sid = _mobile_session_id(payload)

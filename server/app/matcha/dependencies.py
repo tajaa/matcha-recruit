@@ -384,6 +384,34 @@ async def require_employee_record(
         return dict(employee)
 
 
+async def require_schedulable_employee_record(
+    employee: dict = Depends(require_employee_record),
+) -> dict:
+    """``require_employee_record`` for the employee schedule surface: refuses a
+    terminated or offboarded employee and adds ``work_location_id``.
+
+    Termination does not deactivate the user account, and the web portal has no
+    other employment check — without this a former employee can still read
+    every coworker's upcoming shifts and file requests that email managers.
+    """
+    from app.matcha.services.scheduling.schedule_rules import INACTIVE_EMPLOYMENT_STATUSES
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT COALESCE(employment_status, 'active') AS employment_status,
+                      work_location_id
+               FROM employees WHERE id = $1""",
+            employee["id"],
+        )
+    if not row or row["employment_status"] in INACTIVE_EMPLOYMENT_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your employee account is no longer active",
+        )
+    return {**employee, "employment_status": row["employment_status"],
+            "work_location_id": row["work_location_id"]}
+
+
 async def require_interview_prep_access(
     current_user=Depends(get_current_user)
 ):

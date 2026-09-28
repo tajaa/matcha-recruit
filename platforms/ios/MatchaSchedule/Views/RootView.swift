@@ -36,6 +36,9 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .schedulePushTapped)) { notification in
             appState.handlePush(notification.userInfo ?? [:])
         }
+        .onReceive(NotificationCenter.default.publisher(for: .schedulePushReceived)) { _ in
+            Task { await appState.refreshBadgesIfReady() }
+        }
         .onOpenURL { appState.handleURL($0) }
     }
 }

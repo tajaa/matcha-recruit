@@ -23,6 +23,21 @@ final class InboxAndPushTests: XCTestCase {
         XCTAssertEqual(decoded.content, "Hello")
     }
 
+    func testThreadReadsOldestFirstWhateverTheServerOrder() throws {
+        func message(_ id: String, _ at: String) -> String {
+            #"{"id":"\#(id)","conversation_id":"c","sender_id":"s","sender_name":"Ava","content":"\#(id)","attachments":[],"created_at":"\#(at)","edited_at":null}"#
+        }
+        // The server pages newest first.
+        let json = "[" + [
+            message("c", "2026-09-23T10:02:00.500000+00:00"),
+            message("b", "2026-09-23T10:01:00Z"),
+            message("a2", "2026-09-23T10:00:00Z"),
+            message("a1", "2026-09-23T10:00:00Z"),
+        ].joined(separator: ",") + "]"
+        let messages = try JSONDecoder().decode([MWInboxMessage].self, from: Data(json.utf8))
+        XCTAssertEqual(DMOrder.chronological(messages).map(\.id), ["a1", "a2", "b", "c"])
+    }
+
     func testBellNotificationAcceptsMixedMetadata() throws {
         let json = """
         {"notifications":[{"id":"11111111-1111-1111-1111-111111111111","type":"schedule_published",
@@ -43,4 +58,65 @@ final class InboxAndPushTests: XCTestCase {
         XCTAssertNil(PushRoute.destination(for: ["type": "inbox_message", "metadata": ["conversation_id": "../bad"]]))
         XCTAssertEqual(PushRoute.destination(for: URL(string: "matchaschedule://requests/\(id)")!), .requests)
     }
+
+    @MainActor
+    func testSignOutRevokesTheDeviceEvenWithAnExpiredAccessToken() async throws {
+        // An idle session: no live access token, only the stored refresh
+        // token. Sign-out must still reach /auth/mobile/logout, and must not
+        // start with a call that needs an access token.
+        RecordingProtocol.requests = []
+        URLProtocol.registerClass(RecordingProtocol.self)
+        defer {
+            URLProtocol.unregisterClass(RecordingProtocol.self)
+            KeychainHelper.delete(key: KeychainHelper.Keys.refreshToken)
+            KeychainHelper.delete(key: KeychainHelper.Keys.pendingRevoke)
+        }
+        XCTAssertTrue(KeychainHelper.save(key: KeychainHelper.Keys.refreshToken, value: "stored-refresh"))
+        APIClient.shared.accessToken = nil
+
+        let state = AppState()
+        await state.signOut()
+
+        let paths = RecordingProtocol.requests.compactMap { $0.url?.path }
+        XCTAssertEqual(paths.filter { $0.hasSuffix("/auth/mobile/logout") }.count, 1, "\(paths)")
+        XCTAssertFalse(paths.contains { $0.hasSuffix("/push/unregister") }, "\(paths)")
+        let body = RecordingProtocol.requests.first { $0.url?.path.hasSuffix("/auth/mobile/logout") == true }
+            .flatMap(RecordingProtocol.body(of:)) ?? Data()
+        XCTAssertTrue(String(decoding: body, as: UTF8.self).contains("stored-refresh"))
+        XCTAssertNil(KeychainHelper.load(key: KeychainHelper.Keys.refreshToken))
+        if case .signedOut = state.phase {} else { XCTFail("expected signed out") }
+    }
+}
+
+/// Answers every request with 200 {} and records it.
+final class RecordingProtocol: URLProtocol {
+    static var requests: [URLRequest] = []
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    static func body(of request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open(); defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            if read <= 0 { break }
+            data.append(buffer, count: read)
+        }
+        return data
+    }
+
+    override func startLoading() {
+        Self.requests.append(request)
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                       headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("{}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }

@@ -11,6 +11,11 @@ from app.core.services.email._shared import _is_reserved_test_domain
 from app.config import get_settings
 
 
+# A reviewer address that keeps failing is parked after this many sends
+# (empsched27) instead of being retried by every sweep forever.
+MAX_MANAGER_DELIVERY_ATTEMPTS = 5
+
+
 async def mark_manager_ready_notifications_resolved(
     conn, *, company_id: UUID, request_id: UUID,
 ) -> int:
@@ -29,12 +34,34 @@ async def mark_manager_ready_notifications_resolved(
     return int(result.split()[-1])
 
 
+async def reset_manager_ready_deliveries(
+    conn, *, company_id: UUID, request_id: UUID,
+) -> int:
+    """Forget that managers were told about a request that left their queue
+    and may return to it.
+
+    Deliveries are keyed (request, recipient, event) and a sent row is never
+    re-claimed, so a pickup that goes back to awaiting a coworker and is then
+    accepted by someone else would otherwise reach the queue silently: no bell,
+    no email, and the recovery sweep counts it as already delivered.
+    """
+    result = await conn.execute(
+        """DELETE FROM schedule_request_notification_deliveries
+           WHERE company_id = $1 AND request_id = $2
+             AND event_type IN ('manager_ready', 'manager_ready_in_app')""",
+        company_id, request_id,
+    )
+    return int(result.split()[-1])
+
+
 async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[str, int]:
     """Send each company reviewer one email for a manager-ready request.
 
-    The delivery row is claimed before sending. A failed provider call releases
-    the claim, while an interrupted worker's stale claim is reclaimed by the
-    recovery task. Request state is never changed by delivery success or failure.
+    The delivery row is claimed before sending. A failed provider call counts
+    an attempt (re-claimable after five minutes, parked at
+    MAX_MANAGER_DELIVERY_ATTEMPTS), while an interrupted worker's stale claim is
+    reclaimed by the recovery task. Request state is never changed by delivery
+    success or failure.
     """
     request = await conn.fetchrow(
         """
@@ -77,6 +104,7 @@ async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[st
             ON CONFLICT (request_id, recipient_user_id, event_type) DO UPDATE
                SET created_at=NOW()
              WHERE schedule_request_notification_deliveries.sent_at IS NULL
+               AND schedule_request_notification_deliveries.failed_at IS NULL
                AND schedule_request_notification_deliveries.created_at < NOW() - INTERVAL '5 minutes'
             RETURNING id
             """,
@@ -117,6 +145,7 @@ async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[st
             ON CONFLICT (request_id, recipient_user_id, event_type) DO UPDATE
                SET created_at=NOW()
              WHERE schedule_request_notification_deliveries.sent_at IS NULL
+               AND schedule_request_notification_deliveries.failed_at IS NULL
                AND schedule_request_notification_deliveries.created_at < NOW() - INTERVAL '5 minutes'
             RETURNING id
             """,
@@ -154,5 +183,14 @@ async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[st
             )
             sent += 1
         else:
-            await conn.execute("DELETE FROM schedule_request_notification_deliveries WHERE id=$1", claimed)
+            # Keep the row (re-claimable after the 5-minute window) and count
+            # the attempt; park it at the cap so a bouncing address cannot hold
+            # a place in every sweep.
+            await conn.execute(
+                """UPDATE schedule_request_notification_deliveries
+                   SET attempts = attempts + 1,
+                       failed_at = CASE WHEN attempts + 1 >= $2 THEN NOW() ELSE failed_at END
+                   WHERE id = $1""",
+                claimed, MAX_MANAGER_DELIVERY_ATTEMPTS,
+            )
     return {"sent": sent, "recipients": len(recipients)}

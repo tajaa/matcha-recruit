@@ -62,6 +62,8 @@ class FakePortalConn:
         q = " ".join(query.split())
         if "CURRENT_DATE" in q and "schedule_requests" not in q:
             return self.today
+        if "::date FROM employees e" in q:  # employee_local_today
+            return self.today
         if "EXTRACT(DOW FROM s.starts_at)" in q:
             return self.published_week
         if "request_type = 'availability'" in q and "FOR UPDATE" in q:

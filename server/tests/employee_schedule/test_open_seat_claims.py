@@ -251,8 +251,15 @@ async def test_claim_create_starts_awaiting_manager_and_dispatches_after_commit(
     def dispatch(_request_id):
         events.append("dispatch")
 
+    async def no_block(_conn, _company, shift, claimant, **_kwargs):
+        assert claimant == employee_id and shift["id"] == shift_id
+        events.append("compliance")
+
     monkeypatch.setattr(portal, "get_connection", connection)
     monkeypatch.setattr(portal, "_dispatch_manager_ready", dispatch)
+    monkeypatch.setattr(
+        "app.matcha.routes.employee_schedule.requests.assert_no_compliance_block", no_block,
+    )
     monkeypatch.setattr(portal, "serialize_request", lambda row: row, raising=False)
     monkeypatch.setattr("app.matcha.routes.employee_schedule._shared.serialize_request", lambda row: row)
     monkeypatch.setattr("app.matcha.routes.employee_schedule._shared.log_audit", audit)
@@ -265,7 +272,7 @@ async def test_claim_create_starts_awaiting_manager_and_dispatches_after_commit(
         {"id": employee_id, "org_id": company_id},
     )
     assert result["status"] == "awaiting_manager"
-    assert events == ["begin", "insert", "audit", "commit", "dispatch"]
+    assert events == ["begin", "compliance", "insert", "audit", "commit", "dispatch"]
 
 
 def _manager_env(monkeypatch, *, company_id, employee_id, shift_id, request_id, applied,

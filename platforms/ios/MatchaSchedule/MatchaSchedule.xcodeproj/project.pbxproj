@@ -216,6 +216,7 @@
 			buildPhases = (
 				CE1B2029FA2C5F0B1F22C819 /* Sources */,
 				E7464DC97E0CC4EB0CDDA377 /* Resources */,
+				9B59D964352AD57AC78DFABE /* Strip local-network ATS exceptions (Release) */,
 			);
 			buildRules = (
 			);
@@ -295,6 +296,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		9B59D964352AD57AC78DFABE /* Strip local-network ATS exceptions (Release) */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Strip local-network ATS exceptions (Release)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"${CONFIGURATION}\" = \"Release\" ]; then\n  /usr/libexec/PlistBuddy -c \"Delete :NSAppTransportSecurity\" \"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\" 2>/dev/null || true\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		2266A5CD2BB19FCBA8F746E1 /* Sources */ = {
@@ -466,6 +489,7 @@
 				CODE_SIGN_ENTITLEMENTS = "MatchaSchedule-Release.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (

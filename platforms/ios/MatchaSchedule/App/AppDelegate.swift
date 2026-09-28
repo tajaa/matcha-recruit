@@ -32,6 +32,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        // A push arriving in the foreground means the unread counts moved.
+        Task { @MainActor in NotificationCenter.default.post(name: .schedulePushReceived, object: nil) }
         completionHandler([.banner, .list, .sound])
     }
 
@@ -51,4 +53,5 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
 extension Notification.Name {
     static let schedulePushTapped = Notification.Name("schedule-push-tapped")
+    static let schedulePushReceived = Notification.Name("schedule-push-received")
 }

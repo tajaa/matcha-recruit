@@ -71,6 +71,60 @@ async def _active_employee(conn, company_id: UUID, employee_id: UUID) -> None:
         raise HTTPException(status_code=409, detail=f"Employee is {row['employment_status']} and cannot be scheduled")
 
 
+async def compliance_violations_for(conn, company_id: UUID, shift, employee_id: UUID,
+                                    *, exclude_shift_id: UUID | None) -> list[dict]:
+    """``check_shift_compliance`` for putting ``employee_id`` on ``shift``, with
+    the meal break the location's rules require rather than the stored one."""
+    break_plan = await resolve_shift_break_plan(
+        conn, company_id, location_id=shift["location_id"],
+        starts_at=shift["starts_at"], ends_at=shift["ends_at"],
+        employee_id=employee_id,
+    )
+    effective_break = max(
+        int(shift["break_minutes"] or 0),
+        minimum_meal_break_minutes(break_plan),
+    )
+    return await check_shift_compliance(
+        conn, company_id, location_id=shift["location_id"], job_id=shift["job_id"], starts_at=shift["starts_at"],
+        ends_at=shift["ends_at"], break_minutes=effective_break,
+        employee_id=employee_id, exclude_shift_id=exclude_shift_id, fw_event="assign",
+        fw_shift_published=(shift["status"] == "published"), shift_kind=shift["kind"],
+        training_requirement_id=shift["training_requirement_id"],
+    )
+
+
+async def assert_no_compliance_block(conn, company_id: UUID, shift, employee_id: UUID,
+                                     *, exclude_shift_id: UUID | None = None) -> None:
+    """422 on a compliance BLOCK — the one violation class ``force`` can't
+    override at approval. Advisories pass: a manager can still force those."""
+    raise_for_violations(
+        await compliance_violations_for(
+            conn, company_id, shift, employee_id, exclude_shift_id=exclude_shift_id,
+        ),
+        force=True,
+    )
+
+
+async def assert_approvable(conn, company_id: UUID, shift, employee_id: UUID,
+                            *, exclude_shift_id: UUID | None = None) -> None:
+    """Every gate ``_check_recipient`` raises on even with ``force=true``.
+
+    Employee-side flows (claim, accept) call this before a request reaches the
+    manager queue, so nothing lands there that approval can only refuse.
+    """
+    await _active_employee(conn, company_id, employee_id)
+    await assert_employee_schedulable_at(conn, company_id, employee_id, shift["location_id"])
+    await assert_no_compliance_block(
+        conn, company_id, shift, employee_id, exclude_shift_id=exclude_shift_id,
+    )
+
+
+def assert_not_started(shift, *, detail: str = "This shift has already started") -> None:
+    """409 once the shift's start has passed on its store's wall clock."""
+    if shift["starts_at"] <= schedule_wall_clock_now(shift.get("timezone")):
+        raise HTTPException(status_code=409, detail=detail)
+
+
 async def _check_recipient(conn, company_id: UUID, shift, employee_id: UUID,
                            *, exclude_shift_id: UUID | None, force: bool) -> tuple[list[dict], dict | None]:
     await _active_employee(conn, company_id, employee_id)
@@ -88,21 +142,8 @@ async def _check_recipient(conn, company_id: UUID, shift, employee_id: UUID,
     )
     if unqualified and not force:
         raise_not_qualified(unqualified)
-    break_plan = await resolve_shift_break_plan(
-        conn, company_id, location_id=shift["location_id"],
-        starts_at=shift["starts_at"], ends_at=shift["ends_at"],
-        employee_id=employee_id,
-    )
-    effective_break = max(
-        int(shift["break_minutes"] or 0),
-        minimum_meal_break_minutes(break_plan),
-    )
-    violations = await check_shift_compliance(
-        conn, company_id, location_id=shift["location_id"], job_id=shift["job_id"], starts_at=shift["starts_at"],
-        ends_at=shift["ends_at"], break_minutes=effective_break,
-        employee_id=employee_id, exclude_shift_id=exclude_shift_id, fw_event="assign",
-        fw_shift_published=(shift["status"] == "published"), shift_kind=shift["kind"],
-        training_requirement_id=shift["training_requirement_id"],
+    violations = await compliance_violations_for(
+        conn, company_id, shift, employee_id, exclude_shift_id=exclude_shift_id,
     )
     raise_for_violations(violations, force=force)
     return outside, unqualified
@@ -211,6 +252,9 @@ async def review_request(request_id: UUID, body: RequestReview,
                 offered = locked.get(str(req["shift_id"]))
                 if offered is None or offered["status"] != "published":
                     raise HTTPException(status_code=409, detail="Offered shift is no longer published")
+                # Moving people on a shift already worked rewrites the history
+                # labor cost and Fair Workweek read, so it is refused outright.
+                assert_not_started(offered, detail="Offered shift has already started")
 
                 recipient = None if req["request_type"] == "drop" else req["target_employee_id"]
                 if req["request_type"] in ("pickup", "swap") and recipient is None:
@@ -219,6 +263,8 @@ async def review_request(request_id: UUID, body: RequestReview,
                     counter = locked.get(str(req["counter_shift_id"])) if req["request_type"] == "swap" and not legacy_one_way_swap else None
                     if counter is not None and counter["status"] != "published":
                         raise HTTPException(status_code=409, detail="Counter shift is no longer published")
+                    if counter is not None:
+                        assert_not_started(counter, detail="Counter shift has already started")
                     same_day = await find_same_day_assignments(
                         conn, company_id, recipient, offered["starts_at"],
                         exclude_shift_ids=([req["counter_shift_id"]] if req["request_type"] == "swap" and not legacy_one_way_swap else []),
@@ -347,7 +393,9 @@ async def review_request(request_id: UUID, body: RequestReview,
                     if req["request_type"] == "availability" else {})},
             )
             recipients = [req["employee_id"]]
-            if req["request_type"] == "swap" and req["target_employee_id"]:
+            # The coworker who accepted a pickup gains (or doesn't gain) the
+            # shift too; target_employee_id is set on acceptance for both kinds.
+            if req["request_type"] in ("swap", "pickup") and req["target_employee_id"]:
                 recipients.append(req["target_employee_id"])
             await stage_request_event(
                 conn, company_id=company_id, request_id=request_id,

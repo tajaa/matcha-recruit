@@ -1,5 +1,5 @@
 """PTO request self-service."""
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -11,7 +11,7 @@ from app.matcha.models.employees.employee import (
 )
 from app.matcha.dependencies import require_employee_record
 from app.matcha.services.scheduling.time_off_guard import (
-    PUBLISHED_WEEK_TIME_OFF_DETAIL, has_published_schedule_week,
+    PUBLISHED_WEEK_TIME_OFF_DETAIL, employee_local_today, has_published_schedule_week,
 )
 
 from ._shared import _pto_dep
@@ -130,12 +130,6 @@ async def submit_pto_request(
             detail="Start date must be before or equal to end date"
         )
 
-    if request.start_date < date.today():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot request PTO for past dates"
-        )
-
     if request.hours <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -143,8 +137,16 @@ async def submit_pto_request(
         )
 
     async with get_connection() as conn:
+        # The employee's calendar day, not the server's: UTC rolls over at
+        # 5 PM Pacific and "today" would read as a past date all evening.
+        if request.start_date < await employee_local_today(conn, employee["id"]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot request PTO for past dates"
+            )
         if await has_published_schedule_week(
             conn, employee["org_id"], request.start_date, request.end_date,
+            employee_id=employee["id"],
         ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

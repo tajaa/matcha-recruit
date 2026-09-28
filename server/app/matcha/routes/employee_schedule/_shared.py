@@ -281,10 +281,14 @@ async def fetch_shifts(
                 details = json.loads(details)
             except json.JSONDecodeError:
                 details = {}
-        employee_id = details.get("employee_id")
-        if employee_id:
+        # Its own name: rebinding the `employee_id` parameter here made the
+        # privacy branch below compare against the last override row's id,
+        # dropping the caller's own note, guidance and breaks whenever any
+        # forced assignment existed in the window.
+        override_employee_id = details.get("employee_id")
+        if override_employee_id:
             overrides.setdefault(
-                (str(row["entity_id"]), str(employee_id)),
+                (str(row["entity_id"]), str(override_employee_id)),
                 {"at": _iso(row["created_at"]), "violations": details.get("violations", [])},
             )
     by_shift: dict[str, list[dict]] = {}
@@ -294,17 +298,15 @@ async def fetch_shifts(
                 "name": _display_name(r["first_name"], r["last_name"]),
                 "job_title": r["job_title"],
                 "status": r["status"],
-                "availability_overridden": (
-                    str(r["shift_id"]), str(r["employee_id"])
-                ) in overrides,
-                "availability_override_at": overrides.get(
-                    (str(r["shift_id"]), str(r["employee_id"])), {}
-                ).get("at"),
             }
         # Portal calls pass employee_id, so never expose another employee's
-        # private note or individualized compliance guidance. Admin responses
+        # private note, individualized compliance guidance, or the fact that a
+        # manager forced them outside their availability. Admin responses
         # include note delivery controls so the editor can update them.
         if employee_id is None or r["employee_id"] == employee_id:
+            override_key = (str(r["shift_id"]), str(r["employee_id"]))
+            assignment["availability_overridden"] = override_key in overrides
+            assignment["availability_override_at"] = overrides.get(override_key, {}).get("at")
             assignment["manager_note"] = (
                 r["manager_note"] if r["manager_note_visible_to_employee"] else None
             )
@@ -426,7 +428,12 @@ async def fetch_locked_shift_pair(conn, company_id: UUID, *shift_ids: UUID) -> d
                s.location_id, s.break_minutes, s.role, s.kind,
                s.training_requirement_id, s.job_id, s.published_at,
                (SELECT COUNT(*) FROM schedule_shift_assignments a
-                WHERE a.shift_id = s.id) AS assigned_count
+                WHERE a.shift_id = s.id) AS assigned_count,
+               -- A scalar subquery, not a LEFT JOIN: FOR UPDATE cannot lock
+               -- the nullable side of an outer join. Callers gate "has this
+               -- shift started" on the store's wall clock with it.
+               (SELECT bl.timezone FROM business_locations bl
+                WHERE bl.id = s.location_id) AS timezone
         FROM schedule_shifts s
         WHERE s.company_id = $1 AND s.id = ANY($2::uuid[])
         ORDER BY s.id

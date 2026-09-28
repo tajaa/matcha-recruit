@@ -5,8 +5,9 @@ struct ScheduleSnapshot {
     let team: [ScheduleShift]
     let open: [ScheduleShift]
     let locations: [String: String]
-    /// The employee's store week start (0 = Sunday); Sunday when unknown.
-    let weekStartWeekday: Int
+    /// The employee's store week start (0 = Sunday); nil when the store list
+    /// could not be read, so the page keeps the week start it already knew.
+    let weekStartWeekday: Int?
 }
 
 enum ScheduleService {
@@ -45,15 +46,27 @@ enum ScheduleService {
         async let mine: ShiftListResponse = APIClient.shared.request(method: "GET", path: "/v1/portal/me/schedule?\(query)")
         async let team: ShiftListResponse = APIClient.shared.request(method: "GET", path: "/v1/portal/me/schedule?\(query)&team=true")
         async let open: ShiftListResponse = APIClient.shared.request(method: "GET", path: "/v1/portal/me/schedule/open-seats?\(query)")
-        async let places: LocationsResponse = APIClient.shared.request(method: "GET", path: "/locations")
-        let (myResult, teamResult, openResult, placeResult) = try await (mine, team, open, places)
-        let locationIDs = Set(placeResult.locations.map(\.id))
+        async let places = storeLocations()
+        let (myResult, teamResult, openResult) = try await (mine, team, open)
+        let locations = await places
+        let locationIDs = Set(locations.map(\.id))
         return ScheduleSnapshot(
             mine: myResult.shifts,
             team: storeScoped(teamResult.shifts, locationIDs: locationIDs),
             open: openResult.shifts,
-            locations: Dictionary(uniqueKeysWithValues: placeResult.locations.map { ($0.id, $0.name) }),
-            weekStartWeekday: placeResult.locations.first?.week_start_weekday ?? 0
+            locations: Dictionary(locations.map { ($0.id, $0.displayName) }, uniquingKeysWith: { first, _ in first }),
+            weekStartWeekday: locations.isEmpty ? nil : (locations.first?.week_start_weekday ?? 0)
         )
+    }
+
+    /// Store names and week start are decoration: a failure here must never
+    /// take the shifts down with it. Cancellation still propagates as empty.
+    static func storeLocations() async -> [ScheduleLocation] {
+        do {
+            let response: LocationsResponse = try await APIClient.shared.request(method: "GET", path: "/locations")
+            return response.locations
+        } catch {
+            return []
+        }
     }
 }
