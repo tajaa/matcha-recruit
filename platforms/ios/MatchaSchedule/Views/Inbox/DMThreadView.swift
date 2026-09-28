@@ -33,7 +33,10 @@ struct DMThreadView: View {
                         MessageBubble(
                             message: message,
                             isMine: message.senderId == appState.currentUserID,
-                            showsSender: isGroup && previous?.senderId != message.senderId,
+                            // Only other people's names: your own bubbles are already
+                            // right-aligned in your color.
+                            showsSender: isGroup && message.senderId != appState.currentUserID
+                                && previous?.senderId != message.senderId,
                             closesRun: next?.senderId != message.senderId
                                 || DMOrder.startsNewMoment(next ?? message, after: message)
                         )

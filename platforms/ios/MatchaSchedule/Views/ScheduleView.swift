@@ -4,6 +4,12 @@ private enum SchedulePage: Hashable {
     case mine, team
 }
 
+/// Whether the Next shift card knows the answer. A failed fetch must not
+/// read as "nothing scheduled".
+enum UpcomingState: Equatable {
+    case loading, loaded, failed
+}
+
 struct ScheduleView: View {
     let profile: EmployeeProfile
     /// A day inside the week on screen. The week is always derived from it, so
@@ -16,6 +22,9 @@ struct ScheduleView: View {
     @State private var page: SchedulePage = .mine
     @State private var snapshot: ScheduleSnapshot?
     @State private var upcoming: [ScheduleShift] = []
+    @State private var upcomingState: UpcomingState = .loading
+    /// Learned from the store; shift times are its clock face.
+    @State private var storeTimeZone: TimeZone?
     @State private var selectedShift: ScheduleShift?
     @State private var loading = false
     @State private var error: String?
@@ -34,13 +43,13 @@ struct ScheduleView: View {
         (snapshot?.open ?? []).sorted { $0.starts_at < $1.starts_at }
     }
 
-    /// The shift in progress, or the next one to start, by the store clock.
-    private var nextShift: ScheduleShift? {
-        let now = WallClock.now()
-        return upcoming.first { shift in
-            guard let end = WallClock.date(shift.ends_at) else { return false }
-            return end > now
-        }
+    private var zone: TimeZone { storeTimeZone ?? .current }
+
+    /// Tints the background. The card picks its own shift inside its
+    /// minute timer, so it never shows a shift that already ended.
+    private var nextShiftTone: DayPart? {
+        ScheduleService.nextShift(in: upcoming, now: WallClock.now(timeZone: zone))
+            .map { DayPart(wallClockISO: $0.starts_at) }
     }
 
     private var groupedDays: [(key: String, shifts: [ScheduleShift])] {
@@ -53,9 +62,12 @@ struct ScheduleView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     NextShiftCard(
-                        shift: nextShift,
-                        location: nextShift.flatMap { snapshot?.locations[$0.location_id ?? ""] },
-                        onOpen: { selectedShift = $0 }
+                        upcoming: upcoming,
+                        state: upcomingState,
+                        locations: snapshot?.locations ?? [:],
+                        timeZone: zone,
+                        onOpen: { selectedShift = $0 },
+                        onRetry: { Task { await loadUpcoming() } }
                     )
                     .rise()
 
@@ -67,6 +79,7 @@ struct ScheduleView: View {
                         )
                         DayStrip(
                             days: WallClock.days(of: week),
+                            today: WallClock.dayKey(WallClock.today(timeZone: zone)),
                             shifts: displayed,
                             focused: focusedDay
                         ) { key in
@@ -87,7 +100,9 @@ struct ScheduleView: View {
                     }
 
                     weekContent
-                        .id(WallClock.dayKey(week))
+                        // Prefixed: the first day's section is `.id(dayKey)`
+                        // for scrollTo, and the two must not collide.
+                        .id("week-" + WallClock.dayKey(week))
                         .transition(.asymmetric(
                             insertion: .move(edge: travel).combined(with: .opacity),
                             removal: .opacity
@@ -99,13 +114,14 @@ struct ScheduleView: View {
             }
             .scrollIndicators(.hidden)
         }
-        .ambientBackground(nextShift.map { DayPart(wallClockISO: $0.starts_at) })
+        .ambientBackground(nextShiftTone)
         .navigationTitle("Schedule")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    travel = WallClock.today() < anchorDay ? .leading : .trailing
-                    withAnimation(.spring(response: 0.45, dampingFraction: 0.88)) { anchorDay = WallClock.today() }
+                    let today = WallClock.today(timeZone: zone)
+                    travel = today < anchorDay ? .leading : .trailing
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.88)) { anchorDay = today }
                 } label: {
                     Text("Today").font(TypeScale.callout)
                 }
@@ -137,7 +153,7 @@ struct ScheduleView: View {
         VStack(alignment: .leading, spacing: 22) {
             if loading && snapshot == nil {
                 ForEach(0..<3, id: \.self) { index in
-                    ShiftCardPlaceholder().rise(delay: Double(index) * 0.05)
+                    GlassPlaceholder(leading: .bar, lineWidths: [90, 160, 120], label: "Loading shifts").rise(delay: Double(index) * 0.05)
                 }
             } else if displayed.isEmpty && (page == .team || openShifts.isEmpty) {
                 GlassMessage(
@@ -151,7 +167,7 @@ struct ScheduleView: View {
             } else {
                 ForEach(Array(groupedDays.enumerated()), id: \.element.key) { index, day in
                     VStack(alignment: .leading, spacing: 10) {
-                        DayHeader(key: day.key)
+                        DayHeader(key: day.key, today: WallClock.dayKey(WallClock.today(timeZone: zone)))
                         ForEach(day.shifts) { shift in
                             Button { selectedShift = shift } label: {
                                 ShiftCard(
@@ -210,6 +226,7 @@ struct ScheduleView: View {
             // navigated away from must not replace what is on screen.
             guard requested == week else { return }
             withAnimation(.easeOut(duration: 0.2)) { snapshot = loaded }
+            if let learnedZone = loaded.storeTimeZone { storeTimeZone = learnedZone }
             error = nil
             if let learned = loaded.weekStartWeekday, learned != weekStartWeekday {
                 // A Monday-start store: re-derive the week from the anchor day.
@@ -225,11 +242,19 @@ struct ScheduleView: View {
     }
 
     private func loadUpcoming() async {
+        if upcoming.isEmpty { upcomingState = .loading }
         do {
-            let shifts = try await ScheduleService.upcoming()
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) { upcoming = shifts }
+            let shifts = try await ScheduleService.upcoming(from: WallClock.today(timeZone: zone))
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
+                upcoming = shifts
+                upcomingState = .loaded
+            }
         } catch {
-            // The hero is a convenience; the week below still loads on its own.
+            guard !error.isCancellation else { return }
+            // Say so rather than show "nothing scheduled": an employee could
+            // believe they have no shifts when the request simply failed.
+            // Keep any shifts already shown from an earlier load.
+            if upcoming.isEmpty { upcomingState = .failed }
         }
     }
 }
@@ -237,39 +262,66 @@ struct ScheduleView: View {
 // MARK: - Next shift
 
 private struct NextShiftCard: View {
-    let shift: ScheduleShift?
-    let location: String?
+    let upcoming: [ScheduleShift]
+    let state: UpcomingState
+    let locations: [String: String]
+    let timeZone: TimeZone
     let onOpen: (ScheduleShift) -> Void
+    let onRetry: () -> Void
 
     var body: some View {
-        if let shift {
-            Button { onOpen(shift) } label: { filled(shift) }
-                .buttonStyle(PressableStyle())
-                .accessibilityIdentifier("schedule.next")
-        } else {
-            HStack(spacing: 14) {
-                Image(systemName: "moon.zzz.fill")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(Palette.dusk)
-                    .frame(width: 48, height: 48)
-                    .background(Palette.dusk.opacity(0.14), in: Circle())
-                VStack(alignment: .leading, spacing: 4) {
-                    Eyebrow("Next shift")
-                    Text("Nothing in the next four weeks").font(TypeScale.headline).foregroundStyle(Palette.ink)
-                    Text("New shifts appear here as soon as they're published.")
-                        .font(TypeScale.subhead).foregroundStyle(Palette.inkSoft)
+        // The shift is chosen on every tick, so the card moves on to the next
+        // one the minute a shift ends instead of counting down to the past.
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            let now = WallClock.now(context.date, timeZone: timeZone)
+            if let shift = ScheduleService.nextShift(in: upcoming, now: now) {
+                Button { onOpen(shift) } label: { filled(shift, now: now) }
+                    .buttonStyle(PressableStyle())
+                    .accessibilityIdentifier("schedule.next")
+            } else {
+                switch state {
+                case .loading:
+                    message(symbol: "clock", tint: Palette.inkFaint, title: "Checking your next shift",
+                            detail: "One moment.")
+                        .redacted(reason: .placeholder)
+                case .failed:
+                    message(symbol: "exclamationmark.arrow.circlepath", tint: Palette.amber,
+                            title: "Couldn't load your next shift",
+                            detail: "Your week below is unaffected. Tap to try again.")
+                        .onTapGesture(perform: onRetry)
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityIdentifier("schedule.next.retry")
+                case .loaded:
+                    message(symbol: "moon.zzz.fill", tint: Palette.dusk, title: "Nothing in the next four weeks",
+                            detail: "New shifts appear here as soon as they're published.")
                 }
-                Spacer(minLength: 0)
             }
-            .padding(18)
-            .glassSurface(cornerRadius: Metrics.heroRadius)
         }
     }
 
-    private func filled(_ shift: ScheduleShift) -> some View {
+    private func message(symbol: String, tint: Color, title: String, detail: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 48, height: 48)
+                .background(tint.opacity(0.14), in: Circle())
+            VStack(alignment: .leading, spacing: 4) {
+                Eyebrow("Next shift")
+                Text(title).font(TypeScale.headline).foregroundStyle(Palette.ink)
+                Text(detail).font(TypeScale.subhead).foregroundStyle(Palette.inkSoft)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(18)
+        .glassSurface(cornerRadius: Metrics.heroRadius)
+        .contentShape(Rectangle())
+    }
+
+    private func filled(_ shift: ScheduleShift, now: Date) -> some View {
         let part = DayPart(wallClockISO: shift.starts_at)
-        return TimelineView(.periodic(from: .now, by: 60)) { context in
-            let now = WallClock.now(context.date)
+        let location = locations[shift.location_id ?? ""]
+        return Group {
             let start = WallClock.date(shift.starts_at) ?? now
             let end = WallClock.date(shift.ends_at) ?? now
             let onNow = start <= now && now < end
@@ -400,12 +452,12 @@ private struct WeekPill: View {
 /// light. Tapping a day scrolls to it.
 private struct DayStrip: View {
     let days: [Date]
+    /// Today's day key on the store's clock.
+    let today: String
     let shifts: [ScheduleShift]
     let focused: String?
     let onSelect: (String) -> Void
     @Namespace private var namespace
-
-    private var today: String { WallClock.dayKey(WallClock.today()) }
 
     var body: some View {
         HStack(spacing: 4) {
@@ -456,10 +508,11 @@ private struct DayStrip: View {
 
 private struct DayHeader: View {
     let key: String
+    let today: String
 
     var body: some View {
         let date = WallClock.date("\(key)T00:00:00Z") ?? Date()
-        let isToday = key == WallClock.dayKey(WallClock.today())
+        let isToday = key == today
         HStack(spacing: 8) {
             Text(WallClock.format(date, "EEEE"))
                 .font(TypeScale.title)
@@ -575,30 +628,5 @@ struct TightLabel: LabelStyle {
             configuration.icon.font(.system(size: 11, weight: .semibold))
             configuration.title
         }
-    }
-}
-
-private struct ShiftCardPlaceholder: View {
-    @State private var pulse = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Capsule().fill(Palette.inkFaint.opacity(0.3)).frame(width: 4, height: 60)
-            VStack(alignment: .leading, spacing: 8) {
-                RoundedRectangle(cornerRadius: 5).fill(Palette.inkFaint.opacity(0.25)).frame(width: 90, height: 14)
-                RoundedRectangle(cornerRadius: 5).fill(Palette.inkFaint.opacity(0.18)).frame(width: 160, height: 12)
-                RoundedRectangle(cornerRadius: 5).fill(Palette.inkFaint.opacity(0.14)).frame(width: 120, height: 10)
-            }
-            Spacer()
-        }
-        .padding(16)
-        .glassSurface(elevated: false)
-        .opacity(pulse ? 0.55 : 1)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.9).repeatForever()) { pulse = true }
-        }
-        .accessibilityLabel("Loading shifts")
     }
 }

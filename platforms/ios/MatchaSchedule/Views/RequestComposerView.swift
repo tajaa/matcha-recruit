@@ -129,10 +129,7 @@ struct RequestComposerView: View {
                         } catch { self.error = error.localizedDescription }
                     }
                 } label: {
-                    ZStack {
-                        Text(action.submitTitle).opacity(saving ? 0 : 1)
-                        if saving { ProgressView().tint(.white) }
-                    }
+                    LoadingLabel(title: action.submitTitle, busy: saving)
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(saving || loading || (action == .swap && (targetEmployeeID.isEmpty || counterShiftID.isEmpty)))

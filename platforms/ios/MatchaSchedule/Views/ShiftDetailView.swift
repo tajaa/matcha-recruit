@@ -246,19 +246,7 @@ struct ActionTile: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: symbol)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Palette.leaf)
-                    .frame(width: 42, height: 42)
-                    .background(Palette.leaf.opacity(0.13), in: Circle())
-                Text(title).font(TypeScale.callout).foregroundStyle(Palette.ink)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .glassSurface(cornerRadius: 20)
-        }
-        .buttonStyle(PressableStyle())
+        Button(action: action) { TileContent(symbol: symbol, title: title) }
+            .buttonStyle(PressableStyle())
     }
 }

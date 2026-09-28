@@ -110,10 +110,7 @@ struct AvailabilityView: View {
             }
             Section {
                 Button { Task { await submit() } } label: {
-                    ZStack {
-                        Text("Send to my manager").opacity(saving ? 0 : 1)
-                        if saving { ProgressView().tint(.white) }
-                    }
+                    LoadingLabel(title: "Send to my manager", busy: saving)
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(loading || saving || pending != nil)

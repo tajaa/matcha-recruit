@@ -18,12 +18,12 @@ struct RequestsView: View {
                     NavigationLink {
                         AvailabilityView { Task { await load() } }
                     } label: {
-                        TileLabel(symbol: "clock.arrow.2.circlepath", title: "Availability")
+                        TileContent(symbol: "clock.arrow.2.circlepath", title: "Availability")
                     }
                     .buttonStyle(PressableStyle())
                     if profile.enabled_features.time_off {
                         NavigationLink { PTOView() } label: {
-                            TileLabel(symbol: "sun.horizon.fill", title: "Time off")
+                            TileContent(symbol: "sun.horizon.fill", title: "Time off")
                         }
                         .buttonStyle(PressableStyle())
                     }
@@ -35,7 +35,7 @@ struct RequestsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     SectionTitle(title: "Waiting on you", trailing: offers.isEmpty ? nil : "\(offers.count)")
                     if !loaded && loading {
-                        RequestPlaceholder()
+                        GlassPlaceholder(label: "Loading requests")
                     } else if offers.isEmpty {
                         QuietNote(symbol: "tray", text: "No offers from coworkers right now.")
                     } else {
@@ -52,8 +52,8 @@ struct RequestsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     SectionTitle(title: "Your requests")
                     if !loaded && loading {
-                        RequestPlaceholder()
-                        RequestPlaceholder()
+                        GlassPlaceholder(label: "Loading requests")
+                        GlassPlaceholder(label: "Loading requests")
                     } else if requests.isEmpty {
                         QuietNote(symbol: "arrow.left.arrow.right",
                                   text: "Swaps, drops and time off you ask for will show up here.")
@@ -197,26 +197,6 @@ extension ScheduleRequest {
 
 // MARK: - Cards
 
-private struct TileLabel: View {
-    let symbol: String
-    let title: String
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(Palette.leaf)
-                .frame(width: 42, height: 42)
-                .background(Palette.leaf.opacity(0.13), in: Circle())
-            Text(title).font(TypeScale.callout).foregroundStyle(Palette.ink)
-                .lineLimit(1).minimumScaleFactor(0.85)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
-        .glassSurface(cornerRadius: 20)
-    }
-}
-
 private struct OfferCard: View {
     let offer: ScheduleRequest
     let busy: Bool
@@ -246,10 +226,7 @@ private struct OfferCard: View {
                     .labelStyle(TightLabel())
             }
             Button(action: onAccept) {
-                ZStack {
-                    Text(offer.request_type == "swap" ? "Accept swap" : "Take this shift").opacity(busy ? 0 : 1)
-                    if busy { ProgressView().tint(.white) }
-                }
+                LoadingLabel(title: offer.request_type == "swap" ? "Accept swap" : "Take this shift", busy: busy)
             }
             .buttonStyle(PrimaryButtonStyle())
             .disabled(disabled)
@@ -323,22 +300,6 @@ struct QuietNote: View {
     }
 }
 
-private struct RequestPlaceholder: View {
-    var body: some View {
-        HStack(spacing: 12) {
-            Circle().fill(Palette.inkFaint.opacity(0.2)).frame(width: 36, height: 36)
-            VStack(alignment: .leading, spacing: 8) {
-                RoundedRectangle(cornerRadius: 5).fill(Palette.inkFaint.opacity(0.22)).frame(width: 120, height: 13)
-                RoundedRectangle(cornerRadius: 5).fill(Palette.inkFaint.opacity(0.15)).frame(width: 180, height: 11)
-            }
-            Spacer()
-        }
-        .padding(16)
-        .glassSurface(elevated: false)
-        .accessibilityLabel("Loading")
-    }
-}
-
 // MARK: - Can't work
 
 private struct UnavailableView: View {
@@ -390,10 +351,7 @@ private struct UnavailableView: View {
                         } catch { self.error = error.localizedDescription }
                     }
                 } label: {
-                    ZStack {
-                        Text("Send to my manager").opacity(saving ? 0 : 1)
-                        if saving { ProgressView().tint(.white) }
-                    }
+                    LoadingLabel(title: "Send to my manager", busy: saving)
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(saving || DateInput.date(end) < DateInput.date(start))

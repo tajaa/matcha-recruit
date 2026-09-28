@@ -14,7 +14,7 @@ struct InboxListView: View {
                 VStack(spacing: 10) {
                     if let error, loaded { ErrorBanner(message: error) }
                     if !loaded {
-                        ForEach(0..<4, id: \.self) { _ in ConversationPlaceholder() }
+                        ForEach(0..<4, id: \.self) { _ in GlassPlaceholder(leading: .circle(50), lineWidths: [130, 200], label: "Loading messages") }
                     } else if conversations.isEmpty {
                         GlassMessage(
                             symbol: "bubble.left.and.bubble.right.fill",
@@ -147,21 +147,5 @@ private struct ConversationRow: View {
         .padding(14)
         .glassSurface(elevated: unread > 0)
         .contentShape(Rectangle())
-    }
-}
-
-private struct ConversationPlaceholder: View {
-    var body: some View {
-        HStack(spacing: 14) {
-            Circle().fill(Palette.inkFaint.opacity(0.2)).frame(width: 50, height: 50)
-            VStack(alignment: .leading, spacing: 8) {
-                RoundedRectangle(cornerRadius: 5).fill(Palette.inkFaint.opacity(0.22)).frame(width: 130, height: 13)
-                RoundedRectangle(cornerRadius: 5).fill(Palette.inkFaint.opacity(0.15)).frame(width: 200, height: 11)
-            }
-            Spacer()
-        }
-        .padding(14)
-        .glassSurface(elevated: false)
-        .accessibilityLabel("Loading messages")
     }
 }

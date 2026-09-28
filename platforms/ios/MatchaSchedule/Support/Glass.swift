@@ -55,15 +55,28 @@ extension View {
     }
 
     /// Liquid Glass on iOS 26; frosted material before it.
+    ///
+    /// `glassEffect` only exists in the iOS 26 SDK. `#available` is a runtime
+    /// check and does not stop an older SDK failing to compile the call, so
+    /// the compiler check keeps Xcode 16 builds (CI's macos-15 image) working;
+    /// they always take the material path.
     @ViewBuilder
     func glassControl<S: Shape>(in shape: S, interactive: Bool = true) -> some View {
+        #if compiler(>=6.2)
         if #available(iOS 26.0, *) {
             self.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
         } else {
-            self.background(.ultraThinMaterial, in: shape)
-                .overlay(shape.stroke(Color.white.opacity(0.55), lineWidth: 0.8))
-                .shadow(color: Palette.shadow.opacity(0.10), radius: 12, y: 6)
+            materialControl(in: shape)
         }
+        #else
+        materialControl(in: shape)
+        #endif
+    }
+
+    private func materialControl<S: Shape>(in shape: S) -> some View {
+        self.background(.ultraThinMaterial, in: shape)
+            .overlay(shape.stroke(Color.white.opacity(0.55), lineWidth: 0.8))
+            .shadow(color: Palette.shadow.opacity(0.10), radius: 12, y: 6)
     }
 
     /// The ambient light behind a whole screen.
@@ -101,12 +114,19 @@ struct AmbientBackground: View {
     var tone: DayPart?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.scenePhase) private var scenePhase
+    /// Off while a pushed screen covers this one, so only the visible
+    /// background animates. (A sheet does not hide its presenter; the drift is
+    /// slow enough that 12 fps is plenty for the one or two left running.)
+    @State private var onScreen = false
+
+    private var animating: Bool { onScreen && !reduceMotion && scenePhase == .active }
 
     var body: some View {
         ZStack {
             Palette.foam
             if #available(iOS 18.0, *) {
-                TimelineView(.animation(minimumInterval: 1.0 / 20, paused: reduceMotion)) { context in
+                TimelineView(.animation(minimumInterval: 1.0 / 12, paused: !animating)) { context in
                     MeshGradient(
                         width: 3, height: 3,
                         points: points(at: reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate),
@@ -129,6 +149,8 @@ struct AmbientBackground: View {
                 }
             }
         }
+        .onAppear { onScreen = true }
+        .onDisappear { onScreen = false }
     }
 
     private var toneColor: Color { (tone ?? .mid).color }
@@ -420,5 +442,83 @@ extension View {
             .foregroundStyle(Palette.ink)
             .tint(Palette.leaf)
             .ambientBackground(tone)
+    }
+}
+
+// MARK: - Shared building blocks
+
+/// A primary button's label that swaps to a spinner while its action runs,
+/// keeping the button's size steady.
+struct LoadingLabel: View {
+    let title: String
+    let busy: Bool
+
+    var body: some View {
+        ZStack {
+            Text(title).opacity(busy ? 0 : 1)
+            if busy { ProgressView().tint(.white) }
+        }
+    }
+}
+
+/// The icon-over-title tile used for quick actions, as a Button or a
+/// NavigationLink label.
+struct TileContent: View {
+    let symbol: String
+    let title: String
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Palette.leaf)
+                .frame(width: 42, height: 42)
+                .background(Palette.leaf.opacity(0.13), in: Circle())
+            Text(title).font(TypeScale.callout).foregroundStyle(Palette.ink)
+                .lineLimit(1).minimumScaleFactor(0.85)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .glassSurface(cornerRadius: 20)
+    }
+}
+
+/// A loading stand-in for a card: a leading bar or circle and a few text
+/// lines, gently pulsing (still under Reduce Motion).
+struct GlassPlaceholder: View {
+    enum Leading { case bar, circle(CGFloat) }
+
+    var leading: Leading = .circle(36)
+    var lineWidths: [CGFloat] = [120, 180]
+    var label = "Loading"
+    @State private var pulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 14) {
+            switch leading {
+            case .bar:
+                Capsule().fill(Palette.inkFaint.opacity(0.3)).frame(width: 4, height: 60)
+            case .circle(let size):
+                Circle().fill(Palette.inkFaint.opacity(0.2)).frame(width: size, height: size)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(lineWidths.enumerated()), id: \.offset) { index, width in
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(Palette.inkFaint.opacity(0.24 - Double(index) * 0.05))
+                        .frame(width: width, height: index == 0 ? 13 : 11)
+                }
+            }
+            Spacer()
+        }
+        .padding(16)
+        .glassSurface(elevated: false)
+        .opacity(pulse ? 0.55 : 1)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever()) { pulse = true }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
     }
 }

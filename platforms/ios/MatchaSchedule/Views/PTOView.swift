@@ -204,10 +204,7 @@ private struct PTORequestForm: View {
             }
             Section {
                 Button { Task { await submit() } } label: {
-                    ZStack {
-                        Text("Send request").opacity(saving ? 0 : 1)
-                        if saving { ProgressView().tint(.white) }
-                    }
+                    LoadingLabel(title: "Send request", busy: saving)
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(saving)

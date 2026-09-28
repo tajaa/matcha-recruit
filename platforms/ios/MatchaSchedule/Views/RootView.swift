@@ -245,16 +245,14 @@ private struct LoginView: View {
                         ErrorBanner(message: error)
                     }
                     Button(action: submit) {
-                        ZStack {
-                            Text("Sign in").opacity(busy ? 0 : 1)
-                            if busy { ProgressView().tint(.white) }
-                        }
+                        LoadingLabel(title: "Sign in", busy: busy)
                     }
                     .buttonStyle(PrimaryButtonStyle())
                     .disabled(!canSubmit)
                     .padding(.top, 6)
                     .accessibilityIdentifier("login.submit")
-                    .sensoryFeedback(.error, trigger: error)
+                    // Only when an error appears; clearing it on a retry is not a failure.
+                    .sensoryFeedback(trigger: error) { _, new in new == nil ? nil : .error }
                 }
                 .rise(delay: 0.12)
 

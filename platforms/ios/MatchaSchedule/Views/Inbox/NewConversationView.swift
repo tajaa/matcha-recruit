@@ -111,10 +111,7 @@ struct NewConversationView: View {
                 .glassSurface(cornerRadius: 18, elevated: false)
             if let error { ErrorBanner(message: error) }
             Button { Task { await create(with: person) } } label: {
-                ZStack {
-                    Text("Send").opacity(creating ? 0 : 1)
-                    if creating { ProgressView().tint(.white) }
-                }
+                LoadingLabel(title: "Send", busy: creating)
             }
             .buttonStyle(PrimaryButtonStyle())
             .disabled(creating || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
