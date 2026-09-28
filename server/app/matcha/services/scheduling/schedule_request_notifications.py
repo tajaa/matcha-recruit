@@ -29,6 +29,26 @@ async def mark_manager_ready_notifications_resolved(
     return int(result.split()[-1])
 
 
+async def reset_manager_ready_deliveries(
+    conn, *, company_id: UUID, request_id: UUID,
+) -> int:
+    """Forget that managers were told about a request that left their queue
+    and may return to it.
+
+    Deliveries are keyed (request, recipient, event) and a sent row is never
+    re-claimed, so a pickup that goes back to awaiting a coworker and is then
+    accepted by someone else would otherwise reach the queue silently: no bell,
+    no email, and the recovery sweep counts it as already delivered.
+    """
+    result = await conn.execute(
+        """DELETE FROM schedule_request_notification_deliveries
+           WHERE company_id = $1 AND request_id = $2
+             AND event_type IN ('manager_ready', 'manager_ready_in_app')""",
+        company_id, request_id,
+    )
+    return int(result.split()[-1])
+
+
 async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[str, int]:
     """Send each company reviewer one email for a manager-ready request.
 

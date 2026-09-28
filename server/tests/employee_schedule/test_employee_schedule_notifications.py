@@ -271,3 +271,45 @@ def test_send_and_recovery_tasks_run_the_same_delivery_sweep(monkeypatch):
     assert worker.send_schedule_employee_notifications.run()["sent"] == 1
     assert worker.recover_schedule_employee_notifications.run()["sent"] == 1
     assert calls == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_transient_push_failure_rolls_back_and_counts_an_attempt(monkeypatch):
+    """Every device failing transiently must not mark the delivery sent: the
+    transaction (bell row included) rolls back and the attempt is recorded, so
+    the sweep retries until MAX_DELIVERY_ATTEMPTS parks it."""
+    from app.core.services.apns_service import TransientPushError
+
+    delivery_id, company_id, user_id = (uuid4() for _ in range(3))
+    state = {"sent": False, "attempt_updates": [], "push_kwargs": None}
+
+    class Conn:
+        @asynccontextmanager
+        async def transaction(self):
+            yield self
+
+        async def fetch(self, query, *_args):
+            return [{"id": delivery_id}]
+
+        async def fetchrow(self, query, *_args):
+            return {"id": delivery_id, "company_id": company_id,
+                    "recipient_user_id": user_id, "event_type": "schedule_published",
+                    "dedupe_key": "key", "payload": {"shift_count": 1}}
+
+        async def execute(self, query, *args):
+            if "SET sent_at=NOW()" in query:
+                state["sent"] = True
+            if "attempts = attempts + 1" in query:
+                state["attempt_updates"].append(args)
+
+    async def push(*_args, **kwargs):
+        state["push_kwargs"] = kwargs
+        raise TransientPushError("apns down")
+
+    monkeypatch.setattr(notifications.apns_service, "send_to_user", push)
+    with pytest.raises(TransientPushError):
+        await notifications.deliver_pending(Conn())
+    assert state["push_kwargs"]["raise_on_transient"] is True
+    assert state["sent"] is False
+    # Retryable, not parked on the first failure.
+    assert state["attempt_updates"] == [(delivery_id, notifications.MAX_DELIVERY_ATTEMPTS, False)]

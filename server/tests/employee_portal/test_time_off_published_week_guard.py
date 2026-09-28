@@ -19,9 +19,14 @@ async def test_pto_request_rejects_a_week_with_published_shifts(monkeypatch):
 
     class Connection:
         async def fetchval(self, query, *args):
+            if "::date" in query and "FROM employees e" in query:  # employee_local_today
+                return date(2099, 9, 1)
             assert "EXTRACT(DOW FROM s.starts_at)" in query
+            # Scoped to the employee's own store (and locationless shifts):
+            # another store publishing its week must not block this request.
+            assert "s.location_id IS NULL OR s.location_id = (" in query
             assert args == (
-                employee["org_id"], date(2099, 9, 10), date(2099, 9, 11),
+                employee["org_id"], date(2099, 9, 10), date(2099, 9, 11), employee["id"],
             )
             return True
 
