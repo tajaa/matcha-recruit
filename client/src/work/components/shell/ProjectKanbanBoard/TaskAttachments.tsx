@@ -57,6 +57,19 @@ export default function TaskAttachments({ projectId, taskId, initial = [], onCha
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, taskId])
 
+  // Escape closes the preview, not the ticket around it: the capture phase
+  // runs ahead of TaskDetailPanel's listener, which skips handled events.
+  useEffect(() => {
+    if (!preview) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      setPreview(null)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [preview])
+
   function commit(next: MWTaskAttachment[]) {
     setFiles(next)
     onChange?.(next)

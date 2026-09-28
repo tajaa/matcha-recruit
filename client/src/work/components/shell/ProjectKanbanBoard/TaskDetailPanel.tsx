@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2, X, Trash2, ListChecks, Undo2, CheckCircle2, Plus, Copy, ClipboardCopy, Check, Bot } from 'lucide-react'
 import type { MWProjectTask, MWTaskAttachment, BoardColumn, TaskPriority } from '../../../types'
 import TaskAttachments from './TaskAttachments'
@@ -71,14 +71,38 @@ export default function TaskDetailPanel({
     removeSubtask,
   } = useTaskDetailPanel({ projectId, task, onPatched, onSubtaskCountChange })
 
+  // Escape closes the ticket. Blur first so a half-typed description still
+  // saves through its onBlur. A nested overlay (the attachment preview)
+  // handles Escape itself and marks the event handled.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+      onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   return (
-    <>
-      {/* Scrim */}
-      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />
-      {/* Panel */}
-      <aside className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-w-line bg-w-bg shadow-2xl">
+    // Pops out over the board like the desktop viewer sheet: centered and
+    // sized for reading on desktop, full-screen on phones. Closing on
+    // mousedown-outside (not click) keeps a text selection dragged out of the
+    // dialog from dismissing it.
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 md:p-6"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={task.title}
+        className="flex h-full w-full flex-col overflow-hidden bg-w-bg shadow-2xl motion-safe:animate-[task-pop_160ms_ease-out] md:h-auto md:max-h-[min(820px,calc(100dvh-3rem))] md:max-w-[700px] md:rounded-xl md:border md:border-w-line"
+      >
         <div className="flex items-start justify-between gap-3 border-b border-w-line px-5 py-4">
-          <h2 className="text-base font-semibold leading-snug text-w-text">{task.title}</h2>
+          <h2 className="min-w-0 flex-1 text-base font-semibold leading-snug text-w-text">{task.title}</h2>
           <button
             onClick={handleCopyTicket}
             disabled={copying || subtasksLoading}
@@ -94,7 +118,7 @@ export default function TaskDetailPanel({
               <ClipboardCopy className="h-4 w-4" />
             )}
           </button>
-          <button onClick={onClose} className="shrink-0 text-w-dim hover:text-w-text">
+          <button onClick={onClose} aria-label="Close" className="shrink-0 text-w-dim hover:text-w-text">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -400,7 +424,7 @@ export default function TaskDetailPanel({
             Delete card
           </button>
         </div>
-      </aside>
-    </>
+      </div>
+    </div>
   )
 }

@@ -226,6 +226,14 @@ html[data-marketing-board] {
   100% { left: 102%; opacity: 0; }
 }
 
+/* Kanban ticket viewer pop-out (TaskDetailPanel). Ends on `transform: none`
+   and runs without fill, so the dialog never keeps a transform — one would
+   make it the containing block for the fixed attachment preview inside it. */
+@keyframes task-pop {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    App-wide inverse light theme.
    The app is dark-only by default (hardcoded zinc utilities). Tailwind v4
