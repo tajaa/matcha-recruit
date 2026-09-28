@@ -655,6 +655,40 @@ and is idempotent per company/location/week. Existing manual proposals and
 applied plans suppress it; cancelling an automatic proposal suppresses it for
 the rest of that week rather than recreating it on the next worker restart.
 
+**The duplicate guard's refusal names the week and what holds it**
+(`schedule_automation.already_present_result`): "waiting for review" for a
+`proposed` run; for an `applied` one, "remove every draft and published shift
+at this location for that week" — the stale sweep releases an applied run only
+when NO draft/published shift of any origin remains that week, so "clear its
+shifts" sent managers who deleted just the generated ones back to the same
+refusal. `week_start`/`blocking_status` ride on the result.
+**Past target weeks are refused at three points, all on the location's clock
+and week start** (`location_today` / `past_week_refusal`): the rule upsert 422s
+an ENABLED one-time rule whose week has passed or whose `run_date` falls after
+that week ends (a paused rule may keep its old week, so an old rule can still be
+switched off); Run now refuses; and the worker refuses, judged at
+`max(occurrence, now)` — a task delivered late (worker down, hourly restart,
+recycling) must not build a week that ended while it waited. Save-time alone is
+not enough: weeks keep passing after the save. A one-time rule's
+`target_week_start` never moves, so an old rule silently rebuilt a week that had
+ended. That is what the 2026-09-27 Po Coffee report was — the manager cleared
+the week of 2026-10-04 and hit Run now on a rule still frozen at 2026-09-06,
+whose old applied run correctly blocked it under a message that named no week.
+The guard's tenant/location/week scoping and the applied→stale sweep were never
+at fault. The Auto schedules tab warns from the SAVED rule (the week Run now
+builds), on the location's zone via `Intl`, never the browser's or UTC's date.
+**Run now is a manager click** and passes `actor_user_id`/`actor_role`/
+`supersede_proposed=True` like `/autopilot/run`: it replaces the week's
+unapproved suggestion instead of being refused by it. `/autopilot/run` takes an
+explicit week from the manager and is not past-week gated.
+**Archiving a schedule chat cancels the `proposed` week drafts on that thread**
+— an archived thread refuses turns, so they could never be confirmed and would
+only block the week; automatic runs (no thread) are left for the next session.
+The race with a build already in flight is closed by the thread row lock:
+archive's `UPDATE mw_threads` holds it while cancelling, and
+`propose_week_draft` re-reads the thread `FOR UPDATE` inside its insert
+transaction and refuses if it is archived.
+
 An automatic run has no manager thread up front. The authorized
 `schedule_assistant_session` adopts it into that manager's durable
 location/week session when opened, minting the normal confirmation token. The

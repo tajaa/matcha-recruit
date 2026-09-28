@@ -2605,6 +2605,21 @@ async def propose_week_draft(
             persisted_plan["demand_model"] = demand_model
         input_hash = _input_hash(snapshot)
         async with conn.transaction():
+            if thread_id is not None:
+                # Takes the same row lock `archive_schedule_assistant_session`
+                # takes before it cancels the thread's proposed drafts. A build
+                # already running when the chat was archived would otherwise
+                # insert its draft after that cancel: a run on a thread that
+                # refuses every turn, never confirmable, blocking this week.
+                thread_status = await conn.fetchval(
+                    "SELECT status FROM mw_threads WHERE id=$1 AND company_id=$2 FOR UPDATE",
+                    thread_id, company_id,
+                )
+                if thread_status == "archived":
+                    return {
+                        "status": "refused",
+                        "message": "This schedule chat was archived, so the week was not staged.",
+                    }
             if supersede_proposed:
                 await conn.execute(
                     """UPDATE schedule_generation_runs

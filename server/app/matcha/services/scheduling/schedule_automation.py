@@ -15,6 +15,11 @@ def location_zone(timezone_name: str | None):
         return timezone.utc
 
 
+def location_today(timezone_name: str | None, *, now: datetime | None = None) -> date:
+    """The calendar date on the location's wall clock (UTC if it has no valid zone)."""
+    return (now or datetime.now(timezone.utc)).astimezone(location_zone(timezone_name)).date()
+
+
 def next_run_at(
     *, cadence: str, timezone_name: str | None, run_time: time,
     run_weekday: int | None = None, run_date: date | None = None,
@@ -48,9 +53,71 @@ def target_week_start(
         if one_time_week_start is None:
             raise ValueError("A one-time schedule needs a target week.")
         return one_time_week_start
-    local_day = scheduled_for.astimezone(location_zone(timezone_name)).date()
-    current_week = align_week_start(local_day, week_start_weekday)
+    current_week = align_week_start(
+        location_today(timezone_name, now=scheduled_for), week_start_weekday,
+    )
     return current_week + timedelta(days=7 * int(target_weeks_ahead or 1))
+
+
+def past_week_refusal(
+    *, week_start: date, timezone_name: str | None, week_start_weekday: int = 0,
+    now: datetime | None = None,
+) -> dict | None:
+    """Refuse a rule-derived target week that has already ended.
+
+    A one-time rule keeps its ``target_week_start`` forever, so "Run now" on a
+    rule saved weeks ago silently rebuilt a PAST week and was refused by that
+    week's old approved run — which a manager looking at the current week read
+    as their week being blocked (Po Coffee, 2026-09-27). "Past" is judged on
+    the location's own clock and week start, never UTC's Sunday.
+    """
+    local_today = location_today(timezone_name, now=now)
+    if week_start >= align_week_start(local_today, week_start_weekday):
+        return None
+    iso = week_start.isoformat()
+    return {
+        "status": "not_ready",
+        "week_start": iso,
+        "message": (
+            f"This rule targets the week of {iso}, which has already passed. "
+            "Change 'Week starting' and save, or build the week from the shift editor."
+        ),
+    }
+
+
+def already_present_result(
+    *, week_start: date, blocking_status: str | None, generation_run_id: str | None = None,
+) -> dict:
+    """The duplicate-generation refusal, naming the week and what holds it.
+
+    The message used to say only "…already exists for that week", so a manager
+    could not tell WHICH week the rule had targeted or whether it was an
+    unapproved suggestion (review it) or an applied schedule (remove the week's shifts).
+    """
+    iso = week_start.isoformat()
+    if blocking_status == "proposed":
+        message = f"A schedule suggestion for the week of {iso} is already waiting for review."
+    elif blocking_status == "applied":
+        # The applied run is only released once the location has NO draft or
+        # published shift that week, whoever made them (the stale sweep in
+        # generate_review_suggestion) — "clear its shifts" read as the
+        # generated ones alone.
+        message = (
+            f"An approved schedule for the week of {iso} already exists. "
+            "Remove every draft and published shift at this location for that "
+            "week before generating a replacement."
+        )
+    else:
+        message = f"A schedule suggestion already exists for the week of {iso}."
+    result = {
+        "status": "already_present",
+        "message": message,
+        "week_start": iso,
+        "blocking_status": blocking_status,
+    }
+    if generation_run_id:
+        result["generation_run_id"] = generation_run_id
+    return result
 
 
 async def generate_review_suggestion(
@@ -100,11 +167,10 @@ async def generate_review_suggestion(
             company_id, location_id, week_start,
         )
     if existing:
-        return {
-            "status": "already_present",
-            "message": "A schedule suggestion or approved schedule already exists for that week.",
-            "generation_run_id": str(existing["id"]),
-        }
+        return already_present_result(
+            week_start=week_start, blocking_status=existing["status"],
+            generation_run_id=str(existing["id"]),
+        )
 
     from .week_builder import get_week_build_readiness, propose_week_draft
 
@@ -137,5 +203,7 @@ async def generate_review_suggestion(
             "generation_run_id": result.get("generation_run_id"),
         }
     if result.get("status") == "skipped":
-        return {"status": "already_present", "message": result.get("message")}
+        # Lost the insert race to another build of the same week; which state
+        # won is not known here.
+        return already_present_result(week_start=week_start, blocking_status=None)
     return {"status": "not_ready", "message": result.get("message") or "The week is not ready."}

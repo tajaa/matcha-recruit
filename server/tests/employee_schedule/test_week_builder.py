@@ -4,7 +4,7 @@ import inspect
 import json
 from datetime import date, datetime, time, timedelta, timezone
 from unittest.mock import AsyncMock
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -776,6 +776,65 @@ async def test_findings_and_counts_are_persisted_with_the_proposal(monkeypatch):
     assert metrics["gap_count"] == 1
     assert metrics["operating_hours_known"] is True
     assert result["findings"] == proposal["findings"]
+
+
+class _ThreadConn(_FakeConn):
+    """Answers the thread-status read `propose_week_draft` makes under lock."""
+
+    def __init__(self, thread_status):
+        super().__init__(None)
+        self.thread_status = thread_status
+        self.thread_reads = []
+
+    async def fetchval(self, query, *args):
+        if "FROM mw_threads" in query:
+            self.thread_reads.append((query, args))
+            return self.thread_status
+        return await super().fetchval(query, *args)
+
+
+@pytest.mark.asyncio
+async def test_a_chat_archived_mid_build_stages_nothing(monkeypatch):
+    """Archiving cancels the thread's proposed drafts, but a build already
+    running would insert its draft after that cancel — a run no one can
+    confirm, blocking the week. The insert re-reads the thread under lock."""
+    conn = _ThreadConn("archived")
+    _propose_env(monkeypatch, conn, demand=[_demand_shift()])
+    thread_id = uuid4()
+
+    result = await week_builder.propose_week_draft(
+        company_id=COMPANY_ID, actor_user_id=None, thread_id=thread_id,
+        location_id=LOCATION_ID, week_start=WEEK_START,
+    )
+
+    assert result["status"] == "refused"
+    assert "archived" in result["message"]
+    assert not any("schedule_generation_runs" in call[0] for call in conn.executed)
+    query, args = conn.thread_reads[0]
+    assert "FOR UPDATE" in query and args == (thread_id, COMPANY_ID)
+
+
+@pytest.mark.asyncio
+async def test_a_live_chat_still_stages_its_week(monkeypatch):
+    conn = _ThreadConn("active")
+    _propose_env(monkeypatch, conn, demand=[_demand_shift()])
+
+    result = await week_builder.propose_week_draft(
+        company_id=COMPANY_ID, actor_user_id=None, thread_id=uuid4(),
+        location_id=LOCATION_ID, week_start=WEEK_START,
+    )
+
+    assert result["status"] == "ready"
+    assert any("schedule_generation_runs" in call[0] for call in conn.executed)
+
+
+@pytest.mark.asyncio
+async def test_a_threadless_build_never_reads_a_thread(monkeypatch):
+    conn = _ThreadConn("archived")
+    result = await _propose(monkeypatch, conn, demand=[_demand_shift()])
+
+    assert result["status"] == "ready"
+    assert conn.thread_reads == []
 
 
 @pytest.mark.asyncio

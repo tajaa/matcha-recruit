@@ -1,6 +1,6 @@
 """Manager-configured Huume schedule suggestion timing, scoped per location."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,6 +15,7 @@ from app.matcha.models.scheduling.employee_schedule import ScheduleAutomationRul
 from app.matcha.services.scheduling.schedule_automation import (
     generate_review_suggestion,
     next_run_at,
+    past_week_refusal,
     target_week_start as automation_target_week_start,
 )
 
@@ -129,6 +130,25 @@ async def save_auto_schedule(
                         f"{WEEKDAY_NAMES[week_start_weekday]} for this location."
                     ),
                 )
+            # A one-time rule's week never moves, so these are refused where
+            # they are written rather than discovered weeks later when the
+            # run lands on a finished week. A paused rule is left alone so an
+            # old one can still be switched off without editing its week.
+            if body.enabled:
+                iso = body.target_week_start.isoformat()
+                if past_week_refusal(
+                    week_start=body.target_week_start, timezone_name=location["timezone"],
+                    week_start_weekday=week_start_weekday,
+                ):
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"The week of {iso} has already passed. Choose the current week or a later one.",
+                    )
+                if body.run_date and body.run_date > body.target_week_start + timedelta(days=6):
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Choose a run date on or before the last day of the week of {iso}.",
+                    )
         try:
             scheduled_at = next_run_at(
                 cadence=body.cadence,
@@ -207,12 +227,24 @@ async def run_auto_schedule_now(
         one_time_week_start=row["target_week_start"],
         week_start_weekday=location_week_start_weekday,
     )
-    result = await generate_review_suggestion(
+    # A one-time rule's target week never moves, so Run now on an old rule
+    # would rebuild a week that already passed (and be refused by its old
+    # approved run under a message that named no week).
+    result = past_week_refusal(
+        week_start=target, timezone_name=row["timezone"],
+        week_start_weekday=location_week_start_weekday,
+    ) or await generate_review_suggestion(
         company_id=company_id,
         location_id=location_id,
         week_start=target,
         week_template_id=row["week_template_id"],
         mode=row["mode"],
+        # A manager's own click, like /autopilot/run: attributed, priced for
+        # their role, and it replaces this week's unapproved suggestion
+        # instead of being refused by it.
+        actor_user_id=current_user.id,
+        actor_role=current_user.role,
+        supersede_proposed=True,
     )
     generation_id = result.get("generation_run_id")
     async with get_connection() as conn:

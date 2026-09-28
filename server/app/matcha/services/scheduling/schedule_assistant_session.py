@@ -604,6 +604,21 @@ async def archive_schedule_assistant_session(
                    WHERE id=$1""",
                 row["thread_id"],
             )
+            # An archived chat refuses further turns, so a week draft it
+            # staged can never be confirmed — left 'proposed' it would still
+            # block generation for that week with nothing on screen to act on.
+            # Keyed on the thread: automatic runs (no thread) are re-adopted by
+            # the next session and stay untouched. The thread UPDATE above holds
+            # the row lock `propose_week_draft` takes before inserting, so a
+            # build still in flight either lands before this cancel or sees the
+            # archived status and refuses.
+            await conn.execute(
+                """UPDATE schedule_generation_runs
+                   SET status='cancelled', updated_at=NOW()
+                   WHERE thread_id=$1 AND company_id=$2 AND status='proposed'""",
+                row["thread_id"],
+                company_id,
+            )
     return {"session_id": str(session_id), "archived": True}
 
 

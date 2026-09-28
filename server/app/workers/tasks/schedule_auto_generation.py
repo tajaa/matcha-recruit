@@ -10,6 +10,7 @@ from app.matcha.services.scheduling.location_profile import resolve_week_start_w
 from app.matcha.services.scheduling.schedule_automation import (
     generate_review_suggestion,
     next_run_at,
+    past_week_refusal,
     target_week_start,
 )
 
@@ -18,6 +19,10 @@ from ..utils import get_db_connection
 
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def enqueue_schedule_automation(rule_id: UUID, schedule_version: int, scheduled_for: datetime) -> None:
@@ -101,18 +106,29 @@ async def _run(rule_id: str, schedule_version: int, scheduled_for: str) -> dict:
         if following_at:
             enqueue_schedule_automation(rule_uuid, schedule_version, following_at)
 
+        week_start_weekday = await resolve_week_start_weekday(
+            conn, company_id=rule["company_id"], location_id=rule["location_id"],
+        )
         week_start = target_week_start(
             cadence=rule["cadence"],
             scheduled_for=expected_at,
             timezone_name=rule["timezone"],
             target_weeks_ahead=rule["target_weeks_ahead"],
             one_time_week_start=rule["target_week_start"],
-            week_start_weekday=await resolve_week_start_weekday(
-                conn, company_id=rule["company_id"], location_id=rule["location_id"],
-            ),
+            week_start_weekday=week_start_weekday,
+        )
+        # Save refuses a past week, but weeks keep passing after the save.
+        # Judged at delivery, not at the scheduled occurrence: a task that
+        # ran late (worker down or recycling past its ETA) must not build a
+        # week that ended while it waited.
+        stale_target = past_week_refusal(
+            week_start=week_start, timezone_name=rule["timezone"],
+            week_start_weekday=week_start_weekday, now=max(expected_at, _utcnow()),
         )
         try:
-            if mode == "template" and rule["week_template_id"] is None:
+            if stale_target:
+                result = stale_target
+            elif mode == "template" and rule["week_template_id"] is None:
                 result = {"status": "not_ready", "message": "Choose a saved week template."}
             else:
                 kwargs = {
