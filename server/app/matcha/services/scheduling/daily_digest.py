@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 from html import escape
 from uuid import UUID
 
 from app.core.services.email import get_email_service
 from app.core.services.email._shared import _is_reserved_test_domain
+from app.matcha.services.scheduling.break_reminder_events import record_event
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_guidance(value):
@@ -72,7 +76,7 @@ async def _claim(conn, *, company_id, location_id, digest_date, email, recipient
     return row is not None
 
 
-async def _deliver(conn, service, *, company_id, location_id, digest_date, email, recipient_type, to_name, subject, html) -> str:
+async def _deliver(conn, service, *, company_id, location_id, digest_date, email, recipient_type, to_name, subject, html, audit=None) -> str:
     """Claim -> send -> release-on-transient-failure, in one place so all
     three recipient loops share the same idempotency and retry semantics.
 
@@ -80,22 +84,62 @@ async def _deliver(conn, service, *, company_id, location_id, digest_date, email
     kept — a reserved/test domain or an unconfigured provider will never
     succeed, so retrying it every worker restart would just be noise),
     "failed_released" (claim removed — genuinely transient, eligible for the
-    next scheduled run to retry)."""
+    next scheduled run to retry).
+
+    With ``audit`` (the break-reminder fields for this recipient), every
+    attempt — not a duplicate claim, which is no attempt — is also written to
+    the append-only schedule_break_reminder_events record."""
     if not await _claim(conn, company_id=company_id, location_id=location_id, digest_date=digest_date, email=email, recipient_type=recipient_type):
         return "skipped_duplicate"
-    if not service.is_configured() or _is_reserved_test_domain(email):
-        return "skipped_permanent"
-    try:
-        ok = await service.send_email(email, to_name, subject, html)
-    except Exception:
-        ok = False
-    if ok:
-        return "sent"
-    await conn.execute(
-        "DELETE FROM schedule_digest_deliveries WHERE location_id=$1 AND digest_date=$2 AND recipient_email=LOWER($3) AND recipient_type=$4",
-        location_id, digest_date, email, recipient_type,
-    )
-    return "failed_released"
+    if not service.is_configured():
+        result, outcome, detail = "skipped_permanent", "unavailable", "Email delivery is not configured"
+    elif _is_reserved_test_domain(email):
+        result, outcome, detail = "skipped_permanent", "unavailable", "Reserved test address; never sent"
+    else:
+        error = None
+        try:
+            ok = await service.send_email(email, to_name, subject, html)
+        except Exception as exc:
+            ok, error = False, f"{type(exc).__name__}: {exc}"
+        if ok:
+            result, outcome, detail = "sent", "accepted", "Accepted by the email provider"
+        else:
+            await conn.execute(
+                "DELETE FROM schedule_digest_deliveries WHERE location_id=$1 AND digest_date=$2 AND recipient_email=LOWER($3) AND recipient_type=$4",
+                location_id, digest_date, email, recipient_type,
+            )
+            result, outcome, detail = "failed_released", "failed", error or "The email provider did not accept the message"
+    if audit is not None:
+        try:
+            await record_event(
+                conn, company_id=company_id, channel="email", reminder_type="daily_digest",
+                outcome=outcome, outcome_detail=detail, event_date=digest_date,
+                recipient=email, location_id=location_id, **audit,
+            )
+        except Exception:
+            # The email already went (or already failed); raising here would
+            # not undo that, only skip every later recipient at this location.
+            logger.exception(
+                "break reminder record lost: company=%s location=%s recipient_type=%s outcome=%s",
+                company_id, location_id, audit.get("recipient_type"), outcome,
+            )
+    return result
+
+
+def _break_entries(row: dict) -> list[dict]:
+    """The reviewed break times on one assignment, as recorded evidence."""
+    entries = _parse_guidance(row.get("planned_breaks"))
+    if not isinstance(entries, list):
+        return []
+    return [
+        {key: entry.get(key) for key in ("kind", "ordinal", "start_local", "duration_minutes")}
+        for entry in entries
+        if isinstance(entry, dict)
+    ]
+
+
+def _has_break_content(row: dict) -> bool:
+    return bool(row.get("compliance_guidance")) or bool(_break_entries(row))
 
 
 def _manager_html(location_name: str, rows: list[dict], digest_date: date) -> str:
@@ -165,6 +209,7 @@ async def send_location_daily_digest(conn, *, company_id: UUID, location_id: UUI
     rows = await conn.fetch(
         """
         SELECT COALESCE(NULLIF(TRIM(e.first_name || ' ' || e.last_name), ''), e.email) AS name,
+               e.id AS employee_id, a.id AS assignment_id, s.id AS shift_id,
                COALESCE(u.email, e.email) AS email, a.compliance_guidance,
                a.planned_breaks,
                a.manager_note, a.manager_note_visible_to_employee,
@@ -209,12 +254,30 @@ async def send_location_daily_digest(conn, *, company_id: UUID, location_id: UUI
     )
     sent = 0
     service = get_email_service()
+    location_audit = {"location_name": location["name"], "location_timezone": location["timezone"]}
+    # The named digest tells a supervisor each listed employee's breaks, so it
+    # is part of those employees' reminder history (covered_employee_ids).
+    # It is recorded only when it actually carried break content.
+    listed_with_breaks = [row["employee_id"] for row in row_dicts if _has_break_content(row)]
+    manager_subject = f"Today's schedule breaks · {location['name']}"
+    manager_audit = {
+        **location_audit,
+        "recipient_type": "manager",
+        "covered_employee_ids": listed_with_breaks,
+        "context": {
+            "digest_date": digest_date.isoformat(),
+            "subject": manager_subject,
+            "employees_listed": len(row_dicts),
+            "employees_with_break_content": len(set(listed_with_breaks)),
+        },
+    } if listed_with_breaks else None
     for recipient in managers:
         outcome = await _deliver(
             conn, service, company_id=company_id, location_id=location_id, digest_date=digest_date,
             email=recipient["email"], recipient_type="manager", to_name=None,
-            subject=f"Today's schedule breaks · {location['name']}",
+            subject=manager_subject,
             html=_manager_html(location["name"], row_dicts, digest_date),
+            audit=manager_audit,
         )
         if outcome == "sent":
             sent += 1
@@ -243,11 +306,33 @@ async def send_location_daily_digest(conn, *, company_id: UUID, location_id: UUI
             continue
         employee_rows_by_email.setdefault(str(row["email"]).lower(), []).append(row)
     for email, rows_for_employee in employee_rows_by_email.items():
+        subject = f"Your schedule notes · {digest_date.isoformat()}"
+        # The operational mailbox above is aggregate-only and names no one's
+        # break, so it is not a break reminder and has no audit record.
+        employee_audit = None
+        if any(_has_break_content(row) for row in rows_for_employee):
+            first = rows_for_employee[0]
+            employee_audit = {
+                **location_audit,
+                "recipient_type": "employee",
+                "employee_id": first["employee_id"],
+                "employee_name": first.get("name"),
+                "shift_id": first["shift_id"] if len(rows_for_employee) == 1 else None,
+                "assignment_id": first["assignment_id"] if len(rows_for_employee) == 1 else None,
+                "context": {
+                    "digest_date": digest_date.isoformat(),
+                    "subject": subject,
+                    "shift_ids": [str(row["shift_id"]) for row in rows_for_employee],
+                    "breaks": [entry for row in rows_for_employee for entry in _break_entries(row)],
+                    "included_break_guidance": any(row.get("compliance_guidance") for row in rows_for_employee),
+                },
+            }
         outcome = await _deliver(
             conn, service, company_id=company_id, location_id=location_id, digest_date=digest_date,
             email=email, recipient_type="employee", to_name=rows_for_employee[0].get("name"),
-            subject=f"Your schedule notes · {digest_date.isoformat()}",
+            subject=subject,
             html=_employee_html(rows_for_employee, digest_date),
+            audit=employee_audit,
         )
         if outcome == "sent":
             sent += 1

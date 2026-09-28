@@ -938,6 +938,43 @@ without that the whole crew reads the same generic legal line and walks off the
 floor together, which is what staggering exists to prevent. The redacted
 operational digest gets a count only, never times.
 
+### Break-reminder delivery record + break-start push (migration `empsched28`)
+
+Every break reminder Matcha attempts is written to the append-only
+`schedule_break_reminder_events` (`break_reminder_events.py`), and admins read it
+under Schedule → Audit log → Break reminders (`GET /employee-schedule/break-reminder-events`
++ `/filter-options`, `require_admin_or_client`, under the `employee_schedule` mount).
+It exists for wage-and-hour reviews, so what a row claims is deliberately narrow.
+
+- **Two producers, both write the record.** The daily digest (`daily_digest._deliver(audit=…)`)
+  records each employee email and each named manager digest that carried break content;
+  the redacted operational mailbox is not a break reminder and is not recorded, and a
+  duplicate claim is no attempt. The break-start push (`break_reminders.py`, worker
+  `schedule_break_reminders`) pushes every published `planned_breaks` entry to the
+  employee's Matcha Schedule app `LEAD` before it starts, judged on the store's wall
+  clock; later than `GRACE` it is skipped unsent. Locationless shifts are skipped (no
+  timezone to judge "now" by).
+- **Outcome is what the provider said at send time**: `accepted` (took the message),
+  `failed` (rejected/errored, detail kept), `unavailable` (nothing could be sent: no app
+  account, no registered device, provider not configured, reserved test address). None of
+  them is receipt, reading, or a break taken — the UI disclaimer says so; keep it.
+- **Append-only.** A `BEFORE UPDATE` trigger refuses every update. DELETE stays possible
+  only so a deleted company cascades. `employee_id`/`location_id` have no FK and names are
+  snapshotted: the history outlives roster rows, and an FK `SET NULL` would be an UPDATE.
+  No retention purge exists — adding one is a legal-retention decision, not a cleanup.
+- **`event_date` is the location's calendar day, stored at write time**; the date filter is
+  inclusive on both ends. The employee filter also matches manager digests that listed the
+  employee (`covered_employee_ids`), and filter options come from the history, so a former
+  employee stays filterable.
+- **One push per break start.** Dedupe key = assignment + `(kind, ordinal)` + start minute, so
+  a retimed break gets its own reminder. An advisory lock + the unique key stop a double
+  send; a worker dying between push and insert re-pushes on the next sweep rather than
+  leaving a send with no record.
+- **The sweep runs every `SWEEP_SECONDS`, not hourly.** It re-enqueues itself; each run
+  claims `scheduler_settings.last_run_at` and a run that finds a fresh claim ends without
+  re-enqueueing, so the extra chain every hourly restart starts dies out. The scheduler row
+  is seeded **disabled** — enabling it starts buzzing phones at every planned break.
+
 ### Schedule Assistant voice turns
 
 The full schedule editor's Huume assistant supports push-to-talk turns as part

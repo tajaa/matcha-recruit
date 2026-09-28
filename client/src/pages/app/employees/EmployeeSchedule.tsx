@@ -31,7 +31,7 @@ import { useMe } from '../../../hooks/useMe'
 import { useLocationScope } from '../../../hooks/useLocationScope'
 import LocationPicker from '../../../components/shared/LocationPicker'
 import AutoSchedulesTab from '../../../components/employees/AutoSchedulesTab'
-import ScheduleAuditLog from '../../../components/employees/ScheduleAuditLog'
+import ScheduleAuditTab from '../../../components/employees/ScheduleAuditTab'
 import {
   MAX_BREAK_MINUTES,
   MAX_REQUIRED_STAFF,
@@ -260,7 +260,7 @@ export default function EmployeeSchedule() {
       {tab === 'templates' && <TemplatesTab locationId={locationId} onGenerated={() => { setTab('schedule'); reload() }} />}
       {tab === 'auto-schedules' && <AutoSchedulesTab locationId={locationId} weekStartWeekday={weekStartWeekday} />}
       {tab === 'requests' && <RequestsTab locationId={locationId} onReviewed={reload} />}
-      {tab === 'audit' && <ScheduleAuditLog />}
+      {tab === 'audit' && <ScheduleAuditTab />}
       {tab === 'intelligence' && intelligenceEnabled && <ScheduleIntelligence />}
       </div>
       <ScheduleHelperWizard open={guideOpen} onClose={closeGuide} />

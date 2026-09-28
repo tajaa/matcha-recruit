@@ -85,6 +85,7 @@ celery_app = Celery(
         "app.workers.tasks.schedule_warning_events",
         "app.workers.tasks.schedule_break_refresh",
         "app.workers.tasks.schedule_daily_digest",
+        "app.workers.tasks.schedule_break_reminders",
         "app.workers.tasks.schedule_request_notifications",
         "app.workers.tasks.schedule_employee_notifications",
         "app.workers.tasks.schedule_auto_generation",
@@ -218,6 +219,9 @@ _SCHEDULED_TASKS = [
     ("pos_sales_sync", "app.workers.tasks.pos_sales_sync", "run_pos_sales_sync"),
     ("schedule_warning_events", "app.workers.tasks.schedule_warning_events", "reconcile_schedule_warning_events_task"),
     ("schedule_daily_digest", "app.workers.tasks.schedule_daily_digest", "send_schedule_daily_digest"),
+    # Self-rescheduling every couple of minutes; this dispatch only (re)starts
+    # the chain. See the task module for why a second chain dies out.
+    ("schedule_break_reminders", "app.workers.tasks.schedule_break_reminders", "run_schedule_break_reminders"),
     ("schedule_request_notifications", "app.workers.tasks.schedule_request_notifications", "recover_schedule_request_notifications"),
     ("schedule_employee_notifications", "app.workers.tasks.schedule_employee_notifications", "recover_schedule_employee_notifications"),
     ("inventory_expiry_sweep", "app.workers.tasks.inventory_waste_sweeps", "run_inventory_expiry_sweep"),
