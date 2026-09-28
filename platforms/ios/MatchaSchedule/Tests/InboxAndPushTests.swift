@@ -71,7 +71,14 @@ final class InboxAndPushTests: XCTestCase {
             KeychainHelper.delete(key: KeychainHelper.Keys.refreshToken)
             KeychainHelper.delete(key: KeychainHelper.Keys.pendingRevoke)
         }
-        XCTAssertTrue(KeychainHelper.save(key: KeychainHelper.Keys.refreshToken, value: "stored-refresh"))
+        // CI compiles the app unsigned (xcode-build.sh sets
+        // CODE_SIGNING_ALLOWED=NO), and an unsigned simulator app has no
+        // Keychain access group, so the write fails (errSecMissingEntitlement).
+        // The sign-out path reads the refresh token from the Keychain, so there
+        // is nothing to exercise without it; signed local runs cover it.
+        guard KeychainHelper.save(key: KeychainHelper.Keys.refreshToken, value: "stored-refresh") else {
+            throw XCTSkip("Keychain unavailable in an unsigned test host")
+        }
         APIClient.shared.accessToken = nil
 
         let state = AppState()
