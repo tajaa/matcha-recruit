@@ -4,7 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
-
 CompanySize = Literal["1-10", "11-50", "51-100", "101-250", "251-500", "501+"]
 
 
@@ -54,9 +53,11 @@ class ScCertificateSetup(ScOnboardingModel):
 class ScJobSetup(ScOnboardingModel):
     name: str = Field(min_length=1, max_length=150)
     credential_grace_days: int = Field(default=7, ge=0, le=365)
-    # The wizard requires at least one certificate per job; keeping the server
-    # contract identical stops the two validators from drifting apart.
-    certificates: list[ScCertificateSetup] = Field(min_length=1, max_length=50)
+    # A job may carry no certificate: every employee job title must name a job,
+    # and a roster routinely holds roles (a shift supervisor, a dishwasher) with
+    # no credential requirement. validate_sc_submission still requires at least
+    # one mandatory certificate across the whole setup.
+    certificates: list[ScCertificateSetup] = Field(default_factory=list, max_length=50)
 
 
 class ScOnboardingComplete(ScOnboardingModel):

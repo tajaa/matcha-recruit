@@ -41,6 +41,12 @@ LOCATION_COLUMNS = ("name", "address", "city", "state", "zipcode")
 EMPLOYEE_COLUMNS = ("email", "first_name", "last_name", "work_state", "job_title", "department")
 CSV_MAX_ROWS = 500
 
+# Shared verbatim with the wizard's own pre-submit check (ScOnboardingWizard.tsx).
+UNMATCHED_JOB_TITLES_MESSAGE = (
+    "Every employee job title needs a job. Add a job with the same name, or "
+    "correct the title in the employee CSV and upload it again. Missing: "
+)
+
 
 class ScOnboardingError(ValueError):
     pass
@@ -145,14 +151,20 @@ def validate_sc_submission(body: ScOnboardingComplete) -> None:
     if duplicate_jobs:
         raise ScOnboardingError("Jobs contain duplicate name(s): " + ", ".join(duplicate_jobs))
 
+    # "Configured job" means a job in THIS submission — there is no catalog.
+    # The title is what assigns an imported employee to a schedule job, and so
+    # to that job's credential tasks; an unmatched employee would import with
+    # no credential coverage at all, so the rule stays and says how to fix it.
     job_names = {_key(job.name) for job in body.jobs}
-    unknown_titles = sorted(
-        {employee.job_title.strip() for employee in body.employees if _key(employee.job_title) not in job_names},
-        key=str.casefold,
-    )
+    unknown_titles: dict[str, str] = {}
+    for employee in body.employees:
+        key = _key(employee.job_title)
+        if key not in job_names:
+            unknown_titles.setdefault(key, employee.job_title.strip())
     if unknown_titles:
         raise ScOnboardingError(
-            "Employee job_title must match a configured job: " + ", ".join(unknown_titles)
+            UNMATCHED_JOB_TITLES_MESSAGE
+            + ", ".join(sorted(unknown_titles.values(), key=str.casefold))
         )
 
     required_certificate_count = 0
@@ -449,6 +461,10 @@ async def complete_sc_onboarding(
                         "schedule_blocking": certificate.schedule_blocking,
                     }
                 )
+            if not requirements:
+                # A brand-new job with no certificate has no rules to write and
+                # no credential tasks to materialize.
+                continue
             # This shared scheduling write path persists the job rules first,
             # then materializes employee upload tasks with the job's grace
             # period. Calling materialization before the rules exist silently

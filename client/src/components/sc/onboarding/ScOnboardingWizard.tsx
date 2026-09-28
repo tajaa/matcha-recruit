@@ -40,8 +40,36 @@ function emptyJob(): ScJobSetup {
   return { name: '', credential_grace_days: 7, certificates: [emptyCertificate()] }
 }
 
+// Shared verbatim with services/sc_onboarding.UNMATCHED_JOB_TITLES_MESSAGE.
+const UNMATCHED_JOB_TITLES_MESSAGE =
+  'Every employee job title needs a job. Add a job with the same name, or correct the title in the employee CSV and upload it again. Missing: '
+
 function normalized(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/** Distinct employee job titles with no job yet, in roster order. */
+function unmatchedTitles(jobs: ScJobSetup[], employees: ScEmployeeImport[]): string[] {
+  const seen = new Set(jobs.map((job) => normalized(job.name)))
+  const titles: string[] = []
+  for (const employee of employees) {
+    const key = normalized(employee.job_title)
+    if (seen.has(key)) continue
+    seen.add(key)
+    titles.push(employee.job_title.trim())
+  }
+  return titles
+}
+
+/** Adds a certificate-less job for every roster title that has none yet.
+ *  The title is what assigns an imported employee to a job, so the manager
+ *  should see every one of them instead of discovering them one error at a
+ *  time. Blank rows go — they could only fail "Every job needs a name". */
+function withRosterJobs(jobs: ScJobSetup[], employees: ScEmployeeImport[]): ScJobSetup[] {
+  const titles = unmatchedTitles(jobs, employees)
+  if (!titles.length) return jobs
+  const kept = jobs.filter((job) => job.name.trim() || job.certificates.some((certificate) => certificate.name.trim()))
+  return [...kept, ...titles.map((name) => ({ name, credential_grace_days: 7, certificates: [] }))]
 }
 
 function hasDuplicates(values: string[]) {
@@ -126,9 +154,9 @@ export default function ScOnboardingWizard() {
   }
 
   // Mirrors the server contract (models/sc_onboarding.py +
-  // services/sc_onboarding.validate_sc_submission): at least one certificate
-  // per job, at least one mandatory certificate overall, unique names, and
-  // every employee job title matching a configured job. Change both together.
+  // services/sc_onboarding.validate_sc_submission): at least one mandatory
+  // certificate overall (a job may have none), unique names, and every
+  // employee job title matching a job on this step. Change both together.
   function jobsError(): string | null {
     if (!jobs.length) return 'Add at least one job.'
     if (jobs.some((job) => !job.name.trim())) return 'Every job needs a name.'
@@ -145,9 +173,10 @@ export default function ScOnboardingWizard() {
     if (!jobs.some((job) => job.certificates.some((certificate) => certificate.is_required))) {
       return 'Configure at least one mandatory certificate.'
     }
-    const jobNames = new Set(jobs.map((job) => normalized(job.name)))
-    const unknownJobTitle = employees.find((employee) => !jobNames.has(normalized(employee.job_title)))?.job_title
-    if (unknownJobTitle) return `Employee job title must match a configured job: ${unknownJobTitle}`
+    const missing = unmatchedTitles(jobs, employees)
+    if (missing.length) {
+      return UNMATCHED_JOB_TITLES_MESSAGE + [...missing].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })).join(', ')
+    }
     return null
   }
 
@@ -158,6 +187,7 @@ export default function ScOnboardingWizard() {
       return
     }
     setError(null)
+    if (step === 2) setJobs((current) => withRosterJobs(current, employees))
     setStep((current) => Math.min(current + 1, STEPS.length - 1))
   }
 
@@ -273,7 +303,7 @@ export default function ScOnboardingWizard() {
 
           {step === 2 && (
             <div className="space-y-4">
-              <div><h2 className="text-lg font-medium">Employees</h2><p className="text-sm text-zinc-400">Optional. Job titles must exactly match a job configured in the next step. No invitations are sent.</p></div>
+              <div><h2 className="text-lg font-medium">Employees</h2><p className="text-sm text-zinc-400">Optional. Each job title in the file becomes a job in the next step, where you choose its certificates. No invitations are sent.</p></div>
               <FileUpload accept=".csv,text/csv" maxSizeMB={5} onFiles={(files) => { if (files[0]) void loadCsv('employees', files[0], scOnboardingApi.parseEmployeesCsv, setEmployees) }}>
                 <Upload className="mx-auto mb-2 h-5 w-5" /><p>Drop an employees CSV or browse</p>
               </FileUpload>
@@ -284,7 +314,7 @@ export default function ScOnboardingWizard() {
 
           {step === 3 && (
             <div className="space-y-5">
-              <div><h2 className="text-lg font-medium">Jobs and mandatory certificates</h2><p className="text-sm text-zinc-400">A schedule-blocking certificate prevents assignment after the job grace period until valid evidence is on file.</p></div>
+              <div><h2 className="text-lg font-medium">Jobs and mandatory certificates</h2><p className="text-sm text-zinc-400">A schedule-blocking certificate prevents assignment after the job grace period until valid evidence is on file.{employees.length > 0 && ' Every job title from your employee file is listed here; a job can have no certificate.'}</p></div>
               {jobs.map((job, jobIndex) => (
                 <div key={jobIndex} className="space-y-3 rounded-lg border border-white/[0.08] bg-zinc-950/50 p-4">
                   <div className="grid gap-3 sm:grid-cols-[1fr_180px_auto]">
@@ -297,9 +327,10 @@ export default function ScOnboardingWizard() {
                       <Input label="Certificate" value={certificate.name} maxLength={200} onChange={(event) => updateCertificate(jobIndex, certificateIndex, { name: event.target.value })} placeholder="e.g. Food Handler Card" />
                       <label className="flex h-10 items-center gap-2 text-xs text-zinc-300"><Toggle size="sm" checked={certificate.is_required} onChange={(checked) => updateCertificate(jobIndex, certificateIndex, { is_required: checked })} />Mandatory</label>
                       <label className="flex h-10 items-center gap-2 text-xs text-zinc-300"><Toggle size="sm" checked={certificate.schedule_blocking} disabled={!certificate.is_required} onChange={(checked) => updateCertificate(jobIndex, certificateIndex, { schedule_blocking: checked })} />Blocks schedule</label>
-                      <Button aria-label="Remove certificate" variant="ghost" size="sm" disabled={job.certificates.length === 1} onClick={() => updateJob(jobIndex, { certificates: job.certificates.filter((_, i) => i !== certificateIndex) })}><Trash2 className="h-4 w-4" /></Button>
+                      <Button aria-label="Remove certificate" variant="ghost" size="sm" onClick={() => updateJob(jobIndex, { certificates: job.certificates.filter((_, i) => i !== certificateIndex) })}><Trash2 className="h-4 w-4" /></Button>
                     </div>
                   ))}
+                  {job.certificates.length === 0 && <p className="text-xs text-zinc-500">No certificate required for this job.</p>}
                   <Button variant="ghost" size="sm" onClick={() => updateJob(jobIndex, { certificates: [...job.certificates, emptyCertificate()] })}><Plus className="h-3.5 w-3.5" />Add certificate</Button>
                 </div>
               ))}
