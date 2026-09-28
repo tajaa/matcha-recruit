@@ -174,6 +174,17 @@ final class ScheduleModelsTests: XCTestCase {
         AppDelegate.pendingNotification = nil
     }
 
+    func testAppearancePreferenceMapsToInterfaceStyle() {
+        XCTAssertEqual(AppearancePreference.system.interfaceStyle, .unspecified)
+        XCTAssertEqual(AppearancePreference.light.interfaceStyle, .light)
+        XCTAssertEqual(AppearancePreference.dark.interfaceStyle, .dark)
+        // Persisted by raw value; an unknown stored value falls back to nil
+        // (so @AppStorage keeps its System default).
+        XCTAssertEqual(AppearancePreference(rawValue: "dark"), .dark)
+        XCTAssertNil(AppearancePreference(rawValue: "sepia"))
+        XCTAssertEqual(AppearancePreference.allCases.map(\.label), ["System", "Light", "Dark"])
+    }
+
     func testWeekRangeUsesCalendarDays() {
         let day = ISO8601DateFormatter().date(from: "2026-09-23T15:00:00Z")!
         let week = WallClock.weekStart(containing: day)

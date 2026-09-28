@@ -6,9 +6,28 @@ enum ShiftAction: String, Identifiable {
     var title: String {
         switch self {
         case .swap: "Swap shift"
-        case .pickup: "Offer for pickup"
-        case .drop: "Request to drop"
+        case .pickup: "Offer up shift"
+        case .drop: "Drop shift"
         case .claim: "Claim open shift"
+        }
+    }
+
+    /// What happens after sending, in one line.
+    var explainer: String {
+        switch self {
+        case .swap: "Your coworker accepts first, then your manager approves the trade."
+        case .pickup: "Anyone at your store can take it; your manager approves who does."
+        case .drop: "Your manager decides whether the shift can go uncovered."
+        case .claim: "Your manager approves the claim before it's yours."
+        }
+    }
+
+    var submitTitle: String {
+        switch self {
+        case .swap: "Send swap request"
+        case .pickup: "Offer it up"
+        case .drop: "Ask to drop"
+        case .claim: "Claim shift"
         }
     }
 }
@@ -37,40 +56,60 @@ struct RequestComposerView: View {
 
     var body: some View {
         Form {
-            Section("Shift") {
-                Text(shift.title)
-                Text("\(WallClock.label(shift.starts_at, format: "EEE, MMM d · h:mm a")) – \(WallClock.label(shift.ends_at, format: "h:mm a"))")
-                    .foregroundStyle(.secondary)
+            Section {
+                ShiftCard(shift: shift, location: nil, isOpen: action == .claim)
+            } footer: {
+                Text(action.explainer).font(TypeScale.caption).padding(.top, 6)
             }
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets())
+
             if action == .swap {
-                Section("Swap with") {
-                    if loading { ProgressView("Loading coworkers…") }
+                Section {
+                    if loading {
+                        HStack { ProgressView(); Text("Loading coworkers").foregroundStyle(Palette.inkSoft) }
+                    }
                     Picker("Coworker", selection: $targetEmployeeID) {
-                        Text("Select a coworker").tag("")
+                        Text("Choose").tag("")
                         ForEach(coworkers) { person in Text(person.name).tag(person.id) }
                     }
                     .onChange(of: targetEmployeeID) { _, _ in counterShiftID = "" }
                     Picker("Their shift", selection: $counterShiftID) {
-                        Text("Select a shift").tag("")
+                        Text("Choose").tag("")
                         ForEach(counterShifts) { candidate in
-                            Text("\(candidate.title) · \(WallClock.label(candidate.starts_at, format: "MMM d, h:mm a"))")
+                            Text("\(candidate.title) · \(WallClock.label(candidate.starts_at, format: "EEE MMM d, h:mm a"))")
                                 .tag(candidate.id)
                         }
                     }
+                    .disabled(targetEmployeeID.isEmpty)
                     if !targetEmployeeID.isEmpty && counterShifts.isEmpty && !loading {
-                        Text("No published shifts are available for this coworker in the next four weeks.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                        Text("They have no published shifts in the next four weeks.")
+                            .font(TypeScale.caption).foregroundStyle(Palette.inkSoft)
                     }
+                } header: {
+                    Eyebrow("Trade with")
                 }
+                .listRowBackground(GlassRowBackground())
             }
             if action == .claim && shift.has_conflict == true {
-                Section { Label("This shift overlaps one of yours. A manager will review the claim.", systemImage: "exclamationmark.triangle") }
+                Section {
+                    Label("This overlaps one of your shifts. Your manager will see that.", systemImage: "exclamationmark.triangle.fill")
+                        .font(TypeScale.subhead)
+                        .foregroundStyle(Palette.amber)
+                }
+                .listRowBackground(GlassRowBackground())
             }
-            Section("Reason (optional)") {
-                TextField("Add a note for your manager", text: $reason, axis: .vertical)
+            Section {
+                TextField("Add context (optional)", text: $reason, axis: .vertical)
                     .lineLimit(2...5)
+            } header: {
+                Eyebrow("Note for your manager")
             }
-            if let error { Section { Text(error).foregroundStyle(.red) } }
+            .listRowBackground(GlassRowBackground())
+            if let error {
+                Section { ErrorBanner(message: error) }
+                    .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+            }
             Section {
                 Button {
                     saving = true
@@ -89,13 +128,26 @@ struct RequestComposerView: View {
                             dismiss()
                         } catch { self.error = error.localizedDescription }
                     }
-                } label: { Text(action.title).frame(maxWidth: .infinity) }
-                    .disabled(saving || loading || (action == .swap && (targetEmployeeID.isEmpty || counterShiftID.isEmpty)))
+                } label: {
+                    ZStack {
+                        Text(action.submitTitle).opacity(saving ? 0 : 1)
+                        if saving { ProgressView().tint(.white) }
+                    }
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(saving || loading || (action == .swap && (targetEmployeeID.isEmpty || counterShiftID.isEmpty)))
             }
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets())
         }
+        .glassForm(DayPart(wallClockISO: shift.starts_at))
         .navigationTitle(action.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Cancel") { dismiss() } } }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { dismiss() } label: { Text("Cancel").font(TypeScale.callout) }
+            }
+        }
         .task {
             guard action == .swap else { return }
             loading = true

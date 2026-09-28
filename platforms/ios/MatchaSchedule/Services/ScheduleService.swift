@@ -59,6 +59,19 @@ enum ScheduleService {
         )
     }
 
+    /// The employee's own published shifts for the next four weeks, soonest
+    /// first — what the "Next shift" card reads, whatever week is on screen.
+    static func upcoming(from day: Date = WallClock.today()) async throws -> [ScheduleShift] {
+        let (start, _) = WallClock.range(starting: day)
+        let (end, _) = WallClock.range(starting: WallClock.move(day, by: 4))
+        var components = URLComponents()
+        components.queryItems = [URLQueryItem(name: "start", value: start), URLQueryItem(name: "end", value: end)]
+        let response: ShiftListResponse = try await APIClient.shared.request(
+            method: "GET", path: "/v1/portal/me/schedule?\(components.percentEncodedQuery ?? "")"
+        )
+        return response.shifts.sorted { $0.starts_at < $1.starts_at }
+    }
+
     /// Store names and week start are decoration: a failure here must never
     /// take the shifts down with it. Cancellation still propagates as empty.
     static func storeLocations() async -> [ScheduleLocation] {

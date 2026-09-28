@@ -65,6 +65,59 @@ enum WallClock {
         return calendar.date(byAdding: .day, value: weeks * 7, to: week)!
     }
 
+    /// Hour of a wall-clock instant (read in UTC, where the clock face lives).
+    static func hour(of value: Date) -> Int {
+        gregorian.component(.hour, from: value)
+    }
+
+    /// The device's clock face right now, tagged UTC like shift times, so
+    /// "has it started" compares like with like.
+    static func now(_ instant: Date = Date(), timeZone: TimeZone = .current) -> Date {
+        instant.addingTimeInterval(TimeInterval(timeZone.secondsFromGMT(for: instant)))
+    }
+
+    /// The seven days of a week, starting on `week`.
+    static func days(of week: Date) -> [Date] {
+        (0..<7).compactMap { gregorian.date(byAdding: .day, value: $0, to: gregorian.startOfDay(for: week)) }
+    }
+
+    /// Calendar-day key, e.g. "2026-09-23", for grouping and scroll anchors.
+    static func dayKey(_ value: Date) -> String {
+        let parts = gregorian.dateComponents([.year, .month, .day], from: value)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+
+    static func dayKey(_ iso: String) -> String {
+        date(iso).map(dayKey) ?? String(iso.prefix(10))
+    }
+
+    static func format(_ value: Date, _ pattern: String) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = pattern
+        return formatter.string(from: value)
+    }
+
+    /// "8h" or "7h 30m" between two wall-clock timestamps.
+    static func duration(from start: String, to end: String) -> String? {
+        guard let from = date(start), let until = date(end), until > from else { return nil }
+        let minutes = Int(until.timeIntervalSince(from) / 60)
+        let hours = minutes / 60, rest = minutes % 60
+        return rest == 0 ? "\(hours)h" : (hours == 0 ? "\(rest)m" : "\(hours)h \(rest)m")
+    }
+
+    /// "in 14h", "in 3 days", "in 25m" — how long until a wall-clock start.
+    static func countdown(to start: Date, from now: Date) -> String {
+        let minutes = Int(start.timeIntervalSince(now) / 60)
+        if minutes < 1 { return "starting now" }
+        if minutes < 60 { return "in \(minutes)m" }
+        let hours = minutes / 60
+        if hours < 24 { return minutes % 60 == 0 || hours >= 10 ? "in \(hours)h" : "in \(hours)h \(minutes % 60)m" }
+        let days = Int((Double(hours) / 24).rounded())
+        return days == 1 ? "tomorrow" : "in \(days) days"
+    }
+
     /// "12:00 PM" from a planned break's `start_local`. The server sends a
     /// local datetime ("2026-09-23T12:00:00", sometimes with the store's
     /// offset); the clock face is already the store's, so it is read straight
@@ -89,6 +142,32 @@ enum Instant {
         let parser = ISO8601DateFormatter()
         parser.formatOptions = [.withInternetDateTime]
         return parser.date(from: trimmed)
+    }
+
+    /// List-row time: "9:41 AM" today, "Yesterday", a weekday within the
+    /// week, otherwise "Sep 3".
+    static func short(_ iso: String, now: Date = Date(), timeZone: TimeZone = .current,
+                      locale: Locale = .current) -> String {
+        guard let value = date(iso) else { return "" }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        if calendar.isDate(value, inSameDayAs: now) {
+            formatter.timeStyle = .short
+            return formatter.string(from: value)
+        }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+           calendar.isDate(value, inSameDayAs: yesterday) {
+            return "Yesterday"
+        }
+        if let days = calendar.dateComponents([.day], from: value, to: now).day, days < 7 {
+            formatter.setLocalizedDateFormatFromTemplate("EEE")
+            return formatter.string(from: value)
+        }
+        formatter.setLocalizedDateFormatFromTemplate("MMM d")
+        return formatter.string(from: value)
     }
 
     static func label(_ iso: String, timeZone: TimeZone = .current, locale: Locale = .current) -> String {
