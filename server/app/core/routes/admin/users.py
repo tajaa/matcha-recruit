@@ -17,7 +17,7 @@ from pydantic import BaseModel, EmailStr, Field
 logger = logging.getLogger(__name__)
 
 from app.database import get_connection
-from app.core.dependencies import require_admin
+from app.core.dependencies import require_admin, revoke_user_sessions
 from app.core.services.credential_crypto import decrypt_credential_fields
 from app.core.services.scope_registry.codify import codified_sql
 from app.core.feature_flags import merge_company_features
@@ -221,10 +221,15 @@ async def patch_user_beta_flags(
 async def admin_suspend_user(user_id: UUID, body: SuspendBody = Body(default=SuspendBody())):
     """Mark a user is_suspended. Login + bearer auth refuse them."""
     async with get_connection() as conn:
-        result = await conn.execute(
-            "UPDATE users SET is_suspended = TRUE WHERE id = $1",
-            user_id,
-        )
+        async with conn.transaction():
+            result = await conn.execute(
+                "UPDATE users SET is_suspended = TRUE WHERE id = $1",
+                user_id,
+            )
+            if result != "UPDATE 0":
+                # Suspension already refuses login and bearer auth; this also
+                # ends their phones, whose pushes only check the device session.
+                await revoke_user_sessions(conn, user_id)
     if result == "UPDATE 0":
         raise HTTPException(status_code=404, detail="User not found")
     logger.info("Admin suspended user %s reason=%s", user_id, body.reason or "—")

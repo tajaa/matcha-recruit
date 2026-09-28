@@ -996,6 +996,17 @@ plus Matcha Schedule APNs.
 - **Push tokens are session-bound** (`device_tokens.device_session_id`,
   `devicetok03`): mobile logout, a failed mobile refresh, and the send query's
   revoked/inactive filter all stop pushes to a phone whose session ended.
+  Every path that ends a session has to revoke the DEVICE, because the send
+  checks `auth_device_sessions`, not the token watermark:
+  `revoke_user_sessions` (web logout-all, password change/reset) calls
+  `revoke_mobile_devices`; admin suspend and company delete do too; every
+  refused mobile refresh (expired, watermark-revoked, suspended, company gone)
+  ends its device via `_EndedMobileSession`; `/auth/mobile/logout` accepts an
+  expired-but-signed refresh token (`decode_token(verify_exp=False)`) so a
+  sign-out after the 12-hour limit still revokes. The send also skips inactive
+  or suspended users and sessions older than the absolute lifetime. A lost
+  refresh response gets `_MOBILE_REFRESH_GRACE_SECONDS` to re-present the
+  previous generation, which returns the current one without bumping it.
 
 ## `schedule_intelligence` (default ❌)
 

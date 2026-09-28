@@ -20,6 +20,7 @@ def _settings(**overrides):
         "apns_key_id": "KEY",
         "apns_team_id": "TEAM",
         "apns_auth_key_path": "/tmp/unused-apns-key.p8",
+        "jwt_session_absolute_expire_hours": 12,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -240,6 +241,11 @@ async def test_send_skips_tokens_whose_device_session_is_dead(device_env):
     assert "ds.revoked_at IS NULL" in query
     assert "employment_status" in query
     assert args[1] == ["terminated", "offboarded"]
+    # Nothing to a deactivated or suspended user, and nothing to a session past
+    # its absolute lifetime even if the phone never signed out.
+    assert "u.is_active AND NOT COALESCE(u.is_suspended, false)" in query
+    assert "ds.created_at > NOW() - make_interval(hours => $3)" in query
+    assert args[2] == 12
 
 
 def test_apns_client_is_rebuilt_for_a_new_event_loop(monkeypatch):

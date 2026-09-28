@@ -188,23 +188,31 @@ async def send_to_many(
     settings = get_settings()
     if not all((settings.apns_key_id, settings.apns_team_id, settings.apns_auth_key_path)):
         return result
-    # Session-bound (Matcha Schedule) tokens only while their device session is
-    # live and the employee is still employed; legacy rows have no session.
+    # Never to a deactivated or suspended user. Session-bound (Matcha Schedule)
+    # tokens only while their device session is live, inside its absolute
+    # lifetime (a session past it can never refresh again, whether or not the
+    # phone got to sign out), and the employee is still employed. Legacy rows
+    # have no session.
     async with _db(conn) as conn:
         rows = await conn.fetch(
             """SELECT dt.user_id, dt.token, dt.bundle_id, dt.environment
                  FROM device_tokens dt
+                 JOIN users u ON u.id = dt.user_id
                  LEFT JOIN auth_device_sessions ds ON ds.id = dt.device_session_id
                 WHERE dt.user_id = ANY($1::uuid[]) AND dt.platform = 'ios'
+                  AND u.is_active AND NOT COALESCE(u.is_suspended, false)
                   AND (
                         dt.device_session_id IS NULL
-                     OR (ds.revoked_at IS NULL AND NOT EXISTS (
+                     OR (ds.revoked_at IS NULL
+                         AND ds.created_at > NOW() - make_interval(hours => $3)
+                         AND NOT EXISTS (
                             SELECT 1 FROM employees e
                              WHERE e.user_id = dt.user_id
                                AND COALESCE(e.employment_status, 'active') = ANY($2::text[])
                         ))
                   )""",
             user_ids, list(INACTIVE_EMPLOYMENT_STATUSES),
+            int(settings.jwt_session_absolute_expire_hours),
         )
     if not rows:
         return result

@@ -180,6 +180,7 @@ def decode_token(
     expected_type: Optional[str] = None,
     *,
     allow_mobile_access: bool = False,
+    verify_exp: bool = True,
 ) -> Optional[TokenPayload]:
     """Decode and validate a JWT token.
 
@@ -187,6 +188,8 @@ def decode_token(
         token: The JWT token string.
         expected_type: If set, reject tokens whose 'type' field doesn't match
                        (e.g. "refresh" to ensure only refresh tokens are accepted).
+        verify_exp: False accepts an expired but correctly signed token. Only
+                    for revocation (mobile logout) — never to authorize.
     """
     settings = get_settings()
 
@@ -195,7 +198,9 @@ def decode_token(
             token,
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
-            options={"require_exp": True},
+            # python-jose turns require_exp into verify_exp, so both follow the
+            # flag; a token with no exp at all still fails below (payload["exp"]).
+            options={"require_exp": verify_exp, "verify_exp": verify_exp},
         )
 
         token_type = payload.get("type")

@@ -44,6 +44,9 @@ class _Connection:
         self.device_updates = 0
         self.generation = 0
         self.company_deleted_at = None
+        # Whether the previous generation is still inside the lost-response
+        # grace window (_MOBILE_REFRESH_GRACE_SECONDS after the last rotation).
+        self.grace_open = True
         self.executed: list[tuple[str, tuple]] = []
 
     @asynccontextmanager
@@ -51,6 +54,14 @@ class _Connection:
         yield self
 
     async def fetchrow(self, query, *args):
+        if "refresh_generation = $4 + 1" in query:
+            sid, user_id, _inactive, presented, grace = args
+            assert grace == login_routes._MOBILE_REFRESH_GRACE_SECONDS
+            if sid != self.sid or user_id != self.user_id or self.revoked \
+                    or self.employment_status in ("terminated", "offboarded") \
+                    or presented != self.generation - 1 or not self.grace_open:
+                return None
+            return {"id": self.sid, "refresh_generation": self.generation}
         if "UPDATE auth_device_sessions" in query:
             # Compare-and-swap rotation: the presented generation must match.
             assert "refresh_generation = $4" in query
@@ -85,7 +96,11 @@ class _Connection:
         if "INSERT INTO auth_device_sessions" in query:
             self.sid = args[0]
         elif "UPDATE auth_device_sessions SET revoked_at" in query:
-            if "refresh_generation <> $3" in query:
+            if "user_id = ANY($1::uuid[])" in query:
+                # revoke_mobile_devices: every device of these users.
+                if self.user_id in args[0]:
+                    self.revoked = True
+            elif "refresh_generation <> $3" in query:
                 # Replay revoke: only fires when the generation really moved on.
                 assert args[:2] == (self.sid, self.user_id)
                 if args[2] != self.generation:
@@ -280,8 +295,10 @@ async def test_replayed_mobile_refresh_token_revokes_the_device(route_env):
     assert auth.decode_token(rotated.refresh_token, expected_type="refresh").gen == 1
     assert not conn.revoked
 
-    # Presenting the superseded token again is a replay: reject it AND revoke
+    # Past the lost-response grace window, presenting the superseded token
+    # again is a replay: reject it AND revoke
     # the session so the holder of the rotated token is cut off too.
+    conn.grace_open = False
     with pytest.raises(HTTPException) as error:
         await login_routes.refresh_token(RefreshTokenRequest(refresh_token=result.refresh_token))
     assert error.value.status_code == 401
@@ -338,7 +355,103 @@ async def test_global_revocation_watermark_is_stamped_at_write_time(route_env):
     wait would outlive the logout. The watermark must use clock_timestamp()."""
     conn = route_env
     await dependencies.revoke_user_sessions(conn, conn.user_id)
-    query, args = conn.executed[-1]
+    query, args = next((q, a) for q, a in conn.executed if "tokens_valid_after" in q)
     assert "tokens_valid_after = clock_timestamp()" in query
     assert "NOW()" not in query
     assert args == (conn.user_id,)
+
+
+@pytest.mark.asyncio
+async def test_lost_refresh_response_is_retried_inside_the_grace_window(route_env):
+    """The server commits a rotation before the phone stores it. Re-presenting
+    the previous generation moments later returns the CURRENT generation
+    without bumping it — a lost response must not sign the employee out."""
+    conn = route_env
+    result = await login_routes.login(
+        LoginRequest(email="employee@example.com", password="password", client="ios_schedule"),
+        _request(),
+    )
+    await login_routes.refresh_token(RefreshTokenRequest(refresh_token=result.refresh_token))
+    retried = await login_routes.refresh_token(RefreshTokenRequest(refresh_token=result.refresh_token))
+    assert auth.decode_token(retried.refresh_token, expected_type="refresh").gen == 1
+    assert conn.generation == 1 and not conn.revoked
+    assert not any("DELETE FROM device_tokens" in q for q, _ in conn.executed)
+
+
+@pytest.mark.asyncio
+async def test_expired_mobile_session_revokes_the_device_on_refresh(route_env, monkeypatch):
+    conn = route_env
+    result = await login_routes.login(
+        LoginRequest(email="employee@example.com", password="password", client="ios_schedule"),
+        _request(),
+    )
+    monkeypatch.setattr(login_routes, "refresh_session_expired", lambda *_a: True)
+    with pytest.raises(HTTPException) as error:
+        await login_routes.refresh_token(RefreshTokenRequest(refresh_token=result.refresh_token))
+    assert error.value.status_code == 401
+    assert error.value.detail == "Session expired. Please log in again."
+    assert conn.revoked
+    deletes = [a for q, a in conn.executed if "DELETE FROM device_tokens WHERE device_session_id" in q]
+    assert deletes == [(conn.sid, conn.user_id)]
+
+
+@pytest.mark.asyncio
+async def test_suspended_employee_refresh_ends_the_device(route_env):
+    conn = route_env
+    result = await login_routes.login(
+        LoginRequest(email="employee@example.com", password="password", client="ios_schedule"),
+        _request(),
+    )
+    conn.suspended = True
+    with pytest.raises(HTTPException):
+        await login_routes.refresh_token(RefreshTokenRequest(refresh_token=result.refresh_token))
+    assert conn.revoked
+
+
+@pytest.mark.asyncio
+async def test_mobile_logout_still_revokes_after_the_session_expired(route_env):
+    """Past the 12-hour absolute limit the refresh token is expired. Sign-out
+    must still end the device, or the phone keeps the previous user's pushes."""
+    conn = route_env
+    await login_routes.login(
+        LoginRequest(email="employee@example.com", password="password", client="ios_schedule"),
+        _request(),
+    )
+    from jose import jwt as jose_jwt
+
+    expired = jose_jwt.encode(
+        {"sub": str(conn.user_id), "email": "employee@example.com", "role": "employee",
+         "type": "refresh", "exp": 1, "iat": 0, "sid": str(conn.sid), "cl": "ios_schedule",
+         "gen": 0},
+        "test-secret", algorithm="HS256",
+    )
+    assert auth.decode_token(expired, expected_type="refresh") is None
+    await login_routes.mobile_logout(MobileLogoutRequest(refresh_token=expired, push_token="e" * 64))
+    assert conn.revoked
+    forged = jose_jwt.encode({"sub": str(conn.user_id), "type": "refresh", "exp": 1},
+                             "wrong-secret", algorithm="HS256")
+    with pytest.raises(HTTPException) as error:
+        await login_routes.mobile_logout(MobileLogoutRequest(refresh_token=forged))
+    assert error.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_revoking_user_sessions_ends_every_mobile_device(route_env):
+    """Password change/reset and web logout-all go through revoke_user_sessions;
+    the push send only checks the device session, so it must be revoked too."""
+    conn = route_env
+    await login_routes.login(
+        LoginRequest(email="employee@example.com", password="password", client="ios_schedule"),
+        _request(),
+    )
+    await dependencies.revoke_user_sessions(conn, conn.user_id)
+    assert conn.revoked
+    deletes = [(q, a) for q, a in conn.executed if "DELETE FROM device_tokens" in q]
+    assert "device_session_id IS NOT NULL" in deletes[-1][0]
+    assert deletes[-1][1] == ([conn.user_id],)
+
+
+@pytest.mark.asyncio
+async def test_revoke_mobile_devices_with_no_users_is_a_no_op(route_env):
+    await dependencies.revoke_mobile_devices(route_env, [])
+    assert route_env.executed == []

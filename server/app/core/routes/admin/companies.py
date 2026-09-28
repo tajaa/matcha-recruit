@@ -17,7 +17,7 @@ from pydantic import BaseModel, EmailStr, Field
 logger = logging.getLogger(__name__)
 
 from app.database import get_connection
-from app.core.dependencies import require_admin
+from app.core.dependencies import require_admin, revoke_mobile_devices
 from app.core.services.credential_crypto import decrypt_credential_fields
 from app.core.services.scope_registry.codify import codified_sql
 from app.core.feature_flags import (
@@ -789,14 +789,27 @@ async def update_company_admin(company_id: UUID, body: CompanyProfileUpdate, cur
     return {"ok": True}
 
 
+async def _end_company_mobile_devices(conn, company_id: UUID) -> None:
+    """A deactivated company's employees must stop receiving schedule and DM
+    pushes; their refresh is already refused by the company_deleted_at check."""
+    user_ids = [r["user_id"] for r in await conn.fetch(
+        "SELECT user_id FROM employees WHERE org_id = $1 AND user_id IS NOT NULL",
+        company_id,
+    )]
+    await revoke_mobile_devices(conn, user_ids)
+
+
 @router.delete("/companies/{company_id}", dependencies=[Depends(require_admin)])
 async def delete_company_admin(company_id: UUID):
     """Soft-delete a company so it no longer appears in lists."""
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            "UPDATE companies SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING id",
-            company_id,
-        )
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "UPDATE companies SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING id",
+                company_id,
+            )
+            if row:
+                await _end_company_mobile_devices(conn, company_id)
         if not row:
             raise HTTPException(status_code=404, detail="Company not found or already deleted")
         from app.matcha.services.matcha_work.matcha_work_document import invalidate_company_profile_cache
@@ -1200,10 +1213,13 @@ async def admin_refund_charge(company_id: UUID, body: RefundBody):
 async def admin_soft_delete_company(company_id: UUID):
     """Soft-delete a company. Sets deleted_at; rows stay for audit."""
     async with get_connection() as conn:
-        result = await conn.execute(
-            "UPDATE companies SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
-            company_id,
-        )
+        async with conn.transaction():
+            result = await conn.execute(
+                "UPDATE companies SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
+                company_id,
+            )
+            if result != "UPDATE 0":
+                await _end_company_mobile_devices(conn, company_id)
     if result == "UPDATE 0":
         raise HTTPException(status_code=404, detail="Company not found or already deleted")
     return {"ok": True}
