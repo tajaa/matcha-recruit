@@ -323,6 +323,24 @@ async def reject_project_task_endpoint(
     if not note:
         raise HTTPException(status_code=400, detail="A note explaining what's incomplete is required")
 
+    # Sending an agent card back IS the redirect: it starts a paid run. So the
+    # editor check and every gate (plan, monthly cap, token budget, rate limit)
+    # run BEFORE the card moves — a refusal must leave it in Review with the
+    # reviewer's note unspent, not stuck in Changes requested with nothing
+    # working on it.
+    async with get_connection() as conn:
+        card_category = await conn.fetchval(
+            "SELECT category FROM mw_tasks WHERE id = $1 AND project_id = $2",
+            task_id, project_id,
+        )
+    is_agent_card = card_category == "agent"
+    if is_agent_card:
+        from app.matcha.services.matcha_work.agent_card import enqueue as agent_enqueue
+
+        if not _can_edit_project(_role):
+            raise HTTPException(status_code=403, detail="You have read-only access to this project.")
+        await agent_enqueue.preflight(current_user, project["company_id"])
+
     try:
         result = await pt_svc.reject_project_task(
             project_id,
@@ -335,14 +353,14 @@ async def reject_project_task_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
     if not result:
         raise HTTPException(status_code=404, detail="Task not found")
-    if result.get("category") == "agent":
-        # Sending an agent card back IS the redirect: the note becomes the next
-        # round's brief and the agent starts on it immediately.
-        from app.matcha.services.matcha_work.agent_card import enqueue as agent_enqueue
-
+    if is_agent_card and result.get("category") == "agent":
+        # The note is now the next round's brief; the agent starts on it at once.
+        # If the queue itself refuses (a stale live run, the broker being down)
+        # the card is in Changes requested with its note saved, and the client
+        # offers "Run again" with the reason from `agent_run_error`.
         try:
             result["agent_run"] = await agent_enqueue.enqueue_card_agent(
-                task=result, user=current_user, reason="redirect",
+                task=result, user=current_user, reason="redirect", skip_preflight=True,
             )
         except HTTPException as exc:
             result["agent_run_error"] = exc.detail

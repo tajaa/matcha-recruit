@@ -7,6 +7,7 @@ import {
   createSubtask,
   updateSubtask,
   deleteSubtask,
+  agentErrorMessage,
 } from '../../../api/matchaWork'
 import type { MWProjectTask, MWSubtask, MWTaskAttachment, BoardColumn, TaskPriority } from '../../../types'
 import { copyTicketToClipboard } from './copyTicket'
@@ -69,7 +70,13 @@ export function useTaskDetailPanel({
       setShowRejectNote(false)
       setRejectNote('')
     } catch (error) {
-      setReviewError(error instanceof Error ? error.message : 'Could not send the task back.')
+      // An agent card's send-back is refused up front (plan, monthly cap,
+      // editor rights) with a structured detail the generic message hides.
+      setReviewError(
+        task.category === 'agent'
+          ? agentErrorMessage(error)
+          : error instanceof Error ? error.message : 'Could not send the task back.',
+      )
     } finally {
       setReviewBusy(false)
     }

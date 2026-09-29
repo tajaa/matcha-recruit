@@ -219,3 +219,34 @@ async def test_fetch_page_tool_maps_refusals_and_errors(monkeypatch):
     out, urls = await agent.fetch_page_tool("https://a.example")
     assert urls == {"https://a.example/final", "https://a.example"}
     assert out["text_truncated"]
+
+
+@pytest.mark.asyncio
+async def test_hostile_markup_is_a_bad_page_not_a_failed_run(monkeypatch):
+    from app.core.services.safe_fetch import FetchedResponse
+
+    fetched = FetchedResponse(url="https://a.example", final_url="https://a.example", status=200,
+                              content_type="text/html", body=b"<html></html>", truncated=False)
+    monkeypatch.setattr(agent, "fetch_public", AsyncMock(return_value=fetched))
+    monkeypatch.setattr(agent, "extract_page", Mock(side_effect=RecursionError("maximum recursion depth")))
+    out, urls = await agent.fetch_page_tool("https://a.example")
+    assert "Could not read" in out["error"] and urls == set()
+
+
+@pytest.mark.asyncio
+async def test_a_hung_page_fetch_times_out_and_the_run_continues(monkeypatch, wired):
+    import asyncio
+
+    async def hang(url):
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(agent, "fetch_page_tool", hang)
+    monkeypatch.setattr(agent, "_FETCH_SECONDS", 0.05)
+    client = _FakeClient([
+        _response(_call("fetch_page", {"url": "https://slow.example"})),
+        _response(_call("finish", {"result": {**RESULT, "top_pick": None, "sources": []}})),
+    ])
+    monkeypatch.setattr(agent, "get_luna_client", Mock(return_value=client))
+    out = await agent.run_card_agent(**_kwargs())
+    assert out["result"]["headline"] == "Organic Balm wins"
+    assert "took too long" in client.calls[1]["input"][0]["output"]

@@ -12,6 +12,7 @@ quote's source or a rating the run never saw.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -178,6 +179,86 @@ class _Gate:
         return True
 
 
+# ── section Markdown ────────────────────────────────────────────────────────
+# `sections[].body_md` is the one free-form field both clients render as live
+# Markdown, so it is the one place a model (or a page it was steered by) could
+# mint a link or an image the provenance gate never saw. Everything that can
+# navigate or load a resource is removed unless its URL is verified.
+_MD_IMAGE = re.compile(r"!\[[^\]]*\](?:\((?:[^()]|\([^()]*\))*\)|\[[^\]]*\])")
+_MD_INLINE_LINK = re.compile(
+    # The URL may hold one level of balanced parens (`javascript:alert(1)`), so
+    # a hostile link can't leave a stray `)` behind that reads as a fragment.
+    r"\[([^\]]*)\]\(\s*<?((?:[^()\s>]|\([^()\s]*\))*)>?(?:\s+(?:\"[^\"]*\"|'[^']*'))?\s*\)"
+)
+_MD_REF_LINK = re.compile(r"\[([^\]]+)\]\[[^\]]*\]")
+_MD_REF_DEF = re.compile(r"^[ \t]{0,3}\[[^\]]+\]:[ \t]*\S.*$", re.MULTILINE)
+_MD_AUTOLINK = re.compile(r"<([a-zA-Z][a-zA-Z0-9+.\-]*:[^>\s]*)>")
+_HTML_TAG = re.compile(r"</?[a-zA-Z!][^>]*>")
+_BARE_URL = re.compile(
+    r"(?<![(\[<])\b(?:(?:https?|ftp|file)://|(?:javascript|data|vbscript):)[^\s<>()\[\]]+",
+    re.IGNORECASE,
+)
+_URL_TRAILING = ".,;:!?'\"”’"
+
+
+def sanitize_markdown(text: str, gate: _Gate) -> str:
+    """`text` with images, raw HTML, reference links and every link or bare URL
+    the run never saw removed. Link text is kept; verified links survive."""
+    removed = 0
+
+    def inline_link(match: re.Match) -> str:
+        nonlocal removed
+        label, url = match.group(1), match.group(2)
+        normalized = normalize_url(url)
+        if normalized is not None and normalized in gate.allowed:
+            return f"[{label}]({url})"
+        removed += 1
+        return label
+
+    def bare_url(match: re.Match) -> str:
+        nonlocal removed
+        raw = match.group(0)
+        core = raw.rstrip(_URL_TRAILING)
+        normalized = normalize_url(core)
+        if normalized is not None and normalized in gate.allowed:
+            return raw
+        removed += 1
+        return ""
+
+    def autolink(match: re.Match) -> str:
+        nonlocal removed
+        normalized = normalize_url(match.group(1))
+        if normalized is not None and normalized in gate.allowed:
+            return match.group(1)
+        removed += 1
+        return ""
+
+    out = _MD_IMAGE.sub(lambda _m: "", text)
+    out = _MD_INLINE_LINK.sub(inline_link, out)
+    out = _MD_REF_DEF.sub("", out)
+    out = _MD_REF_LINK.sub(lambda m: m.group(1), out)
+    out = _MD_AUTOLINK.sub(autolink, out)
+    out = _HTML_TAG.sub("", out)
+    out = _BARE_URL.sub(bare_url, out)
+    if out != text:
+        gate.warnings.append(
+            f"Removed {removed} unverified link(s) or embedded content from a section"
+            if removed else "Removed images or markup from a section"
+        )
+    return out.strip()
+
+
+def _sections(raw: Any, gate: _Gate) -> list[dict]:
+    sections = []
+    for section in _list(raw):
+        if not isinstance(section, dict):
+            continue
+        body = sanitize_markdown(_text(section.get("body_md"), 4000), gate)
+        if body:
+            sections.append({"heading": _text(section.get("heading"), 120), "body_md": body})
+    return sections[:MAX_SECTIONS]
+
+
 def _pick(raw: Any, gate: _Gate) -> dict | None:
     if not isinstance(raw, dict):
         return None
@@ -306,11 +387,7 @@ def normalize_result(raw: Any, provenance: set[str]) -> tuple[dict, list[str]]:
         ][:MAX_CRITERIA],
         "top_pick": top_pick,
         "alternatives": alternatives[:MAX_ALTERNATIVES],
-        "sections": [
-            {"heading": _text(s.get("heading"), 120), "body_md": _text(s.get("body_md"), 4000)}
-            for s in _list(raw.get("sections"))
-            if isinstance(s, dict) and _text(s.get("body_md"), 4000)
-        ][:MAX_SECTIONS],
+        "sections": _sections(raw.get("sections"), gate),
         "caveats": [c for c in (_text(x, 300) for x in _list(raw.get("caveats"))) if c][:MAX_CAVEATS],
         "sources": sources[:MAX_SOURCES],
         "confidence": confidence if confidence in _CONFIDENCE else "low",

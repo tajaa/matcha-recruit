@@ -45,6 +45,10 @@ _MAX_SEARCHES_PER_RUN = 12
 _MAX_FETCHES = 10
 _WALL_SECONDS = 300.0
 _MAX_PAGE_BYTES = 2 * 1024 * 1024
+# One page load, start to finish. httpx's timeouts are per socket operation, so
+# a host that drips a byte at a time would otherwise hold the run indefinitely.
+_FETCH_SECONDS = 25.0
+_PHOTO_SECONDS = 60.0
 _MAX_TOOL_OUTPUT_CHARS = 12_000
 _MAX_REPAIRS = 1
 _AI_USAGE_FEATURE = "matcha.espresso.agent_card"
@@ -65,7 +69,10 @@ def _host(url: str) -> str:
 async def fetch_page_tool(url: str) -> tuple[dict, set[str]]:
     """(tool output, provenance URLs it vouches for)."""
     try:
-        fetched = await fetch_public(url, max_bytes=_MAX_PAGE_BYTES, accept="text/html,application/xhtml+xml")
+        fetched = await fetch_public(
+            url, max_bytes=_MAX_PAGE_BYTES, accept="text/html,application/xhtml+xml",
+            total_timeout=_FETCH_SECONDS,
+        )
     except UnsafeURL as exc:
         return {"error": f"Refused: {exc}"}, set()
     except Exception as exc:
@@ -74,7 +81,13 @@ async def fetch_page_tool(url: str) -> tuple[dict, set[str]]:
         return {"error": f"The site answered HTTP {fetched.status}", "url": fetched.final_url}, set()
     if "html" not in fetched.content_type and "xml" not in fetched.content_type:
         return {"error": f"Not an HTML page ({fetched.content_type or 'unknown type'})"}, set()
-    page = await asyncio.to_thread(extract_page, fetched.body, fetched.final_url)
+    try:
+        page = await asyncio.to_thread(extract_page, fetched.body, fetched.final_url)
+    except Exception:
+        # Hostile markup (absurd nesting -> RecursionError, parser errors) is a
+        # bad page, not a failed run: tell the model and let it try another.
+        logger.info("agent card page extraction failed for %s", url[:200], exc_info=True)
+        return {"error": "Could not read that page's structure. Try another source."}, set()
     urls = page_urls(page) | {fetched.url}
     encoded = json.dumps(page, default=str)
     if len(encoded) > _MAX_TOOL_OUTPUT_CHARS:
@@ -214,7 +227,13 @@ async def run_card_agent(
                 else:
                     fetches += 1
                     await progress(f"Reading {_host(url)}…")
-                    out, vouched = await fetch_page_tool(url)
+                    remaining = _WALL_SECONDS - (time.monotonic() - started)
+                    try:
+                        out, vouched = await asyncio.wait_for(
+                            fetch_page_tool(url), timeout=max(1.0, min(_FETCH_SECONDS + 5, remaining)),
+                        )
+                    except TimeoutError:
+                        out, vouched = {"error": "The page took too long to load."}, set()
                     provenance.update(vouched)
                     await step(name, "fetch", f"Read {_host(url)}", args,
                                {k: out.get(k) for k in ("url", "title", "error")} | {"products": len(out.get("products") or [])},
@@ -243,6 +262,7 @@ async def run_card_agent(
     await progress("Collecting photos…")
     image_warnings = await images.rehost_images(
         result, company_id=company_id, project_id=project_id, task_id=task_id,
+        total_seconds=_PHOTO_SECONDS,
     )
     for pick in [result.get("top_pick"), *(result.get("alternatives") or [])]:
         if pick:

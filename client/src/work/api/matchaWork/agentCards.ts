@@ -1,4 +1,4 @@
-import { api } from '../../../api/client'
+import { api, ApiError } from '../../../api/client'
 
 // ── Agent cards (category 'agent') ──
 //
@@ -63,4 +63,22 @@ export function rerunAgent(projectId: string, taskId: string) {
     `/matcha-work/projects/${projectId}/tasks/${taskId}/agent-runs`,
     {},
   )
+}
+
+/** Server `detail` -> one readable line (plan / monthly cap / plain string). */
+export function agentErrorMessage(e: unknown): string {
+  if (e instanceof ApiError && e.body && typeof e.body === 'object' && 'detail' in e.body) {
+    const detail = (e.body as { detail: unknown }).detail
+    if (typeof detail === 'string') return detail
+    if (detail && typeof detail === 'object') {
+      const d = detail as Record<string, unknown>
+      if (d.code === 'plan_required') return 'Agent cards need the Pro plan.'
+      if (d.code === 'agent_run_limit') {
+        const resets = typeof d.resets_at === 'string' ? new Date(d.resets_at).toLocaleDateString() : 'next month'
+        return `You've used all ${d.limit} agent runs this month. They reset ${resets}.`
+      }
+      if (typeof d.message === 'string') return d.message
+    }
+  }
+  return e instanceof Error ? e.message : 'Something went wrong.'
 }

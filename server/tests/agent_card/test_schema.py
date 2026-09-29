@@ -117,3 +117,45 @@ def test_duplicate_sources_collapse():
         {"title": "b", "url": "https://reviews.example/best-lip-balm/?utm_medium=x"},
     ]), SEEN)
     assert len(result["sources"]) == 1
+
+
+# ── section Markdown (the one free-form field clients render as live Markdown) ──
+
+def _section(body):
+    return _raw(sections=[{"heading": "How", "body_md": body}])
+
+
+def test_section_images_are_removed_never_hotlinked():
+    result, warnings = normalize_result(_section(
+        "Before ![track](https://evil.example/pixel.png) ![ref][x] after\n\n[x]: https://evil.example/i.png"
+    ), SEEN)
+    body = result["sections"][0]["body_md"]
+    assert "evil.example" not in body and "![" not in body
+    assert any("Removed" in w for w in warnings)
+
+
+def test_section_links_survive_only_when_the_run_saw_them():
+    result, _ = normalize_result(_section(
+        "[good](https://shop.example/balm) [bad](https://evil.example/x) [js](javascript:alert(1)) "
+        "[ref][1] <https://evil.example/auto> https://evil.example/bare. https://shop.example/balm, done\n"
+        "[1]: https://evil.example/ref"
+    ), SEEN)
+    body = result["sections"][0]["body_md"]
+    assert "[good](https://shop.example/balm)" in body
+    assert "https://shop.example/balm," in body
+    for gone in ("evil.example", "javascript", "](", "[1]:"):
+        assert gone not in body.replace("[good](https://shop.example/balm)", "")
+    assert "bad" in body and "js" in body and "ref" in body  # link text is kept
+
+
+def test_section_html_is_stripped_and_empty_sections_dropped():
+    result, _ = normalize_result(_raw(sections=[
+        {"heading": "a", "body_md": "<script>x()</script><b>hi</b>"},
+        {"heading": "b", "body_md": "![only](https://evil.example/a.png)"},
+    ]), SEEN)
+    assert [s["body_md"] for s in result["sections"]] == ["x()hi"]
+
+
+def test_nested_parens_in_a_hostile_link_leave_no_fragment():
+    result, _ = normalize_result(_section("[js](javascript:alert(1)) text"), SEEN)
+    assert result["sections"][0]["body_md"] == "js text"

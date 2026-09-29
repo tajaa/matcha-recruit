@@ -12,9 +12,9 @@ It is not the MCP connector either: that is push-only, so it can't advance a car
 | Card created (`POST …/tasks`, category `agent`) | forced to `todo`, run queued | `routes/matcha_work/tasks.py` → `enqueue.enqueue_card_agent(reason="created")` |
 | Worker claims round 1 | `todo → in_progress` | `workers/tasks/agent_card.py` → `board.claim_column` |
 | Result stored | `→ review` | `board.finish_column` |
-| Reviewer sends it back (existing reject + note) | `changes_requested`; round N+1 runs **while it stays there** | `tasks.py` reject hook → `reason="redirect"` |
+| Reviewer sends it back (existing reject + note) | `changes_requested`; round N+1 runs **while it stays there** | `tasks.py` reject hook: editor check + `preflight` **before** the card moves, then `reason="redirect"` |
 | Approve | `done` | existing `approve_project_task` |
-| Failure | column unchanged; `progress_note` = "Agent stopped: … Use Run again" | `POST …/tasks/{t}/agent-runs` reruns |
+| Failure / broker down / worker killed | column unchanged; `progress_note` = "Agent stopped: … Use Run again" | `POST …/tasks/{t}/agent-runs` reruns |
 
 ## Invariants
 
@@ -32,7 +32,13 @@ It is not the MCP connector either: that is push-only, so it can't advance a car
 - **Images are rehosted, never hotlinked.** `images.rehost_images` fetches each image through `core/services/safe_fetch.fetch_public`, verifies and re-encodes it with Pillow (WebP, ≤1200px, metadata stripped), and uploads it. Any failure drops the image. The dev local-storage path is not a client URL, so it drops too.
 - **Every model-chosen URL goes through `safe_fetch.fetch_public`.** It resolves the host once, requires public IPs only, pins the IP (Host header + SNI), and re-validates each redirect hop. Default ports only.
 - **Read-only agent.** The tools are hosted `web_search`, `fetch_page` and `finish`. The prompt treats page content as untrusted data.
-- **AutoPR must never pick these up.** AutoPR maps unknown categories to the code lane. Both `apps/msandbox/harness/collect.sh` and halion's `collect.sh` drop `category == "agent"`.
+- **AutoPR must never pick these up.** AutoPR maps unknown categories to the code lane. The server refuses them (`project_task_service._AUTOPR_EXCLUDED_CATEGORIES`): `request_autopr_run` and `request_autopr_reconsideration` raise, `claim_autopr_run` returns `ok: False`, and `list_autopr_run_requests` filters them out, so no harness version can queue or claim one. `apps/msandbox/harness/collect.sh` and halion's `collect.sh` also drop `category == "agent"`, as a cheaper first filter.
+- **A refusal never strands a card.** Send-back runs every gate *before* `reject_project_task` moves the card, so a 403/429 leaves it in Review with the reviewer's note unspent. If the queue refuses after the move (a live run, the broker down) the card sits in Changes requested with its note saved, `agent_run_error` in the response, and "Run again" visible: the clients offer it in any open column with no live run.
+- **A dead worker can't block reruns.** `enqueue` fails runs still `queued`/`running` past 11 minutes (Celery's hard limit is 600s) inside the same transaction, before the one-live-run index can 409. The worker also wraps the run in a 420s backstop, and `reconcile_stale_runs` covers the rest. A broker failure at dispatch fails the just-inserted row (it would hold the index and count against the cap).
+- **The cap is atomic.** `enqueue` takes a per-user advisory lock (then the per-card one, always in that order) and counts inside it; `preflight` is only the early, friendly check. The rate limit lives in `preflight`, so it also runs before the card moves.
+- **AI drafts never choose `agent`.** `task_draft._TASK_DRAFT_CATEGORIES` and `task_draft_agent._CATEGORIES` exclude it (pinned by `test_category_allowlists_stay_in_sync`): a create would 403 for a Free/Lite user and silently spend a run for a Pro user. Agent cards come from the Agent template.
+- **Section Markdown is sanitized.** `schema.sanitize_markdown` drops images, raw HTML, reference links and any link or bare URL the run never saw, since `body_md` is the one field both clients render as live Markdown. The clients add a second lock (web renders no `<img>` and only http(s) links; Espresso strips non-http(s) `.link` attributes).
+- **Every await on hostile input is bounded.** `fetch_public` has a total deadline (per-socket timeouts never trip on a slow-drip host), requests `Accept-Encoding: identity` and refuses compressed replies (the byte cap counts decoded bytes, so a small gzip/brotli bomb would inflate inside one chunk). `is_global` is the address test (it also excludes CGNAT `100.64.0.0/10`), with NAT64/6to4/Teredo refused. Page extraction is iterative with node/depth caps and runs inside a try, so hostile JSON-LD/HTML is "a bad page", not a failed run. A photo failure (fetch, decode, S3 error) costs that photo only; storage that returns no public URL (`CLOUDFRONT_DOMAIN` unset) drops every photo once, with one warning, instead of uploading orphans.
 
 ## Limits and gating
 
@@ -45,8 +51,8 @@ It is not the MCP connector either: that is push-only, so it can't advance a car
 - **Per run (`agent.py`):**
   - ≤8 model calls;
   - ≤12 hosted searches (`max_tool_calls` per response plus a running total);
-  - ≤10 page loads;
-  - 300s wall clock.
+  - ≤10 page loads, 25s each;
+  - 300s of model turns, 60s of photo work, 420s overall backstop in the worker.
 - **Last turn:** forces `tool_choice=finish` with no search tool.
 - **Bad finish:** one repair turn, then fail.
 
@@ -59,6 +65,8 @@ celery -A app.workers.celery_app worker -Q agent_cards --concurrency=3 --max-tas
 ```
 
 Then set `AGENT_CARD_QUEUE=agent_cards` on the API. Until then, runs share the main worker.
+
+`on_worker_ready` (the scheduler dispatch that fires on every worker start) is queue-aware: a worker that doesn't consume Celery's default queue (`_serves_default_queue`) skips it, so the dedicated worker doesn't enqueue every scheduled task a second time.
 
 ## Endpoints
 

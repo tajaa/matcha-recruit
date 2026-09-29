@@ -19,9 +19,14 @@ struct AgentResultView: View {
     private var live: Bool { runs?.contains(where: \.isLive) ?? false }
     private var doneRuns: [MWAgentRun] { (runs ?? []).filter { $0.status == "done" && $0.result != nil } }
     private var shown: MWAgentRun? { doneRuns.first(where: { $0.id == selectedRunId }) ?? doneRuns.first }
+    /// Any open column with nothing working on it: a failed run, a card moved
+    /// back by hand, or a redirect whose run the queue refused (its note is
+    /// saved on the card).
     private var canRerun: Bool {
         canEdit && !live && ["todo", "in_progress", "changes_requested"].contains(task.boardColumn)
-            && (runs?.first?.status == "failed" || runs?.isEmpty == true)
+    }
+    private var waitingOnRedirect: Bool {
+        !live && task.boardColumn == "changes_requested" && runs?.first?.status != "failed"
     }
 
     var body: some View {
@@ -58,6 +63,10 @@ struct AgentResultView: View {
                     .font(.ticket(size: 11)).foregroundColor(.orange)
             } else if runs?.isEmpty == true {
                 Text("The agent hasn't run on this card yet.").font(.ticket(size: 11)).foregroundColor(.secondary)
+            }
+            if waitingOnRedirect, runs != nil {
+                Text("Your note is saved, but the agent isn't working on it yet. Run again to start.")
+                    .font(.ticket(size: 11)).foregroundColor(.secondary)
             }
 
             if let result = shown?.result {
@@ -122,6 +131,25 @@ struct AgentResultView: View {
     }
 }
 
+/// Section Markdown with every link that isn't plain http(s) stripped. The
+/// server already removes links and images the run never saw; this is the
+/// second lock, because `Text` opens a link of ANY scheme (file:, custom app
+/// URL schemes) on click.
+private func safeMarkdown(_ markdown: String) -> AttributedString {
+    var attributed = (try? AttributedString(
+        markdown: markdown,
+        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+    )) ?? AttributedString(markdown)
+    for run in Array(attributed.runs) {
+        guard let link = run.link else { continue }
+        let scheme = link.scheme?.lowercased()
+        if scheme != "https" && scheme != "http" {
+            attributed[run.range].link = nil
+        }
+    }
+    return attributed
+}
+
 private func openExternal(_ string: String) {
     guard let url = URL(string: string), let scheme = url.scheme?.lowercased(),
           scheme == "https" || scheme == "http" else { return }
@@ -173,9 +201,7 @@ struct AgentResultBody: View {
             ForEach(result.sections, id: \.self) { section in
                 VStack(alignment: .leading, spacing: 3) {
                     if !section.heading.isEmpty { Text(section.heading).font(.ticket(size: 12)).bold() }
-                    Text((try? AttributedString(markdown: section.bodyMd,
-                                                options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-                         ?? AttributedString(section.bodyMd))
+                    Text(safeMarkdown(section.bodyMd))
                         .font(.ticket(size: 12))
                         .fixedSize(horizontal: false, vertical: true)
                 }

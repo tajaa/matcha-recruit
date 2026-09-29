@@ -30,6 +30,12 @@ def _client(handler) -> httpx.AsyncClient:
     "http://169.254.169.254/latest/meta-data/",
     "https://example.com:8443/",
     "https://user:pw@example.com/",
+    "http://100.64.0.1/",          # CGNAT / carrier-grade NAT
+    "http://100.127.255.254/",
+    "http://[64:ff9b::7f00:1]/",   # NAT64 embedding 127.0.0.1
+    "http://[2002:7f00:1::]/",     # 6to4 embedding 127.0.0.1
+    "http://192.0.0.8/",
+    "http://198.18.0.1/",
 ])
 async def test_refuses_non_public_or_non_default_targets(url):
     with pytest.raises(UnsafeURL):
@@ -120,3 +126,60 @@ def test_ipv4_mapped_v6_is_unwrapped():
 
     assert not safe_fetch._ip_is_public(ipaddress.ip_address("::ffff:127.0.0.1"))
     assert safe_fetch._ip_is_public(ipaddress.ip_address("93.184.216.34"))
+
+
+@pytest.mark.asyncio
+async def test_requests_identity_encoding_and_refuses_a_compressed_reply(monkeypatch):
+    _resolve_to(monkeypatch, {"bomb.example": ["93.184.216.34"]})
+    seen = {}
+
+    def handler(request: httpx.Request):
+        seen["accept_encoding"] = request.headers["accept-encoding"]
+        return httpx.Response(200, headers={"content-encoding": "gzip"}, content=b"x")
+
+    with pytest.raises(UnsafeURL, match="Compressed"):
+        await fetch_public("https://bomb.example/", max_bytes=100, client=_client(handler))
+    assert seen["accept_encoding"] == "identity"
+
+
+@pytest.mark.asyncio
+async def test_identity_encoded_reply_is_fine(monkeypatch):
+    _resolve_to(monkeypatch, {"ok.example": ["93.184.216.34"]})
+    result = await fetch_public(
+        "https://ok.example/", max_bytes=100,
+        client=_client(lambda r: httpx.Response(200, headers={"content-encoding": "identity"}, content=b"ok")),
+    )
+    assert result.body == b"ok"
+
+
+@pytest.mark.asyncio
+async def test_total_timeout_bounds_a_slow_drip_host(monkeypatch):
+    import asyncio
+
+    _resolve_to(monkeypatch, {"drip.example": ["93.184.216.34"]})
+
+    class _Drip(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for _ in range(1000):
+                await asyncio.sleep(0.05)
+                yield b"x"
+
+    def handler(request):
+        return httpx.Response(200, stream=_Drip())
+
+    with pytest.raises(TimeoutError):
+        await fetch_public("https://drip.example/", max_bytes=10_000, total_timeout=0.2, client=_client(handler))
+
+
+@pytest.mark.asyncio
+async def test_total_timeout_covers_redirect_hops_together(monkeypatch):
+    import asyncio
+
+    _resolve_to(monkeypatch, {"a.example": ["93.184.216.34"]})
+
+    async def slow_handler(request):
+        await asyncio.sleep(0.15)
+        return httpx.Response(302, headers={"location": "https://a.example/next"})
+
+    with pytest.raises(TimeoutError):
+        await fetch_public("https://a.example/", max_bytes=10, max_redirects=5, total_timeout=0.4, client=_client(slow_handler))

@@ -89,11 +89,14 @@ async def _move(task_id: UUID, *, to: str, from_columns: tuple[str, ...], run_id
     return dict(row)
 
 
-async def claim_column(task_id: UUID, *, round: int, run_id: UUID) -> dict | None:
-    """Round 1 moves todo → in_progress. A revision round stays in
-    changes_requested while it works (that column IS "fixing it")."""
-    if round > 1:
-        return None
+async def claim_column(task_id: UUID, *, run_id: UUID) -> dict | None:
+    """todo → in_progress when the card is in To do, whatever the round.
+
+    A revision round normally starts from Changes requested, which is already
+    "the agent is fixing it" — that case is a no-op. But a rerun of round N≥2
+    from To do (or a card moved back by hand) must still leave To do, or it
+    would finish without ever passing through In progress.
+    """
     return await _move(task_id, to="in_progress", from_columns=("todo",), run_id=run_id)
 
 

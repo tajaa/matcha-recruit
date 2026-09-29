@@ -15,6 +15,12 @@ from ..celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 FAILED_NOTE = "Agent stopped: {reason} Use Run again to retry."
+# Backstop over the whole run. The loop bounds itself (300s of model turns, 25s
+# per page, 60s of photos) but a stuck await anywhere would otherwise sit until
+# Celery's 540s soft / 600s hard kill — which leaves the row live and the card
+# in In progress. Failing cleanly here lets the run record its spend and the
+# card offer "Run again".
+RUN_DEADLINE_SECONDS = 420.0
 
 
 @celery_app.task(name="app.workers.tasks.agent_card.run_card_agent")
@@ -65,7 +71,7 @@ async def _run(run_id: UUID) -> None:
             previous = None
 
     project_id, task_id = run["project_id"], run["task_id"]
-    moved = await board.claim_column(task_id, round=run["round"], run_id=run_id)
+    moved = await board.claim_column(task_id, run_id=run_id)
     if moved:
         await board.publish_task_updated(project_id, moved)
 
@@ -74,20 +80,28 @@ async def _run(run_id: UUID) -> None:
         ask = f"{ask}\n\n{task['description']}"
     stats: dict = {}
     try:
-        await agent.run_card_agent(
-            run_id=run_id,
-            company_id=run["company_id"],
-            project_id=project_id,
-            task_id=task_id,
-            round=run["round"],
-            ask=ask,
-            review_note=task["review_note"] if run["round"] > 1 else None,
-            previous_result=previous if isinstance(previous, dict) else None,
-            stats=stats,
+        await asyncio.wait_for(
+            agent.run_card_agent(
+                run_id=run_id,
+                company_id=run["company_id"],
+                project_id=project_id,
+                task_id=task_id,
+                round=run["round"],
+                ask=ask,
+                review_note=task["review_note"] if run["round"] > 1 else None,
+                previous_result=previous if isinstance(previous, dict) else None,
+                stats=stats,
+            ),
+            timeout=RUN_DEADLINE_SECONDS,
         )
     except Exception as exc:
         logger.exception("agent card run failed run=%s", run_id)
-        reason = str(exc) if isinstance(exc, agent.CardAgentError) else "something went wrong while researching."
+        if isinstance(exc, agent.CardAgentError):
+            reason = str(exc)
+        elif isinstance(exc, TimeoutError):
+            reason = "the run took too long."
+        else:
+            reason = "something went wrong while researching."
         await store.mark_run(
             run_id,
             status="failed",

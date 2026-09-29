@@ -39,10 +39,24 @@ class FetchedResponse:
     truncated: bool
 
 
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
 def _ip_is_public(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-        ip = ip.ipv4_mapped
-    return not (
+    """Globally routable unicast only.
+
+    `is_global` (not `not is_private`) is the test: it also excludes the
+    CGNAT range 100.64.0.0/10 and the other special-purpose blocks. The
+    explicit flags stay because IPv4 multicast still reports global. IPv6
+    forms that embed an IPv4 address are unwrapped or refused, since they can
+    reach an internal IPv4 host through a translator.
+    """
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        elif ip in _NAT64 or ip.sixtofour is not None or ip.teredo is not None:
+            return False
+    return bool(ip.is_global) and not (
         ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
         or ip.is_multicast or ip.is_unspecified
     )
@@ -117,13 +131,38 @@ async def fetch_public(
     timeout: float = 10.0,
     accept: str = "*/*",
     max_redirects: int = 3,
+    total_timeout: float = 30.0,
     client: httpx.AsyncClient | None = None,
 ) -> FetchedResponse:
     """GET `url` if (and only if) every hop resolves to a public address.
 
     The body is streamed and cut at `max_bytes` (`truncated=True`). Non-2xx
     final responses are returned, not raised — callers decide what a 404 means.
+
+    `timeout` is httpx's per-socket-operation limit, which a host that drips one
+    byte at a time never trips; `total_timeout` bounds the whole call, every
+    redirect hop included, and raises TimeoutError.
+
+    Responses are requested uncompressed and a compressed one is refused: the
+    byte cap counts decoded bytes, so a small gzip/brotli bomb would inflate
+    past it inside a single chunk before the cap could act.
     """
+    async with asyncio.timeout(total_timeout):
+        return await _fetch_public(
+            url, max_bytes=max_bytes, timeout=timeout, accept=accept,
+            max_redirects=max_redirects, client=client,
+        )
+
+
+async def _fetch_public(
+    url: str,
+    *,
+    max_bytes: int,
+    timeout: float,
+    accept: str,
+    max_redirects: int,
+    client: httpx.AsyncClient | None,
+) -> FetchedResponse:
     owns_client = client is None
     http = client or httpx.AsyncClient(follow_redirects=False, timeout=timeout)
     current = url
@@ -135,6 +174,7 @@ async def fetch_public(
                 "Host": host,
                 "User-Agent": _USER_AGENT,
                 "Accept": accept,
+                "Accept-Encoding": "identity",
                 "Accept-Language": "en-US,en;q=0.8",
             }
             extensions = {"sni_hostname": host} if scheme == "https" else {}
@@ -150,6 +190,9 @@ async def fetch_public(
                         raise UnsafeURL("Redirect without a location")
                     current = urljoin(current, location)
                     continue
+                encoding = (response.headers.get("content-encoding") or "identity").strip().lower()
+                if encoding not in ("", "identity"):
+                    raise UnsafeURL("Compressed responses are not fetched")
                 body = bytearray()
                 truncated = False
                 async for chunk in response.aiter_bytes():

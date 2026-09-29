@@ -122,3 +122,63 @@ async def test_luna_client_sends_hosted_tool_controls(monkeypatch):
     captured.clear()
     await luna_client.LunaSession().create_response(model="m", input=[], instructions="i")
     assert "max_tool_calls" not in captured and "include" not in captured
+
+
+def _one_image_result():
+    return {"top_pick": {"name": "A", "images": [
+        {"source_url": "https://img.example/a.png", "page_url": "https://shop.example/p", "alt": ""}]}}
+
+
+@pytest.mark.asyncio
+async def test_an_s3_upload_error_drops_that_photo_not_the_run(monkeypatch):
+    class _Boom:
+        async def upload_file(self, *a, **k):
+            raise RuntimeError("Failed to upload to S3: AccessDenied")
+
+    monkeypatch.setattr(images, "get_storage", lambda: _Boom())
+    monkeypatch.setattr(images, "fetch_public", AsyncMock(return_value=_fetched(_png((20, 20)))))
+    result = _one_image_result()
+    warnings = await images.rehost_images(result, company_id=uuid4(), project_id=uuid4(), task_id=uuid4())
+    assert result["top_pick"]["images"] == [] and len(warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_storage_without_a_public_url_says_so_once_and_stops_uploading(monkeypatch):
+    storage = _Storage(url="s3://matcha-bucket/matcha-work/x.webp")
+    monkeypatch.setattr(images, "get_storage", lambda: storage)
+    monkeypatch.setattr(images, "fetch_public", AsyncMock(return_value=_fetched(_png((20, 20)))))
+    result = _result()
+    warnings = await images.rehost_images(result, company_id=uuid4(), project_id=uuid4(), task_id=uuid4())
+    assert len(storage.uploads) == 1  # not one orphaned object per photo
+    assert sum("no public URL" in w for w in warnings) == 1
+    for pick in [result["top_pick"], *result["alternatives"]]:
+        assert pick["images"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_slow_image_host_cannot_stall_past_the_total_budget(monkeypatch):
+    import asyncio
+    import time
+
+    async def hang(*_a, **_k):
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(images, "get_storage", lambda: _Storage())
+    monkeypatch.setattr(images, "fetch_public", hang)
+    monkeypatch.setattr(images, "_PER_IMAGE_SECONDS", 0.05)
+    result = _result()
+    started = time.monotonic()
+    await images.rehost_images(result, company_id=uuid4(), project_id=uuid4(), task_id=uuid4(), total_seconds=2)
+    assert time.monotonic() - started < 3
+    for pick in [result["top_pick"], *result["alternatives"]]:
+        assert all("url" in image for image in pick["images"])  # never a half-rehosted entry
+
+
+@pytest.mark.asyncio
+async def test_out_of_time_still_leaves_every_pick_with_only_rehosted_images(monkeypatch):
+    monkeypatch.setattr(images, "get_storage", lambda: _Storage())
+    monkeypatch.setattr(images, "fetch_public", AsyncMock(return_value=_fetched(_png((20, 20)))))
+    result = _result()
+    await images.rehost_images(result, company_id=uuid4(), project_id=uuid4(), task_id=uuid4(), total_seconds=0)
+    for pick in [result["top_pick"], *result["alternatives"]]:
+        assert pick["images"] == []

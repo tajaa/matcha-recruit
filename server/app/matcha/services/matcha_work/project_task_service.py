@@ -261,6 +261,17 @@ def _parse_autopr_directives(text: str) -> tuple[list[str], Optional[str]]:
     return directives, test_route
 
 
+# Cards answered by Espresso's own server web agent (services/matcha_work/
+# agent_card/). AutoPR maps unknown categories to the CODE lane, so an agent
+# card that reached it would get a code PR. The harness collectors also drop
+# these, but that is a client-side filter in two shell trees; the server refuses
+# them here so no harness version can queue, claim or reconsider one.
+_AUTOPR_EXCLUDED_CATEGORIES = ("agent",)
+_AUTOPR_EXCLUDED_MESSAGE = (
+    "Agent cards are worked by Espresso's web agent, not AutoPR"
+)
+
+
 class AutoPRReconsiderationConflict(ValueError):
     """The AutoPR decision being answered is stale or no longer reconsiderable."""
 
@@ -356,7 +367,7 @@ async def request_autopr_reconsideration(
         async with conn.transaction():
             task = await conn.fetchrow(
                 """
-                SELECT id, progress_note, board_column, status
+                SELECT id, progress_note, board_column, status, category
                 FROM mw_tasks
                 WHERE id = $1 AND project_id = $2
                 FOR UPDATE
@@ -365,6 +376,8 @@ async def request_autopr_reconsideration(
             )
             if not task:
                 return None
+            if task.get("category") in _AUTOPR_EXCLUDED_CATEGORIES:
+                raise AutoPRReconsiderationConflict(_AUTOPR_EXCLUDED_MESSAGE)
 
             if (
                 task["status"] == "cancelled"
@@ -730,7 +743,7 @@ async def request_autopr_run(
         async with conn.transaction():
             task = await conn.fetchrow(
                 """
-                SELECT id, board_column, status
+                SELECT id, board_column, status, category
                 FROM mw_tasks
                 WHERE id = $1 AND project_id = $2
                 FOR UPDATE
@@ -739,6 +752,8 @@ async def request_autopr_run(
             )
             if not task:
                 return None
+            if task.get("category") in _AUTOPR_EXCLUDED_CATEGORIES:
+                raise AutoPRReconsiderationConflict(_AUTOPR_EXCLUDED_MESSAGE)
             if task["status"] == "cancelled" or task["board_column"] not in _AUTOPR_RUN_LANES:
                 raise AutoPRReconsiderationConflict(
                     "AutoPR only picks up tickets in Todo or Changes Requested"
@@ -808,12 +823,14 @@ async def claim_autopr_run(
     async with get_connection() as conn:
         async with conn.transaction():
             task = await conn.fetchrow(
-                "SELECT id, board_column, status, progress_note FROM mw_tasks "
+                "SELECT id, board_column, status, progress_note, category FROM mw_tasks "
                 "WHERE id = $1 AND project_id = $2 FOR UPDATE",
                 task_id, project_id,
             )
             if not task:
                 return None
+            if task.get("category") in _AUTOPR_EXCLUDED_CATEGORIES:
+                return {"ok": False, "reason": _AUTOPR_EXCLUDED_MESSAGE}
             held = await conn.fetchval(
                 f"SELECT {_AUTOPR_HOLD_SQL} FROM mw_tasks t WHERE t.id = $1",
                 task_id,
@@ -1537,6 +1554,7 @@ async def list_autopr_run_requests(project_ids: list[UUID]) -> list[dict]:
               AND h.metadata->>'kind' = 'autopr_run_request'
               AND t.status != 'cancelled'
               AND t.board_column = ANY($2::text[])
+              AND COALESCE(t.category, '') <> ALL($3::text[])
               AND h.created_at > COALESCE((
                     SELECT MAX(c.created_at) FROM mw_task_history c
                     WHERE c.task_id = h.task_id
@@ -1548,7 +1566,7 @@ async def list_autopr_run_requests(project_ids: list[UUID]) -> list[dict]:
             ORDER BY MAX(h.created_at)
             LIMIT 200
             """,
-            project_ids, list(_AUTOPR_RUN_LANES),
+            project_ids, list(_AUTOPR_RUN_LANES), list(_AUTOPR_EXCLUDED_CATEGORIES),
         )
     return [
         {

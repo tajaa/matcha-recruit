@@ -29,16 +29,30 @@ def _types(node: dict) -> set[str]:
     return {str(t) for t in _as_list(node.get("@type"))}
 
 
+_MAX_LD_NODES = 2000
+_MAX_LD_DEPTH = 40
+
+
 def _walk_ld(node: Any):
-    """Every dict in a JSON-LD blob, including @graph members and nesting."""
-    if isinstance(node, list):
-        for item in node:
-            yield from _walk_ld(item)
-    elif isinstance(node, dict):
-        yield node
-        for key in ("@graph", "mainEntity", "itemListElement", "item"):
-            if key in node:
-                yield from _walk_ld(node[key])
+    """Every dict in a JSON-LD blob, including @graph members and nesting.
+
+    Iterative with a depth and node cap: JSON-LD is attacker-controlled, and a
+    recursive walk over absurd nesting raises RecursionError.
+    """
+    stack: list[tuple[Any, int]] = [(node, 0)]
+    seen = 0
+    while stack and seen < _MAX_LD_NODES:
+        current, depth = stack.pop()
+        if depth > _MAX_LD_DEPTH:
+            continue
+        if isinstance(current, list):
+            stack.extend((item, depth + 1) for item in reversed(current))
+        elif isinstance(current, dict):
+            seen += 1
+            yield current
+            for key in ("item", "itemListElement", "mainEntity", "@graph"):
+                if key in current:
+                    stack.append((current[key], depth + 1))
 
 
 def _image_urls(value: Any, base: str) -> list[str]:
@@ -119,7 +133,7 @@ def extract_page(html: bytes, final_url: str) -> dict:
         raw = script.string or script.get_text() or ""
         try:
             blob = json.loads(raw)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RecursionError):
             continue
         for node in _walk_ld(blob):
             if "Product" in _types(node) and len(products) < MAX_PRODUCTS:

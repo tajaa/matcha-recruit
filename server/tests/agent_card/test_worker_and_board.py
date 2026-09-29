@@ -67,17 +67,28 @@ def board_conn(monkeypatch):
 @pytest.mark.asyncio
 async def test_claim_moves_todo_to_in_progress_and_logs_history(board_conn):
     board_conn["conn"] = conn = _BoardConn("todo")
-    row = await board.claim_column(uuid4(), round=1, run_id=uuid4())
+    row = await board.claim_column(uuid4(), run_id=uuid4())
     assert row["board_column"] == "in_progress"
     assert conn.history and conn.history[0][4] == "column_change"
     assert conn.history[0][3] is None  # actor: the agent, not a person
 
 
 @pytest.mark.asyncio
-async def test_revision_round_stays_in_changes_requested(board_conn):
+async def test_revision_round_from_changes_requested_stays_put(board_conn):
     board_conn["conn"] = conn = _BoardConn("changes_requested")
-    assert await board.claim_column(uuid4(), round=2, run_id=uuid4()) is None
+    assert await board.claim_column(uuid4(), run_id=uuid4()) is None
     assert conn.updates == []
+
+
+@pytest.mark.asyncio
+async def test_revision_rerun_from_todo_still_leaves_todo_and_can_reach_review(board_conn):
+    """Round >= 2 rerun from To do (card moved back by hand): it must pass
+    through In progress or finish_column would refuse to move it to Review."""
+    board_conn["conn"] = conn = _BoardConn("todo")
+    row = await board.claim_column(uuid4(), run_id=uuid4())
+    assert row["board_column"] == "in_progress"
+    review = await board.finish_column(uuid4(), run_id=uuid4())
+    assert review["board_column"] == "review" and conn.column == "review"
 
 
 @pytest.mark.asyncio
@@ -284,3 +295,24 @@ async def test_reconciler_flags_interrupted_agent_cards(monkeypatch):
     progress.assert_awaited_once()
     assert progress.await_args.args[0] == task_id and "interrupted" in progress.await_args.args[1]
     publish.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_worker_backstop_fails_a_stuck_run_cleanly_instead_of_waiting_for_the_hard_kill(monkeypatch):
+    import asyncio
+
+    conn = _WorkerConn(_run_row(), {"title": "x", "description": None, "review_note": None, "category": "agent"})
+    calls = _wire_worker(monkeypatch, conn)
+
+    async def stuck(**kwargs):
+        kwargs["stats"].update(model_calls=1, search_calls=2, token_usage={"total_tokens": 50})
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(agent, "run_card_agent", stuck)
+    monkeypatch.setattr(worker, "RUN_DEADLINE_SECONDS", 0.05)
+    await worker._run(uuid4())
+    assert calls["mark"].await_args.kwargs["status"] == "failed"
+    assert calls["mark"].await_args.kwargs["search_calls"] == 2
+    assert "took too long" in calls["progress"].await_args.args[1]
+    calls["finish"].assert_not_awaited()
+    assert calls["deduct"].await_args.args[2] == 50

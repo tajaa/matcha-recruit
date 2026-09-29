@@ -63,3 +63,30 @@ def test_og_fallback_and_malformed_json_ld_ignored():
 def test_text_is_capped():
     page = extract_page(_html(body="<p>" + "word " * 5000 + "</p>"), "https://x.example/")
     assert len(page["text"]) == MAX_TEXT_CHARS and page["text_truncated"]
+
+
+def test_deeply_nested_json_ld_does_not_crash_the_extractor():
+    depth = 5000
+    bomb = '{"a":' * depth + "1" + "}" * depth
+    html = (
+        f'<html><head><script type="application/ld+json">{bomb}</script></head>'
+        '<body><p>still readable</p></body></html>'
+    ).encode()
+    page = extract_page(html, "https://x.example/")
+    assert page["products"] == [] and "still readable" in page["text"]
+
+
+def test_deep_but_valid_json_ld_walk_is_bounded():
+    node = {"@type": "Product", "name": "Deep"}
+    for _ in range(200):
+        node = {"@graph": [node]}
+    page = extract_page(_html(node), "https://x.example/")
+    assert page["products"] == []  # past the depth cap, so ignored rather than recursed into
+
+
+def test_product_within_the_depth_cap_is_still_found():
+    node = {"@type": "Product", "name": "Shallow"}
+    for _ in range(5):
+        node = {"@graph": [node]}
+    page = extract_page(_html(node), "https://x.example/")
+    assert page["products"][0]["name"] == "Shallow"

@@ -3,8 +3,10 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ExternalLink, Loader2, RotateCcw, ShoppingCart, Sparkles, Star } from 'lucide-react'
 import type { MWProjectTask } from '../../../types'
-import { ApiError } from '../../../../api/client'
-import { listAgentRuns, rerunAgent, type AgentPick, type AgentResult, type AgentRun } from '../../../api/matchaWork'
+import {
+  agentErrorMessage, listAgentRuns, rerunAgent,
+  type AgentPick, type AgentResult, type AgentRun,
+} from '../../../api/matchaWork'
 
 const POLL_MS = 4000
 const EXTERNAL = { target: '_blank', rel: 'noopener noreferrer nofollow' } as const
@@ -23,24 +25,6 @@ function money(amount: number, currency: string) {
   } catch {
     return `${amount.toFixed(2)} ${currency}`
   }
-}
-
-/** Server `detail` → one readable line (plan / monthly cap / plain string). */
-export function agentErrorMessage(e: unknown): string {
-  if (e instanceof ApiError && e.body && typeof e.body === 'object' && 'detail' in e.body) {
-    const detail = (e.body as { detail: unknown }).detail
-    if (typeof detail === 'string') return detail
-    if (detail && typeof detail === 'object') {
-      const d = detail as Record<string, unknown>
-      if (d.code === 'plan_required') return 'Agent cards need the Pro plan.'
-      if (d.code === 'agent_run_limit') {
-        const resets = typeof d.resets_at === 'string' ? new Date(d.resets_at).toLocaleDateString() : 'next month'
-        return `You've used all ${d.limit} agent runs this month. They reset ${resets}.`
-      }
-      if (typeof d.message === 'string') return d.message
-    }
-  }
-  return e instanceof Error ? e.message : 'Something went wrong.'
 }
 
 function Rating({ rating }: { rating: NonNullable<AgentPick['rating']> }) {
@@ -172,9 +156,17 @@ export function AgentResultBody({ result }: { result: AgentResult }) {
       {result.sections.map((s) => (
         <div key={s.heading + s.body_md.slice(0, 20)} className="prose prose-sm prose-invert max-w-none text-sm">
           {s.heading && <p className="text-sm font-semibold text-w-text">{s.heading}</p>}
+          {/* The server strips unverified links and images from body_md; this
+              is the second lock: only http(s) links render, and never an image. */}
           <Markdown
             remarkPlugins={[remarkGfm]}
-            components={{ a: ({ href, children }) => <a {...EXTERNAL} href={href}>{children}</a> }}
+            components={{
+              a: ({ href, children }) =>
+                href && /^https?:\/\//i.test(href)
+                  ? <a {...EXTERNAL} href={href}>{children}</a>
+                  : <>{children}</>,
+              img: () => null,
+            }}
           >
             {s.body_md}
           </Markdown>
@@ -242,7 +234,10 @@ export default function AgentResultView({
   const done = (runs ?? []).filter((r) => r.status === 'done' && r.result)
   const shown = done.find((r) => r.id === selected) ?? done[0]
   const latest = runs?.[0]
+  // Any open column with nothing working on it: a failed run, a card moved back
+  // by hand, or a redirect whose run the queue refused (the note is saved).
   const canRerun = canEdit && !live && ['todo', 'in_progress', 'changes_requested'].includes(task.board_column)
+  const waitingOnRedirect = !live && task.board_column === 'changes_requested' && latest?.status !== 'failed'
 
   async function rerun() {
     setBusy(true)
@@ -297,11 +292,14 @@ export default function AgentResultView({
         <p className="text-xs text-orange-300">{task.progress_note || 'The last run stopped before finishing.'}</p>
       )}
       {!live && !runs?.length && <p className="text-xs text-w-dim">The agent hasn't run on this card yet.</p>}
+      {waitingOnRedirect && (
+        <p className="text-xs text-w-dim">Your note is saved, but the agent isn't working on it yet. Run again to start.</p>
+      )}
 
       {shown?.result && <AgentResultBody result={shown.result} />}
 
       {error && <p className="text-xs text-orange-300">{error}</p>}
-      {canRerun && (latest?.status === 'failed' || !runs?.length) && (
+      {canRerun && (
         <button
           onClick={rerun}
           disabled={busy}
