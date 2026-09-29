@@ -133,6 +133,7 @@
 		7A5C0000000000000000B010 /* NewRoundSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F010 /* NewRoundSheet.swift */; };
 		7A5C0000000000000000B011 /* TaskViewerSheet+Graph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F011 /* TaskViewerSheet+Graph.swift */; };
 		7A5C0000000000000000B012 /* TaskViewerSheet+Sections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F012 /* TaskViewerSheet+Sections.swift */; };
+		AC0D0000000000000000B003 /* AgentResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0D0000000000000000F002 /* AgentResultView.swift */; };
 		7A5C0000000000000000B0AA /* TaskViewerSheet+Outreach.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F0AA /* TaskViewerSheet+Outreach.swift */; };
 		7A5C0000000000000000B013 /* TaskViewerSheet+Actions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F013 /* TaskViewerSheet+Actions.swift */; };
 		7A5C0000000000000000B014 /* TaskViewerSheet+Header.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F014 /* TaskViewerSheet+Header.swift */; };
@@ -190,6 +191,8 @@
 		A49F89EDCE7C833FB29B37FD /* MatchaWorkService+Threads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59E54794E1B03CD3B2C99C21 /* MatchaWorkService+Threads.swift */; };
 		A50B4E10193B35300245E7EB /* ReplayModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BADA5500000000000000F001 /* ReplayModels.swift */; };
 		A51CE423E2DA1299C80F8E71 /* ProjectTaskModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E489FA155C69897ED38F5DF8 /* ProjectTaskModels.swift */; };
+		AC0D0000000000000000B001 /* AgentRunModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0D0000000000000000F001 /* AgentRunModels.swift */; };
+		AC0D0000000000000000B002 /* AgentRunModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0D0000000000000000F001 /* AgentRunModels.swift */; };
 		A52CF0177F6967BD3F8C3945 /* DMThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49252AC99B00DAC28D2FEB49 /* DMThreadView.swift */; };
 		A5A5A5A5A5A5A5A5A5A5B001 /* AppState+Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5A5A5A5A5A5A5A5A5A5C001 /* AppState+Session.swift */; };
 		A5A5A5A5A5A5A5A5A5A5B002 /* AppState+RealtimeHandlers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5A5A5A5A5A5A5A5A5A5C002 /* AppState+RealtimeHandlers.swift */; };
@@ -500,6 +503,7 @@
 		7A5C0000000000000000F010 /* NewRoundSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewRoundSheet.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F011 /* TaskViewerSheet+Graph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Graph.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F012 /* TaskViewerSheet+Sections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Sections.swift"; sourceTree = "<group>"; };
+		AC0D0000000000000000F002 /* AgentResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentResultView.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F0AA /* TaskViewerSheet+Outreach.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Outreach.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F013 /* TaskViewerSheet+Actions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Actions.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F014 /* TaskViewerSheet+Header.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Header.swift"; sourceTree = "<group>"; };
@@ -665,6 +669,7 @@
 		E2A1B0C0D0E0F0010000000C /* EmailTicketWizard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailTicketWizard.swift; sourceTree = "<group>"; };
 		E2B3C4D5F6071829A0B1C2D3 /* UsageSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSummaryView.swift; sourceTree = "<group>"; };
 		E489FA155C69897ED38F5DF8 /* ProjectTaskModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectTaskModels.swift; sourceTree = "<group>"; };
+		AC0D0000000000000000F001 /* AgentRunModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunModels.swift; sourceTree = "<group>"; };
 		E5C3CE5229A938126E840ABD /* MultipartUploadBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MultipartUploadBuilder.swift; sourceTree = "<group>"; };
 		E86DDE94CCCCD549EE767827 /* MatchaWorkService+Elements.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "MatchaWorkService+Elements.swift"; sourceTree = "<group>"; };
 		E93689D55183E3174B00BDD9 /* ProjectDetailViewModel+Files.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ProjectDetailViewModel+Files.swift"; sourceTree = "<group>"; };
@@ -1013,6 +1018,7 @@
 				7A5C0000000000000000F010 /* NewRoundSheet.swift */,
 				7A5C0000000000000000F011 /* TaskViewerSheet+Graph.swift */,
 				7A5C0000000000000000F012 /* TaskViewerSheet+Sections.swift */,
+				AC0D0000000000000000F002 /* AgentResultView.swift */,
 				7A5C0000000000000000F0AA /* TaskViewerSheet+Outreach.swift */,
 				7A5C0000000000000000F017 /* TaskViewerSheet+Discussion.swift */,
 				7A5C0000000000000000F016 /* TaskViewerSheet+History.swift */,
@@ -1094,6 +1100,7 @@
 				B06A176992AA39C8E304EFD0 /* BillingUsageModels.swift */,
 				94FBACAA706BADE04CF26DE2 /* DashboardModels.swift */,
 				E489FA155C69897ED38F5DF8 /* ProjectTaskModels.swift */,
+				AC0D0000000000000000F001 /* AgentRunModels.swift */,
 				BADA5500000000000000F001 /* ReplayModels.swift */,
 				86F9C67C0E32966EBAB0BD94 /* ProjectElementModels.swift */,
 				5C6EEE903BD7EDAD4CB23C91 /* ProjectBizModels.swift */,
@@ -1567,6 +1574,7 @@
 				00EE63CE8D990C99711DCDAC /* DashboardModels.swift in Sources */,
 				48617E06CACB4F59B46A0293 /* ProjectModels.swift in Sources */,
 				A51CE423E2DA1299C80F8E71 /* ProjectTaskModels.swift in Sources */,
+				AC0D0000000000000000B001 /* AgentRunModels.swift in Sources */,
 				F8CDEE104256D2EA82AE3AA5 /* ProjectBizModels.swift in Sources */,
 				7118F364558AA67977EDE479 /* ProjectElementModels.swift in Sources */,
 				EA587DD7AF369D1321E8EDD4 /* ReplayModels.swift in Sources */,
@@ -1659,6 +1667,7 @@
 				7A5C0000000000000000B010 /* NewRoundSheet.swift in Sources */,
 				7A5C0000000000000000B011 /* TaskViewerSheet+Graph.swift in Sources */,
 				7A5C0000000000000000B012 /* TaskViewerSheet+Sections.swift in Sources */,
+				AC0D0000000000000000B003 /* AgentResultView.swift in Sources */,
 				7A5C0000000000000000B0AA /* TaskViewerSheet+Outreach.swift in Sources */,
 				7A5C0000000000000000B017 /* TaskViewerSheet+Discussion.swift in Sources */,
 				7A5C0000000000000000B016 /* TaskViewerSheet+History.swift in Sources */,
@@ -1842,6 +1851,7 @@
 				286D1C1EC6A72DE82EF6E765 /* ProjectMediaView.swift in Sources */,
 				6A029A351EBB310BD348B013 /* ProjectElementsView.swift in Sources */,
 				D66A23402900CA7D8B4894A9 /* ProjectTaskModels.swift in Sources */,
+				AC0D0000000000000000B002 /* AgentRunModels.swift in Sources */,
 				BADA5500000000000000B001 /* ReplayModels.swift in Sources */,
 				C40604AE06F74A358E7B37E0 /* ProjectElementModels.swift in Sources */,
 				E5594BCA329F0F5EC6CD4484 /* ProjectBizModels.swift in Sources */,

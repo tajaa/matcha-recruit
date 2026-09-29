@@ -246,6 +246,7 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
     case fix    // promoted from a "Prop" fix draft
     case research   // AutoPR attaches a report to the card instead of opening a PR
     case email      // AutoPR reads the attached email-*.md snapshots and attaches a triage report
+    case agent      // the server's own web agent answers it with a result page (no AutoPR)
 
     var id: String { rawValue }
 
@@ -260,6 +261,7 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
         case .fix: return "Fix"
         case .research: return "Research"
         case .email: return "Email"
+        case .agent: return "Agent"
         }
     }
 
@@ -274,6 +276,7 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
         case .fix: return "wrench.and.screwdriver"
         case .research: return "magnifyingglass"
         case .email: return "envelope"
+        case .agent: return "sparkle.magnifyingglass"
         }
     }
 
@@ -288,6 +291,7 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
         case .fix: return .orange
         case .research: return .indigo
         case .email: return .cyan
+        case .agent: return .mint
         }
     }
 
@@ -457,6 +461,11 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
             ## Tone
             professional
             """
+        case .agent:
+            return """
+            ## Anything it should know
+            _Budget, must-haves, what to avoid._
+            """
         }
     }
 
@@ -553,6 +562,13 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
                 .init(key: "goal", label: "What should the agent do with these emails?", placeholder: "e.g. Summarize and draft replies to anything from customers", kind: .singleLine),
                 .init(key: "instructions", label: "Instructions", placeholder: "Which senders matter, what to ignore, what a good reply looks like.", kind: .multiLine),
                 .init(key: "tone", label: "Tone", placeholder: "", kind: .picker(["professional", "casual", "brief"])),
+            ]
+        case .agent:
+            // The request is the title ("Find me the best organic lip balm");
+            // the server's web agent starts on it at once and lands a result
+            // page in Review (server/app/matcha/services/matcha_work/agent_card/).
+            return [
+                .init(key: "details", label: "Anything it should know", placeholder: "Budget, must-haves, what to avoid.", kind: .multiLine),
             ]
         }
     }
