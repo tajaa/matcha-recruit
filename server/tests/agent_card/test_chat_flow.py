@@ -732,7 +732,13 @@ async def test_approved_purchase_is_charged_in_stripe_test_mode(env, monkeypatch
     assert seen["brand"] == "visa"
     update = env["db"].charge_updates[0]
     assert update[1:] == ("test_charged", "pi_test_123", None)
-    assert "Test charge of $4.49 succeeded in Stripe test mode (pi_test_123). No real money moved." in _said(env)[-1]
+    receipt = _said(env)[-1]
+    assert receipt.startswith("All done. Here's your receipt.")
+    for line in ("Receipt (Stripe TEST mode, no real money moved)", "Item: Organic Lip Balm (Dr. Bronner's)",
+                 "Store: Shop", "Total: $4.49 USD", "Paid with: Visa ending 4242 (Mercury test)",
+                 "Payment: pi_test_123 (succeeded)", "Product page: https://shop.example.com/p"):
+        assert line in receipt
+    assert "4242 4242" not in receipt
 
 
 @pytest.mark.asyncio

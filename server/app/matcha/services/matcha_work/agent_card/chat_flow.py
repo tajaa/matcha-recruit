@@ -223,6 +223,33 @@ def _offer_line(offer: dict) -> str:
     return " ".join(parts)
 
 
+def format_receipt(payload: dict, *, card: dict, purchase_id, payment_intent_id: str, task_id) -> str:
+    """The "all done" message after a successful Stripe test charge."""
+    from datetime import datetime, timezone
+
+    item = payload["item_name"] + (f" ({payload['brand']})" if payload.get("brand") else "")
+    code = (payload.get("currency") or "USD").upper()
+    lines = [
+        "All done. Here's your receipt.",
+        "",
+        "Receipt (Stripe TEST mode, no real money moved)",
+        f"Item: {item}",
+    ]
+    if payload.get("retailer"):
+        lines.append(f"Store: {payload['retailer']}")
+    lines += [
+        f"Total: {format_money(payload['amount'], code)} {code}",
+        f"Paid with: {_card_label(card)}",
+        f"Payment: {payment_intent_id} (succeeded)",
+        f"Order ref: {str(purchase_id)[:8].upper()}",
+        f"Date: {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC",
+        "",
+        f"Product page: {payload['checkout_url']}",
+        f"It's saved on ⟦ticket:{task_id}|the card|Review⟧ under Purchases.",
+    ]
+    return "\n".join(lines)
+
+
 _BRANDS = {"visa": "Visa", "mastercard": "Mastercard", "amex": "Amex", "discover": "Discover"}
 
 
@@ -747,9 +774,10 @@ async def _answer_pick_card(conn, prompt, user, answer: Answer, *, say) -> None:
            WHERE id = $1""",
         purchase_id, outcome["status"], outcome["payment_intent_id"], outcome["error"],
     )
-    money = format_money(payload["amount"], payload["currency"])
     if outcome["status"] == "test_charged":
-        await say(f"{approved} Test charge of {money} succeeded in Stripe test mode "
-                  f"({outcome['payment_intent_id']}). No real money moved. {link}")
+        await say(format_receipt(
+            payload, card=dict(card), purchase_id=purchase_id,
+            payment_intent_id=outcome["payment_intent_id"], task_id=prompt["task_id"],
+        ))
     else:
         await say(f"{approved} The Stripe test charge failed: {outcome['error']} {link}")
