@@ -10,35 +10,35 @@ from app.matcha.services.matcha_work import project_service, project_task_servic
 from app.matcha.services.matcha_work.agent_card import chat_create, chat_flow, enqueue
 
 
-@pytest.mark.parametrize("text, repo, expected", [
-    ("@espresso find me organic sweat pants to buy online. ship home, not office.", False,
+@pytest.mark.parametrize("text, expected", [
+    ("@espresso find me organic sweat pants to buy online. ship home, not office.",
      "find me organic sweat pants to buy online. ship home, not office."),
-    ("@espresso please find the best standing desk under $400", True,
-     "please find the best standing desk under $400"),
-    ("hey @espresso can you compare noise cancelling headphones", False,
-     "hey can you compare noise cancelling headphones"),
-    ("@espresso what's the best espresso grinder for home", False, "what's the best espresso grinder for home"),
-    ("@espresso buy me a 6 ft braided usb-c cable", True, "buy me a 6 ft braided usb-c cable"),
-    ("@espresso find the best espresso machine under $500", True, "find the best espresso machine under $500"),
-    ("@espresso research standing desks, ship to Oakland", True, "research standing desks, ship to Oakland"),
+    ("@espresso please find the best standing desk under $400", "please find the best standing desk under $400"),
+    ("hey @espresso can you compare cheap noise cancelling headphones",
+     "hey can you compare cheap noise cancelling headphones"),
+    ("@espresso buy me a 6 ft braided usb-c cable", "buy me a 6 ft braided usb-c cable"),
+    ("@espresso find the best espresso machine under $500", "find the best espresso machine under $500"),
+    ("@espresso research standing desks, ship to Oakland", "research standing desks, ship to Oakland"),
     # Repo questions stay with the repo agent.
-    ("@espresso how does the auth middleware work", True, None),
-    ("@espresso find where we validate the webhook signature", True, None),
-    # Errand verbs, but no money word: in a repo project these are code questions.
-    ("@espresso compare our two auth flows", True, None),
-    ("@espresso what's the best place to add caching", True, None),
-    ("@espresso find where the order total is computed", True, None),
-    ("@espresso recommend a review process for deals", True, None),
-    # Code talk is never an errand, even with no repo connected (it would
-    # spend a monthly agent run on a web search).
-    ("@espresso compare our two auth flows", False, None),
-    ("@espresso find the function that prices a cart", False, None),
-    ("@espresso research how does the scheduler pick shifts", False, None),
-    ("@espresso find it", False, None),  # too short to be an errand
-    ("@espresso thanks!", False, None),
+    ("@espresso how does the auth middleware work", None),
+    ("@espresso find where we validate the webhook signature", None),
+    # Errand verbs, but no money word: code questions, or questions about the
+    # business, never a paid web search. This holds with no repo connected too
+    # (those get the "connect a repo" reply, which says how to phrase an errand).
+    ("@espresso compare our two auth flows", None),
+    ("@espresso what's the best place to add caching", None),
+    ("@espresso find where the order total is computed", None),
+    ("@espresso recommend a review process for deals", None),
+    ("@espresso research why signups dropped last week", None),
+    ("@espresso what's the best espresso grinder for home", None),
+    # Code talk is never an errand, even with a money word.
+    ("@espresso find the function that prices a cart", None),
+    ("@espresso research how does the scheduler pick shifts to buy", None),
+    ("@espresso find it", None),  # too short to be an errand
+    ("@espresso thanks!", None),
 ])
-def test_errand_request(text, repo, expected):
-    assert chat_create.errand_request(text, repo_connected=repo) == expected
+def test_errand_request(text, expected):
+    assert chat_create.errand_request(text) == expected
 
 
 @pytest.mark.parametrize("request_text, title", [
@@ -169,9 +169,11 @@ async def test_handle_mention_routes_errands_and_leaves_repo_questions(env, monk
     monkeypatch.setattr(chat_create, "create_card_from_chat", create)
     monkeypatch.setattr(chat_flow, "handle_chat_answer", AsyncMock(return_value=False))
     common = dict(project_id=uuid4(), company_id=uuid4(), channel_id=uuid4(), user=_user())
-    assert await chat_create.handle_mention(text="@espresso find me wool socks to buy", repo_connected=False, **common)
+    assert await chat_create.handle_mention(text="@espresso find me wool socks to buy", **common)
     assert create.await_args.kwargs["request"] == "find me wool socks to buy"
-    assert not await chat_create.handle_mention(text="@espresso how does login work", repo_connected=True, **common)
+    assert not await chat_create.handle_mention(text="@espresso how does login work", **common)
+    assert not await chat_create.handle_mention(text="@espresso research why signups dropped", **common)
+    assert create.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -181,14 +183,46 @@ async def test_espresso_buy_it_answers_an_open_purchase_question_instead_of_maki
     monkeypatch.setattr(chat_create, "create_card_from_chat", create)
     monkeypatch.setattr(chat_flow, "handle_chat_answer", answer)
     common = dict(project_id=uuid4(), company_id=uuid4(), channel_id=uuid4(), user=_user())
-    assert await chat_create.handle_mention(text="@espresso buy it", repo_connected=False, **common)
+    assert await chat_create.handle_mention(text="@espresso buy it", **common)
     assert answer.await_args.kwargs["content"] == "buy it"
     create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text, content", [
+    ("@espresso yes", "yes"),
+    ("@espresso show me", "show me"),
+    ("@espresso 2", "2"),
+])
+async def test_espresso_yes_or_a_card_number_answers_the_open_question(env, monkeypatch, text, content):
+    create = AsyncMock()
+    answer = AsyncMock(return_value=True)
+    monkeypatch.setattr(chat_create, "create_card_from_chat", create)
+    monkeypatch.setattr(chat_flow, "handle_chat_answer", answer)
+    common = dict(project_id=uuid4(), company_id=uuid4(), channel_id=uuid4(), user=_user())
+    assert await chat_create.handle_mention(text=text, **common)
+    assert answer.await_args.kwargs["content"] == content
+    create.assert_not_awaited()
+    assert env["posted"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["@espresso buy the top pick", "@espresso yes", "@espresso 4242"])
+async def test_an_answer_with_nothing_open_gets_a_reply_and_never_a_card(env, monkeypatch, text):
+    # "buy the top pick" after its question expired used to become a new
+    # errand card, spending a monthly agent run; "yes" went to the repo agent.
+    create = AsyncMock()
+    monkeypatch.setattr(chat_create, "create_card_from_chat", create)
+    monkeypatch.setattr(chat_flow, "handle_chat_answer", AsyncMock(return_value=False))
+    common = dict(project_id=uuid4(), company_id=uuid4(), channel_id=uuid4(), user=_user())
+    assert await chat_create.handle_mention(text=text, **common)
+    create.assert_not_awaited()
+    assert env["posted"] == [chat_create.NOTHING_TO_ANSWER]
 
 
 @pytest.mark.asyncio
 async def test_handle_mention_reports_an_unexpected_failure(env, monkeypatch):
     monkeypatch.setattr(chat_create, "create_card_from_chat", AsyncMock(side_effect=RuntimeError("db")))
     common = dict(project_id=uuid4(), company_id=uuid4(), channel_id=uuid4(), user=_user())
-    assert await chat_create.handle_mention(text="@espresso find me wool socks to buy", repo_connected=False, **common)
+    assert await chat_create.handle_mention(text="@espresso find me wool socks to buy", **common)
     assert "Something went wrong" in env["posted"][0]

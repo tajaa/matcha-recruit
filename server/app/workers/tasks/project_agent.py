@@ -1,28 +1,28 @@
 """Celery entry points for durable Espresso project-agent tasks."""
 from __future__ import annotations
 
-import asyncio
 import logging
 from uuid import UUID
 
 from ..celery_app import celery_app
+from ..utils import run_with_chat_fanout
 
 logger = logging.getLogger(__name__)
 
 
 @celery_app.task(name="app.workers.tasks.project_agent.run_repo_question")
 def run_repo_question(run_id: str) -> None:
-    asyncio.run(_run(UUID(run_id)))
+    run_with_chat_fanout(_run(UUID(run_id)))
 
 
 @celery_app.task(name="app.workers.tasks.project_agent.run_task_draft")
 def run_task_draft(run_id: str) -> None:
-    asyncio.run(_run(UUID(run_id)))
+    run_with_chat_fanout(_run(UUID(run_id)))
 
 
 @celery_app.task(name="app.workers.tasks.project_agent.reconcile_stale_runs")
 def reconcile_stale_runs() -> None:
-    asyncio.run(_reconcile())
+    run_with_chat_fanout(_reconcile())
 
 
 async def _reconcile() -> None:

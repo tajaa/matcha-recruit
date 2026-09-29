@@ -229,7 +229,16 @@ final class ChannelsWebSocket: NSObject {
         }
     }
 
-    func sendMessage(channelId: String, content: String, attachments: [ChannelAttachment] = [], replyToId: String? = nil, clientMessageId: String? = nil) {
+    /// Send a chat message. By default it goes through the durable outbox, so
+    /// it is replayed on reconnect, even after a restart. `queue: false` sends
+    /// only over an open socket and never touches the outbox: agent-card quick
+    /// replies, where a stale answer replayed later is worse than none.
+    /// Returns whether the message was sent or queued.
+    @discardableResult
+    func sendMessage(
+        channelId: String, content: String, attachments: [ChannelAttachment] = [],
+        replyToId: String? = nil, clientMessageId: String? = nil, queue: Bool = true
+    ) -> Bool {
         // Always carry a client_message_id: it's both the optimistic-UI
         // correlation key and the server-side idempotency key for safe resends.
         let cmid = clientMessageId ?? UUID().uuidString
@@ -237,8 +246,14 @@ final class ChannelsWebSocket: NSObject {
             cmid: cmid, channelId: channelId, content: content,
             attachments: attachments, replyToId: replyToId, attempts: 0,
         )
+        guard queue else {
+            guard isConnected, task != nil else { return false }
+            send(messagePayload(item))
+            return true
+        }
         enqueueOutbox(item)
         attemptSend(cmid: cmid)
+        return true
     }
 
     // ── Outbox plumbing ──────────────────────────────────────────────────────
@@ -257,7 +272,7 @@ final class ChannelsWebSocket: NSObject {
     /// attempts so a permanently-rejected message can't loop forever.
     private func attemptSend(cmid: String) {
         guard let idx = outbox.firstIndex(where: { $0.cmid == cmid }) else { return }
-        guard isConnected, let task else {
+        guard isConnected, task != nil else {
             connect()   // didOpenWithProtocol flushes the whole outbox
             return
         }
@@ -268,7 +283,11 @@ final class ChannelsWebSocket: NSObject {
         }
         outbox[idx].attempts += 1
         persistOutbox()
-        let item = outbox[idx]
+        // On a send error it stays in the outbox; reconnect's flush retries it.
+        send(messagePayload(outbox[idx]))
+    }
+
+    private func messagePayload(_ item: OutboxItem) -> [String: Any] {
         var payload: [String: Any] = [
             "type": "message",
             "channel_id": item.channelId,
@@ -286,14 +305,7 @@ final class ChannelsWebSocket: NSObject {
                 ]
             }
         }
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let str = String(data: data, encoding: .utf8) else { return }
-        task.send(.string(str)) { [weak self] error in
-            if error != nil {
-                // Stays in the outbox; reconnect's flush retries it.
-                Task { @MainActor in self?.scheduleReconnect() }
-            }
-        }
+        return payload
     }
 
     /// Re-send everything queued. Called on every (re)connect once the handshake

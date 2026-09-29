@@ -14,7 +14,7 @@ import {
   setChannelMute,
 } from '../../api/channels'
 import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment, ChannelPaymentInfo } from '../../api/channels'
-import { mergeMessages } from '../../api/channelMessages'
+import { mergeMessages, retrySendOptions } from '../../api/channelMessages'
 import { ChannelSocket } from '../../api/channelSocket'
 import { useMe } from '../../../hooks/useMe'
 import { listOpenPostings } from '../../api/channelJobPostings'
@@ -310,6 +310,7 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
         client_message_id: cmid,
         pending: true,
         failed: !sent,
+        ...(queueIfOffline ? {} : { no_queue: true }),
         reply_to_id: replyTarget?.id ?? null,
         reply_preview: replyTarget
           ? {
@@ -343,7 +344,9 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
   function handleRetryMessage(msg: ChannelMessage) {
     if (!channelId || !msg.client_message_id) return
     const cmid = msg.client_message_id
-    const sent = socketRef.current?.sendMessage(channelId, msg.content, msg.attachments, cmid, msg.reply_to_id ?? undefined) ?? false
+    const sent = socketRef.current?.sendMessage(
+      channelId, msg.content, msg.attachments, cmid, msg.reply_to_id ?? undefined, retrySendOptions(msg),
+    ) ?? false
     // Previously ignored `sent` — a retry while still offline cleared
     // `failed` unconditionally, so the row sat showing "pending" for a full
     // 8s before flipping back to failed, even though channelSocket already

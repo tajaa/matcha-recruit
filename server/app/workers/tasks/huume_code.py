@@ -1,23 +1,23 @@
 """Celery entry point for the collab-chat Huume draft-PR agent."""
 from __future__ import annotations
 
-import asyncio
 import logging
 from uuid import UUID
 
 from ..celery_app import celery_app
+from ..utils import run_with_chat_fanout
 
 logger = logging.getLogger(__name__)
 
 
 @celery_app.task(name="app.workers.tasks.huume_code.run_huume_code")
 def run_huume_code(run_id: str) -> None:
-    asyncio.run(_run(UUID(run_id)))
+    run_with_chat_fanout(_run(UUID(run_id)))
 
 
 @celery_app.task(name="app.workers.tasks.huume_code.reconcile_stale_runs")
 def reconcile_stale_runs() -> None:
-    asyncio.run(_reconcile())
+    run_with_chat_fanout(_reconcile())
 
 
 async def _reconcile() -> None:

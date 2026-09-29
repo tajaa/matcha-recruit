@@ -180,7 +180,10 @@ async def _bg_apply_autopr_context_reply(
 ) -> None:
     """Turn a direct reply to Espresso into decision-bound card evidence."""
     try:
-        from app.matcha.services.matcha_work.project_agent.chat import post_as_espresso
+        from app.matcha.services.matcha_work.project_agent.chat import (
+            post_as_espresso,
+            strip_espresso_mention,
+        )
         from app.matcha.services.matcha_work.project_task_service import (
             AutoPRReconsiderationConflict,
             request_autopr_reconsideration,
@@ -189,9 +192,7 @@ async def _bg_apply_autopr_context_reply(
         project_id = reference["project_id"]
         task_id = reference["task_id"]
         channel_id = UUID(channel_id_str)
-        text = re.sub(
-            r"(?i)(?:(?<=^)|(?<=\s))@espresso\b", "", content or "", count=1,
-        ).strip()
+        text = strip_espresso_mention(content)
         async with get_connection() as conn:
             project = await conn.fetchrow(
                 """SELECT p.company_id,
@@ -408,7 +409,10 @@ async def _bg_dispatch_espresso_mention(
     claimed = False
     try:
         from app.core.feature_flags import merge_company_features
-        from app.matcha.services.matcha_work.project_agent.chat import post_as_espresso
+        from app.matcha.services.matcha_work.project_agent.chat import (
+            post_as_espresso,
+            strip_espresso_mention,
+        )
         from app.matcha.services.matcha_work.project_agent.guards import can_ask_project_agent
         from app.matcha.services.billing import token_budget_service
         from app.workers.tasks.project_agent import run_repo_question
@@ -472,22 +476,22 @@ async def _bg_dispatch_espresso_mention(
         )
         if await handle_agent_card_mention(
             project_id=project["id"], company_id=company_id, channel_id=channel_id,
-            user=user, text=content, repo_connected=bool(project["github_repo"]),
+            user=user, text=content,
         ):
             return True
         if not project["github_repo"]:
             await post_as_espresso(
                 company_id, channel_id,
-                "Connect a GitHub repository in Elements before asking me about the app, "
-                "or ask me to find something, like \"@espresso find me organic sweatpants to buy online\".",
+                "Connect a GitHub repository in Elements before asking me about the app. "
+                "To have me shop for something, say what to buy, like "
+                "\"@espresso find me organic sweatpants to buy online\". "
+                "That starts an agent card, which uses one of your monthly agent runs.",
             )
             return True
 
         # Strip the first virtual-agent mention before persisting the task;
         # keep every other character exactly as the user wrote it.
-        question = re.sub(
-            r"(?i)(?:(?<=^)|(?<=\s))@espresso\b", "", content or "", count=1,
-        ).strip()
+        question = strip_espresso_mention(content)
         if not question:
             await post_as_espresso(
                 company_id, channel_id,
