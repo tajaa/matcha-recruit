@@ -308,6 +308,11 @@ struct TaskViewerSheet: View {
                 autoPRRuntimeControl
                 researchReportSection
 
+                if liveAutoPRTask.category == "agent", let projectID = viewModel.project?.id {
+                    AgentResultView(projectId: projectID, task: liveAutoPRTask,
+                                    canEdit: researchWithAssistantCanEdit)
+                }
+
                 if viewMode == .list {
                     checklistSection
 

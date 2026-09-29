@@ -26,6 +26,7 @@ _MAX_MODEL_CALLS = 3
 _WALL_SECONDS = 90.0
 _GUIDANCE_PATHS = ("CLAUDE.md", "AGENTS.md")
 _PRIORITIES = {"critical", "high", "medium", "low"}
+# Not `agent`: see matcha_work_ai/task_draft.py — drafts never create paid cards.
 _CATEGORIES = {"engineering", "bug", "product", "sales", "general", "manual", "feat", "fix", "research", "email"}
 _COLUMNS = {"todo", "in_progress", "review", "done"}
 TASK_DRAFT_MODEL = LUNA

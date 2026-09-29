@@ -32,11 +32,32 @@ def test_the_web_draft_prompt_names_the_email_category():
     assert '→ "email"' in source
 
 
+# Categories a person must pick on purpose. `agent` starts a paid web run and is
+# plan- and quota-gated, so an AI draft may never choose it for them.
+_NEVER_DRAFTED = {"agent"}
+
+
 def test_category_allowlists_stay_in_sync():
     """Three copies of one list; a template added to one and not the others is
     exactly the drift this guards."""
-    assert task_draft._TASK_DRAFT_CATEGORIES == project_task_service._ALLOWED_CATEGORIES
-    assert task_draft_agent._CATEGORIES == project_task_service._ALLOWED_CATEGORIES
+    draftable = project_task_service._ALLOWED_CATEGORIES - _NEVER_DRAFTED
+    assert task_draft._TASK_DRAFT_CATEGORIES == draftable
+    assert task_draft_agent._CATEGORIES == draftable
+
+
+def test_ai_drafts_can_never_create_an_agent_card():
+    import inspect
+
+    from app.matcha.services.matcha_work.project_agent.tools import task_draft_declarations
+
+    assert "agent" in project_task_service._ALLOWED_CATEGORIES
+    assert "agent" not in task_draft._TASK_DRAFT_CATEGORIES
+    assert "agent" not in task_draft_agent._CATEGORIES
+    decl = next(d for d in task_draft_declarations() if d["name"] == "draft_ticket")
+    assert "agent" not in decl["parameters"]["properties"]["category"]["description"].lower()
+    assert "| agent" not in inspect.getsource(task_draft)
+    # A model that emits it anyway falls back instead of minting a paid card.
+    assert task_draft_agent._CATEGORIES.isdisjoint(_NEVER_DRAFTED)
 
 
 @pytest.mark.asyncio

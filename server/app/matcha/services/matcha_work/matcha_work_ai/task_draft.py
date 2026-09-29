@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 _TASK_DRAFT_PRIORITIES = {"critical", "high", "medium", "low"}
 
 
+# Deliberately NOT project_task_service._ALLOWED_CATEGORIES: `agent` cards start
+# a paid web run on create and are gated by plan + monthly cap, so a draft must
+# never pick one for the user (a free/lite user's create would 403; a Pro user
+# would silently spend a run). Agent cards come from the Agent template only.
 _TASK_DRAFT_CATEGORIES = {"engineering", "bug", "product", "sales", "general", "manual", "feat", "fix", "research", "email"}
 
 

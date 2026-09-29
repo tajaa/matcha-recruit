@@ -500,7 +500,8 @@ cat > "$TMP_DIR/collect-bundle.json" <<'EOF'
     {"id":"88888888-0000-4000-8000-000000000008","title":"Blocked on a vendor that used the words","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: EXTERNAL DEPENDENCY · [autopr:no-spec 2026-09-02T01:00:00Z] external_dependency · note: the vendor said it was already_fixed upstream"},
     {"id":"bbbbbbbb-0000-4000-8000-00000000000b","title":"Unqueued assigned card","assigned_email":"owner@example.com","board_column":"todo","status":"pending","autopr_paused":true,"autopr_reconsideration_pending":true,"autopr_run_requested_at":"2026-09-02T03:00:00+00:00"},
     {"id":"aaaaaaaa-0000-4000-8000-00000000000a","title":"Queued but already in review","assigned_email":"human@example.com","board_column":"review","status":"pending","autopr_run_requested_at":"2026-09-02T03:00:00+00:00"},
-    {"id":"cccccccc-0000-4000-8000-00000000000c","title":"Resume interrupted pickup","assigned_email":"human@example.com","board_column":"in_progress","status":"pending","autopr_claimed_at":"2026-09-02T03:05:00+00:00"}
+    {"id":"cccccccc-0000-4000-8000-00000000000c","title":"Resume interrupted pickup","assigned_email":"human@example.com","board_column":"in_progress","status":"pending","autopr_claimed_at":"2026-09-02T03:05:00+00:00"},
+    {"id":"dddddddd-0000-4000-8000-00000000000d","title":"Find me the best organic lip balm","category":"agent","assigned_email":"owner@example.com","board_column":"todo","status":"pending","autopr_run_requested_at":"2026-09-02T03:00:00+00:00"}
   ]
 }
 EOF
@@ -557,6 +558,11 @@ check "collector keeps unqueued work visibly on hold instead of dropping it" \
     $(printf '%s' "$collected" | jq -e \
         'any(.id8 == "bbbbbbbb" and .autopr_paused == true and has("autopr_hold_reason"))' >/dev/null \
       && echo 0 || echo 1)
+
+# Agent cards belong to the matcha server's own web agent; the code lane is
+# the default for an unknown category, so the collector must never admit one.
+check "collector never admits an agent card, even assigned and hand-queued" \
+    $(printf '%s' "$collected" | jq -e 'all(.id8 != "dddddddd")' >/dev/null && echo 0 || echo 1)
 
 check "collector admits a hand-queued card and only in an eligible lane" \
     $([ "$collect_rc" = "0" ] \

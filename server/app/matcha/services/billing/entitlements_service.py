@@ -56,6 +56,14 @@ PLAN_QUOTAS: dict[str, tuple[int, int]] = {
     PLAN_BUSINESS: (500_000, 12),
 }
 
+# Agent cards (a card that runs Espresso's web agent) — monthly runs per user by
+# plan. Each run spends real money (hosted web searches + Luna tokens), so the
+# cap is per person, not per company. Plans absent here get no agent cards.
+AGENT_CARD_MONTHLY_RUNS: dict[str, int] = {
+    PLAN_PRO: 40,
+    PLAN_BUSINESS: 100,
+}
+
 # Plan ordering for ">= lite" style checks.
 _PLAN_RANK = {PLAN_FREE: 0, PLAN_LITE: 1, PLAN_PRO: 2, PLAN_BUSINESS: 2}
 
@@ -189,6 +197,7 @@ def features_for_plan(plan: str) -> dict[str, bool]:
         # channels.create_channel); business excluded there regardless.
         "paid_channels": plan == PLAN_PRO,
         "business_modes": plan == PLAN_BUSINESS,
+        "agent_cards": pro_plus,
     }
 
 
@@ -214,6 +223,14 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
         }
     except Exception:
         # Quota detail is informational here — never fail the entitlement read.
+        pass
+
+    try:
+        from ..matcha_work.agent_card.quota import card_agent_usage
+
+        quotas["agent_runs"] = await card_agent_usage(user_id, plan=plan)
+    except Exception:
+        # Informational, like the token quota above.
         pass
 
     return {

@@ -9,6 +9,7 @@ import { autoPRProgressBanner } from '../../../utils/autoprProgress'
 import TaskViewerExtras from './TaskViewerExtras'
 import TaskCommitSuggestions from './TaskCommitSuggestions'
 import ResearchWithAssistant from './ResearchWithAssistant'
+import AgentResultView from './AgentResultView'
 
 interface TaskDetailPanelProps {
   projectId: string
@@ -39,6 +40,9 @@ export default function TaskDetailPanel({
   const [subtaskReason, setSubtaskReason] = useState('')
   const [subtaskError, setSubtaskError] = useState<string | null>(null)
   const autoPRBanner = autoPRProgressBanner(task.progress_note, task.pr_number)
+  // An agent card's status line is shown by AgentResultView; sending it back
+  // is a redirect the agent starts working on immediately.
+  const isAgentCard = task.category === 'agent'
   const {
     setAttachments,
     duplicating,
@@ -178,7 +182,7 @@ export default function TaskDetailPanel({
                 <p className="mt-0.5 text-xs leading-relaxed">{autoPRBanner.message}</p>
               </div>
             </div>
-          ) : task.progress_note?.trim() ? (
+          ) : task.progress_note?.trim() && !isAgentCard ? (
             <div className="rounded-lg border border-w-line bg-w-surface/60 px-3 py-2.5">
               <p className="text-xs font-medium text-w-dim">Progress</p>
               <p className="mt-1 text-sm text-w-text">{task.progress_note}</p>
@@ -186,6 +190,8 @@ export default function TaskDetailPanel({
           ) : null}
 
           {canEdit && <ResearchWithAssistant projectId={projectId} task={task} />}
+
+          {isAgentCard && <AgentResultView projectId={projectId} task={task} canEdit={canEdit} />}
 
           {/* Review send-back / approve — only while sitting in Review */}
           {task.board_column === 'review' && (
@@ -210,7 +216,7 @@ export default function TaskDetailPanel({
                     className="flex items-center gap-1.5 rounded-lg border border-w-line px-2.5 py-1.5 text-xs font-medium text-w-text transition-colors hover:bg-w-surface2 disabled:opacity-50"
                   >
                     <Undo2 className="h-3.5 w-3.5" />
-                    Send back
+                    {isAgentCard ? 'Redirect' : 'Send back'}
                   </button>
                 </div>
               ) : (
@@ -220,7 +226,7 @@ export default function TaskDetailPanel({
                     onChange={(e) => setRejectNote(e.target.value)}
                     autoFocus
                     rows={2}
-                    placeholder="What needs to change?"
+                    placeholder={isAgentCard ? 'What should the agent change? It starts on it right away.' : 'What needs to change?'}
                     className="w-full resize-none rounded-lg border border-w-line bg-w-surface px-2.5 py-1.5 text-sm text-w-text placeholder-w-faint outline-none focus:border-w-line"
                   />
                   <div className="flex items-center gap-2">
@@ -230,7 +236,7 @@ export default function TaskDetailPanel({
                       className="flex items-center gap-1.5 rounded-lg bg-orange-600 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-orange-500 disabled:opacity-50"
                     >
                       {reviewBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                      Send back
+                      {isAgentCard ? 'Redirect' : 'Send back'}
                     </button>
                     <button
                       onClick={() => {

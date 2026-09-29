@@ -257,7 +257,10 @@ extension TaskViewerSheet {
     /// controls and the runtime pickers so neither renders on a sales card or
     /// an unwatched board.
     var canControlAutoPR: Bool {
-        canRequestAutoPRRun
+        // Agent cards are run by the server's own agent, never AutoPR (the
+        // harness's collector drops them), so no AutoPR controls on them.
+        guard liveAutoPRTask.category != "agent" else { return false }
+        return canRequestAutoPRRun
             || liveAutoPRTask.autoprClaimedAt != nil
             || liveAutoPRTask.autoprPaused == true
     }

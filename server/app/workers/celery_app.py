@@ -79,6 +79,7 @@ celery_app = Celery(
         "app.workers.tasks.debug_error",
         "app.workers.tasks.huume_code",
         "app.workers.tasks.project_agent",
+        "app.workers.tasks.agent_card",
         "app.workers.tasks.sales_intake_poll",
         "app.workers.tasks.pos_sales_sync",
         "app.workers.tasks.schedule_eligibility",
@@ -238,8 +239,24 @@ _SCHEDULED_TASKS = [
 ]
 
 
+def _serves_default_queue(consumer) -> bool:
+    """Whether this worker consumes Celery's default queue.
+
+    Everything on_worker_ready dispatches goes to the default queue and is
+    driven by this signal, which fires on EVERY worker start. A dedicated
+    worker (`-Q agent_cards`) would otherwise run the whole dispatch too, so
+    every scheduled task would be enqueued twice. If the queue set can't be
+    read, assume yes — the previous, single-worker behavior.
+    """
+    try:
+        default = celery_app.conf.task_default_queue or "celery"
+        return default in {q.name for q in consumer.task_consumer.queues}
+    except Exception:
+        return True
+
+
 @worker_ready.connect
-def on_worker_ready(**kwargs):
+def on_worker_ready(sender=None, **kwargs):
     """Auto-dispatch scheduled compliance checks on every worker startup.
 
     The systemd timer restarts the worker every 15 minutes, so this
@@ -247,6 +264,10 @@ def on_worker_ready(**kwargs):
     needing celery-beat infrastructure.
     """
     import importlib
+
+    if sender is not None and not _serves_default_queue(sender):
+        logger.info("[Worker] not serving the default queue; skipping scheduler dispatch")
+        return
 
     from app.workers.tasks.er_document_processing import reset_stale_er_documents
 

@@ -68,6 +68,44 @@ def function_calls(payload: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def web_search_calls(output: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The hosted `web_search_call` items among a response's `output[]`."""
+    return [
+        item for item in output or []
+        if isinstance(item, dict) and item.get("type") == "web_search_call"
+    ]
+
+
+def cited_urls(output: list[dict[str, Any]]) -> list[str]:
+    """Every URL the provider says it actually saw: `url_citation` annotations
+    on message text plus the sources a `web_search_call` returned (present only
+    when the request asked for `include=["web_search_call.action.sources"]`).
+    """
+    urls: list[str] = []
+    for item in output or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "web_search_call":
+            action = item.get("action") or {}
+            for source in action.get("sources") or []:
+                if isinstance(source, dict) and isinstance(source.get("url"), str):
+                    urls.append(source["url"])
+            continue
+        if item.get("type") != "message":
+            continue
+        for content in item.get("content", []) or []:
+            if not isinstance(content, dict):
+                continue
+            for annotation in content.get("annotations", []) or []:
+                if (
+                    isinstance(annotation, dict)
+                    and annotation.get("type") == "url_citation"
+                    and isinstance(annotation.get("url"), str)
+                ):
+                    urls.append(annotation["url"])
+    return urls
+
+
 def http_error_detail(exc: httpx.HTTPError) -> str:
     """The provider's own error detail, bounded, for logs and the usage audit.
 
