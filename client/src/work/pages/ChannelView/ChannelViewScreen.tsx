@@ -56,6 +56,7 @@ export default function ChannelViewScreen({ channelId: channelIdOverride, embedd
     replyTo,
     setReplyTo,
     handleReply,
+    handleQuickReply,
     mentionQuery,
     mentionMatches,
     inputTextareaRef,
@@ -227,6 +228,7 @@ export default function ChannelViewScreen({ channelId: channelIdOverride, embedd
             members={channel?.members ?? []}
             onDelete={handleDeleteMessage}
             onReply={handleReply}
+            onQuickReply={handleQuickReply}
             onRetry={handleRetryMessage}
             onLoadOlder={loadOlder}
             hasMore={hasMore}

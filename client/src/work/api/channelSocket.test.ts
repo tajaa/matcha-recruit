@@ -128,6 +128,35 @@ describe('ChannelSocket outbox', () => {
     expect(latest().frames().some((f) => f.client_message_id === 'cmid-echo')).toBe(false)
   })
 
+  it('a quick reply sent while offline is not queued for replay', () => {
+    const s = new ChannelSocket()
+    s.connect()
+    latest().readyState = FakeWebSocket.CLOSED
+    expect(s.sendMessage('ch-1', 'Buy it', undefined, 'cmid-q', 'msg-1', { queueIfOffline: false })).toBe(false)
+    latest().readyState = FakeWebSocket.OPEN
+    latest().open()
+    expect(latest().frames().some((f) => f.client_message_id === 'cmid-q')).toBe(false)
+  })
+
+  it('dispatches agent-card question updates to listeners and supports cleanup', () => {
+    const s = new ChannelSocket()
+    const received: unknown[] = []
+    const handler = (update: unknown) => received.push(update)
+    s.addAgentCardPromptListener(handler)
+    s.connect()
+    latest().receive({
+      type: 'agent_card_prompt_updated', channel_id: 'ch-1', prompt_id: 'p-1',
+      status: 'answered', answer: 'yes', answer_text: 'Showed the result',
+    })
+    latest().receive({ type: 'agent_card_prompt_updated', channel_id: 'ch-1' })  // malformed: dropped
+    expect(received).toEqual([{
+      channel_id: 'ch-1', prompt_id: 'p-1', status: 'answered', answer: 'yes', answer_text: 'Showed the result',
+    }])
+    s.removeAgentCardPromptListener(handler)
+    latest().receive({ type: 'agent_card_prompt_updated', channel_id: 'ch-1', prompt_id: 'p-2', status: 'superseded' })
+    expect(received).toHaveLength(1)
+  })
+
   it('dispatches notification frames to listeners and supports cleanup', () => {
     const s = new ChannelSocket()
     const received: string[] = []

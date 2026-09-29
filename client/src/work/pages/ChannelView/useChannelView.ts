@@ -143,6 +143,7 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors the ?posting= URL param into state
     if (postingParam) setActivePostingId(postingParam)
   }, [postingParam])
 
@@ -156,12 +157,14 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
   // check), so the message posts unthreaded while the composer still showed
   // "Replying to…".
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate reset on channel switch (see above)
     setReplyTo(null)
   }, [channelId])
 
   // Load channel data
   useEffect(() => {
     if (!channelId) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset the view before fetching the new channel
     setLoading(true)
     setError('')
     setHasMore(true)
@@ -241,6 +244,7 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
   // applied).
   useEffect(() => {
     if (!channelId || !isMember) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clear postings for a channel we can't read
       setOpenPostings([])
       return
     }
@@ -266,7 +270,32 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
       setPendingFiles([])
     }
 
+    sendChannelMessage(content, { attachments, replyTarget: replyTo })
+    setInput('')
+    setReplyTo(null)
+  }
+
+  /** The one send path for a typed message and a one-tap quick reply:
+   *  socket send, optimistic row, echo deadline. Returns whether the frame
+   *  went out now. By default an offline send is queued to the durable
+   *  outbox (channelSocket.ts, replayed on reconnect) and its row marked
+   *  failed so it visibly needs attention; with `queueIfOffline: false`
+   *  nothing is queued or shown and the caller reports it. The row may be
+   *  appended after the send: the loopback guard skips it if the echo won. */
+  function sendChannelMessage(
+    content: string,
+    { attachments, replyTarget, queueIfOffline = true }: {
+      attachments?: ChannelAttachment[]
+      replyTarget?: ChannelMessage | null
+      queueIfOffline?: boolean
+    } = {},
+  ): boolean {
+    if (!channelId) return false
     const cmid = makeTempId('cmid')
+    const sent = socketRef.current?.sendMessage(
+      channelId, content, attachments, cmid, replyTarget?.id, { queueIfOffline },
+    ) ?? false
+    if (!sent && !queueIfOffline) return false
     if (me?.user) {
       const optimistic: ChannelMessage = {
         id: cmid,
@@ -280,17 +309,16 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
         edited_at: null,
         client_message_id: cmid,
         pending: true,
-        reply_to_id: replyTo?.id ?? null,
-        reply_preview: replyTo
+        failed: !sent,
+        reply_to_id: replyTarget?.id ?? null,
+        reply_preview: replyTarget
           ? {
-              id: replyTo.id,
-              sender_name: replyTo.message_type === 'system' ? 'Huume' : replyTo.sender_name,
-              content: replyTo.content,
+              id: replyTarget.id,
+              sender_name: replyTarget.message_type === 'system' ? 'Huume' : replyTarget.sender_name,
+              content: replyTarget.content,
             }
           : null,
       }
-      // Loopback-race guard: WS echo may arrive before this append; skip if a
-      // message with our cmid is already present.
       appendOptimistic(optimistic, (m) => m.client_message_id === cmid)
       const container = messagesContainerRef.current
       if (container) {
@@ -298,22 +326,18 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
         if (nearBottom) setTimeout(scrollToBottom, 50)
       }
     }
-    const sent = socketRef.current?.sendMessage(channelId, content, attachments, cmid, replyTo?.id) ?? false
-    if (!sent) {
-      // Queued to the durable outbox (channelSocket.ts); it replays on
-      // reconnect. Mark failed now so the row visibly needs attention
-      // rather than ghosting as pending forever.
-      setMessages((prev) => prev.map((m) => (m.client_message_id === cmid ? { ...m, failed: true } : m)))
-    } else {
-      // 8s echo deadline (mirrors Espresso's schedulePendingTimeout): if the
-      // echo hasn't replaced the pending row by then, flip it to failed.
-      // Only meaningful when the frame actually went out — if it didn't,
-      // the row is already marked failed above and this would just be a
-      // wasted no-op update 8s later.
-      scheduleFailedDeadline(cmid)
-    }
-    setInput('')
-    setReplyTo(null)
+    // 8s echo deadline (mirrors Espresso's schedulePendingTimeout): if the
+    // echo hasn't replaced the pending row by then, flip it to failed. Only
+    // when the frame actually went out; an unsent row is already failed.
+    if (sent) scheduleFailedDeadline(cmid)
+    return sent
+  }
+
+  /** One-tap threaded reply (Espresso agent-card question buttons): the same
+   *  send as typing it as a reply, so the server treats it identically. Never
+   *  queued: returns false when offline and the card keeps its buttons. */
+  function handleQuickReply(target: ChannelMessage, content: string): boolean {
+    return sendChannelMessage(content, { replyTarget: target, queueIfOffline: false })
   }
 
   function handleRetryMessage(msg: ChannelMessage) {
@@ -498,6 +522,7 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
     replyTo,
     setReplyTo,
     handleReply,
+    handleQuickReply,
     mentionQuery,
     mentionMatches,
     inputTextareaRef,

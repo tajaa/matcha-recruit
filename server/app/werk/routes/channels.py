@@ -166,6 +166,19 @@ def _metadata_dict(raw) -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
+async def _resolve_agent_card_prompt_statuses(conn, messages, *, channel_id: UUID):
+    """Overlay each Espresso agent-card question's live state (answered /
+    superseded / expired) so a reloaded chat never offers stale buttons.
+    Best-effort: history still loads if the lookup fails."""
+    try:
+        from app.matcha.services.matcha_work.agent_card.chat_flow import overlay_prompt_statuses
+
+        return await overlay_prompt_statuses(conn, messages, channel_id=channel_id)
+    except Exception:
+        logger.warning("agent-card question status overlay failed", exc_info=True)
+        return messages
+
+
 async def _resolve_event_draft_action_statuses(conn, messages, *, channel_id: UUID):
     """Overlay canonical draft state onto persisted action-card metadata.
 
@@ -1465,6 +1478,7 @@ async def get_channel(
         messages = await _resolve_event_draft_action_statuses(
             conn, messages, channel_id=channel_id,
         )
+        messages = await _resolve_agent_card_prompt_statuses(conn, messages, channel_id=channel_id)
         msg_ids = [m["id"] for m in messages]
         reactions_map = await _fetch_reactions_map(conn, msg_ids)
 
@@ -1595,6 +1609,7 @@ async def get_channel_messages(
         rows = await _resolve_event_draft_action_statuses(
             conn, rows, channel_id=channel_id,
         )
+        rows = await _resolve_agent_card_prompt_statuses(conn, rows, channel_id=channel_id)
         msg_ids = [r["id"] for r in rows]
         reactions_map = await _fetch_reactions_map(conn, msg_ids)
         return [_row_to_message(r, reactions_map) for r in reversed(rows)]

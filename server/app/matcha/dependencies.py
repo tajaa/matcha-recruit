@@ -21,7 +21,8 @@ require_broker = require_roles("broker")
 # (channels + boards). Tenant scoping is enforced downstream by
 # resolve_accessible_company_scope (it resolves the employee's org_id), so an
 # employee still only ever sees/touches their own company's rows.
-require_company_member = require_roles("admin", "client", "individual", "employee")
+COMPANY_MEMBER_ROLES = ("admin", "client", "individual", "employee")
+require_company_member = require_roles(*COMPANY_MEMBER_ROLES)
 
 
 async def require_broker_pro(current_user=Depends(require_broker)):

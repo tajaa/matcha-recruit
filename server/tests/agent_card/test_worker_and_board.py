@@ -331,3 +331,38 @@ async def test_worker_backstop_fails_a_stuck_run_cleanly_instead_of_waiting_for_
     assert "took too long" in calls["progress"].await_args.args[1]
     calls["finish"].assert_not_awaited()
     assert calls["deduct"].await_args.args[2] == 50
+
+
+@pytest.mark.asyncio
+async def test_chat_offer_opens_redis_for_the_task_so_the_question_is_live(monkeypatch):
+    # The chat fanout publishes on the shared Redis client, which only the API
+    # opens; a Celery task must open (and close) its own or the question is
+    # saved but never reaches an open chat.
+    from app.core.services import redis_cache
+    from app.matcha.services.matcha_work.agent_card import chat_flow
+    from app.workers.tasks import agent_card as task_mod
+
+    seen = {}
+
+    async def offer(run_id):
+        seen["client_during_offer"] = redis_cache.get_redis_cache()
+        return True
+
+    monkeypatch.setattr(redis_cache, "_redis_client", None)
+    monkeypatch.setattr(chat_flow, "offer_result", offer)
+    await task_mod._offer_in_chat(uuid4())
+    assert seen["client_during_offer"] is not None
+    assert redis_cache.get_redis_cache() is None  # closed again after
+
+
+@pytest.mark.asyncio
+async def test_chat_offer_reuses_an_open_redis_client(monkeypatch):
+    from app.core.services import redis_cache
+    from app.matcha.services.matcha_work.agent_card import chat_flow
+    from app.workers.tasks import agent_card as task_mod
+
+    existing = object()
+    monkeypatch.setattr(redis_cache, "_redis_client", existing)
+    monkeypatch.setattr(chat_flow, "offer_result", AsyncMock(side_effect=RuntimeError("boom")))
+    await task_mod._offer_in_chat(uuid4())  # best-effort: never raises
+    assert redis_cache.get_redis_cache() is existing

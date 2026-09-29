@@ -121,6 +121,7 @@
 		788DF3AB085B3D15F4231730 /* ChatPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C52416548CAE98530BAD906E /* ChatPanelView.swift */; };
 		262CF510B3161AD8AD73511C /* ChatMessageComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E35F4A71D8F7681E613FCF9 /* ChatMessageComposer.swift */; };
 		79C8F2CC973CDDC430211240 /* ChannelMessageRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2122823C3D149F37FE040CC /* ChannelMessageRowView.swift */; };
+		AC0D0000000000000000B004 /* AgentCardMessageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0D0000000000000000F003 /* AgentCardMessageView.swift */; };
 		7A5C0000000000000000B001 /* TaskRound.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F001 /* TaskRound.swift */; };
 		7A5C0000000000000000B002 /* RoundView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F002 /* RoundView.swift */; };
 		7A5C0000000000000000B003 /* EventRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F003 /* EventRow.swift */; };
@@ -683,6 +684,7 @@
 		EFA913188262AF991DDD2652 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		EFC745338E971AFA15B607A9 /* MatchaWorkService+Files.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "MatchaWorkService+Files.swift"; sourceTree = "<group>"; };
 		F2122823C3D149F37FE040CC /* ChannelMessageRowView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChannelMessageRowView.swift; sourceTree = "<group>"; };
+		AC0D0000000000000000F003 /* AgentCardMessageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCardMessageView.swift; sourceTree = "<group>"; };
 		F2945FB0998BBD2E516955D3 /* ThreadModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThreadModels.swift; sourceTree = "<group>"; };
 		F36237057E487E8EC4E98717 /* ProjectModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectModels.swift; sourceTree = "<group>"; };
 		F50B6E14F35F67F6AE743538 /* WerkiOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WerkiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1305,6 +1307,7 @@
 				DDDD0E0E0E0E0E0E01010004 /* InviteToBroadcastSheet.swift */,
 				BCB330C91A9BDEA760F9F330 /* PendingChannelAttachment.swift */,
 				F2122823C3D149F37FE040CC /* ChannelMessageRowView.swift */,
+				AC0D0000000000000000F003 /* AgentCardMessageView.swift */,
 				FF4C96E6C5F0062D21DAB318 /* ChannelMessageComposer.swift */,
 				F9D68DEBAAF0B1E63F7FE7AC /* TypingBubbleView.swift */,
 				5C3824618E8E47BA061C783C /* ChannelDetailView+Messages.swift */,
@@ -1828,6 +1831,7 @@
 				046A3081C9F9A8E486713901 /* EmptyPreviewView.swift in Sources */,
 				EF490FCC7A73D9DD090B6E9D /* PendingChannelAttachment.swift in Sources */,
 				79C8F2CC973CDDC430211240 /* ChannelMessageRowView.swift in Sources */,
+				AC0D0000000000000000B004 /* AgentCardMessageView.swift in Sources */,
 				AB82F80A190A3ABAA475142E /* ChannelMessageComposer.swift in Sources */,
 				15E1BD123DCD5C4F06029703 /* ProjectLayoutEnums.swift in Sources */,
 				CD8E2AC8C71F4565B14885A3 /* CollabOverviewView.swift in Sources */,

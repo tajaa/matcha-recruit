@@ -413,6 +413,10 @@ async def _bg_dispatch_espresso_mention(
         from app.matcha.services.billing import token_budget_service
         from app.workers.tasks.project_agent import run_repo_question
 
+        # Lookups only. Everything after this block takes connections of its
+        # own (each post, the agent-card handler, the run insert), so this one
+        # is released first: holding it while waiting on the pool for another
+        # is how a burst of mentions starves the pool.
         async with get_connection() as conn:
             project = await conn.fetchrow(
                 """SELECT p.id, p.company_id, p.github_repo,
@@ -425,18 +429,6 @@ async def _bg_dispatch_espresso_mention(
             if not project:
                 return False
             claimed = True
-            company_id = project["company_id"]
-            channel_id = UUID(channel_id_str)
-            features = merge_company_features(
-                project["enabled_features"], project["signup_source"],
-            )
-            if not features.get("matcha_work"):
-                await post_as_espresso(
-                    company_id, channel_id,
-                    "Espresso repository questions aren't enabled for this workspace.",
-                )
-                return True
-
             collaborator_role = await conn.fetchval(
                 """SELECT role FROM mw_project_collaborators
                    WHERE project_id=$1 AND user_id=$2 AND status='active'""",
@@ -452,52 +444,77 @@ async def _bg_dispatch_espresso_mention(
                 sender_company_id = await conn.fetchval(
                     "SELECT org_id FROM employees WHERE user_id=$1", user.id,
                 )
-            if not can_ask_project_agent(
-                sender_company_id=sender_company_id,
-                project_company_id=company_id,
-                collaborator_role=collaborator_role,
-            ):
-                await post_as_espresso(
-                    company_id, channel_id,
-                    "I can only inspect the repository for people who can access this project.",
-                )
-                return True
-            if not project["github_repo"]:
-                await post_as_espresso(
-                    company_id, channel_id,
-                    "Connect a GitHub repository in Elements before asking me about the app.",
-                )
-                return True
+        company_id = project["company_id"]
+        channel_id = UUID(channel_id_str)
+        features = merge_company_features(
+            project["enabled_features"], project["signup_source"],
+        )
+        if not features.get("matcha_work"):
+            await post_as_espresso(
+                company_id, channel_id,
+                "Espresso repository questions aren't enabled for this workspace.",
+            )
+            return True
+        if not can_ask_project_agent(
+            sender_company_id=sender_company_id,
+            project_company_id=company_id,
+            collaborator_role=collaborator_role,
+        ):
+            await post_as_espresso(
+                company_id, channel_id,
+                "I can only inspect the repository for people who can access this project.",
+            )
+            return True
+        # "@espresso find me … to buy" is an errand: it becomes an agent
+        # card (To do → In progress → Review) instead of a repo question.
+        from app.matcha.services.matcha_work.agent_card.chat_create import (
+            handle_mention as handle_agent_card_mention,
+        )
+        if await handle_agent_card_mention(
+            project_id=project["id"], company_id=company_id, channel_id=channel_id,
+            user=user, text=content, repo_connected=bool(project["github_repo"]),
+        ):
+            return True
+        if not project["github_repo"]:
+            await post_as_espresso(
+                company_id, channel_id,
+                "Connect a GitHub repository in Elements before asking me about the app, "
+                "or ask me to find something, like \"@espresso find me organic sweatpants to buy online\".",
+            )
+            return True
 
-            # Strip the first virtual-agent mention before persisting the task;
-            # keep every other character exactly as the user wrote it.
-            question = re.sub(
-                r"(?i)(?:(?<=^)|(?<=\s))@espresso\b", "", content or "", count=1,
-            ).strip()
-            if not question:
-                await post_as_espresso(
-                    company_id, channel_id,
-                    "Ask me a question about how this project or its connected repository works.",
-                )
-                return True
-            if sender_role != "admin":
-                try:
-                    await token_budget_service.check_token_budget(company_id)
-                except HTTPException:
-                    await post_as_espresso(
-                        company_id, channel_id,
-                        "This workspace has reached its Matcha Work AI token budget.",
-                    )
-                    return True
+        # Strip the first virtual-agent mention before persisting the task;
+        # keep every other character exactly as the user wrote it.
+        question = re.sub(
+            r"(?i)(?:(?<=^)|(?<=\s))@espresso\b", "", content or "", count=1,
+        ).strip()
+        if not question:
+            await post_as_espresso(
+                company_id, channel_id,
+                "Ask me a question about how this project or its connected repository works.",
+            )
+            return True
+        if sender_role != "admin":
             try:
-                await check_rate_limit(str(company_id), "espresso_repo_question", 20, 3600)
+                await token_budget_service.check_token_budget(company_id)
             except HTTPException:
                 await post_as_espresso(
                     company_id, channel_id,
-                    "Espresso has reached this workspace's hourly repo-question limit. Please try again later.",
+                    "This workspace has reached its Matcha Work AI token budget.",
                 )
                 return True
+        try:
+            await check_rate_limit(str(company_id), "espresso_repo_question", 20, 3600)
+        except HTTPException:
+            await post_as_espresso(
+                company_id, channel_id,
+                "Espresso has reached this workspace's hourly repo-question limit. Please try again later.",
+            )
+            return True
 
+        run_id = None
+        enqueue_failed = False
+        async with get_connection() as conn:
             async with conn.transaction():
                 await conn.execute(
                     "SELECT pg_advisory_xact_lock(hashtext($1))", str(project["id"]),
@@ -511,45 +528,48 @@ async def _bg_dispatch_espresso_mention(
                        )""",
                     project["id"],
                 )
-                if live:
-                    await post_as_espresso(
-                        company_id, channel_id,
-                        "I'm already answering a repository question for this project. Ask me again when that answer lands.",
+                if not live:
+                    run_id = await conn.fetchval(
+                        """INSERT INTO mw_project_agent_runs
+                           (company_id, project_id, channel_id, requested_by,
+                            trigger_message_id, agent_key, kind, prompt, status)
+                           VALUES ($1,$2,$3,$4,$5,'espresso','repo_question',$6,'queued')
+                           ON CONFLICT (trigger_message_id, agent_key) DO NOTHING
+                           RETURNING id""",
+                        company_id, project["id"], channel_id, user.id,
+                        trigger_message_id, question,
                     )
-                    return True
-                run_id = await conn.fetchval(
-                    """INSERT INTO mw_project_agent_runs
-                       (company_id, project_id, channel_id, requested_by,
-                        trigger_message_id, agent_key, kind, prompt, status)
-                       VALUES ($1,$2,$3,$4,$5,'espresso','repo_question',$6,'queued')
-                       ON CONFLICT (trigger_message_id, agent_key) DO NOTHING
-                       RETURNING id""",
-                    company_id, project["id"], channel_id, user.id,
-                    trigger_message_id, question,
-                )
-            if run_id is None:
-                return True
-            try:
-                run_repo_question.delay(str(run_id))
-            except Exception:
-                logger.exception(
-                    "Failed to enqueue Espresso project-agent run=%s", run_id,
-                )
-                failed_run_id = await conn.fetchval(
-                    """UPDATE mw_project_agent_runs
-                       SET status='failed', completed_at=NOW(),
-                           error='Task enqueue failed before worker delivery.'
-                       WHERE id=$1 AND status='queued'
-                       RETURNING id""",
-                    run_id,
-                )
-                if failed_run_id is not None:
-                    await post_as_espresso(
-                        company_id,
-                        channel_id,
-                        "I couldn't queue that repository question right now. Please try again.",
+            if run_id is not None:
+                try:
+                    run_repo_question.delay(str(run_id))
+                except Exception:
+                    logger.exception(
+                        "Failed to enqueue Espresso project-agent run=%s", run_id,
                     )
-                    return True
+                    failed_run_id = await conn.fetchval(
+                        """UPDATE mw_project_agent_runs
+                           SET status='failed', completed_at=NOW(),
+                               error='Task enqueue failed before worker delivery.'
+                           WHERE id=$1 AND status='queued'
+                           RETURNING id""",
+                        run_id,
+                    )
+                    enqueue_failed = failed_run_id is not None
+        if live:
+            await post_as_espresso(
+                company_id, channel_id,
+                "I'm already answering a repository question for this project. Ask me again when that answer lands.",
+            )
+            return True
+        if run_id is None:
+            return True
+        if enqueue_failed:
+            await post_as_espresso(
+                company_id,
+                channel_id,
+                "I couldn't queue that repository question right now. Please try again.",
+            )
+            return True
 
         await post_as_espresso(
             company_id, channel_id,

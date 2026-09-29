@@ -2,6 +2,8 @@ import { FileText, Reply, Trash2 } from 'lucide-react'
 import type { ChannelMessage, ChannelMember } from '../../api/channels'
 import { HuumeAvatar } from '../../components/channels/HuumeAvatar'
 import ChannelActionCard from '../../components/channels/actions/ChannelActionCard'
+import AgentCardMessage from '../../components/channels/AgentCardMessage'
+import { isAgentCardMessage, splitTicketToken } from '../../components/channels/agentCardMessageHelpers'
 import { renderMessageContent } from './mentions'
 import { isUrgentSystemContent, renderSystemContent, stripEmphasis } from './systemContent'
 
@@ -15,6 +17,8 @@ interface MessageListProps {
   onDelete: (msg: ChannelMessage) => void
   onReply: (msg: ChannelMessage) => void
   onRetry: (msg: ChannelMessage) => void
+  /** Send a threaded reply to `msg` (Espresso agent-card question buttons). */
+  onQuickReply?: (msg: ChannelMessage, reply: string) => boolean
   onLoadOlder: () => void
   hasMore: boolean
   loadingOlder: boolean
@@ -38,6 +42,7 @@ export default function MessageList({
   onDelete,
   onReply,
   onRetry,
+  onQuickReply,
   onLoadOlder,
   hasMore,
   loadingOlder,
@@ -157,6 +162,23 @@ export default function MessageList({
                     ? '[message deleted by author]'
                     : '[message removed by a moderator]'}
                 </p>
+              ) : isAgentCardMessage(msg.metadata) ? (
+                (() => {
+                  // Espresso's agent-card result / question / receipt: a card,
+                  // with the ticket marker shown as a small label.
+                  const { title, body } = splitTicketToken(msg.content)
+                  return (
+                    <>
+                      {title && <p className="text-[11px] font-medium text-w-accent">Card · {title}</p>}
+                      <AgentCardMessage
+                        metadata={msg.metadata}
+                        content={body}
+                        userId={userId}
+                        onQuickReply={onQuickReply ? (reply) => onQuickReply(msg, reply) : undefined}
+                      />
+                    </>
+                  )
+                })()
               ) : msg.content ? (
                 <p className="text-sm text-w-text whitespace-pre-wrap break-words">
                   {renderMessageContent(

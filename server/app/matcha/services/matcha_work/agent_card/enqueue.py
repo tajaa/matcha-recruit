@@ -23,7 +23,7 @@ from app.database import get_connection
 from app.matcha.services.billing.entitlements_service import PLAN_PRO, require_plan
 
 from .agent import CARD_AGENT_MODEL
-from .chat_flow import close_open_prompts
+from .chat_flow import broadcast_prompt_updates, close_open_prompts
 from .quota import card_agent_usage, limit_for_plan, usage_payload, used_this_month
 
 logger = logging.getLogger(__name__)
@@ -181,7 +181,8 @@ async def enqueue_card_agent(
     # under the same per-card lock.
     try:
         async with get_connection() as conn:
-            await close_open_prompts(conn, task_id)
+            closed = await close_open_prompts(conn, task_id)
+        await broadcast_prompt_updates(closed)
     except Exception:
         logger.warning("closing agent-card questions failed task=%s", task_id, exc_info=True)
     logger.info("agent card run queued run=%s task=%s round=%s reason=%s", run_id, task_id, round_no, reason)

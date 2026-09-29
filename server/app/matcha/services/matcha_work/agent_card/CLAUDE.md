@@ -10,10 +10,11 @@ It is not the MCP connector either: that is push-only, so it can't advance a car
 | Event | Card column | Code |
 |---|---|---|
 | Card created (`POST …/tasks`, category `agent`) | forced to `todo`, run queued | `routes/matcha_work/tasks.py` → `enqueue.enqueue_card_agent(reason="created")` |
+| `@espresso find me … to buy` in a project chat | same: new card in `todo`, run queued | `werk/routes/channels_ws.py:_bg_dispatch_espresso_mention` → `chat_create.handle_mention` |
 | Worker claims round 1 | `todo → in_progress` | `workers/tasks/agent_card.py` → `board.claim_column` |
 | Result stored | `→ review` | `board.finish_column` |
 | Reviewer sends it back (existing reject + note) | `changes_requested`; round N+1 runs **while it stays there** | `tasks.py` reject hook: editor check + `preflight` **before** the card moves, then `reason="redirect"` |
-| Result stored, project has a discussion chat | Espresso asks "want to see what I found?" | `workers/tasks/agent_card.py` → `chat_flow.offer_result` (best-effort) |
+| Result stored, project has a discussion chat | Espresso asks "want to see what I found?" | `workers/tasks/agent_card.py` → `chat_flow.offer_result` (best-effort; the task opens its own Redis client for the chat fanout, since only the API opens the shared one) |
 | Approve | `done` | existing `approve_project_task` |
 | Failure / broker down / worker killed | column unchanged; `progress_note` = "Agent stopped: … Use Run again" | `POST …/tasks/{t}/agent-runs` reruns |
 
@@ -89,7 +90,7 @@ Invariants:
 
 - **No model call.** `parse_answer` (threaded replies) is a closed set of yes/no phrases plus a last 4 or a card number. `is_plain_yes` (unthreaded) is only "yes" / "yes please" / "show me" / "show it".
 - **Everyday chat is never an answer.** A question answers to a threaded reply, or to a plain message (`_plain_target`) that resolves as follows:
-  - an explicit, un-negated buy phrase (`is_buy_intent`: "buy it", "buy the best one", "purchase it"; also when replying to another message, e.g. the result) goes to the sender's **own** open `purchase`/`pick_card`;
+  - an explicit, un-negated buy command aimed back at the pick (`is_buy_intent`: the **whole message** is "buy it", "yes, buy the best one", "go ahead and order it please", or a bare "buy" / "place the order"; also when replying to another message, e.g. the result) goes to the sender's **own** open `purchase`/`pick_card`. A buy word inside an ordinary sentence ("find me a rain jacket to buy that is waterproof") never matches, since with one saved card a match would complete the purchase;
   - a bare card number or last 4 goes to the sender's own open `pick_card`;
   - a plain "yes" goes to the sender's own buy/card question only within 10 minutes of it being asked (`FRESH_PURCHASE_QUESTION`), otherwise to the channel's newest `show_result`.
 
@@ -107,6 +108,40 @@ Invariants:
 
   Real checkout is a later change.
 - **Purchases are internal-only in v1** (`chat_flow.purchases_allowed`): platform admins plus the accounts in `AGENT_PURCHASE_ALLOWED_EMAILS` (comma-separated). Everyone else still gets the "see it?" question. The clients show Payment cards when `GET /payment-cards` says `enabled` (or cards exist), never by role.
+
+### Rich chat messages
+
+Every Espresso message in this flow carries structured `metadata` that both apps render as a card: web `components/channels/AgentCardMessage.tsx`, Espresso `Views/Channels/AgentCardMessageView.swift`. The `content` is only a short plain-text fallback, used for notifications and older apps, with **no raw URLs**, except a handoff's checkout link ("Finish checkout here: …"), which is the one thing that message exists to deliver.
+
+| `metadata.kind` | Payload | Card |
+|---|---|---|
+| `agent_card_result` | `result`: `result_view()`, which is the headline, a ≤420-char summary, the top pick (https CDN photo, price, rating, 3 reasons, buy link) and ≤3 alternatives | product card with "View at <store>" and an "Also compared" list |
+| `agent_card_prompt` | `view`: `{question, offer?, buttons[]}`, plus `prompt_id`, `expires_at` and, on buy / card questions, `owner_user_id` | the question, an offer preview, and quick-reply buttons |
+| `agent_card_receipt` | `receipt`: `receipt_view()` with status `paid_test` / `approved` / `no_price` / `failed` | a receipt labelled TEST MODE |
+
+- **Buttons.** A button sends its `reply` ("Show me", "Buy it", "Use card 1", …) as a **threaded reply** to the question through the normal chat send, so the server path is identical to typing it. A test pins that every button reply parses as the answer it stands for.
+  - A quick reply is **never queued** for replay: offline, nothing is sent and the card keeps its buttons with a note.
+  - A sent press shows "Sending …" until the question closes. If it stays open for 8s (e.g. "Buy it" with no saved card, where Espresso keeps asking), the buttons come back.
+  - Buy / card buttons render only for `owner_user_id`; everyone else sees "Waiting for the buyer".
+  - Buttons retire at `expires_at` without a reload.
+- **The heading is `view.question`**, fixed server text ("I finished it. Want to see what I found?"). The card title lives in the ticket marker and is never parsed back out of `content`.
+- **Live question state.** When a question closes, `_claimed` (answered) or `close_open_prompts` / `offer_result` (superseded) queue an `agent_card_prompt_updated` socket event (`{channel_id, prompt_id, status, answer, answer_text}`), sent after the transaction commits through `project_task_notifications.broadcast_channel_event` (the existing matcha→werk bridge). Both apps restamp the message, so every open chat drops the buttons. Best-effort: a reload reads the same state.
+- **History.** Chat history (`werk/routes/channels.py` → `chat_flow.overlay_prompt_statuses`) stamps each question with `prompt_status` (open/answered/superseded/expired), `answer` and `answer_text` ("Showed the result", "Used the card ending 4242"), so a reloaded chat shows answered questions without live buttons.
+- **Links and photos.** Photos render only from https URLs, which means our CDN. Links are http(s) only and open without referrer or opener.
+
+### `@espresso` errands (`chat_create.py`)
+
+`@espresso find me organic sweat pants to buy online. ship home, not office.` creates an agent card and runs it.
+
+- **The card.** The title is the first sentence ("Find me organic sweat pants to buy online") and the whole message becomes the details, so the constraints reach the agent. It is created in To do and moves along the board like any agent card. Espresso replies "On it" with a ticket chip, then asks when the result is ready.
+- **Gates.** It uses the same gates as the board, **before** the card exists: the REST route's role gate (`COMPANY_MEMBER_ROLES`, behind `require_company_member`, so brokers, creators and agency users are refused), the REST access rule, the editor role (`role_can_edit`), and `enqueue.preflight`. A refusal is posted in chat, and no card is created.
+- **What counts as an errand (`errand_request`).** It is deterministic:
+  - the message has at least 3 words and starts with find / buy / order / compare / research / recommend / "what's the best" / …;
+  - it isn't code talk (`_CODE_TALK`: code/repo/function/endpoint/…, "where is", "how does", "is computed", "our … auth/flow/api"), repo-connected or not, since a web search on it would spend a monthly run;
+  - in a **repo-connected** project it also needs a word that means spending money (buy, price, cheap, online, $…, ship to/home, …). "best", "compare", "order", "review" and "deal" deliberately don't count: they are everyday code words, so "@espresso compare our two auth flows" and "find where the order total is computed" still go to the repo agent.
+- **The mention dispatcher holds no connection while it runs the handler.** `_bg_dispatch_espresso_mention` releases its lookup connection before any post, the agent-card handler, or the run insert, each of which takes its own; holding one across them starves the pool under a burst of mentions.
+- **"@espresso buy it" with an open buy question** answers that question and creates no card.
+- **Buy phrases.** A buy phrase only ever answers a question when the whole message is a short command aimed back at the pick ("buy it", "yes, buy the best one", "purchase this") or a bare "buy" / "place the order". "Find me socks to buy" is always a new errand.
 
 ### Card vault (`core/services/card_vault.py`, `routes/matcha_work/payment_cards.py`)
 

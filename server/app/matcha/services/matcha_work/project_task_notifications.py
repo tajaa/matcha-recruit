@@ -288,6 +288,14 @@ async def broadcast_channel_action_updated(channel_id: UUID, action: dict) -> No
     })
 
 
+async def broadcast_channel_event(channel_id: UUID, event: dict) -> None:
+    """Fan a small typed event (e.g. `agent_card_prompt_updated`) out to a
+    channel room through the same bridge."""
+    from app.werk.routes.channels_ws import manager
+
+    await manager._broadcast_to_room(str(channel_id), event)
+
+
 async def broadcast_channel_system_message(
     channel_id: UUID,
     row: dict,

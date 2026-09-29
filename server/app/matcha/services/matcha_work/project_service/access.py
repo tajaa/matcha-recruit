@@ -12,6 +12,12 @@ from uuid import UUID
 EMPLOYEE_HIDDEN_PROJECT_TYPES = ("discipline", "recruiting")
 
 
+def role_can_edit(role: Optional[str]) -> bool:
+    """Write gate: only the explicit read-only roles are blocked (the owner can
+    come back as role None or 'owner' depending on the access path)."""
+    return role not in ("viewer", "commenter")
+
+
 def hidden_from_user(project: dict, user) -> bool:
     return user.role == "employee" and project.get("project_type") in EMPLOYEE_HIDDEN_PROJECT_TYPES
 

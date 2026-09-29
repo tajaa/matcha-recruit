@@ -72,6 +72,7 @@ from .discipline import (  # noqa: F401
 from .access import (  # noqa: F401
     hidden_from_user,
     resolve_project_access,
+    role_can_edit,
 )
 from .collaborators import (  # noqa: F401
     create_project_chat,
