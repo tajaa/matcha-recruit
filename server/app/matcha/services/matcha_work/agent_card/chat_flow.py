@@ -5,7 +5,9 @@ see what I found?". Yes posts a readable summary of the result (the full page
 stays on the card). For a shopping result, and for a user allowed to buy, it
 then asks "want to buy it?", then which saved card, and records a purchase
 handoff: the exact item, retailer, checkout link and verified total the user
-approved. v1 never charges anything; the user finishes checkout at the link.
+approved. Nothing real is charged: by default an approved purchase with a
+verified total is charged in Stripe TEST mode (`test_charge.py`, test keys
+only, no card number sent); otherwise the user finishes checkout at the link.
 
 Every question is a `mw_agent_card_prompts` row. Answers are parsed
 deterministically (no model call):
@@ -38,6 +40,7 @@ from app.core.services import card_vault
 from app.database import connection_or_direct, decode_jsonb
 
 from ..project_agent.chat import broadcast_espresso_message, persist_espresso_message
+from . import test_charge
 
 logger = logging.getLogger(__name__)
 
@@ -710,18 +713,43 @@ async def _answer_pick_card(conn, prompt, user, answer: Answer, *, say) -> None:
     async with conn.transaction():
         if not await _claimed(conn, prompt, user, f"card:{card['last4']}", say):
             return
-        await conn.execute(
+        purchase_id = await conn.fetchval(
             """INSERT INTO mw_agent_purchase_requests
                    (company_id, project_id, task_id, run_id, prompt_id, user_id, card_id,
                     card_last4, item_name, retailer, checkout_url, amount, currency)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)""",
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+               RETURNING id""",
             prompt["company_id"], prompt["project_id"], prompt["task_id"], prompt["run_id"],
             prompt["id"], user.id, card["id"], card["last4"], payload["item_name"],
             payload.get("retailer"), payload["checkout_url"], payload.get("amount"),
             payload.get("currency"),
         )
-        await say(
-            f"Approved: {_offer_line(payload)}, on your {_card_label(dict(card))}. "
-            "I haven't charged anything. Finish checkout here: "
-            f"{payload['checkout_url']}\nIt's saved on the card under Purchases."
-        )
+    # The Stripe call happens after commit (never inside a transaction); the
+    # approval is recorded either way.
+    approved = f"Approved: {_offer_line(payload)}, on your {_card_label(dict(card))}."
+    link = f"Checkout link: {payload['checkout_url']}\nIt's saved on the card under Purchases."
+    key = test_charge.test_key()
+    if key is None:
+        await say(f"{approved} I haven't charged anything. Finish checkout here: {payload['checkout_url']}\n"
+                  "It's saved on the card under Purchases.")
+        return
+    if payload.get("amount") is None or not payload.get("currency"):
+        await say(f"{approved} No verified price, so I didn't make a test charge. {link}")
+        return
+    outcome = await test_charge.charge(
+        key, purchase_id=purchase_id, amount=payload["amount"], currency=payload["currency"],
+        brand=card["brand"], description=f"Agent card test purchase: {payload['item_name']}",
+        metadata={"purchase_id": purchase_id, "task_id": prompt["task_id"], "card_last4": card["last4"]},
+    )
+    await conn.execute(
+        """UPDATE mw_agent_purchase_requests
+           SET status = $2, stripe_payment_intent_id = $3, charge_error = $4
+           WHERE id = $1""",
+        purchase_id, outcome["status"], outcome["payment_intent_id"], outcome["error"],
+    )
+    money = format_money(payload["amount"], payload["currency"])
+    if outcome["status"] == "test_charged":
+        await say(f"{approved} Test charge of {money} succeeded in Stripe test mode "
+                  f"({outcome['payment_intent_id']}). No real money moved. {link}")
+    else:
+        await say(f"{approved} The Stripe test charge failed: {outcome['error']} {link}")

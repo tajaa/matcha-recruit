@@ -149,6 +149,12 @@ private struct AgentPurchasesView: View {
                 HStack(spacing: 6) {
                     Text(Self.line(purchase)).font(.ticket(size: 11))
                     Text("· card ending \(purchase.cardLast4)").font(.ticket(size: 11)).foregroundColor(.secondary)
+                    if purchase.status == "test_charged" {
+                        Text("· Stripe test charge succeeded").font(.ticket(size: 11)).foregroundColor(.green)
+                    } else if purchase.status == "test_failed" {
+                        Text("· Stripe test charge failed").font(.ticket(size: 11)).foregroundColor(.orange)
+                            .help(purchase.chargeError ?? "")
+                    }
                     Spacer()
                     if let url = URL(string: purchase.checkoutUrl),
                        ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
@@ -157,7 +163,7 @@ private struct AgentPurchasesView: View {
                     }
                 }
             }
-            Text("Approved in chat. Nothing was charged: finish checkout at the link.")
+            Text("Approved in chat. No real money moves: test charges run in Stripe test mode, and real checkout happens at the link.")
                 .font(.ticket(size: 10)).foregroundColor(.secondary)
         }
         .padding(8)

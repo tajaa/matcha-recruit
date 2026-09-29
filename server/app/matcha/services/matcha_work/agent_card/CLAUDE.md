@@ -100,7 +100,13 @@ Invariants:
 - **Who may answer.** Every question uses the REST API's own rule, `project_service.resolve_project_access`, which `_verify_project_access` also calls. So collaborators and the company's own users qualify, except that employees never reach discipline/recruiting boards, and admins qualify only as collaborators. `purchase`/`pick_card` answer only to their `owner_user_id`, the person who said yes to seeing the result.
 - **The approved purchase is frozen and verified.** `purchase_offer` takes the top pick at its first provenance-gated buy link. The total is the pick's **source-checked** `price` with its currency, or nothing ("price not confirmed"). A buy link's own `price` is only the model's claim and has no currency, so it is never offered. The payload is frozen into the question and copied verbatim into the purchase row.
 - **Card choice is unambiguous.** Options are numbered and shown with label and expiry. A last 4 digits shared by two cards gets "reply with its number".
-- **v1 never charges.** The purchase is a handoff: the user finishes checkout at the link. The status is `handoff`; automated checkout is a later change.
+- **No real money moves.** By default (`AGENT_PURCHASE_MODE=stripe_test`), an approved purchase with a verified total is charged in **Stripe test mode** (`test_charge.py`, migration `agentchat02`).
+  - It only runs with a `sk_test_`/`rk_test_` key: `AGENT_PURCHASE_STRIPE_KEY`, else `STRIPE_SECRET_KEY`. A live key means no charge, never a live one.
+  - The saved card's number is never sent to Stripe. Stripe's test payment method for the brand (`pm_card_visa`, …) stands in.
+  - The purchase id is the idempotency key. The call runs after the purchase row commits, and the outcome is recorded in `status` (`test_charged`/`test_failed`), `stripe_payment_intent_id` and `charge_error`.
+  - With no verified price, no key, or `AGENT_PURCHASE_MODE=handoff`, the purchase is a handoff (`status='handoff'`): the user finishes checkout at the link.
+
+  Real checkout is a later change.
 - **Purchases are admin-only in v1** (`chat_flow.purchases_allowed`). Everyone else still gets the "see it?" question.
 
 ### Card vault (`core/services/card_vault.py`, `routes/matcha_work/payment_cards.py`)

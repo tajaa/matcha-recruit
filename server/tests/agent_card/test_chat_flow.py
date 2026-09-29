@@ -146,6 +146,7 @@ class _DB:
         self.prompts: dict = {}
         self.purchases: list = []
         self.locks: list = []
+        self.charge_updates: list = []
         self.newer_run = False
 
     def add_prompt(self, kind="show_result", *, owner=None, payload=None, status="open", live=True):
@@ -194,6 +195,9 @@ class _DB:
                 return None
             p.update(status="answered", live=False, answer=args[1], answered_by=args[2])
             return True
+        if "INSERT INTO mw_agent_purchase_requests" in query:
+            self.purchases.append(args)
+            return uuid4()
         if "INSERT INTO mw_agent_card_prompts" in query:
             pid = uuid4()
             self.prompts[pid] = {
@@ -212,8 +216,8 @@ class _DB:
             for p in self.prompts.values():
                 if p["task_id"] == args[0] and p["live"]:
                     p.update(status="superseded", live=False)
-        elif "INSERT INTO mw_agent_purchase_requests" in query:
-            self.purchases.append(args)
+        elif "UPDATE mw_agent_purchase_requests" in query:
+            self.charge_updates.append(args)
 
 
 @pytest.fixture
@@ -239,6 +243,8 @@ def env(monkeypatch):
     monkeypatch.setattr(chat_flow, "persist_espresso_message", persist)
     monkeypatch.setattr(chat_flow, "broadcast_espresso_message", broadcast)
     monkeypatch.setattr(chat_flow, "_can_access_project", access)
+    # Handoff-only unless a test opts into the Stripe test charge.
+    monkeypatch.setattr(chat_flow.test_charge, "test_key", lambda: None)
     return holder
 
 
@@ -695,3 +701,65 @@ async def test_close_open_prompts():
 
 def test_ttls_are_sane():
     assert chat_flow.PICK_CARD_TTL < chat_flow.PURCHASE_TTL < chat_flow.OFFER_TTL <= timedelta(days=7)
+
+
+# ── Stripe test-mode charge ───────────────────────────────────────────────────
+
+async def _approve(env, user, payload=OFFER):
+    db = env["db"]
+    card = _card(user)
+    db.cards = [card]
+    pid = db.add_prompt("pick_card", owner=user.id, payload={
+        **payload, "options": [{"n": 1, "card_id": str(card["id"]), "last4": "4242", "brand": "visa", "label": ""}],
+    })
+    assert await _answer(env, user, "1", prompt_id=pid)
+    return card
+
+
+@pytest.mark.asyncio
+async def test_approved_purchase_is_charged_in_stripe_test_mode(env, monkeypatch):
+    seen = {}
+
+    async def charge(key, **kwargs):
+        seen.update(kwargs, key=key)
+        return {"status": "test_charged", "payment_intent_id": "pi_test_123", "error": None}
+
+    monkeypatch.setattr(chat_flow.test_charge, "test_key", lambda: "sk_test_x")
+    monkeypatch.setattr(chat_flow.test_charge, "charge", charge)
+    user = _user()
+    await _approve(env, user)
+    assert seen["key"] == "sk_test_x" and seen["amount"] == 4.49 and seen["currency"] == "USD"
+    assert seen["brand"] == "visa"
+    update = env["db"].charge_updates[0]
+    assert update[1:] == ("test_charged", "pi_test_123", None)
+    assert "Test charge of $4.49 succeeded in Stripe test mode (pi_test_123). No real money moved." in _said(env)[-1]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_test_charge_is_recorded_and_reported(env, monkeypatch):
+    monkeypatch.setattr(chat_flow.test_charge, "test_key", lambda: "sk_test_x")
+    monkeypatch.setattr(chat_flow.test_charge, "charge", AsyncMock(
+        return_value={"status": "test_failed", "payment_intent_id": None, "error": "Your card was declined."}))
+    await _approve(env, _user())
+    assert env["db"].charge_updates[0][1] == "test_failed"
+    assert "The Stripe test charge failed: Your card was declined." in _said(env)[-1]
+
+
+@pytest.mark.asyncio
+async def test_no_verified_price_means_no_test_charge(env, monkeypatch):
+    charge = AsyncMock()
+    monkeypatch.setattr(chat_flow.test_charge, "test_key", lambda: "sk_test_x")
+    monkeypatch.setattr(chat_flow.test_charge, "charge", charge)
+    await _approve(env, _user(), payload={**OFFER, "amount": None, "currency": None})
+    charge.assert_not_awaited()
+    assert "No verified price, so I didn't make a test charge." in _said(env)[-1]
+    assert len(env["db"].purchases) == 1
+
+
+@pytest.mark.asyncio
+async def test_handoff_mode_charges_nothing(env, monkeypatch):
+    charge = AsyncMock()
+    monkeypatch.setattr(chat_flow.test_charge, "charge", charge)
+    await _approve(env, _user())
+    charge.assert_not_awaited()
+    assert "I haven't charged anything" in _said(env)[-1]

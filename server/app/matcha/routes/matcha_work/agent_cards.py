@@ -65,7 +65,7 @@ async def list_agent_runs_endpoint(
         # Only your own purchase handoffs: they carry your card's last 4.
         purchases = await conn.fetch(
             """SELECT id, run_id, item_name, retailer, checkout_url, amount, currency,
-                      card_last4, status, created_at
+                      card_last4, status, stripe_payment_intent_id, charge_error, created_at
                FROM mw_agent_purchase_requests
                WHERE task_id = $1 AND user_id = $2
                ORDER BY created_at DESC
@@ -105,6 +105,8 @@ async def list_agent_runs_endpoint(
                 "currency": p["currency"],
                 "card_last4": p["card_last4"],
                 "status": p["status"],
+                "stripe_payment_intent_id": p["stripe_payment_intent_id"],
+                "charge_error": p["charge_error"],
                 "created_at": _iso(p["created_at"]),
             }
             for p in purchases

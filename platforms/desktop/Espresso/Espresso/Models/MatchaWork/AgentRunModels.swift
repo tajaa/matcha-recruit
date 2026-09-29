@@ -148,13 +148,17 @@ struct MWAgentPurchase: Decodable, Identifiable, Hashable {
     let amount: Double?
     let currency: String?
     let cardLast4: String
+    /// handoff / cancelled, or test_charged / test_failed when a Stripe
+    /// TEST-mode charge ran (no real money).
     let status: String
+    let chargeError: String?
 
     enum CodingKeys: String, CodingKey {
         case id, retailer, amount, currency, status
         case itemName = "item_name"
         case checkoutUrl = "checkout_url"
         case cardLast4 = "card_last4"
+        case chargeError = "charge_error"
     }
 }
 

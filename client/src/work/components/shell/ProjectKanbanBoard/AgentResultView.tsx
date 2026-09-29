@@ -206,6 +206,10 @@ function Purchases({ purchases }: { purchases: AgentPurchase[] }) {
             {p.retailer ? ` at ${p.retailer}` : ''}
             {p.amount != null ? ` · ${money(p.amount, p.currency ?? 'USD')}` : ''}
             <span className="text-w-faint"> · card ending {p.card_last4}</span>
+            {p.status === 'test_charged' && <span className="text-emerald-300"> · Stripe test charge succeeded</span>}
+            {p.status === 'test_failed' && (
+              <span className="text-orange-300"> · Stripe test charge failed{p.charge_error ? `: ${p.charge_error}` : ''}</span>
+            )}
           </span>
           {/^https?:\/\//i.test(p.checkout_url) && (
             <a
@@ -218,7 +222,7 @@ function Purchases({ purchases }: { purchases: AgentPurchase[] }) {
           )}
         </div>
       ))}
-      <p className="text-[11px] text-w-faint">Approved in chat. Nothing was charged: finish checkout at the link.</p>
+      <p className="text-[11px] text-w-faint">Approved in chat. No real money moves: test charges run in Stripe test mode, and real checkout happens at the link.</p>
     </div>
   )
 }

@@ -1245,7 +1245,10 @@ export type AgentPurchase = {
   amount: number | null
   currency: string | null
   card_last4: string
-  status: 'handoff' | 'cancelled'
+  /** test_charged / test_failed: a Stripe TEST-mode charge ran (no real money). */
+  status: 'handoff' | 'cancelled' | 'test_charged' | 'test_failed'
+  stripe_payment_intent_id?: string | null
+  charge_error?: string | null
   created_at: string | null
 }
 

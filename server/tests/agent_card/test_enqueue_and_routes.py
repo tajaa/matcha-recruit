@@ -505,7 +505,8 @@ async def test_agent_runs_list_and_rerun_endpoints(monkeypatch):
                 assert "user_id = $2" in query  # only the caller's own handoffs
                 return [{"id": uuid4(), "run_id": run_id, "item_name": "Balm", "retailer": "Shop",
                          "checkout_url": "https://shop.example.com/b", "amount": Decimal("7.50"),
-                         "currency": "USD", "card_last4": "4242", "status": "handoff", "created_at": now}]
+                         "currency": "USD", "card_last4": "4242", "status": "test_charged",
+                         "stripe_payment_intent_id": "pi_test_1", "charge_error": None, "created_at": now}]
             return [{"id": run_id, "round": 1, "status": "done", "result": '{"headline": "h"}', "error": None,
                      "search_calls": 2, "model_calls": 3, "created_at": now, "started_at": now, "completed_at": now}]
 
@@ -519,6 +520,7 @@ async def test_agent_runs_list_and_rerun_endpoints(monkeypatch):
     assert out["runs"][0]["result"] == {"headline": "h"}
     assert out["runs"][0]["steps"][0]["kind"] == "search"
     assert out["purchases"][0]["amount"] == 7.5 and out["purchases"][0]["card_last4"] == "4242"
+    assert out["purchases"][0]["stripe_payment_intent_id"] == "pi_test_1"
 
     queued = AsyncMock(return_value={"run_id": "r", "round": 1, "status": "queued"})
     monkeypatch.setattr(enqueue, "enqueue_card_agent", queued)
