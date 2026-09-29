@@ -11,6 +11,8 @@ export type WorkEntitlements = {
     used?: number
     remaining?: number
     resets_at?: string | null
+    /** Agent-card runs this UTC month (server: agent_card/quota.py). */
+    agent_runs?: { limit: number; used: number; remaining: number; resets_at: string }
   }
 }
 

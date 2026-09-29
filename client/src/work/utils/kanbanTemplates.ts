@@ -1,4 +1,4 @@
-import { Hammer, DollarSign, Sparkles, Bug, FileText, Wrench, Search, Mail, type LucideIcon } from 'lucide-react'
+import { Hammer, DollarSign, Sparkles, Bug, FileText, Wrench, Search, Mail, Bot, type LucideIcon } from 'lucide-react'
 import type { TaskPriority } from '../types'
 
 export type TemplateFieldKind = 'single' | 'multi' | { picker: string[] }
@@ -134,6 +134,20 @@ export const KANBAN_TEMPLATES: KanbanTemplate[] = [
       { key: 'why', label: 'Why it matters to us', placeholder: 'The decision this informs.', kind: 'multi' },
       { key: 'constraints', label: 'Constraints / scope', placeholder: 'Budget, timeline, what to leave out.', kind: 'multi' },
       { key: 'sources', label: 'Preferred sources', placeholder: 'Vendor docs, a competitor, a paper — or leave blank.', kind: 'single' },
+    ],
+  },
+  {
+    // Answered by the matcha server's own web agent (no AutoPR): created in
+    // To do, it runs at once, lands in Review as a result page, and a send-back
+    // is a redirect it reworks — server/app/matcha/services/matcha_work/agent_card/.
+    key: 'agent',
+    displayName: 'Agent',
+    icon: Bot,
+    colorClass: 'text-emerald-400',
+    defaultPriority: 'medium',
+    hint: 'Put the request in the title ("Find me the best organic lip balm"). Espresso researches it on the web right away and moves the card to Review with a result page — picks, photos, reviews and where to buy. Send it back with a note to redirect it.',
+    fields: [
+      { key: 'details', label: 'Anything it should know', placeholder: 'Budget, must-haves, what to avoid.', kind: 'multi' },
     ],
   },
   {
