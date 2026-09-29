@@ -1,4 +1,5 @@
-"""Saved payment cards for agent-card purchases (per user, internal-only in v1).
+"""Saved payment cards for agent-card purchases (per user; admins plus the
+`AGENT_PURCHASE_ALLOWED_EMAILS` allowlist in v1).
 
 The card number is validated, encrypted with the vault key and stored; only
 brand, last 4 digits, expiry and a label ever come back out. There is no CVV
@@ -43,7 +44,7 @@ def _card_out(row) -> dict:
 
 
 def _require_purchases(user: CurrentUser) -> None:
-    if not purchases_allowed(user.role):
+    if not purchases_allowed(user):
         raise HTTPException(
             status_code=403,
             detail={"code": "purchases_unavailable", "message": "Agent purchases aren't available on this account."},
@@ -52,7 +53,7 @@ def _require_purchases(user: CurrentUser) -> None:
 
 @router.get("/payment-cards")
 async def list_payment_cards(current_user: CurrentUser = Depends(require_company_member)):
-    enabled = purchases_allowed(current_user.role)
+    enabled = purchases_allowed(current_user)
     async with get_connection() as conn:
         rows = await conn.fetch(
             """SELECT id, label, brand, last4, exp_month, exp_year, created_at

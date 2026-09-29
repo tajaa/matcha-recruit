@@ -8,6 +8,9 @@ import AppKit
 /// that were previously only flippable via UserDefaults directly.
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
+    /// Whether the server lets this account buy through agent cards (admins
+    /// plus an allowlist), or it already has saved cards.
+    @State private var paymentCardsAvailable = false
 
     var body: some View {
         TabView {
@@ -19,8 +22,8 @@ struct SettingsView: View {
                 .tabItem { Label("Account", systemImage: "person.circle") }
             ConnectorsSettingsTab()
                 .tabItem { Label("AI Connectors", systemImage: "powerplug") }
-            // Agent-card purchases are internal-only (platform admins) in v1.
-            if appState.currentUser?.role == "admin" {
+            // Agent-card purchases are internal-only in v1; the server decides who.
+            if appState.currentUser?.role == "admin" || paymentCardsAvailable {
                 PaymentCardsSettingsTab()
                     .tabItem { Label("Payment Cards", systemImage: "creditcard") }
             }
@@ -28,6 +31,10 @@ struct SettingsView: View {
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 480, height: 360)
+        .task(id: appState.currentUser?.email) {
+            guard let state = try? await MatchaWorkService.shared.paymentCards() else { return }
+            paymentCardsAvailable = state.enabled || !state.cards.isEmpty
+        }
     }
 }
 
@@ -75,12 +82,20 @@ private struct PaymentCardsSettingsTab: View {
             if let state, state.enabled {
                 Section {
                     if state.configured {
-                        TextField("Card number", text: $number)
-                            .textContentType(.creditCardNumber)
-                        TextField("Expiry (MM/YY)", text: $expiry)
-                        TextField("Label (optional)", text: $label)
+                        // Grouped macOS forms render a plain TextField as a
+                        // row label plus an invisible, borderless trailing
+                        // box; bordered fields with prompts are clickable.
+                        TextField("Card number", text: $number, prompt: Text("4242 4242 4242 4242"))
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Expiry", text: $expiry, prompt: Text("MM/YY"))
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Label", text: $label, prompt: Text("Optional, e.g. Stripe test"))
+                            .textFieldStyle(.roundedBorder)
+                        // Always pressable: save() says what's missing
+                        // instead of a silently grayed-out button.
                         Button(busy ? "Saving…" : "Save card") { Task { await save() } }
-                            .disabled(busy || number.isEmpty || expiry.isEmpty)
+                            .disabled(busy)
+                            .keyboardShortcut(.defaultAction)
                     } else {
                         Text("Card storage isn't set up on this server yet.").foregroundColor(.orange)
                     }
@@ -123,8 +138,12 @@ private struct PaymentCardsSettingsTab: View {
     }
 
     private func save() async {
+        if number.filter(\.isNumber).count < 12 {
+            message = "Enter the card number."
+            return
+        }
         guard let (month, year) = Self.parseExpiry(expiry) else {
-            message = "Enter the expiry as MM/YY."
+            message = "Enter the expiry as MM/YY, e.g. 12/30."
             return
         }
         busy = true

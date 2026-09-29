@@ -5,7 +5,9 @@ see what I found?". Yes posts a readable summary of the result (the full page
 stays on the card). For a shopping result, and for a user allowed to buy, it
 then asks "want to buy it?", then which saved card, and records a purchase
 handoff: the exact item, retailer, checkout link and verified total the user
-approved. v1 never charges anything; the user finishes checkout at the link.
+approved. Nothing real is charged: by default an approved purchase with a
+verified total is charged in Stripe TEST mode (`test_charge.py`, test keys
+only, no card number sent); otherwise the user finishes checkout at the link.
 
 Every question is a `mw_agent_card_prompts` row. Answers are parsed
 deterministically (no model call):
@@ -29,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -38,6 +41,7 @@ from app.core.services import card_vault
 from app.database import connection_or_direct, decode_jsonb
 
 from ..project_agent.chat import broadcast_espresso_message, persist_espresso_message
+from . import test_charge
 
 logger = logging.getLogger(__name__)
 
@@ -102,14 +106,56 @@ def parse_answer(text: str) -> Answer | None:
 
 
 def is_plain_yes(text: str) -> bool:
-    """Whether a plain (unthreaded) message asks to see a result. Synchronous
+    """Whether a plain (unthreaded) message is an explicit yes. Synchronous
     and allocation-light: it runs on the chat socket's hot path."""
     return isinstance(text, str) and len(text) <= 30 and _normalize(text) in _PLAIN_YES
 
 
-def purchases_allowed(role: str | None) -> bool:
-    """Buying through chat is internal-only in v1: platform admins."""
-    return (role or "").lower() == "admin"
+_BUY_INTENT = re.compile(r"\b(buy|purchase|order|checkout|check out)\b")
+_NEGATION = re.compile(r"\b(don t|dont|do not|not|no|never|cancel|stop|wait|hold|later)\b")
+
+
+def is_buy_intent(text: str) -> bool:
+    """An explicit, un-negated request to buy ("buy it", "buy the best one",
+    "go ahead and purchase"). Only ever applied to the sender's OWN open
+    purchase question, so "ok" or "sure" to a colleague never buys anything."""
+    if not isinstance(text, str) or len(text) > 80:
+        return False
+    normalized = _normalize(text)
+    return bool(_BUY_INTENT.search(normalized)) and not _NEGATION.search(normalized)
+
+
+def plain_card_choice(text: str) -> Answer | None:
+    """A bare card number ("1") or last 4 ("4242") typed as a plain message."""
+    if not isinstance(text, str) or len(text) > 30:
+        return None
+    answer = parse_answer(text)
+    return answer if answer and answer.kind in ("choice", "last4") else None
+
+
+def might_answer_plain(text: str) -> bool:
+    """Hot-path guard for a plain message: could it answer an agent-card question?"""
+    return is_plain_yes(text) or is_buy_intent(text) or plain_card_choice(text) is not None
+
+
+# A plain "yes" answers the sender's own buy / card question only right after
+# it was asked; after that it takes a threaded reply or an explicit "buy it".
+FRESH_PURCHASE_QUESTION = timedelta(minutes=10)
+
+
+PURCHASE_ALLOWLIST_ENV = "AGENT_PURCHASE_ALLOWED_EMAILS"
+
+
+def purchases_allowed(user) -> bool:
+    """Buying through chat is internal-only in v1: platform admins, plus the
+    accounts listed (comma-separated emails) in `AGENT_PURCHASE_ALLOWED_EMAILS`."""
+    if user is None:
+        return False
+    if (getattr(user, "role", "") or "").lower() == "admin":
+        return True
+    email = (getattr(user, "email", "") or "").strip().lower()
+    allowed = {e.strip().lower() for e in (os.getenv(PURCHASE_ALLOWLIST_ENV) or "").split(",") if e.strip()}
+    return bool(email) and email in allowed
 
 
 # ── formatting ────────────────────────────────────────────────────────────────
@@ -218,6 +264,33 @@ def _offer_line(offer: dict) -> str:
     money = format_money(offer.get("amount"), offer.get("currency"))
     parts.append(f"for {money}" if money else "(price not confirmed)")
     return " ".join(parts)
+
+
+def format_receipt(payload: dict, *, card: dict, purchase_id, payment_intent_id: str, task_id) -> str:
+    """The "all done" message after a successful Stripe test charge."""
+    from datetime import datetime, timezone
+
+    item = payload["item_name"] + (f" ({payload['brand']})" if payload.get("brand") else "")
+    code = (payload.get("currency") or "USD").upper()
+    lines = [
+        "All done. Here's your receipt.",
+        "",
+        "Receipt (Stripe TEST mode, no real money moved)",
+        f"Item: {item}",
+    ]
+    if payload.get("retailer"):
+        lines.append(f"Store: {payload['retailer']}")
+    lines += [
+        f"Total: {format_money(payload['amount'], code)} {code}",
+        f"Paid with: {_card_label(card)}",
+        f"Payment: {payment_intent_id} (succeeded)",
+        f"Order ref: {str(purchase_id)[:8].upper()}",
+        f"Date: {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC",
+        "",
+        f"Product page: {payload['checkout_url']}",
+        f"It's saved on ⟦ticket:{task_id}|the card|Review⟧ under Purchases.",
+    ]
+    return "\n".join(lines)
 
 
 _BRANDS = {"visa": "Visa", "mastercard": "Mastercard", "amex": "Amex", "discover": "Discover"}
@@ -435,7 +508,10 @@ async def _can_access_project(prompt: dict, user) -> bool:
     return await resolve_project_access(prompt["project_id"], actor, company_id=company_id) is not None
 
 
-async def _load_prompt(conn, channel_id: UUID, *, prompt_id: UUID | None, purchase_owner=None) -> dict | None:
+async def _load_prompt(
+    conn, channel_id: UUID, *, prompt_id: UUID | None, purchase_owner=None,
+    kinds: tuple[str, ...] = PURCHASE_KINDS, max_age: timedelta | None = None,
+) -> dict | None:
     if prompt_id is not None:
         row = await conn.fetchrow(
             """SELECT *, (status = 'open' AND expires_at > NOW()) AS live
@@ -446,10 +522,11 @@ async def _load_prompt(conn, channel_id: UUID, *, prompt_id: UUID | None, purcha
         row = await conn.fetchrow(
             """SELECT *, TRUE AS live
                FROM mw_agent_card_prompts
-               WHERE channel_id = $1 AND owner_user_id = $2 AND kind IN ('purchase', 'pick_card')
+               WHERE channel_id = $1 AND owner_user_id = $2 AND kind = ANY($3::text[])
                  AND status = 'open' AND expires_at > NOW()
+                 AND ($4::interval IS NULL OR created_at > NOW() - $4::interval)
                ORDER BY created_at DESC LIMIT 1""",
-            channel_id, purchase_owner,
+            channel_id, purchase_owner, list(kinds), max_age,
         )
     else:
         row = await conn.fetchrow(
@@ -533,13 +610,14 @@ async def handle_chat_answer(
     question). Everything else is ordinary chat.
     """
     targeted = prompt_id is not None
-    if not targeted and not card_number_removed and not is_plain_yes(content):
-        return False
+    plain_answer: Answer | None = None
     async with connection_or_direct() as conn:
-        prompt = await _load_prompt(
-            conn, channel_id, prompt_id=prompt_id,
-            purchase_owner=user.id if card_number_removed and not targeted else None,
-        )
+        if targeted:
+            prompt = await _load_prompt(conn, channel_id, prompt_id=prompt_id)
+        elif card_number_removed:
+            prompt = await _load_prompt(conn, channel_id, prompt_id=None, purchase_owner=user.id)
+        else:
+            prompt, plain_answer = await _plain_target(conn, channel_id, user, content)
     if prompt is None:
         return False
     allowed = await _can_access_project(prompt, user)
@@ -562,14 +640,40 @@ async def handle_chat_answer(
                 f"{ADD_CARD_HINT} instead."
             )
         else:
-            await _answer(conn, prompt, user, content, targeted=targeted, say=say, outbox=outbox)
+            await _answer(conn, prompt, user, content, targeted=targeted, plain_answer=plain_answer,
+                          say=say, outbox=outbox)
     for message in outbox:
         await broadcast_espresso_message(message)
     return True
 
 
-async def _answer(conn, prompt: dict, user, content: str, *, targeted: bool, say, outbox) -> None:
-    answer = Answer("yes") if not targeted else parse_answer(content)
+async def _plain_target(conn, channel_id: UUID, user, content: str) -> tuple[dict | None, Answer | None]:
+    """Which question a plain (unthreaded) message answers, if any:
+      * an explicit "buy it" → the sender's own open buy / card question;
+      * "1" / "4242" → the sender's own open card question;
+      * "yes" → the sender's own buy / card question if it was just asked,
+        else the channel's newest "want to see it?" question.
+    """
+    buy, choice, yes = is_buy_intent(content), plain_card_choice(content), is_plain_yes(content)
+    if buy or yes:
+        prompt = await _load_prompt(
+            conn, channel_id, prompt_id=None, purchase_owner=user.id,
+            max_age=None if buy else FRESH_PURCHASE_QUESTION,
+        )
+        if prompt:
+            return prompt, Answer("yes")
+    if choice:
+        prompt = await _load_prompt(conn, channel_id, prompt_id=None, purchase_owner=user.id, kinds=("pick_card",))
+        if prompt:
+            return prompt, choice
+    if yes:
+        return await _load_prompt(conn, channel_id, prompt_id=None), Answer("yes")
+    return None, None
+
+
+async def _answer(conn, prompt: dict, user, content: str, *, targeted: bool, say, outbox,
+                  plain_answer: Answer | None = None) -> None:
+    answer = parse_answer(content) if targeted else plain_answer
     kind = prompt["kind"]
     owner = prompt.get("owner_user_id")
     if owner is not None and owner != user.id:
@@ -613,13 +717,13 @@ async def _answer_show_result(conn, prompt, user, answer: Answer, *, say, outbox
             return
         await say(format_result(result, task_id=prompt["task_id"], title=row["title"], column=row["board_column"]))
         offer = purchase_offer(result)
-        if offer and purchases_allowed(getattr(user, "role", None)):
+        if offer and purchases_allowed(user):
             outbox.append(await _ask(
                 conn, prompt=prompt, kind="purchase", owner_user_id=user.id, payload=offer,
                 ttl=PURCHASE_TTL,
                 content=(
                     f"Want me to buy it? {_offer_line(offer)}. "
-                    "Reply to this message with yes or no."
+                    "Reply yes (or \"buy it\") to buy, or no to skip."
                 ),
             ))
 
@@ -648,11 +752,11 @@ async def _answer_purchase(conn, prompt, user, answer: Answer, *, say, outbox) -
     if len(options) == 1:
         question = (
             f"Use your {_card_label(options[0], with_expiry=True)}? "
-            "Reply to this message with yes, or no to cancel."
+            "Reply yes (or 1) to confirm, or no to cancel."
         )
     else:
         question = (
-            "Which card? Reply to this message with its number: "
+            "Which card? Reply with its number: "
             + "; ".join(f"{o['n']}. {_card_label(o, with_expiry=True)}" for o in options)
             + ". Or reply no to cancel."
         )
@@ -710,18 +814,44 @@ async def _answer_pick_card(conn, prompt, user, answer: Answer, *, say) -> None:
     async with conn.transaction():
         if not await _claimed(conn, prompt, user, f"card:{card['last4']}", say):
             return
-        await conn.execute(
+        purchase_id = await conn.fetchval(
             """INSERT INTO mw_agent_purchase_requests
                    (company_id, project_id, task_id, run_id, prompt_id, user_id, card_id,
                     card_last4, item_name, retailer, checkout_url, amount, currency)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)""",
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+               RETURNING id""",
             prompt["company_id"], prompt["project_id"], prompt["task_id"], prompt["run_id"],
             prompt["id"], user.id, card["id"], card["last4"], payload["item_name"],
             payload.get("retailer"), payload["checkout_url"], payload.get("amount"),
             payload.get("currency"),
         )
-        await say(
-            f"Approved: {_offer_line(payload)}, on your {_card_label(dict(card))}. "
-            "I haven't charged anything. Finish checkout here: "
-            f"{payload['checkout_url']}\nIt's saved on the card under Purchases."
-        )
+    # The Stripe call happens after commit (never inside a transaction); the
+    # approval is recorded either way.
+    approved = f"Approved: {_offer_line(payload)}, on your {_card_label(dict(card))}."
+    link = f"Checkout link: {payload['checkout_url']}\nIt's saved on the card under Purchases."
+    key = test_charge.test_key()
+    if key is None:
+        await say(f"{approved} I haven't charged anything. Finish checkout here: {payload['checkout_url']}\n"
+                  "It's saved on the card under Purchases.")
+        return
+    if payload.get("amount") is None or not payload.get("currency"):
+        await say(f"{approved} No verified price, so I didn't make a test charge. {link}")
+        return
+    outcome = await test_charge.charge(
+        key, purchase_id=purchase_id, amount=payload["amount"], currency=payload["currency"],
+        brand=card["brand"], description=f"Agent card test purchase: {payload['item_name']}",
+        metadata={"purchase_id": purchase_id, "task_id": prompt["task_id"], "card_last4": card["last4"]},
+    )
+    await conn.execute(
+        """UPDATE mw_agent_purchase_requests
+           SET status = $2, stripe_payment_intent_id = $3, charge_error = $4
+           WHERE id = $1""",
+        purchase_id, outcome["status"], outcome["payment_intent_id"], outcome["error"],
+    )
+    if outcome["status"] == "test_charged":
+        await say(format_receipt(
+            payload, card=dict(card), purchase_id=purchase_id,
+            payment_intent_id=outcome["payment_intent_id"], task_id=prompt["task_id"],
+        ))
+    else:
+        await say(f"{approved} The Stripe test charge failed: {outcome['error']} {link}")

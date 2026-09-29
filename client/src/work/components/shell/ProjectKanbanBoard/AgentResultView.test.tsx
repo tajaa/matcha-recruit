@@ -106,7 +106,7 @@ describe('AgentResultView purchases', () => {
       runs: [run('r1', 1, 'done', result('Pick'))],
       purchases: [
         { id: 'p1', run_id: 'r1', item_name: 'Organic Balm', retailer: 'Shop', checkout_url: 'https://shop.example/buy',
-          amount: 4.29, currency: 'USD', card_last4: '4242', status: 'handoff', created_at: null },
+          amount: 4.29, currency: 'USD', card_last4: '4242', status: 'test_charged', stripe_payment_intent_id: 'pi_test_1', created_at: null },
         { id: 'p2', run_id: 'r1', item_name: 'Sketchy', retailer: null, checkout_url: 'javascript:alert(1)',
           amount: null, currency: null, card_last4: '5454', status: 'handoff', created_at: null },
       ],
@@ -118,7 +118,8 @@ describe('AgentResultView purchases', () => {
     expect(links).toHaveLength(1)  // the non-http(s) one renders no link
     expect(links[0].getAttribute('href')).toBe('https://shop.example/buy')
     expect(links[0].getAttribute('rel')).toBe('noopener noreferrer nofollow')
-    expect(screen.getByText(/Nothing was charged/)).toBeTruthy()
+    expect(screen.getByText(/Stripe test charge succeeded/)).toBeTruthy()
+    expect(screen.getByText(/No real money moves/)).toBeTruthy()
   })
 
   it('shows no purchases section when there are none', async () => {

@@ -82,26 +82,31 @@ When a run finishes and the card's project has a discussion chat, Espresso asks 
 | Question (`mw_agent_card_prompts.kind`) | How it's answered | yes | no |
 |---|---|---|---|
 | `show_result` (7 days) | threaded reply, or a plain "yes" | posts the short read (headline, top pick with price/rating/why/buy link, alternatives); the full page stays on the card. For an admin with a shopping result, asks `purchase` | threaded only: "It's on the card" |
-| `purchase` (2 days) | **threaded reply by its owner only** | no saved card → says where to add one and **stays open**; else asks `pick_card` | "I won't buy it" |
-| `pick_card` (2 hours) | **threaded reply by its owner only** | the card's number (1, 2, …), its last 4 when unique, or yes with one card → inserts `mw_agent_purchase_requests` and posts the checkout link | cancelled |
+| `purchase` (2 days) | its owner: threaded reply, "buy it", or "yes" within 10 min | no saved card → says where to add one and **stays open**; else asks `pick_card` | "I won't buy it" |
+| `pick_card` (2 hours) | its owner: threaded reply, the card's number / last 4, or "yes" within 10 min | the card's number (1, 2, …), its last 4 when unique, or yes with one card → inserts `mw_agent_purchase_requests` and posts the checkout link | cancelled |
 
 Invariants:
 
 - **No model call.** `parse_answer` (threaded replies) is a closed set of yes/no phrases plus a last 4 or a card number. `is_plain_yes` (unthreaded) is only "yes" / "yes please" / "show me" / "show it".
-- **Everyday chat is never an answer.** A plain message counts only as an explicit "yes", only in a project discussion chat, and only for the newest open `show_result`, so it can show a result but never close one, approve a purchase or pick a card. "ok" to a colleague does nothing. Buying needs a threaded reply from the person who owns the question.
-- **Routing (`werk/routes/channels_ws.py`).** `_routes_to_agent_card` is synchronous and DB-free. It sends a threaded reply to a question's message (metadata `kind: agent_card_prompt`, `prompt_id`) to that question, never to the `@espresso` repo agent. A plain message goes only when all of these hold:
-  - it is an explicit yes (`is_plain_yes`);
-  - the channel is `ChannelScope.PROJECT_DISCUSSION`;
-  - it has no reply target and no mentions;
-  - no live Huume event-draft or schedule pill in the channel owns that "yes".
+- **Everyday chat is never an answer.** A question answers to a threaded reply, or to a plain message (`_plain_target`) that resolves as follows:
+  - an explicit, un-negated buy phrase (`is_buy_intent`: "buy it", "buy the best one", "purchase it"; also when replying to another message, e.g. the result) goes to the sender's **own** open `purchase`/`pick_card`;
+  - a bare card number or last 4 goes to the sender's own open `pick_card`;
+  - a plain "yes" goes to the sender's own buy/card question only within 10 minutes of it being asked (`FRESH_PURCHASE_QUESTION`), otherwise to the channel's newest `show_result`.
 
-  Ordinary chat in other channels never spawns a task or touches the pool.
+  "ok", "sure" and "don't buy it" never match, and nobody else's message can answer someone's buy question. The WS router (`_routes_to_agent_card`) is regex-only: project discussion chats, no mentions, and no live Huume pill.
+- **The agent never says it can't buy.** `prompt.py` tells it to research and pick with exact price and link. The purchase question comes from Espresso after review.
 - **Answered once, never from a stale result.** Every claim runs in a transaction that takes `enqueue`'s own per-card lock (`{task_id}:card_agent`). The claim first checks whether a newer run on the card counts (`_NEWER_RUN_SQL`: queued/running/done; failed and never-dispatched runs don't). If one does, it closes the card's open questions and replies "replaced by a newer run". Otherwise it is one conditional `UPDATE … WHERE status='open' AND expires_at > NOW()`. `offer_result` takes the same lock and skips a run that is no longer the latest. `enqueue` closes open questions only **after** a successful dispatch, so a broker failure leaves the current result's questions open. There is one offer per run (partial unique index).
 - **Who may answer.** Every question uses the REST API's own rule, `project_service.resolve_project_access`, which `_verify_project_access` also calls. So collaborators and the company's own users qualify, except that employees never reach discipline/recruiting boards, and admins qualify only as collaborators. `purchase`/`pick_card` answer only to their `owner_user_id`, the person who said yes to seeing the result.
 - **The approved purchase is frozen and verified.** `purchase_offer` takes the top pick at its first provenance-gated buy link. The total is the pick's **source-checked** `price` with its currency, or nothing ("price not confirmed"). A buy link's own `price` is only the model's claim and has no currency, so it is never offered. The payload is frozen into the question and copied verbatim into the purchase row.
 - **Card choice is unambiguous.** Options are numbered and shown with label and expiry. A last 4 digits shared by two cards gets "reply with its number".
-- **v1 never charges.** The purchase is a handoff: the user finishes checkout at the link. The status is `handoff`; automated checkout is a later change.
-- **Purchases are admin-only in v1** (`chat_flow.purchases_allowed`). Everyone else still gets the "see it?" question.
+- **No real money moves.** By default (`AGENT_PURCHASE_MODE=stripe_test`), an approved purchase with a verified total is charged in **Stripe test mode** (`test_charge.py`, migration `agentchat02`).
+  - It only runs with a `sk_test_`/`rk_test_` key: `AGENT_PURCHASE_STRIPE_KEY`, else `STRIPE_SECRET_KEY`. A live key means no charge, never a live one.
+  - The saved card's number is never sent to Stripe. Stripe's test payment method for the brand (`pm_card_visa`, …) stands in.
+  - The purchase id is the idempotency key. The call runs after the purchase row commits, and the outcome is recorded in `status` (`test_charged`/`test_failed`), `stripe_payment_intent_id` and `charge_error`.
+  - With no verified price, no key, or `AGENT_PURCHASE_MODE=handoff`, the purchase is a handoff (`status='handoff'`): the user finishes checkout at the link.
+
+  Real checkout is a later change.
+- **Purchases are internal-only in v1** (`chat_flow.purchases_allowed`): platform admins plus the accounts in `AGENT_PURCHASE_ALLOWED_EMAILS` (comma-separated). Everyone else still gets the "see it?" question. The clients show Payment cards when `GET /payment-cards` says `enabled` (or cards exist), never by role.
 
 ### Card vault (`core/services/card_vault.py`, `routes/matcha_work/payment_cards.py`)
 
@@ -120,4 +125,4 @@ Invariants:
 
   Separators are up to three whitespace characters (newlines and non-breaking spaces included), `.`, `-` or `/`. Every matching window is found and overlaps merged, so no digits of a card survive. Dates and phone numbers are not card-shaped (0% measured). A random card-shaped digit string matches about 5% of the time, which is why redaction only runs in the purchase context above.
 - **Photos.** A card photo in reply to a purchase question gets a "delete that image" warning; nothing reads it.
-- **Endpoints.** `GET/POST /matcha-work/payment-cards` and `DELETE /matcha-work/payment-cards/{id}` are per user with a maximum of 5 cards. Adding is admin-only (`403 purchases_unavailable`); anyone can list or delete their own. `GET …/agent-runs` also returns `purchases`, the caller's own only.
+- **Endpoints.** `GET/POST /matcha-work/payment-cards` and `DELETE /matcha-work/payment-cards/{id}` are per user with a maximum of 5 cards. Adding needs `purchases_allowed` (`403 purchases_unavailable`); anyone can list or delete their own. `GET …/agent-runs` also returns `purchases`, the caller's own only.
