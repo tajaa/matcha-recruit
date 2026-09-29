@@ -288,10 +288,16 @@ def _agent_card_prompt_reference(raw_metadata) -> Optional[UUID]:
     return prompt_reference(raw_metadata)
 
 
-def _agent_card_plain_yes(content: str) -> bool:
-    from app.matcha.services.matcha_work.agent_card.chat_flow import is_plain_yes
+def _agent_card_plain_answer(content: str) -> bool:
+    from app.matcha.services.matcha_work.agent_card.chat_flow import might_answer_plain
 
-    return is_plain_yes(content)
+    return might_answer_plain(content)
+
+
+def _agent_card_buy_intent(content: str) -> bool:
+    from app.matcha.services.matcha_work.agent_card.chat_flow import is_buy_intent
+
+    return is_buy_intent(content)
 
 
 async def _agent_card_redaction(
@@ -319,21 +325,26 @@ def _routes_to_agent_card(
     is_project_chat: bool,
 ) -> bool:
     """Whether a new message goes to Espresso's agent-card questions: a
-    threaded reply to one, a message whose card number was just removed, or
-    a plain "yes" (no reply target, no mentions) in a project discussion chat —
-    which only ever shows a result; buying needs a threaded reply. Synchronous
-    and DB-free, so other channels and ordinary chat never spawn a task. A
-    live Huume event-draft or schedule pill keeps priority for that "yes"."""
+    threaded reply to one, a message whose card number was just removed, or —
+    in a project discussion chat, with no mentions — an explicit "buy it"
+    (even as a reply to another message, e.g. the result), or a plain "yes" /
+    card number / last 4 with no reply target. `chat_flow` then applies it
+    only to the sender's own buy / card question, or shows a result; a bare
+    "ok" never matches. Synchronous and DB-free, so other channels and
+    ordinary chat never spawn a task. A live Huume event-draft or schedule
+    pill keeps priority for those words."""
     if agent_prompt_id is not None or card_number_removed:
         return True
-    return (
-        is_project_chat
-        and not reply_to_id
-        and not mention_handles
-        and not _channel_recently_ems_drafted(room_key)
-        and not _channel_recently_clarified(room_key)
-        and _agent_card_plain_yes(content)
-    )
+    if (
+        not is_project_chat
+        or mention_handles
+        or _channel_recently_ems_drafted(room_key)
+        or _channel_recently_clarified(room_key)
+    ):
+        return False
+    if _agent_card_buy_intent(content):
+        return True
+    return not reply_to_id and _agent_card_plain_answer(content)
 
 
 async def _bg_agent_card_reply(

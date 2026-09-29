@@ -168,8 +168,11 @@ def test_ws_helpers_wrap_the_chat_flow():
     pid = uuid4()
     assert channels_ws._agent_card_prompt_reference({"kind": "agent_card_prompt", "prompt_id": str(pid)}) == pid
     assert channels_ws._agent_card_prompt_reference({}) is None
-    assert channels_ws._agent_card_plain_yes("yes please")
-    assert not channels_ws._agent_card_plain_yes("ok")
+    assert channels_ws._agent_card_plain_answer("yes please")
+    assert channels_ws._agent_card_plain_answer("4242")
+    assert not channels_ws._agent_card_plain_answer("ok")
+    assert channels_ws._agent_card_buy_intent("Buy the best one")
+    assert not channels_ws._agent_card_buy_intent("don't buy it")
 
 
 @pytest.mark.asyncio
@@ -212,10 +215,14 @@ def test_routing_answers_to_agent_card_questions(monkeypatch):
     assert route(**{**base, "card_number_removed": True, "content": "x"})
     # Everyday acknowledgements never spawn a task, and nothing outside a
     # project discussion chat does either.
-    for text in ("ok", "k", "sure", "no", "4242", "see you at 5"):
+    for text in ("ok", "k", "sure", "no", "see you at 5"):
         assert not route(**{**base, "content": text})
+    assert route(**{**base, "content": "4242"})  # a card pick; chat_flow checks it's the sender's
     assert not route(**{**base, "is_project_chat": False})
-    assert not route(**{**base, "reply_to_id": uuid4()})  # a reply to someone else
+    assert not route(**{**base, "reply_to_id": uuid4()})  # a plain "yes" replying to someone else
+    # An explicit buy counts even as a reply to another message (e.g. the result).
+    assert route(**{**base, "content": "Buy the best one", "reply_to_id": uuid4()})
+    assert not route(**{**base, "content": "Buy the best one", "is_project_chat": False})
     assert not route(**{**base, "mention_handles": ["espresso"]})
     monkeypatch.setattr(channels_ws, "_channel_recently_ems_drafted", lambda _k: True)
     assert not route(**base)  # a live Huume event-draft pill keeps its "yes"

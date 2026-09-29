@@ -55,6 +55,16 @@ def test_plain_messages_only_count_as_an_explicit_yes(text, expected):
     assert chat_flow.is_plain_yes(text) is expected
 
 
+@pytest.mark.parametrize("text, expected", [
+    ("Buy the best one", True), ("buy it", True), ("please purchase it", True), ("place the order", True),
+    ("ok", False), ("sure", False), ("don't buy it", False), ("do not purchase", False),
+    ("not yet, don't order", False), ("cancel the order", False), ("wait before you buy", False),
+    ("buy " * 30, False),
+])
+def test_buy_intent(text, expected):
+    assert chat_flow.is_buy_intent(text) is expected
+
+
 def test_buying_is_admins_plus_an_email_allowlist(monkeypatch):
     person = lambda role, email: SimpleNamespace(role=role, email=email)  # noqa: E731
     monkeypatch.delenv(chat_flow.PURCHASE_ALLOWLIST_ENV, raising=False)
@@ -155,9 +165,11 @@ class _DB:
         self.charge_updates: list = []
         self.newer_run = False
 
-    def add_prompt(self, kind="show_result", *, owner=None, payload=None, status="open", live=True):
+    def add_prompt(self, kind="show_result", *, owner=None, payload=None, status="open", live=True,
+                   age=timedelta(0)):
         pid = uuid4()
         self.prompts[pid] = {
+            "age": age,
             "id": pid, "company_id": self.company_id, "project_id": self.project_id,
             "task_id": self.task_id, "run_id": self.run_id, "channel_id": self.channel_id,
             "kind": kind, "owner_user_id": owner, "payload": json.dumps(payload or {}),
@@ -178,7 +190,9 @@ class _DB:
             p = self.prompts.get(args[0])
             return dict(p) if p and p["channel_id"] == args[1] else None
         if "FROM mw_agent_card_prompts" in query and "owner_user_id = $2" in query:
-            return self._newest(lambda p: p["owner_user_id"] == args[1] and p["kind"] in chat_flow.PURCHASE_KINDS)
+            kinds, max_age = args[2], args[3]
+            return self._newest(lambda p: p["owner_user_id"] == args[1] and p["kind"] in kinds
+                                and (max_age is None or p.get("age", timedelta(0)) < max_age))
         if "FROM mw_agent_card_prompts" in query and "kind = 'show_result'" in query:
             return self._newest(lambda p: p["kind"] == "show_result")
         if "r.result, t.title" in query:
@@ -290,13 +304,13 @@ async def test_yes_shows_the_result_then_threaded_replies_buy_it(env):
     assert "Top pick: Organic Lip Balm" in _said(env)[0]
     buy_q = _newest(db, "purchase")
     assert buy_q["owner_user_id"] == user.id and buy_q["ttl"] == chat_flow.PURCHASE_TTL
-    assert "Want me to buy it? Organic Lip Balm at Shop for $4.49. Reply to this message" in _said(env)[1]
+    assert "Want me to buy it? Organic Lip Balm at Shop for $4.49. Reply yes (or \"buy it\")" in _said(env)[1]
     assert env["said"][1]["metadata"]["prompt_kind"] == "purchase"
     assert db.locks == [f"{db.task_id}:card_agent"]  # the claim holds enqueue's per-card lock
 
     assert await _answer(env, user, "yes", prompt_id=buy_q["id"])
     pick_q = _newest(db, "pick_card")
-    assert "Use your Visa ending 4242 (Mercury test, expires 12/31)?" in _said(env)[2]
+    assert "Use your Visa ending 4242 (Mercury test, expires 12/31)? Reply yes (or 1) to confirm" in _said(env)[2]
     assert json.loads(pick_q["payload"])["checkout_url"] == "https://shop.example.com/p"
 
     assert await _answer(env, user, "yes", prompt_id=pick_q["id"])
@@ -309,8 +323,8 @@ async def test_yes_shows_the_result_then_threaded_replies_buy_it(env):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("text", ["yes", "ok", "sure", "4242", "no"])
-async def test_a_plain_message_can_never_answer_a_purchase_question(env, text):
+@pytest.mark.parametrize("text", ["ok", "sure", "k", "no", "later", "don't buy it", "not yet, don't order"])
+async def test_everyday_or_negated_replies_never_answer_a_purchase_question(env, text):
     # An admin's "ok" to a colleague must not approve a purchase or pick a card.
     db, user = env["db"], _user()
     db.cards = [_card(user)]
@@ -320,6 +334,52 @@ async def test_a_plain_message_can_never_answer_a_purchase_question(env, text):
     assert await _answer(env, user, text) is False
     assert env["said"] == [] and db.purchases == []
     assert db.prompts[buy]["status"] == db.prompts[pick]["status"] == "open"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["Buy the best one", "buy it", "yes, purchase it", "go ahead and order it"])
+async def test_an_explicit_buy_from_the_owner_answers_their_purchase_question(env, text):
+    db, user = env["db"], _user()
+    db.cards = [_card(user)]
+    buy = db.add_prompt("purchase", owner=user.id, payload=OFFER, age=timedelta(hours=5))
+    assert await _answer(env, user, text)  # no reply target needed, even hours later
+    assert db.prompts[buy]["status"] == "answered"
+    assert "Use your Visa ending 4242" in _said(env)[0]
+
+
+@pytest.mark.asyncio
+async def test_someone_elses_buy_never_answers_the_owners_question(env):
+    db, owner, other = env["db"], _user(), _user()
+    buy = db.add_prompt("purchase", owner=owner.id, payload=OFFER)
+    assert await _answer(env, other, "buy it") is False
+    assert db.prompts[buy]["status"] == "open" and env["said"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_plain_yes_answers_a_just_asked_buy_question_only(env):
+    db, user = env["db"], _user()
+    db.cards = [_card(user)]
+    stale = db.add_prompt("purchase", owner=user.id, payload=OFFER, age=timedelta(minutes=30))
+    assert await _answer(env, user, "yes") is False  # 30 minutes later: needs a reply or "buy it"
+    assert db.prompts[stale]["status"] == "open"
+    fresh = db.add_prompt("purchase", owner=user.id, payload=OFFER, age=timedelta(minutes=2))
+    assert await _answer(env, user, "yes")
+    assert db.prompts[fresh]["status"] == "answered"
+
+
+@pytest.mark.asyncio
+async def test_a_plain_card_number_or_last_four_picks_the_owners_card(env):
+    db, user = env["db"], _user()
+    card = _card(user)
+    db.cards = [card]
+    options = [{"n": 1, "card_id": str(card["id"]), "last4": "4242", "brand": "visa", "label": ""}]
+    db.add_prompt("pick_card", owner=user.id, payload={**OFFER, "options": options})
+    assert await _answer(env, user, "4242")
+    assert len(db.purchases) == 1
+    db.add_prompt("pick_card", owner=user.id, payload={**OFFER, "options": options})
+    assert await _answer(env, user, "1")
+    assert len(db.purchases) == 2
+    assert await _answer(env, _user(), "1") is False  # not their question
 
 
 @pytest.mark.asyncio
@@ -424,7 +484,7 @@ async def test_several_cards_are_numbered_and_picked_by_number_or_unique_last_fo
     db, user = env["db"], _user()
     pick = await _pick_question(env, user, [_card(user, "4242"), _card(user, "5454", label="")])
     assert _said(env)[0].startswith(
-        "Which card? Reply to this message with its number: 1. Visa ending 4242 (Mercury test, expires 12/31); "
+        "Which card? Reply with its number: 1. Visa ending 4242 (Mercury test, expires 12/31); "
         "2. Visa ending 5454 (expires 12/31)."
     )
     await _answer(env, user, "yes", prompt_id=pick)  # ambiguous with 2 cards

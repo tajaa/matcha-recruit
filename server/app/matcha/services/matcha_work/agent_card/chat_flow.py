@@ -106,9 +106,41 @@ def parse_answer(text: str) -> Answer | None:
 
 
 def is_plain_yes(text: str) -> bool:
-    """Whether a plain (unthreaded) message asks to see a result. Synchronous
+    """Whether a plain (unthreaded) message is an explicit yes. Synchronous
     and allocation-light: it runs on the chat socket's hot path."""
     return isinstance(text, str) and len(text) <= 30 and _normalize(text) in _PLAIN_YES
+
+
+_BUY_INTENT = re.compile(r"\b(buy|purchase|order|checkout|check out)\b")
+_NEGATION = re.compile(r"\b(don t|dont|do not|not|no|never|cancel|stop|wait|hold|later)\b")
+
+
+def is_buy_intent(text: str) -> bool:
+    """An explicit, un-negated request to buy ("buy it", "buy the best one",
+    "go ahead and purchase"). Only ever applied to the sender's OWN open
+    purchase question, so "ok" or "sure" to a colleague never buys anything."""
+    if not isinstance(text, str) or len(text) > 80:
+        return False
+    normalized = _normalize(text)
+    return bool(_BUY_INTENT.search(normalized)) and not _NEGATION.search(normalized)
+
+
+def plain_card_choice(text: str) -> Answer | None:
+    """A bare card number ("1") or last 4 ("4242") typed as a plain message."""
+    if not isinstance(text, str) or len(text) > 30:
+        return None
+    answer = parse_answer(text)
+    return answer if answer and answer.kind in ("choice", "last4") else None
+
+
+def might_answer_plain(text: str) -> bool:
+    """Hot-path guard for a plain message: could it answer an agent-card question?"""
+    return is_plain_yes(text) or is_buy_intent(text) or plain_card_choice(text) is not None
+
+
+# A plain "yes" answers the sender's own buy / card question only right after
+# it was asked; after that it takes a threaded reply or an explicit "buy it".
+FRESH_PURCHASE_QUESTION = timedelta(minutes=10)
 
 
 PURCHASE_ALLOWLIST_ENV = "AGENT_PURCHASE_ALLOWED_EMAILS"
@@ -476,7 +508,10 @@ async def _can_access_project(prompt: dict, user) -> bool:
     return await resolve_project_access(prompt["project_id"], actor, company_id=company_id) is not None
 
 
-async def _load_prompt(conn, channel_id: UUID, *, prompt_id: UUID | None, purchase_owner=None) -> dict | None:
+async def _load_prompt(
+    conn, channel_id: UUID, *, prompt_id: UUID | None, purchase_owner=None,
+    kinds: tuple[str, ...] = PURCHASE_KINDS, max_age: timedelta | None = None,
+) -> dict | None:
     if prompt_id is not None:
         row = await conn.fetchrow(
             """SELECT *, (status = 'open' AND expires_at > NOW()) AS live
@@ -487,10 +522,11 @@ async def _load_prompt(conn, channel_id: UUID, *, prompt_id: UUID | None, purcha
         row = await conn.fetchrow(
             """SELECT *, TRUE AS live
                FROM mw_agent_card_prompts
-               WHERE channel_id = $1 AND owner_user_id = $2 AND kind IN ('purchase', 'pick_card')
+               WHERE channel_id = $1 AND owner_user_id = $2 AND kind = ANY($3::text[])
                  AND status = 'open' AND expires_at > NOW()
+                 AND ($4::interval IS NULL OR created_at > NOW() - $4::interval)
                ORDER BY created_at DESC LIMIT 1""",
-            channel_id, purchase_owner,
+            channel_id, purchase_owner, list(kinds), max_age,
         )
     else:
         row = await conn.fetchrow(
@@ -574,13 +610,14 @@ async def handle_chat_answer(
     question). Everything else is ordinary chat.
     """
     targeted = prompt_id is not None
-    if not targeted and not card_number_removed and not is_plain_yes(content):
-        return False
+    plain_answer: Answer | None = None
     async with connection_or_direct() as conn:
-        prompt = await _load_prompt(
-            conn, channel_id, prompt_id=prompt_id,
-            purchase_owner=user.id if card_number_removed and not targeted else None,
-        )
+        if targeted:
+            prompt = await _load_prompt(conn, channel_id, prompt_id=prompt_id)
+        elif card_number_removed:
+            prompt = await _load_prompt(conn, channel_id, prompt_id=None, purchase_owner=user.id)
+        else:
+            prompt, plain_answer = await _plain_target(conn, channel_id, user, content)
     if prompt is None:
         return False
     allowed = await _can_access_project(prompt, user)
@@ -603,14 +640,40 @@ async def handle_chat_answer(
                 f"{ADD_CARD_HINT} instead."
             )
         else:
-            await _answer(conn, prompt, user, content, targeted=targeted, say=say, outbox=outbox)
+            await _answer(conn, prompt, user, content, targeted=targeted, plain_answer=plain_answer,
+                          say=say, outbox=outbox)
     for message in outbox:
         await broadcast_espresso_message(message)
     return True
 
 
-async def _answer(conn, prompt: dict, user, content: str, *, targeted: bool, say, outbox) -> None:
-    answer = Answer("yes") if not targeted else parse_answer(content)
+async def _plain_target(conn, channel_id: UUID, user, content: str) -> tuple[dict | None, Answer | None]:
+    """Which question a plain (unthreaded) message answers, if any:
+      * an explicit "buy it" → the sender's own open buy / card question;
+      * "1" / "4242" → the sender's own open card question;
+      * "yes" → the sender's own buy / card question if it was just asked,
+        else the channel's newest "want to see it?" question.
+    """
+    buy, choice, yes = is_buy_intent(content), plain_card_choice(content), is_plain_yes(content)
+    if buy or yes:
+        prompt = await _load_prompt(
+            conn, channel_id, prompt_id=None, purchase_owner=user.id,
+            max_age=None if buy else FRESH_PURCHASE_QUESTION,
+        )
+        if prompt:
+            return prompt, Answer("yes")
+    if choice:
+        prompt = await _load_prompt(conn, channel_id, prompt_id=None, purchase_owner=user.id, kinds=("pick_card",))
+        if prompt:
+            return prompt, choice
+    if yes:
+        return await _load_prompt(conn, channel_id, prompt_id=None), Answer("yes")
+    return None, None
+
+
+async def _answer(conn, prompt: dict, user, content: str, *, targeted: bool, say, outbox,
+                  plain_answer: Answer | None = None) -> None:
+    answer = parse_answer(content) if targeted else plain_answer
     kind = prompt["kind"]
     owner = prompt.get("owner_user_id")
     if owner is not None and owner != user.id:
@@ -660,7 +723,7 @@ async def _answer_show_result(conn, prompt, user, answer: Answer, *, say, outbox
                 ttl=PURCHASE_TTL,
                 content=(
                     f"Want me to buy it? {_offer_line(offer)}. "
-                    "Reply to this message with yes or no."
+                    "Reply yes (or \"buy it\") to buy, or no to skip."
                 ),
             ))
 
@@ -689,11 +752,11 @@ async def _answer_purchase(conn, prompt, user, answer: Answer, *, say, outbox) -
     if len(options) == 1:
         question = (
             f"Use your {_card_label(options[0], with_expiry=True)}? "
-            "Reply to this message with yes, or no to cancel."
+            "Reply yes (or 1) to confirm, or no to cancel."
         )
     else:
         question = (
-            "Which card? Reply to this message with its number: "
+            "Which card? Reply with its number: "
             + "; ".join(f"{o['n']}. {_card_label(o, with_expiry=True)}" for o in options)
             + ". Or reply no to cancel."
         )
