@@ -107,7 +107,7 @@ Invariants:
   - With no verified price, no key, or `AGENT_PURCHASE_MODE=handoff`, the purchase is a handoff (`status='handoff'`): the user finishes checkout at the link.
 
   Real checkout is a later change.
-- **Purchases are admin-only in v1** (`chat_flow.purchases_allowed`). Everyone else still gets the "see it?" question.
+- **Purchases are internal-only in v1** (`chat_flow.purchases_allowed`): platform admins plus the accounts in `AGENT_PURCHASE_ALLOWED_EMAILS` (comma-separated). Everyone else still gets the "see it?" question. The clients show Payment cards when `GET /payment-cards` says `enabled` (or cards exist), never by role.
 
 ### Card vault (`core/services/card_vault.py`, `routes/matcha_work/payment_cards.py`)
 
@@ -126,4 +126,4 @@ Invariants:
 
   Separators are up to three whitespace characters (newlines and non-breaking spaces included), `.`, `-` or `/`. Every matching window is found and overlaps merged, so no digits of a card survive. Dates and phone numbers are not card-shaped (0% measured). A random card-shaped digit string matches about 5% of the time, which is why redaction only runs in the purchase context above.
 - **Photos.** A card photo in reply to a purchase question gets a "delete that image" warning; nothing reads it.
-- **Endpoints.** `GET/POST /matcha-work/payment-cards` and `DELETE /matcha-work/payment-cards/{id}` are per user with a maximum of 5 cards. Adding is admin-only (`403 purchases_unavailable`); anyone can list or delete their own. `GET …/agent-runs` also returns `purchases`, the caller's own only.
+- **Endpoints.** `GET/POST /matcha-work/payment-cards` and `DELETE /matcha-work/payment-cards/{id}` are per user with a maximum of 5 cards. Adding needs `purchases_allowed` (`403 purchases_unavailable`); anyone can list or delete their own. `GET …/agent-runs` also returns `purchases`, the caller's own only.

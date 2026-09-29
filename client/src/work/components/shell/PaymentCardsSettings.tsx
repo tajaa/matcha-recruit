@@ -23,7 +23,7 @@ const BRAND: Record<PaymentCard['brand'], string> = {
  * The number is sent once and never shown again. There is no security-code
  * field, and card numbers never go through chat.
  */
-export default function PaymentCardsSettings() {
+export default function PaymentCardsSettings({ isAdmin = false }: { isAdmin?: boolean }) {
   const [state, setState] = useState<{ enabled: boolean; configured: boolean; cards: PaymentCard[] } | null>(null)
   const [number, setNumber] = useState('')
   const [expiry, setExpiry] = useState('')
@@ -79,8 +79,10 @@ export default function PaymentCardsSettings() {
   }
 
   if (!state) {
-    // Rendered only for admins, who can use this: a failed load says so
-    // instead of making the section silently disappear.
+    // Whether this account can buy isn't known until the list loads, so only
+    // admins (who always can) see the loading/error state; a failed load says
+    // so instead of making the section silently disappear.
+    if (!isAdmin) return null
     return (
       <section className="rounded-xl border border-w-line bg-w-surface p-5">
         <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-w-text">

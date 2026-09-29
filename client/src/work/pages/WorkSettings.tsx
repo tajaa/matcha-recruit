@@ -87,8 +87,9 @@ export default function WorkSettings() {
     {me && <AccountSettings me={me} refresh={refresh} />}
     {surface === 'espresso' && <AppearanceSettings />}
     {me && <AiConnectorsSettings />}
-    {/* Agent-card purchases are internal-only (platform admins) in v1. */}
-    {me?.user.role === 'admin' && <PaymentCardsSettings />}
+    {/* Agent-card purchases are internal-only in v1; the server decides who
+        (admins plus an allowlist). Everyone else sees nothing. */}
+    {me && <PaymentCardsSettings isAdmin={me.user.role === 'admin'} />}
     <section className="rounded-xl border border-w-line bg-w-surface p-5"><h2 className="text-sm font-semibold text-w-text">About</h2><p className="mt-2 text-xs text-w-dim">{surface === 'espresso' ? 'Espresso' : 'Matcha Work'} brings your projects, notes, and conversations together.</p></section>
   </div>
 }

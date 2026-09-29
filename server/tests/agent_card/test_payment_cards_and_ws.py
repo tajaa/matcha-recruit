@@ -18,7 +18,7 @@ VISA = "4242 4242 4242 4242"
 
 
 def _user(role="admin"):
-    return SimpleNamespace(id=uuid4(), role=role)
+    return SimpleNamespace(id=uuid4(), role=role, email=f"{role}@example.com")
 
 
 class _Conn:
@@ -107,6 +107,14 @@ async def test_add_card_rejects_bad_input(conn, over, code):
     assert exc.value.status_code == code
     assert "4242" not in str(exc.value.detail)
     assert conn["conn"].inserted is None
+
+
+@pytest.mark.asyncio
+async def test_allowlisted_non_admin_can_add_a_card(conn, monkeypatch):
+    monkeypatch.setenv("AGENT_PURCHASE_ALLOWED_EMAILS", "haley@example.com")
+    user = SimpleNamespace(id=uuid4(), role="individual", email="haley@example.com")
+    assert (await payment_cards.add_payment_card(_body(), user))["last4"] == "4242"
+    assert (await payment_cards.list_payment_cards(user))["enabled"] is True
 
 
 @pytest.mark.asyncio

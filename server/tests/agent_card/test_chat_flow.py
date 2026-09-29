@@ -55,10 +55,16 @@ def test_plain_messages_only_count_as_an_explicit_yes(text, expected):
     assert chat_flow.is_plain_yes(text) is expected
 
 
-def test_only_platform_admins_can_buy_in_v1():
-    assert chat_flow.purchases_allowed("admin")
-    assert not chat_flow.purchases_allowed("client")
+def test_buying_is_admins_plus_an_email_allowlist(monkeypatch):
+    person = lambda role, email: SimpleNamespace(role=role, email=email)  # noqa: E731
+    monkeypatch.delenv(chat_flow.PURCHASE_ALLOWLIST_ENV, raising=False)
+    assert chat_flow.purchases_allowed(person("admin", "a@example.com"))
+    assert not chat_flow.purchases_allowed(person("individual", "haley@example.com"))
     assert not chat_flow.purchases_allowed(None)
+    monkeypatch.setenv(chat_flow.PURCHASE_ALLOWLIST_ENV, " Haley@Example.com , other@example.com")
+    assert chat_flow.purchases_allowed(person("individual", "haley@example.com"))
+    assert not chat_flow.purchases_allowed(person("client", "someone@example.com"))
+    assert not chat_flow.purchases_allowed(person("client", ""))
 
 
 def test_format_result_is_a_short_read_with_ticket_chip():

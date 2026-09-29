@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -110,9 +111,19 @@ def is_plain_yes(text: str) -> bool:
     return isinstance(text, str) and len(text) <= 30 and _normalize(text) in _PLAIN_YES
 
 
-def purchases_allowed(role: str | None) -> bool:
-    """Buying through chat is internal-only in v1: platform admins."""
-    return (role or "").lower() == "admin"
+PURCHASE_ALLOWLIST_ENV = "AGENT_PURCHASE_ALLOWED_EMAILS"
+
+
+def purchases_allowed(user) -> bool:
+    """Buying through chat is internal-only in v1: platform admins, plus the
+    accounts listed (comma-separated emails) in `AGENT_PURCHASE_ALLOWED_EMAILS`."""
+    if user is None:
+        return False
+    if (getattr(user, "role", "") or "").lower() == "admin":
+        return True
+    email = (getattr(user, "email", "") or "").strip().lower()
+    allowed = {e.strip().lower() for e in (os.getenv(PURCHASE_ALLOWLIST_ENV) or "").split(",") if e.strip()}
+    return bool(email) and email in allowed
 
 
 # ── formatting ────────────────────────────────────────────────────────────────
@@ -643,7 +654,7 @@ async def _answer_show_result(conn, prompt, user, answer: Answer, *, say, outbox
             return
         await say(format_result(result, task_id=prompt["task_id"], title=row["title"], column=row["board_column"]))
         offer = purchase_offer(result)
-        if offer and purchases_allowed(getattr(user, "role", None)):
+        if offer and purchases_allowed(user):
             outbox.append(await _ask(
                 conn, prompt=prompt, kind="purchase", owner_user_id=user.id, payload=offer,
                 ttl=PURCHASE_TTL,
