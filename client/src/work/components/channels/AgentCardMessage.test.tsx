@@ -140,6 +140,32 @@ describe('AgentCardMessage', () => {
     expect(screen.getByText('I finished it. Want to see what I found?')).toBeTruthy()
   })
 
+  it('renders a flight result as flight rows, labelled when fares are sandbox data', () => {
+    const meta: AgentChatMetadata = {
+      kind: 'agent_card_result',
+      result: {
+        headline: 'Cheapest: two one-ways', summary: 'Saves $110.', top_pick: null, alternatives: [],
+        flights: {
+          test_data: true,
+          options: [{
+            label: 'Cheapest', price_text: '$310.00', total_with_bags_text: '$380.00', carriers: ['Delta'],
+            ticketing: 'separate', warning: 'Two separate tickets',
+            slices: [{ origin: 'SFO', destination: 'JFK', departing_at: '2026-11-12T22:05:00',
+              arriving_at: '2026-11-13T06:40:00', stops: 0, duration_minutes: 335, flight_numbers: ['DL 300'] }],
+          }],
+        },
+      },
+    }
+    render(<AgentCardMessage metadata={meta} content="" />)
+    expect(screen.getByText(/TEST DATA/)).toBeTruthy()
+    expect(screen.getByText('$380.00')).toBeTruthy()
+    expect(screen.getByText('with bags')).toBeTruthy()
+    expect(screen.getByText(/2 tickets/)).toBeTruthy()
+    expect(screen.getByText('+1')).toBeTruthy()
+    expect(screen.getByText(/Two separate tickets/)).toBeTruthy()
+    expect(screen.getByText(/no location, device, cookies or history sent/)).toBeTruthy()
+  })
+
   it('renders the receipt with test-mode labelling', () => {
     const meta: AgentChatMetadata = {
       kind: 'agent_card_receipt',

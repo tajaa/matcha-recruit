@@ -8,6 +8,7 @@ import {
   type AgentPick, type AgentResult, type AgentRun,
 } from '../../../api/matchaWork'
 import type { AgentPurchase } from '../../../types'
+import AgentFlightsView from './AgentFlightsView'
 
 const POLL_MS = 4000
 const EXTERNAL = { target: '_blank', rel: 'noopener noreferrer nofollow' } as const
@@ -135,6 +136,7 @@ export function AgentResultBody({ result }: { result: AgentResult }) {
         <p className="text-base font-semibold text-w-text">{result.headline}</p>
         <p className="mt-1 text-sm text-w-dim">{result.summary}</p>
       </div>
+      {result.flights && result.flights.options.length > 0 && <AgentFlightsView flights={result.flights} />}
       {result.top_pick && <PickCard pick={result.top_pick} hero />}
       {result.criteria.length > 0 && (
         <div>

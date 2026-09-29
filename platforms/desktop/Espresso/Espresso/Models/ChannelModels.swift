@@ -199,18 +199,74 @@ struct AgentChatPick: Codable, Hashable {
     }
 }
 
+struct AgentChatFlightSlice: Codable, Hashable {
+    let origin: String
+    let destination: String
+    let departingAt: String
+    let arrivingAt: String
+    let stops: Int
+    let durationMinutes: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case origin, destination, stops
+        case departingAt = "departing_at"
+        case arrivingAt = "arriving_at"
+        case durationMinutes = "duration_minutes"
+    }
+}
+
+struct AgentChatFlightOption: Codable, Hashable {
+    let label: String?
+    let priceText: String?
+    let totalWithBagsText: String?
+    let carriers: [String]
+    let ticketing: String
+    let slices: [AgentChatFlightSlice]
+    let warning: String?
+
+    enum CodingKeys: String, CodingKey {
+        case label, carriers, ticketing, slices, warning
+        case priceText = "price_text"
+        case totalWithBagsText = "total_with_bags_text"
+    }
+}
+
+/// A flight search's top chosen offers (server: chat_flow.flights_view).
+struct AgentChatFlights: Codable, Hashable {
+    let testData: Bool?
+    let options: [AgentChatFlightOption]
+
+    enum CodingKeys: String, CodingKey {
+        case options
+        case testData = "test_data"
+    }
+}
+
 struct AgentChatResult: Codable, Hashable {
     let headline: String
     let summary: String
     let topPick: AgentChatPick?
     let alternatives: [AgentChatPick]
     let sections: [String]?
+    let flights: AgentChatFlights?
     let sourceCount: Int?
 
     enum CodingKeys: String, CodingKey {
-        case headline, summary, alternatives, sections
+        case headline, summary, alternatives, sections, flights
         case topPick = "top_pick"
         case sourceCount = "source_count"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        headline = try c.decode(String.self, forKey: .headline)
+        summary = try c.decode(String.self, forKey: .summary)
+        topPick = try c.decodeIfPresent(AgentChatPick.self, forKey: .topPick)
+        alternatives = try c.decode([AgentChatPick].self, forKey: .alternatives)
+        sections = try c.decodeIfPresent([String].self, forKey: .sections)
+        // Lenient: an odd flights block never costs the whole result card.
+        flights = try? c.decodeIfPresent(AgentChatFlights.self, forKey: .flights)
+        sourceCount = try c.decodeIfPresent(Int.self, forKey: .sourceCount)
     }
 }
 

@@ -22,11 +22,62 @@ export type AgentPick = {
   buy_links: AgentLink[]
 }
 
+export type AgentFlightSegment = {
+  carrier: string
+  flight_number: string
+  origin: string
+  destination: string
+  /** Local time at that airport, no offset: "2026-11-12T07:05:00". */
+  departing_at: string
+  arriving_at: string
+  duration_minutes: number | null
+}
+
+export type AgentFlightSlice = {
+  origin: string
+  destination: string
+  departing_at: string
+  arriving_at: string
+  duration_minutes: number | null
+  stops: number
+  fare_brand: string | null
+  segments: AgentFlightSegment[]
+}
+
+/** One offer the agent chose. Every field except label/why is the server's
+ *  own search data (agent_card/flights.py), never the model's. */
+export type AgentFlightOption = {
+  id: string
+  label: string | null
+  why: string[]
+  ticketing: 'single' | 'separate'
+  total_amount: string
+  currency: string
+  /** Fare plus the listed fees for the bags asked for; null when unpriced. */
+  true_total_amount: string | null
+  bag_note: string | null
+  carriers: string[]
+  slices: AgentFlightSlice[]
+  bags_included: { checked: number; carry_on: number }
+  conditions: { refundable: boolean | null; changeable: boolean | null }
+  expires_at: string | null
+  warnings: string[]
+}
+
+export type AgentFlights = {
+  query_summary: string
+  options: AgentFlightOption[]
+  searched_at: string | null
+  /** Duffel sandbox fares (a duffel_test_ token): not real prices. */
+  test_data: boolean
+  privacy: { via: string; sent: string[]; not_sent: string[] }
+}
+
 export type AgentResult = {
   schema: 'agent_result.v1'
   headline: string
   summary: string
-  answer_type: 'recommendation' | 'answer'
+  answer_type: 'recommendation' | 'answer' | 'flights'
   criteria: { name: string; why: string }[]
   top_pick: AgentPick | null
   alternatives: AgentPick[]
@@ -35,6 +86,7 @@ export type AgentResult = {
   sources: { title: string; url: string }[]
   confidence: 'high' | 'medium' | 'low'
   changes_from_previous: string | null
+  flights?: AgentFlights
   warnings?: string[]
   round?: number
 }
