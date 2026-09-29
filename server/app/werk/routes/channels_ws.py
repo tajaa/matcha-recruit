@@ -282,6 +282,106 @@ async def _bg_apply_autopr_context_reply(
         logger.warning("AutoPR context reply failed", exc_info=True)
 
 
+def _agent_card_prompt_reference(raw_metadata) -> Optional[UUID]:
+    from app.matcha.services.matcha_work.agent_card.chat_flow import prompt_reference
+
+    return prompt_reference(raw_metadata)
+
+
+def _agent_card_might_answer(content: str) -> bool:
+    from app.matcha.services.matcha_work.agent_card.chat_flow import might_answer
+
+    return might_answer(content)
+
+
+def _contains_card_number(content: str) -> bool:
+    from app.core.services.card_vault import contains_pan
+
+    return contains_pan(content)
+
+
+def _redact_card_numbers(content: str) -> str:
+    from app.core.services.card_vault import redact_pans
+
+    return redact_pans(content)
+
+
+async def _agent_card_redaction(
+    conn, channel_id: UUID, content: Optional[str], agent_prompt_id: Optional[UUID],
+) -> tuple[Optional[str], bool]:
+    """(content to store, whether a card number was removed).
+
+    Only at Espresso's agent-card questions: a threaded reply to one, or any
+    message while one is open in the channel. The channel lookup runs only
+    for text that holds a Luhn-valid number."""
+    if not content or not _contains_card_number(content):
+        return content, False
+    if agent_prompt_id is None and not await _channel_has_agent_prompt(conn, channel_id):
+        return content, False
+    return _redact_card_numbers(content), True
+
+
+def _routes_to_agent_card(
+    *,
+    agent_prompt_id: Optional[UUID],
+    card_number_removed: bool,
+    reply_to_id,
+    mention_handles: list,
+    content: str,
+    room_key: str,
+) -> bool:
+    """Whether a new message answers an Espresso agent-card question ("want
+    to see it?" / "buy it?" / which card): a threaded reply to one, a message
+    whose card number was just removed, or a plain yes / no / last-4 with no
+    reply target and no mentions. A live Huume event-draft or schedule pill
+    in the same channel keeps priority for that untargeted "yes"."""
+    if agent_prompt_id is not None or card_number_removed:
+        return True
+    return (
+        not reply_to_id
+        and not mention_handles
+        and not _channel_recently_ems_drafted(room_key)
+        and not _channel_recently_clarified(room_key)
+        and _agent_card_might_answer(content)
+    )
+
+
+async def _channel_has_agent_prompt(conn, channel_id: UUID) -> bool:
+    """Whether Espresso has an open agent-card question here. Fails closed:
+    if the lookup errors, the card number is still removed."""
+    try:
+        from app.matcha.services.matcha_work.agent_card.chat_flow import channel_has_open_prompt
+
+        return await channel_has_open_prompt(conn, channel_id)
+    except Exception:
+        logger.warning("agent-card prompt lookup failed; redacting", exc_info=True)
+        return True
+
+
+async def _bg_agent_card_reply(
+    channel_id_str: str,
+    user,
+    content: str,
+    prompt_id: Optional[UUID],
+    has_attachments: bool,
+    card_number_removed: bool,
+) -> None:
+    """Apply a chat message as the answer to an Espresso agent-card question."""
+    try:
+        from app.matcha.services.matcha_work.agent_card.chat_flow import handle_chat_answer
+
+        await handle_chat_answer(
+            channel_id=UUID(channel_id_str),
+            user=user,
+            content=content,
+            prompt_id=prompt_id,
+            has_attachments=has_attachments,
+            card_number_removed=card_number_removed,
+        )
+    except Exception:
+        logger.warning("Agent card chat answer failed", exc_info=True)
+
+
 async def _bg_sync_channel_attachments(channel_id_str: str, user_id, attachments: list) -> None:
     """Mirror a message's attachments into the linked collab project's Files,
     on its own connection and off the send hot path. The reverse JSONB lookup
@@ -3989,6 +4089,14 @@ async def channel_websocket(
                                             raw_reply_metadata = {}
                                     if isinstance(raw_reply_metadata, dict):
                                         reply_target_metadata = raw_reply_metadata
+                            # A card number typed at one of Espresso's
+                            # agent-card questions is removed BEFORE it is
+                            # stored, broadcast, emailed or notified. The
+                            # channel lookup only runs for Luhn-valid numbers.
+                            agent_prompt_id = _agent_card_prompt_reference(reply_target_metadata)
+                            content, card_number_removed = await _agent_card_redaction(
+                                conn, ch_uuid, content, agent_prompt_id,
+                            )
                             # ON CONFLICT path makes the INSERT idempotent on
                             # (sender_id, client_message_id) so a retried send
                             # returns the original row instead of inserting a
@@ -4145,8 +4253,25 @@ async def channel_websocket(
                                 ))
                             if (
                                 is_new_message
+                                and autopr_context_ref is None
+                                and _routes_to_agent_card(
+                                    agent_prompt_id=agent_prompt_id,
+                                    card_number_removed=card_number_removed,
+                                    reply_to_id=row["reply_to_id"],
+                                    mention_handles=mention_handles,
+                                    content=row["content"],
+                                    room_key=room_key,
+                                )
+                            ):
+                                _spawn_bg(_bg_agent_card_reply(
+                                    str(ch_uuid), user, row["content"], agent_prompt_id,
+                                    bool(broadcast_attachments), card_number_removed,
+                                ))
+                            if (
+                                is_new_message
                                 and "espresso" in mention_handles
                                 and autopr_context_ref is None
+                                and agent_prompt_id is None
                             ):
                                 _spawn_bg(_bg_dispatch_espresso_mention(
                                     str(ch_uuid), user, row["content"], row["id"],

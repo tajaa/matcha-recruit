@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -105,6 +106,8 @@ class _Conn:
         elif "SET status = 'failed'" in query:
             self.executed.append(("sweep" if "INTERVAL" in query else "fail", args))
             self.updates.append((query, args))
+        elif "UPDATE mw_agent_card_prompts SET status = 'superseded'" in query:
+            self.executed.append(("close_prompts", args))
         else:
             raise AssertionError(query)
 
@@ -159,7 +162,7 @@ async def test_locks_are_user_then_card_then_stale_sweep_then_count_then_insert(
     task, user = _task(), _user()
     await enqueue.enqueue_card_agent(task=task, user=user, reason="rerun", skip_preflight=True)
     steps = [step[0] if step[0] != "lock" else f"lock:{step[1].split(':', 1)[1]}" for step in wired["conn"].executed]
-    assert steps == ["lock:card_agent_cap", "lock:card_agent", "sweep", "count", "insert"]
+    assert steps == ["lock:card_agent_cap", "lock:card_agent", "sweep", "count", "insert", "close_prompts"]
     locks = [step[1] for step in wired["conn"].executed if step[0] == "lock"]
     assert locks[0].startswith(str(user.id)) and locks[1].startswith(str(task["id"]))
 
@@ -466,6 +469,11 @@ async def test_agent_runs_list_and_rerun_endpoints(monkeypatch):
         async def fetch(self, query, *args):
             if "mw_project_agent_steps" in query:
                 return [{"run_id": run_id, "seq": 1, "kind": "search", "label": "Searched", "status": "ok"}]
+            if "mw_agent_purchase_requests" in query:
+                assert "user_id = $2" in query  # only the caller's own handoffs
+                return [{"id": uuid4(), "run_id": run_id, "item_name": "Balm", "retailer": "Shop",
+                         "checkout_url": "https://shop.example.com/b", "amount": Decimal("7.50"),
+                         "currency": "USD", "card_last4": "4242", "status": "handoff", "created_at": now}]
             return [{"id": run_id, "round": 1, "status": "done", "result": '{"headline": "h"}', "error": None,
                      "search_calls": 2, "model_calls": 3, "created_at": now, "started_at": now, "completed_at": now}]
 
@@ -478,6 +486,7 @@ async def test_agent_runs_list_and_rerun_endpoints(monkeypatch):
     out = await agent_cards.list_agent_runs_endpoint(uuid4(), uuid4(), _user())
     assert out["runs"][0]["result"] == {"headline": "h"}
     assert out["runs"][0]["steps"][0]["kind"] == "search"
+    assert out["purchases"][0]["amount"] == 7.5 and out["purchases"][0]["card_last4"] == "4242"
 
     queued = AsyncMock(return_value={"run_id": "r", "round": 1, "status": "queued"})
     monkeypatch.setattr(enqueue, "enqueue_card_agent", queued)

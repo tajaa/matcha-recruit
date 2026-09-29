@@ -54,8 +54,25 @@ export type AgentRun = {
   steps: { seq: number; kind: string; label: string; status: string }[]
 }
 
+/** A purchase approved in the project chat. v1 is a handoff: nothing was
+ *  charged, the person finishes checkout at the link. */
+export type AgentPurchase = {
+  id: string
+  run_id: string | null
+  item_name: string
+  retailer: string | null
+  checkout_url: string
+  amount: number | null
+  currency: string | null
+  card_last4: string
+  status: 'handoff' | 'cancelled'
+  created_at: string | null
+}
+
 export function listAgentRuns(projectId: string, taskId: string) {
-  return api.get<{ runs: AgentRun[] }>(`/matcha-work/projects/${projectId}/tasks/${taskId}/agent-runs`)
+  return api.get<{ runs: AgentRun[]; purchases?: AgentPurchase[] }>(
+    `/matcha-work/projects/${projectId}/tasks/${taskId}/agent-runs`,
+  )
 }
 
 export function rerunAgent(projectId: string, taskId: string) {
@@ -63,6 +80,33 @@ export function rerunAgent(projectId: string, taskId: string) {
     `/matcha-work/projects/${projectId}/tasks/${taskId}/agent-runs`,
     {},
   )
+}
+
+// ── Saved payment cards (agent-card purchases; admin-only in v1) ──
+//
+// Backend: server/app/matcha/routes/matcha_work/payment_cards.py. The number is
+// sent once, encrypted server-side, and never returned. There is no CVV field.
+
+export type PaymentCard = {
+  id: string
+  label: string
+  brand: 'visa' | 'mastercard' | 'amex' | 'discover' | 'card'
+  last4: string
+  exp_month: number
+  exp_year: number
+  created_at: string | null
+}
+
+export function listPaymentCards() {
+  return api.get<{ enabled: boolean; configured: boolean; cards: PaymentCard[] }>('/matcha-work/payment-cards')
+}
+
+export function addPaymentCard(body: { number: string; exp_month: number; exp_year: number; label: string }) {
+  return api.post<PaymentCard>('/matcha-work/payment-cards', body)
+}
+
+export function deletePaymentCard(cardId: string) {
+  return api.delete<void>(`/matcha-work/payment-cards/${cardId}`)
 }
 
 /** Server `detail` -> one readable line (plan / monthly cap / plain string). */

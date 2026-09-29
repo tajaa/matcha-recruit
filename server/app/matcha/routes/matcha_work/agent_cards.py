@@ -51,7 +51,8 @@ async def list_agent_runs_endpoint(
     task_id: UUID,
     current_user: CurrentUser = Depends(require_company_member),
 ):
-    """Every agent pass on this card, newest first, with its steps."""
+    """Every agent pass on this card, newest first, with its steps, plus the
+    caller's purchase handoffs for it."""
     await _verify_project_access(project_id, current_user)
     async with get_connection() as conn:
         await _load_task(conn, project_id, task_id)
@@ -71,6 +72,16 @@ async def list_agent_runs_endpoint(
                ORDER BY run_id, seq""",
             [r["id"] for r in runs],
         ) if runs else []
+        # Only your own purchase handoffs: they carry your card's last 4.
+        purchases = await conn.fetch(
+            """SELECT id, run_id, item_name, retailer, checkout_url, amount, currency,
+                      card_last4, status, created_at
+               FROM mw_agent_purchase_requests
+               WHERE task_id = $1 AND user_id = $2
+               ORDER BY created_at DESC
+               LIMIT 20""",
+            task_id, current_user.id,
+        )
     by_run: dict[UUID, list[dict]] = {}
     for step in steps:
         by_run.setdefault(step["run_id"], []).append({
@@ -92,7 +103,22 @@ async def list_agent_runs_endpoint(
                 "steps": by_run.get(r["id"], []),
             }
             for r in runs
-        ]
+        ],
+        "purchases": [
+            {
+                "id": str(p["id"]),
+                "run_id": str(p["run_id"]) if p["run_id"] else None,
+                "item_name": p["item_name"],
+                "retailer": p["retailer"],
+                "checkout_url": p["checkout_url"],
+                "amount": float(p["amount"]) if p["amount"] is not None else None,
+                "currency": p["currency"],
+                "card_last4": p["card_last4"],
+                "status": p["status"],
+                "created_at": _iso(p["created_at"]),
+            }
+            for p in purchases
+        ],
     }
 
 

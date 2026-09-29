@@ -7,6 +7,7 @@ import { ESPRESSO_THEMES, setEspressoTheme, useEspressoTheme } from '../utils/es
 import { useWorkSurface } from '../routes/WorkSurfaceContext'
 import { avatarValidationError } from '../utils/avatarValidation'
 import AiConnectorsSettings from '../components/shell/AiConnectorsSettings'
+import PaymentCardsSettings from '../components/shell/PaymentCardsSettings'
 
 export function AccountSettings({ me, refresh }: { me: MeResponse; refresh: () => Promise<void> }) {
   const [name, setName] = useState(me.profile?.name ?? '')
@@ -86,6 +87,8 @@ export default function WorkSettings() {
     {me && <AccountSettings me={me} refresh={refresh} />}
     {surface === 'espresso' && <AppearanceSettings />}
     {me && <AiConnectorsSettings />}
+    {/* Agent-card purchases are internal-only (platform admins) in v1. */}
+    {me?.user.role === 'admin' && <PaymentCardsSettings />}
     <section className="rounded-xl border border-w-line bg-w-surface p-5"><h2 className="text-sm font-semibold text-w-text">About</h2><p className="mt-2 text-xs text-w-dim">{surface === 'espresso' ? 'Espresso' : 'Matcha Work'} brings your projects, notes, and conversations together.</p></section>
   </div>
 }

@@ -23,6 +23,7 @@ from app.database import get_connection
 from app.matcha.services.billing.entitlements_service import PLAN_PRO, require_plan
 
 from .agent import CARD_AGENT_MODEL
+from .chat_flow import close_open_prompts
 from .quota import card_agent_usage, limit_for_plan, usage_payload, used_this_month
 
 logger = logging.getLogger(__name__)
@@ -152,6 +153,8 @@ async def enqueue_card_agent(
                 )
             except asyncpg.UniqueViolationError:
                 raise HTTPException(status_code=409, detail="The agent is already working on this card.")
+            # Questions about the previous pass (see / buy it) are stale now.
+            await close_open_prompts(conn, task_id)
 
     from app.workers.tasks.agent_card import run_card_agent
 

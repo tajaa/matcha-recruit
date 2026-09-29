@@ -13,6 +13,7 @@ It is not the MCP connector either: that is push-only, so it can't advance a car
 | Worker claims round 1 | `todo → in_progress` | `workers/tasks/agent_card.py` → `board.claim_column` |
 | Result stored | `→ review` | `board.finish_column` |
 | Reviewer sends it back (existing reject + note) | `changes_requested`; round N+1 runs **while it stays there** | `tasks.py` reject hook: editor check + `preflight` **before** the card moves, then `reason="redirect"` |
+| Result stored, project has a discussion chat | Espresso asks "want to see what I found?" | `workers/tasks/agent_card.py` → `chat_flow.offer_result` (best-effort) |
 | Approve | `done` | existing `approve_project_task` |
 | Failure / broker down / worker killed | column unchanged; `progress_note` = "Agent stopped: … Use Run again" | `POST …/tasks/{t}/agent-runs` reruns |
 
@@ -73,3 +74,30 @@ Then set `AGENT_CARD_QUEUE=agent_cards` on the API. Until then, runs share the m
 - `GET /matcha-work/projects/{p}/tasks/{t}/agent-runs`: rounds, newest first, with result and steps.
 - `POST /matcha-work/projects/{p}/tasks/{t}/agent-runs`: run again. Returns 202, or 409 while a run is live or the card is in review/done.
 - Create and reject responses carry `agent_run` (`{run_id, round, status}`) or `agent_run_error` (the gate's `detail`).
+
+## Chat questions and purchases (`chat_flow.py`, migration `agentchat01`)
+
+When a run finishes and the card's project has a discussion chat, Espresso asks there "I finished "<card>". Want to see what I found?". The conversation:
+
+| Question (`mw_agent_card_prompts.kind`) | yes | no |
+|---|---|---|
+| `show_result` (7 days) | posts the short read (headline, top pick with price/rating/why/buy link, alternatives); the full page stays on the card. For an admin with a shopping result, asks `purchase` | "It's on the card" |
+| `purchase` (2 days, owner only) | no saved card → says where to add one and **stays open**; else asks `pick_card` | "I won't buy it" |
+| `pick_card` (2 hours, owner only) | last 4 digits (or yes with one card) → inserts `mw_agent_purchase_requests` and posts the checkout link | cancelled |
+
+Invariants:
+
+- **No model call.** `parse_answer` is a closed set of yes/no phrases plus "4242" / "card ending 4242". Anything else is chat.
+- **Routing (`werk/routes/channels_ws.py`).** A threaded reply to a question's message (metadata `kind: agent_card_prompt`, `prompt_id`) goes to that question and never to the `@espresso` repo agent. A plain yes/no/last-4 with no reply target and no mentions goes to the channel's newest open question, unless a live Huume event-draft or schedule pill in the channel owns that "yes". Pure helpers: `_routes_to_agent_card`, `_agent_card_redaction`.
+- **Answered once.** Every state change is a conditional `UPDATE … WHERE status='open' AND expires_at > NOW()`; a newer offer for the card, or any new run on it (`enqueue` → `close_open_prompts`), supersedes its open questions, so nobody buys from a stale result. One offer per run (partial unique index).
+- **Who may answer.** Project access (active collaborator, same company, or admin) for every question; `purchase`/`pick_card` only by their `owner_user_id` (the person who said yes to seeing it). Outsiders get a refusal on a threaded reply and silence otherwise.
+- **The approved purchase is frozen.** `purchase_offer` takes the top pick at its first provenance-gated buy link and stores item, retailer, checkout URL and amount in the question's payload; the purchase row copies that payload, so what's recorded is exactly what the user saw.
+- **v1 never charges.** The purchase is a handoff: the user finishes checkout at the link. Status is `handoff`; automated checkout is a later change.
+- **Purchases are admin-only in v1** (`chat_flow.purchases_allowed`). Everyone else still gets the "see it?" question.
+
+### Card vault (`core/services/card_vault.py`, `routes/matcha_work/payment_cards.py`)
+
+- Only the card number is encrypted (AES-256-GCM, keys from `PAYMENT_CARD_KEYS`, never the JWT-derived `secret_crypto` key). Saving fails closed (503) when no key is configured. Each ciphertext is bound (associated data) to its row id and owner.
+- **No CVV** column, field or prompt. Brand, last 4, expiry and a label are the only readable fields; no endpoint returns the number. `DELETE` removes the row, ciphertext included; past purchases keep a `card_last4` snapshot.
+- **Card numbers never go through chat or the model.** Chat only ever shows brand + last 4. A Luhn-valid number (longest whole-group 12-19 digit window, so a trailing CVV doesn't hide it) typed as a reply to a question, or anywhere in a channel with an open question, is replaced with `[card number removed]` **before** the message is stored, broadcast, emailed or notified; Espresso then posts a warning. The lookup fails closed (redacts). Card photos in reply to a purchase question get a "delete that image" warning; nothing reads them.
+- `GET/POST /matcha-work/payment-cards`, `DELETE /matcha-work/payment-cards/{id}`: per user, max 5, admin-only to add (`403 purchases_unavailable`), anyone can list/delete their own. `GET …/agent-runs` also returns `purchases` (the caller's own only).
