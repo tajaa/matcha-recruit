@@ -339,6 +339,39 @@ def _pick(raw: Any, gate: _Gate) -> dict | None:
     }
 
 
+def _sources(raw: Any, gate: _Gate) -> list[dict]:
+    sources = []
+    seen: set[str] = set()
+    for source in _list(raw):
+        if not isinstance(source, dict) or not gate.ok(source.get("url"), "source"):
+            continue
+        key = normalize_url(source["url"])
+        if key in seen:
+            continue
+        seen.add(key)
+        sources.append({
+            "title": _text(source.get("title"), 160) or (urlsplit(str(source["url"])).hostname or ""),
+            "url": str(source["url"]).strip(),
+        })
+    return sources[:MAX_SOURCES]
+
+
+def _criteria(raw: Any) -> list[dict]:
+    return [
+        {"name": _text(c.get("name"), 80), "why": _text(c.get("why"), 240)}
+        for c in _list(raw)
+        if isinstance(c, dict) and _text(c.get("name"), 80)
+    ][:MAX_CRITERIA]
+
+
+# The gates, by their public names, for the agent runtime's result blocks.
+Gate = _Gate
+gate_pick = _pick
+gate_sections = _sections
+gate_sources = _sources
+gate_criteria = _criteria
+
+
 def normalize_result(raw: Any, provenance: set[str]) -> tuple[dict, list[str]]:
     """Coerce and provenance-gate a `finish` payload.
 
@@ -358,19 +391,7 @@ def normalize_result(raw: Any, provenance: set[str]) -> tuple[dict, list[str]]:
     alternatives = [p for p in (_pick(a, gate) for a in _list(raw.get("alternatives"))) if p]
     if len(alternatives) > MAX_ALTERNATIVES:
         gate.warnings.append(f"Trimmed alternatives to {MAX_ALTERNATIVES}")
-    sources = []
-    seen: set[str] = set()
-    for source in _list(raw.get("sources")):
-        if not isinstance(source, dict) or not gate.ok(source.get("url"), "source"):
-            continue
-        key = normalize_url(source["url"])
-        if key in seen:
-            continue
-        seen.add(key)
-        sources.append({
-            "title": _text(source.get("title"), 160) or (urlsplit(str(source["url"])).hostname or ""),
-            "url": str(source["url"]).strip(),
-        })
+    sources = _sources(raw.get("sources"), gate)
     answer_type = raw.get("answer_type")
     if answer_type not in _ANSWER_TYPES:
         answer_type = "recommendation" if top_pick else "answer"
@@ -380,16 +401,12 @@ def normalize_result(raw: Any, provenance: set[str]) -> tuple[dict, list[str]]:
         "headline": headline,
         "summary": summary,
         "answer_type": answer_type,
-        "criteria": [
-            {"name": _text(c.get("name"), 80), "why": _text(c.get("why"), 240)}
-            for c in _list(raw.get("criteria"))
-            if isinstance(c, dict) and _text(c.get("name"), 80)
-        ][:MAX_CRITERIA],
+        "criteria": _criteria(raw.get("criteria")),
         "top_pick": top_pick,
         "alternatives": alternatives[:MAX_ALTERNATIVES],
         "sections": _sections(raw.get("sections"), gate),
         "caveats": [c for c in (_text(x, 300) for x in _list(raw.get("caveats"))) if c][:MAX_CAVEATS],
-        "sources": sources[:MAX_SOURCES],
+        "sources": sources,
         "confidence": confidence if confidence in _CONFIDENCE else "low",
         "changes_from_previous": _text(raw.get("changes_from_previous"), 800) or None,
     }
