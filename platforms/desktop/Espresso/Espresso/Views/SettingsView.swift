@@ -82,10 +82,15 @@ private struct PaymentCardsSettingsTab: View {
             if let state, state.enabled {
                 Section {
                     if state.configured {
-                        TextField("Card number", text: $number)
-                            .textContentType(.creditCardNumber)
-                        TextField("Expiry (MM/YY)", text: $expiry)
-                        TextField("Label (optional)", text: $label)
+                        // Grouped macOS forms render a plain TextField as a
+                        // row label plus an invisible, borderless trailing
+                        // box; bordered fields with prompts are clickable.
+                        TextField("Card number", text: $number, prompt: Text("4242 4242 4242 4242"))
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Expiry", text: $expiry, prompt: Text("MM/YY"))
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Label", text: $label, prompt: Text("Optional, e.g. Stripe test"))
+                            .textFieldStyle(.roundedBorder)
                         Button(busy ? "Saving…" : "Save card") { Task { await save() } }
                             .disabled(busy || number.isEmpty || expiry.isEmpty)
                     } else {
