@@ -1,4 +1,5 @@
 import { api, ApiError } from '../../../api/client'
+import type { AgentPurchase, PaymentCard } from '../../types'
 
 // ── Agent cards (category 'agent') ──
 //
@@ -54,21 +55,6 @@ export type AgentRun = {
   steps: { seq: number; kind: string; label: string; status: string }[]
 }
 
-/** A purchase approved in the project chat. v1 is a handoff: nothing was
- *  charged, the person finishes checkout at the link. */
-export type AgentPurchase = {
-  id: string
-  run_id: string | null
-  item_name: string
-  retailer: string | null
-  checkout_url: string
-  amount: number | null
-  currency: string | null
-  card_last4: string
-  status: 'handoff' | 'cancelled'
-  created_at: string | null
-}
-
 export function listAgentRuns(projectId: string, taskId: string) {
   return api.get<{ runs: AgentRun[]; purchases?: AgentPurchase[] }>(
     `/matcha-work/projects/${projectId}/tasks/${taskId}/agent-runs`,
@@ -86,16 +72,6 @@ export function rerunAgent(projectId: string, taskId: string) {
 //
 // Backend: server/app/matcha/routes/matcha_work/payment_cards.py. The number is
 // sent once, encrypted server-side, and never returned. There is no CVV field.
-
-export type PaymentCard = {
-  id: string
-  label: string
-  brand: 'visa' | 'mastercard' | 'amex' | 'discover' | 'card'
-  last4: string
-  exp_month: number
-  exp_year: number
-  created_at: string | null
-}
 
 export function listPaymentCards() {
   return api.get<{ enabled: boolean; configured: boolean; cards: PaymentCard[] }>('/matcha-work/payment-cards')

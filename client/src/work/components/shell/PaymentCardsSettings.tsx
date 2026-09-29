@@ -5,8 +5,8 @@ import {
   agentErrorMessage,
   deletePaymentCard,
   listPaymentCards,
-  type PaymentCard,
 } from '../../api/matchaWork'
+import type { PaymentCard } from '../../types'
 
 const BRAND: Record<PaymentCard['brand'], string> = {
   visa: 'Visa',
@@ -79,9 +79,27 @@ export default function PaymentCardsSettings() {
   }
 
   if (!state) {
-    return message ? null : (
-      <section className="flex justify-center rounded-xl border border-w-line bg-w-surface p-5">
-        <Loader2 className="h-4 w-4 animate-spin text-w-dim" />
+    // Rendered only for admins, who can use this: a failed load says so
+    // instead of making the section silently disappear.
+    return (
+      <section className="rounded-xl border border-w-line bg-w-surface p-5">
+        <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-w-text">
+          <CreditCard className="h-4 w-4" /> Payment cards
+        </h2>
+        {message ? (
+          <div className="flex items-center gap-3">
+            <p role="status" className="text-xs text-orange-300">Couldn't load your cards: {message}</p>
+            <button
+              type="button"
+              onClick={() => { setMessage(''); void load() }}
+              className="rounded-md border border-w-line px-2 py-1 text-xs text-w-text hover:bg-w-surface2"
+            >
+              Retry
+            </button>
+          </div>
+        ) : (
+          <Loader2 className="h-4 w-4 animate-spin text-w-dim" />
+        )}
       </section>
     )
   }

@@ -153,8 +153,6 @@ async def enqueue_card_agent(
                 )
             except asyncpg.UniqueViolationError:
                 raise HTTPException(status_code=409, detail="The agent is already working on this card.")
-            # Questions about the previous pass (see / buy it) are stale now.
-            await close_open_prompts(conn, task_id)
 
     from app.workers.tasks.agent_card import run_card_agent
 
@@ -177,5 +175,14 @@ async def enqueue_card_agent(
             status_code=503,
             detail="Couldn't start the agent right now. Try again in a moment.",
         )
+    # Only now are the previous pass's chat questions (see it / buy it) stale:
+    # a dispatch failure above leaves them, and that result, current. A reply
+    # racing this is already refused: answers re-check for a newer live run
+    # under the same per-card lock.
+    try:
+        async with get_connection() as conn:
+            await close_open_prompts(conn, task_id)
+    except Exception:
+        logger.warning("closing agent-card questions failed task=%s", task_id, exc_info=True)
     logger.info("agent card run queued run=%s task=%s round=%s reason=%s", run_id, task_id, round_no, reason)
     return {"run_id": str(run_id), "round": round_no, "status": "queued"}

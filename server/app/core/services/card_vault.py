@@ -143,33 +143,57 @@ def expiry_ok(month: int, year: int, *, today: date | None = None) -> bool:
     return (year, month) >= (today.year, today.month)
 
 
-# Runs of digit groups separated by single spaces or dashes. A card number is
-# the longest whole-group window of 12-19 digits that passes Luhn, so "4242
-# 4242 4242 4242 123" (number then CVV) still finds the whole number.
-_DIGIT_RUN = re.compile(r"(?<![0-9])[0-9]+(?:[ -][0-9]+)*(?![0-9])")
+# Card-number detection for chat. A candidate is a run of digit groups joined
+# by up to three separator characters (any whitespace, including newlines and
+# non-breaking spaces from copy-paste, or . - /). A window of whole groups
+# counts as a card number when it is
+#   * card-shaped: one 13-19 digit group, or groups of at least 4 digits
+#     (4-4-4-4, 4-6-5 Amex, 8-8, ...), where a trailing short group is allowed
+#     only after 4-digit groups (4-4-4-1 / 4-4-4-4-3);
+#   * 13-19 digits, starting with a card prefix (2-6), and Luhn-valid.
+# Phone numbers (3-3-4) and dates (4-2-2) are not card-shaped. Every matching
+# window is found and overlaps are merged, so no digits of a card survive.
+_SEP = r"[\s./-]{1,3}"
+_DIGIT_RUN = re.compile(rf"(?<![0-9])[0-9]+(?:{_SEP}[0-9]+)*(?![0-9])")
 _GROUP = re.compile(r"[0-9]+")
+_CARD_PREFIXES = "23456"
 REDACTED = "[card number removed]"
 
 
+def _card_shaped(lengths: list[int]) -> bool:
+    if len(lengths) == 1:
+        return 13 <= lengths[0] <= 19
+    if all(n >= 4 for n in lengths):
+        return True
+    head, last = lengths[:-1], lengths[-1]
+    return len(lengths) >= 4 and all(n == 4 for n in head) and 1 <= last <= 4
+
+
 def _pan_spans(text: str) -> list[tuple[int, int]]:
-    spans = []
+    spans: list[tuple[int, int]] = []
     for run in _DIGIT_RUN.finditer(text or ""):
-        groups = [(m.start() + run.start(), m.end() + run.start(), m.group(0)) for m in _GROUP.finditer(run.group(0))]
-        i = 0
-        while i < len(groups):
-            digits, found = "", None
+        groups = [(run.start() + m.start(), run.start() + m.end(), m.group(0)) for m in _GROUP.finditer(run.group(0))]
+        for i in range(len(groups)):
+            digits, lengths = "", []
             for j in range(i, len(groups)):
                 digits += groups[j][2]
+                lengths.append(len(groups[j][2]))
                 if len(digits) > 19:
                     break
-                if len(digits) >= 12 and luhn_ok(digits):
-                    found = j  # keep going: the longest valid window wins
-            if found is None:
-                i += 1
-                continue
-            spans.append((groups[i][0], groups[found][1]))
-            i = found + 1
-    return spans
+                if (
+                    len(digits) >= 13
+                    and digits[0] in _CARD_PREFIXES
+                    and _card_shaped(lengths)
+                    and luhn_ok(digits)
+                ):
+                    spans.append((groups[i][0], groups[j][1]))
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
 
 
 def contains_pan(text: str) -> bool:

@@ -77,3 +77,14 @@ describe('PaymentCardsSettings', () => {
     await waitFor(() => expect(container.querySelector('section')).toBeNull())
   })
 })
+
+describe('PaymentCardsSettings load failure', () => {
+  it('shows the error with a retry instead of disappearing', async () => {
+    mock.list.mockRejectedValueOnce(new Error('Server is updating.'))
+    mock.list.mockResolvedValueOnce({ enabled: true, configured: true, cards: [card] })
+    render(<PaymentCardsSettings />)
+    expect(await screen.findByText(/Couldn't load your cards: Server is updating\./)).toBeTruthy()
+    fireEvent.click(screen.getByText('Retry'))
+    expect(await screen.findByText(/Visa ending 4242/)).toBeTruthy()
+  })
+})

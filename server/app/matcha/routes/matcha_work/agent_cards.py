@@ -5,13 +5,12 @@ Runs start on their own when an agent card is created or sent back from review
 """
 from __future__ import annotations
 
-import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.models.auth import CurrentUser
-from app.database import get_connection
+from app.database import decode_jsonb, get_connection
 from app.matcha.dependencies import require_company_member
 from app.matcha.routes.matcha_work._shared import (
     _can_edit_project,
@@ -19,15 +18,6 @@ from app.matcha.routes.matcha_work._shared import (
 )
 
 router = APIRouter()
-
-
-def _jsonb(value):
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except ValueError:
-            return None
-    return value
 
 
 def _iso(value):
@@ -93,7 +83,7 @@ async def list_agent_runs_endpoint(
                 "id": str(r["id"]),
                 "round": r["round"],
                 "status": r["status"],
-                "result": _jsonb(r["result"]),
+                "result": decode_jsonb(r["result"]),
                 "error": r["error"],
                 "search_calls": r["search_calls"],
                 "model_calls": r["model_calls"],

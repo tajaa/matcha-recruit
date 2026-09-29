@@ -236,6 +236,38 @@ async def test_broker_down_fails_the_row_so_it_cannot_hold_the_live_run_slot(wir
     fail = [u for u in wired["conn"].updates if "AND status = 'queued'" in u[0]]
     assert len(fail) == 1 and "Could not be queued" in fail[0][0]
     assert fail[0][1] == (wired["conn"].run_id,)
+    # The current result's chat questions stay open: nothing replaced it.
+    assert "close_prompts" not in [step[0] for step in wired["conn"].executed]
+
+
+@pytest.mark.asyncio
+async def test_open_questions_close_only_after_the_new_run_is_dispatched(wired):
+    order = []
+    wired["dispatch"].side_effect = lambda *a, **k: order.append("dispatch")
+    original = wired["conn"].execute
+
+    async def execute(query, *args):
+        if "mw_agent_card_prompts" in query:
+            order.append("close_prompts")
+        return await original(query, *args)
+
+    wired["conn"].execute = execute
+    await enqueue.enqueue_card_agent(task=_task(), user=_user(), reason="redirect", skip_preflight=True)
+    assert order == ["dispatch", "close_prompts"]
+
+
+@pytest.mark.asyncio
+async def test_a_failure_closing_questions_never_fails_the_enqueue(wired):
+    original = wired["conn"].execute
+
+    async def execute(query, *args):
+        if "mw_agent_card_prompts" in query:
+            raise RuntimeError("db blip")
+        return await original(query, *args)
+
+    wired["conn"].execute = execute
+    out = await enqueue.enqueue_card_agent(task=_task(), user=_user(), reason="rerun", skip_preflight=True)
+    assert out["status"] == "queued"
 
 
 @pytest.mark.asyncio

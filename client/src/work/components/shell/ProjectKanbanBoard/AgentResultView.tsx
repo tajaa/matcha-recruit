@@ -5,8 +5,9 @@ import { ExternalLink, Loader2, RotateCcw, ShoppingCart, Sparkles, Star } from '
 import type { MWProjectTask } from '../../../types'
 import {
   agentErrorMessage, listAgentRuns, rerunAgent,
-  type AgentPick, type AgentPurchase, type AgentResult, type AgentRun,
+  type AgentPick, type AgentResult, type AgentRun,
 } from '../../../api/matchaWork'
+import type { AgentPurchase } from '../../../types'
 
 const POLL_MS = 4000
 const EXTERNAL = { target: '_blank', rel: 'noopener noreferrer nofollow' } as const
@@ -190,11 +191,6 @@ export function AgentResultBody({ result }: { result: AgentResult }) {
   )
 }
 
-/**
- * The agent card's result page inside the task panel: the newest round's
- * structured result, a round switcher, live status while a run is working,
- * and "Run again" after a failure.
- */
 /** Purchases approved in the project chat. v1 records a handoff and charges
  *  nothing; the person finishes checkout at the link. */
 function Purchases({ purchases }: { purchases: AgentPurchase[] }) {
@@ -227,6 +223,11 @@ function Purchases({ purchases }: { purchases: AgentPurchase[] }) {
   )
 }
 
+/**
+ * The agent card's result page inside the task panel: the newest round's
+ * structured result, a round switcher, live status while a run is working,
+ * and "Run again" after a failure.
+ */
 export default function AgentResultView({
   projectId,
   task,

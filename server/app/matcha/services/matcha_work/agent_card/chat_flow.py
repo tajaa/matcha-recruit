@@ -4,41 +4,55 @@ When a run finishes, Espresso asks in the card's project discussion "want to
 see what I found?". Yes posts a readable summary of the result (the full page
 stays on the card). For a shopping result, and for a user allowed to buy, it
 then asks "want to buy it?", then which saved card, and records a purchase
-handoff: the exact item, retailer, checkout link and total the user approved.
-v1 never charges anything; the user finishes checkout at the link.
+handoff: the exact item, retailer, checkout link and verified total the user
+approved. v1 never charges anything; the user finishes checkout at the link.
 
 Every question is a `mw_agent_card_prompts` row. Answers are parsed
-deterministically (no model call): a threaded reply goes to that question; a
-plain "yes" / "no" / last-4 goes to the channel's newest open question. A
-question is claimed with one conditional UPDATE, so it is answered once.
+deterministically (no model call):
+  * a threaded reply goes to the question it replies to — the only way to
+    answer "buy it?" and "which card?", and only by the person who owns them;
+  * a plain "yes" (a small, explicit set) with no reply target shows the
+    channel's newest open result. Nothing else in ordinary chat is an answer,
+    so "ok" to a colleague can never approve a purchase.
+A question is claimed with one conditional UPDATE, under the same per-card
+advisory lock `enqueue` takes, and only while its run is still the card's
+current result; a newer run supersedes it.
 
 Card numbers never travel through chat or the model: saved cards are added
 through the payment-cards API, chat only ever shows the brand and last 4
-digits, and a card number typed at an open question is removed before the
-message is stored (see `channels_ws`).
+digits, and a card number typed in reply to a question, or by someone with an
+open purchase question in the channel, is removed before the message is
+stored or broadcast (`redact_card_numbers`, used by the chat socket and the
+message-edit endpoint).
 """
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any
 from uuid import UUID
 
 from app.core.services import card_vault
-from app.database import connection_or_direct
+from app.database import connection_or_direct, decode_jsonb
 
 from ..project_agent.chat import broadcast_espresso_message, persist_espresso_message
+
+logger = logging.getLogger(__name__)
 
 PROMPT_METADATA_KIND = "agent_card_prompt"
 OFFER_TTL = timedelta(days=7)
 PURCHASE_TTL = timedelta(days=2)
 PICK_CARD_TTL = timedelta(hours=2)
 MAX_MESSAGE_CHARS = 3500
+PURCHASE_KINDS = ("purchase", "pick_card")
 
 ADD_CARD_HINT = "Add one in Espresso under Settings → Payment cards"
+STALE_REPLY = "That result was replaced by a newer run on the card, so I've closed this question."
 
+# Threaded replies: a generous vocabulary, because the reply target already
+# says which question is being answered.
 _YES = {
     "y", "yes", "yeah", "yea", "yep", "yup", "sure", "ok", "okay", "k", "please",
     "yes please", "show me", "show it", "go ahead", "do it", "buy it", "purchase",
@@ -49,22 +63,29 @@ _NO = {
     "n", "no", "nope", "nah", "not now", "later", "skip", "cancel", "no thanks",
     "no thank you", "dont", "don t", "do not", "stop", "never mind", "nevermind",
 }
+# Plain messages (no reply target): only an explicit request to see a result.
+_PLAIN_YES = {"yes", "yes please", "show me", "show it", "yes show me"}
 _LAST4 = re.compile(r"^(?:use\s+)?(?:the\s+)?(?:card\s+)?(?:ending\s+)?(?:in\s+)?(\d{4})$")
+_CHOICE = re.compile(r"^(?:use\s+)?(?:card\s+|number\s+|option\s+)?([1-9])$")
 _ESPRESSO_MENTION = re.compile(r"(?i)(?:(?<=^)|(?<=\s))@espresso\b")
 
 
 @dataclass(frozen=True)
 class Answer:
-    kind: str  # "yes" | "no" | "last4"
-    last4: str | None = None
+    kind: str  # "yes" | "no" | "last4" | "choice"
+    value: str | None = None
+
+
+def _normalize(text: str) -> str:
+    normalized = re.sub(r"[^a-z0-9 ]+", " ", _ESPRESSO_MENTION.sub("", text).lower())
+    return " ".join(normalized.split())
 
 
 def parse_answer(text: str) -> Answer | None:
-    """A yes / no / "the one ending 4242", or None when it's something else."""
+    """A threaded reply's answer: yes / no / last 4 digits / a numbered choice."""
     if not isinstance(text, str) or len(text) > 60:
         return None
-    normalized = re.sub(r"[^a-z0-9 ]+", " ", _ESPRESSO_MENTION.sub("", text).lower())
-    normalized = " ".join(normalized.split())
+    normalized = _normalize(text)
     if not normalized:
         return None
     if normalized in _YES:
@@ -74,12 +95,16 @@ def parse_answer(text: str) -> Answer | None:
     match = _LAST4.match(normalized)
     if match:
         return Answer("last4", match.group(1))
+    match = _CHOICE.match(normalized)
+    if match:
+        return Answer("choice", match.group(1))
     return None
 
 
-def might_answer(text: str) -> bool:
-    """Cheap, synchronous hot-path guard: could this plain message be an answer?"""
-    return parse_answer(text) is not None
+def is_plain_yes(text: str) -> bool:
+    """Whether a plain (unthreaded) message asks to see a result. Synchronous
+    and allocation-light: it runs on the chat socket's hot path."""
+    return isinstance(text, str) and len(text) <= 30 and _normalize(text) in _PLAIN_YES
 
 
 def purchases_allowed(role: str | None) -> bool:
@@ -157,6 +182,9 @@ def format_result(result: dict, *, task_id, title: str, column: str | None) -> s
 def purchase_offer(result: dict) -> dict | None:
     """The one thing a yes would buy: the top pick at its first verified buy link.
 
+    The total is the pick's source-checked price (`price`, gated on its source
+    URL, with its currency) or nothing: a buy link's own `price` is only the
+    model's claim and has no currency, so it is never offered as the total.
     Frozen into the question's payload so the purchase that gets approved is
     exactly the item, store, link and total the user was shown.
     """
@@ -172,14 +200,14 @@ def purchase_offer(result: dict) -> dict | None:
     if not link:
         return None
     price = pick.get("price") or {}
-    amount = link.get("price") if link.get("price") is not None else price.get("amount")
+    verified = price.get("amount") is not None and price.get("currency")
     return {
         "item_name": pick["name"],
         "brand": pick.get("brand") or None,
         "retailer": link.get("retailer") or None,
         "checkout_url": link["url"],
-        "amount": amount,
-        "currency": (price.get("currency") or "USD") if amount is not None else None,
+        "amount": price["amount"] if verified else None,
+        "currency": price["currency"] if verified else None,
     }
 
 
@@ -195,33 +223,86 @@ def _offer_line(offer: dict) -> str:
 _BRANDS = {"visa": "Visa", "mastercard": "Mastercard", "amex": "Amex", "discover": "Discover"}
 
 
-def _card_label(card: dict) -> str:
+def _card_label(card: dict, *, with_expiry: bool = False) -> str:
     brand = _BRANDS.get(card.get("brand") or "", "card")
-    label = f"{brand} ending {card['last4']}"
+    text = f"{brand} ending {card['last4']}"
+    details = []
     if card.get("label"):
-        label += f" ({card['label']})"
-    return label
+        # Labels are validated on save; redact again in case an older row slipped through.
+        details.append(card_vault.redact_pans(card["label"]))
+    if with_expiry and card.get("exp_month") and card.get("exp_year"):
+        details.append(f"expires {int(card['exp_month']):02d}/{int(card['exp_year']) % 100:02d}")
+    if details:
+        text += f" ({', '.join(details)})"
+    return text
 
 
 # ── storage helpers ───────────────────────────────────────────────────────────
 
-def _jsonb(value) -> Any:
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except ValueError:
-            return None
-    return value
+# Is there a run on this card newer than the question's own run that still
+# counts (queued, running or done)? A failed or never-dispatched newer run does
+# not replace the result the question is about.
+_NEWER_RUN_SQL = """SELECT EXISTS(
+    SELECT 1 FROM mw_project_agent_runs n
+    JOIN mw_project_agent_runs r ON r.id = $2
+    WHERE n.task_id = $1 AND n.kind = 'card_agent' AND n.id <> r.id
+      AND n.created_at > r.created_at
+      AND n.status IN ('queued', 'running', 'done')
+)"""
 
 
-async def channel_has_open_prompt(conn, channel_id: UUID) -> bool:
+async def _lock_card(conn, task_id) -> None:
+    """The per-card lock `enqueue` takes (caller's transaction), so a question
+    and a new run on the same card are strictly ordered."""
+    await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", f"{task_id}:card_agent")
+
+
+async def _superseded(conn, task_id, run_id) -> bool:
+    return bool(await conn.fetchval(_NEWER_RUN_SQL, task_id, run_id))
+
+
+async def close_open_prompts(conn, task_id: UUID) -> None:
+    """Close a card's open questions (a new run started)."""
+    await conn.execute(
+        """UPDATE mw_agent_card_prompts SET status = 'superseded'
+           WHERE task_id = $1 AND status = 'open'""",
+        task_id,
+    )
+
+
+async def user_has_open_purchase_question(conn, channel_id: UUID, user_id) -> bool:
     return bool(await conn.fetchval(
         """SELECT EXISTS(
                SELECT 1 FROM mw_agent_card_prompts
-               WHERE channel_id = $1 AND status = 'open' AND expires_at > NOW()
+               WHERE channel_id = $1 AND owner_user_id = $2
+                 AND kind IN ('purchase', 'pick_card')
+                 AND status = 'open' AND expires_at > NOW()
            )""",
-        channel_id,
+        channel_id, user_id,
     ))
+
+
+async def redact_card_numbers(
+    conn, *, channel_id: UUID, user_id, replied_prompt_id: UUID | None, content: str | None,
+) -> tuple[str | None, bool]:
+    """(content to store, whether a card number was removed).
+
+    Applies to a reply to one of Espresso's questions, or to a message from
+    someone who has an open "buy it?" / "which card?" question in this
+    channel. Ordinary chat is never rewritten. The lookup runs only for text
+    that holds a card-shaped, Luhn-valid number, and fails closed.
+    """
+    if not content or not card_vault.contains_pan(content):
+        return content, False
+    if replied_prompt_id is None:
+        try:
+            applies = await user_has_open_purchase_question(conn, channel_id, user_id)
+        except Exception:
+            logger.warning("agent-card question lookup failed; redacting", exc_info=True)
+            applies = True
+        if not applies:
+            return content, False
+    return card_vault.redact_pans(content), True
 
 
 async def _ask(conn, *, prompt: dict, kind: str, owner_user_id, payload: dict, ttl: timedelta,
@@ -261,7 +342,7 @@ def _prompt_metadata(prompt_id, project_id, task_id, kind: str) -> dict:
 
 def prompt_reference(raw_metadata) -> UUID | None:
     """The question a threaded reply answers, from the replied-to message's metadata."""
-    raw_metadata = _jsonb(raw_metadata)
+    raw_metadata = decode_jsonb(raw_metadata)
     if not isinstance(raw_metadata, dict) or raw_metadata.get("kind") != PROMPT_METADATA_KIND:
         return None
     try:
@@ -276,8 +357,9 @@ async def offer_result(run_id: UUID) -> bool:
     """Ask "want to see what I found?" in the card's project chat.
 
     Pool-free (runs in the Celery worker). No-op when the project has no
-    discussion chat. Idempotent per run; a newer offer closes the card's older
-    open questions so nobody buys from a superseded result.
+    discussion chat, or when a newer run has already started on the card (the
+    card was sent back between finishing and this offer). Idempotent per run;
+    a newer offer closes the card's older open questions.
     """
     payload = None
     async with connection_or_direct() as conn:
@@ -304,9 +386,9 @@ async def offer_result(run_id: UUID) -> bool:
             f"I {verb} \"{title}\". Want to see what I found? Reply yes or no."
         )
         async with conn.transaction():
-            await conn.execute(
-                "SELECT pg_advisory_xact_lock(hashtext($1))", f"{row['task_id']}:agent_prompts",
-            )
+            await _lock_card(conn, row["task_id"])
+            if await _superseded(conn, row["task_id"], run_id):
+                return False
             prompt_id = await conn.fetchval(
                 """INSERT INTO mw_agent_card_prompts
                        (company_id, project_id, task_id, run_id, channel_id, kind, expires_at)
@@ -335,63 +417,79 @@ async def offer_result(run_id: UUID) -> bool:
     return True
 
 
-async def close_open_prompts(conn, task_id: UUID) -> None:
-    """A new run on the card makes its open questions stale (caller's transaction)."""
-    await conn.execute(
-        """UPDATE mw_agent_card_prompts SET status = 'superseded'
-           WHERE task_id = $1 AND status = 'open'""",
-        task_id,
-    )
-
-
 # ── answers, from the chat socket ─────────────────────────────────────────────
 
-async def _can_access_project(conn, prompt: dict, user) -> bool:
-    if (getattr(user, "role", "") or "").lower() == "admin":
-        return True
-    return bool(await conn.fetchval(
-        """SELECT EXISTS(
-               SELECT 1 FROM mw_project_collaborators
-               WHERE project_id = $1 AND user_id = $3 AND status = 'active'
-           ) OR EXISTS(
-               SELECT 1 FROM clients WHERE user_id = $3 AND company_id = $2
-           ) OR EXISTS(
-               SELECT 1 FROM employees WHERE user_id = $3 AND org_id = $2
-           )""",
-        prompt["project_id"], prompt["company_id"], user.id,
-    ))
+async def _can_access_project(prompt: dict, user) -> bool:
+    """The REST API's own rule (`project_service.resolve_project_access`, behind
+    `_verify_project_access`): collaborators, the company's own users except
+    employees on discipline/recruiting boards, and admins only as collaborators."""
+    from app.core.models.auth import CurrentUser
+    from app.matcha.dependencies import get_client_company_id
+
+    from ..project_service import resolve_project_access
+
+    actor = user if isinstance(user, CurrentUser) else CurrentUser(
+        id=user.id, email=getattr(user, "email", None) or "", role=user.role,
+    )
+    company_id = None if actor.role == "admin" else await get_client_company_id(actor)
+    return await resolve_project_access(prompt["project_id"], actor, company_id=company_id) is not None
 
 
-async def _load_prompt(conn, channel_id: UUID, prompt_id: UUID | None) -> dict | None:
+async def _load_prompt(conn, channel_id: UUID, *, prompt_id: UUID | None, purchase_owner=None) -> dict | None:
     if prompt_id is not None:
         row = await conn.fetchrow(
             """SELECT *, (status = 'open' AND expires_at > NOW()) AS live
                FROM mw_agent_card_prompts WHERE id = $1 AND channel_id = $2""",
             prompt_id, channel_id,
         )
+    elif purchase_owner is not None:
+        row = await conn.fetchrow(
+            """SELECT *, TRUE AS live
+               FROM mw_agent_card_prompts
+               WHERE channel_id = $1 AND owner_user_id = $2 AND kind IN ('purchase', 'pick_card')
+                 AND status = 'open' AND expires_at > NOW()
+               ORDER BY created_at DESC LIMIT 1""",
+            channel_id, purchase_owner,
+        )
     else:
         row = await conn.fetchrow(
             """SELECT *, TRUE AS live
                FROM mw_agent_card_prompts
-               WHERE channel_id = $1 AND status = 'open' AND expires_at > NOW()
+               WHERE channel_id = $1 AND kind = 'show_result'
+                 AND status = 'open' AND expires_at > NOW()
                ORDER BY created_at DESC LIMIT 1""",
             channel_id,
         )
     if not row:
         return None
     prompt = dict(row)
-    prompt["payload"] = _jsonb(prompt.get("payload")) or {}
+    prompt["payload"] = decode_jsonb(prompt.get("payload"), {}) or {}
     return prompt
 
 
-async def _claim(conn, prompt: dict, user, answer: str) -> bool:
-    return await conn.fetchval(
+async def _claim(conn, prompt: dict, user, answer: str) -> str:
+    """"ok", "gone" (someone else answered it first) or "stale" (a newer run
+    replaced its result; the card's open questions are closed). Must run in
+    the caller's transaction."""
+    await _lock_card(conn, prompt["task_id"])
+    if await _superseded(conn, prompt["task_id"], prompt["run_id"]):
+        await close_open_prompts(conn, prompt["task_id"])
+        return "stale"
+    claimed = await conn.fetchval(
         """UPDATE mw_agent_card_prompts
            SET status = 'answered', answer = $2, answered_by = $3, answered_at = NOW()
            WHERE id = $1 AND status = 'open' AND expires_at > NOW()
            RETURNING TRUE""",
         prompt["id"], answer, user.id,
-    ) is not None
+    )
+    return "ok" if claimed else "gone"
+
+
+async def _claimed(conn, prompt, user, answer: str, say) -> bool:
+    outcome = await _claim(conn, prompt, user, answer)
+    if outcome == "stale":
+        await say(STALE_REPLY)
+    return outcome == "ok"
 
 
 async def _saved_cards(conn, user_id) -> list[dict]:
@@ -410,8 +508,12 @@ async def _saved_cards(conn, user_id) -> list[dict]:
 _HINTS = {
     "show_result": "Reply yes to see what I found, or no to skip.",
     "purchase": "Reply yes to buy it, or no to skip.",
-    "pick_card": "Reply with the last 4 digits of the card to use, or no to cancel.",
+    "pick_card": "Reply with the number of the card to use, or no to cancel.",
 }
+_CARD_NUMBER_WARNING = (
+    "I removed a card number from that message. Please never paste card numbers in chat. "
+    f"{ADD_CARD_HINT}, where they're stored encrypted."
+)
 
 
 async def handle_chat_answer(
@@ -425,151 +527,178 @@ async def handle_chat_answer(
 ) -> bool:
     """Apply one chat message as an answer. Returns whether it was one of ours.
 
-    `prompt_id` is set for a threaded reply to a question; otherwise the
-    channel's newest open question is the target, and anything that isn't a
-    clear answer from someone who may give it is left as ordinary chat.
+    `prompt_id` is set for a threaded reply to a question. Without it, only a
+    plain "yes" is considered (it shows the channel's newest open result), or a
+    removed card number (warned about against the sender's own open purchase
+    question). Everything else is ordinary chat.
     """
     targeted = prompt_id is not None
+    if not targeted and not card_number_removed and not is_plain_yes(content):
+        return False
+    async with connection_or_direct() as conn:
+        prompt = await _load_prompt(
+            conn, channel_id, prompt_id=prompt_id,
+            purchase_owner=user.id if card_number_removed and not targeted else None,
+        )
+    if prompt is None:
+        return False
+    allowed = await _can_access_project(prompt, user)
+    if not allowed and not targeted:
+        return False
+
     outbox: list[dict | None] = []
-    handled = False
     async with connection_or_direct() as conn:
 
         async def say(text: str) -> None:
             outbox.append(await persist_espresso_message(conn, prompt["company_id"], channel_id, text))
 
-        prompt = await _load_prompt(conn, channel_id, prompt_id)
-        if prompt is None:
-            return False
-        if not await _can_access_project(conn, prompt, user):
-            if targeted:
-                await say("I can only take answers from people on this project.")
-            handled = targeted
+        if not allowed:
+            await say("I can only take answers from people on this project.")
         elif card_number_removed:
-            await say(
-                "I removed a card number from that message. Please never paste card numbers in chat. "
-                f"{ADD_CARD_HINT}, where they're stored encrypted."
-            )
-            handled = True
-        elif has_attachments and targeted and prompt["kind"] in ("purchase", "pick_card"):
+            await say(_CARD_NUMBER_WARNING)
+        elif has_attachments and targeted and prompt["kind"] in PURCHASE_KINDS:
             await say(
                 "I don't read card photos. Please delete that image from the chat. "
                 f"{ADD_CARD_HINT} instead."
             )
-            handled = True
         else:
-            handled = await _answer(conn, prompt, user, content, targeted=targeted, say=say, outbox=outbox)
+            await _answer(conn, prompt, user, content, targeted=targeted, say=say, outbox=outbox)
     for message in outbox:
         await broadcast_espresso_message(message)
-    return handled
+    return True
 
 
-async def _answer(conn, prompt: dict, user, content: str, *, targeted: bool, say, outbox) -> bool:
-    answer = parse_answer(content)
+async def _answer(conn, prompt: dict, user, content: str, *, targeted: bool, say, outbox) -> None:
+    answer = Answer("yes") if not targeted else parse_answer(content)
     kind = prompt["kind"]
     owner = prompt.get("owner_user_id")
     if owner is not None and owner != user.id:
-        if targeted:
-            await say("Only the person who asked to buy this can answer that.")
-        return targeted
-    if answer is None or (answer.kind == "last4" and kind != "pick_card"):
+        await say("Only the person who asked to buy this can answer that.")
+        return
+    if answer is None or (answer.kind in ("last4", "choice") and kind != "pick_card"):
         # Chatter in reply to a closed question is just chat.
-        if targeted and prompt["live"]:
+        if prompt["live"]:
             await say(_HINTS[kind])
-        return targeted
+        return
     if not prompt["live"]:
         await say("That question has closed. The latest result is on the card.")
-        return True
+        return
 
     if kind == "show_result":
-        return await _answer_show_result(conn, prompt, user, answer, say=say, outbox=outbox)
-    if kind == "purchase":
-        return await _answer_purchase(conn, prompt, user, answer, say=say, outbox=outbox)
-    return await _answer_pick_card(conn, prompt, user, answer, say=say)
+        await _answer_show_result(conn, prompt, user, answer, say=say, outbox=outbox)
+    elif kind == "purchase":
+        await _answer_purchase(conn, prompt, user, answer, say=say, outbox=outbox)
+    else:
+        await _answer_pick_card(conn, prompt, user, answer, say=say)
 
 
-async def _answer_show_result(conn, prompt, user, answer: Answer, *, say, outbox) -> bool:
+async def _answer_show_result(conn, prompt, user, answer: Answer, *, say, outbox) -> None:
     if answer.kind == "no":
-        if await _claim(conn, prompt, user, "no"):
-            await say("No problem. It's on the card whenever you want it.")
-        return True
+        async with conn.transaction():
+            if await _claimed(conn, prompt, user, "no", say):
+                await say("No problem. It's on the card whenever you want it.")
+        return
     row = await conn.fetchrow(
         """SELECT r.result, t.title, t.board_column
            FROM mw_project_agent_runs r JOIN mw_tasks t ON t.id = r.task_id
            WHERE r.id = $1""",
         prompt["run_id"],
     )
-    result = _jsonb(row["result"]) if row else None
-    if not isinstance(result, dict):
-        if await _claim(conn, prompt, user, "yes"):
-            await say("I couldn't load that result any more. Open the card to see its latest run.")
-        return True
+    result = decode_jsonb(row["result"]) if row else None
     async with conn.transaction():
-        if not await _claim(conn, prompt, user, "yes"):
-            return True
+        if not await _claimed(conn, prompt, user, "yes", say):
+            return
+        if not isinstance(result, dict):
+            await say("I couldn't load that result any more. Open the card to see its latest run.")
+            return
         await say(format_result(result, task_id=prompt["task_id"], title=row["title"], column=row["board_column"]))
         offer = purchase_offer(result)
         if offer and purchases_allowed(getattr(user, "role", None)):
             outbox.append(await _ask(
                 conn, prompt=prompt, kind="purchase", owner_user_id=user.id, payload=offer,
                 ttl=PURCHASE_TTL,
-                content=f"Want me to buy it? {_offer_line(offer)}. Reply yes or no.",
+                content=(
+                    f"Want me to buy it? {_offer_line(offer)}. "
+                    "Reply to this message with yes or no."
+                ),
             ))
-    return True
 
 
-async def _answer_purchase(conn, prompt, user, answer: Answer, *, say, outbox) -> bool:
+async def _answer_purchase(conn, prompt, user, answer: Answer, *, say, outbox) -> None:
     if answer.kind == "no":
-        if await _claim(conn, prompt, user, "no"):
-            await say("Okay, I won't buy it.")
-        return True
+        async with conn.transaction():
+            if await _claimed(conn, prompt, user, "no", say):
+                await say("Okay, I won't buy it.")
+        return
     cards = await _saved_cards(conn, user.id)
     if not cards:
         # Leave the question open so "yes" works again once a card is saved.
         await say(
             f"You don't have a saved card yet. {ADD_CARD_HINT} (never paste card numbers in chat), "
-            "then reply yes here again."
+            "then reply yes to that question again."
         )
-        return True
+        return
     options = [
-        {"card_id": str(c["id"]), "last4": c["last4"], "brand": c["brand"], "label": c["label"]}
-        for c in cards
+        {
+            "n": i + 1, "card_id": str(c["id"]), "last4": c["last4"], "brand": c["brand"],
+            "label": c["label"], "exp_month": c["exp_month"], "exp_year": c["exp_year"],
+        }
+        for i, c in enumerate(cards)
     ]
     if len(options) == 1:
-        question = f"Use your {_card_label(options[0])}? Reply yes, or no to cancel."
+        question = (
+            f"Use your {_card_label(options[0], with_expiry=True)}? "
+            "Reply to this message with yes, or no to cancel."
+        )
     else:
-        question = "Which card? Reply with the last 4 digits: " + "; ".join(
-            _card_label(o) for o in options
-        ) + ". Or reply no to cancel."
+        question = (
+            "Which card? Reply to this message with its number: "
+            + "; ".join(f"{o['n']}. {_card_label(o, with_expiry=True)}" for o in options)
+            + ". Or reply no to cancel."
+        )
     async with conn.transaction():
-        if not await _claim(conn, prompt, user, "yes"):
-            return True
+        if not await _claimed(conn, prompt, user, "yes", say):
+            return
         outbox.append(await _ask(
             conn, prompt=prompt, kind="pick_card", owner_user_id=user.id,
             payload={**prompt["payload"], "options": options}, ttl=PICK_CARD_TTL, content=question,
         ))
-    return True
 
 
-async def _answer_pick_card(conn, prompt, user, answer: Answer, *, say) -> bool:
-    payload = prompt["payload"]
-    options = payload.get("options") or []
-    if answer.kind == "no":
-        if await _claim(conn, prompt, user, "no"):
-            await say("Okay, cancelled. Nothing was bought.")
-        return True
+def _choose(options: list[dict], answer: Answer) -> tuple[dict | None, str | None]:
+    """(chosen option, or a reply explaining why none was chosen)."""
     if answer.kind == "yes":
-        if len(options) != 1:
-            await say(_HINTS["pick_card"])
-            return True
-        chosen = options[0]
-    else:
-        chosen = next((o for o in options if o["last4"] == answer.last4), None)
+        if len(options) == 1:
+            return options[0], None
+        return None, _HINTS["pick_card"]
+    if answer.kind == "choice":
+        n = int(answer.value)
+        chosen = next((o for o in options if o.get("n") == n), None)
         if chosen is None:
-            await say(
-                f"I don't see a saved card ending {answer.last4}. Reply with one of: "
-                + ", ".join(o["last4"] for o in options) + "."
-            )
-            return True
+            return None, f"There's no card {n}. Reply with a number from 1 to {len(options)}."
+        return chosen, None
+    matches = [o for o in options if o["last4"] == answer.value]
+    if len(matches) == 1:
+        return matches[0], None
+    if matches:
+        return None, (
+            f"More than one saved card ends in {answer.value}. Reply with its number: "
+            + ", ".join(str(o["n"]) for o in matches) + "."
+        )
+    return None, f"I don't see a saved card ending {answer.value}. Reply with the card's number."
+
+
+async def _answer_pick_card(conn, prompt, user, answer: Answer, *, say) -> None:
+    payload = prompt["payload"]
+    if answer.kind == "no":
+        async with conn.transaction():
+            if await _claimed(conn, prompt, user, "no", say):
+                await say("Okay, cancelled. Nothing was bought.")
+        return
+    chosen, problem = _choose(payload.get("options") or [], answer)
+    if problem:
+        await say(problem)
+        return
     card = await conn.fetchrow(
         """SELECT id, last4, brand, label, exp_month, exp_year
            FROM mw_payment_cards WHERE id = $1 AND user_id = $2""",
@@ -577,10 +706,10 @@ async def _answer_pick_card(conn, prompt, user, answer: Answer, *, say) -> bool:
     )
     if not card or not card_vault.expiry_ok(card["exp_month"], card["exp_year"]):
         await say(f"The card ending {chosen['last4']} was removed or has expired. Pick another, or reply no.")
-        return True
+        return
     async with conn.transaction():
-        if not await _claim(conn, prompt, user, f"card:{card['last4']}"):
-            return True
+        if not await _claimed(conn, prompt, user, f"card:{card['last4']}", say):
+            return
         await conn.execute(
             """INSERT INTO mw_agent_purchase_requests
                    (company_id, project_id, task_id, run_id, prompt_id, user_id, card_id,
@@ -596,4 +725,3 @@ async def _answer_pick_card(conn, prompt, user, answer: Answer, *, say) -> bool:
             "I haven't charged anything. Finish checkout here: "
             f"{payload['checkout_url']}\nIt's saved on the card under Purchases."
         )
-    return True

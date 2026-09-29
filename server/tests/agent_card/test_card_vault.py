@@ -93,8 +93,7 @@ def test_card_numbers_in_chat_are_found_and_redacted_but_other_numbers_are_not()
     redacted = card_vault.redact_pans(text)
     assert "4242 4242" not in redacted and card_vault.REDACTED in redacted
     assert "12/30" in redacted
-    # A non-Luhn digit run (order number) is left alone.
-    assert "1234567890123" in redacted
+    assert "1234567890123" in redacted  # not a card prefix
     assert not card_vault.contains_pan("call me at 415 555 0100")
 
 
@@ -103,3 +102,50 @@ def test_a_card_number_followed_by_its_cvv_is_still_redacted():
     assert redacted == f"card {card_vault.REDACTED} 123 exp 1230"
     assert card_vault.redact_pans("no digits here") == "no digits here"
     assert card_vault.redact_pans("") == ""
+
+
+@pytest.mark.parametrize("text", [
+    "4242  4242  4242  4242",          # double spaces
+    "4242.4242.4242.4242",             # dots
+    "4242/4242/4242/4242",             # slashes
+    "4242\u00a04242\u00a04242\u00a04242",  # non-breaking spaces from copy-paste
+    "4242 4242\n4242 4242",             # split across lines
+    "4242424242424242",
+    "42424242 42424242",
+    "3782 822463 10005",               # Amex 4-6-5
+    "4222 2222 2222 2",                # 13-digit Visa layout (4-4-4-1)
+])
+def test_formatting_tricks_do_not_hide_a_card_number(text):
+    assert card_vault.redact_pans(f"x {text} y") == f"x {card_vault.REDACTED} y"
+
+
+def test_no_digits_of_a_card_survive_next_to_other_numbers():
+    # A leading number must not shift the match so part of the card survives.
+    assert card_vault.redact_pans("room 1000 4111 1111 1111 1111") == f"room 1000 {card_vault.REDACTED}"
+
+
+@pytest.mark.parametrize("text", [
+    "meeting 2026-10-01 3pm room 4412",
+    "415-555-0100 415-555-0199",
+    "order 1234 5678 9012 3456",       # 4-4-4-4 but not a card prefix
+    "call 555 0100 or 555 0199 today",
+    "invoice 2026/10/01 total 1234.56",
+])
+def test_everyday_numbers_are_left_alone(text):
+    assert not card_vault.contains_pan(text)
+    assert card_vault.redact_pans(text) == text
+
+
+def test_false_positive_rate_on_dates_and_phone_numbers_is_zero():
+    import random
+
+    rng = random.Random(7)
+
+    def digits(k):
+        return "".join(rng.choice("0123456789") for _ in range(k))
+
+    messages = [
+        f"meeting 2026-{rng.randint(1, 12):02d}-{rng.randint(1, 28):02d} {rng.randint(0, 23):02d}:{rng.randint(0, 59):02d} room {digits(4)}"
+        for _ in range(2000)
+    ] + [f"{digits(3)}-{digits(3)}-{digits(4)} {digits(3)}-{digits(3)}-{digits(4)}" for _ in range(2000)]
+    assert not any(card_vault.contains_pan(m) for m in messages)

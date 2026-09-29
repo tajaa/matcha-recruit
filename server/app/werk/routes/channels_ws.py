@@ -288,37 +288,24 @@ def _agent_card_prompt_reference(raw_metadata) -> Optional[UUID]:
     return prompt_reference(raw_metadata)
 
 
-def _agent_card_might_answer(content: str) -> bool:
-    from app.matcha.services.matcha_work.agent_card.chat_flow import might_answer
+def _agent_card_plain_yes(content: str) -> bool:
+    from app.matcha.services.matcha_work.agent_card.chat_flow import is_plain_yes
 
-    return might_answer(content)
-
-
-def _contains_card_number(content: str) -> bool:
-    from app.core.services.card_vault import contains_pan
-
-    return contains_pan(content)
-
-
-def _redact_card_numbers(content: str) -> str:
-    from app.core.services.card_vault import redact_pans
-
-    return redact_pans(content)
+    return is_plain_yes(content)
 
 
 async def _agent_card_redaction(
-    conn, channel_id: UUID, content: Optional[str], agent_prompt_id: Optional[UUID],
+    conn, channel_id: UUID, user_id: UUID, content: Optional[str], agent_prompt_id: Optional[UUID],
 ) -> tuple[Optional[str], bool]:
-    """(content to store, whether a card number was removed).
+    """(content to store, whether a card number was removed) — see
+    `chat_flow.redact_card_numbers`. Queries only for text holding a
+    card-shaped, Luhn-valid number, so ordinary chat costs a regex."""
+    from app.matcha.services.matcha_work.agent_card.chat_flow import redact_card_numbers
 
-    Only at Espresso's agent-card questions: a threaded reply to one, or any
-    message while one is open in the channel. The channel lookup runs only
-    for text that holds a Luhn-valid number."""
-    if not content or not _contains_card_number(content):
-        return content, False
-    if agent_prompt_id is None and not await _channel_has_agent_prompt(conn, channel_id):
-        return content, False
-    return _redact_card_numbers(content), True
+    return await redact_card_numbers(
+        conn, channel_id=channel_id, user_id=user_id,
+        replied_prompt_id=agent_prompt_id, content=content,
+    )
 
 
 def _routes_to_agent_card(
@@ -329,33 +316,24 @@ def _routes_to_agent_card(
     mention_handles: list,
     content: str,
     room_key: str,
+    is_project_chat: bool,
 ) -> bool:
-    """Whether a new message answers an Espresso agent-card question ("want
-    to see it?" / "buy it?" / which card): a threaded reply to one, a message
-    whose card number was just removed, or a plain yes / no / last-4 with no
-    reply target and no mentions. A live Huume event-draft or schedule pill
-    in the same channel keeps priority for that untargeted "yes"."""
+    """Whether a new message goes to Espresso's agent-card questions: a
+    threaded reply to one, a message whose card number was just removed, or
+    a plain "yes" (no reply target, no mentions) in a project discussion chat —
+    which only ever shows a result; buying needs a threaded reply. Synchronous
+    and DB-free, so other channels and ordinary chat never spawn a task. A
+    live Huume event-draft or schedule pill keeps priority for that "yes"."""
     if agent_prompt_id is not None or card_number_removed:
         return True
     return (
-        not reply_to_id
+        is_project_chat
+        and not reply_to_id
         and not mention_handles
         and not _channel_recently_ems_drafted(room_key)
         and not _channel_recently_clarified(room_key)
-        and _agent_card_might_answer(content)
+        and _agent_card_plain_yes(content)
     )
-
-
-async def _channel_has_agent_prompt(conn, channel_id: UUID) -> bool:
-    """Whether Espresso has an open agent-card question here. Fails closed:
-    if the lookup errors, the card number is still removed."""
-    try:
-        from app.matcha.services.matcha_work.agent_card.chat_flow import channel_has_open_prompt
-
-        return await channel_has_open_prompt(conn, channel_id)
-    except Exception:
-        logger.warning("agent-card prompt lookup failed; redacting", exc_info=True)
-        return True
 
 
 async def _bg_agent_card_reply(
@@ -4089,13 +4067,15 @@ async def channel_websocket(
                                             raw_reply_metadata = {}
                                     if isinstance(raw_reply_metadata, dict):
                                         reply_target_metadata = raw_reply_metadata
-                            # A card number typed at one of Espresso's
-                            # agent-card questions is removed BEFORE it is
-                            # stored, broadcast, emailed or notified. The
-                            # channel lookup only runs for Luhn-valid numbers.
+                            # A card number typed in reply to one of
+                            # Espresso's agent-card questions, or by someone
+                            # with an open "buy it?" question here, is removed
+                            # BEFORE it is stored, broadcast, emailed or
+                            # notified. The lookup runs only for card-shaped,
+                            # Luhn-valid numbers.
                             agent_prompt_id = _agent_card_prompt_reference(reply_target_metadata)
                             content, card_number_removed = await _agent_card_redaction(
-                                conn, ch_uuid, content, agent_prompt_id,
+                                conn, ch_uuid, user.id, content, agent_prompt_id,
                             )
                             # ON CONFLICT path makes the INSERT idempotent on
                             # (sender_id, client_message_id) so a retried send
@@ -4261,6 +4241,7 @@ async def channel_websocket(
                                     mention_handles=mention_handles,
                                     content=row["content"],
                                     room_key=room_key,
+                                    is_project_chat=access.scope is ChannelScope.PROJECT_DISCUSSION,
                                 )
                             ):
                                 _spawn_bg(_bg_agent_card_reply(

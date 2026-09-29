@@ -79,25 +79,45 @@ Then set `AGENT_CARD_QUEUE=agent_cards` on the API. Until then, runs share the m
 
 When a run finishes and the card's project has a discussion chat, Espresso asks there "I finished "<card>". Want to see what I found?". The conversation:
 
-| Question (`mw_agent_card_prompts.kind`) | yes | no |
-|---|---|---|
-| `show_result` (7 days) | posts the short read (headline, top pick with price/rating/why/buy link, alternatives); the full page stays on the card. For an admin with a shopping result, asks `purchase` | "It's on the card" |
-| `purchase` (2 days, owner only) | no saved card → says where to add one and **stays open**; else asks `pick_card` | "I won't buy it" |
-| `pick_card` (2 hours, owner only) | last 4 digits (or yes with one card) → inserts `mw_agent_purchase_requests` and posts the checkout link | cancelled |
+| Question (`mw_agent_card_prompts.kind`) | How it's answered | yes | no |
+|---|---|---|---|
+| `show_result` (7 days) | threaded reply, or a plain "yes" | posts the short read (headline, top pick with price/rating/why/buy link, alternatives); the full page stays on the card. For an admin with a shopping result, asks `purchase` | threaded only: "It's on the card" |
+| `purchase` (2 days) | **threaded reply by its owner only** | no saved card → says where to add one and **stays open**; else asks `pick_card` | "I won't buy it" |
+| `pick_card` (2 hours) | **threaded reply by its owner only** | the card's number (1, 2, …), its last 4 when unique, or yes with one card → inserts `mw_agent_purchase_requests` and posts the checkout link | cancelled |
 
 Invariants:
 
-- **No model call.** `parse_answer` is a closed set of yes/no phrases plus "4242" / "card ending 4242". Anything else is chat.
-- **Routing (`werk/routes/channels_ws.py`).** A threaded reply to a question's message (metadata `kind: agent_card_prompt`, `prompt_id`) goes to that question and never to the `@espresso` repo agent. A plain yes/no/last-4 with no reply target and no mentions goes to the channel's newest open question, unless a live Huume event-draft or schedule pill in the channel owns that "yes". Pure helpers: `_routes_to_agent_card`, `_agent_card_redaction`.
-- **Answered once.** Every state change is a conditional `UPDATE … WHERE status='open' AND expires_at > NOW()`; a newer offer for the card, or any new run on it (`enqueue` → `close_open_prompts`), supersedes its open questions, so nobody buys from a stale result. One offer per run (partial unique index).
-- **Who may answer.** Project access (active collaborator, same company, or admin) for every question; `purchase`/`pick_card` only by their `owner_user_id` (the person who said yes to seeing it). Outsiders get a refusal on a threaded reply and silence otherwise.
-- **The approved purchase is frozen.** `purchase_offer` takes the top pick at its first provenance-gated buy link and stores item, retailer, checkout URL and amount in the question's payload; the purchase row copies that payload, so what's recorded is exactly what the user saw.
-- **v1 never charges.** The purchase is a handoff: the user finishes checkout at the link. Status is `handoff`; automated checkout is a later change.
+- **No model call.** `parse_answer` (threaded replies) is a closed set of yes/no phrases plus a last 4 or a card number. `is_plain_yes` (unthreaded) is only "yes" / "yes please" / "show me" / "show it".
+- **Everyday chat is never an answer.** A plain message counts only as an explicit "yes", only in a project discussion chat, and only for the newest open `show_result`, so it can show a result but never close one, approve a purchase or pick a card. "ok" to a colleague does nothing. Buying needs a threaded reply from the person who owns the question.
+- **Routing (`werk/routes/channels_ws.py`).** `_routes_to_agent_card` is synchronous and DB-free. It sends a threaded reply to a question's message (metadata `kind: agent_card_prompt`, `prompt_id`) to that question, never to the `@espresso` repo agent. A plain message goes only when all of these hold:
+  - it is an explicit yes (`is_plain_yes`);
+  - the channel is `ChannelScope.PROJECT_DISCUSSION`;
+  - it has no reply target and no mentions;
+  - no live Huume event-draft or schedule pill in the channel owns that "yes".
+
+  Ordinary chat in other channels never spawns a task or touches the pool.
+- **Answered once, never from a stale result.** Every claim runs in a transaction that takes `enqueue`'s own per-card lock (`{task_id}:card_agent`). The claim first checks whether a newer run on the card counts (`_NEWER_RUN_SQL`: queued/running/done; failed and never-dispatched runs don't). If one does, it closes the card's open questions and replies "replaced by a newer run". Otherwise it is one conditional `UPDATE … WHERE status='open' AND expires_at > NOW()`. `offer_result` takes the same lock and skips a run that is no longer the latest. `enqueue` closes open questions only **after** a successful dispatch, so a broker failure leaves the current result's questions open. There is one offer per run (partial unique index).
+- **Who may answer.** Every question uses the REST API's own rule, `project_service.resolve_project_access`, which `_verify_project_access` also calls. So collaborators and the company's own users qualify, except that employees never reach discipline/recruiting boards, and admins qualify only as collaborators. `purchase`/`pick_card` answer only to their `owner_user_id`, the person who said yes to seeing the result.
+- **The approved purchase is frozen and verified.** `purchase_offer` takes the top pick at its first provenance-gated buy link. The total is the pick's **source-checked** `price` with its currency, or nothing ("price not confirmed"). A buy link's own `price` is only the model's claim and has no currency, so it is never offered. The payload is frozen into the question and copied verbatim into the purchase row.
+- **Card choice is unambiguous.** Options are numbered and shown with label and expiry. A last 4 digits shared by two cards gets "reply with its number".
+- **v1 never charges.** The purchase is a handoff: the user finishes checkout at the link. The status is `handoff`; automated checkout is a later change.
 - **Purchases are admin-only in v1** (`chat_flow.purchases_allowed`). Everyone else still gets the "see it?" question.
 
 ### Card vault (`core/services/card_vault.py`, `routes/matcha_work/payment_cards.py`)
 
-- Only the card number is encrypted (AES-256-GCM, keys from `PAYMENT_CARD_KEYS`, never the JWT-derived `secret_crypto` key). Saving fails closed (503) when no key is configured. Each ciphertext is bound (associated data) to its row id and owner.
-- **No CVV** column, field or prompt. Brand, last 4, expiry and a label are the only readable fields; no endpoint returns the number. `DELETE` removes the row, ciphertext included; past purchases keep a `card_last4` snapshot.
-- **Card numbers never go through chat or the model.** Chat only ever shows brand + last 4. A Luhn-valid number (longest whole-group 12-19 digit window, so a trailing CVV doesn't hide it) typed as a reply to a question, or anywhere in a channel with an open question, is replaced with `[card number removed]` **before** the message is stored, broadcast, emailed or notified; Espresso then posts a warning. The lookup fails closed (redacts). Card photos in reply to a purchase question get a "delete that image" warning; nothing reads them.
-- `GET/POST /matcha-work/payment-cards`, `DELETE /matcha-work/payment-cards/{id}`: per user, max 5, admin-only to add (`403 purchases_unavailable`), anyone can list/delete their own. `GET …/agent-runs` also returns `purchases` (the caller's own only).
+- **Encryption.** Only the card number is encrypted: AES-256-GCM with keys from `PAYMENT_CARD_KEYS`, never the JWT-derived `secret_crypto` key. Saving fails closed (503) when no key is configured. Each ciphertext is bound (associated data) to its row id and owner.
+- **No CVV** column, field or prompt. Brand, last 4, expiry and a label are the only readable fields, and no endpoint returns the number. A **label with more than 4 digits is refused**, because it is plain text shown in chat. `DELETE` removes the row, ciphertext included; past purchases keep a `card_last4` snapshot.
+- **Card numbers never go through chat or the model.** Chat only ever shows brand plus last 4. `redact_card_numbers` replaces a card number with `[card number removed]` **before** it is stored, broadcast, emailed or notified. It runs on both the chat socket's send path and `werk/routes/channels.py`'s message edit. It covers:
+  - a reply to one of Espresso's questions;
+  - any message from someone who owns an open `purchase`/`pick_card` question in that channel.
+
+  Espresso then posts a warning. Ordinary chat is never rewritten, and the lookup fails closed.
+- **What counts as a card number (`contains_pan`).** A window of whole digit groups that meets all of these:
+  - it is card-shaped: one 13-19 digit group, or groups of at least 4 digits such as 4-4-4-4, 4-6-5 or 8-8, with a short trailing group allowed only after 4-digit groups;
+  - it has 13-19 digits;
+  - it starts with 2-6;
+  - it passes Luhn.
+
+  Separators are up to three whitespace characters (newlines and non-breaking spaces included), `.`, `-` or `/`. Every matching window is found and overlaps merged, so no digits of a card survive. Dates and phone numbers are not card-shaped (0% measured). A random card-shaped digit string matches about 5% of the time, which is why redaction only runs in the purchase context above.
+- **Photos.** A card photo in reply to a purchase question gets a "delete that image" warning; nothing reads it.
+- **Endpoints.** `GET/POST /matcha-work/payment-cards` and `DELETE /matcha-work/payment-cards/{id}` are per user with a maximum of 5 cards. Adding is admin-only (`403 purchases_unavailable`); anyone can list or delete their own. `GET …/agent-runs` also returns `purchases`, the caller's own only.

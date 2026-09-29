@@ -1,8 +1,10 @@
 import base64
+import json
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -95,6 +97,9 @@ def test_cvv_is_never_accepted_into_the_model():
     ({"number": "4242 4242 4242 4241"}, 400),
     ({"exp_year": 2020}, 400),
     ({"exp_month": 13}, 400),
+    # The label is plain text shown in chat: no card number, or piece of one.
+    ({"label": "Visa 4242 4242 4242 4242"}, 400),
+    ({"label": "card 42424"}, 400),
 ])
 async def test_add_card_rejects_bad_input(conn, over, code):
     with pytest.raises(HTTPException) as exc:
@@ -143,25 +148,36 @@ async def test_delete_card_is_scoped_to_its_owner(conn):
     assert exc.value.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_label_with_up_to_four_digits_is_saved(conn):
+    out = await payment_cards.add_payment_card(_body(label="Mercury 2026"), _user())
+    assert out["label"] == "Mercury 2026"
+
+
 # ── chat socket helpers ───────────────────────────────────────────────────────
 
 def test_ws_helpers_wrap_the_chat_flow():
     pid = uuid4()
     assert channels_ws._agent_card_prompt_reference({"kind": "agent_card_prompt", "prompt_id": str(pid)}) == pid
     assert channels_ws._agent_card_prompt_reference({}) is None
-    assert channels_ws._agent_card_might_answer("yes please")
-    assert not channels_ws._agent_card_might_answer("see you at 5")
-    assert channels_ws._contains_card_number(f"here {VISA}")
-    assert channels_ws._redact_card_numbers(f"here {VISA}") == f"here {card_vault.REDACTED}"
+    assert channels_ws._agent_card_plain_yes("yes please")
+    assert not channels_ws._agent_card_plain_yes("ok")
 
 
 @pytest.mark.asyncio
-async def test_prompt_lookup_failure_fails_closed():
-    class Broken:
-        async def fetchval(self, *_a):
-            raise RuntimeError("relation does not exist")
+async def test_ws_redaction_delegates_to_the_chat_flow(monkeypatch):
+    from app.matcha.services.matcha_work.agent_card import chat_flow
 
-    assert await channels_ws._channel_has_agent_prompt(Broken(), uuid4()) is True
+    seen = {}
+
+    async def redact(conn, **kwargs):
+        seen.update(kwargs)
+        return "x", True
+
+    monkeypatch.setattr(chat_flow, "redact_card_numbers", redact)
+    uid, cid, pid = uuid4(), uuid4(), uuid4()
+    assert await channels_ws._agent_card_redaction(object(), cid, uid, "text", pid) == ("x", True)
+    assert seen == {"channel_id": cid, "user_id": uid, "replied_prompt_id": pid, "content": "text"}
 
 
 @pytest.mark.asyncio
@@ -179,39 +195,89 @@ async def test_bg_reply_never_raises(monkeypatch):
     assert seen["card_number_removed"] is True and seen["content"] == "yes"
 
 
-@pytest.mark.asyncio
-async def test_redaction_only_happens_at_agent_card_questions(monkeypatch):
-    class C:
-        def __init__(self, open_):
-            self.open_, self.calls = open_, 0
-
-        async def fetchval(self, *_a):
-            self.calls += 1
-            return self.open_
-
-    text = f"pay with {VISA}"
-    quiet = C(False)
-    assert await channels_ws._agent_card_redaction(quiet, uuid4(), "hello", None) == ("hello", False)
-    assert quiet.calls == 0  # ordinary chat never queries
-    assert await channels_ws._agent_card_redaction(quiet, uuid4(), text, None) == (text, False)
-    assert quiet.calls == 1
-    removed = (f"pay with {card_vault.REDACTED}", True)
-    assert await channels_ws._agent_card_redaction(C(True), uuid4(), text, None) == removed
-    threaded = C(False)
-    assert await channels_ws._agent_card_redaction(threaded, uuid4(), text, uuid4()) == removed
-    assert threaded.calls == 0
-    assert await channels_ws._agent_card_redaction(quiet, uuid4(), None, None) == (None, False)
-
-
 def test_routing_answers_to_agent_card_questions(monkeypatch):
     route = channels_ws._routes_to_agent_card
     base = dict(agent_prompt_id=None, card_number_removed=False, reply_to_id=None,
-                mention_handles=[], content="yes", room_key=str(uuid4()))
+                mention_handles=[], content="yes", room_key=str(uuid4()), is_project_chat=True)
     assert route(**base)
-    assert route(**{**base, "agent_prompt_id": uuid4(), "content": "anything"})
+    assert route(**{**base, "agent_prompt_id": uuid4(), "content": "anything", "is_project_chat": False})
     assert route(**{**base, "card_number_removed": True, "content": "x"})
-    assert not route(**{**base, "content": "see you at 5"})
+    # Everyday acknowledgements never spawn a task, and nothing outside a
+    # project discussion chat does either.
+    for text in ("ok", "k", "sure", "no", "4242", "see you at 5"):
+        assert not route(**{**base, "content": text})
+    assert not route(**{**base, "is_project_chat": False})
     assert not route(**{**base, "reply_to_id": uuid4()})  # a reply to someone else
     assert not route(**{**base, "mention_handles": ["espresso"]})
     monkeypatch.setattr(channels_ws, "_channel_recently_ems_drafted", lambda _k: True)
     assert not route(**base)  # a live Huume event-draft pill keeps its "yes"
+
+
+# ── message edits ─────────────────────────────────────────────────────────────
+
+class _EditConn:
+    def __init__(self, reply_metadata=None, owns_purchase=False):
+        self.reply_metadata = reply_metadata
+        self.owns_purchase = owns_purchase
+        self.stored = None
+
+    async def fetchrow(self, query, *args):
+        assert "LEFT JOIN channel_messages r ON r.id = m.reply_to_id" in query
+        return {"id": args[0], "sender_id": self.user_id, "deleted_at": None,
+                "created_at": datetime.now(timezone.utc), "message_type": "user",
+                "reply_metadata": self.reply_metadata}
+
+    async def fetchval(self, query, *args):
+        if "mw_agent_card_prompts" in query:
+            return self.owns_purchase
+        assert "UPDATE channel_messages SET content" in query
+        self.stored = args[1]
+        return datetime.now(timezone.utc)
+
+
+@pytest.fixture
+def edit_env(monkeypatch):
+    from app.matcha.services.matcha_work.agent_card import chat_flow
+    from app.werk.routes import channels
+
+    holder = {"broadcast": AsyncMock(), "warn": AsyncMock(return_value=True)}
+
+    @asynccontextmanager
+    async def gc():
+        yield holder["conn"]
+
+    monkeypatch.setattr(channels, "get_connection", gc)
+    monkeypatch.setattr(channels, "_require_channel_capability", AsyncMock())
+    monkeypatch.setattr(channels_ws, "broadcast_message_edited", holder["broadcast"])
+    monkeypatch.setattr(chat_flow, "handle_chat_answer", holder["warn"])
+    holder["channels"] = channels
+    return holder
+
+
+async def _edit(env, user, text, **conn_kw):
+    env["conn"] = _EditConn(**conn_kw)
+    env["conn"].user_id = user.id
+    body = env["channels"].MessageEditRequest(content=text)
+    return await env["channels"].edit_channel_message(uuid4(), uuid4(), body, user)
+
+
+@pytest.mark.asyncio
+async def test_editing_a_card_number_into_a_reply_to_a_question_is_redacted(edit_env):
+    user, pid = _user(), uuid4()
+    await _edit(edit_env, user, f"use {VISA}",
+                reply_metadata=json.dumps({"kind": "agent_card_prompt", "prompt_id": str(pid)}))
+    assert edit_env["conn"].stored == f"use {card_vault.REDACTED}"
+    assert edit_env["broadcast"].await_args.kwargs["content"] == f"use {card_vault.REDACTED}"
+    warn = edit_env["warn"].await_args.kwargs
+    assert warn["prompt_id"] == pid and warn["card_number_removed"] is True
+
+
+@pytest.mark.asyncio
+async def test_editing_by_the_purchase_owner_is_redacted_and_ordinary_edits_are_not(edit_env):
+    user = _user()
+    await _edit(edit_env, user, f"here {VISA}", owns_purchase=True)
+    assert edit_env["conn"].stored == f"here {card_vault.REDACTED}"
+    edit_env["warn"].reset_mock()
+    await _edit(edit_env, user, f"here {VISA}", owns_purchase=False)
+    assert edit_env["conn"].stored == f"here {VISA}"
+    edit_env["warn"].assert_not_awaited()

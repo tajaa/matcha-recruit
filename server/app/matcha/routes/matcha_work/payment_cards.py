@@ -20,6 +20,7 @@ from app.matcha.services.matcha_work.agent_card.chat_flow import purchases_allow
 router = APIRouter()
 
 MAX_CARDS_PER_USER = 5
+MAX_LABEL_DIGITS = 4
 
 
 class PaymentCardCreate(BaseModel):
@@ -79,6 +80,11 @@ async def add_payment_card(
     if not card_vault.expiry_ok(body.exp_month, body.exp_year):
         raise HTTPException(status_code=400, detail="That card has expired or the expiry date is invalid.")
     label = " ".join((body.label or "").split())[:40]
+    # The label is stored in plain text and shown in project chat ("Visa ending
+    # 4242 (label)"), so it must never carry a card number — or any piece of
+    # one: more than 4 digits is refused outright.
+    if sum(ch.isdigit() for ch in label) > MAX_LABEL_DIGITS:
+        raise HTTPException(status_code=400, detail="Card labels can't contain card numbers.")
     card_id = uuid4()
     ciphertext, key_id = card_vault.encrypt_pan(pan, card_id=card_id, user_id=current_user.id)
     async with get_connection() as conn:

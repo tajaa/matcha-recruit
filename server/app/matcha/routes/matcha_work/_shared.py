@@ -125,31 +125,21 @@ def _guard_sensitive_project_type(project: dict, current_user: CurrentUser) -> N
     mw_projects under the same company and must stay hidden — even by direct id,
     not just absent from the board list. 404 (not 403) so existence isn't leaked.
     Admins/clients are unaffected."""
-    if current_user.role == "employee" and project.get("project_type") in ("discipline", "recruiting"):
+    from app.matcha.services.matcha_work.project_service import hidden_from_user
+    if hidden_from_user(project, current_user):
         raise HTTPException(status_code=404, detail="Project not found")
 
 async def _verify_project_access(project_id: UUID, current_user: CurrentUser) -> tuple[dict, str]:
-    """Check project access. For admins, uses collaborator table. Returns (project, role)."""
+    """Check project access. For admins, uses collaborator table. Returns (project, role).
+
+    The rule itself is `project_service.resolve_project_access`, shared with
+    the agent-card chat answers."""
     from app.matcha.services.matcha_work import project_service as proj_svc
-    if current_user.role == "admin":
-        result = await proj_svc.get_project_as_collaborator(project_id, current_user.id)
-        if result:
-            return result
+    company_id = None if current_user.role == "admin" else await get_client_company_id(current_user)
+    result = await proj_svc.resolve_project_access(project_id, current_user, company_id=company_id)
+    if result is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    company_id = await get_client_company_id(current_user)
-    project = None
-    if company_id:
-        project = await proj_svc.get_project(project_id, company_id, user_id=current_user.id)
-    if not project:
-        result = await proj_svc.get_project_as_collaborator(project_id, current_user.id)
-        if result:
-            _guard_sensitive_project_type(result[0], current_user)
-            return result
-        raise HTTPException(status_code=404, detail="Project not found")
-    _guard_sensitive_project_type(project, current_user)
-    if not project.get("collaborator_role"):
-        project["collaborator_role"] = "owner"
-    return project, project["collaborator_role"]
+    return result
 
 def _can_edit_project(role: Optional[str]) -> bool:
     """Write gate for collab project content (elements, element files/folders,
