@@ -1,6 +1,6 @@
 import json
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -57,9 +57,13 @@ def test_plain_messages_only_count_as_an_explicit_yes(text, expected):
 
 @pytest.mark.parametrize("text, expected", [
     ("Buy the best one", True), ("buy it", True), ("please purchase it", True), ("place the order", True),
-    ("buy", True), ("go ahead and buy the top pick", True),
+    ("buy", True), ("go ahead and buy the top pick", True), ("Yes, buy it!", True), ("let's buy it", True),
+    ("I want to buy it", True), ("can you order it for me please", True), ("@espresso buy that one", True),
     # New business, not a yes to the open question:
     ("I want to buy new shoes tomorrow", False), ("find me wool socks to buy", False), ("buy new shoes", False),
+    # A buy word plus a stray it/this/that inside an ordinary sentence:
+    ("find me a rain jacket to buy that is waterproof", False), ("I want to buy a desk, is it worth it", False),
+    ("should we buy this for the office or wait", False), ("buy it from a local store instead?", False),
     ("ok", False), ("sure", False), ("don't buy it", False), ("do not purchase", False),
     ("not yet, don't order", False), ("cancel the order", False), ("wait before you buy", False),
     ("buy " * 30, False),
@@ -218,6 +222,15 @@ class _DB:
         yield
 
     async def fetchrow(self, query, *args):
+        if "INSERT INTO mw_agent_card_prompts" in query:
+            pid = uuid4()
+            self.prompts[pid] = {
+                "id": pid, "company_id": args[0], "project_id": args[1], "task_id": args[2],
+                "run_id": args[3], "channel_id": args[4], "kind": args[5], "owner_user_id": args[6],
+                "payload": args[7], "status": "open", "live": True, "seq": len(self.prompts),
+                "ttl": args[8],
+            }
+            return {"id": pid, "expires_at": datetime(2031, 1, 1, tzinfo=timezone.utc)}
         if "FROM mw_agent_card_prompts WHERE id = $1" in query:
             p = self.prompts.get(args[0])
             return dict(p) if p and p["channel_id"] == args[1] else None
@@ -235,6 +248,11 @@ class _DB:
         raise AssertionError(query)
 
     async def fetch(self, query, *args):
+        if "SET status = 'superseded'" in query:
+            closed = [p for p in self.prompts.values() if p["task_id"] == args[0] and p["live"]]
+            for p in closed:
+                p.update(status="superseded", live=False)
+            return [{"id": p["id"], "channel_id": p["channel_id"], "kind": p["kind"]} for p in closed]
         assert "FROM mw_payment_cards" in query
         return [c for c in self.cards if c["user_id"] == args[0]]
 
@@ -250,31 +268,18 @@ class _DB:
         if "INSERT INTO mw_agent_purchase_requests" in query:
             self.purchases.append(args)
             return uuid4()
-        if "INSERT INTO mw_agent_card_prompts" in query:
-            pid = uuid4()
-            self.prompts[pid] = {
-                "id": pid, "company_id": args[0], "project_id": args[1], "task_id": args[2],
-                "run_id": args[3], "channel_id": args[4], "kind": args[5], "owner_user_id": args[6],
-                "payload": args[7], "status": "open", "live": True, "seq": len(self.prompts),
-                "ttl": args[8],
-            }
-            return pid
         raise AssertionError(query)
 
     async def execute(self, query, *args):
         if "pg_advisory_xact_lock" in query:
             self.locks.append(args[0])
-        elif "SET status = 'superseded'" in query:
-            for p in self.prompts.values():
-                if p["task_id"] == args[0] and p["live"]:
-                    p.update(status="superseded", live=False)
         elif "UPDATE mw_agent_purchase_requests" in query:
             self.charge_updates.append(args)
 
 
 @pytest.fixture
 def env(monkeypatch):
-    holder = {"db": _DB(), "said": [], "broadcast": [], "access": True}
+    holder = {"db": _DB(), "said": [], "broadcast": [], "access": True, "updates": []}
 
     @asynccontextmanager
     async def cod():
@@ -288,12 +293,16 @@ def env(monkeypatch):
     async def broadcast(payload):
         holder["broadcast"].append(payload)
 
+    async def publish_update(update):
+        holder["updates"].append(update)
+
     async def access(prompt, user):
         return holder["access"]
 
     monkeypatch.setattr(chat_flow, "connection_or_direct", cod)
     monkeypatch.setattr(chat_flow, "persist_espresso_message", persist)
     monkeypatch.setattr(chat_flow, "broadcast_espresso_message", broadcast)
+    monkeypatch.setattr(chat_flow, "_publish_prompt_update", publish_update)
     monkeypatch.setattr(chat_flow, "_can_access_project", access)
     # Handoff-only unless a test opts into the Stripe test charge.
     monkeypatch.setattr(chat_flow.test_charge, "test_key", lambda: None)
@@ -340,6 +349,14 @@ async def test_yes_shows_the_result_then_threaded_replies_buy_it(env):
     assert buy_q["owner_user_id"] == user.id and buy_q["ttl"] == chat_flow.PURCHASE_TTL
     assert "Want me to buy it? Organic Lip Balm at Shop for $4.49. Reply yes (or \"buy it\")" in _said(env)[1]
     assert env["said"][1]["metadata"]["prompt_kind"] == "purchase"
+    # Only the buyer gets live buttons, and they retire on time.
+    assert env["said"][1]["metadata"]["owner_user_id"] == str(user.id)
+    assert env["said"][1]["metadata"]["expires_at"] == "2031-01-01T00:00:00+00:00"
+    # Every open chat hears the "see it?" question closed.
+    assert env["updates"] == [{
+        "type": "agent_card_prompt_updated", "channel_id": str(db.channel_id), "prompt_id": str(offer_id),
+        "status": "answered", "answer": "yes", "answer_text": "Showed the result",
+    }]
     view = env["said"][1]["metadata"]["view"]
     assert view["offer"]["price_text"] == "$4.49" and view["offer"]["item_name"] == "Organic Lip Balm"
     assert [b["reply"] for b in view["buttons"]] == ["Buy it", "No thanks"]
@@ -363,6 +380,9 @@ async def test_yes_shows_the_result_then_threaded_replies_buy_it(env):
     assert args[5] == user.id and args[7] == "4242" and args[8] == "Organic Lip Balm"
     assert args[10] == "https://shop.example.com/p" and args[11] == 4.49 and args[12] == "USD"
     assert "I haven't charged anything" in _said(env)[3]
+    assert [(u["prompt_id"], u["answer"]) for u in env["updates"]] == [
+        (str(offer_id), "yes"), (str(buy_q["id"]), "yes"), (str(pick_q["id"]), "card:4242"),
+    ]
     assert len(env["broadcast"]) == len(env["said"])  # every message fanned out after commit
 
 
@@ -600,6 +620,7 @@ async def test_a_newer_run_on_the_card_closes_the_question_instead_of_answering_
     assert _said(env) == [chat_flow.STALE_REPLY]
     assert db.prompts[pid]["status"] == "superseded"
     assert db.purchases == []
+    assert [(u["prompt_id"], u["status"]) for u in env["updates"]] == [(str(pid), "superseded")]
 
 
 # ── card numbers and photos ───────────────────────────────────────────────────
@@ -696,24 +717,32 @@ async def test_chat_answers_use_the_rest_apis_project_access_rule(monkeypatch):
 # ── the worker's offer ────────────────────────────────────────────────────────
 
 class _OfferConn:
-    def __init__(self, row, inserted=True, newer_run=False):
+    def __init__(self, row, inserted=True, newer_run=False, older_open=()):
         self.row, self.inserted, self.newer_run = row, inserted, newer_run
+        self.older_open = list(older_open)
         self.executed = []
+        self.fetched = []
 
     @asynccontextmanager
     async def transaction(self):
         yield
 
     async def fetchrow(self, query, *args):
+        if "INSERT INTO mw_agent_card_prompts" in query:
+            assert "ON CONFLICT (run_id) WHERE kind = 'show_result' DO NOTHING" in query
+            assert args[5] == chat_flow.OFFER_TTL
+            return {"id": uuid4(), "expires_at": datetime(2031, 1, 1, tzinfo=timezone.utc)} if self.inserted else None
         assert "FROM mw_project_agent_runs r" in query
         return self.row
 
     async def fetchval(self, query, *args):
-        if query == chat_flow._NEWER_RUN_SQL:
-            return self.newer_run
-        assert "ON CONFLICT (run_id) WHERE kind = 'show_result' DO NOTHING" in query
-        assert args[5] == chat_flow.OFFER_TTL
-        return uuid4() if self.inserted else None
+        assert query == chat_flow._NEWER_RUN_SQL
+        return self.newer_run
+
+    async def fetch(self, query, *args):
+        self.fetched.append((query, args))
+        assert "SET status = 'superseded'" in query and "RETURNING id, channel_id, kind" in query
+        return self.older_open
 
     async def execute(self, query, *args):
         self.executed.append((query, args))
@@ -741,25 +770,36 @@ def offer_env(monkeypatch):
     monkeypatch.setattr(chat_flow, "connection_or_direct", cod)
     monkeypatch.setattr(chat_flow, "persist_espresso_message", persist)
     holder["broadcast"] = AsyncMock()
+    holder["updates"] = AsyncMock()
     monkeypatch.setattr(chat_flow, "broadcast_espresso_message", holder["broadcast"])
+    monkeypatch.setattr(chat_flow, "_publish_prompt_update", holder["updates"])
     return holder
 
 
 @pytest.mark.asyncio
 async def test_offer_asks_once_under_the_card_lock_and_supersedes_older_questions(offer_env):
     row = _offer_row()
-    offer_env["conn"] = conn = _OfferConn(row)
+    older = {"id": uuid4(), "channel_id": row["channel_id"], "kind": "purchase"}
+    offer_env["conn"] = conn = _OfferConn(row, older_open=[older])
     assert await chat_flow.offer_result(uuid4())
     content, metadata = offer_env["said"][0]
     assert "I finished \"Find a balm\". Want to see what I found? Reply yes or no." in content
     assert metadata["kind"] == "agent_card_prompt" and metadata["prompt_kind"] == "show_result"
+    # The heading is fixed server text, never cut out of the (user-titled) content.
+    assert metadata["view"]["question"] == "I finished it. Want to see what I found?"
+    assert metadata["expires_at"] == "2031-01-01T00:00:00+00:00" and "owner_user_id" not in metadata
     assert [b["reply"] for b in metadata["view"]["buttons"]] == ["Show me", "Not now"]
     assert [parse_answer(b["reply"]).kind for b in metadata["view"]["buttons"]] == ["yes", "no"]
     queries = [q for q, _ in conn.executed]
     assert conn.executed[0][1] == (f"{row['task_id']}:card_agent",)  # same lock as enqueue
-    assert any("SET status = 'superseded'" in q for q in queries)
+    assert len(conn.fetched) == 1 and conn.fetched[0][1][0] == row["task_id"]
     assert any("SET message_id" in q for q in queries)
     offer_env["broadcast"].assert_awaited_once()
+    # Open chats hear that the older question closed.
+    offer_env["updates"].assert_awaited_once_with({
+        "type": "agent_card_prompt_updated", "channel_id": row["channel_id"], "prompt_id": str(older["id"]),
+        "status": "superseded", "answer": None, "answer_text": None,
+    })
 
 
 @pytest.mark.asyncio
@@ -774,6 +814,7 @@ async def test_offer_for_a_revision_says_reworked(offer_env):
     offer_env["conn"] = _OfferConn(_offer_row(round=2))
     await chat_flow.offer_result(uuid4())
     assert "I reworked" in offer_env["said"][0][0]
+    assert offer_env["said"][0][1]["view"]["question"] == "I reworked it. Want to see the new result?"
 
 
 @pytest.mark.asyncio
@@ -781,7 +822,7 @@ async def test_offer_is_idempotent_per_run(offer_env):
     offer_env["conn"] = conn = _OfferConn(_offer_row(), inserted=False)
     assert await chat_flow.offer_result(uuid4())
     assert offer_env["said"] == []
-    assert not any("superseded" in q for q, _ in conn.executed)
+    assert conn.fetched == []
 
 
 @pytest.mark.asyncio
@@ -799,16 +840,60 @@ def test_newer_run_rule_ignores_failed_runs():
 
 
 @pytest.mark.asyncio
-async def test_close_open_prompts():
+async def test_close_open_prompts_returns_the_events_to_broadcast():
+    channel, pid = uuid4(), uuid4()
+
     class C:
         q = []
 
-        async def execute(self, query, *args):
+        async def fetch(self, query, *args):
             self.q.append(query)
+            return [{"id": pid, "channel_id": channel, "kind": "show_result"}]
 
     conn = C()
-    await chat_flow.close_open_prompts(conn, uuid4())
+    events = await chat_flow.close_open_prompts(conn, uuid4())
     assert "superseded" in conn.q[0]
+    assert events == [{"type": "agent_card_prompt_updated", "channel_id": str(channel), "prompt_id": str(pid),
+                       "status": "superseded", "answer": None, "answer_text": None}]
+
+
+@pytest.mark.asyncio
+async def test_prompt_update_broadcast_is_best_effort(monkeypatch):
+    calls = []
+
+    async def boom(update):
+        calls.append(update)
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(chat_flow, "_publish_prompt_update", boom)
+    await chat_flow.broadcast_prompt_updates([{"channel_id": str(uuid4())}, {"channel_id": str(uuid4())}])
+    assert len(calls) == 2  # one failure doesn't stop the rest
+
+
+@pytest.mark.asyncio
+async def test_prompt_updates_ride_the_channel_bridge(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_notifications
+
+    sent = []
+
+    async def bridge(channel_id, event):
+        sent.append((channel_id, event))
+
+    monkeypatch.setattr(project_task_notifications, "broadcast_channel_event", bridge)
+    channel = uuid4()
+    update = {"type": "agent_card_prompt_updated", "channel_id": str(channel), "prompt_id": "p"}
+    await chat_flow._publish_prompt_update(update)
+    assert sent == [(channel, update)]
+
+
+@pytest.mark.parametrize("kind, answer, text", [
+    ("show_result", "yes", "Showed the result"), ("show_result", "no", "Skipped for now"),
+    ("purchase", "yes", "Going ahead with the purchase"), ("purchase", "no", "Not buying it"),
+    ("pick_card", "card:4242", "Used the card ending 4242"), ("pick_card", "no", "Cancelled"),
+    ("pick_card", "odd", "Answered"), ("show_result", None, None),
+])
+def test_answer_text(kind, answer, text):
+    assert chat_flow.answer_text(kind, answer) == text
 
 
 def test_ttls_are_sane():
@@ -879,6 +964,7 @@ async def test_no_verified_price_means_no_test_charge(env, monkeypatch):
     await _approve(env, _user(), payload={**OFFER, "amount": None, "currency": None})
     charge.assert_not_awaited()
     assert "No verified price, so I didn't make a test charge." in _said(env)[-1]
+    assert "Finish checkout here: https://shop.example.com/p" in _said(env)[-1]
     assert env["said"][-1]["metadata"]["receipt"]["status"] == "no_price"
     assert len(env["db"].purchases) == 1
 
@@ -889,7 +975,8 @@ async def test_handoff_mode_charges_nothing(env, monkeypatch):
     monkeypatch.setattr(chat_flow.test_charge, "charge", charge)
     await _approve(env, _user())
     charge.assert_not_awaited()
-    assert "I haven't charged anything" in _said(env)[-1]
+    # Plain text is what notifications and older apps show: the link is in it.
+    assert "I haven't charged anything. Finish checkout here: https://shop.example.com/p" in _said(env)[-1]
     assert env["said"][-1]["metadata"]["receipt"]["status"] == "approved"
 
 
@@ -902,8 +989,8 @@ async def test_history_overlay_stamps_question_state():
     class C:
         async def fetch(self, query, *args):
             assert "mw_agent_card_prompts" in query and set(args[0]) == {answered, expired}
-            return [{"id": answered, "status": "answered", "answer": "yes", "expired": False},
-                    {"id": expired, "status": "open", "answer": None, "expired": True}]
+            return [{"id": answered, "kind": "show_result", "status": "answered", "answer": "yes", "expired": False},
+                    {"id": expired, "kind": "purchase", "status": "open", "answer": None, "expired": True}]
 
     def msg(pid):
         return {"id": uuid4(), "metadata": json.dumps({"kind": "agent_card_prompt", "prompt_id": str(pid)})}
@@ -911,6 +998,7 @@ async def test_history_overlay_stamps_question_state():
     plain = {"id": uuid4(), "metadata": "{}"}
     out = await chat_flow.overlay_prompt_statuses(C(), [msg(answered), msg(expired), plain], channel_id=uuid4())
     assert out[0]["metadata"]["prompt_status"] == "answered" and out[0]["metadata"]["answer"] == "yes"
+    assert out[0]["metadata"]["answer_text"] == "Showed the result"
     assert out[1]["metadata"]["prompt_status"] == "expired"
     assert out[2] is plain
 
@@ -920,3 +1008,21 @@ async def test_history_overlay_stamps_question_state():
 
     assert await chat_flow.overlay_prompt_statuses(Never(), [plain], channel_id=uuid4()) == [plain]
     del other
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", [
+    "find me a rain jacket to buy that is waterproof", "I want to buy a desk, is it worth it",
+])
+async def test_a_new_shopping_sentence_never_completes_an_open_card_question(env, text):
+    # One saved card + an open "use this card?" question: a plain "yes" would
+    # buy. An ordinary sentence with a buy word and a stray "that"/"it" must not.
+    db, user = env["db"], _user()
+    card = _card(user)
+    db.cards = [card]
+    pid = db.add_prompt("pick_card", owner=user.id, payload={
+        **OFFER, "options": [{"n": 1, "card_id": str(card["id"]), "last4": "4242", "brand": "visa", "label": ""}],
+    })
+    assert chat_flow.might_answer_plain(text) is False
+    assert await _answer(env, user, text) is False
+    assert db.purchases == [] and db.prompts[pid]["status"] == "open" and env["said"] == []

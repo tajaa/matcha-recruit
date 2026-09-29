@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from uuid import UUID
 
 from ..celery_app import celery_app
@@ -127,13 +128,27 @@ async def _run(run_id: UUID) -> None:
 
 async def _offer_in_chat(run_id: UUID) -> None:
     """Ask in the project chat whether to show the result. Best-effort: the
-    result is already on the card, so a chat failure never fails the run."""
+    result is already on the card, so a chat failure never fails the run.
+
+    The chat fanout publishes through the shared Redis client, which only the
+    API opens (in its lifespan). A Celery task has none, so without one the
+    question was saved but reached open chats only on their next reload. It is
+    opened here, on this task's own event loop, and closed after."""
+    from app.core.services import redis_cache
+
+    opened = False
     try:
         from app.matcha.services.matcha_work.agent_card import chat_flow
 
+        if redis_cache.get_redis_cache() is None:
+            await redis_cache.init_redis_cache(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+            opened = True
         await chat_flow.offer_result(run_id)
     except Exception:
         logger.warning("agent card chat offer failed run=%s", run_id, exc_info=True)
+    finally:
+        if opened:
+            await redis_cache.close_redis_cache()
 
 
 async def _deduct_tokens(run, stats: dict) -> None:

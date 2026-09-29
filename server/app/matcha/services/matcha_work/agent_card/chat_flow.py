@@ -48,6 +48,10 @@ logger = logging.getLogger(__name__)
 PROMPT_METADATA_KIND = "agent_card_prompt"
 RESULT_METADATA_KIND = "agent_card_result"
 RECEIPT_METADATA_KIND = "agent_card_receipt"
+# Socket event when a question closes (answered / superseded), so every open
+# chat drops its buttons without a reload. Expiry needs no event: questions
+# carry `expires_at`.
+PROMPT_UPDATED_EVENT = "agent_card_prompt_updated"
 OFFER_TTL = timedelta(days=7)
 PURCHASE_TTL = timedelta(days=2)
 PICK_CARD_TTL = timedelta(hours=2)
@@ -113,18 +117,25 @@ def is_plain_yes(text: str) -> bool:
     return isinstance(text, str) and len(text) <= 30 and _normalize(text) in _PLAIN_YES
 
 
-_BUY_INTENT = re.compile(r"\b(buy|purchase|order|checkout|check out)\b")
 _NEGATION = re.compile(r"\b(don t|dont|do not|not|no|never|cancel|stop|wait|hold|later)\b")
 
 
-# A buy phrase answers a question only when it points back at the offered
-# pick ("buy it", "buy the best one") or is a bare "buy" / "place the order".
-# "I want to buy new shoes" or "find me socks to buy" is new business, not a
-# yes to whatever buy question happens to be open.
-_REFERS_BACK = re.compile(
-    r"\b(it|this|that|this one|that one|the (?:best|top|first|recommended|cheapest) (?:one|pick|option)|"
-    r"the pick|your pick|top pick)\b"
+# A buy phrase answers a question only when the WHOLE message is a short
+# command aimed back at the offered pick ("buy it", "yes, buy the best one",
+# "go ahead and order it, please") or a bare "buy" / "place the order". A buy
+# word inside an ordinary sentence ("find me a rain jacket to buy that is
+# waterproof", "I want to buy a desk, is it worth it") is new business, never
+# a yes to whatever buy question happens to be open.
+_BUY_LEAD = (
+    r"(?:(?:yes|yeah|yep|ok|okay|sure|please|pls|go ahead and|let s|lets|then|just|"
+    r"i ll|i will|i want to|i d like to|id like to|can you|could you|you can)\s+)*"
 )
+_BUY_TARGET = (
+    r"(?:it|this|that|this one|that one|the pick|your pick|the top pick|top pick|"
+    r"the (?:best|top|first|recommended|cheapest) (?:one|pick|option))"
+)
+_BUY_TAIL = r"(?:\s+(?:please|pls|now|then|for me|thanks|thank you))*"
+_BUY_COMMAND = re.compile(rf"^{_BUY_LEAD}(?:buy|purchase|order)\s+{_BUY_TARGET}{_BUY_TAIL}$")
 _BARE_BUY = {"buy", "purchase", "order", "buy now", "purchase now", "order now", "checkout", "check out",
              "place the order", "place order", "yes buy", "yes purchase"}
 
@@ -136,9 +147,9 @@ def is_buy_intent(text: str) -> bool:
     if not isinstance(text, str) or len(text) > 80:
         return False
     normalized = _normalize(text)
-    if not _BUY_INTENT.search(normalized) or _NEGATION.search(normalized):
+    if _NEGATION.search(normalized):
         return False
-    return normalized in _BARE_BUY or bool(_REFERS_BACK.search(normalized))
+    return normalized in _BARE_BUY or bool(_BUY_COMMAND.match(normalized))
 
 
 def plain_card_choice(text: str) -> Answer | None:
@@ -311,9 +322,12 @@ def _button(label: str, reply: str | None = None, *, primary: bool = False, deta
             "detail": detail}
 
 
-def _show_view() -> dict:
-    return {"question": "Want to see what I found?",
-            "buttons": [_button("Show me", primary=True), _button("Not now")]}
+def _show_view(*, reworked: bool) -> dict:
+    # The card's heading. Fixed text: the task title (user-written) stays in the
+    # message's ticket marker and is never parsed back out.
+    question = ("I reworked it. Want to see the new result?" if reworked
+                else "I finished it. Want to see what I found?")
+    return {"question": question, "buttons": [_button("Show me", primary=True), _button("Not now")]}
 
 
 def _purchase_view(offer: dict) -> dict:
@@ -480,13 +494,59 @@ async def _superseded(conn, task_id, run_id) -> bool:
     return bool(await conn.fetchval(_NEWER_RUN_SQL, task_id, run_id))
 
 
-async def close_open_prompts(conn, task_id: UUID) -> None:
-    """Close a card's open questions (a new run started)."""
-    await conn.execute(
+async def close_open_prompts(conn, task_id: UUID) -> list[dict]:
+    """Close a card's open questions (a new run started). Returns the socket
+    events to send once the caller's transaction commits
+    (`broadcast_prompt_updates`)."""
+    rows = await conn.fetch(
         """UPDATE mw_agent_card_prompts SET status = 'superseded'
-           WHERE task_id = $1 AND status = 'open'""",
+           WHERE task_id = $1 AND status = 'open'
+           RETURNING id, channel_id, kind""",
         task_id,
     )
+    return [prompt_update(row, "superseded") for row in rows]
+
+
+def answer_text(kind: str, answer: str | None) -> str | None:
+    """How a closed question's answer reads on its card."""
+    if not answer:
+        return None
+    if answer.startswith("card:"):
+        return f"Used the card ending {answer.removeprefix('card:')}"
+    if kind == "show_result":
+        return "Showed the result" if answer == "yes" else "Skipped for now"
+    if kind == "purchase":
+        return "Going ahead with the purchase" if answer == "yes" else "Not buying it"
+    return "Cancelled" if answer == "no" else "Answered"
+
+
+def prompt_update(row, status: str, answer: str | None = None) -> dict:
+    """The `agent_card_prompt_updated` socket event for one closed question."""
+    return {
+        "type": PROMPT_UPDATED_EVENT,
+        "channel_id": str(row["channel_id"]),
+        "prompt_id": str(row["id"]),
+        "status": status,
+        "answer": answer,
+        "answer_text": answer_text(row["kind"], answer),
+    }
+
+
+async def _publish_prompt_update(update: dict) -> None:
+    from ..project_task_notifications import broadcast_channel_event
+
+    await broadcast_channel_event(UUID(update["channel_id"]), update)
+
+
+async def broadcast_prompt_updates(updates: list[dict]) -> None:
+    """Tell every open chat these questions closed. Best-effort: a reload
+    reads the same state (`overlay_prompt_statuses`), and a late button press
+    is refused by the claim anyway."""
+    for update in updates:
+        try:
+            await _publish_prompt_update(update)
+        except Exception:
+            logger.warning("agent-card question update broadcast failed", exc_info=True)
 
 
 async def user_has_open_purchase_question(conn, channel_id: UUID, user_id) -> bool:
@@ -528,18 +588,22 @@ async def _ask(conn, *, prompt: dict, kind: str, owner_user_id, payload: dict, t
                content: str, view: dict | None = None) -> dict | None:
     """Insert a follow-up question and its Espresso message on the caller's
     transaction. Returns the message payload to broadcast after commit."""
-    prompt_id = await conn.fetchval(
+    row = await conn.fetchrow(
         """INSERT INTO mw_agent_card_prompts
                (company_id, project_id, task_id, run_id, channel_id, kind,
                 owner_user_id, payload, expires_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW() + $9::interval)
-           RETURNING id""",
+           RETURNING id, expires_at""",
         prompt["company_id"], prompt["project_id"], prompt["task_id"], prompt["run_id"],
         prompt["channel_id"], kind, owner_user_id, json.dumps(payload), ttl,
     )
+    prompt_id = row["id"]
     message = await persist_espresso_message(
         conn, prompt["company_id"], prompt["channel_id"], content,
-        metadata=_prompt_metadata(prompt_id, prompt["project_id"], prompt["task_id"], kind, view=view),
+        metadata=_prompt_metadata(
+            prompt_id, prompt["project_id"], prompt["task_id"], kind, view=view,
+            owner_user_id=owner_user_id, expires_at=row["expires_at"],
+        ),
     )
     if message:
         await conn.execute(
@@ -549,7 +613,10 @@ async def _ask(conn, *, prompt: dict, kind: str, owner_user_id, payload: dict, t
     return message
 
 
-def _prompt_metadata(prompt_id, project_id, task_id, kind: str, *, view: dict | None = None) -> dict:
+def _prompt_metadata(prompt_id, project_id, task_id, kind: str, *, view: dict | None = None,
+                     owner_user_id=None, expires_at=None) -> dict:
+    """`owner_user_id` (buy / card questions) lets the apps show the buttons
+    only to the buyer; `expires_at` lets them retire the buttons on time."""
     metadata = {
         "kind": PROMPT_METADATA_KIND,
         "prompt_id": str(prompt_id),
@@ -557,6 +624,10 @@ def _prompt_metadata(prompt_id, project_id, task_id, kind: str, *, view: dict | 
         "project_id": str(project_id),
         "task_id": str(task_id),
     }
+    if owner_user_id is not None:
+        metadata["owner_user_id"] = str(owner_user_id)
+    if expires_at is not None:
+        metadata["expires_at"] = expires_at.isoformat()
     if view:
         metadata["view"] = view
     return metadata
@@ -575,23 +646,22 @@ async def overlay_prompt_statuses(conn, messages, *, channel_id: UUID) -> list:
     if not ids:
         return list(messages)
     rows = await conn.fetch(
-        """SELECT id, status, answer, (status = 'open' AND expires_at <= NOW()) AS expired
+        """SELECT id, kind, status, answer, (status = 'open' AND expires_at <= NOW()) AS expired
            FROM mw_agent_card_prompts WHERE id = ANY($1::uuid[]) AND channel_id = $2""",
         sorted(ids, key=str), channel_id,
     )
-    states = {
-        row["id"]: ("expired" if row["expired"] else row["status"], row["answer"]) for row in rows
-    }
+    states = {row["id"]: row for row in rows}
     out = []
     for message in messages:
         prompt_id = prompt_reference(message.get("metadata"))
-        if prompt_id in states:
-            status, answer = states[prompt_id]
+        row = states.get(prompt_id)
+        if row is not None:
             message = dict(message)
             message["metadata"] = {
                 **(decode_jsonb(message.get("metadata"), {}) or {}),
-                "prompt_status": status,
-                "answer": answer,
+                "prompt_status": "expired" if row["expired"] else row["status"],
+                "answer": row["answer"],
+                "answer_text": answer_text(row["kind"], row["answer"]),
             }
         out.append(message)
     return out
@@ -637,34 +707,37 @@ async def offer_result(run_id: UUID) -> bool:
         except ValueError:
             return False
         title = row["title"] or "your agent card"
-        verb = "reworked" if (row["round"] or 1) > 1 else "finished"
+        reworked = (row["round"] or 1) > 1
         content = (
             f"{_ticket_token(row['task_id'], title, row['board_column'])}\n"
-            f"I {verb} \"{title}\". Want to see what I found? Reply yes or no."
+            f"I {'reworked' if reworked else 'finished'} \"{title}\". Want to see what I found? Reply yes or no."
         )
         async with conn.transaction():
             await _lock_card(conn, row["task_id"])
             if await _superseded(conn, row["task_id"], run_id):
                 return False
-            prompt_id = await conn.fetchval(
+            inserted = await conn.fetchrow(
                 """INSERT INTO mw_agent_card_prompts
                        (company_id, project_id, task_id, run_id, channel_id, kind, expires_at)
                    VALUES ($1, $2, $3, $4, $5, 'show_result', NOW() + $6::interval)
                    ON CONFLICT (run_id) WHERE kind = 'show_result' DO NOTHING
-                   RETURNING id""",
+                   RETURNING id, expires_at""",
                 row["company_id"], row["project_id"], row["task_id"], run_id, channel_id, OFFER_TTL,
             )
-            if prompt_id is None:
+            if inserted is None:
                 return True
-            await conn.execute(
+            prompt_id = inserted["id"]
+            closed = await conn.fetch(
                 """UPDATE mw_agent_card_prompts SET status = 'superseded'
-                   WHERE task_id = $1 AND status = 'open' AND id <> $2""",
+                   WHERE task_id = $1 AND status = 'open' AND id <> $2
+                   RETURNING id, channel_id, kind""",
                 row["task_id"], prompt_id,
             )
             payload = await persist_espresso_message(
                 conn, row["company_id"], channel_id, content,
                 metadata=_prompt_metadata(
-                    prompt_id, row["project_id"], row["task_id"], "show_result", view=_show_view(),
+                    prompt_id, row["project_id"], row["task_id"], "show_result",
+                    view=_show_view(reworked=reworked), expires_at=inserted["expires_at"],
                 ),
             )
             if payload:
@@ -673,6 +746,7 @@ async def offer_result(run_id: UUID) -> bool:
                     prompt_id, UUID(payload["id"]),
                 )
     await broadcast_espresso_message(payload)
+    await broadcast_prompt_updates([prompt_update(r, "superseded") for r in closed])
     return True
 
 
@@ -730,14 +804,31 @@ async def _load_prompt(
     return prompt
 
 
-async def _claim(conn, prompt: dict, user, answer: str) -> str:
-    """"ok", "gone" (someone else answered it first) or "stale" (a newer run
-    replaced its result; the card's open questions are closed). Must run in
-    the caller's transaction."""
+class _Outbox:
+    """What to broadcast once the answer's transaction has committed:
+    Espresso's new messages, and the questions that closed (so every open
+    chat drops their buttons)."""
+
+    def __init__(self) -> None:
+        self.messages: list[dict | None] = []
+        self.prompt_updates: list[dict] = []
+
+    async def flush(self) -> None:
+        for message in self.messages:
+            await broadcast_espresso_message(message)
+        await broadcast_prompt_updates(self.prompt_updates)
+
+
+async def _claimed(conn, prompt, user, answer: str, *, say, outbox: _Outbox) -> bool:
+    """Claim the question for this answer. False when someone else answered
+    it first, or when a newer run replaced its result (the card's open
+    questions are then closed and the user is told). Must run in the
+    caller's transaction."""
     await _lock_card(conn, prompt["task_id"])
     if await _superseded(conn, prompt["task_id"], prompt["run_id"]):
-        await close_open_prompts(conn, prompt["task_id"])
-        return "stale"
+        outbox.prompt_updates += await close_open_prompts(conn, prompt["task_id"])
+        await say(STALE_REPLY)
+        return False
     claimed = await conn.fetchval(
         """UPDATE mw_agent_card_prompts
            SET status = 'answered', answer = $2, answered_by = $3, answered_at = NOW()
@@ -745,14 +836,9 @@ async def _claim(conn, prompt: dict, user, answer: str) -> str:
            RETURNING TRUE""",
         prompt["id"], answer, user.id,
     )
-    return "ok" if claimed else "gone"
-
-
-async def _claimed(conn, prompt, user, answer: str, say) -> bool:
-    outcome = await _claim(conn, prompt, user, answer)
-    if outcome == "stale":
-        await say(STALE_REPLY)
-    return outcome == "ok"
+    if claimed:
+        outbox.prompt_updates.append(prompt_update(prompt, "answered", answer))
+    return bool(claimed)
 
 
 async def _saved_cards(conn, user_id) -> list[dict]:
@@ -810,11 +896,11 @@ async def handle_chat_answer(
     if not allowed and not targeted:
         return False
 
-    outbox: list[dict | None] = []
+    outbox = _Outbox()
     async with connection_or_direct() as conn:
 
         async def say(text: str, metadata: dict | None = None) -> None:
-            outbox.append(await persist_espresso_message(
+            outbox.messages.append(await persist_espresso_message(
                 conn, prompt["company_id"], channel_id, text, metadata=metadata,
             ))
 
@@ -830,8 +916,7 @@ async def handle_chat_answer(
         else:
             await _answer(conn, prompt, user, content, targeted=targeted, plain_answer=plain_answer,
                           say=say, outbox=outbox)
-    for message in outbox:
-        await broadcast_espresso_message(message)
+    await outbox.flush()
     return True
 
 
@@ -881,13 +966,13 @@ async def _answer(conn, prompt: dict, user, content: str, *, targeted: bool, say
     elif kind == "purchase":
         await _answer_purchase(conn, prompt, user, answer, say=say, outbox=outbox)
     else:
-        await _answer_pick_card(conn, prompt, user, answer, say=say)
+        await _answer_pick_card(conn, prompt, user, answer, say=say, outbox=outbox)
 
 
 async def _answer_show_result(conn, prompt, user, answer: Answer, *, say, outbox) -> None:
     if answer.kind == "no":
         async with conn.transaction():
-            if await _claimed(conn, prompt, user, "no", say):
+            if await _claimed(conn, prompt, user, "no", say=say, outbox=outbox):
                 await say("No problem. It's on the card whenever you want it.")
         return
     row = await conn.fetchrow(
@@ -898,7 +983,7 @@ async def _answer_show_result(conn, prompt, user, answer: Answer, *, say, outbox
     )
     result = decode_jsonb(row["result"]) if row else None
     async with conn.transaction():
-        if not await _claimed(conn, prompt, user, "yes", say):
+        if not await _claimed(conn, prompt, user, "yes", say=say, outbox=outbox):
             return
         if not isinstance(result, dict):
             await say("I couldn't load that result any more. Open the card to see its latest run.")
@@ -915,7 +1000,7 @@ async def _answer_show_result(conn, prompt, user, answer: Answer, *, say, outbox
         )
         offer = purchase_offer(result)
         if offer and purchases_allowed(user):
-            outbox.append(await _ask(
+            outbox.messages.append(await _ask(
                 conn, prompt=prompt, kind="purchase", owner_user_id=user.id, payload=offer,
                 ttl=PURCHASE_TTL,
                 content=(
@@ -929,7 +1014,7 @@ async def _answer_show_result(conn, prompt, user, answer: Answer, *, say, outbox
 async def _answer_purchase(conn, prompt, user, answer: Answer, *, say, outbox) -> None:
     if answer.kind == "no":
         async with conn.transaction():
-            if await _claimed(conn, prompt, user, "no", say):
+            if await _claimed(conn, prompt, user, "no", say=say, outbox=outbox):
                 await say("Okay, I won't buy it.")
         return
     cards = await _saved_cards(conn, user.id)
@@ -959,9 +1044,9 @@ async def _answer_purchase(conn, prompt, user, answer: Answer, *, say, outbox) -
             + ". Or reply no to cancel."
         )
     async with conn.transaction():
-        if not await _claimed(conn, prompt, user, "yes", say):
+        if not await _claimed(conn, prompt, user, "yes", say=say, outbox=outbox):
             return
-        outbox.append(await _ask(
+        outbox.messages.append(await _ask(
             conn, prompt=prompt, kind="pick_card", owner_user_id=user.id,
             payload={**prompt["payload"], "options": options}, ttl=PICK_CARD_TTL, content=question,
             view=_pick_card_view(options),
@@ -991,11 +1076,11 @@ def _choose(options: list[dict], answer: Answer) -> tuple[dict | None, str | Non
     return None, f"I don't see a saved card ending {answer.value}. Reply with the card's number."
 
 
-async def _answer_pick_card(conn, prompt, user, answer: Answer, *, say) -> None:
+async def _answer_pick_card(conn, prompt, user, answer: Answer, *, say, outbox) -> None:
     payload = prompt["payload"]
     if answer.kind == "no":
         async with conn.transaction():
-            if await _claimed(conn, prompt, user, "no", say):
+            if await _claimed(conn, prompt, user, "no", say=say, outbox=outbox):
                 await say("Okay, cancelled. Nothing was bought.")
         return
     chosen, problem = _choose(payload.get("options") or [], answer)
@@ -1011,7 +1096,7 @@ async def _answer_pick_card(conn, prompt, user, answer: Answer, *, say) -> None:
         await say(f"The card ending {chosen['last4']} was removed or has expired. Pick another, or reply no.")
         return
     async with conn.transaction():
-        if not await _claimed(conn, prompt, user, f"card:{card['last4']}", say):
+        if not await _claimed(conn, prompt, user, f"card:{card['last4']}", say=say, outbox=outbox):
             return
         purchase_id = await conn.fetchval(
             """INSERT INTO mw_agent_purchase_requests
@@ -1028,6 +1113,9 @@ async def _answer_pick_card(conn, prompt, user, answer: Answer, *, say) -> None:
     # approval is recorded either way.
     approved = f"Approved: {_offer_line(payload)}, on your {_card_label(dict(card))}."
     link = "The product link is on the card under Purchases."
+    # The receipt card renders the link as a button; this plain text is what
+    # notifications and older apps show, so a handoff carries the URL itself.
+    checkout = f"Finish checkout here: {payload['checkout_url']}"
 
     def receipt(status: str, **extra) -> dict:
         return {
@@ -1039,11 +1127,11 @@ async def _answer_pick_card(conn, prompt, user, answer: Answer, *, say) -> None:
 
     key = test_charge.test_key()
     if key is None:
-        await say(f"{approved} I haven't charged anything; finish checkout at the product link. {link}",
-                  receipt("approved"))
+        await say(f"{approved} I haven't charged anything. {checkout}", receipt("approved"))
         return
     if payload.get("amount") is None or not payload.get("currency"):
-        await say(f"{approved} No verified price, so I didn't make a test charge. {link}", receipt("no_price"))
+        await say(f"{approved} No verified price, so I didn't make a test charge. {checkout}",
+                  receipt("no_price"))
         return
     outcome = await test_charge.charge(
         key, purchase_id=purchase_id, amount=payload["amount"], currency=payload["currency"],

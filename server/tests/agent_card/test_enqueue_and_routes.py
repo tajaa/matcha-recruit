@@ -106,10 +106,13 @@ class _Conn:
         elif "SET status = 'failed'" in query:
             self.executed.append(("sweep" if "INTERVAL" in query else "fail", args))
             self.updates.append((query, args))
-        elif "UPDATE mw_agent_card_prompts SET status = 'superseded'" in query:
-            self.executed.append(("close_prompts", args))
         else:
             raise AssertionError(query)
+
+    async def fetch(self, query, *args):
+        assert "UPDATE mw_agent_card_prompts SET status = 'superseded'" in query
+        self.executed.append(("close_prompts", args))
+        return []
 
     async def fetchval(self, query, *args):
         if "COUNT(*)" in query:
@@ -244,16 +247,30 @@ async def test_broker_down_fails_the_row_so_it_cannot_hold_the_live_run_slot(wir
 async def test_open_questions_close_only_after_the_new_run_is_dispatched(wired):
     order = []
     wired["dispatch"].side_effect = lambda *a, **k: order.append("dispatch")
-    original = wired["conn"].execute
+    original = wired["conn"].fetch
 
-    async def execute(query, *args):
+    async def fetch(query, *args):
         if "mw_agent_card_prompts" in query:
             order.append("close_prompts")
         return await original(query, *args)
 
-    wired["conn"].execute = execute
+    wired["conn"].fetch = fetch
     await enqueue.enqueue_card_agent(task=_task(), user=_user(), reason="redirect", skip_preflight=True)
     assert order == ["dispatch", "close_prompts"]
+
+
+@pytest.mark.asyncio
+async def test_closed_questions_are_broadcast_after_dispatch(wired, monkeypatch):
+    event = {"type": "agent_card_prompt_updated", "channel_id": "c", "prompt_id": "p", "status": "superseded"}
+
+    async def closed(conn, task_id):
+        return [event]
+
+    sent = AsyncMock()
+    monkeypatch.setattr(enqueue, "close_open_prompts", closed)
+    monkeypatch.setattr(enqueue, "broadcast_prompt_updates", sent)
+    await enqueue.enqueue_card_agent(task=_task(), user=_user(), reason="redirect", skip_preflight=True)
+    sent.assert_awaited_once_with([event])
 
 
 @pytest.mark.asyncio

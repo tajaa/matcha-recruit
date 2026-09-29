@@ -6,8 +6,8 @@ with it), then queued exactly like a card made on the board. It moves To do →
 In progress → Review on its own, and Espresso asks back in this chat when the
 result is ready (`chat_flow.offer_result`).
 
-Same gates as `POST …/tasks` with category `agent`: the REST project-access
-rule, editor role, and `enqueue.preflight` (plan, monthly cap, token budget,
+Same gates as `POST …/tasks` with category `agent`: the company-member role
+gate, the REST project-access rule, editor role, and `enqueue.preflight` (plan, monthly cap, token budget,
 rate limit) BEFORE the card exists, so a refusal never leaves a dead card.
 
 Which mentions count as errands is deterministic (`errand_request`), so a
@@ -33,11 +33,24 @@ _ERRAND_START = re.compile(
     r"compare|research|recommend|source|pick out|what(?:'s| is) the best|which is the best)\b",
     re.I,
 )
-# In a repo-connected project "find …" can be a code question, so it also
-# needs a shopping/research signal.
+# In a repo-connected project "find …", "compare …" or "what's the best …"
+# can be a code question, so an errand there also needs a word that means
+# spending money. Deliberately narrow: "order", "review", "best" and "deal"
+# are everyday code words ("find where the order total is computed").
 _SHOPPING = re.compile(
-    r"\b(buy|purchase|order|shop|shopping|price|prices|cheap|cheapest|under \$\d|\$\d|best|compare|"
-    r"recommend|review|reviews|deal|deals|online|ship|shipping|deliver|delivery)\b",
+    r"\b(?:buy|buying|purchase|shop|shopping|for sale|price|prices|priced|cheap|cheaper|cheapest|"
+    r"affordable|online|in stock|amazon|order me|ship(?:ped|ping)? (?:to|home)|deliver(?:ed|y)? to)\b"
+    r"|\$\s?\d",
+    re.I,
+)
+# A question about the app itself is never an errand, repo-connected or not:
+# it would spend one of the user's monthly agent runs on a web search.
+_CODE_TALK = re.compile(
+    r"\b(?:code|codebase|repo|repository|function|method|endpoint|module|migration|schema|"
+    r"component|stack trace|pull request|commit)s?\b"
+    r"|\bwhere (?:is|are|do|does|we|in)\b|\bhow (?:does|do|is|are)\b"
+    r"|\b(?:is|are) (?:computed|calculated|implemented|defined|handled|stored|validated|rendered|parsed)\b"
+    r"|\bour (?:\w+ ){0,2}(?:app|api|auth|backend|frontend|flows?|logic|services?|system)\b",
     re.I,
 )
 _MIN_WORDS = 3
@@ -54,7 +67,7 @@ def errand_request(text: str, *, repo_connected: bool) -> str | None:
     request = " ".join(strip_mention(text).split())
     if len(request.split()) < _MIN_WORDS or not _ERRAND_START.search(request):
         return None
-    if repo_connected and not _SHOPPING.search(request):
+    if _CODE_TALK.search(request) or (repo_connected and not _SHOPPING.search(request)):
         return None
     return request
 
@@ -94,13 +107,18 @@ async def create_card_from_chat(
 ) -> dict | None:
     """Create and queue the agent card, and say so in the chat. Returns the
     task, or None when it was refused (the reason is posted)."""
-    from app.matcha.dependencies import get_client_company_id
+    from app.matcha.dependencies import COMPANY_MEMBER_ROLES, get_client_company_id
     from app.matcha.services.matcha_work import project_task_service as pt_svc
     from app.matcha.services.matcha_work.project_service import resolve_project_access, role_can_edit
 
     from . import enqueue
 
     actor = _actor(user)
+    if actor.role not in COMPANY_MEMBER_ROLES:
+        # The REST route's role gate (`require_company_member`): brokers,
+        # creators and agency users can't add cards on the board either.
+        await post_as_espresso(company_id, channel_id, "Only members of this workspace can add agent cards.")
+        return None
     caller_company = None if actor.role == "admin" else await get_client_company_id(actor)
     access = await resolve_project_access(project_id, actor, company_id=caller_company)
     if access is None:

@@ -19,9 +19,21 @@ from app.matcha.services.matcha_work.agent_card import chat_create, chat_flow, e
      "hey can you compare noise cancelling headphones"),
     ("@espresso what's the best espresso grinder for home", False, "what's the best espresso grinder for home"),
     ("@espresso buy me a 6 ft braided usb-c cable", True, "buy me a 6 ft braided usb-c cable"),
+    ("@espresso find the best espresso machine under $500", True, "find the best espresso machine under $500"),
+    ("@espresso research standing desks, ship to Oakland", True, "research standing desks, ship to Oakland"),
     # Repo questions stay with the repo agent.
     ("@espresso how does the auth middleware work", True, None),
     ("@espresso find where we validate the webhook signature", True, None),
+    # Errand verbs, but no money word: in a repo project these are code questions.
+    ("@espresso compare our two auth flows", True, None),
+    ("@espresso what's the best place to add caching", True, None),
+    ("@espresso find where the order total is computed", True, None),
+    ("@espresso recommend a review process for deals", True, None),
+    # Code talk is never an errand, even with no repo connected (it would
+    # spend a monthly agent run on a web search).
+    ("@espresso compare our two auth flows", False, None),
+    ("@espresso find the function that prices a cart", False, None),
+    ("@espresso research how does the scheduler pick shifts", False, None),
     ("@espresso find it", False, None),  # too short to be an errand
     ("@espresso thanks!", False, None),
 ])
@@ -119,6 +131,22 @@ async def test_access_and_edit_rights_are_the_rest_rules(env, role, access, mess
     assert await _create() is None
     env["create"].assert_not_awaited()
     assert message in env["posted"][0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["broker", "creator", "agency", "candidate"])
+async def test_only_company_member_roles_can_add_cards_from_chat(env, role):
+    # The REST route's `require_company_member` gate, applied before anything else.
+    assert await _create(user=_user(role)) is None
+    env["create"].assert_not_awaited()
+    env["preflight"].assert_not_awaited()
+    assert env["posted"] == ["Only members of this workspace can add agent cards."]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", dependencies.COMPANY_MEMBER_ROLES)
+async def test_company_member_roles_pass_the_role_gate(env, role):
+    assert await _create(user=_user(role)) is env["task"]
 
 
 @pytest.mark.asyncio
