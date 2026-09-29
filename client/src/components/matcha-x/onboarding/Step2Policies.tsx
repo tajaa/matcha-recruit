@@ -54,7 +54,7 @@ export default function Step2Policies({
 
       <label
         className={
-          'flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl py-10 cursor-pointer transition-colors ' +
+          'flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl py-6 cursor-pointer transition-colors ' +
           (uploadedName
             ? 'border-emerald-800 bg-emerald-950/20'
             : 'border-zinc-800 bg-zinc-900/40 hover:border-zinc-700')

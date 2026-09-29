@@ -88,7 +88,7 @@ export default function DisciplineSettings() {
       {error && <div className="text-sm text-red-400">{error}</div>}
 
       {loading ? (
-        <div className="p-12 flex items-center justify-center">
+        <div className="p-8 flex items-center justify-center">
           <Loader2 className="w-5 h-5 animate-spin text-zinc-400" />
         </div>
       ) : (
@@ -264,7 +264,7 @@ function TemplatesSection() {
 
       {error && <div className="text-sm text-red-400">{error}</div>}
       {loading ? (
-        <div className="p-8 flex items-center justify-center">
+        <div className="p-6 flex items-center justify-center">
           <Loader2 className="w-5 h-5 animate-spin text-zinc-400" />
         </div>
       ) : (
@@ -400,7 +400,7 @@ function ApproversSection() {
       </div>
       {error && <div className="text-sm text-red-400">{error}</div>}
       {loading ? (
-        <div className="p-8 flex items-center justify-center">
+        <div className="p-6 flex items-center justify-center">
           <Loader2 className="w-5 h-5 animate-spin text-zinc-400" />
         </div>
       ) : (

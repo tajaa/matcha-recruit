@@ -269,7 +269,7 @@ export default function Cappe() {
                     </td>
                   </tr>
                 ))}
-                {filteredBrands.length === 0 && <tr><td colSpan={9} className="px-4 py-12 text-center text-zinc-500">No brand accounts found.</td></tr>}
+                {filteredBrands.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-zinc-500">No brand accounts found.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -320,7 +320,7 @@ export default function Cappe() {
                     </Fragment>
                   )
                 })}
-                {filteredWebsites.length === 0 && <tr><td colSpan={8} className="px-4 py-12 text-center text-zinc-500">No Gummfit accounts found.</td></tr>}
+                {filteredWebsites.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-zinc-500">No Gummfit accounts found.</td></tr>}
               </tbody>
             </table>
           </div>

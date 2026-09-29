@@ -108,7 +108,7 @@ export default function AdminCompanyDetail() {
   }
 
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-5 h-5 text-zinc-500 animate-spin" /></div>
-  if (!data) return <div className="p-8 text-center text-sm text-zinc-500">Company not found</div>
+  if (!data) return <div className="p-6 text-center text-sm text-zinc-500">Company not found</div>
 
   const { company: co, employees, risk, ir_summary: ir, er_summary: er, compliance: comp, policies, recent_incidents, recent_er_cases } = data
 
@@ -299,7 +299,7 @@ export default function AdminCompanyDetail() {
               ))}
             </tbody>
           </table>
-          {employees.length === 0 && <p className="text-center text-sm text-zinc-500 py-8">No employees</p>}
+          {employees.length === 0 && <p className="text-center text-sm text-zinc-500 py-6">No employees</p>}
         </div>
       )}
 

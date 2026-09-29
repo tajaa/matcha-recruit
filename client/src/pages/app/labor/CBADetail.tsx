@@ -90,7 +90,7 @@ export default function CBADetail() {
     return <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-zinc-500" /></div>
   }
   if (!cba) {
-    return <Card className="p-8 text-center text-sm text-zinc-500">{error || 'CBA not found.'}</Card>
+    return <Card className="p-6 text-center text-sm text-zinc-500">{error || 'CBA not found.'}</Card>
   }
 
   const steps = cba.grievance_step_config ?? []

@@ -189,7 +189,7 @@ export function TagsTab({ tags, onChange, subscribers }: {
                 </React.Fragment>
               )
             })}
-            {tags.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-500">No tags yet.</td></tr>}
+            {tags.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-zinc-500">No tags yet.</td></tr>}
           </tbody>
         </table>
       </div>

@@ -144,7 +144,7 @@ export default function LegalDefense() {
       {/* Workbench */}
       <div className="min-w-0 flex-1">
         {!selectedId ? (
-          <div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center">
+          <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
             <Scale className="h-8 w-8 text-zinc-700" />
             <p className="max-w-md text-sm leading-relaxed text-zinc-500">
               Select or create a matter. Describe the legal request; the assistant organizes your
@@ -387,7 +387,7 @@ function SubjectScopeSetter({ matter, theory, onRefresh }: {
 
 function ExamplesPanel({ items, onUse }: { items: string[]; onUse: (text: string) => void }) {
   return (
-    <div className="h-full overflow-y-auto px-5 py-8">
+    <div className="h-full overflow-y-auto px-5 py-6">
       <div className={LABEL}>Example prompts</div>
       <p className="mt-2 max-w-[60ch] text-sm leading-relaxed text-zinc-400">
         Click one to drop it into the console composer, then edit or send it as-is.

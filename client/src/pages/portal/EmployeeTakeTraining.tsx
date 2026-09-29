@@ -126,7 +126,7 @@ export default function EmployeeTakeTraining() {
   if (error) {
     return (
       <div className="max-w-3xl">
-        <Card className="p-6 bg-red-500/5 border-red-500/20">
+        <Card className="p-5 bg-red-500/5 border-red-500/20">
           <div className="flex items-center gap-2 text-red-300">
             <AlertCircle className="w-4 h-4" /> {error}
           </div>
@@ -162,7 +162,7 @@ export default function EmployeeTakeTraining() {
       </div>
 
       {stage === 'not_started' && (
-        <Card className="p-6">
+        <Card className="p-5">
           <h2 className="text-base font-medium text-zinc-100 mb-2">Begin training</h2>
           <p className="text-sm text-zinc-400 mb-4">
             This module covers California SB 1343 harassment-prevention requirements.
@@ -191,7 +191,7 @@ export default function EmployeeTakeTraining() {
             </span>
           </Card>
 
-          <Card className="p-6 mb-4">
+          <Card className="p-5 mb-4">
             <div className="flex items-center justify-between text-xs text-zinc-500 mb-4">
               <span>
                 Section {sectionIdx + 1} of {lesson.sections.length}
@@ -251,7 +251,7 @@ export default function EmployeeTakeTraining() {
       )}
 
       {stage === 'quiz' && (
-        <Card className="p-6">
+        <Card className="p-5">
           <h2 className="text-base font-semibold text-zinc-100 mb-4">Quiz</h2>
           <div className="space-y-6">
             {lesson.quiz.questions.map((q, i) => (
@@ -303,7 +303,7 @@ export default function EmployeeTakeTraining() {
       )}
 
       {stage === 'pass_attest' && quizResult && (
-        <Card className="p-6">
+        <Card className="p-5">
           <div className="flex items-center gap-2 text-emerald-400 mb-2">
             <CheckCircle2 className="w-5 h-5" />
             <span className="text-base font-semibold">Passed</span>
@@ -345,7 +345,7 @@ export default function EmployeeTakeTraining() {
       )}
 
       {stage === 'failed' && quizResult && (
-        <Card className="p-6 bg-amber-500/5 border-amber-500/20">
+        <Card className="p-5 bg-amber-500/5 border-amber-500/20">
           <div className="flex items-center gap-2 text-amber-300 mb-2">
             <AlertCircle className="w-5 h-5" />
             <span className="text-base font-semibold">Did not pass</span>
@@ -371,7 +371,7 @@ export default function EmployeeTakeTraining() {
       )}
 
       {stage === 'completed' && (
-        <Card className="p-8 text-center">
+        <Card className="p-6 text-center">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-emerald-500/10 mb-4">
             <CheckCircle2 className="w-6 h-6 text-emerald-400" />
           </div>

@@ -22,7 +22,7 @@ type Props = {
 export default function RequirementsView({ detail, specialtyFilter, categoryFilteredReqs, sectioned, onNavigate, ctx }: Props) {
   if (categoryFilteredReqs.length === 0) {
     return (
-      <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center space-y-2">
+      <div className="border border-zinc-800 rounded-lg px-4 py-5 text-center space-y-2">
         <p className="text-sm text-zinc-600">
           No city-level requirements{specialtyFilter !== 'all' ? ' for this specialty' : ''}.
         </p>

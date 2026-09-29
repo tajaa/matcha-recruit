@@ -17,7 +17,7 @@ export function ExceedanceCurvePanel({ mc }: Props) {
   }
 
   return (
-    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
+    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-4">
       <div className="flex items-center justify-between">
         <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Loss Exceedance Curve<InfoTip text="Shows the probability of your annual loss exceeding any given threshold. Read it as: 'There is an X% chance of losing more than $Y.' A steeper drop means losses are more predictable; a long flat tail means extreme losses are more likely." /></div>
         <div className="text-[10px] text-zinc-600 font-mono">P(Loss &ge; threshold)</div>

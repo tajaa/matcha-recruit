@@ -234,7 +234,7 @@ export default function Handbooks() {
 
       {/* List */}
       {filtered.length === 0 ? (
-        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-12 text-center">
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-8 text-center">
           <p className="text-sm text-zinc-400">
             {tab === 'all' ? 'No handbooks yet.' : `No ${tab} handbooks.`}
           </p>

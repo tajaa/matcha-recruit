@@ -473,7 +473,7 @@ export default function CredentialTemplates() {
                 </span>
               </div>
               {previewResult.requirements.length === 0 ? (
-                <div className="px-4 py-8 text-center text-sm text-zinc-600">
+                <div className="px-4 py-6 text-center text-sm text-zinc-600">
                   No credential requirements for this role.
                 </div>
               ) : (
@@ -505,7 +505,7 @@ export default function CredentialTemplates() {
       )}
 
       {tab === 'dropdown' && typeSettingsLoading && (
-        <div className="flex items-center justify-center py-12 text-xs uppercase tracking-wider text-zinc-500 animate-pulse">
+        <div className="flex items-center justify-center py-8 text-xs uppercase tracking-wider text-zinc-500 animate-pulse">
           Loading dropdown options...
         </div>
       )}

@@ -56,7 +56,7 @@ export function ERSimilarCasesPanel({ caseId }: Props) {
 
   if (loading) {
     return (
-      <div className="text-center py-8">
+      <div className="text-center py-6">
         <p className="text-sm text-zinc-500">{phase || 'Finding similar cases...'}</p>
       </div>
     )
@@ -64,7 +64,7 @@ export function ERSimilarCasesPanel({ caseId }: Props) {
 
   if (!data) {
     return (
-      <div className="text-center py-8">
+      <div className="text-center py-6">
         <p className="text-sm text-zinc-500 mb-4">Find similar past cases to identify patterns and precedents.</p>
         <Button onClick={() => streamSimilarCases()}>Find Similar Cases</Button>
         {error && <p className="text-xs text-red-400 mt-2">{error}</p>}

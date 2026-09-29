@@ -81,7 +81,7 @@ export function Modal({
       }}
     >
       {bare ? children : (
-        <div className={`bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full ${widthClass[width]} shadow-xl`}>
+        <div className={`bg-zinc-900 border border-zinc-800 rounded-2xl p-5 w-full ${widthClass[width]} shadow-xl`}>
           <h2 className="text-lg font-semibold text-zinc-100 mb-4">{title}</h2>
           {children}
         </div>

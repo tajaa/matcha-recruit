@@ -211,11 +211,11 @@ export default function KeyCoverageDrawer({ jurisdictionId, category, state, onC
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
           {loading ? (
-            <div className="text-center py-12 text-zinc-500">Loading...</div>
+            <div className="text-center py-8 text-zinc-500">Loading...</div>
           ) : data ? (
             data.by_category.map(cat => <CategorySection key={cat.category} cat={cat} />)
           ) : (
-            <div className="text-center py-12 text-zinc-500">Failed to load coverage data</div>
+            <div className="text-center py-8 text-zinc-500">Failed to load coverage data</div>
           )}
         </div>
       </div>

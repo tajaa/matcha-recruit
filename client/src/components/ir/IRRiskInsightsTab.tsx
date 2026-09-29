@@ -228,9 +228,9 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
           <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Loading risk insights…</div>
         </div>
       ) : matrixError ? (
-        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 text-sm text-red-400">{matrixError}</div>
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 text-sm text-red-400">{matrixError}</div>
       ) : !assessment || matrix?.company_total === 0 ? (
-        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-12 text-center">
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-8 text-center">
           <p className="text-sm text-zinc-400 mb-1">No incidents in this window.</p>
           <p className="text-[11px] text-zinc-600">
             Once incidents are reported, scores and themes will appear here.
@@ -300,13 +300,13 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
               )}
             </div>
             {insightsLoading && !insights ? (
-              <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 flex items-center justify-center text-zinc-500">
+              <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 flex items-center justify-center text-zinc-500">
                 <Loader2 className="w-4 h-4 animate-spin" />
               </div>
             ) : insightsError ? (
               <p className="text-sm text-red-400">{insightsError}</p>
             ) : !insights || insights.themes.length === 0 ? (
-              <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 text-sm text-zinc-500 text-center">
+              <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 text-sm text-zinc-500 text-center">
                 No recurring patterns detected. Themes need ≥3 supporting incidents to surface.
               </div>
             ) : (
@@ -328,7 +328,7 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
 
           {/* Upgrade footer — lite (IR-only) tenants only */}
           {isLiteTenant && (
-          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
               <div className="text-sm font-medium text-zinc-100">Want a holistic risk score?</div>
               <p className="text-xs text-zinc-500 mt-1 leading-relaxed">

@@ -42,7 +42,7 @@ export function DimensionCorrelationPanel({ qs }: Props) {
   ] : []
 
   return (
-    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
+    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-4">
       <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Dimension Correlation<InfoTip text="Scatter plot showing how two risk dimensions move together over time. Pearson r measures linear correlation: +1 = perfectly correlated, 0 = no relationship, -1 = inversely correlated. R² shows what % of variation in one dimension is explained by the other." /></div>
 
       {/* Selectors */}
@@ -64,10 +64,10 @@ export function DimensionCorrelationPanel({ qs }: Props) {
         </select>
       </div>
 
-      {loading && <div className="text-xs text-zinc-500 animate-pulse py-8 text-center">Loading...</div>}
+      {loading && <div className="text-xs text-zinc-500 animate-pulse py-6 text-center">Loading...</div>}
 
       {!loading && !data && (
-        <div className="text-xs text-zinc-500 py-8 text-center">Not enough history for correlation analysis</div>
+        <div className="text-xs text-zinc-500 py-6 text-center">Not enough history for correlation analysis</div>
       )}
 
       {!loading && data && (

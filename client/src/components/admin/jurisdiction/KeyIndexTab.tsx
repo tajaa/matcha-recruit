@@ -41,7 +41,7 @@ function KeyRow({ k, expanded, onToggle }: { k: RegulationKeyCoverage; expanded:
       </tr>
       {expanded && (
         <tr className="bg-zinc-800/20">
-          <td colSpan={8} className="px-6 py-3 text-xs text-zinc-400">
+          <td colSpan={8} className="px-5 py-3 text-xs text-zinc-400">
             <div className="flex gap-6">
               <div><strong>State variance:</strong> {k.state_variance}</div>
               <div><strong>Best tier:</strong> T{k.best_tier || 0}</div>
@@ -89,8 +89,8 @@ export default function KeyIndexTab() {
     })
   }
 
-  if (loading) return <div className="text-zinc-500 py-12 text-center">Loading key index...</div>
-  if (!data) return <div className="text-zinc-500 py-12 text-center">Failed to load</div>
+  if (loading) return <div className="text-zinc-500 py-8 text-center">Loading key index...</div>
+  if (!data) return <div className="text-zinc-500 py-8 text-center">Failed to load</div>
 
   const totalKeys = filtered.reduce((s, c) => s + c.keys.length, 0)
 

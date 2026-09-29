@@ -111,7 +111,7 @@ function StatuteDrawer({ itemId, onClose }: { itemId: string; onClose: () => voi
           <button className="text-zinc-500 hover:text-zinc-200 text-lg leading-none" onClick={onClose}>×</button>
         </div>
         {loading ? (
-          <div className="text-zinc-500 text-sm py-8 text-center">Loading statute text…</div>
+          <div className="text-zinc-500 text-sm py-6 text-center">Loading statute text…</div>
         ) : body?.body_text ? (
           <>
             {body.body_source_url && (
@@ -120,7 +120,7 @@ function StatuteDrawer({ itemId, onClose }: { itemId: string; onClose: () => voi
             <pre className="whitespace-pre-wrap text-xs text-zinc-300 mt-3 leading-relaxed font-sans">{body.body_text}</pre>
           </>
         ) : (
-          <div className="text-zinc-500 text-sm py-8 text-center">No fetched text for this citation yet.</div>
+          <div className="text-zinc-500 text-sm py-6 text-center">No fetched text for this citation yet.</div>
         )}
       </div>
     </div>
@@ -225,8 +225,8 @@ export default function PolicyDetailPage() {
     } finally { setSaving(false) }
   }
 
-  if (loading) return <div className="text-zinc-500 py-12 text-center">Loading policy...</div>
-  if (!data) return <div className="text-zinc-500 py-12 text-center">Policy not found.</div>
+  if (loading) return <div className="text-zinc-500 py-8 text-center">Loading policy...</div>
+  if (!data) return <div className="text-zinc-500 py-8 text-center">Policy not found.</div>
 
   return (
     <div className="space-y-5">
@@ -335,7 +335,7 @@ export default function PolicyDetailPage() {
           </tbody>
         </table>
         {filtered.length === 0 && (
-          <p className="text-sm text-zinc-600 text-center py-6">
+          <p className="text-sm text-zinc-600 text-center py-5">
             {search ? `No jurisdictions match "${search}"` : 'No jurisdiction data.'}
           </p>
         )}
@@ -352,7 +352,7 @@ export default function PolicyDetailPage() {
         </button>
         {logOpen && (
           data.change_log.length === 0 ? (
-            <p className="text-sm text-zinc-600 text-center py-6">No changes recorded yet.</p>
+            <p className="text-sm text-zinc-600 text-center py-5">No changes recorded yet.</p>
           ) : (
             <table className="w-full text-left">
               <thead className="bg-zinc-900/50 text-zinc-400 text-xs uppercase">
@@ -440,7 +440,7 @@ function JurisdictionRow({ j, expanded, editing, editForm, setEditForm, saving, 
       </tr>
       {expanded && (
         <tr className="bg-zinc-800/20">
-          <td colSpan={8} className="px-6 py-3 text-xs text-zinc-400 space-y-2">
+          <td colSpan={8} className="px-5 py-3 text-xs text-zinc-400 space-y-2">
             {/* Drift: the authority behind this row's value changed upstream. */}
             {j.change_status === 'needs_review' && j.drift && (
               <div className="flex items-center gap-2 rounded border border-purple-500/30 bg-purple-500/10 px-3 py-2">

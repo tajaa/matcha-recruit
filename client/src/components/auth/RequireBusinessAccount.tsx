@@ -39,7 +39,7 @@ export default function RequireBusinessAccount({ children }: Props) {
     return (
       <div
         style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}
-        className="flex items-center justify-center px-6 text-center text-sm"
+        className="flex items-center justify-center px-5 text-center text-sm"
       >
         Could not verify your session. Check your connection and reload.
       </div>
@@ -50,10 +50,10 @@ export default function RequireBusinessAccount({ children }: Props) {
     return (
       <div
         style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}
-        className="flex items-center justify-center px-6"
+        className="flex items-center justify-center px-5"
       >
         <div
-          className="max-w-md w-full p-8 rounded-2xl"
+          className="max-w-md w-full p-6 rounded-2xl"
           style={{ border: `1px solid ${LINE}` }}
         >
           <h1

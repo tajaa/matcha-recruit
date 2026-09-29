@@ -162,7 +162,7 @@ export default function FractionalHR() {
   const prospectCount = overview?.status_counts.prospect ?? 0
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-5 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-zinc-100">Fractional HR</h1>
@@ -302,7 +302,7 @@ export default function FractionalHR() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-zinc-500 text-sm">
+                  <td colSpan={6} className="py-6 text-center text-zinc-500 text-sm">
                     No clients yet. Create your first fractional HR engagement.
                   </td>
                 </tr>

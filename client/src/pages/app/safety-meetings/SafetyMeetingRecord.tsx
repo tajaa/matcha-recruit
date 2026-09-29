@@ -75,11 +75,11 @@ export default function SafetyMeetingRecord() {
 
   const transcript = Object.entries(segments).sort(([a], [b]) => Number(a) - Number(b)).map(([, text]) => text).filter(Boolean)
 
-  if (!meeting) return <main className="mx-auto max-w-4xl px-6 py-12"><p className="text-slate-500">{error || 'Loading meeting...'}</p></main>
+  if (!meeting) return <main className="mx-auto max-w-4xl px-5 py-8"><p className="text-slate-500">{error || 'Loading meeting...'}</p></main>
 
   return (
-    <main className="mx-auto max-w-4xl px-6 py-8">
-      <div className="mb-8 flex flex-col gap-5 rounded-2xl bg-slate-950 p-6 text-white sm:flex-row sm:items-center sm:justify-between">
+    <main className="mx-auto max-w-4xl px-5 py-6">
+      <div className="mb-8 flex flex-col gap-5 rounded-2xl bg-slate-950 p-5 text-white sm:flex-row sm:items-center sm:justify-between">
         <div><p className="text-sm font-medium text-emerald-300">Live safety meeting</p><h1 className="mt-1 text-2xl font-semibold">{meeting.title}</h1>{meeting.topic && <p className="mt-1 text-sm text-slate-300">{meeting.topic}</p>}</div>
         <div className="flex items-center gap-4"><span className="font-mono text-2xl tabular-nums">{formatTime(recorder.elapsedSeconds)}</span>{recorder.status === 'recording' ? <button disabled={finishing} className="inline-flex items-center gap-2 rounded-xl bg-red-500 px-4 py-3 font-semibold text-white hover:bg-red-600 disabled:opacity-50" onClick={endMeeting}><Square size={16} fill="currentColor" /> End meeting</button> : <button className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 font-semibold text-white hover:bg-emerald-400" onClick={() => { setError(''); void recorder.start() }}><Mic size={17} /> Start microphone</button>}</div>
       </div>
@@ -89,7 +89,7 @@ export default function SafetyMeetingRecord() {
 
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4"><div><h2 className="font-semibold text-slate-900">Live transcript</h2><p className="mt-1 text-sm text-slate-500">The transcript updates as each audio segment is processed.</p></div>{uploading > 0 && <span className="text-xs font-medium text-slate-500">Processing {uploading} segment{uploading === 1 ? '' : 's'}...</span>}</div>
-        {transcript.length === 0 ? <div className="flex flex-col items-center px-6 py-16 text-center"><Mic className="mb-3 text-emerald-600" size={28} /><p className="font-medium text-slate-800">{recorder.status === 'recording' ? 'Listening...' : 'Start the microphone when everyone is ready.'}</p><p className="mt-1 text-sm text-slate-500">Keep Matcha open while the safety talk is underway.</p></div> : <div className="space-y-4 p-5">{transcript.map((text, index) => <p key={`${index}-${text.slice(0, 12)}`} className="rounded-xl bg-slate-50 p-4 text-sm leading-7 text-slate-700">{text}</p>)}</div>}
+        {transcript.length === 0 ? <div className="flex flex-col items-center px-5 py-16 text-center"><Mic className="mb-3 text-emerald-600" size={28} /><p className="font-medium text-slate-800">{recorder.status === 'recording' ? 'Listening...' : 'Start the microphone when everyone is ready.'}</p><p className="mt-1 text-sm text-slate-500">Keep Matcha open while the safety talk is underway.</p></div> : <div className="space-y-4 p-5">{transcript.map((text, index) => <p key={`${index}-${text.slice(0, 12)}`} className="rounded-xl bg-slate-50 p-4 text-sm leading-7 text-slate-700">{text}</p>)}</div>}
       </section>
       <div className="mt-5 flex items-center gap-2 text-xs text-slate-500"><CheckCircle2 size={15} className="text-emerald-600" /> Audio is retained privately with the signed record.</div>
     </main>

@@ -56,7 +56,7 @@ export default function ProfileResumeSection() {
   }
 
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
       <div className="flex items-start justify-between mb-4">
         <div>
           <h2 className="text-sm font-medium text-zinc-300">Profile Resume</h2>
@@ -114,7 +114,7 @@ function EmptyState({ onSelect, uploading }: { onSelect: () => void; uploading: 
     <button
       onClick={onSelect}
       disabled={uploading}
-      className="w-full flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-zinc-700 hover:border-emerald-600 hover:bg-zinc-900/60 py-8 transition-colors disabled:opacity-60"
+      className="w-full flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-zinc-700 hover:border-emerald-600 hover:bg-zinc-900/60 py-6 transition-colors disabled:opacity-60"
     >
       {uploading ? (
         <Loader2 size={20} className="text-zinc-400 animate-spin" />

@@ -101,7 +101,7 @@ export default function PayerData() {
   const o = overview
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6 space-y-4">
+    <div className="max-w-7xl mx-auto px-4 py-5 space-y-4">
       <div>
         <h1 className="text-xl font-bold text-zinc-100">Payer Data</h1>
         <p className="text-sm text-zinc-500">Medical coverage policies — Medicare NCDs/LCDs and commercial payer research</p>
@@ -144,7 +144,7 @@ export default function PayerData() {
       </div>
 
       {loading ? (
-        <div className="text-zinc-500 py-12 text-center">Loading...</div>
+        <div className="text-zinc-500 py-8 text-center">Loading...</div>
       ) : (
         <>
           {/* Overview */}

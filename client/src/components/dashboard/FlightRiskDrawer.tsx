@@ -81,7 +81,7 @@ export function FlightRiskDrawer({ open, onClose, summary }: Props) {
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
       <div className="relative w-full max-w-3xl h-full bg-zinc-950 border-l border-zinc-800 overflow-y-auto">
-        <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-950">
+        <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-4 border-b border-zinc-800 bg-zinc-950">
           <div>
             <h2 className="text-lg font-semibold text-zinc-100">Flight-Risk Detail</h2>
             <p className="text-xs text-zinc-500 mt-0.5">
@@ -100,7 +100,7 @@ export function FlightRiskDrawer({ open, onClose, summary }: Props) {
           </button>
         </div>
 
-        <div className="px-6 py-4 flex gap-1 flex-wrap text-xs">
+        <div className="px-5 py-4 flex gap-1 flex-wrap text-xs">
           {(['flagged', 'all', 'critical', 'high', 'elevated', 'low'] as const).map((f) => (
             <button
               key={f}
@@ -116,7 +116,7 @@ export function FlightRiskDrawer({ open, onClose, summary }: Props) {
           ))}
         </div>
 
-        <div className="px-6 pb-6">
+        <div className="px-5 pb-6">
           {err && (
             <p className="text-sm text-red-400 flex items-center gap-2">
               <AlertTriangle className="h-4 w-4" />

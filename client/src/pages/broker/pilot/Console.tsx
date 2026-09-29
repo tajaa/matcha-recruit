@@ -150,7 +150,7 @@ export function Console({ session, context, onTurnComplete, onUploadDocs }: Cons
         ))}
       </div>
       {view === 'examples' ? (
-        <div className="flex-1 overflow-y-auto px-5 py-8">
+        <div className="flex-1 overflow-y-auto px-5 py-6">
           <div className={LABEL}>{session.template ? `${session.template.label} · example prompts` : 'Example prompts'}</div>
           <p className="mt-2 max-w-[60ch] text-sm leading-relaxed text-zinc-400">
             Click one to drop it into the composer, then edit or send it as-is.
@@ -171,7 +171,7 @@ export function Console({ session, context, onTurnComplete, onUploadDocs }: Cons
       <div className="flex-1 overflow-y-auto">
         <div className="flex min-h-full flex-col justify-end">
           {messages.length === 0 && !status && (
-            <div className="px-5 py-8">
+            <div className="px-5 py-6">
               <div className={LABEL}>{session.template ? session.template.label : 'Analyst console'}</div>
               <p className="mt-2 max-w-[60ch] text-sm leading-relaxed text-zinc-400">
                 {session.template

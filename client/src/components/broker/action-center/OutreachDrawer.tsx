@@ -90,7 +90,7 @@ export function OutreachDrawer({ companyId, companyName, onClose }: OutreachDraw
           )}
 
           {!loading && !error && data && data.prompts.length === 0 && (
-            <p className="text-sm text-zinc-500 py-8 text-center">No outreach ideas right now.</p>
+            <p className="text-sm text-zinc-500 py-6 text-center">No outreach ideas right now.</p>
           )}
 
           {!loading && !error && data?.prompts.map((p, i) => {

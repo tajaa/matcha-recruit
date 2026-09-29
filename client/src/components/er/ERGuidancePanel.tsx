@@ -67,20 +67,20 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
   if (!guidance && !loading) {
     // First document fetch still in flight — avoid flashing the empty state.
     if (docStats === null) {
-      return <p className="text-sm text-zinc-500 py-8 text-center">Loading...</p>
+      return <p className="text-sm text-zinc-500 py-6 text-center">Loading...</p>
     }
     // A document was uploaded (e.g. at intake) and is still parsing — wait for it
     // rather than nagging the user to upload a complaint.
     if (isProcessing) {
       return (
-        <p className="text-sm text-zinc-500 py-8 text-center">
+        <p className="text-sm text-zinc-500 py-6 text-center">
           Processing your documents… guidance will appear once parsing finishes.
         </p>
       )
     }
     if (!hasReadyContent) {
       return (
-        <div className="text-center py-8">
+        <div className="text-center py-6">
           <p className="text-sm text-zinc-500">
             {totalDocs > 0
               ? 'Document processing did not complete. Re-upload on the Documents tab, or add a case description.'
@@ -90,7 +90,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
       )
     }
     return (
-      <div className="text-center py-8">
+      <div className="text-center py-6">
         <p className="text-sm text-zinc-500 mb-4">
           {error ? 'Guidance generation failed. You can try again.' : 'Generate AI-powered guidance for this case based on uploaded documents and notes.'}
         </p>
@@ -101,7 +101,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
   }
 
   if (loading) {
-    return <p className="text-sm text-zinc-500 py-8 text-center">Analyzing case...</p>
+    return <p className="text-sm text-zinc-500 py-6 text-center">Analyzing case...</p>
   }
 
   if (!guidance) return null

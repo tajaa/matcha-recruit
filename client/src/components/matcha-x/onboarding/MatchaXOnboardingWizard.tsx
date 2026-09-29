@@ -74,7 +74,7 @@ export default function MatchaXOnboardingWizard() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0c0c0e] px-4 py-10">
+    <div className="min-h-screen bg-[#0c0c0e] px-4 py-6">
       <div className={(wide ? 'max-w-5xl' : 'max-w-xl') + ' mx-auto'}>
         <div className="flex items-center justify-between mb-8">
           <Stepper current={step} />

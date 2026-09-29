@@ -275,7 +275,7 @@ export default function HandbookDetail() {
               onDirtyChange={handleDirtyChange}
             />
           ) : (
-            <div className="border border-zinc-800 rounded-lg p-8 text-center">
+            <div className="border border-zinc-800 rounded-lg p-6 text-center">
               <p className="text-sm text-zinc-600">Select a section from the sidebar to edit.</p>
             </div>
           )}

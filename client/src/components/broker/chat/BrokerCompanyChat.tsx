@@ -269,11 +269,11 @@ export default function BrokerCompanyChat({ adapter }: { adapter: BrokerChatAdap
         </div>
         <div className="flex-1 overflow-y-auto">
           {loadingConvs ? (
-            <div className="flex items-center justify-center py-10 text-zinc-500">
+            <div className="flex items-center justify-center py-6 text-zinc-500">
               <Loader2 className="h-5 w-5 animate-spin" />
             </div>
           ) : conversations.length === 0 ? (
-            <div className="px-4 py-10 text-center text-sm text-zinc-500">
+            <div className="px-4 py-6 text-center text-sm text-zinc-500">
               No conversations yet.
             </div>
           ) : (
@@ -344,11 +344,11 @@ export default function BrokerCompanyChat({ adapter }: { adapter: BrokerChatAdap
               className="flex-1 space-y-3 overflow-y-auto px-5 py-4"
             >
               {loadingMsgs ? (
-                <div className="flex items-center justify-center py-10 text-zinc-500">
+                <div className="flex items-center justify-center py-6 text-zinc-500">
                   <Loader2 className="h-5 w-5 animate-spin" />
                 </div>
               ) : messages.length === 0 ? (
-                <div className="py-10 text-center text-sm text-zinc-500">
+                <div className="py-6 text-center text-sm text-zinc-500">
                   No messages yet. Say hello.
                 </div>
               ) : (
@@ -538,11 +538,11 @@ function NewConversationModal({
   return (
     <Modal open onClose={onClose} title="New conversation" width="md">
       {loadingTargets ? (
-        <div className="flex items-center justify-center py-8 text-zinc-500">
+        <div className="flex items-center justify-center py-6 text-zinc-500">
           <Loader2 className="h-5 w-5 animate-spin" />
         </div>
       ) : targets.length === 0 ? (
-        <p className="py-6 text-sm text-zinc-400">
+        <p className="py-5 text-sm text-zinc-400">
           No {adapter.targetNoun} is available to message right now.
         </p>
       ) : (

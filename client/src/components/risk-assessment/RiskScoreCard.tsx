@@ -51,7 +51,7 @@ export function RiskScoreCard({ score, band, dimensions, weights }: Props) {
     <div>
       <MetricStrip cols="grid-cols-5">
         {/* Big number */}
-        <div className="col-span-2 bg-zinc-900 p-8 flex flex-col justify-between group">
+        <div className="col-span-2 bg-zinc-900 p-6 flex flex-col justify-between group">
           <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold flex items-center gap-1.5">
             Overall Risk Score
             <HelpTooltip text={DIMENSION_HELP.overall} />
@@ -77,7 +77,7 @@ export function RiskScoreCard({ score, band, dimensions, weights }: Props) {
           const c = BAND_COLOR[dim.band as Band]
           const weightPct = weights?.[key] != null ? `${Math.round(weights[key] * 100)}%` : null
           return (
-            <div key={key} className="bg-zinc-900 p-6 flex flex-col justify-between group">
+            <div key={key} className="bg-zinc-900 p-5 flex flex-col justify-between group">
               <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
                 {DIMENSION_LABELS[key]}
                 <HelpTooltip text={DIMENSION_HELP[key]} />

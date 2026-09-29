@@ -101,14 +101,14 @@ export default function DisciplineDetail() {
 
   if (loading) {
     return (
-      <div className="p-8 flex items-center justify-center">
+      <div className="p-6 flex items-center justify-center">
         <Loader2 className="w-5 h-5 animate-spin text-zinc-400" />
       </div>
     )
   }
   if (error || !record) {
     return (
-      <div className="p-6">
+      <div className="p-5">
         <Button variant="ghost" onClick={() => navigate('/app/discipline')}>
           <ArrowLeft className="w-4 h-4" />
           <span className="ml-2">Back</span>

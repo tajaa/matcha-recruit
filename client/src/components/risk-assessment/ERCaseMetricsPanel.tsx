@@ -46,7 +46,7 @@ export function ERCaseMetricsPanel() {
       </div>
 
       {loading && (
-        <div className="border border-zinc-800 rounded-2xl p-8 text-center">
+        <div className="border border-zinc-800 rounded-2xl p-6 text-center">
           <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Loading metrics...</div>
         </div>
       )}

@@ -48,7 +48,7 @@ export default function BrokerPropertyPortfolio() {
       </div>
 
       {companies.length === 0 ? (
-        <Card className="p-8 text-center">
+        <Card className="p-6 text-center">
           <p className="text-sm text-zinc-400">No clients have a Statement of Values yet.</p>
           <p className="text-xs text-zinc-600 mt-1">Property appears here once a client adds buildings under Commercial Property.</p>
         </Card>

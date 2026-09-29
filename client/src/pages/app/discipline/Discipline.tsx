@@ -180,11 +180,11 @@ export default function Discipline() {
 
       <div className="rounded-lg border border-zinc-800 bg-zinc-950 overflow-x-auto">
         {loading ? (
-          <div className="p-8 flex items-center justify-center text-zinc-400">
+          <div className="p-6 flex items-center justify-center text-zinc-400">
             <Loader2 className="w-5 h-5 animate-spin" />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="p-8 text-center text-zinc-500 text-sm">
+          <div className="p-6 text-center text-zinc-500 text-sm">
             No performance action records match the current filters.
           </div>
         ) : (

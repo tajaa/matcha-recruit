@@ -161,7 +161,7 @@ export function QuotingDeskPanel({
             <th className="py-2.5 px-4">Line</th><th>Premium</th><th>Status</th><th>Expires</th><th></th>
           </tr></thead>
           <tbody>
-            {quotes.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-zinc-600">No quotes yet — request one above.</td></tr>}
+            {quotes.length === 0 && <tr><td colSpan={5} className="px-4 py-5 text-zinc-600">No quotes yet — request one above.</td></tr>}
             {quotes.map((q) => (
               <tr key={q.id} className="border-b border-zinc-900">
                 <td className="px-4 py-2.5 text-zinc-200">{LINES.find((l) => l.key === q.line)?.label ?? q.line}</td>
