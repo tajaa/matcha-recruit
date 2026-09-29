@@ -91,8 +91,11 @@ private struct PaymentCardsSettingsTab: View {
                             .textFieldStyle(.roundedBorder)
                         TextField("Label", text: $label, prompt: Text("Optional, e.g. Stripe test"))
                             .textFieldStyle(.roundedBorder)
+                        // Always pressable: save() says what's missing
+                        // instead of a silently grayed-out button.
                         Button(busy ? "Saving…" : "Save card") { Task { await save() } }
-                            .disabled(busy || number.isEmpty || expiry.isEmpty)
+                            .disabled(busy)
+                            .keyboardShortcut(.defaultAction)
                     } else {
                         Text("Card storage isn't set up on this server yet.").foregroundColor(.orange)
                     }
@@ -135,8 +138,12 @@ private struct PaymentCardsSettingsTab: View {
     }
 
     private func save() async {
+        if number.filter(\.isNumber).count < 12 {
+            message = "Enter the card number."
+            return
+        }
         guard let (month, year) = Self.parseExpiry(expiry) else {
-            message = "Enter the expiry as MM/YY."
+            message = "Enter the expiry as MM/YY, e.g. 12/30."
             return
         }
         busy = true
