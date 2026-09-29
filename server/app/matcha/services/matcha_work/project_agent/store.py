@@ -21,7 +21,7 @@ async def mark_run(run_id: UUID, *, status: str, **values: Any) -> None:
     ]
     params: list[Any] = [run_id, status]
     json_columns = {"result", "token_usage"}
-    for column in ("result", "error", "model_calls", "files_read", "token_usage"):
+    for column in ("result", "error", "model_calls", "files_read", "token_usage", "search_calls"):
         if column not in values:
             continue
         assignments.append(

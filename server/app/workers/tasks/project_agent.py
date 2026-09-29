@@ -29,13 +29,27 @@ async def _reconcile() -> None:
     from app.database import connection_or_direct
 
     async with connection_or_direct() as conn:
-        await conn.execute(
+        stale = await conn.fetch(
             """UPDATE mw_project_agent_runs
                SET status='failed', completed_at=NOW(),
                    error=COALESCE(error, 'Interrupted before completion; start the task again.')
                WHERE status IN ('queued', 'running')
-                 AND COALESCE(started_at, created_at) < NOW() - INTERVAL '15 minutes'"""
+                 AND COALESCE(started_at, created_at) < NOW() - INTERVAL '15 minutes'
+               RETURNING kind, project_id, task_id"""
         )
+    # An agent card whose run died (worker restart mid-run) would otherwise sit
+    # in In progress forever with a stale status line; say what happened.
+    from app.matcha.services.matcha_work.agent_card import board
+    from app.workers.tasks.agent_card import FAILED_NOTE
+
+    for row in stale:
+        if row["kind"] != "card_agent" or row["task_id"] is None:
+            continue
+        task = await board.set_progress(
+            row["task_id"], FAILED_NOTE.format(reason="the run was interrupted."), force=True,
+        )
+        if task:
+            await board.publish_task_updated(row["project_id"], task)
 
 
 async def _run(run_id: UUID) -> None:

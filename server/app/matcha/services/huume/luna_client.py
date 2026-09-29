@@ -143,6 +143,10 @@ class LunaResponse:
     usage: dict[str, Any] = field(default_factory=dict)
     status: str | None = None
     incomplete_details: dict[str, Any] | None = None
+    # The raw `output[]` items. Hosted tools (web_search) leave their calls and
+    # citations here rather than in `function_calls`, and the agent-card loop
+    # reads them for its provenance gate and search count.
+    output_items: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def truncated(self) -> bool:
@@ -211,6 +215,8 @@ class LunaSession:
         timeout_seconds: float = _DEFAULT_TOTAL_TIMEOUT_SECONDS,
         before_request: _RequestHook | None = None,
         after_request: _RequestHook | None = None,
+        max_tool_calls: int | None = None,
+        include: list[str] | None = None,
     ) -> LunaResponse:
         settings = get_settings()
         if not settings.openai_api_key:
@@ -246,6 +252,12 @@ class LunaSession:
         # caller's json.loads silently yields nothing.
         if response_format_json:
             payload["text"] = {"format": {"type": "json_object"}}
+        # Caps the provider's built-in (hosted) tool calls inside one response —
+        # the only lever on how many web searches a single turn can spend.
+        if max_tool_calls is not None:
+            payload["max_tool_calls"] = max_tool_calls
+        if include:
+            payload["include"] = list(include)
 
         data, attempt_started = await self._post(
             payload, model=model, api_key=settings.openai_api_key,
@@ -293,6 +305,7 @@ class LunaSession:
             usage=data.get("usage") or {},
             status=data.get("status"),
             incomplete_details=data.get("incomplete_details"),
+            output_items=[item for item in data.get("output", []) or [] if isinstance(item, dict)],
         )
 
     async def _post(

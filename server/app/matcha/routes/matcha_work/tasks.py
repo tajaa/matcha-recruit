@@ -120,6 +120,18 @@ async def create_project_task_endpoint(
     assigned_raw = body.get("assigned_to")
     assigned_to = UUID(assigned_raw) if assigned_raw else None
 
+    # An agent card starts its web run on create, so its gates (plan, monthly
+    # cap, token budget) run BEFORE the insert: a refusal must not leave a card
+    # on the board that can never run. It always starts in To do.
+    is_agent_card = body.get("category") == "agent"
+    if is_agent_card:
+        from app.matcha.services.matcha_work.agent_card import enqueue as agent_enqueue
+
+        if not _can_edit_project(_role):
+            raise HTTPException(status_code=403, detail="You have read-only access to this project.")
+        await agent_enqueue.preflight(current_user, project["company_id"])
+        body = {**body, "board_column": "todo"}
+
     try:
         result = await pt_svc.create_project_task(
             project_id=project_id,
@@ -175,6 +187,15 @@ async def create_project_task_endpoint(
             result["subtask_total"] = created
             result["subtask_done"] = 0
 
+    if is_agent_card and result.get("id"):
+        try:
+            result["agent_run"] = await agent_enqueue.enqueue_card_agent(
+                task=result, user=current_user, reason="created", skip_preflight=True,
+            )
+        except HTTPException as exc:
+            # The card exists; report why the run didn't start so the client
+            # can offer "Run again" instead of failing the create.
+            result["agent_run_error"] = exc.detail
     return result
 
 @router.patch("/projects/{project_id}/tasks/{task_id}")
@@ -314,6 +335,17 @@ async def reject_project_task_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
     if not result:
         raise HTTPException(status_code=404, detail="Task not found")
+    if result.get("category") == "agent":
+        # Sending an agent card back IS the redirect: the note becomes the next
+        # round's brief and the agent starts on it immediately.
+        from app.matcha.services.matcha_work.agent_card import enqueue as agent_enqueue
+
+        try:
+            result["agent_run"] = await agent_enqueue.enqueue_card_agent(
+                task=result, user=current_user, reason="redirect",
+            )
+        except HTTPException as exc:
+            result["agent_run_error"] = exc.detail
     return result
 
 @router.post("/projects/{project_id}/tasks/{task_id}/approve")

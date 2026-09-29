@@ -51,6 +51,10 @@ from .project_agent_runs import router as _project_agent_runs_router
 
 router.include_router(_project_agent_runs_router)
 
+from .agent_cards import router as _agent_cards_router
+
+router.include_router(_agent_cards_router)
+
 from .ticket_drafts import router as _ticket_drafts_router
 
 router.include_router(_ticket_drafts_router)

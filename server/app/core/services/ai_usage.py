@@ -156,6 +156,7 @@ _SPLIT_SERVICE_PACKAGES = {
     "matcha_work_ai",
     "matcha_work_document",
     "project_agent",
+    "agent_card",
     "project_service",
     "risk_assessment_service",
 }

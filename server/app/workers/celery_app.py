@@ -79,6 +79,7 @@ celery_app = Celery(
         "app.workers.tasks.debug_error",
         "app.workers.tasks.huume_code",
         "app.workers.tasks.project_agent",
+        "app.workers.tasks.agent_card",
         "app.workers.tasks.sales_intake_poll",
         "app.workers.tasks.pos_sales_sync",
         "app.workers.tasks.schedule_eligibility",
