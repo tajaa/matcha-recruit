@@ -82,11 +82,19 @@ struct ChannelMessageMetadata: Codable, Hashable {
     /// `kind` is agent_card_result / agent_card_prompt / agent_card_receipt.
     let kind: String?
     let promptKind: String?
+    let promptId: String?
     let taskId: String?
-    /// Live question state stamped onto history: open / answered /
-    /// superseded / expired. Absent on a just-posted question (open).
-    let promptStatus: String?
-    let answer: String?
+    /// Buy / card questions answer only to this user, so only they get buttons.
+    let ownerUserId: String?
+    /// ISO time the question stops taking answers.
+    let expiresAt: String?
+    /// Live question state: open / answered / superseded / expired. Stamped
+    /// onto history, and kept live by the `agent_card_prompt_updated` socket
+    /// event. Absent on a just-posted question (open).
+    var promptStatus: String?
+    var answer: String?
+    /// How the answer reads on the card ("Showed the result").
+    var answerText: String?
     let view: AgentChatPromptView?
     let result: AgentChatResult?
     let receipt: AgentChatReceipt?
@@ -94,13 +102,18 @@ struct ChannelMessageMetadata: Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case action, kind, answer, view, result, receipt
         case promptKind = "prompt_kind"
+        case promptId = "prompt_id"
         case taskId = "task_id"
+        case ownerUserId = "owner_user_id"
+        case expiresAt = "expires_at"
         case promptStatus = "prompt_status"
+        case answerText = "answer_text"
     }
 
     init(action: ChannelActionReference? = nil) {
         self.action = action
-        kind = nil; promptKind = nil; taskId = nil; promptStatus = nil; answer = nil
+        kind = nil; promptKind = nil; promptId = nil; taskId = nil; ownerUserId = nil; expiresAt = nil
+        promptStatus = nil; answer = nil; answerText = nil
         view = nil; result = nil; receipt = nil
     }
 
@@ -111,9 +124,13 @@ struct ChannelMessageMetadata: Codable, Hashable {
         action = try? c.decodeIfPresent(ChannelActionReference.self, forKey: .action)
         kind = try? c.decodeIfPresent(String.self, forKey: .kind)
         promptKind = try? c.decodeIfPresent(String.self, forKey: .promptKind)
+        promptId = try? c.decodeIfPresent(String.self, forKey: .promptId)
         taskId = try? c.decodeIfPresent(String.self, forKey: .taskId)
+        ownerUserId = try? c.decodeIfPresent(String.self, forKey: .ownerUserId)
+        expiresAt = try? c.decodeIfPresent(String.self, forKey: .expiresAt)
         promptStatus = try? c.decodeIfPresent(String.self, forKey: .promptStatus)
         answer = try? c.decodeIfPresent(String.self, forKey: .answer)
+        answerText = try? c.decodeIfPresent(String.self, forKey: .answerText)
         view = try? c.decodeIfPresent(AgentChatPromptView.self, forKey: .view)
         result = try? c.decodeIfPresent(AgentChatResult.self, forKey: .result)
         receipt = try? c.decodeIfPresent(AgentChatReceipt.self, forKey: .receipt)
@@ -248,7 +265,8 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
     /// Client-generated correlation ID used to reconcile optimistic-pending
     /// entries with their server echo. Round-trips through the WS payload.
     let clientMessageId: String?
-    let metadata: ChannelMessageMetadata?
+    /// `var` so a live agent-card question update can restamp its state.
+    var metadata: ChannelMessageMetadata?
     /// Local-only flag: true while a sent message is awaiting server echo.
     /// Not encoded; the custom decoder always sets this to false. Mutable
     /// so the failure-timeout in ChannelChatViewModel can flip it off when

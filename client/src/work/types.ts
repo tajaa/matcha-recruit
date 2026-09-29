@@ -1315,10 +1315,18 @@ export type AgentChatReceipt = {
 export type AgentChatMetadata = {
   kind?: 'agent_card_result' | 'agent_card_prompt' | 'agent_card_receipt'
   prompt_kind?: 'show_result' | 'purchase' | 'pick_card'
+  prompt_id?: string
   task_id?: string
-  /** Stamped onto history: open / answered / superseded / expired. */
+  /** Buy / card questions: only this user may answer, so only they get buttons. */
+  owner_user_id?: string
+  /** ISO time the question stops taking answers. */
+  expires_at?: string
+  /** open / answered / superseded / expired: stamped onto history and kept
+   *  live by the `agent_card_prompt_updated` socket event. */
   prompt_status?: string
   answer?: string | null
+  /** How the answer reads on the card ("Showed the result"). */
+  answer_text?: string | null
   view?: AgentChatPromptView
   result?: AgentChatResult
   receipt?: AgentChatReceipt

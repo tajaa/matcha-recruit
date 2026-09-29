@@ -102,7 +102,12 @@ extension ChannelDetailView {
     /// One-tap threaded reply (Espresso agent-card question buttons): sent
     /// through the normal chat path, so the server treats it exactly like a
     /// typed reply to that question.
-    func quickReply(to message: ChannelMessage, text: String) {
+    /// One-tap threaded reply (agent-card question buttons). Never queued:
+    /// offline, it sends nothing and returns false, and the card keeps its
+    /// buttons, since a stale answer replayed later is worse than none.
+    @discardableResult
+    func quickReply(to message: ChannelMessage, text: String) -> Bool {
+        guard ws.isConnected else { return false }
         let cmid = UUID().uuidString
         appendOptimisticMessage(
             clientMessageId: cmid,
@@ -118,6 +123,7 @@ extension ChannelDetailView {
         )
         ws.sendMessage(channelId: channelId, content: text, replyToId: message.id, clientMessageId: cmid)
         selfSendScroll += 1
+        return true
     }
 
     func send(_ draft: String) {

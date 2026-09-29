@@ -4,6 +4,7 @@ import { getChannelMessages } from '../../api/channels'
 import type { ChannelMessage } from '../../api/channels'
 import { mergeMessages, upsertMessage } from '../../api/channelMessages'
 import { ChannelSocket, getSharedChannelSocket } from '../../api/channelSocket'
+import type { AgentCardPromptUpdate } from '../../api/channelSocket'
 import { useToast } from '../../../components/ui'
 
 type OnlineUser = { id: string; name: string; avatar_url: string | null }
@@ -145,6 +146,28 @@ export function useChannelSocket({
     }
     socket.addChannelActionListener(handleChannelActionUpdated)
 
+    // An Espresso agent-card question closed: stamp its message so every open
+    // chat drops the buttons (history carries the same fields on reload).
+    const handleAgentCardPromptUpdated = (data: AgentCardPromptUpdate) => {
+      if (data.channel_id !== channelId) return
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.metadata?.kind === 'agent_card_prompt' && message.metadata.prompt_id === data.prompt_id
+            ? {
+                ...message,
+                metadata: {
+                  ...message.metadata,
+                  prompt_status: data.status,
+                  answer: data.answer,
+                  answer_text: data.answer_text,
+                },
+              }
+            : message
+        )
+      )
+    }
+    socket.addAgentCardPromptListener(handleAgentCardPromptUpdated)
+
     // Server rejected a join_room/message send (not a member, bad channel,
     // over the length cap) — surface it instead of leaving a pending
     // optimistic row (or a stuck composer) with no explanation.
@@ -210,6 +233,7 @@ export function useChannelSocket({
       socket.onMessageEdited = null
       socket.onReactionUpdate = null
       socket.removeChannelActionListener(handleChannelActionUpdated)
+      socket.removeAgentCardPromptListener(handleAgentCardPromptUpdated)
       socket.onServerError = null
       // Unsubscribe rather than nulling a shared slot: useChannelNotifications
       // and useLiveKitCall hold the same singleton, and `= null` used to remove

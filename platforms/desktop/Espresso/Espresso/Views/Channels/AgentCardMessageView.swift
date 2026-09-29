@@ -18,9 +18,19 @@ struct AgentCardMessageView: View {
     /// Message text without the leading ticket marker (used for a question's
     /// heading when the payload has none).
     let text: String
-    let onQuickReply: ((String) -> Void)?
+    /// The viewer: a buy / card question shows its buttons only to its owner.
+    let currentUserId: String
+    /// Sends the reply; false when it couldn't go out (offline).
+    let onQuickReply: ((String) -> Bool)?
 
-    @State private var sentReply: String?
+    /// The label of a pressed button, until the server closes the question
+    /// (live `agent_card_prompt_updated`) or `sendingWindow` passes. If the
+    /// question stays open (e.g. "Buy it" before any card is saved, where
+    /// Espresso says so and keeps asking), the buttons come back.
+    @State private var sending: String?
+    @State private var offline = false
+    @State private var expired = false
+    private static let sendingWindow: Duration = .seconds(8)
 
     var body: some View {
         Group {
@@ -200,11 +210,14 @@ struct AgentCardMessageView: View {
 
     @ViewBuilder
     private func promptCard(_ view: AgentChatPromptView) -> some View {
-        let status = meta.promptStatus ?? "open"
-        let answered = sentReply != nil || status != "open"
+        let status = (meta.promptStatus ?? "open") != "open" ? (meta.promptStatus ?? "open") : (expired ? "expired" : "open")
+        // Buy / card questions answer only to their owner; the server refuses anyone else.
+        let forSomeoneElse = meta.ownerUserId.map { $0 != currentUserId } ?? false
         card {
             VStack(alignment: .leading, spacing: 10) {
-                Text(heading(view))
+                // The server's fixed question text; the message content holds the
+                // user-written card title and is never parsed for it.
+                Text(view.question ?? text)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(appState.themeText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -228,34 +241,61 @@ struct AgentCardMessageView: View {
                     .padding(8)
                     .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(appState.themeText.opacity(0.04)))
                 }
-                if answered {
-                    Label(statusText(status), systemImage: status == "answered" || sentReply != nil ? "checkmark.circle.fill" : "clock")
+                if status != "open" {
+                    Label(closedText(status), systemImage: status == "answered" ? "checkmark.circle.fill" : "clock")
                         .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(appState.themeTextSecondary)
+                } else if let sending {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Sending \u{201C}\(sending)\u{201D}\u{2026}")
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(appState.themeTextSecondary)
+                } else if forSomeoneElse {
+                    Text("Waiting for the buyer to answer.")
+                        .font(.system(size: 11))
                         .foregroundColor(appState.themeTextSecondary)
                 } else {
                     buttonRow(view.buttons)
+                    if offline {
+                        Text("Couldn't send: you're offline. Try again once you're reconnected.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.orange)
+                    }
                 }
             }
         }
-    }
-
-    private func heading(_ view: AgentChatPromptView) -> String {
-        if meta.promptKind == "show_result" {
-            // "I finished "X". Want to see what I found?" — drop the typed-reply hint.
-            let trimmed = text.replacingOccurrences(of: "\\s+Reply\\b[\\s\\S]*$", with: "", options: .regularExpression)
-            return trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
+        .task(id: sending) {
+            guard sending != nil else { return }
+            try? await Task.sleep(for: Self.sendingWindow)
+            if !Task.isCancelled { sending = nil }
         }
-        return view.question ?? text
+        .task(id: meta.expiresAt) {
+            // Retire the buttons on time while the card is on screen.
+            guard let raw = meta.expiresAt, let deadline = Self.parseDate(raw) else { return }
+            let wait = deadline.timeIntervalSinceNow
+            if wait > 0 {
+                try? await Task.sleep(for: .seconds(wait))
+                if Task.isCancelled { return }
+            }
+            expired = true
+        }
     }
 
-    private func statusText(_ status: String) -> String {
-        if let sentReply { return "You replied \u{201C}\(sentReply)\u{201D}" }
+    private func closedText(_ status: String) -> String {
         switch status {
-        case "answered": return meta.answer.map { "Answered: \($0)" } ?? "Answered"
+        case "answered": return meta.answerText ?? "Answered"
         case "superseded": return "Replaced by a newer result"
         case "expired": return "This question expired"
         default: return "Closed"
         }
+    }
+
+    private static func parseDate(_ raw: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
     }
 
     private func buttonRow(_ buttons: [AgentChatButton]) -> some View {
@@ -283,8 +323,9 @@ struct AgentCardMessageView: View {
             }
         }
         let action = {
-            sentReply = button.label
-            onQuickReply?(button.reply)
+            let sent = onQuickReply?(button.reply) ?? false
+            offline = !sent
+            if sent { sending = button.label }
         }
         if button.style == "primary" {
             Button(action: action) { label }

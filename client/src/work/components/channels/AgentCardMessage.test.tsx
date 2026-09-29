@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import AgentCardMessage from './AgentCardMessage'
 import { isAgentCardMessage, splitTicketToken } from './agentCardMessageHelpers'
 import type { AgentChatMetadata } from '../../types'
@@ -45,40 +45,99 @@ describe('AgentCardMessage', () => {
     expect(screen.getByText(/7 sources/)).toBeTruthy()
   })
 
-  it('question buttons send their reply once and then show what was sent', () => {
-    const onQuickReply = vi.fn()
-    const meta: AgentChatMetadata = {
-      kind: 'agent_card_prompt',
-      prompt_kind: 'purchase',
-      view: {
-        question: 'Want me to buy it?',
-        offer: { item_name: 'Anker 6 ft USB-C cable', retailer: 'Anker store', price_text: '$19.99' },
-        buttons: [
-          { label: 'Buy it', reply: 'Buy it', style: 'primary' },
-          { label: 'No thanks', reply: 'No thanks', style: 'secondary' },
-        ],
-      },
-    }
-    render(<AgentCardMessage metadata={meta} content="Want me to buy it? Reply yes" onQuickReply={onQuickReply} />)
+  const buyQuestion: AgentChatMetadata = {
+    kind: 'agent_card_prompt',
+    prompt_kind: 'purchase',
+    prompt_id: 'p1',
+    owner_user_id: 'u1',
+    view: {
+      question: 'Want me to buy it?',
+      offer: { item_name: 'Anker 6 ft USB-C cable', retailer: 'Anker store', price_text: '$19.99' },
+      buttons: [
+        { label: 'Buy it', reply: 'Buy it', style: 'primary' },
+        { label: 'No thanks', reply: 'No thanks', style: 'secondary' },
+      ],
+    },
+  }
+
+  it('a pressed button shows it is sending until the server closes the question', () => {
+    const onQuickReply = vi.fn(() => true)
+    const { rerender } = render(
+      <AgentCardMessage metadata={buyQuestion} content="Want me to buy it? Reply yes" userId="u1" onQuickReply={onQuickReply} />,
+    )
     expect(screen.getByText('Want me to buy it?')).toBeTruthy()
     fireEvent.click(screen.getByText('Buy it'))
     expect(onQuickReply).toHaveBeenCalledWith('Buy it')
     expect(screen.queryByText('No thanks')).toBeNull()
-    expect(screen.getByText('You replied “Buy it”')).toBeTruthy()
+    expect(screen.getByText('Sending “Buy it”…')).toBeTruthy()
+    // The socket's agent_card_prompt_updated event stamps the message.
+    rerender(
+      <AgentCardMessage
+        metadata={{ ...buyQuestion, prompt_status: 'answered', answer: 'yes', answer_text: 'Going ahead with the purchase' }}
+        content="" userId="u1" onQuickReply={onQuickReply}
+      />,
+    )
+    expect(screen.getByText('Going ahead with the purchase')).toBeTruthy()
+    expect(screen.queryByRole('button')).toBeNull()
   })
 
-  it('an answered question from history shows no buttons', () => {
+  it('buttons come back if the question stays open (e.g. no saved card yet)', () => {
+    vi.useFakeTimers()
+    try {
+      render(<AgentCardMessage metadata={buyQuestion} content="" userId="u1" onQuickReply={() => true} />)
+      fireEvent.click(screen.getByText('Buy it'))
+      expect(screen.queryByText('Buy it')).toBeNull()
+      act(() => { vi.advanceTimersByTime(8000) })
+      expect(screen.getByText('Buy it')).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('an offline press keeps the buttons and says so', () => {
+    render(<AgentCardMessage metadata={buyQuestion} content="" userId="u1" onQuickReply={() => false} />)
+    fireEvent.click(screen.getByText('Buy it'))
+    expect(screen.getByText('Buy it')).toBeTruthy()
+    expect(screen.getByText(/Couldn't send: you're offline/)).toBeTruthy()
+    expect(screen.queryByText(/Sending/)).toBeNull()
+  })
+
+  it("someone else's buy question shows no buttons", () => {
+    render(<AgentCardMessage metadata={buyQuestion} content="" userId="u2" onQuickReply={() => true} />)
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.getByText('Waiting for the buyer to answer.')).toBeTruthy()
+  })
+
+  it('a question past its expiry shows as expired without a reload', () => {
+    const meta = { ...buyQuestion, expires_at: '2020-01-01T00:00:00+00:00' }
+    render(<AgentCardMessage metadata={meta} content="" userId="u1" onQuickReply={() => true} />)
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.getByText('This question expired')).toBeTruthy()
+  })
+
+  it('an answered question from history shows its answer and no buttons', () => {
     const meta: AgentChatMetadata = {
       kind: 'agent_card_prompt',
       prompt_kind: 'show_result',
       prompt_status: 'answered',
       answer: 'yes',
-      view: { question: 'Want to see what I found?', buttons: [{ label: 'Show me', reply: 'Show me', style: 'primary' }] },
+      answer_text: 'Showed the result',
+      view: { question: 'I finished it. Want to see what I found?', buttons: [{ label: 'Show me', reply: 'Show me', style: 'primary' }] },
     }
     render(<AgentCardMessage metadata={meta} content={'I finished "Balm". Want to see what I found? Reply yes or no.'} />)
-    expect(screen.getByText('I finished "Balm". Want to see what I found?')).toBeTruthy()
+    expect(screen.getByText('I finished it. Want to see what I found?')).toBeTruthy()
     expect(screen.queryByRole('button')).toBeNull()
-    expect(screen.getByText('Answered: yes')).toBeTruthy()
+    expect(screen.getByText('Showed the result')).toBeTruthy()
+  })
+
+  it('the heading is the server question, never cut from the user-titled content', () => {
+    const meta: AgentChatMetadata = {
+      kind: 'agent_card_prompt',
+      prompt_kind: 'show_result',
+      view: { question: 'I finished it. Want to see what I found?', buttons: [] },
+    }
+    render(<AgentCardMessage metadata={meta} content={'I finished "Find a Reply-All blocker". Want to see what I found? Reply yes or no.'} />)
+    expect(screen.getByText('I finished it. Want to see what I found?')).toBeTruthy()
   })
 
   it('renders the receipt with test-mode labelling', () => {

@@ -18,7 +18,7 @@ interface MessageListProps {
   onReply: (msg: ChannelMessage) => void
   onRetry: (msg: ChannelMessage) => void
   /** Send a threaded reply to `msg` (Espresso agent-card question buttons). */
-  onQuickReply?: (msg: ChannelMessage, reply: string) => void
+  onQuickReply?: (msg: ChannelMessage, reply: string) => boolean
   onLoadOlder: () => void
   hasMore: boolean
   loadingOlder: boolean
@@ -173,6 +173,7 @@ export default function MessageList({
                       <AgentCardMessage
                         metadata={msg.metadata}
                         content={body}
+                        userId={userId}
                         onQuickReply={onQuickReply ? (reply) => onQuickReply(msg, reply) : undefined}
                       />
                     </>

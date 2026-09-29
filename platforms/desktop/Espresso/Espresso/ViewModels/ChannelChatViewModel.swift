@@ -348,6 +348,18 @@ final class ChannelChatViewModel {
                 self.messages[idx].editedAt = editedAt ?? ISO8601DateFormatter().string(from: Date())
             }
         }
+        sub.onAgentCardPromptUpdated = { [weak self] update in
+            guard let self, update.channelId == self.channelId else { return }
+            // Every question message carries its prompt id; restamp its state
+            // so the card drops its buttons without a reload.
+            for idx in self.messages.indices
+            where self.messages[idx].metadata?.kind == "agent_card_prompt"
+                && self.messages[idx].metadata?.promptId == update.promptId {
+                self.messages[idx].metadata?.promptStatus = update.status
+                self.messages[idx].metadata?.answer = update.answer
+                self.messages[idx].metadata?.answerText = update.answerText
+            }
+        }
         sub.onReactionUpdate = { [weak self] messageId, reactions in
             guard let self else { return }
             if let idx = self.messages.firstIndex(where: { $0.id == messageId }) {

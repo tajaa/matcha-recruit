@@ -19,6 +19,17 @@ struct ChannelSubscriber {
     var onUserLeft: ((ChannelOnlineUser) -> Void)?
     var onTyping: ((_ userId: String, _ name: String) -> Void)?
     var onError: ((String) -> Void)?
+    /// An Espresso agent-card question closed (answered / superseded).
+    var onAgentCardPromptUpdated: ((AgentCardPromptUpdate) -> Void)?
+}
+
+/// `agent_card_prompt_updated` (server: agent_card/chat_flow.py).
+struct AgentCardPromptUpdate {
+    let channelId: String
+    let promptId: String
+    let status: String
+    let answer: String?
+    let answerText: String?
 }
 
 @MainActor
@@ -414,6 +425,16 @@ final class ChannelsWebSocket: NSObject {
                let content = obj["content"] as? String {
                 let editedAt = obj["edited_at"] as? String
                 dispatch { $0.onMessageEdited?(messageId, content, editedAt) }
+            }
+        case "agent_card_prompt_updated":
+            if let channelId = obj["channel_id"] as? String,
+               let promptId = obj["prompt_id"] as? String,
+               let status = obj["status"] as? String {
+                let update = AgentCardPromptUpdate(
+                    channelId: channelId, promptId: promptId, status: status,
+                    answer: obj["answer"] as? String, answerText: obj["answer_text"] as? String,
+                )
+                dispatch { $0.onAgentCardPromptUpdated?(update) }
             }
         case "reaction_update":
             if let messageId = obj["message_id"] as? String,

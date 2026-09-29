@@ -22,7 +22,7 @@ struct ChannelMessageRowView: View {
     var onCreateTicket: ((ChannelMessage) -> Void)? = nil
     /// Send a threaded reply to this message (Espresso's agent-card question
     /// buttons). nil hides nothing; the buttons just stay disabled.
-    var onQuickReply: ((ChannelMessage, String) -> Void)? = nil
+    var onQuickReply: ((ChannelMessage, String) -> Bool)? = nil
 
     var body: some View {
         // iMessage-style sides: my messages render right in an accent bubble
@@ -90,6 +90,7 @@ struct ChannelMessageRowView: View {
                             AgentCardMessageView(
                                 meta: meta,
                                 text: displayBody,
+                                currentUserId: currentUserId,
                                 onQuickReply: onQuickReply.map { send in { reply in send(msg, reply) } }
                             )
                         } else if msg.metadata?.action?.kind == "event_assignment" {

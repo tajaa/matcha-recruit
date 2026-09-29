@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
-  BadgeCheck, CheckCircle2, Clock, ExternalLink, ImageIcon, ShoppingBag, Star, XOctagon,
+  BadgeCheck, CheckCircle2, Clock, ExternalLink, ImageIcon, Loader2, ShoppingBag, Star, XOctagon,
 } from 'lucide-react'
 import type {
   AgentChatButton, AgentChatMetadata, AgentChatPick, AgentChatPromptView, AgentChatReceipt, AgentChatResult,
@@ -137,48 +137,80 @@ function ResultCard({ result }: { result: AgentChatResult }) {
   )
 }
 
-function statusText(meta: AgentChatMetadata, sent: string | null): string {
-  if (sent) return `You replied “${sent}”`
-  switch (meta.prompt_status) {
-    case 'answered': return meta.answer ? `Answered: ${meta.answer}` : 'Answered'
+function closedText(meta: AgentChatMetadata, status: string): string {
+  switch (status) {
+    case 'answered': return meta.answer_text || 'Answered'
     case 'superseded': return 'Replaced by a newer result'
     case 'expired': return 'This question expired'
     default: return 'Closed'
   }
 }
 
+/** True once `expiresAt` has passed, flipping on time while the card is open. */
+function useExpired(expiresAt?: string): boolean {
+  const deadline = expiresAt ? Date.parse(expiresAt) : Number.NaN
+  const [expired, setExpired] = useState(() => !Number.isNaN(deadline) && deadline <= Date.now())
+  useEffect(() => {
+    if (Number.isNaN(deadline) || expired) return
+    // setTimeout caps at 2^31-1 ms (~24 days); questions live 7 days at most.
+    const timer = setTimeout(() => setExpired(true), Math.min(Math.max(deadline - Date.now(), 0), 2 ** 31 - 1))
+    return () => clearTimeout(timer)
+  }, [deadline, expired])
+  return expired
+}
+
+/** How long a pressed button waits for the server to close the question.
+ *  If it stays open (e.g. "Buy it" before any card is saved, where Espresso
+ *  says so and keeps asking), the buttons come back. */
+const SENDING_MS = 8000
+
 function PromptCard({
-  meta, view, heading, onQuickReply,
+  meta, view, heading, userId, onQuickReply,
 }: {
   meta: AgentChatMetadata
   view: AgentChatPromptView
   heading: string
-  onQuickReply?: (reply: string) => void
+  userId?: string
+  onQuickReply?: (reply: string) => boolean
 }) {
-  const [sent, setSent] = useState<string | null>(null)
-  const open = !sent && (meta.prompt_status ?? 'open') === 'open'
+  const [sending, setSending] = useState<string | null>(null)
+  const [offline, setOffline] = useState(false)
+  const expired = useExpired(meta.expires_at)
+  useEffect(() => {
+    if (!sending) return
+    const timer = setTimeout(() => setSending(null), SENDING_MS)
+    return () => clearTimeout(timer)
+  }, [sending])
+  const status = meta.prompt_status && meta.prompt_status !== 'open' ? meta.prompt_status : expired ? 'expired' : 'open'
+  // Buy / card questions answer only to their owner; the server refuses anyone else.
+  const forSomeoneElse = !!meta.owner_user_id && meta.owner_user_id !== userId
   const stacked = view.buttons.some((b) => b.detail)
   const offer = view.offer
   const press = (button: AgentChatButton) => {
-    setSent(button.label)
-    onQuickReply?.(button.reply)
+    const sent = onQuickReply?.(button.reply) ?? false
+    setOffline(!sent)
+    if (sent) setSending(button.label)
   }
-  return (
-    <Card>
-      <p className="text-sm font-semibold text-w-text">{heading}</p>
-      {offer && (
-        <div className="flex items-center gap-2.5 rounded-xl bg-w-surface2/60 p-2">
-          <Photo url={offer.image_url} size={56} alt={offer.item_name} />
-          <div className="min-w-0 flex-1">
-            <p className="line-clamp-2 text-xs font-semibold text-w-text">{offer.item_name}</p>
-            {offer.retailer && <p className="text-[11px] text-w-dim">{offer.retailer}</p>}
-          </div>
-          {offer.price_text
-            ? <span className="text-base font-bold text-w-text">{offer.price_text}</span>
-            : <span className="text-[11px] text-orange-300">Price not confirmed</span>}
-        </div>
-      )}
-      {open ? (
+  let footer: React.ReactNode
+  if (status !== 'open') {
+    footer = (
+      <p className="flex items-center gap-1.5 text-[11px] text-w-dim">
+        {status === 'answered' ? <CheckCircle2 size={12} /> : <Clock size={12} />}
+        {closedText(meta, status)}
+      </p>
+    )
+  } else if (sending) {
+    footer = (
+      <p className="flex items-center gap-1.5 text-[11px] text-w-dim">
+        <Loader2 size={12} className="animate-spin" />
+        Sending “{sending}”…
+      </p>
+    )
+  } else if (forSomeoneElse) {
+    footer = <p className="text-[11px] text-w-dim">Waiting for the buyer to answer.</p>
+  } else {
+    footer = (
+      <>
         <div className={stacked ? 'flex flex-col items-start gap-1.5' : 'flex flex-wrap gap-2'}>
           {view.buttons.map((button) => (
             <button
@@ -197,12 +229,28 @@ function PromptCard({
             </button>
           ))}
         </div>
-      ) : (
-        <p className="flex items-center gap-1.5 text-[11px] text-w-dim">
-          {sent || meta.prompt_status === 'answered' ? <CheckCircle2 size={12} /> : <Clock size={12} />}
-          {statusText(meta, sent)}
-        </p>
+        {offline && (
+          <p className="text-[11px] text-orange-300">Couldn't send: you're offline. Try again once you're reconnected.</p>
+        )}
+      </>
+    )
+  }
+  return (
+    <Card>
+      <p className="text-sm font-semibold text-w-text">{heading}</p>
+      {offer && (
+        <div className="flex items-center gap-2.5 rounded-xl bg-w-surface2/60 p-2">
+          <Photo url={offer.image_url} size={56} alt={offer.item_name} />
+          <div className="min-w-0 flex-1">
+            <p className="line-clamp-2 text-xs font-semibold text-w-text">{offer.item_name}</p>
+            {offer.retailer && <p className="text-[11px] text-w-dim">{offer.retailer}</p>}
+          </div>
+          {offer.price_text
+            ? <span className="text-base font-bold text-w-text">{offer.price_text}</span>
+            : <span className="text-[11px] text-orange-300">Price not confirmed</span>}
+        </div>
       )}
+      {footer}
     </Card>
   )
 }
@@ -269,20 +317,25 @@ function ReceiptCard({ receipt: r }: { receipt: AgentChatReceipt }) {
 }
 
 export default function AgentCardMessage({
-  metadata, content, onQuickReply,
+  metadata, content, userId, onQuickReply,
 }: {
   metadata: AgentChatMetadata
   /** Message text without the ticket marker (a question's heading fallback). */
   content: string
-  onQuickReply?: (reply: string) => void
+  /** The viewer: a buy / card question shows its buttons only to its owner. */
+  userId?: string
+  /** Sends the reply; false when it couldn't go out (offline). */
+  onQuickReply?: (reply: string) => boolean
 }) {
   if (metadata.kind === 'agent_card_result' && metadata.result) return <ResultCard result={metadata.result} />
   if (metadata.kind === 'agent_card_receipt' && metadata.receipt) return <ReceiptCard receipt={metadata.receipt} />
   if (metadata.kind === 'agent_card_prompt' && metadata.view) {
-    const heading = metadata.prompt_kind === 'show_result'
-      ? content.replace(/\s+Reply\b[\s\S]*$/, '').trim()  // drop the typed-reply hint
-      : metadata.view.question || content
-    return <PromptCard meta={metadata} view={metadata.view} heading={heading} onQuickReply={onQuickReply} />
+    // The heading is the server's fixed question text; the content holds the
+    // user-written card title and is never parsed for it.
+    const heading = metadata.view.question || content
+    return (
+      <PromptCard meta={metadata} view={metadata.view} heading={heading} userId={userId} onQuickReply={onQuickReply} />
+    )
   }
   return null
 }

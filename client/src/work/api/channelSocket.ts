@@ -12,6 +12,14 @@ type ChannelActionHandler = (update: ChannelActionUpdate) => void
 type NotificationHandler = (notification: MWNotification) => void
 /** `sym_chat.updated` — the shared shape of a sym-chat changed; open pages refetch. */
 export type SymChatEvent = { sym_chat_id: string; status?: string }
+/** An Espresso agent-card question closed (server: agent_card/chat_flow.py). */
+export type AgentCardPromptUpdate = {
+  channel_id: string
+  prompt_id: string
+  status: string
+  answer: string | null
+  answer_text: string | null
+}
 type SymChatHandler = (event: SymChatEvent) => void
 
 /** Tab-session outbox for sends attempted while the socket was down. It
@@ -85,6 +93,7 @@ export class ChannelSocket extends BaseSocket {
   private channelActionListeners = new ListenerSet<ChannelActionUpdate>()
   private notificationListeners = new ListenerSet<MWNotification>()
   private symChatListeners = new ListenerSet<SymChatEvent>()
+  private agentCardPromptListeners = new ListenerSet<AgentCardPromptUpdate>()
 
   // Deprecated single-handler; kept for backward compat. Setting this adds
   // the handler to the multi-listener set. Prefer addMessageListener.
@@ -109,6 +118,15 @@ export class ChannelSocket extends BaseSocket {
 
   removeChannelActionListener(handler: ChannelActionHandler) {
     this.channelActionListeners.remove(handler)
+  }
+
+  /** Espresso agent-card question closed (answered / superseded). */
+  addAgentCardPromptListener(handler: (update: AgentCardPromptUpdate) => void) {
+    this.agentCardPromptListeners.add(handler)
+  }
+
+  removeAgentCardPromptListener(handler: (update: AgentCardPromptUpdate) => void) {
+    this.agentCardPromptListeners.remove(handler)
   }
 
   addNotificationListener(handler: NotificationHandler) {
@@ -314,6 +332,17 @@ export class ChannelSocket extends BaseSocket {
         if (notification) this.notificationListeners.dispatch(notification)
         break
       }
+      case 'agent_card_prompt_updated':
+        if (typeof data.channel_id === 'string' && typeof data.prompt_id === 'string' && typeof data.status === 'string') {
+          this.agentCardPromptListeners.dispatch({
+            channel_id: data.channel_id,
+            prompt_id: data.prompt_id,
+            status: data.status,
+            answer: typeof data.answer === 'string' ? data.answer : null,
+            answer_text: typeof data.answer_text === 'string' ? data.answer_text : null,
+          })
+        }
+        break
       case 'sym_chat.updated':
         if (typeof data.sym_chat_id === 'string') {
           this.symChatListeners.dispatch({
@@ -398,12 +427,15 @@ export class ChannelSocket extends BaseSocket {
     this.joinedRooms.delete(channelId)
   }
 
+  /** `queueIfOffline: false` sends only if the socket is open right now
+   *  (quick-reply buttons: a stale answer replayed later is worse than none). */
   sendMessage(
     channelId: string,
     content: string,
     attachments?: { url: string; filename: string; content_type: string; size: number }[],
     clientMessageId?: string,
     replyToId?: string,
+    { queueIfOffline = true }: { queueIfOffline?: boolean } = {},
   ): boolean {
     const sent = this.send({
       type: 'message',
@@ -413,7 +445,7 @@ export class ChannelSocket extends BaseSocket {
       ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
       ...(replyToId ? { reply_to_id: replyToId } : {}),
     })
-    if (!sent && clientMessageId) {
+    if (!sent && clientMessageId && queueIfOffline) {
       this._enqueueOutbox({
         channel_id: channelId, content, attachments,
         client_message_id: clientMessageId, reply_to_id: replyToId,
