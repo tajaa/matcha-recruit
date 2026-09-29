@@ -69,6 +69,10 @@ from .discipline import (  # noqa: F401
     record_discipline_signed,
     record_discipline_refused,
 )
+from .access import (  # noqa: F401
+    hidden_from_user,
+    resolve_project_access,
+)
 from .collaborators import (  # noqa: F401
     create_project_chat,
     list_project_chats,

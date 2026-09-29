@@ -19,10 +19,140 @@ struct SettingsView: View {
                 .tabItem { Label("Account", systemImage: "person.circle") }
             ConnectorsSettingsTab()
                 .tabItem { Label("AI Connectors", systemImage: "powerplug") }
+            // Agent-card purchases are internal-only (platform admins) in v1.
+            if appState.currentUser?.role == "admin" {
+                PaymentCardsSettingsTab()
+                    .tabItem { Label("Payment Cards", systemImage: "creditcard") }
+            }
             AboutSettingsTab()
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 480, height: 360)
+    }
+}
+
+// MARK: - Payment Cards
+
+/// Saved cards for agent-card purchases. When Espresso asks in a project chat
+/// "want me to buy it?", you reply with a card's last 4 digits. The number is
+/// sent once, encrypted on the server and never shown again; there is no
+/// security-code field, and card numbers never go through chat.
+private struct PaymentCardsSettingsTab: View {
+    @State private var state: MWPaymentCardsState?
+    @State private var number = ""
+    @State private var expiry = ""
+    @State private var label = ""
+    @State private var busy = false
+    @State private var message: String?
+
+    var body: some View {
+        Form {
+            Section {
+                if let state {
+                    if state.cards.isEmpty {
+                        Text("No saved cards.").foregroundColor(.secondary)
+                    }
+                    ForEach(state.cards) { card in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(card.brandName) ending \(card.last4)")
+                                Text(Self.caption(card)).font(.caption).foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Button("Remove") { Task { await remove(card) } }
+                                .disabled(busy)
+                        }
+                    }
+                } else if message == nil {
+                    ProgressView().controlSize(.small)
+                }
+            } header: {
+                Text("Saved cards").font(.subheadline).bold()
+            } footer: {
+                Text("When Espresso asks in a project chat whether to buy something, reply with a card's last 4 digits. Never paste a card number in chat.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+            if let state, state.enabled {
+                Section {
+                    if state.configured {
+                        TextField("Card number", text: $number)
+                            .textContentType(.creditCardNumber)
+                        TextField("Expiry (MM/YY)", text: $expiry)
+                        TextField("Label (optional)", text: $label)
+                        Button(busy ? "Saving…" : "Save card") { Task { await save() } }
+                            .disabled(busy || number.isEmpty || expiry.isEmpty)
+                    } else {
+                        Text("Card storage isn't set up on this server yet.").foregroundColor(.orange)
+                    }
+                } header: {
+                    Text("Add a card").font(.subheadline).bold()
+                } footer: {
+                    Text("Encrypted on the server and never shown again. No security code is asked for or stored.")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+            }
+            if let message {
+                Text(message).font(.caption).foregroundColor(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .task { await load() }
+    }
+
+    private static func caption(_ card: MWPaymentCard) -> String {
+        let expiry = String(format: "%02d/%02d", card.expMonth, card.expYear % 100)
+        return card.label.isEmpty ? "Expires \(expiry)" : "\(card.label) · expires \(expiry)"
+    }
+
+    /// "03/31" or "3/2031" → (3, 2031).
+    static func parseExpiry(_ text: String) -> (month: Int, year: Int)? {
+        let parts = text.split(separator: "/").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parts.count == 2, let month = Int(parts[0]), let year = Int(parts[1]),
+              (1...12).contains(month), parts[1].count == 2 || parts[1].count == 4 else {
+            return nil
+        }
+        return (month, parts[1].count == 2 ? 2000 + year : year)
+    }
+
+    private func load() async {
+        do {
+            state = try await MatchaWorkService.shared.paymentCards()
+        } catch {
+            message = (error as? APIError)?.serverDetail ?? error.localizedDescription
+        }
+    }
+
+    private func save() async {
+        guard let (month, year) = Self.parseExpiry(expiry) else {
+            message = "Enter the expiry as MM/YY."
+            return
+        }
+        busy = true
+        message = nil
+        defer { busy = false }
+        do {
+            _ = try await MatchaWorkService.shared.addPaymentCard(
+                number: number, expMonth: month, expYear: year, label: label
+            )
+            number = ""
+            expiry = ""
+            label = ""
+            message = "Card saved."
+            await load()
+        } catch {
+            message = (error as? APIError)?.serverDetail ?? error.localizedDescription
+        }
+    }
+
+    private func remove(_ card: MWPaymentCard) async {
+        busy = true
+        defer { busy = false }
+        do {
+            try await MatchaWorkService.shared.deletePaymentCard(id: card.id)
+            await load()
+        } catch {
+            message = (error as? APIError)?.serverDetail ?? error.localizedDescription
+        }
     }
 }
 

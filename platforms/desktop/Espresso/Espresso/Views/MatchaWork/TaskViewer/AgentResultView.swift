@@ -12,6 +12,7 @@ struct AgentResultView: View {
     let canEdit: Bool
 
     @State private var runs: [MWAgentRun]?
+    @State private var purchases: [MWAgentPurchase] = []
     @State private var selectedRunId: String?
     @State private var busy = false
     @State private var errorText: String?
@@ -72,6 +73,9 @@ struct AgentResultView: View {
             if let result = shown?.result {
                 AgentResultBody(result: result)
             }
+            if !purchases.isEmpty {
+                AgentPurchasesView(purchases: purchases)
+            }
 
             if let errorText {
                 Text(errorText).font(.ticket(size: 11)).foregroundColor(.orange)
@@ -105,7 +109,9 @@ struct AgentResultView: View {
 
     private func load() async {
         do {
-            runs = try await MatchaWorkService.shared.agentRuns(projectId: projectId, taskId: task.id)
+            let res = try await MatchaWorkService.shared.agentRuns(projectId: projectId, taskId: task.id)
+            runs = res.runs
+            purchases = res.purchases ?? []
         } catch {
             errorText = error.localizedDescription
             if runs == nil { runs = [] }
@@ -128,6 +134,43 @@ struct AgentResultView: View {
         } catch {
             errorText = error.localizedDescription
         }
+    }
+}
+
+/// Purchases approved in the project chat. v1 records a handoff and charges
+/// nothing; the person finishes checkout at the link.
+private struct AgentPurchasesView: View {
+    let purchases: [MWAgentPurchase]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Purchases", systemImage: "cart").font(.ticket(size: 11)).foregroundColor(.secondary)
+            ForEach(purchases) { purchase in
+                HStack(spacing: 6) {
+                    Text(Self.line(purchase)).font(.ticket(size: 11))
+                    Text("· card ending \(purchase.cardLast4)").font(.ticket(size: 11)).foregroundColor(.secondary)
+                    Spacer()
+                    if let url = URL(string: purchase.checkoutUrl),
+                       ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+                        Button("Checkout") { NSWorkspace.shared.open(url) }
+                            .controlSize(.small)
+                    }
+                }
+            }
+            Text("Approved in chat. Nothing was charged: finish checkout at the link.")
+                .font(.ticket(size: 10)).foregroundColor(.secondary)
+        }
+        .padding(8)
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.1), lineWidth: 0.5))
+    }
+
+    private static func line(_ purchase: MWAgentPurchase) -> String {
+        var text = purchase.itemName
+        if let retailer = purchase.retailer, !retailer.isEmpty { text += " at \(retailer)" }
+        if let amount = purchase.amount {
+            text += " · " + amount.formatted(.currency(code: purchase.currency ?? "USD"))
+        }
+        return text
     }
 }
 

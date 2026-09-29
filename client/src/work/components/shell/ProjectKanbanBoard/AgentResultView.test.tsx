@@ -100,6 +100,35 @@ describe('AgentResultView after a redirect the queue refused', () => {
   })
 })
 
+describe('AgentResultView purchases', () => {
+  it('lists chat-approved purchases with a hardened checkout link and the card last 4', async () => {
+    mock.list.mockResolvedValue({
+      runs: [run('r1', 1, 'done', result('Pick'))],
+      purchases: [
+        { id: 'p1', run_id: 'r1', item_name: 'Organic Balm', retailer: 'Shop', checkout_url: 'https://shop.example/buy',
+          amount: 4.29, currency: 'USD', card_last4: '4242', status: 'handoff', created_at: null },
+        { id: 'p2', run_id: 'r1', item_name: 'Sketchy', retailer: null, checkout_url: 'javascript:alert(1)',
+          amount: null, currency: null, card_last4: '5454', status: 'handoff', created_at: null },
+      ],
+    })
+    render(<AgentResultView projectId="p" task={task()} canEdit />)
+    await screen.findByText('Purchases')
+    expect(screen.getByText(/card ending 4242/)).toBeTruthy()
+    const links = screen.getAllByRole('link', { name: /Checkout/ })
+    expect(links).toHaveLength(1)  // the non-http(s) one renders no link
+    expect(links[0].getAttribute('href')).toBe('https://shop.example/buy')
+    expect(links[0].getAttribute('rel')).toBe('noopener noreferrer nofollow')
+    expect(screen.getByText(/Nothing was charged/)).toBeTruthy()
+  })
+
+  it('shows no purchases section when there are none', async () => {
+    mock.list.mockResolvedValue({ runs: [run('r1', 1, 'done', result('Pick'))] })
+    render(<AgentResultView projectId="p" task={task()} canEdit />)
+    await screen.findByText('Pick')
+    expect(screen.queryByText('Purchases')).toBeNull()
+  })
+})
+
 describe('AgentResultView section Markdown', () => {
   it('renders no images and only http(s) links, hardened', async () => {
     const res = {

@@ -1619,7 +1619,11 @@ async def delete_channel_message(
     async with get_connection() as conn:
         await _require_channel_capability(conn, channel_id, current_user)
         msg = await conn.fetchrow(
-            "SELECT id, sender_id, deleted_at, created_at, message_type FROM channel_messages WHERE id = $1 AND channel_id = $2",
+            """SELECT m.id, m.sender_id, m.deleted_at, m.created_at, m.message_type,
+                      r.metadata AS reply_metadata
+               FROM channel_messages m
+               LEFT JOIN channel_messages r ON r.id = m.reply_to_id AND r.channel_id = m.channel_id
+               WHERE m.id = $1 AND m.channel_id = $2""",
             message_id, channel_id,
         )
         if not msg:
@@ -1693,7 +1697,11 @@ async def edit_channel_message(
     async with get_connection() as conn:
         await _require_channel_capability(conn, channel_id, current_user)
         msg = await conn.fetchrow(
-            "SELECT id, sender_id, deleted_at, created_at, message_type FROM channel_messages WHERE id = $1 AND channel_id = $2",
+            """SELECT m.id, m.sender_id, m.deleted_at, m.created_at, m.message_type,
+                      r.metadata AS reply_metadata
+               FROM channel_messages m
+               LEFT JOIN channel_messages r ON r.id = m.reply_to_id AND r.channel_id = m.channel_id
+               WHERE m.id = $1 AND m.channel_id = $2""",
             message_id, channel_id,
         )
         if not msg:
@@ -1706,6 +1714,19 @@ async def edit_channel_message(
             raise HTTPException(status_code=403, detail="You can only edit your own messages")
         if datetime.now(timezone.utc) - msg["created_at"] > MESSAGE_EDIT_WINDOW:
             raise HTTPException(status_code=403, detail="This message is too old to edit")
+
+        # Same rule as a new message (channels_ws): a card number edited into a
+        # reply to one of Espresso's agent-card questions, or by someone with an
+        # open "buy it?" question here, is removed before it is stored.
+        from app.matcha.services.matcha_work.agent_card.chat_flow import (
+            prompt_reference,
+            redact_card_numbers,
+        )
+        replied_prompt_id = prompt_reference(msg["reply_metadata"])
+        new_content, card_number_removed = await redact_card_numbers(
+            conn, channel_id=channel_id, user_id=current_user.id,
+            replied_prompt_id=replied_prompt_id, content=new_content,
+        )
 
         edited_at = await conn.fetchval(
             "UPDATE channel_messages SET content = $2, edited_at = NOW() WHERE id = $1 RETURNING edited_at",
@@ -1723,6 +1744,17 @@ async def edit_channel_message(
         )
     except Exception as exc:
         logger.warning("Failed to broadcast channel message edit: %s", exc)
+
+    if card_number_removed:
+        try:
+            from app.matcha.services.matcha_work.agent_card.chat_flow import handle_chat_answer
+
+            await handle_chat_answer(
+                channel_id=channel_id, user=current_user, content=new_content,
+                prompt_id=replied_prompt_id, card_number_removed=True,
+            )
+        except Exception:
+            logger.warning("agent-card card-number warning failed", exc_info=True)
 
     return {"ok": True, "edited": True, "edited_at": edited_at.isoformat() if edited_at else None}
 

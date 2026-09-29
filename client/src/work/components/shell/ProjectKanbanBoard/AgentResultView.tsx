@@ -7,6 +7,7 @@ import {
   agentErrorMessage, listAgentRuns, rerunAgent,
   type AgentPick, type AgentResult, type AgentRun,
 } from '../../../api/matchaWork'
+import type { AgentPurchase } from '../../../types'
 
 const POLL_MS = 4000
 const EXTERNAL = { target: '_blank', rel: 'noopener noreferrer nofollow' } as const
@@ -190,6 +191,38 @@ export function AgentResultBody({ result }: { result: AgentResult }) {
   )
 }
 
+/** Purchases approved in the project chat. v1 records a handoff and charges
+ *  nothing; the person finishes checkout at the link. */
+function Purchases({ purchases }: { purchases: AgentPurchase[] }) {
+  return (
+    <div className="space-y-1.5 rounded-lg border border-w-line p-2.5">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-w-dim">
+        <ShoppingCart className="h-3.5 w-3.5" /> Purchases
+      </div>
+      {purchases.map((p) => (
+        <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+          <span className="text-w-text">
+            {p.item_name}
+            {p.retailer ? ` at ${p.retailer}` : ''}
+            {p.amount != null ? ` · ${money(p.amount, p.currency ?? 'USD')}` : ''}
+            <span className="text-w-faint"> · card ending {p.card_last4}</span>
+          </span>
+          {/^https?:\/\//i.test(p.checkout_url) && (
+            <a
+              href={p.checkout_url}
+              {...EXTERNAL}
+              className="inline-flex items-center gap-1 rounded border border-w-line px-2 py-0.5 text-w-text hover:bg-w-surface2"
+            >
+              Checkout <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+        </div>
+      ))}
+      <p className="text-[11px] text-w-faint">Approved in chat. Nothing was charged: finish checkout at the link.</p>
+    </div>
+  )
+}
+
 /**
  * The agent card's result page inside the task panel: the newest round's
  * structured result, a round switcher, live status while a run is working,
@@ -205,6 +238,7 @@ export default function AgentResultView({
   canEdit: boolean
 }) {
   const [runs, setRuns] = useState<AgentRun[] | null>(null)
+  const [purchases, setPurchases] = useState<AgentPurchase[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -213,6 +247,7 @@ export default function AgentResultView({
     try {
       const res = await listAgentRuns(projectId, task.id)
       setRuns(res.runs)
+      setPurchases(res.purchases ?? [])
     } catch (e) {
       setError(agentErrorMessage(e))
     }
@@ -221,6 +256,7 @@ export default function AgentResultView({
   // Reload whenever the card itself changes (a WS task.updated moves it or
   // updates its status line), and poll while a run is live.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch; state is set after it resolves
     void load()
   }, [load, task.board_column, task.progress_note])
 
@@ -297,6 +333,7 @@ export default function AgentResultView({
       )}
 
       {shown?.result && <AgentResultBody result={shown.result} />}
+      {purchases.length > 0 && <Purchases purchases={purchases} />}
 
       {error && <p className="text-xs text-orange-300">{error}</p>}
       {canRerun && (

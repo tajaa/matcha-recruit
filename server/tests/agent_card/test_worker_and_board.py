@@ -8,7 +8,7 @@ import pytest
 
 from app import database
 from app.matcha.services.billing import token_budget_service
-from app.matcha.services.matcha_work.agent_card import agent, board
+from app.matcha.services.matcha_work.agent_card import agent, board, chat_flow
 from app.matcha.services.matcha_work.project_agent import store
 from app.workers.tasks import agent_card as worker
 
@@ -181,7 +181,9 @@ def _wire_worker(monkeypatch, conn, *, run_result=None, run_error=None):
         "publish": AsyncMock(),
         "mark": AsyncMock(),
         "deduct": AsyncMock(),
+        "offer": AsyncMock(return_value=True),
     }
+    monkeypatch.setattr(chat_flow, "offer_result", calls["offer"])
     monkeypatch.setattr(board, "claim_column", calls["claim"])
     monkeypatch.setattr(board, "finish_column", calls["finish"])
     monkeypatch.setattr(board, "set_progress", calls["progress"])
@@ -217,6 +219,18 @@ async def test_worker_happy_path_claims_runs_finishes_and_deducts(monkeypatch):
     assert calls["publish"].await_count == 2
     assert calls["deduct"].await_args.args[2] == 900
     calls["mark"].assert_not_awaited()  # agent.run_card_agent marks done itself
+    calls["offer"].assert_awaited_once()  # then asks in the project chat
+
+
+@pytest.mark.asyncio
+async def test_worker_chat_offer_failure_never_fails_a_finished_run(monkeypatch):
+    conn = _WorkerConn(_run_row(), {"title": "x", "description": None, "review_note": None, "category": "agent"})
+    calls = _wire_worker(monkeypatch, conn)
+    calls["offer"].side_effect = RuntimeError("chat is down")
+    await worker._run(uuid4())
+    calls["finish"].assert_awaited_once()
+    calls["mark"].assert_not_awaited()
+    assert calls["deduct"].await_count == 1
 
 
 @pytest.mark.asyncio
@@ -240,6 +254,7 @@ async def test_worker_failure_marks_failed_with_spend_and_leaves_card(monkeypatc
     note = calls["progress"].await_args.args[1]
     assert "ran out of time" in note and "Run again" in note
     assert calls["deduct"].await_count == 1  # tokens were spent even though it failed
+    calls["offer"].assert_not_awaited()  # nothing to show
 
 
 @pytest.mark.asyncio

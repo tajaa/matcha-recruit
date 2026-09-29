@@ -1,4 +1,5 @@
 import { api, ApiError } from '../../../api/client'
+import type { AgentPurchase, PaymentCard } from '../../types'
 
 // ── Agent cards (category 'agent') ──
 //
@@ -55,7 +56,9 @@ export type AgentRun = {
 }
 
 export function listAgentRuns(projectId: string, taskId: string) {
-  return api.get<{ runs: AgentRun[] }>(`/matcha-work/projects/${projectId}/tasks/${taskId}/agent-runs`)
+  return api.get<{ runs: AgentRun[]; purchases?: AgentPurchase[] }>(
+    `/matcha-work/projects/${projectId}/tasks/${taskId}/agent-runs`,
+  )
 }
 
 export function rerunAgent(projectId: string, taskId: string) {
@@ -63,6 +66,23 @@ export function rerunAgent(projectId: string, taskId: string) {
     `/matcha-work/projects/${projectId}/tasks/${taskId}/agent-runs`,
     {},
   )
+}
+
+// ── Saved payment cards (agent-card purchases; admin-only in v1) ──
+//
+// Backend: server/app/matcha/routes/matcha_work/payment_cards.py. The number is
+// sent once, encrypted server-side, and never returned. There is no CVV field.
+
+export function listPaymentCards() {
+  return api.get<{ enabled: boolean; configured: boolean; cards: PaymentCard[] }>('/matcha-work/payment-cards')
+}
+
+export function addPaymentCard(body: { number: string; exp_month: number; exp_year: number; label: string }) {
+  return api.post<PaymentCard>('/matcha-work/payment-cards', body)
+}
+
+export function deletePaymentCard(cardId: string) {
+  return api.delete<void>(`/matcha-work/payment-cards/${cardId}`)
 }
 
 /** Server `detail` -> one readable line (plan / monthly cap / plain string). */

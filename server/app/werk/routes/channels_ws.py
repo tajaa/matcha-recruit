@@ -282,6 +282,84 @@ async def _bg_apply_autopr_context_reply(
         logger.warning("AutoPR context reply failed", exc_info=True)
 
 
+def _agent_card_prompt_reference(raw_metadata) -> Optional[UUID]:
+    from app.matcha.services.matcha_work.agent_card.chat_flow import prompt_reference
+
+    return prompt_reference(raw_metadata)
+
+
+def _agent_card_plain_yes(content: str) -> bool:
+    from app.matcha.services.matcha_work.agent_card.chat_flow import is_plain_yes
+
+    return is_plain_yes(content)
+
+
+async def _agent_card_redaction(
+    conn, channel_id: UUID, user_id: UUID, content: Optional[str], agent_prompt_id: Optional[UUID],
+) -> tuple[Optional[str], bool]:
+    """(content to store, whether a card number was removed) — see
+    `chat_flow.redact_card_numbers`. Queries only for text holding a
+    card-shaped, Luhn-valid number, so ordinary chat costs a regex."""
+    from app.matcha.services.matcha_work.agent_card.chat_flow import redact_card_numbers
+
+    return await redact_card_numbers(
+        conn, channel_id=channel_id, user_id=user_id,
+        replied_prompt_id=agent_prompt_id, content=content,
+    )
+
+
+def _routes_to_agent_card(
+    *,
+    agent_prompt_id: Optional[UUID],
+    card_number_removed: bool,
+    reply_to_id,
+    mention_handles: list,
+    content: str,
+    room_key: str,
+    is_project_chat: bool,
+) -> bool:
+    """Whether a new message goes to Espresso's agent-card questions: a
+    threaded reply to one, a message whose card number was just removed, or
+    a plain "yes" (no reply target, no mentions) in a project discussion chat —
+    which only ever shows a result; buying needs a threaded reply. Synchronous
+    and DB-free, so other channels and ordinary chat never spawn a task. A
+    live Huume event-draft or schedule pill keeps priority for that "yes"."""
+    if agent_prompt_id is not None or card_number_removed:
+        return True
+    return (
+        is_project_chat
+        and not reply_to_id
+        and not mention_handles
+        and not _channel_recently_ems_drafted(room_key)
+        and not _channel_recently_clarified(room_key)
+        and _agent_card_plain_yes(content)
+    )
+
+
+async def _bg_agent_card_reply(
+    channel_id_str: str,
+    user,
+    content: str,
+    prompt_id: Optional[UUID],
+    has_attachments: bool,
+    card_number_removed: bool,
+) -> None:
+    """Apply a chat message as the answer to an Espresso agent-card question."""
+    try:
+        from app.matcha.services.matcha_work.agent_card.chat_flow import handle_chat_answer
+
+        await handle_chat_answer(
+            channel_id=UUID(channel_id_str),
+            user=user,
+            content=content,
+            prompt_id=prompt_id,
+            has_attachments=has_attachments,
+            card_number_removed=card_number_removed,
+        )
+    except Exception:
+        logger.warning("Agent card chat answer failed", exc_info=True)
+
+
 async def _bg_sync_channel_attachments(channel_id_str: str, user_id, attachments: list) -> None:
     """Mirror a message's attachments into the linked collab project's Files,
     on its own connection and off the send hot path. The reverse JSONB lookup
@@ -3989,6 +4067,16 @@ async def channel_websocket(
                                             raw_reply_metadata = {}
                                     if isinstance(raw_reply_metadata, dict):
                                         reply_target_metadata = raw_reply_metadata
+                            # A card number typed in reply to one of
+                            # Espresso's agent-card questions, or by someone
+                            # with an open "buy it?" question here, is removed
+                            # BEFORE it is stored, broadcast, emailed or
+                            # notified. The lookup runs only for card-shaped,
+                            # Luhn-valid numbers.
+                            agent_prompt_id = _agent_card_prompt_reference(reply_target_metadata)
+                            content, card_number_removed = await _agent_card_redaction(
+                                conn, ch_uuid, user.id, content, agent_prompt_id,
+                            )
                             # ON CONFLICT path makes the INSERT idempotent on
                             # (sender_id, client_message_id) so a retried send
                             # returns the original row instead of inserting a
@@ -4145,8 +4233,26 @@ async def channel_websocket(
                                 ))
                             if (
                                 is_new_message
+                                and autopr_context_ref is None
+                                and _routes_to_agent_card(
+                                    agent_prompt_id=agent_prompt_id,
+                                    card_number_removed=card_number_removed,
+                                    reply_to_id=row["reply_to_id"],
+                                    mention_handles=mention_handles,
+                                    content=row["content"],
+                                    room_key=room_key,
+                                    is_project_chat=access.scope is ChannelScope.PROJECT_DISCUSSION,
+                                )
+                            ):
+                                _spawn_bg(_bg_agent_card_reply(
+                                    str(ch_uuid), user, row["content"], agent_prompt_id,
+                                    bool(broadcast_attachments), card_number_removed,
+                                ))
+                            if (
+                                is_new_message
                                 and "espresso" in mention_handles
                                 and autopr_context_ref is None
+                                and agent_prompt_id is None
                             ):
                                 _spawn_bg(_bg_dispatch_espresso_mention(
                                     str(ch_uuid), user, row["content"], row["id"],

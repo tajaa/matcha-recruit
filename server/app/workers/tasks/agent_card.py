@@ -2,7 +2,8 @@
 
 Lifecycle: claim the queued run → move the card todo → in_progress (round 1;
 revision rounds stay in changes_requested) → run the web agent → move the card
-to review. Failure leaves the card where it is with a "Run again" status line.
+to review → ask in the project chat whether to show the result. Failure
+leaves the card where it is with a "Run again" status line.
 """
 from __future__ import annotations
 
@@ -119,8 +120,20 @@ async def _run(run_id: UUID) -> None:
         latest = note_row or row
         if latest:
             await board.publish_task_updated(project_id, latest)
+        await _offer_in_chat(run_id)
     finally:
         await _deduct_tokens(run, stats)
+
+
+async def _offer_in_chat(run_id: UUID) -> None:
+    """Ask in the project chat whether to show the result. Best-effort: the
+    result is already on the card, so a chat failure never fails the run."""
+    try:
+        from app.matcha.services.matcha_work.agent_card import chat_flow
+
+        await chat_flow.offer_result(run_id)
+    except Exception:
+        logger.warning("agent card chat offer failed run=%s", run_id, exc_info=True)
 
 
 async def _deduct_tokens(run, stats: dict) -> None:
