@@ -2,11 +2,23 @@
 from __future__ import annotations
 
 import json
+import re
 from uuid import UUID
 
 from app.database import connection_or_direct
 
 from .identity import ensure_espresso_bot_user
+
+# `@espresso` at the start of a message or after whitespace, the way the chat
+# mention parser reads it (so "me@espresso.dev" is not a mention). The one
+# copy: agent-card answers and errands and the chat socket all use it.
+ESPRESSO_MENTION = re.compile(r"(?i)(?:(?<=^)|(?<=\s))@espresso\b")
+
+
+def strip_espresso_mention(text: str | None) -> str:
+    """The message without its first `@espresso`, trimmed. Every other
+    character stays exactly as the user wrote it."""
+    return ESPRESSO_MENTION.sub("", text or "", count=1).strip()
 
 
 async def persist_espresso_message(

@@ -99,29 +99,41 @@ extension ChannelDetailView {
         composerSeedNonce += 1
     }
 
-    /// One-tap threaded reply (Espresso agent-card question buttons): sent
-    /// through the normal chat path, so the server treats it exactly like a
-    /// typed reply to that question.
-    /// One-tap threaded reply (agent-card question buttons). Never queued:
-    /// offline, it sends nothing and returns false, and the card keeps its
-    /// buttons, since a stale answer replayed later is worse than none.
+    /// One-tap threaded reply (agent-card question buttons). It takes the
+    /// same send path as typing the reply, so the server treats it
+    /// identically, but it is never queued: offline it sends nothing and
+    /// returns false, and the card keeps its buttons, since a stale answer
+    /// replayed later is worse than none.
     @discardableResult
     func quickReply(to message: ChannelMessage, text: String) -> Bool {
-        guard ws.isConnected else { return false }
+        postMessage(text, replyTo: message, queue: false)
+    }
+
+    /// The one chat send: sends over the socket (or queues it, unless `queue`
+    /// is false), then shows the optimistic row the echo will replace.
+    /// Returns false, showing nothing, when an unqueued send can't go out.
+    @discardableResult
+    func postMessage(
+        _ content: String, attachments: [ChannelAttachment] = [],
+        replyTo target: ChannelMessage?, queue: Bool = true
+    ) -> Bool {
         let cmid = UUID().uuidString
+        guard ws.sendMessage(
+            channelId: channelId, content: content, attachments: attachments,
+            replyToId: target?.id, clientMessageId: cmid, queue: queue
+        ) else { return false }
         appendOptimisticMessage(
             clientMessageId: cmid,
-            content: text,
-            attachments: [],
-            replyToId: message.id,
-            replyPreview: ReplyPreview(
-                id: message.id,
-                senderName: message.senderName,
-                content: message.content,
-                attachments: message.attachments,
-            ),
+            content: content,
+            attachments: attachments,
+            replyToId: target?.id,
+            replyPreview: target.map { ReplyPreview(
+                id: $0.id,
+                senderName: $0.senderName,
+                content: $0.content,
+                attachments: $0.attachments,
+            ) },
         )
-        ws.sendMessage(channelId: channelId, content: text, replyToId: message.id, clientMessageId: cmid)
         selfSendScroll += 1
         return true
     }
@@ -157,27 +169,12 @@ extension ChannelDetailView {
         guard !content.isEmpty || !attachmentsToSend.isEmpty else { return }
         guard !isUploading else { return }
 
-        let replyId = replyingTo?.id
-        let replyPreviewForOptimistic = replyingTo.map { ReplyPreview(
-            id: $0.id,
-            senderName: $0.senderName,
-            content: $0.content,
-            attachments: $0.attachments,
-        ) }
+        let target = replyingTo
 
         if attachmentsToSend.isEmpty {
-            let cmid = UUID().uuidString
-            appendOptimisticMessage(
-                clientMessageId: cmid,
-                content: content,
-                attachments: [],
-                replyToId: replyId,
-                replyPreview: replyPreviewForOptimistic,
-            )
-            ws.sendMessage(channelId: channelId, content: content, replyToId: replyId, clientMessageId: cmid)
+            postMessage(content, replyTo: target)
             seedComposer("")
             replyingTo = nil
-            selfSendScroll += 1
             return
         }
 
@@ -189,20 +186,11 @@ extension ChannelDetailView {
                     channelId: channelId, files: files
                 )
                 await MainActor.run {
-                    let cmid = UUID().uuidString
-                    appendOptimisticMessage(
-                        clientMessageId: cmid,
-                        content: content,
-                        attachments: uploaded,
-                        replyToId: replyId,
-                        replyPreview: replyPreviewForOptimistic,
-                    )
-                    ws.sendMessage(channelId: channelId, content: content, attachments: uploaded, replyToId: replyId, clientMessageId: cmid)
+                    postMessage(content, attachments: uploaded, replyTo: target)
                     seedComposer("")
                     replyingTo = nil
                     pendingAttachments.removeAll()
                     isUploading = false
-                    selfSendScroll += 1
                 }
             } catch {
                 await MainActor.run {

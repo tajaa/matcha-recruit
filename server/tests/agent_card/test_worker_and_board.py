@@ -334,35 +334,33 @@ async def test_worker_backstop_fails_a_stuck_run_cleanly_instead_of_waiting_for_
 
 
 @pytest.mark.asyncio
-async def test_chat_offer_opens_redis_for_the_task_so_the_question_is_live(monkeypatch):
-    # The chat fanout publishes on the shared Redis client, which only the API
-    # opens; a Celery task must open (and close) its own or the question is
-    # saved but never reaches an open chat.
-    from app.core.services import redis_cache
+async def test_chat_offer_is_best_effort(monkeypatch):
     from app.matcha.services.matcha_work.agent_card import chat_flow
     from app.workers.tasks import agent_card as task_mod
 
-    seen = {}
-
-    async def offer(run_id):
-        seen["client_during_offer"] = redis_cache.get_redis_cache()
-        return True
-
-    monkeypatch.setattr(redis_cache, "_redis_client", None)
+    offer = AsyncMock(side_effect=RuntimeError("boom"))
     monkeypatch.setattr(chat_flow, "offer_result", offer)
-    await task_mod._offer_in_chat(uuid4())
-    assert seen["client_during_offer"] is not None
-    assert redis_cache.get_redis_cache() is None  # closed again after
+    await task_mod._offer_in_chat(uuid4())  # never raises
+    offer.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_chat_offer_reuses_an_open_redis_client(monkeypatch):
-    from app.core.services import redis_cache
-    from app.matcha.services.matcha_work.agent_card import chat_flow
-    from app.workers.tasks import agent_card as task_mod
+def test_chat_posting_tasks_run_with_the_chat_fanout(monkeypatch):
+    # Every task that posts to chat runs under run_with_chat_fanout, so its
+    # messages reach open chats live instead of on the next reload.
+    from app.workers.tasks import agent_card, huume_code, project_agent
 
-    existing = object()
-    monkeypatch.setattr(redis_cache, "_redis_client", existing)
-    monkeypatch.setattr(chat_flow, "offer_result", AsyncMock(side_effect=RuntimeError("boom")))
-    await task_mod._offer_in_chat(uuid4())  # best-effort: never raises
-    assert redis_cache.get_redis_cache() is existing
+    ran = []
+
+    def fake_run(coro):
+        ran.append(coro.__qualname__)
+        coro.close()
+
+    for module in (agent_card, huume_code, project_agent):
+        monkeypatch.setattr(module, "run_with_chat_fanout", fake_run)
+    agent_card.run_card_agent.run(str(uuid4()))
+    project_agent.run_repo_question.run(str(uuid4()))
+    project_agent.run_task_draft.run(str(uuid4()))
+    project_agent.reconcile_stale_runs.run()
+    huume_code.run_huume_code.run(str(uuid4()))
+    huume_code.reconcile_stale_runs.run()
+    assert ran == ["_run", "_run", "_run", "_reconcile", "_run", "_reconcile"]

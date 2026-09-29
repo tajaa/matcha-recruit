@@ -12,6 +12,7 @@ from app.core.models.auth import CurrentUser
 from app.core.services.storage import get_storage
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id
+from app.matcha.services.matcha_work.project_service.access import role_can_edit
 from app.matcha.models.matcha_work.matcha_work import ThreadDetailResponse
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 from app.matcha.services.matcha_work.matcha_work_ai import _infer_skill_from_state
@@ -141,14 +142,13 @@ async def _verify_project_access(project_id: UUID, current_user: CurrentUser) ->
         raise HTTPException(status_code=404, detail="Project not found")
     return result
 
-def _can_edit_project(role: Optional[str]) -> bool:
-    """Write gate for collab project content (elements, element files/folders,
-    notes). Permissive on purpose: only explicit read-only roles are blocked.
-    `_verify_project_access` returns role=None / 'owner' for the owner depending
-    on access path, so an `in ('owner','editor')` allowlist 403s legitimate
-    owners — mirror the client's `canEditElements` (viewer/commenter blocked)."""
-    from app.matcha.services.matcha_work.project_service import role_can_edit
-    return role_can_edit(role)
+# Write gate for collab project content (elements, element files/folders,
+# notes): the one rule in `project_service.access.role_can_edit`, shared with
+# the agent-card chat. Permissive on purpose: only explicit read-only roles are
+# blocked. `_verify_project_access` returns role=None / 'owner' for the owner
+# depending on access path, so an `in ('owner','editor')` allowlist 403s
+# legitimate owners — mirror the client's `canEditElements`.
+_can_edit_project = role_can_edit
 
 def _resolve_file_urls(files: list[dict]) -> list[dict]:
     """Rewrite s3:// storage_url values to short-lived presigned https URLs so

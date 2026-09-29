@@ -40,7 +40,7 @@ from uuid import UUID
 from app.core.services import card_vault
 from app.database import connection_or_direct, decode_jsonb
 
-from ..project_agent.chat import broadcast_espresso_message, persist_espresso_message
+from ..project_agent.chat import ESPRESSO_MENTION, broadcast_espresso_message, persist_espresso_message
 from . import test_charge
 
 logger = logging.getLogger(__name__)
@@ -77,7 +77,6 @@ _NO = {
 _PLAIN_YES = {"yes", "yes please", "show me", "show it", "yes show me"}
 _LAST4 = re.compile(r"^(?:use\s+)?(?:the\s+)?(?:card\s+)?(?:ending\s+)?(?:in\s+)?(\d{4})$")
 _CHOICE = re.compile(r"^(?:use\s+)?(?:card\s+|number\s+|option\s+)?([1-9])$")
-_ESPRESSO_MENTION = re.compile(r"(?i)(?:(?<=^)|(?<=\s))@espresso\b")
 
 
 @dataclass(frozen=True)
@@ -87,18 +86,20 @@ class Answer:
 
 
 def _normalize(text: str) -> str:
-    normalized = re.sub(r"[^a-z0-9 ]+", " ", _ESPRESSO_MENTION.sub("", text).lower())
+    normalized = re.sub(r"[^a-z0-9 ]+", " ", ESPRESSO_MENTION.sub("", text).lower())
     return " ".join(normalized.split())
 
 
 def parse_answer(text: str) -> Answer | None:
-    """A threaded reply's answer: yes / no / last 4 digits / a numbered choice."""
+    """A threaded reply's answer: yes / no / last 4 digits / a numbered choice.
+    Every buy command that answers a plain message ("buy", "order it") is a
+    yes here too: a threaded reply is never stricter than a plain one."""
     if not isinstance(text, str) or len(text) > 60:
         return None
     normalized = _normalize(text)
     if not normalized:
         return None
-    if normalized in _YES:
+    if normalized in _YES or is_buy_intent(normalized):
         return Answer("yes")
     if normalized in _NO:
         return Answer("no")
@@ -507,12 +508,22 @@ async def close_open_prompts(conn, task_id: UUID) -> list[dict]:
     return [prompt_update(row, "superseded") for row in rows]
 
 
+def public_answer(answer: str | None) -> str | None:
+    """A closed question's answer as every channel member may see it. The
+    stored card answer carries the buyer's last 4 (`card:4242`); the chat
+    history and socket events only ever say a card was chosen."""
+    if answer and answer.startswith("card:"):
+        return "card"
+    return answer
+
+
 def answer_text(kind: str, answer: str | None) -> str | None:
-    """How a closed question's answer reads on its card."""
+    """How a closed question's answer reads on its card, for everyone in the
+    channel. Never the buyer's card details: those stay on their receipt."""
     if not answer:
         return None
-    if answer.startswith("card:"):
-        return f"Used the card ending {answer.removeprefix('card:')}"
+    if answer == "card" or answer.startswith("card:"):
+        return "Card chosen"
     if kind == "show_result":
         return "Showed the result" if answer == "yes" else "Skipped for now"
     if kind == "purchase":
@@ -527,7 +538,7 @@ def prompt_update(row, status: str, answer: str | None = None) -> dict:
         "channel_id": str(row["channel_id"]),
         "prompt_id": str(row["id"]),
         "status": status,
-        "answer": answer,
+        "answer": public_answer(answer),
         "answer_text": answer_text(row["kind"], answer),
     }
 
@@ -660,7 +671,7 @@ async def overlay_prompt_statuses(conn, messages, *, channel_id: UUID) -> list:
             message["metadata"] = {
                 **(decode_jsonb(message.get("metadata"), {}) or {}),
                 "prompt_status": "expired" if row["expired"] else row["status"],
-                "answer": row["answer"],
+                "answer": public_answer(row["answer"]),
                 "answer_text": answer_text(row["kind"], row["answer"]),
             }
         out.append(message)

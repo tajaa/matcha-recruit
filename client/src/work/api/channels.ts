@@ -129,6 +129,10 @@ export interface ChannelMessage {
   /** Local-only: pending send that got no echo within 8s (or was queued to
    * the outbox while offline). Renders a retry affordance. */
   failed?: boolean
+  /** Local-only: a quick-reply answer to an Espresso question. Never queued
+   * to the outbox, not even by Retry: a stale answer replayed later is worse
+   * than none. */
+  no_queue?: boolean
 }
 
 export interface ChannelDetail {
