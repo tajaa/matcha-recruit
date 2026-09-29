@@ -1,7 +1,9 @@
 """Bounded web agent that answers one agent card with a structured result.
 
 Hosted web_search (provider side) + our `fetch_page` + a `finish` tool whose
-payload goes through `schema.normalize_result`'s provenance gate. Read-only:
+payload goes through `schema.normalize_result`'s provenance gate. A travel
+request also gets `search_flights` (Duffel, `flights.py`) when a token is
+configured. Read-only:
 no tool here writes anywhere except the run's own audit rows and the card's
 progress line.
 """
@@ -30,7 +32,7 @@ from app.matcha.services.matcha_work.project_agent.agent import (
     _safe_for_audit,
 )
 
-from . import board, images
+from . import board, flights, images
 from .page_extract import extract_page, page_urls
 from .prompt import build_system_prompt
 from .schema import normalize_result
@@ -51,6 +53,8 @@ _FETCH_SECONDS = 25.0
 _PHOTO_SECONDS = 60.0
 _MAX_TOOL_OUTPUT_CHARS = 12_000
 _MAX_REPAIRS = 1
+_MAX_FLIGHT_SEARCHES = 3
+_FLIGHT_SEARCH_SECONDS = 120.0
 _AI_USAGE_FEATURE = "matcha.espresso.agent_card"
 _FINISH_CHOICE = {"type": "function", "name": "finish"}
 
@@ -168,8 +172,12 @@ async def run_card_agent(
 
     input_items = [text_item("user", _user_turn(ask, review_note, previous_result))]
     pending: list[dict[str, Any]] = []
-    instructions = build_system_prompt(round)
-    tools = declarations()
+    travel = flights.is_travel_ask(ask)
+    flight_token = flights.token() if travel else None
+    flight_session = flights.FlightSession(flight_token) if flight_token else None
+    flight_searches = 0
+    instructions = build_system_prompt(round, travel=travel, flight_search=flight_session is not None)
+    tools = declarations(flights=flight_session is not None)
     await progress("Searching the web…" if round == 1 else "Working on your feedback…")
 
     while result is None and model_calls < _MAX_MODEL_CALLS:
@@ -239,9 +247,38 @@ async def run_card_agent(
                                {k: out.get(k) for k in ("url", "title", "error")} | {"products": len(out.get("products") or [])},
                                "error" if "error" in out else "ok")
                 outputs.append(tool_output_item(call["call_id"], out))
+            elif name == "search_flights" and flight_session is not None:
+                if flight_searches >= _MAX_FLIGHT_SEARCHES:
+                    out = {"error": "Flight search limit reached; finish with the offers you have."}
+                    await step(name, "search", "Flight search limit reached", args, out, "skipped")
+                else:
+                    flight_searches += 1
+                    await progress("Searching flights…")
+                    remaining = _WALL_SECONDS - (time.monotonic() - started)
+                    try:
+                        out = await asyncio.wait_for(
+                            flight_session.search(args),
+                            timeout=max(5.0, min(_FLIGHT_SEARCH_SECONDS, remaining)),
+                        )
+                    except TimeoutError:
+                        out = {"error": "The flight search took too long. Try fewer options, or finish."}
+                    except Exception as exc:
+                        logger.warning("agent card flight search failed", exc_info=True)
+                        out = {"error": f"The flight search failed: {type(exc).__name__}"}
+                    options = out.get("options") or []
+                    await step(
+                        name, "search",
+                        f"Searched flights: {out.get('searched') or 'failed'}"[:200], args,
+                        {"options": len(options), "offer_requests": out.get("offer_requests"),
+                         "error": out.get("error")},
+                        "error" if "error" in out else "ok",
+                    )
+                    if options:
+                        await progress(f"Comparing {len(options)} flight options…")
+                outputs.append(tool_output_item(call["call_id"], out))
             elif name == "finish":
                 try:
-                    normalized, warnings = normalize_result(args.get("result"), provenance)
+                    normalized, warnings = normalize_result(args.get("result"), provenance, flights=flight_session)
                 except ValueError as exc:
                     await step(name, "finish", "Result rejected", {"error": str(exc)}, {}, "error")
                     if repairs >= _MAX_REPAIRS:

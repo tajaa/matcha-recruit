@@ -36,10 +36,13 @@ _ERRAND_START = re.compile(
 # In a repo-connected project "find …", "compare …" or "what's the best …"
 # can be a code question, so an errand there also needs a word that means
 # spending money. Deliberately narrow: "order", "review", "best" and "deal"
-# are everyday code words ("find where the order total is computed").
+# are everyday code words ("find where the order total is computed"). Travel
+# counts too, but "flight" only as a trip ("a flight to Denver"): this codebase
+# also has an HR "flight risk" feature.
 _SHOPPING = re.compile(
     r"\b(?:buy|buying|purchase|shop|shopping|for sale|price|prices|priced|cheap|cheaper|cheapest|"
-    r"affordable|online|in stock|amazon|order me|ship(?:ped|ping)? (?:to|home)|deliver(?:ed|y)? to)\b"
+    r"affordable|online|in stock|amazon|order me|ship(?:ped|ping)? (?:to|home)|deliver(?:ed|y)? to|"
+    r"flights? (?:to|from|between)|airfares?|plane tickets?|round[- ]trip)\b"
     r"|\$\s?\d",
     re.I,
 )

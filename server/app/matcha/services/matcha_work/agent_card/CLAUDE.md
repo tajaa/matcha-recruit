@@ -33,7 +33,7 @@ It is not the MCP connector either: that is push-only, so it can't advance a car
   The model can rank and summarise. It cannot mint a link.
 - **Images are rehosted, never hotlinked.** `images.rehost_images` fetches each image through `core/services/safe_fetch.fetch_public`, verifies and re-encodes it with Pillow (WebP, ≤1200px, metadata stripped), and uploads it. Any failure drops the image. The dev local-storage path is not a client URL, so it drops too.
 - **Every model-chosen URL goes through `safe_fetch.fetch_public`.** It resolves the host once, requires public IPs only, pins the IP (Host header + SNI), and re-validates each redirect hop. Default ports only.
-- **Read-only agent.** The tools are hosted `web_search`, `fetch_page` and `finish`. The prompt treats page content as untrusted data.
+- **Read-only agent.** The tools are hosted `web_search`, `fetch_page`, `finish` and, for travel requests, `search_flights` (search only; it never books). The prompt treats page content as untrusted data.
 - **AutoPR must never pick these up.** AutoPR maps unknown categories to the code lane. The server refuses them (`project_task_service._AUTOPR_EXCLUDED_CATEGORIES`): `request_autopr_run` and `request_autopr_reconsideration` raise, `claim_autopr_run` returns `ok: False`, and `list_autopr_run_requests` filters them out, so no harness version can queue or claim one. `apps/msandbox/harness/collect.sh` and halion's `collect.sh` also drop `category == "agent"`, as a cheaper first filter.
 - **A refusal never strands a card.** Send-back runs every gate *before* `reject_project_task` moves the card, so a 403/429 leaves it in Review with the reviewer's note unspent. If the queue refuses after the move (a live run, the broker down) the card sits in Changes requested with its note saved, `agent_run_error` in the response, and "Run again" visible: the clients offer it in any open column with no live run.
 - **A dead worker can't block reruns.** `enqueue` fails runs still `queued`/`running` past 11 minutes (Celery's hard limit is 600s) inside the same transaction, before the one-live-run index can 409. The worker also wraps the run in a 420s backstop, and `reconcile_stale_runs` covers the rest. A broker failure at dispatch fails the just-inserted row (it would hold the index and count against the cap).
@@ -57,6 +57,43 @@ It is not the MCP connector either: that is push-only, so it can't advance a car
   - 300s of model turns, 60s of photo work, 420s overall backstop in the worker.
 - **Last turn:** forces `tool_choice=finish` with no search tool.
 - **Bad finish:** one repair turn, then fail.
+
+## Flights (`flights.py`, Duffel)
+
+A travel request (`flights.is_travel_ask`: flight, fly, airfare, round-trip, …) gets the `search_flights` tool when `DUFFEL_ACCESS_TOKEN` is set. Without a token the prompt says fares weren't checked live, and the run researches with web search as an `answer`.
+
+**Why an API.** Airline and Google Flights pages need JavaScript and block bots, so `fetch_page` never sees a fare. Amadeus Self-Service closed 2026-07-17.
+
+**Private by construction.** Requests carry only the itinerary: airports, dates, passenger count (children and lap infants as fixed pricing ages 8 and 1), cabin and bags to price. Nothing about the person is sent: no location, device, browser, cookies, account or search history. `privacy_disclosure()` is server text on every flight result, never the model's. There is no proxy rotation or fingerprint spoofing; a neutral API makes it pointless.
+
+**One call does the cheap-fare work, in code, within `MAX_OFFER_REQUESTS = 12` per run** (`plan_variants`, most useful first):
+1. the exact trip;
+2. for a round trip, each direction as its own one-way ticket (paired into `ticketing: "separate"` options, never across currencies). Duffel's own `include_split_ticket` needs support-granted access, so the pairing is ours;
+3. `flexible_days` (0–2) shifts, nearest first;
+4. `nearby_airports` (Duffel `/places/suggestions`, ~100 mi, at most 2 per end) on the exact dates.
+
+Run with at most 4 concurrent requests.
+
+**True total.** For options missing the bags asked for, up to 6 offers per call are re-read with `return_available_services` and the listed bag prices added (`bag_cost`: per-slice or whole-trip bag services, lap infants excluded). An option whose bags can't be priced says so (`bag_note`) and ranks by its bare fare.
+
+**Warnings are computed, not written by the model:**
+- separate tickets;
+- a connection under 60 min (a separate-ticket pair splits by direction, so each connection stays inside one ticket);
+- an overnight or 6 h+ layover;
+- basic economy, or a fare that can't be changed;
+- no carry-on;
+- a different airport or date.
+
+**The offer-id gate** (`schema._flights`). The model's `finish` names offers by `offer_id` with a label and reasons. Every other field is rebuilt from the run's `FlightSession`, so a price or time the model wrote is ignored and an id the search never returned is dropped. `answer_type: "flights"` with no surviving option gets one repair. A flight result never carries `top_pick`, so `chat_flow.purchase_offer` never asks "want me to buy it?". Booking through Duffel orders is a later change.
+
+**Limits:**
+- 3 `search_flights` calls per run, 120 s each;
+- a Duffel 429/5xx retried once;
+- `supplier_timeout` 15 s.
+
+The step kind is `search`, so no migration is needed. **`duffel_test_` tokens return Duffel Airways sandbox fares**, and the result, chat card and plain text all label them TEST DATA.
+
+**Never suggest hidden-city tickets.** They break the airline's contract of carriage, and the prompt forbids them.
 
 ## Queue
 

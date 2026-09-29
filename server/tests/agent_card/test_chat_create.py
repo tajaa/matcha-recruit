@@ -21,6 +21,10 @@ from app.matcha.services.matcha_work.agent_card import chat_create, chat_flow, e
     ("@espresso buy me a 6 ft braided usb-c cable", True, "buy me a 6 ft braided usb-c cable"),
     ("@espresso find the best espresso machine under $500", True, "find the best espresso machine under $500"),
     ("@espresso research standing desks, ship to Oakland", True, "research standing desks, ship to Oakland"),
+    ("@espresso find a flight to Denver next Friday", True, "find a flight to Denver next Friday"),
+    ("@espresso research round-trip options to Lisbon in May", True, "research round-trip options to Lisbon in May"),
+    # "flight risk" is an HR feature in this codebase, not a trip.
+    ("@espresso find the flight risk scores for the team", True, None),
     # Repo questions stay with the repo agent.
     ("@espresso how does the auth middleware work", True, None),
     ("@espresso find where we validate the webhook signature", True, None),

@@ -40,5 +40,38 @@ back with the note below. Address the note directly, keep what was right, and fi
 """
 
 
-def build_system_prompt(round: int) -> str:
-    return _BASE + (_REVISION.format(round=round) if round > 1 else "")
+_TRAVEL_SEARCH = """
+This request is about flights. Use `search_flights` for fares: web pages don't show \
+live prices.
+- Pass IATA codes (an airport like SFO or a city like NYC), dates as YYYY-MM-DD, and \
+what the person asked for: passengers, cabin, bags, how flexible they are. For \
+"cheapest", set flexible_days 1 unless they gave fixed dates, and nearby_airports true \
+unless they said only one airport will do. Price in the bags they mention.
+- A round trip is also priced as two one-way tickets; those options say ticketing \
+"separate". Weigh the saving against the risk the tool's warnings describe.
+- You have at most 3 flight searches. Then finish with answer_type "flights" and \
+`flights.options`: up to 5 offers by offer_id, each with a label (Cheapest, Best value, \
+Fastest, Fewest stops, Most flexible) and 1-3 short reasons. When bags are needed, \
+compare total_with_bags, not the bare fare.
+- The page shows each offer's own price, times, flights, bags and warnings next to your \
+reasons. Quote numbers only as the tool gave them, and never invent an offer_id.
+- Say plainly when the saving comes from another airport, another date or separate \
+tickets, and what that costs the traveller.
+- Never suggest hidden-city tickets (booking past the real destination and skipping the \
+last leg): it breaks the airline's contract of carriage.
+- Leave top_pick null and alternatives empty. Offers expire within hours; in a revision, \
+search again instead of reusing old offer_ids.
+"""
+
+_TRAVEL_NO_SEARCH = """
+This request is about flights, but live fare search isn't connected here. Research with \
+web search, use answer_type "answer", put what you found in sections, and say in caveats \
+that prices weren't checked live and change often.
+"""
+
+
+def build_system_prompt(round: int, *, travel: bool = False, flight_search: bool = False) -> str:
+    prompt = _BASE
+    if travel:
+        prompt += _TRAVEL_SEARCH if flight_search else _TRAVEL_NO_SEARCH
+    return prompt + (_REVISION.format(round=round) if round > 1 else "")
