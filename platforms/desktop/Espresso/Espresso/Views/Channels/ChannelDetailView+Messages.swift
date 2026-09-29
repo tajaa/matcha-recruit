@@ -177,7 +177,8 @@ extension ChannelDetailView {
                             onRequestDelete: { pendingMessageDelete = $0 },
                             onRequestEdit: { editingMessage = $0; seedComposer($0.content); replyingTo = nil },
                             onOpenAttachment: { previewFile = previewModel($0) },
-                            onCreateTicket: vm.channel?.projectId != nil ? { startTicketDraft(from: $0) } : nil
+                            onCreateTicket: vm.channel?.projectId != nil ? { startTicketDraft(from: $0) } : nil,
+                            onQuickReply: { quickReply(to: $0, text: $1) }
                         )
                         .opacity((msg.pending || msg.failed) ? 0.55 : 1.0)
                         .id(msg.stableKey)

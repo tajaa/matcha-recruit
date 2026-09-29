@@ -99,6 +99,27 @@ extension ChannelDetailView {
         composerSeedNonce += 1
     }
 
+    /// One-tap threaded reply (Espresso agent-card question buttons): sent
+    /// through the normal chat path, so the server treats it exactly like a
+    /// typed reply to that question.
+    func quickReply(to message: ChannelMessage, text: String) {
+        let cmid = UUID().uuidString
+        appendOptimisticMessage(
+            clientMessageId: cmid,
+            content: text,
+            attachments: [],
+            replyToId: message.id,
+            replyPreview: ReplyPreview(
+                id: message.id,
+                senderName: message.senderName,
+                content: message.content,
+                attachments: message.attachments,
+            ),
+        )
+        ws.sendMessage(channelId: channelId, content: text, replyToId: message.id, clientMessageId: cmid)
+        selfSendScroll += 1
+    }
+
     func send(_ draft: String) {
         let trimmed = draft.trimmingCharacters(in: .whitespaces)
         // Edit mode: commit the edit instead of sending a new message.

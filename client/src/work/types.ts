@@ -1263,3 +1263,63 @@ export type PaymentCard = {
   exp_year: number
   created_at: string | null
 }
+
+// ── Agent cards: rich chat payloads ──
+// Backend: server/app/matcha/services/matcha_work/agent_card/chat_flow.py
+// (result_view / _prompt_metadata view / receipt_view), carried on
+// ChannelMessage.metadata.
+
+export type AgentChatButton = { label: string; reply: string; style?: 'primary' | 'secondary' | null; detail?: string | null }
+
+export type AgentChatPick = {
+  name: string
+  brand?: string | null
+  image_url?: string | null
+  price_text?: string | null
+  buy_url?: string | null
+  retailer?: string | null
+  rating?: { value: number; scale?: number | null; count?: number | null } | null
+  why?: string[]
+}
+
+export type AgentChatResult = {
+  headline: string
+  summary: string
+  top_pick: AgentChatPick | null
+  alternatives: AgentChatPick[]
+  sections?: string[]
+  source_count?: number
+}
+
+export type AgentChatPromptView = {
+  question?: string | null
+  offer?: { item_name: string; brand?: string | null; retailer?: string | null; price_text?: string | null; image_url?: string | null } | null
+  buttons: AgentChatButton[]
+}
+
+export type AgentChatReceipt = {
+  status: 'paid_test' | 'approved' | 'no_price' | 'failed'
+  item_name: string
+  brand?: string | null
+  image_url?: string | null
+  retailer?: string | null
+  total_text?: string | null
+  card_text?: string | null
+  payment_intent_id?: string | null
+  order_ref?: string | null
+  date?: string | null
+  product_url?: string | null
+  error?: string | null
+}
+
+export type AgentChatMetadata = {
+  kind?: 'agent_card_result' | 'agent_card_prompt' | 'agent_card_receipt'
+  prompt_kind?: 'show_result' | 'purchase' | 'pick_card'
+  task_id?: string
+  /** Stamped onto history: open / answered / superseded / expired. */
+  prompt_status?: string
+  answer?: string | null
+  view?: AgentChatPromptView
+  result?: AgentChatResult
+  receipt?: AgentChatReceipt
+}

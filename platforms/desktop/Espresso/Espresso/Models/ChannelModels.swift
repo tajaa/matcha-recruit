@@ -78,6 +78,151 @@ struct ChannelActionReference: Codable, Hashable {
 
 struct ChannelMessageMetadata: Codable, Hashable {
     let action: ChannelActionReference?
+    /// Espresso agent-card payloads (server: agent_card/chat_flow.py).
+    /// `kind` is agent_card_result / agent_card_prompt / agent_card_receipt.
+    let kind: String?
+    let promptKind: String?
+    let taskId: String?
+    /// Live question state stamped onto history: open / answered /
+    /// superseded / expired. Absent on a just-posted question (open).
+    let promptStatus: String?
+    let answer: String?
+    let view: AgentChatPromptView?
+    let result: AgentChatResult?
+    let receipt: AgentChatReceipt?
+
+    enum CodingKeys: String, CodingKey {
+        case action, kind, answer, view, result, receipt
+        case promptKind = "prompt_kind"
+        case taskId = "task_id"
+        case promptStatus = "prompt_status"
+    }
+
+    init(action: ChannelActionReference? = nil) {
+        self.action = action
+        kind = nil; promptKind = nil; taskId = nil; promptStatus = nil; answer = nil
+        view = nil; result = nil; receipt = nil
+    }
+
+    // Every field is optional and decoded on its own, so one odd field never
+    // costs the whole metadata (and with it the Huume action card).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        action = try? c.decodeIfPresent(ChannelActionReference.self, forKey: .action)
+        kind = try? c.decodeIfPresent(String.self, forKey: .kind)
+        promptKind = try? c.decodeIfPresent(String.self, forKey: .promptKind)
+        taskId = try? c.decodeIfPresent(String.self, forKey: .taskId)
+        promptStatus = try? c.decodeIfPresent(String.self, forKey: .promptStatus)
+        answer = try? c.decodeIfPresent(String.self, forKey: .answer)
+        view = try? c.decodeIfPresent(AgentChatPromptView.self, forKey: .view)
+        result = try? c.decodeIfPresent(AgentChatResult.self, forKey: .result)
+        receipt = try? c.decodeIfPresent(AgentChatReceipt.self, forKey: .receipt)
+    }
+
+    var isAgentCard: Bool {
+        switch kind {
+        case "agent_card_result": return result != nil
+        case "agent_card_prompt": return view != nil
+        case "agent_card_receipt": return receipt != nil
+        default: return false
+        }
+    }
+}
+
+struct AgentChatButton: Codable, Hashable {
+    let label: String
+    /// Sent verbatim as a threaded reply to the question.
+    let reply: String
+    let style: String?
+    let detail: String?
+}
+
+struct AgentChatOffer: Codable, Hashable {
+    let itemName: String
+    let brand: String?
+    let retailer: String?
+    let priceText: String?
+    let imageUrl: String?
+
+    enum CodingKeys: String, CodingKey {
+        case brand, retailer
+        case itemName = "item_name"
+        case priceText = "price_text"
+        case imageUrl = "image_url"
+    }
+}
+
+struct AgentChatPromptView: Codable, Hashable {
+    let question: String?
+    let offer: AgentChatOffer?
+    let buttons: [AgentChatButton]
+}
+
+struct AgentChatRating: Codable, Hashable {
+    let value: Double
+    let scale: Double?
+    let count: Int?
+}
+
+struct AgentChatPick: Codable, Hashable {
+    let name: String
+    let brand: String?
+    let imageUrl: String?
+    let priceText: String?
+    let buyUrl: String?
+    let retailer: String?
+    let rating: AgentChatRating?
+    let why: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case name, brand, retailer, rating, why
+        case imageUrl = "image_url"
+        case priceText = "price_text"
+        case buyUrl = "buy_url"
+    }
+}
+
+struct AgentChatResult: Codable, Hashable {
+    let headline: String
+    let summary: String
+    let topPick: AgentChatPick?
+    let alternatives: [AgentChatPick]
+    let sections: [String]?
+    let sourceCount: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case headline, summary, alternatives, sections
+        case topPick = "top_pick"
+        case sourceCount = "source_count"
+    }
+}
+
+struct AgentChatReceipt: Codable, Hashable {
+    /// paid_test / approved / no_price / failed
+    let status: String
+    let itemName: String
+    let brand: String?
+    let imageUrl: String?
+    let retailer: String?
+    let totalText: String?
+    let currency: String?
+    let cardText: String?
+    let paymentIntentId: String?
+    let orderRef: String?
+    let date: String?
+    let productUrl: String?
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status, brand, retailer, currency, date, error
+        case itemName = "item_name"
+        case imageUrl = "image_url"
+        case totalText = "total_text"
+        case cardText = "card_text"
+        case paymentIntentId = "payment_intent_id"
+        case orderRef = "order_ref"
+        case productUrl = "product_url"
+    }
 }
 
 struct ChannelMessage: Codable, Identifiable, Hashable {

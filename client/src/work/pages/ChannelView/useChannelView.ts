@@ -143,6 +143,7 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors the ?posting= URL param into state
     if (postingParam) setActivePostingId(postingParam)
   }, [postingParam])
 
@@ -156,12 +157,14 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
   // check), so the message posts unthreaded while the composer still showed
   // "Replying to…".
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate reset on channel switch (see above)
     setReplyTo(null)
   }, [channelId])
 
   // Load channel data
   useEffect(() => {
     if (!channelId) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset the view before fetching the new channel
     setLoading(true)
     setError('')
     setHasMore(true)
@@ -241,6 +244,7 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
   // applied).
   useEffect(() => {
     if (!channelId || !isMember) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clear postings for a channel we can't read
       setOpenPostings([])
       return
     }
@@ -314,6 +318,38 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
     }
     setInput('')
     setReplyTo(null)
+  }
+
+  /** One-tap threaded reply (Espresso agent-card question buttons): the same
+   *  socket send as typing it as a reply, so the server treats it identically. */
+  function handleQuickReply(target: ChannelMessage, content: string) {
+    if (!channelId) return
+    const cmid = makeTempId('cmid')
+    if (me?.user) {
+      const optimistic: ChannelMessage = {
+        id: cmid,
+        channel_id: channelId,
+        sender_id: me.user.id,
+        sender_name: me.profile?.name ?? me.user.email,
+        sender_avatar_url: me.user.avatar_url ?? null,
+        content,
+        attachments: [],
+        created_at: new Date().toISOString(),
+        edited_at: null,
+        client_message_id: cmid,
+        pending: true,
+        reply_to_id: target.id,
+        reply_preview: { id: target.id, sender_name: target.sender_name, content: target.content },
+      }
+      appendOptimistic(optimistic, (m) => m.client_message_id === cmid)
+      setTimeout(scrollToBottom, 50)
+    }
+    const sent = socketRef.current?.sendMessage(channelId, content, undefined, cmid, target.id) ?? false
+    if (!sent) {
+      setMessages((prev) => prev.map((m) => (m.client_message_id === cmid ? { ...m, failed: true } : m)))
+    } else {
+      scheduleFailedDeadline(cmid)
+    }
   }
 
   function handleRetryMessage(msg: ChannelMessage) {
@@ -498,6 +534,7 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
     replyTo,
     setReplyTo,
     handleReply,
+    handleQuickReply,
     mentionQuery,
     mentionMatches,
     inputTextareaRef,

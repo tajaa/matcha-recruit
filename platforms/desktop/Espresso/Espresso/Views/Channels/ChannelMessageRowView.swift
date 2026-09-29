@@ -20,6 +20,9 @@ struct ChannelMessageRowView: View {
     /// Turn this message into a kanban ticket. nil when the channel isn't a
     /// collab project's chat (no board to target) — the menu item is hidden.
     var onCreateTicket: ((ChannelMessage) -> Void)? = nil
+    /// Send a threaded reply to this message (Espresso's agent-card question
+    /// buttons). nil hides nothing; the buttons just stay disabled.
+    var onQuickReply: ((ChannelMessage, String) -> Void)? = nil
 
     var body: some View {
         // iMessage-style sides: my messages render right in an accent bubble
@@ -83,7 +86,13 @@ struct ChannelMessageRowView: View {
                         if let t = ticket {
                             TicketRefChip(id: t.id, title: t.title, column: t.column)
                         }
-                        if msg.metadata?.action?.kind == "event_assignment" {
+                        if let meta = msg.metadata, meta.isAgentCard {
+                            AgentCardMessageView(
+                                meta: meta,
+                                text: displayBody,
+                                onQuickReply: onQuickReply.map { send in { reply in send(msg, reply) } }
+                            )
+                        } else if msg.metadata?.action?.kind == "event_assignment" {
                             VStack(alignment: .leading, spacing: 5) {
                                 HStack(spacing: 5) {
                                     Image(systemName: "person.badge.clock")
