@@ -46,6 +46,8 @@ from . import test_charge
 logger = logging.getLogger(__name__)
 
 PROMPT_METADATA_KIND = "agent_card_prompt"
+RESULT_METADATA_KIND = "agent_card_result"
+RECEIPT_METADATA_KIND = "agent_card_receipt"
 OFFER_TTL = timedelta(days=7)
 PURCHASE_TTL = timedelta(days=2)
 PICK_CARD_TTL = timedelta(hours=2)
@@ -115,14 +117,28 @@ _BUY_INTENT = re.compile(r"\b(buy|purchase|order|checkout|check out)\b")
 _NEGATION = re.compile(r"\b(don t|dont|do not|not|no|never|cancel|stop|wait|hold|later)\b")
 
 
+# A buy phrase answers a question only when it points back at the offered
+# pick ("buy it", "buy the best one") or is a bare "buy" / "place the order".
+# "I want to buy new shoes" or "find me socks to buy" is new business, not a
+# yes to whatever buy question happens to be open.
+_REFERS_BACK = re.compile(
+    r"\b(it|this|that|this one|that one|the (?:best|top|first|recommended|cheapest) (?:one|pick|option)|"
+    r"the pick|your pick|top pick)\b"
+)
+_BARE_BUY = {"buy", "purchase", "order", "buy now", "purchase now", "order now", "checkout", "check out",
+             "place the order", "place order", "yes buy", "yes purchase"}
+
+
 def is_buy_intent(text: str) -> bool:
-    """An explicit, un-negated request to buy ("buy it", "buy the best one",
-    "go ahead and purchase"). Only ever applied to the sender's OWN open
-    purchase question, so "ok" or "sure" to a colleague never buys anything."""
+    """An explicit, un-negated "buy it" aimed at the offered pick. Only ever
+    applied to the sender's OWN open purchase question, so "ok" or "sure" to a
+    colleague, or a new "find me … to buy", never buys anything."""
     if not isinstance(text, str) or len(text) > 80:
         return False
     normalized = _normalize(text)
-    return bool(_BUY_INTENT.search(normalized)) and not _NEGATION.search(normalized)
+    if not _BUY_INTENT.search(normalized) or _NEGATION.search(normalized):
+        return False
+    return normalized in _BARE_BUY or bool(_REFERS_BACK.search(normalized))
 
 
 def plain_card_choice(text: str) -> Answer | None:
@@ -196,26 +212,89 @@ def _rating_line(pick: dict) -> str | None:
     return line
 
 
+def _short(text: str, limit: int) -> str:
+    """Clip to `limit` chars, preferring a sentence end, else a word."""
+    text = " ".join((text or "").split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    if end >= limit // 2:
+        return cut[: end + 1]
+    if text[limit] != " ":  # mid-word: drop the partial word
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(" ,;:") + "…"
+
+
+def _http_url(url) -> str | None:
+    url = str(url or "").strip()
+    return url if url.startswith(("https://", "http://")) else None
+
+
+def _image_url(pick: dict) -> str | None:
+    """The first rehosted photo. Only https (our CDN) ever reaches a client."""
+    for image in pick.get("images") or []:
+        url = str((image or {}).get("url") or "")
+        if url.startswith("https://"):
+            return url
+    return None
+
+
+def _pick_view(pick: dict, *, full: bool) -> dict:
+    buy = next((b for b in (pick.get("buy_links") or []) if _http_url(b.get("url"))), None)
+    view = {
+        "name": pick["name"],
+        "brand": pick.get("brand") or None,
+        "image_url": _image_url(pick),
+        "price_text": _pick_price(pick),
+        "buy_url": buy["url"] if buy else None,
+        "retailer": (buy.get("retailer") or None) if buy else None,
+    }
+    if full:
+        rating = pick.get("rating") or {}
+        view["rating"] = (
+            {"value": rating["value"], "scale": rating.get("scale") or 5, "count": rating.get("count")}
+            if rating.get("value") is not None else None
+        )
+        view["why"] = [w for w in (pick.get("why") or []) if w][:3]
+    return view
+
+
+def result_view(result: dict) -> dict:
+    """What the chat card renders: headline, a short summary, the top pick
+    (photo, price, rating, reasons, buy link) and up to 3 alternatives."""
+    pick = result.get("top_pick") if isinstance(result.get("top_pick"), dict) else None
+    return {
+        "headline": result.get("headline") or "",
+        "summary": _short(result.get("summary") or "", 420),
+        "answer_type": result.get("answer_type") or ("recommendation" if pick else "answer"),
+        "top_pick": _pick_view(pick, full=True) if pick else None,
+        "alternatives": [
+            _pick_view(a, full=False) for a in (result.get("alternatives") or [])[:3] if isinstance(a, dict)
+        ],
+        "sections": [] if pick else [
+            s["heading"] for s in (result.get("sections") or [])[:6] if isinstance(s, dict) and s.get("heading")
+        ],
+        "source_count": len(result.get("sources") or []),
+        "confidence": result.get("confidence"),
+    }
+
+
 def format_result(result: dict, *, task_id, title: str, column: str | None) -> str:
-    """The result as a chat message. The full page (photos, every review and
-    source) stays on the card; this is the short read."""
-    lines = [_ticket_token(task_id, title, column), result.get("headline") or title, ""]
-    lines.append(result.get("summary") or "")
+    """Plain-text fallback for the result card (notifications, older apps):
+    short, no raw URLs. The card itself renders `result_view`."""
+    lines = [_ticket_token(task_id, title, column), result.get("headline") or title]
+    summary = _short(result.get("summary") or "", 280)
+    if summary:
+        lines += ["", summary]
     pick = result.get("top_pick")
     if pick:
         facts = [f for f in (_pick_price(pick), _rating_line(pick)) if f]
         name = pick["name"] + (f" by {pick['brand']}" if pick.get("brand") else "")
         lines += ["", "Top pick: " + " · ".join([name, *facts])]
-        lines += [f"• {why}" for why in (pick.get("why") or [])[:3]]
-        buy = (pick.get("buy_links") or [None])[0]
-        if buy:
-            lines.append(f"Buy at {buy.get('retailer') or 'the store'}: {buy['url']}")
-    alternatives = result.get("alternatives") or []
+    alternatives = [a["name"] for a in (result.get("alternatives") or [])[:3]]
     if alternatives:
-        lines += ["", "Also worth a look:"]
-        for alt in alternatives[:3]:
-            price = _pick_price(alt)
-            lines.append(f"• {alt['name']}" + (f", {price}" if price else ""))
+        lines.append("Also compared: " + ", ".join(alternatives))
     if not pick and result.get("sections"):
         lines += ["", "Covers: " + ", ".join(s["heading"] for s in result["sections"][:6] if s.get("heading"))]
     lines += ["", "The full page, with photos, reviews and sources, is on the card."]
@@ -223,6 +302,73 @@ def format_result(result: dict, *, task_id, title: str, column: str | None) -> s
     if len(text) > MAX_MESSAGE_CHARS:
         text = text[: MAX_MESSAGE_CHARS - 1].rstrip() + "…"
     return text
+
+
+def _button(label: str, reply: str | None = None, *, primary: bool = False, detail: str | None = None) -> dict:
+    """A quick-reply button: the app sends `reply` as a threaded reply to the
+    question, so it goes through exactly the same path as typing it."""
+    return {"label": label, "reply": reply or label, "style": "primary" if primary else "secondary",
+            "detail": detail}
+
+
+def _show_view() -> dict:
+    return {"question": "Want to see what I found?",
+            "buttons": [_button("Show me", primary=True), _button("Not now")]}
+
+
+def _purchase_view(offer: dict) -> dict:
+    return {
+        "question": "Want me to buy it?",
+        "offer": {
+            "item_name": offer["item_name"],
+            "brand": offer.get("brand"),
+            "retailer": offer.get("retailer"),
+            "price_text": format_money(offer.get("amount"), offer.get("currency")),
+            "image_url": offer.get("image_url"),
+        },
+        "buttons": [_button("Buy it", primary=True), _button("No thanks")],
+    }
+
+
+def _pick_card_view(options: list[dict]) -> dict:
+    buttons = []
+    for o in options:
+        detail = ", ".join(
+            d for d in (
+                card_vault.redact_pans(o.get("label") or ""),
+                f"expires {int(o['exp_month']):02d}/{int(o['exp_year']) % 100:02d}" if o.get("exp_month") else "",
+            ) if d
+        )
+        buttons.append(_button(
+            f"{_BRANDS.get(o.get('brand') or '', 'Card')} •••• {o['last4']}",
+            f"Use card {o['n']}", primary=len(options) == 1, detail=detail or None,
+        ))
+    buttons.append(_button("Cancel"))
+    return {"question": "Use this card?" if len(options) == 1 else "Which card should I use?", "buttons": buttons}
+
+
+def receipt_view(payload: dict, *, card: dict, purchase_id, status: str,
+                 payment_intent_id: str | None = None, error: str | None = None) -> dict:
+    """The receipt card. `status`: paid_test (Stripe test charge succeeded),
+    failed, approved (handoff: nothing charged) or no_price."""
+    from datetime import datetime, timezone
+
+    return {
+        "status": status,
+        "test_mode": True,
+        "item_name": payload["item_name"],
+        "brand": payload.get("brand"),
+        "image_url": payload.get("image_url"),
+        "retailer": payload.get("retailer"),
+        "total_text": format_money(payload.get("amount"), payload.get("currency")),
+        "currency": (payload.get("currency") or "").upper() or None,
+        "card_text": _card_label(card),
+        "payment_intent_id": payment_intent_id,
+        "order_ref": str(purchase_id)[:8].upper(),
+        "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "product_url": _http_url(payload.get("checkout_url")),
+        "error": error,
+    }
 
 
 def purchase_offer(result: dict) -> dict | None:
@@ -254,6 +400,7 @@ def purchase_offer(result: dict) -> dict | None:
         "checkout_url": link["url"],
         "amount": price["amount"] if verified else None,
         "currency": price["currency"] if verified else None,
+        "image_url": _image_url(pick),
     }
 
 
@@ -287,7 +434,6 @@ def format_receipt(payload: dict, *, card: dict, purchase_id, payment_intent_id:
         f"Order ref: {str(purchase_id)[:8].upper()}",
         f"Date: {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC",
         "",
-        f"Product page: {payload['checkout_url']}",
         f"It's saved on ⟦ticket:{task_id}|the card|Review⟧ under Purchases.",
     ]
     return "\n".join(lines)
@@ -379,7 +525,7 @@ async def redact_card_numbers(
 
 
 async def _ask(conn, *, prompt: dict, kind: str, owner_user_id, payload: dict, ttl: timedelta,
-               content: str) -> dict | None:
+               content: str, view: dict | None = None) -> dict | None:
     """Insert a follow-up question and its Espresso message on the caller's
     transaction. Returns the message payload to broadcast after commit."""
     prompt_id = await conn.fetchval(
@@ -393,7 +539,7 @@ async def _ask(conn, *, prompt: dict, kind: str, owner_user_id, payload: dict, t
     )
     message = await persist_espresso_message(
         conn, prompt["company_id"], prompt["channel_id"], content,
-        metadata=_prompt_metadata(prompt_id, prompt["project_id"], prompt["task_id"], kind),
+        metadata=_prompt_metadata(prompt_id, prompt["project_id"], prompt["task_id"], kind, view=view),
     )
     if message:
         await conn.execute(
@@ -403,14 +549,52 @@ async def _ask(conn, *, prompt: dict, kind: str, owner_user_id, payload: dict, t
     return message
 
 
-def _prompt_metadata(prompt_id, project_id, task_id, kind: str) -> dict:
-    return {
+def _prompt_metadata(prompt_id, project_id, task_id, kind: str, *, view: dict | None = None) -> dict:
+    metadata = {
         "kind": PROMPT_METADATA_KIND,
         "prompt_id": str(prompt_id),
         "prompt_kind": kind,
         "project_id": str(project_id),
         "task_id": str(task_id),
     }
+    if view:
+        metadata["view"] = view
+    return metadata
+
+
+async def overlay_prompt_statuses(conn, messages, *, channel_id: UUID) -> list:
+    """Stamp each question message with its live state (`prompt_status`:
+    open / answered / superseded / expired, and `answer`) so a reloaded chat
+    shows answered questions as answered instead of offering stale buttons.
+    One indexed query per history page; other messages pass through."""
+    ids: set[UUID] = set()
+    for message in messages:
+        prompt_id = prompt_reference(message.get("metadata"))
+        if prompt_id is not None:
+            ids.add(prompt_id)
+    if not ids:
+        return list(messages)
+    rows = await conn.fetch(
+        """SELECT id, status, answer, (status = 'open' AND expires_at <= NOW()) AS expired
+           FROM mw_agent_card_prompts WHERE id = ANY($1::uuid[]) AND channel_id = $2""",
+        sorted(ids, key=str), channel_id,
+    )
+    states = {
+        row["id"]: ("expired" if row["expired"] else row["status"], row["answer"]) for row in rows
+    }
+    out = []
+    for message in messages:
+        prompt_id = prompt_reference(message.get("metadata"))
+        if prompt_id in states:
+            status, answer = states[prompt_id]
+            message = dict(message)
+            message["metadata"] = {
+                **(decode_jsonb(message.get("metadata"), {}) or {}),
+                "prompt_status": status,
+                "answer": answer,
+            }
+        out.append(message)
+    return out
 
 
 def prompt_reference(raw_metadata) -> UUID | None:
@@ -479,7 +663,9 @@ async def offer_result(run_id: UUID) -> bool:
             )
             payload = await persist_espresso_message(
                 conn, row["company_id"], channel_id, content,
-                metadata=_prompt_metadata(prompt_id, row["project_id"], row["task_id"], "show_result"),
+                metadata=_prompt_metadata(
+                    prompt_id, row["project_id"], row["task_id"], "show_result", view=_show_view(),
+                ),
             )
             if payload:
                 await conn.execute(
@@ -627,8 +813,10 @@ async def handle_chat_answer(
     outbox: list[dict | None] = []
     async with connection_or_direct() as conn:
 
-        async def say(text: str) -> None:
-            outbox.append(await persist_espresso_message(conn, prompt["company_id"], channel_id, text))
+        async def say(text: str, metadata: dict | None = None) -> None:
+            outbox.append(await persist_espresso_message(
+                conn, prompt["company_id"], channel_id, text, metadata=metadata,
+            ))
 
         if not allowed:
             await say("I can only take answers from people on this project.")
@@ -715,7 +903,16 @@ async def _answer_show_result(conn, prompt, user, answer: Answer, *, say, outbox
         if not isinstance(result, dict):
             await say("I couldn't load that result any more. Open the card to see its latest run.")
             return
-        await say(format_result(result, task_id=prompt["task_id"], title=row["title"], column=row["board_column"]))
+        await say(
+            format_result(result, task_id=prompt["task_id"], title=row["title"], column=row["board_column"]),
+            metadata={
+                "kind": RESULT_METADATA_KIND,
+                "task_id": str(prompt["task_id"]),
+                "project_id": str(prompt["project_id"]),
+                "run_id": str(prompt["run_id"]),
+                "result": result_view(result),
+            },
+        )
         offer = purchase_offer(result)
         if offer and purchases_allowed(user):
             outbox.append(await _ask(
@@ -725,6 +922,7 @@ async def _answer_show_result(conn, prompt, user, answer: Answer, *, say, outbox
                     f"Want me to buy it? {_offer_line(offer)}. "
                     "Reply yes (or \"buy it\") to buy, or no to skip."
                 ),
+                view=_purchase_view(offer),
             ))
 
 
@@ -766,6 +964,7 @@ async def _answer_purchase(conn, prompt, user, answer: Answer, *, say, outbox) -
         outbox.append(await _ask(
             conn, prompt=prompt, kind="pick_card", owner_user_id=user.id,
             payload={**prompt["payload"], "options": options}, ttl=PICK_CARD_TTL, content=question,
+            view=_pick_card_view(options),
         ))
 
 
@@ -828,14 +1027,23 @@ async def _answer_pick_card(conn, prompt, user, answer: Answer, *, say) -> None:
     # The Stripe call happens after commit (never inside a transaction); the
     # approval is recorded either way.
     approved = f"Approved: {_offer_line(payload)}, on your {_card_label(dict(card))}."
-    link = f"Checkout link: {payload['checkout_url']}\nIt's saved on the card under Purchases."
+    link = "The product link is on the card under Purchases."
+
+    def receipt(status: str, **extra) -> dict:
+        return {
+            "kind": RECEIPT_METADATA_KIND,
+            "task_id": str(prompt["task_id"]),
+            "project_id": str(prompt["project_id"]),
+            "receipt": receipt_view(payload, card=dict(card), purchase_id=purchase_id, status=status, **extra),
+        }
+
     key = test_charge.test_key()
     if key is None:
-        await say(f"{approved} I haven't charged anything. Finish checkout here: {payload['checkout_url']}\n"
-                  "It's saved on the card under Purchases.")
+        await say(f"{approved} I haven't charged anything; finish checkout at the product link. {link}",
+                  receipt("approved"))
         return
     if payload.get("amount") is None or not payload.get("currency"):
-        await say(f"{approved} No verified price, so I didn't make a test charge. {link}")
+        await say(f"{approved} No verified price, so I didn't make a test charge. {link}", receipt("no_price"))
         return
     outcome = await test_charge.charge(
         key, purchase_id=purchase_id, amount=payload["amount"], currency=payload["currency"],
@@ -849,9 +1057,13 @@ async def _answer_pick_card(conn, prompt, user, answer: Answer, *, say) -> None:
         purchase_id, outcome["status"], outcome["payment_intent_id"], outcome["error"],
     )
     if outcome["status"] == "test_charged":
-        await say(format_receipt(
-            payload, card=dict(card), purchase_id=purchase_id,
-            payment_intent_id=outcome["payment_intent_id"], task_id=prompt["task_id"],
-        ))
+        await say(
+            format_receipt(
+                payload, card=dict(card), purchase_id=purchase_id,
+                payment_intent_id=outcome["payment_intent_id"], task_id=prompt["task_id"],
+            ),
+            receipt("paid_test", payment_intent_id=outcome["payment_intent_id"]),
+        )
     else:
-        await say(f"{approved} The Stripe test charge failed: {outcome['error']} {link}")
+        await say(f"{approved} The Stripe test charge failed: {outcome['error']} {link}",
+                  receipt("failed", payment_intent_id=outcome["payment_intent_id"], error=outcome["error"]))

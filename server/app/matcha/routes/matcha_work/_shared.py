@@ -147,7 +147,8 @@ def _can_edit_project(role: Optional[str]) -> bool:
     `_verify_project_access` returns role=None / 'owner' for the owner depending
     on access path, so an `in ('owner','editor')` allowlist 403s legitimate
     owners — mirror the client's `canEditElements` (viewer/commenter blocked)."""
-    return role not in ("viewer", "commenter")
+    from app.matcha.services.matcha_work.project_service import role_can_edit
+    return role_can_edit(role)
 
 def _resolve_file_urls(files: list[dict]) -> list[dict]:
     """Rewrite s3:// storage_url values to short-lived presigned https URLs so

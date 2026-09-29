@@ -462,10 +462,21 @@ async def _bg_dispatch_espresso_mention(
                     "I can only inspect the repository for people who can access this project.",
                 )
                 return True
+            # "@espresso find me … to buy" is an errand: it becomes an agent
+            # card (To do → In progress → Review) instead of a repo question.
+            from app.matcha.services.matcha_work.agent_card.chat_create import (
+                handle_mention as handle_agent_card_mention,
+            )
+            if await handle_agent_card_mention(
+                project_id=project["id"], company_id=company_id, channel_id=channel_id,
+                user=user, text=content, repo_connected=bool(project["github_repo"]),
+            ):
+                return True
             if not project["github_repo"]:
                 await post_as_espresso(
                     company_id, channel_id,
-                    "Connect a GitHub repository in Elements before asking me about the app.",
+                    "Connect a GitHub repository in Elements before asking me about the app, "
+                    "or ask me to find something, like \"@espresso find me organic sweatpants to buy online\".",
                 )
                 return True
 

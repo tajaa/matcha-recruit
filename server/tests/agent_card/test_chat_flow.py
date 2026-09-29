@@ -57,6 +57,9 @@ def test_plain_messages_only_count_as_an_explicit_yes(text, expected):
 
 @pytest.mark.parametrize("text, expected", [
     ("Buy the best one", True), ("buy it", True), ("please purchase it", True), ("place the order", True),
+    ("buy", True), ("go ahead and buy the top pick", True),
+    # New business, not a yes to the open question:
+    ("I want to buy new shoes tomorrow", False), ("find me wool socks to buy", False), ("buy new shoes", False),
     ("ok", False), ("sure", False), ("don't buy it", False), ("do not purchase", False),
     ("not yet, don't order", False), ("cancel the order", False), ("wait before you buy", False),
     ("buy " * 30, False),
@@ -77,15 +80,43 @@ def test_buying_is_admins_plus_an_email_allowlist(monkeypatch):
     assert not chat_flow.purchases_allowed(person("client", ""))
 
 
-def test_format_result_is_a_short_read_with_ticket_chip():
+def test_format_result_is_a_short_fallback_without_raw_urls():
     task_id = uuid4()
     text = chat_flow.format_result(RESULT, task_id=task_id, title="Find a | balm", column="review")
     assert text.startswith(f"⟦ticket:{task_id}|Find a / balm|Review⟧")
     assert "Top pick: Organic Lip Balm by Dr. Bronner's · $4.49 · 4.7/5 from 1,203 ratings" in text
-    assert "• Fourth reason" not in text  # at most 3 reasons
-    assert "Buy at Shop: https://shop.example.com/p" in text
-    assert "• Badger Balm" in text
+    assert "Also compared: Badger Balm" in text
+    assert "http" not in text  # links live on the card and in the rich message
     assert text.endswith("is on the card.")
+
+
+def test_result_view_is_what_the_chat_card_renders():
+    result = json.loads(json.dumps(RESULT))
+    result["top_pick"]["images"] = [
+        {"url": "http://insecure.example.com/a.webp", "page_url": "x", "alt": "a"},
+        {"url": "https://cdn.example.com/a.webp", "page_url": "x", "alt": "a"},
+    ]
+    result["summary"] = "First sentence is here. " + "Long detail " * 60
+    view = chat_flow.result_view(result)
+    pick = view["top_pick"]
+    assert pick["image_url"] == "https://cdn.example.com/a.webp"  # https (our CDN) only
+    assert pick["price_text"] == "$4.49" and pick["rating"] == {"value": 4.7, "scale": 5.0, "count": 1203}
+    assert pick["why"] == ["USDA organic", "Fair trade", "Under $5"]
+    assert pick["buy_url"] == "https://shop.example.com/p" and pick["retailer"] == "Shop"
+    assert view["alternatives"] == [{"name": "Badger Balm", "brand": None, "image_url": None,
+                                     "price_text": None, "buy_url": None, "retailer": None}]
+    assert len(view["summary"]) <= 421 and view["summary"].endswith("…")
+    assert view["sections"] == []
+    answer = chat_flow.result_view({"headline": "H", "summary": "S", "top_pick": None,
+                                    "sections": [{"heading": "History", "body_md": "x"}]})
+    assert answer["answer_type"] == "answer" and answer["sections"] == ["History"]
+
+
+def test_short_clips_at_a_sentence_or_a_word():
+    assert chat_flow._short("short", 20) == "short"
+    assert chat_flow._short("One two three. Four five six seven", 20) == "One two three."
+    assert chat_flow._short("alpha beta gamma delta epsilon", 16) == "alpha beta gamma…"
+    assert chat_flow._short("alpha beta gamma delta epsilon", 14) == "alpha beta…"
 
 
 def test_format_result_for_a_plain_answer_lists_sections_and_caps_length():
@@ -101,6 +132,7 @@ def test_purchase_offer_freezes_item_store_link_and_verified_price():
     assert OFFER == {
         "item_name": "Organic Lip Balm", "brand": "Dr. Bronner's", "retailer": "Shop",
         "checkout_url": "https://shop.example.com/p", "amount": 4.49, "currency": "USD",
+        "image_url": None,
     }
     assert chat_flow.purchase_offer({**RESULT, "answer_type": "answer"}) is None
     no_link = json.loads(json.dumps(RESULT))
@@ -302,16 +334,28 @@ async def test_yes_shows_the_result_then_threaded_replies_buy_it(env):
     assert await _answer(env, user, "yes")  # a plain "yes" shows the newest result
     assert db.prompts[offer_id]["status"] == "answered"
     assert "Top pick: Organic Lip Balm" in _said(env)[0]
+    result_meta = env["said"][0]["metadata"]
+    assert result_meta["kind"] == "agent_card_result" and result_meta["result"]["top_pick"]["price_text"] == "$4.49"
     buy_q = _newest(db, "purchase")
     assert buy_q["owner_user_id"] == user.id and buy_q["ttl"] == chat_flow.PURCHASE_TTL
     assert "Want me to buy it? Organic Lip Balm at Shop for $4.49. Reply yes (or \"buy it\")" in _said(env)[1]
     assert env["said"][1]["metadata"]["prompt_kind"] == "purchase"
+    view = env["said"][1]["metadata"]["view"]
+    assert view["offer"]["price_text"] == "$4.49" and view["offer"]["item_name"] == "Organic Lip Balm"
+    assert [b["reply"] for b in view["buttons"]] == ["Buy it", "No thanks"]
+    # Every button reply parses as the answer it stands for.
+    assert [parse_answer(b["reply"]).kind for b in view["buttons"]] == ["yes", "no"]
     assert db.locks == [f"{db.task_id}:card_agent"]  # the claim holds enqueue's per-card lock
 
     assert await _answer(env, user, "yes", prompt_id=buy_q["id"])
     pick_q = _newest(db, "pick_card")
     assert "Use your Visa ending 4242 (Mercury test, expires 12/31)? Reply yes (or 1) to confirm" in _said(env)[2]
     assert json.loads(pick_q["payload"])["checkout_url"] == "https://shop.example.com/p"
+    pick_view = env["said"][2]["metadata"]["view"]
+    assert pick_view["buttons"][0] == {"label": "Visa •••• 4242", "reply": "Use card 1", "style": "primary",
+                                       "detail": "Mercury test, expires 12/31"}
+    assert parse_answer(pick_view["buttons"][0]["reply"]) == Answer("choice", "1")
+    assert parse_answer(pick_view["buttons"][-1]["reply"]).kind == "no"
 
     assert await _answer(env, user, "yes", prompt_id=pick_q["id"])
     assert len(db.purchases) == 1
@@ -709,6 +753,8 @@ async def test_offer_asks_once_under_the_card_lock_and_supersedes_older_question
     content, metadata = offer_env["said"][0]
     assert "I finished \"Find a balm\". Want to see what I found? Reply yes or no." in content
     assert metadata["kind"] == "agent_card_prompt" and metadata["prompt_kind"] == "show_result"
+    assert [b["reply"] for b in metadata["view"]["buttons"]] == ["Show me", "Not now"]
+    assert [parse_answer(b["reply"]).kind for b in metadata["view"]["buttons"]] == ["yes", "no"]
     queries = [q for q, _ in conn.executed]
     assert conn.executed[0][1] == (f"{row['task_id']}:card_agent",)  # same lock as enqueue
     assert any("SET status = 'superseded'" in q for q in queries)
@@ -802,9 +848,15 @@ async def test_approved_purchase_is_charged_in_stripe_test_mode(env, monkeypatch
     assert receipt.startswith("All done. Here's your receipt.")
     for line in ("Receipt (Stripe TEST mode, no real money moved)", "Item: Organic Lip Balm (Dr. Bronner's)",
                  "Store: Shop", "Total: $4.49 USD", "Paid with: Visa ending 4242 (Mercury test)",
-                 "Payment: pi_test_123 (succeeded)", "Product page: https://shop.example.com/p"):
+                 "Payment: pi_test_123 (succeeded)"):
         assert line in receipt
-    assert "4242 4242" not in receipt
+    assert "4242 4242" not in receipt and "http" not in receipt
+    card = env["said"][-1]["metadata"]
+    assert card["kind"] == "agent_card_receipt"
+    r = card["receipt"]
+    assert r["status"] == "paid_test" and r["total_text"] == "$4.49" and r["currency"] == "USD"
+    assert r["payment_intent_id"] == "pi_test_123" and r["card_text"] == "Visa ending 4242 (Mercury test)"
+    assert r["product_url"] == "https://shop.example.com/p" and len(r["order_ref"]) == 8
 
 
 @pytest.mark.asyncio
@@ -815,6 +867,8 @@ async def test_a_failed_test_charge_is_recorded_and_reported(env, monkeypatch):
     await _approve(env, _user())
     assert env["db"].charge_updates[0][1] == "test_failed"
     assert "The Stripe test charge failed: Your card was declined." in _said(env)[-1]
+    receipt = env["said"][-1]["metadata"]["receipt"]
+    assert receipt["status"] == "failed" and receipt["error"] == "Your card was declined."
 
 
 @pytest.mark.asyncio
@@ -825,6 +879,7 @@ async def test_no_verified_price_means_no_test_charge(env, monkeypatch):
     await _approve(env, _user(), payload={**OFFER, "amount": None, "currency": None})
     charge.assert_not_awaited()
     assert "No verified price, so I didn't make a test charge." in _said(env)[-1]
+    assert env["said"][-1]["metadata"]["receipt"]["status"] == "no_price"
     assert len(env["db"].purchases) == 1
 
 
@@ -835,3 +890,33 @@ async def test_handoff_mode_charges_nothing(env, monkeypatch):
     await _approve(env, _user())
     charge.assert_not_awaited()
     assert "I haven't charged anything" in _said(env)[-1]
+    assert env["said"][-1]["metadata"]["receipt"]["status"] == "approved"
+
+
+# ── history overlay ───────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_history_overlay_stamps_question_state():
+    answered, expired, other = uuid4(), uuid4(), uuid4()
+
+    class C:
+        async def fetch(self, query, *args):
+            assert "mw_agent_card_prompts" in query and set(args[0]) == {answered, expired}
+            return [{"id": answered, "status": "answered", "answer": "yes", "expired": False},
+                    {"id": expired, "status": "open", "answer": None, "expired": True}]
+
+    def msg(pid):
+        return {"id": uuid4(), "metadata": json.dumps({"kind": "agent_card_prompt", "prompt_id": str(pid)})}
+
+    plain = {"id": uuid4(), "metadata": "{}"}
+    out = await chat_flow.overlay_prompt_statuses(C(), [msg(answered), msg(expired), plain], channel_id=uuid4())
+    assert out[0]["metadata"]["prompt_status"] == "answered" and out[0]["metadata"]["answer"] == "yes"
+    assert out[1]["metadata"]["prompt_status"] == "expired"
+    assert out[2] is plain
+
+    class Never:
+        async def fetch(self, *a):
+            raise AssertionError("no question messages: no query")
+
+    assert await chat_flow.overlay_prompt_statuses(Never(), [plain], channel_id=uuid4()) == [plain]
+    del other
