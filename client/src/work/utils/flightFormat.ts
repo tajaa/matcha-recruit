@@ -46,15 +46,3 @@ export function flightDuration(minutes: number | null | undefined): string {
 export function stopsText(stops: number): string {
   return stops === 0 ? 'Nonstop' : `${stops} stop${stops === 1 ? '' : 's'}`
 }
-
-/** "310.00" + "USD" → "$310.00" (falls back to "310.00 XYZ"). */
-export function fareText(amount: string | null | undefined, currency: string): string {
-  if (amount == null) return ''
-  const value = Number(amount)
-  if (!Number.isFinite(value)) return amount
-  try {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency || 'USD' }).format(value)
-  } catch {
-    return `${value.toFixed(2)} ${currency}`
-  }
-}

@@ -54,7 +54,10 @@ _PHOTO_SECONDS = 60.0
 _MAX_TOOL_OUTPUT_CHARS = 12_000
 _MAX_REPAIRS = 1
 _MAX_FLIGHT_SEARCHES = 3
-_FLIGHT_SEARCH_SECONDS = 120.0
+# One search's time budget. The search itself stops at it and keeps whatever
+# finished (flights.SEARCH_SECONDS); the wait_for below is only a backstop.
+_FLIGHT_SEARCH_SECONDS = 100.0
+_MIN_FLIGHT_SEARCH_SECONDS = 30.0
 _AI_USAGE_FEATURE = "matcha.espresso.agent_card"
 _FINISH_CHOICE = {"type": "function", "name": "finish"}
 
@@ -248,18 +251,18 @@ async def run_card_agent(
                                "error" if "error" in out else "ok")
                 outputs.append(tool_output_item(call["call_id"], out))
             elif name == "search_flights" and flight_session is not None:
+                seconds = min(_FLIGHT_SEARCH_SECONDS, _WALL_SECONDS - (time.monotonic() - started) - 5.0)
                 if flight_searches >= _MAX_FLIGHT_SEARCHES:
                     out = {"error": "Flight search limit reached; finish with the offers you have."}
                     await step(name, "search", "Flight search limit reached", args, out, "skipped")
+                elif seconds < _MIN_FLIGHT_SEARCH_SECONDS:
+                    out = {"error": "Not enough time left for another flight search; finish with the offers you have."}
+                    await step(name, "search", "No time left for a flight search", args, out, "skipped")
                 else:
                     flight_searches += 1
                     await progress("Searching flights…")
-                    remaining = _WALL_SECONDS - (time.monotonic() - started)
                     try:
-                        out = await asyncio.wait_for(
-                            flight_session.search(args),
-                            timeout=max(5.0, min(_FLIGHT_SEARCH_SECONDS, remaining)),
-                        )
+                        out = await asyncio.wait_for(flight_session.search(args, seconds=seconds), timeout=seconds + 10.0)
                     except TimeoutError:
                         out = {"error": "The flight search took too long. Try fewer options, or finish."}
                     except Exception as exc:

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import AgentFlightsView from './AgentFlightsView'
 import type { AgentFlightOption, AgentFlights } from '../../../api/matchaWork'
-import { dayOffset, fareText, flightClock, flightDay, flightDuration, stopsText } from '../../../utils/flightFormat'
+import { dayOffset, flightClock, flightDay, flightDuration, stopsText } from '../../../utils/flightFormat'
+import { formatMoney } from '../../../utils/money'
 
 const option = (over: Partial<AgentFlightOption> = {}): AgentFlightOption => ({
   id: 'combo:a+b',
@@ -95,8 +96,8 @@ describe('flight formatting', () => {
     expect(flightDuration(null)).toBe('')
     expect(stopsText(0)).toBe('Nonstop')
     expect(stopsText(2)).toBe('2 stops')
-    expect(fareText('310', 'USD')).toBe('$310.00')
-    expect(fareText(null, 'USD')).toBe('')
-    expect(fareText('abc', 'USD')).toBe('abc')
+    expect(formatMoney('310', 'USD')).toBe('$310.00')
+    expect(formatMoney(null, 'USD')).toBe('')
+    expect(formatMoney('abc', 'USD')).toBe('abc')
   })
 })

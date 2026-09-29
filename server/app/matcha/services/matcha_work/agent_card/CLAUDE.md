@@ -60,21 +60,26 @@ It is not the MCP connector either: that is push-only, so it can't advance a car
 
 ## Flights (`flights.py`, Duffel)
 
-A travel request (`flights.is_travel_ask`: flight, fly, airfare, round-trip, …) gets the `search_flights` tool when `DUFFEL_ACCESS_TOKEN` is set. Without a token the prompt says fares weren't checked live, and the run researches with web search as an `answer`.
+A travel request gets the `search_flights` tool when `DUFFEL_ACCESS_TOKEN` is set. `flights.is_travel_ask` is a trip said plainly (`is_trip`: "flights to Denver", "fly to", airfare, "one-way tickets", "round trip to Lisbon") or, on a card, "flight" itself, except the other flights ("flight risk", "wine flight", "flight simulator", "flight jacket"). Bare "fly", "one-way" and "nonstop" never count, so "fly fishing rod" and "one-way valve" keep the shopping flow and its buy question. A chat errand in a repo-connected project counts only `is_trip`, never a bare "flight" or "round-trip": this codebase has flight search code and JSON round-trip tests. Without a token the prompt says fares weren't checked live, and the run researches with web search as an `answer`.
 
 **Why an API.** Airline and Google Flights pages need JavaScript and block bots, so `fetch_page` never sees a fare. Amadeus Self-Service closed 2026-07-17.
 
 **Private by construction.** Requests carry only the itinerary: airports, dates, passenger count (children and lap infants as fixed pricing ages 8 and 1), cabin and bags to price. Nothing about the person is sent: no location, device, browser, cookies, account or search history. `privacy_disclosure()` is server text on every flight result, never the model's. There is no proxy rotation or fingerprint spoofing; a neutral API makes it pointless.
 
-**One call does the cheap-fare work, in code, within `MAX_OFFER_REQUESTS = 12` per run** (`plan_variants`, most useful first):
+**One call does the cheap-fare work, in code** (`plan_variants`), within `MAX_OFFER_REQUESTS = 16` per run and `MAX_REQUESTS_PER_SEARCH = 10` per call, so a refining search always has room:
 1. the exact trip;
 2. for a round trip, each direction as its own one-way ticket (paired into `ticketing: "separate"` options, never across currencies). Duffel's own `include_split_ticket` needs support-granted access, so the pairing is ours;
-3. `flexible_days` (0–2) shifts, nearest first;
-4. `nearby_airports` (Duffel `/places/suggestions`, ~100 mi, at most 2 per end) on the exact dates.
+3. then `flexible_days` (0–2) shifts and `nearby_airports` (on the exact dates) **take turns**, nearest date first and one changed airport before two, so a tight budget tries some of each. What didn't fit comes back as `not_searched`, and the model is told it can search again narrower.
+
+Nearby airports come from Duffel `/places/suggestions` (~100 mi, at most 2 per end). A city code (NYC) already covers its own airports, so its nearby ones are the airports around it. An airport that is, or is near, the other end is dropped, so a short hop never plans SJC→SJC.
 
 Run with at most 4 concurrent requests.
 
-**True total.** For options missing the bags asked for, up to 6 offers per call are re-read with `return_available_services` and the listed bag prices added (`bag_cost`: per-slice or whole-trip bag services, lap infants excluded). An option whose bags can't be priced says so (`bag_note`) and ranks by its bare fare.
+**Time budget.** One call has `SEARCH_SECONDS` (100 s; the agent passes what's left of its wall clock, and won't start a search with under 30 s). Nearby lookups get ≤10 s and bag pricing keeps 15 s back. Requests still running when time runs out are cancelled and whatever finished is kept; requests that never reached Duffel are given back to the budget (`requests_used` is reserved up front and refunded, even on cancel).
+
+**True total.** For options missing the bags asked for, up to 6 offers per call are re-read with `return_available_services`, concurrently, and the listed bag prices added (`bag_cost`: per-slice or whole-trip bag services). Lap infants carry no bags: they're skipped both in what the fare includes and in what's bought, whether Duffel returns their type or only the age we sent. An option whose bags can't be priced says so (`bag_note`).
+
+**Ranking** (`_rank`): offers in the search's main currency (the exact trip's) first, since amounts in different currencies are never compared; then totals that cover the bags ahead of fares whose bag fees couldn't be priced; then price, then time in the air. The tool output names the currency and says when either rule reordered things.
 
 **Warnings are computed, not written by the model:**
 - separate tickets;
@@ -87,7 +92,7 @@ Run with at most 4 concurrent requests.
 **The offer-id gate** (`schema._flights`). The model's `finish` names offers by `offer_id` with a label and reasons. Every other field is rebuilt from the run's `FlightSession`, so a price or time the model wrote is ignored and an id the search never returned is dropped. `answer_type: "flights"` with no surviving option gets one repair. A flight result never carries `top_pick`, so `chat_flow.purchase_offer` never asks "want me to buy it?". Booking through Duffel orders is a later change.
 
 **Limits:**
-- 3 `search_flights` calls per run, 120 s each;
+- 3 `search_flights` calls per run, 100 s each;
 - a Duffel 429/5xx retried once;
 - `supplier_timeout` 15 s.
 

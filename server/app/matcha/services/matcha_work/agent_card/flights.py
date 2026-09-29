@@ -10,11 +10,11 @@ about the person — location, device, browser, cookies, account, search
 history — is sent, so none of it can move the price. `privacy_disclosure()`
 puts exactly that on the result.
 
-The cheaper-fare work is done here, deterministically, within a fixed budget:
-flexible dates, nearby airports, round trips also priced as two one-way
-tickets, and a total that includes the bags the person needs. Warnings (tight
-connections, overnight layovers, basic economy, separate tickets, a different
-airport or date) are computed here too.
+The cheaper-fare work is done here, deterministically, within a fixed request
+budget and time budget: flexible dates, nearby airports, round trips also
+priced as two one-way tickets, and a total that includes the bags the person
+needs. Warnings (tight connections, overnight layovers, basic economy, separate
+tickets, a different airport or date) are computed here too.
 
 The model never states a fare. It picks offers by id; `schema` rebuilds every
 price, time, flight number, bag count and warning from `FlightSession`.
@@ -25,6 +25,8 @@ import asyncio
 import logging
 import os
 import re
+import time
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -38,11 +40,18 @@ TOKEN_ENV = "DUFFEL_ACCESS_TOKEN"
 API_BASE = "https://api.duffel.com"
 API_VERSION = "v2"
 
-MAX_OFFER_REQUESTS = 12  # per run, across every search_flights call
+MAX_OFFER_REQUESTS = 16  # per run, across every search_flights call
+# One call can't spend the whole run, so a refining search is still possible.
+MAX_REQUESTS_PER_SEARCH = 10
 MAX_CONCURRENT_REQUESTS = 4
 MAX_OFFER_FETCHES = 6  # per call: offers re-read to price bags ("true total")
 SUPPLIER_TIMEOUT_MS = 15_000
-HTTP_TIMEOUT_SECONDS = 30.0
+HTTP_TIMEOUT_SECONDS = 25.0
+# Time budget of one call. Whatever finishes inside it is kept; requests
+# still waiting when it runs out are cancelled and given back to the budget.
+SEARCH_SECONDS = 100.0
+NEARBY_SECONDS = 10.0
+BAG_SECONDS = 15.0  # held back from the offer requests for bag pricing
 MAX_OFFERS_KEPT_PER_REQUEST = 40
 MAX_OPTIONS_STORED = 80
 MAX_TOOL_OPTIONS = 15
@@ -57,9 +66,26 @@ CABINS = ("economy", "premium_economy", "business", "first")
 # anyone's real age.
 _CHILD_AGE, _INFANT_AGE = 8, 1
 
-_TRAVEL = re.compile(
-    r"\b(?:flights?|fly|flying|airfare|air fare|plane tickets?|airline tickets?|round[- ]trip|one[- ]way|"
-    r"layovers?|nonstop|non-stop)\b",
+# A trip, said so plainly: "flights to Denver", "fly to Denver", "airfare",
+# "one-way tickets", "round trip to Lisbon" (never "a JSON round-trip to
+# disk" or "flights from the queue"). Enough on its own to make a chat message
+# an errand.
+_TRIP = re.compile(
+    r"\bflights?\s+(?:to|from|into|between)\s+(?-i:[A-Z])"
+    r"|\bfly(?:ing)?\s+(?:to|from|into|out\s+of|between|home|back)\b"
+    r"|\b(?:air\s?fares?|(?:plane|airline)\s+(?:tickets?|fares?))\b"
+    r"|\b(?:round[- ]trip|one[- ]way|non-?stop|direct)\s+(?:flights?|tickets?|fares?)\b"
+    r"|\b(?:round[- ]trip|non-?stop)\s+(?:to|from)\s+(?-i:[A-Z])",
+    re.IGNORECASE,
+)
+# On a card someone made to be researched, "flight" alone is a trip too
+# ("cheapest flight SFO to JFK"), unless it's one of the other flights:
+# "employee flight risk", "a wine flight", "flight simulator". Bare "fly",
+# "one-way" and "nonstop" never count ("fly fishing rod", "one-way valve").
+_FLIGHT_WORD = re.compile(
+    r"(?<!wine )(?<!beer )(?<!tasting )\bflights?\b"
+    r"(?!\s+(?:risks?|of|mode|sim(?:ulator)?s?|controllers?|jackets?|decks?|suits?|sticks?|cases?|"
+    r"recorders?|schools?|instructors?|attendants?|logs?)\b)",
     re.IGNORECASE,
 )
 _IATA = re.compile(r"^[A-Z]{3}$")
@@ -79,8 +105,14 @@ def enabled() -> bool:
     return token() is not None
 
 
+def is_trip(text: str) -> bool:
+    """An unmistakable trip request: what makes a chat message a travel errand."""
+    return bool(_TRIP.search(text or ""))
+
+
 def is_travel_ask(text: str) -> bool:
-    return bool(_TRAVEL.search(text or ""))
+    """Whether an agent card is about flights (gets `search_flights`)."""
+    return is_trip(text) or bool(_FLIGHT_WORD.search(text or ""))
 
 
 def privacy_disclosure() -> dict:
@@ -211,25 +243,27 @@ class Variant:
 
 def plan_variants(
     q: FlightQuery, *, origins: list[str], destinations: list[str], budget: int, today: date,
-) -> list[Variant]:
-    """The offer requests to run, most useful first, at most `budget`:
-    the exact trip; for a round trip, each direction as its own one-way
-    ticket; then other dates; then other airports (on the exact dates)."""
+) -> tuple[list[Variant], dict[str, int]]:
+    """The offer requests to run, at most `budget`, and how many were left
+    out. First the exact trip and, for a round trip, each direction as its
+    own one-way ticket. Then other dates and other airports (on the exact
+    dates) take turns, nearest date first and one changed airport before two,
+    so a tight budget still tries some of each."""
     def trip(o: str, d: str, out_shift: int, back_shift: int) -> tuple[tuple[str, str, date], ...]:
         legs = [(o, d, q.depart + timedelta(days=out_shift))]
         if q.return_date:
             legs.append((d, o, q.return_date + timedelta(days=back_shift)))
         return tuple(legs)
 
-    def valid(slices) -> bool:
-        dates = [s[2] for s in slices]
+    def valid(v: Variant) -> bool:
+        dates = [s[2] for s in v.slices]
         return dates[0] >= today and dates == sorted(dates)
 
-    plan: list[Variant] = [Variant(trip(q.origin, q.destination, 0, 0), (0, 0) if q.round_trip else (0,), False)]
+    exact_shift = (0, 0) if q.round_trip else (0,)
+    core = [Variant(trip(q.origin, q.destination, 0, 0), exact_shift, False)]
     if q.round_trip:
-        exact = plan[0].slices
-        plan.append(Variant((exact[0],), (0,), False, leg="out"))
-        plan.append(Variant((exact[1],), (0,), False, leg="back"))
+        exact = core[0].slices
+        core += [Variant((exact[0],), (0,), False, leg="out"), Variant((exact[1],), (0,), False, leg="back")]
     flex = range(-q.flexible_days, q.flexible_days + 1)
     if q.round_trip:
         shifts = sorted(
@@ -238,15 +272,28 @@ def plan_variants(
         )
     else:
         shifts = sorted(((a,) for a in flex if a != 0), key=lambda s: (abs(s[0]), s))
-    for shift in shifts:
-        slices = trip(q.origin, q.destination, shift[0], shift[1] if q.round_trip else 0)
-        plan.append(Variant(slices, shift, False))
-    for o in origins:
-        for d in destinations:
-            if (o, d) == (q.origin, q.destination):
-                continue
-            plan.append(Variant(trip(o, d, 0, 0), (0, 0) if q.round_trip else (0,), True))
-    return [v for v in plan if valid(v.slices)][:budget]
+    dated = [
+        v for v in (
+            Variant(trip(q.origin, q.destination, s[0], s[1] if q.round_trip else 0), s, False) for s in shifts
+        ) if valid(v)
+    ]
+    pairs = [
+        (o, d) for o in origins for d in destinations
+        if o != d and (o, d) != (q.origin, q.destination)
+    ]
+    pairs.sort(key=lambda p: (p[0] != q.origin) + (p[1] != q.destination))  # stable: nearby order kept
+    moved = [v for v in (Variant(trip(o, d, 0, 0), exact_shift, True) for o, d in pairs) if valid(v)]
+
+    plan = [v for v in core if valid(v)][:budget]
+    turns: list[Variant] = []
+    for i in range(max(len(dated), len(moved))):
+        turns += dated[i:i + 1] + moved[i:i + 1]
+    chosen = turns[:max(0, budget - len(plan))]
+    skipped = {
+        "other_dates": len(dated) - sum(not v.airports_changed for v in chosen),
+        "other_airports": len(moved) - sum(v.airports_changed for v in chosen),
+    }
+    return plan + chosen, skipped
 
 
 # ── Duffel ────────────────────────────────────────────────────────────────────
@@ -333,13 +380,28 @@ def _when(value: str) -> datetime | None:
         return None
 
 
+def _lap_infant(passenger: dict) -> bool:
+    """A lap infant: no seat and no bags of their own. Duffel may return the
+    type, or only the age we sent (lap infants go as age 1)."""
+    kind = passenger.get("type")
+    if kind == "infant_without_seat":
+        return True
+    age = passenger.get("age")
+    return not kind and isinstance(age, int) and not isinstance(age, bool) and age < 2
+
+
 def _bags_included(offer: dict) -> dict:
-    """Bags every passenger has on every segment (the minimum across them)."""
+    """Bags every seated passenger has on every segment (the minimum across
+    them). A lap infant has none, so counting them would make every fare look
+    bagless and charge the adult for bags the fare already includes."""
+    infants = {str(p.get("id")) for p in offer.get("passengers") or [] if _lap_infant(p)}
     checked: list[int] = []
     carry_on: list[int] = []
     for sl in offer.get("slices") or []:
         for seg in sl.get("segments") or []:
             for pax in seg.get("passengers") or []:
+                if str(pax.get("passenger_id")) in infants:
+                    continue
                 bags = {b.get("type"): int(b.get("quantity") or 0) for b in pax.get("baggages") or []}
                 checked.append(bags.get("checked", 0))
                 carry_on.append(bags.get("carry_on", 0))
@@ -473,7 +535,7 @@ def bag_cost(offer: dict, *, bag_type: str, quantity: int) -> Decimal | None:
     journey = frozenset().union(*slice_segments)
     total = Decimal(0)
     for pax in offer.get("passengers") or []:
-        if pax.get("type") == "infant_without_seat":
+        if _lap_infant(pax):
             continue
         mine = [s for s in services if pax.get("id") in (s.get("passenger_ids") or [])]
 
@@ -539,9 +601,25 @@ def warnings_for(option: dict, q: FlightQuery) -> list[str]:
     return out
 
 
-def _sort_key(option: dict) -> tuple:
-    amount = _money(option["true_total_amount"]) or _money(option["total_amount"])
-    return (amount, sum(sl["duration_minutes"] or 0 for sl in option["slices"]))
+def _primary_currency(options: list[dict]) -> str | None:
+    counts = Counter(o["currency"] for o in options if o["currency"])
+    return counts.most_common(1)[0][0] if counts else None
+
+
+def _rank(primary: str | None):
+    """Sort key: offers in the search's main currency first, since amounts in
+    different currencies are never compared; then totals that cover the bags
+    asked for ahead of fares whose bag fees couldn't be priced (a $250 fare
+    plus unknown bags isn't cheaper than a $310 total with them); then price;
+    then time in the air."""
+    def key(option: dict) -> tuple:
+        priced = option["true_total_amount"] is not None
+        amount = _money(option["true_total_amount"] if priced else option["total_amount"])
+        return (
+            option["currency"] != primary, not priced, amount,
+            sum(sl["duration_minutes"] or 0 for sl in option["slices"]),
+        )
+    return key
 
 
 def tool_view(option: dict) -> dict:
@@ -592,29 +670,43 @@ class FlightSession:
     def option(self, offer_id: str) -> dict | None:
         return self.options.get(offer_id)
 
-    async def search(self, args: dict) -> dict:
-        """Tool output: the cheapest options found, or `{error}`."""
+    async def search(self, args: dict, *, seconds: float = SEARCH_SECONDS) -> dict:
+        """Tool output: the cheapest options found, or `{error}`. Returns
+        within about `seconds`, with whatever finished in time."""
         today = self._today or datetime.now(timezone.utc).date()
         try:
             q = parse_query(args, today=today)
         except FlightError as exc:
             return {"error": str(exc)}
-        budget = MAX_OFFER_REQUESTS - self.requests_used
+        budget = min(MAX_REQUESTS_PER_SEARCH, MAX_OFFER_REQUESTS - self.requests_used)
         if budget <= 0:
             return {"error": "Flight search budget used up; finish with the offers you have."}
         client = DuffelClient(self._token, transport=self._transport)
         try:
-            return await self._search(client, q, budget, today)
+            return await self._search(client, q, budget, today, deadline=time.monotonic() + seconds)
         finally:
             await client.aclose()
 
     async def _nearby(self, client: DuffelClient, code: str) -> list[str]:
+        """Other airports within ~100 miles of `code`, an airport or a city.
+        A city code (NYC) already searches every airport in the city, so those
+        are left out: what comes back is the airports around it."""
         try:
             matches = await client.places(query=code)
-            place = next((p for p in matches if p.get("iata_code") == code and p.get("type") == "airport"), None)
-            if not place or place.get("latitude") is None or place.get("longitude") is None:
+            place = next(
+                (p for p in matches if p.get("iata_code") == code and p.get("type") in ("airport", "city")), None,
+            )
+            if not place:
                 return []
-            around = await client.places(lat=place["latitude"], lng=place["longitude"], rad=NEARBY_RADIUS_METRES)
+            own = {code} | {a.get("iata_code") for a in place.get("airports") or [] if a.get("iata_code")}
+            anchor = next(
+                (p for p in [place, *(place.get("airports") or [])]
+                 if p.get("latitude") is not None and p.get("longitude") is not None),
+                None,
+            )
+            if anchor is None:
+                return []
+            around = await client.places(lat=anchor["latitude"], lng=anchor["longitude"], rad=NEARBY_RADIUS_METRES)
         except (DuffelError, httpx.HTTPError):
             logger.info("nearby airport lookup failed for %s", code, exc_info=True)
             return []
@@ -622,42 +714,99 @@ class FlightSession:
         for p in around:
             for airport in [p, *(p.get("airports") or [])] if p.get("type") == "city" else [p]:
                 iata = airport.get("iata_code")
-                if airport.get("type", "airport") == "airport" and iata and iata != code and iata not in codes:
+                if airport.get("type", "airport") == "airport" and iata and iata not in own and iata not in codes:
                     codes.append(iata)
         return codes[:MAX_NEARBY_AIRPORTS]
 
-    async def _search(self, client: DuffelClient, q: FlightQuery, budget: int, today: date) -> dict:
-        origins, destinations = [q.origin], [q.destination]
-        if q.nearby_airports:
-            near_o, near_d = await asyncio.gather(self._nearby(client, q.origin), self._nearby(client, q.destination))
-            origins += near_o
-            destinations += near_d
-        variants = plan_variants(q, origins=origins, destinations=destinations, budget=budget, today=today)
-        self.requests_used += len(variants)
+    async def _nearby_both(self, client: DuffelClient, q: FlightQuery, timeout: float) -> tuple[list[str], list[str]]:
+        """Nearby airports for each end, never one that is (or is near) the
+        other end: a short hop like SFO→SJC must not plan SJC→SJC."""
+        try:
+            near_o, near_d = await asyncio.wait_for(
+                asyncio.gather(self._nearby(client, q.origin), self._nearby(client, q.destination)),
+                timeout=max(0.0, timeout),
+            )
+        except TimeoutError:
+            logger.info("nearby airport lookup ran out of time")
+            return [], []
+        shared = set(near_o) & set(near_d)
+        return (
+            [c for c in near_o if c != q.destination and c not in shared],
+            [c for c in near_d if c != q.origin and c not in shared],
+        )
+
+    async def _offer_requests(
+        self, client: DuffelClient, q: FlightQuery, variants: list[Variant], started: list[int], *, timeout: float,
+    ) -> list[list[dict] | BaseException | None]:
+        """Each variant's offers, its error, or None when time ran out first.
+        `started[0]` counts the requests that actually went to Duffel."""
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 
-        async def run(variant: Variant):
+        async def run(variant: Variant) -> list[dict]:
             async with semaphore:
+                started[0] += 1
                 return await client.offer_request(variant, q)
 
-        results = await asyncio.gather(*(run(v) for v in variants), return_exceptions=True)
-        failed = 0
-        options: list[dict] = []
-        legs: dict[str, list[dict]] = {"out": [], "back": []}
+        tasks = [asyncio.create_task(run(v)) for v in variants]
+        try:
+            if tasks:
+                await asyncio.wait(tasks, timeout=max(0.0, timeout))
+        finally:
+            for task in tasks:
+                task.cancel()  # no-op on a finished task
+            await asyncio.gather(*tasks, return_exceptions=True)
+        return [
+            None if task.cancelled() else (task.exception() or task.result())
+            for task in tasks
+        ]
+
+    async def _search(self, client: DuffelClient, q: FlightQuery, budget: int, today: date, *,
+                      deadline: float) -> dict:
+        def left() -> float:
+            return deadline - time.monotonic()
+
+        origins, destinations = [q.origin], [q.destination]
+        if q.nearby_airports:
+            near_o, near_d = await self._nearby_both(client, q, min(NEARBY_SECONDS, left() - BAG_SECONDS))
+            origins += near_o
+            destinations += near_d
+        variants, skipped = plan_variants(q, origins=origins, destinations=destinations, budget=budget, today=today)
+        # Reserved up front, so an overlapping call can't overspend; what never
+        # reached Duffel (time ran out first) is given back, even on cancel.
+        self.requests_used += len(variants)
+        started = [0]
+        try:
+            results = await self._offer_requests(client, q, variants, started, timeout=left() - BAG_SECONDS)
+        finally:
+            self.requests_used -= len(variants) - started[0]
+
+        failed = timed_out = 0
+        found: list[tuple[Variant, list[dict]]] = []
         for variant, result in zip(variants, results):
-            if isinstance(result, BaseException):
+            if result is None:
+                timed_out += 1
+            elif isinstance(result, BaseException):
                 failed += 1
                 logger.info("duffel offer request failed: %s", result)
-                continue
-            parsed = [o for o in (offer_option(raw, variant) for raw in result) if o]
-            parsed.sort(key=_sort_key)
-            parsed = parsed[:MAX_OFFERS_KEPT_PER_REQUEST]
-            (legs[variant.leg] if variant.leg else options).extend(parsed)
-        if failed == len(variants):
+            else:
+                found.append((variant, [o for o in (offer_option(raw, variant) for raw in result) if o]))
+        if not found:
+            if timed_out:
+                return {"error": "The flight search ran out of time before the airline data provider answered. "
+                                 "Try again with fewer dates or airports, or finish with what you have."}
             return {"error": "The flight search failed at the airline data provider. Try again or finish with what you have."}
 
-        legs["out"].sort(key=_sort_key)
-        legs["back"].sort(key=_sort_key)
+        # Amounts are only compared within one currency: the exact trip's.
+        exact = next((opts for v, opts in found if v is variants[0]), [])
+        primary = _primary_currency(exact) or _primary_currency([o for _, opts in found for o in opts])
+        key = _rank(primary)
+        options: list[dict] = []
+        legs: dict[str, list[dict]] = {"out": [], "back": []}
+        for variant, parsed in found:
+            parsed = sorted(parsed, key=key)[:MAX_OFFERS_KEPT_PER_REQUEST]
+            (legs[variant.leg] if variant.leg else options).extend(parsed)
+        legs["out"].sort(key=key)
+        legs["back"].sort(key=key)
         for out in legs["out"][:MAX_LEGS_PAIRED]:
             for back in legs["back"][:MAX_LEGS_PAIRED]:
                 pair = combine(out, back)
@@ -666,65 +815,113 @@ class FlightSession:
 
         # Same flights found by two requests: keep the cheaper.
         unique: dict[tuple, dict] = {}
-        for option in sorted(options, key=_sort_key):
+        for option in sorted(options, key=key):
             unique.setdefault(_signature(option), option)
-        ranked = sorted(unique.values(), key=_sort_key)
+        ranked = sorted(unique.values(), key=key)
 
-        await self._price_bags(client, q, ranked)
+        await self._price_bags(client, q, ranked, timeout=left())
         for option in ranked:
             option["warnings"] = warnings_for(option, q)
-        ranked.sort(key=_sort_key)
+        ranked.sort(key=key)
 
         for option in ranked[:MAX_OPTIONS_STORED]:
             self.options[option["id"]] = option
         self.searched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         self.query_summary = q.summary()
-        return {
+        shown = ranked[:MAX_TOOL_OPTIONS]
+        out = {
             "searched": q.summary(),
-            "offer_requests": len(variants),
+            "offer_requests": started[0],
             "failed_requests": failed,
             "requests_left": MAX_OFFER_REQUESTS - self.requests_used,
-            "options": [tool_view(o) for o in ranked[:MAX_TOOL_OPTIONS]],
+            "currency": primary,
+            "options": [tool_view(o) for o in shown],
             "note": "Choose by offer_id. Prices, times, bags and warnings on the page come from this data.",
         }
+        notes = []
+        if timed_out:
+            out["timed_out_requests"] = timed_out
+            notes.append(f"{timed_out} request(s) ran out of time and weren't counted against the budget.")
+        if q.nearby_airports:
+            out["nearby_airports"] = {"origin": origins[1:], "destination": destinations[1:]}
+            if len(origins) + len(destinations) == 2:
+                notes.append("No nearby airports were found, so only the airports asked for were searched.")
+        if any(skipped.values()):
+            out["not_searched"] = skipped
+            notes.append(
+                "Some other dates or airports weren't searched within this search's request budget. "
+                "Search again with a narrower ask to try them."
+            )
+        others = sorted({o["currency"] for o in shown if o["currency"] != primary})
+        if others:
+            notes.append(
+                f"Offers priced in {', '.join(others)} are listed after the {primary} offers: "
+                "amounts in different currencies aren't comparable."
+            )
+        if any(o["true_total_amount"] is None for o in shown) and (q.checked_bags or q.carry_on_bags):
+            notes.append(
+                "Offers whose bag fees couldn't be priced are listed after the ones whose total includes "
+                "the bags; their real cost is higher than the fare shown."
+            )
+        if notes:
+            out["note"] += " " + " ".join(notes)
+        return out
 
-    async def _price_bags(self, client: DuffelClient, q: FlightQuery, ranked: list[dict]) -> None:
+    async def _price_bags(self, client: DuffelClient, q: FlightQuery, ranked: list[dict], *,
+                          timeout: float) -> None:
         """Fill `true_total_amount` for the cheapest options that lack the
-        bags asked for, within `MAX_OFFER_FETCHES` offer reads."""
+        bags asked for: up to `MAX_OFFER_FETCHES` offer reads, concurrently,
+        within `timeout`. An option that can't be priced says so."""
         if not q.checked_bags and not q.carry_on_bags:
             for option in ranked:
                 option["true_total_amount"] = option["total_amount"]
             return
-        cache: dict[str, Decimal | None] = {}
-        fetches = 0
-
-        async def extra_for(offer_id: str) -> Decimal | None:
-            nonlocal fetches
-            if offer_id in cache:
-                return cache[offer_id]
-            if fetches >= MAX_OFFER_FETCHES:
-                return None
-            fetches += 1
-            try:
-                offer = await client.offer(offer_id)
-            except (DuffelError, httpx.HTTPError):
-                cache[offer_id] = None
-                return None
-            included = _bags_included(offer)
-            checked = bag_cost(offer, bag_type="checked", quantity=max(0, q.checked_bags - included["checked"]))
-            carry = bag_cost(offer, bag_type="carry_on", quantity=max(0, q.carry_on_bags - included["carry_on"]))
-            cache[offer_id] = None if checked is None or carry is None else checked + carry
-            return cache[offer_id]
-
+        needed: list[dict] = []
         for option in ranked:
             included = option["bags_included"]
             if included["checked"] >= q.checked_bags and included["carry_on"] >= q.carry_on_bags:
                 option["true_total_amount"] = option["total_amount"]
                 option["bag_note"] = "Bags you need are included"
+            else:
+                needed.append(option)
+        # Cheapest first, whole options only: a separate-ticket pair needs
+        # both of its offers read.
+        wanted: list[str] = []
+        for option in needed:
+            new = [leg for leg in option["leg_ids"] if leg not in wanted]
+            if len(wanted) + len(new) <= MAX_OFFER_FETCHES:
+                wanted += new
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+
+        async def extra_for(offer_id: str) -> Decimal | None:
+            async with semaphore:
+                offer = await client.offer(offer_id)
+            included = _bags_included(offer)
+            checked = bag_cost(offer, bag_type="checked", quantity=max(0, q.checked_bags - included["checked"]))
+            carry = bag_cost(offer, bag_type="carry_on", quantity=max(0, q.carry_on_bags - included["carry_on"]))
+            return None if checked is None or carry is None else checked + carry
+
+        tasks = {offer_id: asyncio.create_task(extra_for(offer_id)) for offer_id in wanted}
+        extras: dict[str, Decimal | None] = {}
+        try:
+            if tasks:
+                await asyncio.wait(tasks.values(), timeout=max(0.0, timeout))
+        finally:
+            for task in tasks.values():
+                task.cancel()
+            await asyncio.gather(*tasks.values(), return_exceptions=True)
+        for offer_id, task in tasks.items():
+            if task.cancelled():
                 continue
-            extras = [await extra_for(leg_id) for leg_id in option["leg_ids"]]
-            if all(e is not None for e in extras):
-                option["true_total_amount"] = str(Decimal(option["total_amount"]) + sum(extras, Decimal(0)))
+            if task.exception() is not None:
+                logger.info("bag pricing failed for %s: %s", offer_id, task.exception())
+                continue
+            extras[offer_id] = task.result()
+
+        for option in needed:
+            parts = [extras.get(leg) for leg in option["leg_ids"]]
+            if parts and all(part is not None for part in parts):
+                option["true_total_amount"] = str(Decimal(option["total_amount"]) + sum(parts, Decimal(0)))
                 option["bag_note"] = "Includes the airline's listed bag fees"
             else:
                 option["bag_note"] = "Bag fees not priced; check with the airline"

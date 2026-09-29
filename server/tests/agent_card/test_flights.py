@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import date
 from decimal import Decimal
@@ -58,27 +59,32 @@ def _nonstop(prefix, origin, dest, day, number="100", checked=0, code="UA"):
 class FakeDuffel:
     """Answers offer requests from a function of the requested slices."""
 
-    def __init__(self, offers_for, *, offers_by_id=None, places=None, fail=()):
+    def __init__(self, offers_for, *, offers_by_id=None, places=None, fail=(), slow=()):
         self.offers_for = offers_for
         self.offers_by_id = offers_by_id or {}
         self.places = places or {}
         self.fail = set(fail)
+        self.slow = set(slow)  # request keys / offer ids that never answer in time
         self.requests: list[dict] = []
         self.offer_reads: list[str] = []
 
-    def handler(self, request: httpx.Request) -> httpx.Response:
+    async def handler(self, request: httpx.Request) -> httpx.Response:
         assert request.headers["Duffel-Version"] == "v2"
         assert request.headers["Authorization"].startswith("Bearer duffel_test_")
         if request.url.path == "/air/offer_requests":
             body = json.loads(request.content)["data"]
             self.requests.append(body)
             key = tuple((s["origin"], s["destination"], s["departure_date"]) for s in body["slices"])
+            if key in self.slow:
+                await asyncio.sleep(30)
             if key in self.fail:
                 return httpx.Response(422, json={"errors": [{"message": "No such route"}]})
             return httpx.Response(200, json={"data": {"offers": self.offers_for(key)}})
         if request.url.path.startswith("/air/offers/"):
             oid = request.url.path.rsplit("/", 1)[-1]
             self.offer_reads.append(oid)
+            if oid in self.slow:
+                await asyncio.sleep(30)
             assert request.url.params["return_available_services"] == "true"
             return httpx.Response(200, json={"data": self.offers_by_id[oid]})
         if request.url.path == "/places/suggestions":
@@ -135,23 +141,46 @@ def test_query_defaults_and_passengers():
 
 # ── the search plan ───────────────────────────────────────────────────────────
 
-def test_plan_puts_the_exact_trip_and_one_way_legs_first_then_dates_then_airports():
+def test_plan_puts_the_exact_trip_and_one_way_legs_first_then_dates_and_airports_in_turn():
     q = flights.parse_query({**ROUND_TRIP, "flexible_days": 1}, today=TODAY)
-    plan = flights.plan_variants(q, origins=["SFO", "OAK"], destinations=["JFK", "EWR"], budget=99, today=TODAY)
+    plan, skipped = flights.plan_variants(
+        q, origins=["SFO", "OAK"], destinations=["JFK", "EWR"], budget=99, today=TODAY,
+    )
     assert plan[0].slices == (("SFO", "JFK", date(2026, 11, 12)), ("JFK", "SFO", date(2026, 11, 15)))
     assert [v.leg for v in plan[1:3]] == ["out", "back"]
-    # 8 date shifts (3x3 minus the exact), nearest first, then 3 other airport pairs.
-    shifts = [v.date_shift for v in plan[3:11]]
-    assert set(shifts[:4]) == {(-1, 0), (1, 0), (0, -1), (0, 1)}  # one day off, before two
-    assert all(not v.airports_changed for v in plan[:11])
-    assert [(v.slices[0][0], v.slices[0][1]) for v in plan[11:]] == [("SFO", "EWR"), ("OAK", "JFK"), ("OAK", "EWR")]
-    assert len(flights.plan_variants(q, origins=["SFO"], destinations=["JFK"], budget=4, today=TODAY)) == 4
+    rest = plan[3:]
+    # Dates and airports take turns, so a tight budget still tries both.
+    assert [v.airports_changed for v in rest[:6]] == [False, True, False, True, False, True]
+    dates = [v.date_shift for v in rest if not v.airports_changed]
+    assert len(dates) == 8 and set(dates[:4]) == {(-1, 0), (1, 0), (0, -1), (0, 1)}  # one day off first
+    airports = [(v.slices[0][0], v.slices[0][1]) for v in rest if v.airports_changed]
+    assert airports == [("SFO", "EWR"), ("OAK", "JFK"), ("OAK", "EWR")]  # one end changed before both
+    assert skipped == {"other_dates": 0, "other_airports": 0}
+
+
+def test_a_tight_budget_keeps_some_of_each_and_reports_what_it_left_out():
+    q = flights.parse_query({**ROUND_TRIP, "flexible_days": 2}, today=TODAY)
+    plan, skipped = flights.plan_variants(
+        q, origins=["SFO", "OAK"], destinations=["JFK", "EWR"], budget=10, today=TODAY,
+    )
+    assert len(plan) == 10
+    changed = sum(v.airports_changed for v in plan)
+    assert changed == 3  # all three airport pairs fit alongside the nearest dates
+    # 24 shifts, less one that returns before it departs (out +2, back -2): 23,
+    # of which the 4 nearest fit.
+    assert skipped == {"other_dates": 19, "other_airports": 0}
+
+
+def test_the_plan_never_flies_an_airport_to_itself():
+    q = flights.parse_query({"origin": "SFO", "destination": "SJC", "depart_date": "2026-11-12"}, today=TODAY)
+    plan, _ = flights.plan_variants(q, origins=["SFO", "SJC"], destinations=["SJC", "SFO"], budget=99, today=TODAY)
+    assert all(v.slices[0][0] != v.slices[0][1] for v in plan)
 
 
 def test_plan_skips_dates_in_the_past_and_returns_before_departure():
     q = flights.parse_query({"origin": "SFO", "destination": "JFK", "depart_date": "2026-10-01",
                              "return_date": "2026-10-02", "flexible_days": 1}, today=TODAY)
-    plan = flights.plan_variants(q, origins=["SFO"], destinations=["JFK"], budget=99, today=TODAY)
+    plan, _ = flights.plan_variants(q, origins=["SFO"], destinations=["JFK"], budget=99, today=TODAY)
     for v in plan:
         dates = [s[2] for s in v.slices]
         assert dates[0] >= TODAY and dates == sorted(dates)
@@ -178,14 +207,46 @@ async def test_round_trip_is_also_priced_as_two_one_way_tickets():
 
 
 @pytest.mark.asyncio
-async def test_the_offer_request_budget_is_shared_across_calls():
+async def test_one_search_cant_spend_the_whole_run_and_says_what_it_skipped():
     duffel = FakeDuffel(_simple_offers)
     session = duffel.session()
-    await session.search({**ROUND_TRIP, "flexible_days": 2})  # wants 3 + 24 requests
-    assert len(duffel.requests) == flights.MAX_OFFER_REQUESTS
+    first = await session.search({**ROUND_TRIP, "flexible_days": 2})  # wants 3 + 24 requests
+    assert len(duffel.requests) == flights.MAX_REQUESTS_PER_SEARCH
+    assert first["not_searched"] == {"other_dates": 23 - 7, "other_airports": 0}  # 23 valid shifts
+    assert "weren't searched" in first["note"]
+    assert first["requests_left"] == flights.MAX_OFFER_REQUESTS - flights.MAX_REQUESTS_PER_SEARCH
+    # A refining search still has room.
+    second = await session.search({**ROUND_TRIP, "flexible_days": 1})
+    assert "error" not in second and len(duffel.requests) == flights.MAX_OFFER_REQUESTS
     again = await session.search(ROUND_TRIP)
     assert "budget used up" in again["error"]
     assert len(duffel.requests) == flights.MAX_OFFER_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_a_slow_search_keeps_what_finished_and_refunds_what_never_started(monkeypatch):
+    monkeypatch.setattr(flights, "MAX_CONCURRENT_REQUESTS", 1)
+    monkeypatch.setattr(flights, "BAG_SECONDS", 0.0)
+    out_leg = (("SFO", "JFK", "2026-11-12"),)
+    duffel = FakeDuffel(_simple_offers, slow={out_leg})
+    session = duffel.session()
+    out = await session.search(ROUND_TRIP, seconds=0.3)
+    # The exact trip answered; the outbound leg hung; the return leg never started.
+    assert [o["offer_id"] for o in out["options"]] == ["rt_SFOJFK_2026-11-12_2026-11-15"]
+    assert out["timed_out_requests"] == 2 and out["offer_requests"] == 2
+    assert session.requests_used == 2 and len(duffel.requests) == 2
+    assert "ran out of time" in out["note"]
+
+
+@pytest.mark.asyncio
+async def test_a_search_where_nothing_answers_in_time_is_an_error(monkeypatch):
+    monkeypatch.setattr(flights, "BAG_SECONDS", 0.0)
+    exact = (("SFO", "JFK", "2026-11-12"),)
+    duffel = FakeDuffel(_simple_offers, slow={exact})
+    session = duffel.session()
+    out = await session.search({**ROUND_TRIP, "return_date": None}, seconds=0.1)
+    assert "ran out of time" in out["error"]
+    assert session.requests_used == 1  # it reached Duffel, so it counts
 
 
 @pytest.mark.asyncio
@@ -217,9 +278,54 @@ async def test_nearby_airports_come_from_places():
         ],
     }
     duffel = FakeDuffel(_simple_offers, places=places)
-    await duffel.session().search({**ROUND_TRIP, "return_date": None, "nearby_airports": True})
+    out = await duffel.session().search({**ROUND_TRIP, "return_date": None, "nearby_airports": True})
     origins = [r["slices"][0]["origin"] for r in duffel.requests]
     assert origins == ["SFO", "OAK", "SJC"]  # at most 2 nearby; JFK had no place data
+    assert out["nearby_airports"] == {"origin": ["OAK", "SJC"], "destination": []}
+
+
+@pytest.mark.asyncio
+async def test_a_city_code_gets_the_airports_around_the_city_not_its_own():
+    places = {
+        "NYC": [{"type": "city", "iata_code": "NYC", "airports": [
+            {"type": "airport", "iata_code": "JFK", "latitude": 40.6, "longitude": -73.8},
+            {"type": "airport", "iata_code": "LGA"}, {"type": "airport", "iata_code": "EWR"},
+        ]}],
+        "near:40.6": [{"type": "airport", "iata_code": code} for code in ("JFK", "LGA", "EWR", "HPN", "ISP")],
+    }
+    duffel = FakeDuffel(_simple_offers, places=places)
+    out = await duffel.session().search(
+        {"origin": "SFO", "destination": "NYC", "depart_date": "2026-11-12", "nearby_airports": True},
+    )
+    assert out["nearby_airports"]["destination"] == ["HPN", "ISP"]
+
+
+@pytest.mark.asyncio
+async def test_a_short_hop_never_searches_an_airport_to_itself():
+    places = {
+        "SFO": [{"type": "airport", "iata_code": "SFO", "latitude": 37.6, "longitude": -122.4}],
+        "SJC": [{"type": "airport", "iata_code": "SJC", "latitude": 37.3, "longitude": -121.9}],
+        "near:37.6": [{"type": "airport", "iata_code": c} for c in ("SFO", "SJC", "OAK")],
+        "near:37.3": [{"type": "airport", "iata_code": c} for c in ("SJC", "SFO", "OAK")],
+    }
+    duffel = FakeDuffel(_simple_offers, places=places)
+    out = await duffel.session().search(
+        {"origin": "SFO", "destination": "SJC", "depart_date": "2026-11-12", "nearby_airports": True},
+    )
+    assert [(r["slices"][0]["origin"], r["slices"][0]["destination"]) for r in duffel.requests] == [("SFO", "SJC")]
+    assert "No nearby airports" in out["note"]
+
+
+@pytest.mark.asyncio
+async def test_a_nearby_lookup_that_runs_out_of_time_searches_only_the_airports_asked_for(monkeypatch):
+    session = FakeDuffel(_simple_offers).session()
+
+    async def hang(client, code):
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(session, "_nearby", hang)
+    q = flights.parse_query({**ROUND_TRIP, "nearby_airports": True}, today=TODAY)
+    assert await session._nearby_both(None, q, 0.05) == ([], [])
 
 
 @pytest.mark.asyncio
@@ -240,6 +346,91 @@ async def test_true_total_prices_the_bags_asked_for():
     assert session.option("bagged")["true_total_amount"] == "130.00"
     assert session.option("bagged")["bag_note"] == "Bags you need are included"
     assert duffel.offer_reads == ["cheap"]
+
+
+@pytest.mark.asyncio
+async def test_an_unpriced_fare_ranks_after_a_total_that_includes_the_bags():
+    offers = {
+        "cheap": _offer("cheap", "250.00", _nonstop("a", "SFO", "JFK", "2026-11-12")),  # bags unknown
+        "bagged": _offer("bagged", "310.00", _nonstop("b", "SFO", "JFK", "2026-11-12", "200", checked=1)),
+    }
+    offers["cheap"]["available_services"] = []
+    duffel = FakeDuffel(lambda key: list(offers.values()), offers_by_id=offers)
+    out = await duffel.session().search({**ROUND_TRIP, "return_date": None, "checked_bags": 1})
+    assert [o["offer_id"] for o in out["options"]] == ["bagged", "cheap"]
+    assert "couldn't be priced" in out["note"]
+
+
+@pytest.mark.asyncio
+async def test_amounts_in_another_currency_are_never_ranked_against_the_main_one():
+    def offers_for(key):
+        (o, d, day), = key
+        if day == "2026-11-12":
+            return [_offer("usd", "280.00", _nonstop("a", o, d, day))]
+        return [_offer(f"cad_{day}", "200.00", _nonstop("b", o, d, day, "200"), currency="CAD")]
+
+    out = await FakeDuffel(offers_for).session().search({**ROUND_TRIP, "return_date": None, "flexible_days": 1})
+    assert out["currency"] == "USD"
+    assert out["options"][0]["offer_id"] == "usd"  # CAD 200 is not "cheaper" than USD 280
+    assert "CAD" in out["note"]
+
+
+@pytest.mark.asyncio
+async def test_bag_prices_are_read_concurrently_and_a_slow_read_just_goes_unpriced():
+    fast = _offer("fast", "100.00", _nonstop("a", "SFO", "JFK", "2026-11-12"))
+    slow = _offer("slow", "110.00", _nonstop("b", "SFO", "JFK", "2026-11-12", "200"))
+    for offer, seg in ((fast, "a_seg"), (slow, "b_seg")):
+        offer["available_services"] = [
+            {"type": "baggage", "total_amount": "30.00", "total_currency": "USD", "maximum_quantity": 1,
+             "passenger_ids": ["pas_1"], "segment_ids": [seg], "metadata": {"type": "checked"}},
+        ]
+    duffel = FakeDuffel(lambda key: [], offers_by_id={"fast": fast, "slow": slow}, slow={"slow"})
+    session = duffel.session()
+    q = flights.parse_query({**ROUND_TRIP, "return_date": None, "checked_bags": 1}, today=TODAY)
+    v = flights.Variant((("SFO", "JFK", date(2026, 11, 12)),), (0,), False)
+    ranked = [flights.offer_option(fast, v), flights.offer_option(slow, v)]
+    client = flights.DuffelClient("duffel_test_x", transport=httpx.MockTransport(duffel.handler))
+    try:
+        await asyncio.wait_for(session._price_bags(client, q, ranked, timeout=0.2), timeout=5)
+    finally:
+        await client.aclose()
+    assert sorted(duffel.offer_reads) == ["fast", "slow"]  # both asked for at once
+    assert ranked[0]["true_total_amount"] == "130.00"
+    assert ranked[1]["true_total_amount"] is None
+    assert ranked[1]["bag_note"] == "Bag fees not priced; check with the airline"
+
+
+def _with_lap_infant(offer, *, infant_type=None):
+    offer["passengers"] = [{"id": "pas_1", "type": "adult"}, {"id": "pas_2", "type": infant_type, "age": 1}]
+    for sl in offer["slices"]:
+        for seg in sl["segments"]:
+            seg["passengers"].append({"passenger_id": "pas_2", "baggages": []})
+    return offer
+
+
+@pytest.mark.parametrize("infant_type", [None, "infant_without_seat"])
+def test_a_lap_infant_has_no_bags_and_doesnt_hide_the_adults(infant_type):
+    v = flights.Variant((("SFO", "JFK", date(2026, 11, 12)),), (0,), False)
+    offer = _with_lap_infant(_offer("x", "300.00", _nonstop("a", "SFO", "JFK", "2026-11-12", checked=1)),
+                             infant_type=infant_type)
+    assert flights.offer_option(offer, v)["bags_included"] == {"checked": 1, "carry_on": 1}
+    offer["available_services"] = [
+        {"type": "baggage", "total_amount": "40.00", "total_currency": "USD", "maximum_quantity": 2,
+         "passenger_ids": ["pas_1"], "segment_ids": ["a_seg"], "metadata": {"type": "checked"}},
+    ]
+    # Only the adult is charged for a second bag; the infant has no bag service to buy.
+    assert flights.bag_cost(offer, bag_type="checked", quantity=1) == Decimal("40.00")
+
+
+@pytest.mark.asyncio
+async def test_a_trip_with_a_lap_infant_isnt_charged_for_bags_the_fare_includes():
+    offer = _with_lap_infant(_offer("x", "300.00", _nonstop("a", "SFO", "JFK", "2026-11-12", checked=1)))
+    duffel = FakeDuffel(lambda key: [offer], offers_by_id={"x": offer})
+    session = duffel.session()
+    await session.search({**ROUND_TRIP, "return_date": None, "infants": 1, "checked_bags": 1})
+    assert session.option("x")["true_total_amount"] == "300.00"
+    assert session.option("x")["bag_note"] == "Bags you need are included"
+    assert duffel.offer_reads == []
 
 
 def test_bag_cost_needs_every_slice_covered():
@@ -314,7 +505,15 @@ def test_token_and_travel_detection(monkeypatch):
     assert flights.token() == "duffel_test_x"
     assert flights.is_travel_ask("Find me the cheapest flight SFO to JFK")
     assert flights.is_travel_ask("round-trip to Lisbon in May, nonstop")
+    assert flights.is_travel_ask("I need to fly to Denver on Friday")
+    assert flights.is_travel_ask("one-way tickets to Paris")
     assert not flights.is_travel_ask("Find me the best organic lip balm")
+    # Products and HR, not trips: they keep the shopping flow and its buy question.
+    for text in ("Find a good fly fishing rod", "Research employee flight risk tools", "a wine flight set",
+                 "one-way valve for an aquarium", "best nonstop blender", "flight simulator joystick",
+                 "a JSON round-trip test harness", "vintage flight jacket"):
+        assert not flights.is_travel_ask(text), text
+    assert flights.is_trip("flights to Denver") and not flights.is_trip("flights from the retry queue")
     assert flights.FlightSession("duffel_test_x").test_data
     assert not flights.FlightSession("duffel_live_x").test_data
 
@@ -443,6 +642,22 @@ async def test_a_crashing_flight_search_is_a_tool_error_not_a_failed_run(monkeyp
     monkeypatch.setattr(agent, "get_luna_client", Mock(return_value=client))
     await agent.run_card_agent(**_kwargs(ask="cheapest flight SFO to JFK"))
     assert "RuntimeError" in json.loads(client.calls[1]["input"][0]["output"])["error"]
+    assert boom.search.await_args.kwargs["seconds"] <= agent._FLIGHT_SEARCH_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_no_flight_search_starts_without_time_left_for_it(monkeypatch, looped):
+    record_step, duffel = looped
+    monkeypatch.setattr(agent, "_WALL_SECONDS", agent._MIN_FLIGHT_SEARCH_SECONDS)
+    client = _FakeClient([
+        _response(_call("search_flights", ROUND_TRIP)),
+        _response(_call("finish", {"result": {"headline": "h", "summary": "s", "answer_type": "answer",
+                                              "confidence": "low"}})),
+    ])
+    monkeypatch.setattr(agent, "get_luna_client", Mock(return_value=client))
+    await agent.run_card_agent(**_kwargs(ask="cheapest flight SFO to JFK"))
+    assert "Not enough time" in json.loads(client.calls[1]["input"][0]["output"])["error"]
+    assert duffel.requests == []
 
 
 @pytest.mark.asyncio

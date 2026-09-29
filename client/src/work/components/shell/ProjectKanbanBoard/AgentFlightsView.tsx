@@ -1,8 +1,9 @@
 import { AlertTriangle, Plane, ShieldCheck, Ticket } from 'lucide-react'
 import type { AgentFlightOption, AgentFlightSlice, AgentFlights } from '../../../api/matchaWork'
 import {
-  dayOffset, fareText, flightClock, flightDay, flightDuration, stopsText,
+  dayOffset, flightClock, flightDay, flightDuration, stopsText,
 } from '../../../utils/flightFormat'
+import { formatMoney } from '../../../utils/money'
 
 /**
  * A flight-search result on an agent card (server: agent_card/flights.py).
@@ -74,10 +75,10 @@ function OptionCard({ option }: { option: AgentFlightOption }) {
         </div>
         <div className="shrink-0 text-right">
           <p className="text-lg font-bold text-w-text">
-            {fareText(withBags ? option.true_total_amount : option.total_amount, option.currency)}
+            {formatMoney(withBags ? option.true_total_amount : option.total_amount, option.currency)}
           </p>
           {withBags && (
-            <p className="text-[10px] text-w-dim">fare {fareText(option.total_amount, option.currency)} + bags</p>
+            <p className="text-[10px] text-w-dim">fare {formatMoney(option.total_amount, option.currency)} + bags</p>
           )}
           {option.bag_note && <p className="max-w-[160px] text-[10px] text-w-faint">{option.bag_note}</p>}
         </div>

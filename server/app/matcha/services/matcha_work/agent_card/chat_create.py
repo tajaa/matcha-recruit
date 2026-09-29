@@ -21,7 +21,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
-from . import chat_flow
+from . import chat_flow, flights
 from ..project_agent.chat import post_as_espresso
 
 logger = logging.getLogger(__name__)
@@ -36,13 +36,14 @@ _ERRAND_START = re.compile(
 # In a repo-connected project "find …", "compare …" or "what's the best …"
 # can be a code question, so an errand there also needs a word that means
 # spending money. Deliberately narrow: "order", "review", "best" and "deal"
-# are everyday code words ("find where the order total is computed"). Travel
-# counts too, but "flight" only as a trip ("a flight to Denver"): this codebase
-# also has an HR "flight risk" feature.
+# are everyday code words ("find where the order total is computed"). An
+# unmistakable trip counts too (`flights.is_trip`: "flights to Denver",
+# "airfare", "one-way tickets"), never a bare "flight" or "round-trip": this
+# codebase has flight search code, an HR "flight risk" feature and JSON
+# round-trip tests.
 _SHOPPING = re.compile(
     r"\b(?:buy|buying|purchase|shop|shopping|for sale|price|prices|priced|cheap|cheaper|cheapest|"
-    r"affordable|online|in stock|amazon|order me|ship(?:ped|ping)? (?:to|home)|deliver(?:ed|y)? to|"
-    r"flights? (?:to|from|between)|airfares?|plane tickets?|round[- ]trip)\b"
+    r"affordable|online|in stock|amazon|order me|ship(?:ped|ping)? (?:to|home)|deliver(?:ed|y)? to)\b"
     r"|\$\s?\d",
     re.I,
 )
@@ -70,7 +71,8 @@ def errand_request(text: str, *, repo_connected: bool) -> str | None:
     request = " ".join(strip_mention(text).split())
     if len(request.split()) < _MIN_WORDS or not _ERRAND_START.search(request):
         return None
-    if _CODE_TALK.search(request) or (repo_connected and not _SHOPPING.search(request)):
+    spends_money = _SHOPPING.search(request) or flights.is_trip(request)
+    if _CODE_TALK.search(request) or (repo_connected and not spends_money):
         return None
     return request
 
