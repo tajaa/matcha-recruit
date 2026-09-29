@@ -61,3 +61,10 @@ export function upsertMessage(prev: ChannelMessage[], msg: ChannelMessage): Chan
   next.sort(compareMessages)
   return next
 }
+
+/** How Retry re-sends a failed row. A quick-reply answer (`no_queue`) keeps
+ *  its rule: offline it stays failed instead of waiting in the outbox, where
+ *  a "Buy it" could replay hours later. */
+export function retrySendOptions(msg: ChannelMessage): { queueIfOffline: boolean } {
+  return { queueIfOffline: !msg.no_queue }
+}

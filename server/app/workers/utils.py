@@ -1,9 +1,11 @@
 """Shared utilities for Celery worker tasks."""
 
+import asyncio
 import json
+import logging
 import os
 import ssl as _ssl
-from typing import Any
+from typing import Any, Awaitable, TypeVar
 
 import asyncpg
 from dotenv import load_dotenv
@@ -32,6 +34,42 @@ async def get_db_connection() -> asyncpg.Connection:
         raise RuntimeError("DATABASE_URL environment variable not set")
     ssl_ctx = _make_ssl_context(os.getenv("DATABASE_SSL", "disable"))
     return await asyncpg.connect(database_url, ssl=ssl_ctx)
+
+
+logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
+
+
+async def _with_chat_fanout(coro: Awaitable[_T]) -> _T:
+    from app.core.services import redis_cache
+
+    opened = False
+    if redis_cache.get_redis_cache() is None:
+        try:
+            await redis_cache.init_redis_cache(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+            opened = True
+        except Exception:
+            logger.warning("worker Redis client failed to open; chat posts will wait for a reload", exc_info=True)
+    try:
+        return await coro
+    finally:
+        if opened:
+            await redis_cache.close_redis_cache()
+
+
+def run_with_chat_fanout(coro: Awaitable[_T]) -> _T:
+    """`asyncio.run` for a task that posts to chat or sockets.
+
+    The socket fanout (`channels_ws.manager`) publishes on the shared Redis
+    client, which only the API opens, in its lifespan. Without one a worker's
+    chat message is saved but reaches open chats only on their next reload.
+    The client can't be opened once per worker process: each task runs its own
+    `asyncio.run` loop and an asyncio Redis client is bound to the loop it
+    first connects on (the same reason workers have no DB pool). So the task
+    entry opens it on the task's own loop, and closes it after. Opening is
+    lazy (no connection until the first publish), so a task that posts
+    nothing costs nothing."""
+    return asyncio.run(_with_chat_fanout(coro))
 
 
 def parse_jsonb(value: Any) -> Any:

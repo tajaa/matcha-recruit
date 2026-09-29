@@ -11,7 +11,8 @@ gate, the REST project-access rule, editor role, and `enqueue.preflight` (plan, 
 rate limit) BEFORE the card exists, so a refusal never leaves a dead card.
 
 Which mentions count as errands is deterministic (`errand_request`), so a
-repository question to `@espresso` keeps going to the repo agent.
+repository question to `@espresso` keeps going to the repo agent. An answer
+("@espresso yes", "@espresso buy it", "@espresso 2") is never an errand.
 """
 from __future__ import annotations
 
@@ -22,25 +23,25 @@ from uuid import UUID
 from fastapi import HTTPException
 
 from . import chat_flow, flights
-from ..project_agent.chat import post_as_espresso
+from ..project_agent.chat import post_as_espresso, strip_espresso_mention
 
 logger = logging.getLogger(__name__)
 
-_MENTION = re.compile(r"(?i)(?:(?<=^)|(?<=\s))@espresso\b")
 _POLITE = r"(?:(?:hey|hi|ok|okay)\s+)?(?:please\s+|pls\s+|can you\s+|could you\s+|would you\s+)?"
 _ERRAND_START = re.compile(
     rf"^{_POLITE}(?:find|buy|order|purchase|shop|get me|look for|search for|hunt for|track down|"
     r"compare|research|recommend|source|pick out|what(?:'s| is) the best|which is the best)\b",
     re.I,
 )
-# In a repo-connected project "find …", "compare …" or "what's the best …"
-# can be a code question, so an errand there also needs a word that means
-# spending money. Deliberately narrow: "order", "review", "best" and "deal"
-# are everyday code words ("find where the order total is computed"). An
-# unmistakable trip counts too (`flights.is_trip`: "flights to Denver",
-# "airfare", "one-way tickets"), never a bare "flight" or "round-trip": this
-# codebase has flight search code, an HR "flight risk" feature and JSON
-# round-trip tests.
+# An errand also needs a word that means spending money, repo-connected or
+# not: "find …", "research …" or "compare …" alone can be a code question or a
+# question about the business ("research why signups dropped"), and an errand
+# spends one of the user's monthly agent runs. Deliberately narrow: "order",
+# "review", "best" and "deal" are everyday code words ("find where the order
+# total is computed"). An unmistakable trip counts too (`flights.is_trip`:
+# "flights to Denver", "airfare", "one-way tickets"), never a bare "flight" or
+# "round-trip": this codebase has flight search code, an HR "flight risk"
+# feature and JSON round-trip tests.
 _SHOPPING = re.compile(
     r"\b(?:buy|buying|purchase|shop|shopping|for sale|price|prices|priced|cheap|cheaper|cheapest|"
     r"affordable|online|in stock|amazon|order me|ship(?:ped|ping)? (?:to|home)|deliver(?:ed|y)? to)\b"
@@ -61,18 +62,19 @@ _MIN_WORDS = 3
 _TITLE_CHARS = 120
 
 
-def strip_mention(text: str) -> str:
-    return _MENTION.sub("", text or "", count=1).strip()
+NOTHING_TO_ANSWER = (
+    "There's no open question from me for you here. It may have been answered or expired; "
+    "the result is still on its card."
+)
 
 
-def errand_request(text: str, *, repo_connected: bool) -> str | None:
+def errand_request(text: str) -> str | None:
     """The errand text when this `@espresso` message asks for something to be
     found or bought; None when it's a question for the repo agent."""
-    request = " ".join(strip_mention(text).split())
+    request = " ".join(strip_espresso_mention(text).split())
     if len(request.split()) < _MIN_WORDS or not _ERRAND_START.search(request):
         return None
-    spends_money = _SHOPPING.search(request) or flights.is_trip(request)
-    if _CODE_TALK.search(request) or (repo_connected and not spends_money):
+    if _CODE_TALK.search(request) or not (_SHOPPING.search(request) or flights.is_trip(request)):
         return None
     return request
 
@@ -169,20 +171,22 @@ async def create_card_from_chat(
 
 
 async def handle_mention(
-    *, project_id: UUID, company_id: UUID, channel_id: UUID, user, text: str, repo_connected: bool,
+    *, project_id: UUID, company_id: UUID, channel_id: UUID, user, text: str,
 ) -> bool:
     """Handle an `@espresso` mention if it's for the agent-card flow. Returns
     False to let the repo agent take it.
 
-    "@espresso buy it" from someone with an open buy question answers that
-    question instead of making a new card.
+    An answer ("@espresso yes", "@espresso buy it", "@espresso 2") goes to
+    Espresso's open question, exactly like the same words without the
+    mention. With no question left to answer it gets a short reply: it never
+    becomes a new card (which would spend an agent run) or a repo question.
     """
-    request = strip_mention(text)
-    if chat_flow.is_buy_intent(request) or chat_flow.plain_card_choice(request):
-        handled = await chat_flow.handle_chat_answer(channel_id=channel_id, user=user, content=request)
-        if handled:
-            return True
-    errand = errand_request(text, repo_connected=repo_connected)
+    request = strip_espresso_mention(text)
+    if chat_flow.might_answer_plain(request):
+        if not await chat_flow.handle_chat_answer(channel_id=channel_id, user=user, content=request):
+            await post_as_espresso(company_id, channel_id, NOTHING_TO_ANSWER)
+        return True
+    errand = errand_request(text)
     if errand is None:
         return False
     try:

@@ -14,7 +14,7 @@ It is not the MCP connector either: that is push-only, so it can't advance a car
 | Worker claims round 1 | `todo → in_progress` | `workers/tasks/agent_card.py` → `board.claim_column` |
 | Result stored | `→ review` | `board.finish_column` |
 | Reviewer sends it back (existing reject + note) | `changes_requested`; round N+1 runs **while it stays there** | `tasks.py` reject hook: editor check + `preflight` **before** the card moves, then `reason="redirect"` |
-| Result stored, project has a discussion chat | Espresso asks "want to see what I found?" | `workers/tasks/agent_card.py` → `chat_flow.offer_result` (best-effort; the task opens its own Redis client for the chat fanout, since only the API opens the shared one) |
+| Result stored, project has a discussion chat | Espresso asks "want to see what I found?" | `workers/tasks/agent_card.py` → `chat_flow.offer_result` (best-effort; live because the task runs under `workers/utils.run_with_chat_fanout`) |
 | Approve | `done` | existing `approve_project_task` |
 | Failure / broker down / worker killed | column unchanged; `progress_note` = "Agent stopped: … Use Run again" | `POST …/tasks/{t}/agent-runs` reruns |
 
@@ -60,7 +60,7 @@ It is not the MCP connector either: that is push-only, so it can't advance a car
 
 ## Flights (`flights.py`, Duffel)
 
-A travel request gets the `search_flights` tool when `DUFFEL_ACCESS_TOKEN` is set. `flights.is_travel_ask` is a trip said plainly (`is_trip`: "flights to Denver", "fly to", airfare, "one-way tickets", "round trip to Lisbon") or, on a card, "flight" itself, except the other flights ("flight risk", "wine flight", "flight simulator", "flight jacket"). Bare "fly", "one-way" and "nonstop" never count, so "fly fishing rod" and "one-way valve" keep the shopping flow and its buy question. A chat errand in a repo-connected project counts only `is_trip`, never a bare "flight" or "round-trip": this codebase has flight search code and JSON round-trip tests. Without a token the prompt says fares weren't checked live, and the run researches with web search as an `answer`.
+A travel request gets the `search_flights` tool when `DUFFEL_ACCESS_TOKEN` is set. `flights.is_travel_ask` is a trip said plainly (`is_trip`: "flights to Denver", "fly to", airfare, "one-way tickets", "round trip to Lisbon") or, on a card, "flight" itself, except the other flights ("flight risk", "wine flight", "flight simulator", "flight jacket"). Bare "fly", "one-way" and "nonstop" never count, so "fly fishing rod" and "one-way valve" keep the shopping flow and its buy question. As the money word a chat errand needs, only `is_trip` counts, never a bare "flight" or "round-trip": this codebase has flight search code and JSON round-trip tests. Without a token the prompt says fares weren't checked live, and the run researches with web search as an `answer`.
 
 **Why an API.** Airline and Google Flights pages need JavaScript and block bots, so `fetch_page` never sees a fare. Amadeus Self-Service closed 2026-07-17.
 
@@ -130,7 +130,7 @@ When a run finishes and the card's project has a discussion chat, Espresso asks 
 
 Invariants:
 
-- **No model call.** `parse_answer` (threaded replies) is a closed set of yes/no phrases plus a last 4 or a card number. `is_plain_yes` (unthreaded) is only "yes" / "yes please" / "show me" / "show it".
+- **No model call.** `parse_answer` (threaded replies) is a closed set of yes/no phrases plus a last 4 or a card number; every buy command `is_buy_intent` accepts ("buy", "order it") is also a yes there, so a threaded reply is never stricter than a plain one. `is_plain_yes` (unthreaded) is only "yes" / "yes please" / "show me" / "show it".
 - **Everyday chat is never an answer.** A question answers to a threaded reply, or to a plain message (`_plain_target`) that resolves as follows:
   - an explicit, un-negated buy command aimed back at the pick (`is_buy_intent`: the **whole message** is "buy it", "yes, buy the best one", "go ahead and order it please", or a bare "buy" / "place the order"; also when replying to another message, e.g. the result) goes to the sender's **own** open `purchase`/`pick_card`. A buy word inside an ordinary sentence ("find me a rain jacket to buy that is waterproof") never matches, since with one saved card a match would complete the purchase;
   - a bare card number or last 4 goes to the sender's own open `pick_card`;
@@ -168,7 +168,8 @@ Every Espresso message in this flow carries structured `metadata` that both apps
   - Buttons retire at `expires_at` without a reload.
 - **The heading is `view.question`**, fixed server text ("I finished it. Want to see what I found?"). The card title lives in the ticket marker and is never parsed back out of `content`.
 - **Live question state.** When a question closes, `_claimed` (answered) or `close_open_prompts` / `offer_result` (superseded) queue an `agent_card_prompt_updated` socket event (`{channel_id, prompt_id, status, answer, answer_text}`), sent after the transaction commits through `project_task_notifications.broadcast_channel_event` (the existing matcha→werk bridge). Both apps restamp the message, so every open chat drops the buttons. Best-effort: a reload reads the same state.
-- **History.** Chat history (`werk/routes/channels.py` → `chat_flow.overlay_prompt_statuses`) stamps each question with `prompt_status` (open/answered/superseded/expired), `answer` and `answer_text` ("Showed the result", "Used the card ending 4242"), so a reloaded chat shows answered questions without live buttons.
+- **History.** Chat history (`werk/routes/channels.py` → `chat_flow.overlay_prompt_statuses`) stamps each question with `prompt_status` (open/answered/superseded/expired), `answer` and `answer_text` ("Showed the result", "Card chosen"), so a reloaded chat shows answered questions without live buttons.
+- **Closed questions never name the card.** History and the socket event go to every channel member, so a card answer is `answer: "card"` / "Card chosen" (`public_answer`); the stored `card:<last4>` stays server-side. The buyer's `pick_card` question and receipt still show brand + last 4 in the shared chat.
 - **Links and photos.** Photos render only from https URLs, which means our CDN. Links are http(s) only and open without referrer or opener.
 
 ### `@espresso` errands (`chat_create.py`)
@@ -180,9 +181,9 @@ Every Espresso message in this flow carries structured `metadata` that both apps
 - **What counts as an errand (`errand_request`).** It is deterministic:
   - the message has at least 3 words and starts with find / buy / order / compare / research / recommend / "what's the best" / …;
   - it isn't code talk (`_CODE_TALK`: code/repo/function/endpoint/…, "where is", "how does", "is computed", "our … auth/flow/api"), repo-connected or not, since a web search on it would spend a monthly run;
-  - in a **repo-connected** project it also needs a word that means spending money (buy, price, cheap, online, $…, ship to/home, …). "best", "compare", "order", "review" and "deal" deliberately don't count: they are everyday code words, so "@espresso compare our two auth flows" and "find where the order total is computed" still go to the repo agent.
+  - it needs a word that means spending money (buy, price, cheap, online, $…, ship to/home, …, or an unmistakable trip: `flights.is_trip`), **repo-connected or not**: "research why signups dropped" or "compare our Q3 numbers" alone would spend a monthly run on a web search. "best", "compare", "order", "review" and "deal" deliberately don't count: they are everyday code words, so "@espresso compare our two auth flows" and "find where the order total is computed" still go to the repo agent. With no repo connected, a mention that isn't an errand gets the "connect a repo" reply, which says how to phrase one and that it uses a monthly run.
 - **The mention dispatcher holds no connection while it runs the handler.** `_bg_dispatch_espresso_mention` releases its lookup connection before any post, the agent-card handler, or the run insert, each of which takes its own; holding one across them starves the pool under a burst of mentions.
-- **"@espresso buy it" with an open buy question** answers that question and creates no card.
+- **An answer is never an errand.** "@espresso buy it", "@espresso yes" and "@espresso 2" (`might_answer_plain`) go to Espresso's open question exactly like the same words without the mention. With nothing open (answered, expired) Espresso says so: an expired "buy the top pick" never becomes a new card, and "yes" never goes to the repo agent.
 - **Buy phrases.** A buy phrase only ever answers a question when the whole message is a short command aimed back at the pick ("buy it", "yes, buy the best one", "purchase this") or a bare "buy" / "place the order". "Find me socks to buy" is always a new errand.
 
 ### Card vault (`core/services/card_vault.py`, `routes/matcha_work/payment_cards.py`)

@@ -219,6 +219,40 @@ async def test_agent_card_mention_runs_with_no_connection_held(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_no_repo_and_not_an_errand_says_how_to_ask_for_one(monkeypatch):
+    # "research why signups dropped" has no money word, so it isn't an
+    # errand: no card (and no monthly run) without a repo to ask either.
+    company_id, project_id, channel_id = uuid4(), uuid4(), uuid4()
+    conn = _Connection({
+        "id": project_id,
+        "company_id": company_id,
+        "github_repo": None,
+        "enabled_features": {"matcha_work": True},
+        "signup_source": "invite",
+    }, uuid4())
+
+    @asynccontextmanager
+    async def get_connection():
+        yield conn
+
+    post = AsyncMock()
+    monkeypatch.setattr(channels_ws, "get_connection", get_connection)
+    monkeypatch.setattr(chat, "post_as_espresso", post)
+
+    claimed = await channels_ws._bg_dispatch_espresso_mention(
+        str(channel_id),
+        SimpleNamespace(id=uuid4(), role="client"),
+        "@espresso research why signups dropped",
+        uuid4(),
+    )
+
+    assert claimed is True
+    post.assert_awaited_once()
+    reply = post.await_args.args[2]
+    assert "Connect a GitHub repository" in reply and "monthly agent runs" in reply
+
+
+@pytest.mark.asyncio
 async def test_live_repo_question_is_reported_after_the_transaction(monkeypatch):
     company_id, project_id, channel_id, user_id = uuid4(), uuid4(), uuid4(), uuid4()
     conn = _Connection({

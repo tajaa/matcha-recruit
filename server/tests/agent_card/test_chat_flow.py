@@ -40,6 +40,10 @@ OFFER = chat_flow.purchase_offer(RESULT)
     ("use 4242", Answer("last4", "4242")), ("2", Answer("choice", "2")), ("card 1", Answer("choice", "1")),
     ("yes but only vegan ones", None), ("what about cheaper ones?", None), ("", None), ("0", None),
     ("y" * 61, None),
+    # Every buy command a plain message accepts is a yes as a threaded reply too.
+    ("buy", Answer("yes")), ("order it", Answer("yes")), ("Buy the top pick", Answer("yes")),
+    ("go ahead and order it please", Answer("yes")), ("place the order", Answer("yes")),
+    ("don't buy it", None), ("buy new shoes", None),
 ])
 def test_parse_answer_for_threaded_replies(text, expected):
     assert parse_answer(text) == expected
@@ -380,9 +384,13 @@ async def test_yes_shows_the_result_then_threaded_replies_buy_it(env):
     assert args[5] == user.id and args[7] == "4242" and args[8] == "Organic Lip Balm"
     assert args[10] == "https://shop.example.com/p" and args[11] == 4.49 and args[12] == "USD"
     assert "I haven't charged anything" in _said(env)[3]
-    assert [(u["prompt_id"], u["answer"]) for u in env["updates"]] == [
-        (str(offer_id), "yes"), (str(buy_q["id"]), "yes"), (str(pick_q["id"]), "card:4242"),
+    # The whole channel hears which question closed, never the buyer's card.
+    assert [(u["prompt_id"], u["answer"], u["answer_text"]) for u in env["updates"]] == [
+        (str(offer_id), "yes", "Showed the result"),
+        (str(buy_q["id"]), "yes", "Going ahead with the purchase"),
+        (str(pick_q["id"]), "card", "Card chosen"),
     ]
+    assert "4242" not in json.dumps(env["updates"])
     assert len(env["broadcast"]) == len(env["said"])  # every message fanned out after commit
 
 
@@ -889,11 +897,18 @@ async def test_prompt_updates_ride_the_channel_bridge(monkeypatch):
 @pytest.mark.parametrize("kind, answer, text", [
     ("show_result", "yes", "Showed the result"), ("show_result", "no", "Skipped for now"),
     ("purchase", "yes", "Going ahead with the purchase"), ("purchase", "no", "Not buying it"),
-    ("pick_card", "card:4242", "Used the card ending 4242"), ("pick_card", "no", "Cancelled"),
+    ("pick_card", "card:4242", "Card chosen"), ("pick_card", "card", "Card chosen"), ("pick_card", "no", "Cancelled"),
     ("pick_card", "odd", "Answered"), ("show_result", None, None),
 ])
 def test_answer_text(kind, answer, text):
     assert chat_flow.answer_text(kind, answer) == text
+
+
+@pytest.mark.parametrize("answer, public", [
+    ("card:4242", "card"), ("yes", "yes"), ("no", "no"), (None, None),
+])
+def test_public_answer_never_carries_the_buyers_card(answer, public):
+    assert chat_flow.public_answer(answer) == public
 
 
 def test_ttls_are_sane():
@@ -988,26 +1003,32 @@ async def test_history_overlay_stamps_question_state():
 
     class C:
         async def fetch(self, query, *args):
-            assert "mw_agent_card_prompts" in query and set(args[0]) == {answered, expired}
+            assert "mw_agent_card_prompts" in query and set(args[0]) == {answered, expired, other}
             return [{"id": answered, "kind": "show_result", "status": "answered", "answer": "yes", "expired": False},
-                    {"id": expired, "kind": "purchase", "status": "open", "answer": None, "expired": True}]
+                    {"id": expired, "kind": "purchase", "status": "open", "answer": None, "expired": True},
+                    {"id": other, "kind": "pick_card", "status": "answered", "answer": "card:4242",
+                     "expired": False}]
 
     def msg(pid):
         return {"id": uuid4(), "metadata": json.dumps({"kind": "agent_card_prompt", "prompt_id": str(pid)})}
 
     plain = {"id": uuid4(), "metadata": "{}"}
-    out = await chat_flow.overlay_prompt_statuses(C(), [msg(answered), msg(expired), plain], channel_id=uuid4())
+    out = await chat_flow.overlay_prompt_statuses(
+        C(), [msg(answered), msg(expired), plain, msg(other)], channel_id=uuid4(),
+    )
     assert out[0]["metadata"]["prompt_status"] == "answered" and out[0]["metadata"]["answer"] == "yes"
     assert out[0]["metadata"]["answer_text"] == "Showed the result"
     assert out[1]["metadata"]["prompt_status"] == "expired"
     assert out[2] is plain
+    # Every channel member reads history: the card question says a card was
+    # chosen, never which one.
+    assert out[3]["metadata"]["answer"] == "card" and out[3]["metadata"]["answer_text"] == "Card chosen"
 
     class Never:
         async def fetch(self, *a):
             raise AssertionError("no question messages: no query")
 
     assert await chat_flow.overlay_prompt_statuses(Never(), [plain], channel_id=uuid4()) == [plain]
-    del other
 
 
 @pytest.mark.asyncio

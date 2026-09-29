@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compareMessages, mergeMessages, upsertMessage } from './channelMessages'
+import { compareMessages, mergeMessages, retrySendOptions, upsertMessage } from './channelMessages'
 import type { ChannelMessage } from './channels'
 
 function msg(over: Partial<ChannelMessage>): ChannelMessage {
@@ -81,5 +81,15 @@ describe('compareMessages', () => {
   it('ties on created_at break by id', () => {
     const a = msg({ id: 'a' }); const b = msg({ id: 'b' })
     expect(compareMessages(a, b)).toBeLessThan(0)
+  })
+})
+
+describe('retrySendOptions', () => {
+  it('never queues a quick-reply answer, even on Retry', () => {
+    expect(retrySendOptions(msg({ failed: true, no_queue: true }))).toEqual({ queueIfOffline: false })
+  })
+
+  it('queues an ordinary message while offline', () => {
+    expect(retrySendOptions(msg({ failed: true }))).toEqual({ queueIfOffline: true })
   })
 })
