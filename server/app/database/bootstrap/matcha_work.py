@@ -888,3 +888,88 @@ async def create_matcha_work(conn):
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_drive_audit_company ON drive_audit_log (company_id, created_at DESC)")
         # Per-user Google Drive import connection (migration mdrive02).
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS gdrive_token JSONB")
+
+        # HR cases (migration hrcase01). Keep in sync with alembic/versions/hrcase01_hr_cases.py.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS hr_case_settings (
+                company_id UUID PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+                next_seq INTEGER NOT NULL DEFAULT 0,
+                filename_template TEXT NOT NULL
+                    DEFAULT '{last_name}_{first_name}_{action_type}_{delivered_date}',
+                triage_min_confidence NUMERIC(3, 2) NOT NULL DEFAULT 0.60
+                    CHECK (triage_min_confidence BETWEEN 0 AND 1),
+                updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS hr_cases (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                case_number VARCHAR(20) NOT NULL,
+                origin VARCHAR(16) NOT NULL
+                    CHECK (origin IN ('intake_triage', 'close_check', 'gm_draft', 'huume', 'manual')),
+                stage VARCHAR(20) NOT NULL DEFAULT 'flagged'
+                    CHECK (stage IN ('flagged', 'drafting', 'hr_review', 'changes_requested', 'approved',
+                                     'delivered', 'verifying', 'needs_attention', 'closed', 'dismissed')),
+                source_incident_id UUID REFERENCES ir_incidents(id) ON DELETE SET NULL,
+                employee_id UUID REFERENCES employees(id) ON DELETE SET NULL,
+                action_type VARCHAR(20)
+                    CHECK (action_type IN ('verbal_warning', 'written_warning', 'final_warning',
+                                           'suspension', 'pip', 'other')),
+                occurrence_dates DATE[] NOT NULL DEFAULT '{}',
+                gm_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                opened_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                thread_id UUID REFERENCES mw_threads(id) ON DELETE SET NULL,
+                draft_file_id UUID REFERENCES drive_files(id) ON DELETE SET NULL,
+                signed_file_id UUID REFERENCES drive_files(id) ON DELETE SET NULL,
+                triage JSONB,
+                review JSONB,
+                verification JSONB,
+                decision VARCHAR(20) CHECK (decision IN ('approved', 'changes_requested')),
+                decision_reason TEXT,
+                decided_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                decided_at TIMESTAMPTZ,
+                delivered_at TIMESTAMPTZ,
+                delivered_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                attention_reasons TEXT[] NOT NULL DEFAULT '{}',
+                attention_acknowledged_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                attention_acknowledged_at TIMESTAMPTZ,
+                dismissed_reason TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                closed_at TIMESTAMPTZ
+            )
+        
+        """)
+        await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_hr_cases_number ON hr_cases (company_id, case_number)")
+        await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_hr_cases_open_incident ON hr_cases (source_incident_id) WHERE source_incident_id IS NOT NULL AND stage NOT IN ('closed', 'dismissed')")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_hr_cases_company_stage ON hr_cases (company_id, stage, updated_at DESC)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_hr_cases_gm ON hr_cases (gm_user_id) WHERE gm_user_id IS NOT NULL")
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS hr_case_events (
+                id BIGSERIAL PRIMARY KEY,
+                case_id UUID NOT NULL REFERENCES hr_cases(id) ON DELETE CASCADE,
+                actor_user_id UUID,
+                event VARCHAR(40) NOT NULL,
+                from_stage VARCHAR(20),
+                to_stage VARCHAR(20),
+                details JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_hr_case_events_case ON hr_case_events (case_id, created_at)")
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS hr_case_triage_log (
+                incident_id UUID NOT NULL REFERENCES ir_incidents(id) ON DELETE CASCADE,
+                phase VARCHAR(8) NOT NULL CHECK (phase IN ('intake', 'close')),
+                company_id UUID NOT NULL,
+                implicated BOOLEAN,
+                result JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (incident_id, phase)
+            )
+        
+        """)

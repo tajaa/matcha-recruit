@@ -435,6 +435,14 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # downloads are presigned. Gates /matcha-work/drive/* + the /work/drive
     # page. Requires matcha_work; default off; admin-toggle; NOT bundled.
     "matcha_drive": False,
+    # HR cases — incident -> write-up -> HR approval -> delivery -> signed
+    # copy, on business /work (services/hr_cases/). New incidents get a
+    # grounded handbook check; a likely violation opens a flagged case and
+    # notifies the reporter (GM) and HR. Cases live on a dedicated HR Cases
+    # page visible only to Work admins and people with access to Drive's
+    # HR / Discipline folder. Standalone: does NOT write progressive_discipline.
+    # Requires matcha_work + matcha_drive; default off; admin-toggle; NOT bundled.
+    "hr_cases": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,
@@ -845,6 +853,7 @@ FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "matcha_ops_calls_all_members": ("matcha_ops",),
     "sym_chat": ("matcha_work",),
     "matcha_drive": ("matcha_work",),
+    "hr_cases": ("matcha_work", "matcha_drive"),
 }
 
 

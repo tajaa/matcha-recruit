@@ -117,3 +117,11 @@ describe('matcha drive feature', () => {
     expect(FEATURE_REQUIRES.matcha_drive).toEqual(['matcha_work'])
   })
 })
+
+describe('hr cases feature', () => {
+  it('is togglable in admin and requires work + drive', () => {
+    const work = FEATURE_GROUPS.find((group) => group.label === 'Matcha Work')
+    expect(work?.features.hr_cases).toContain('HR Cases')
+    expect(FEATURE_REQUIRES.hr_cases).toEqual(['matcha_work', 'matcha_drive'])
+  })
+})

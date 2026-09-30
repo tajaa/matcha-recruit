@@ -1386,3 +1386,52 @@ export type DriveGrant = {
 }
 
 export type DrivePerson = { id: string; name: string; email: string; kind: 'business' | 'employee' }
+
+// ── HR cases (backend: server/app/matcha/routes/matcha_work/hr_cases.py) ──
+
+export type HrCaseStage =
+  | 'flagged' | 'drafting' | 'hr_review' | 'changes_requested' | 'approved'
+  | 'delivered' | 'verifying' | 'needs_attention' | 'closed' | 'dismissed'
+
+export type HrCaseTriage = {
+  phase: 'intake' | 'close'
+  violations: { policy_title: string | null; relevance: string | null; confidence: number | null }[]
+  citation_count: number
+  summary: string | null
+}
+
+export type HrCaseEvent = {
+  event: string
+  from_stage: HrCaseStage | null
+  to_stage: HrCaseStage | null
+  details: Record<string, unknown>
+  created_at: string | null
+  actor_name: string | null
+}
+
+export type HrCase = {
+  id: string
+  case_number: string
+  origin: 'intake_triage' | 'close_check' | 'gm_draft' | 'huume' | 'manual'
+  stage: HrCaseStage
+  stage_label: string
+  column: string
+  checklist: { key: string; label: string; done: boolean }[]
+  allowed_events: string[]
+  source_incident_id: string | null
+  incident_number: string | null
+  incident_title: string | null
+  employee_id: string | null
+  employee_name: string | null
+  gm_user_id: string | null
+  gm_name: string | null
+  action_type: string | null
+  triage: HrCaseTriage | null
+  dismissed_reason: string | null
+  created_at: string
+  updated_at: string
+  closed_at: string | null
+  events?: HrCaseEvent[]
+}
+
+export type HrCaseColumn = { key: string; label: string; stages: HrCaseStage[] }

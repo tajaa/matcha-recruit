@@ -737,6 +737,9 @@ async def _close_incident_via_copilot(
             )
         except Exception:
             logger.exception("Failed to auto-assign incident training for %s", incident_id)
+        # HR cases close re-check (fire-and-forget; no-op without `hr_cases`).
+        from app.matcha.services.hr_cases.triage import schedule_close_check
+        schedule_close_check(row["company_id"], incident_id)
 
     return {
         "already_closed": False,

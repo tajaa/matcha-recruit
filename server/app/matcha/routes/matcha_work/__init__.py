@@ -141,4 +141,8 @@ from .drive import router as _drive_router, oauth_callback_router as _drive_oaut
 router.include_router(_drive_router)
 oauth_callback_router.include_router(_drive_oauth_callback_router)
 
+from .hr_cases import router as _hr_cases_router
+
+router.include_router(_hr_cases_router)
+
 __all__ = ["router", "oauth_callback_router", "public_router", "presence_router"]
