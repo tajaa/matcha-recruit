@@ -1,9 +1,9 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useState, type CSSProperties } from "react";
 import MarketingNav from "../landing/MarketingNav";
 import MarketingFooter from "../landing/MarketingFooter";
 import { useSEO } from "../../hooks/useSEO";
 import { HOME_JSON_LD } from "./data";
-import { BONE, NOIR } from "./theme";
+import { ASH, BONE, LINE_D, NOIR } from "./theme";
 import { GrainOverlay, PageStyle, useMarketingNoir } from "./PageChrome";
 import { Hero } from "./Hero";
 import { ShowcaseSection } from "./ShowcaseSection";
@@ -18,6 +18,14 @@ const PricingContactModal = lazy(() =>
     default: m?.PricingContactModal ?? (() => null),
   })),
 );
+
+const DARK_FOOTER_STYLE = {
+  backgroundColor: NOIR,
+  color: BONE,
+  "--color-ivory-ink": BONE,
+  "--color-ivory-muted": ASH,
+  "--color-ivory-line": LINE_D,
+} as CSSProperties;
 
 export default function Home() {
   const [isPricingOpen, setIsPricingOpen] = useState(false);
@@ -87,7 +95,7 @@ export default function Home() {
       <Manifesto />
       <CTABand onDemoClick={openPricing} />
 
-      <div style={{ backgroundColor: BONE, color: "var(--color-ivory-ink)" }}>
+      <div style={DARK_FOOTER_STYLE}>
         <MarketingFooter newsletterVariant="matcha" />
       </div>
     </div>
