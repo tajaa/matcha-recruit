@@ -178,6 +178,8 @@ extension AgentCardMessageView {
             if !flights.options.isEmpty { flightRows(flights) }
         case .reservation(let booking):
             reservationView(booking)
+        case .purchaseSetup(let setup):
+            if !setup.steps.isEmpty { PurchaseSetupView(setup: setup) }
         case .unknown:
             EmptyView()
         }
@@ -367,5 +369,52 @@ extension AgentCardMessageView {
         case "handoff": return ("Over to you", "arrow.uturn.right.circle.fill", appState.themeAccent)
         default: return ("Done", "checkmark.seal.fill", .green)
         }
+    }
+}
+
+
+/// "Before I can buy it": what to add in Settings, with a button that opens
+/// the Settings window on the right tab. Card numbers and addresses are never
+/// asked for in chat.
+private struct PurchaseSetupView: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.openSettings) private var openSettings
+    let setup: AgentPurchaseSetup
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Before I can buy it")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(appState.themeText)
+            ForEach(setup.steps, id: \.key) { step in
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: step.key == "payment_card" ? "creditcard" : "shippingbox")
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeAccent)
+                        .frame(width: 14)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("\(step.label) in \(step.where)")
+                            .font(.system(size: 12))
+                            .foregroundColor(appState.themeText)
+                        if let detail = step.detail, !detail.isEmpty {
+                            Text(detail)
+                                .font(.system(size: 11))
+                                .foregroundColor(appState.themeTextSecondary)
+                        }
+                        Button(step.label) {
+                            SettingsTab.select(step.key == "payment_card" ? .paymentCards : .shipping)
+                            openSettings()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }
+            }
+            Text("Then ask me again. Never paste a card number in chat.")
+                .font(.system(size: 11))
+                .foregroundColor(appState.themeTextSecondary)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(appState.themeText.opacity(0.04)))
     }
 }
