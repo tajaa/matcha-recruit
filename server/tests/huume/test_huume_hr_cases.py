@@ -584,13 +584,19 @@ async def test_execute_signed_files_and_queues_check(exec_env, monkeypatch):
     async def upload(conn, **kw):
         exec_env["upload_kw"] = kw
         return {"case": {"id": uuid4(), "case_number": "HRC-3"}, "mime_type": "application/pdf"}
+    spawned = {}
+
+    def spawn(**kw):
+        spawned.update(kw)
     monkeypatch.setattr(skill, "_fetch_bytes", fetch_bytes)
     monkeypatch.setattr(workflow, "upload_signed", upload)
+    monkeypatch.setattr(workflow, "spawn_signed_check", spawn)
     action = {"type": "hr_case_signed", "case_id": str(uuid4()), "source": "attachment", "attachment_url": "u"}
     out = await skill.execute(company_id=COMPANY, actor_user_id=USER, action=action)
     assert out["status"] == "created" and "checking it now" in out["message"]
-    fn, args, kwargs = out["bg_tasks"][0]
-    assert fn is workflow.check_signed_and_notify and kwargs["data"] == b"%PDF"
+    # Detached, so the reply doesn't wait out the model read (bg_tasks run inline).
+    assert "bg_tasks" not in out
+    assert spawned["data"] == b"%PDF" and spawned["mime_type"] == "application/pdf"
     assert exec_env["upload_kw"]["filename"] == "s.pdf"
 
 

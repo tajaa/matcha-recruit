@@ -34,8 +34,11 @@ export default function HrCaseSignedSection({ hrCase, onOpenSigned, onUploadSign
   return (
     <section className="space-y-2">
       <h3 className="text-xs font-medium uppercase tracking-wide text-w-faint">Signed copy</h3>
-      {hrCase.stage === 'verifying' && (
+      {hrCase.stage === 'verifying' && !hrCase.check_stale && (
         <p className="flex items-center gap-1.5 text-xs text-w-dim"><Loader2 size={12} className="animate-spin" /> Checking the signed copy…</p>
+      )}
+      {hrCase.stage === 'verifying' && hrCase.check_stale && (
+        <p className="text-xs text-amber-200">The check on this copy didn’t finish. Run it again.</p>
       )}
       {v?.outcome === 'verified' && (
         <p className="flex items-center gap-1.5 text-xs text-emerald-300"><CheckCircle2 size={13} /> Signed, readable and filed.</p>
@@ -62,7 +65,8 @@ export default function HrCaseSignedSection({ hrCase, onOpenSigned, onUploadSign
             Handled — close case
           </button>
         )}
-        {hrCase.stage === 'needs_attention' && v?.reasons.includes('check_unavailable') && (
+        {((hrCase.stage === 'needs_attention' && v?.reasons.includes('check_unavailable')) ||
+          (hrCase.stage === 'verifying' && hrCase.check_stale)) && (
           <button type="button" disabled={busy} onClick={() => void run(onRecheck)} className="rounded-lg border border-w-line px-3 py-1 text-sm text-w-dim hover:text-w-text disabled:opacity-50">
             Check again
           </button>

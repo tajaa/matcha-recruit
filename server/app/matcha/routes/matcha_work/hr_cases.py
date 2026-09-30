@@ -429,8 +429,10 @@ async def upload_signed(
 
 @router.get("/{case_id}/signed")
 async def signed_download(case_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
-    """Short-lived link to the filed signed copy — HR or the case's manager."""
-    from app.core.services.storage import get_storage
+    """Short-lived link to the filed signed copy — HR or the case's manager.
+    Through Drive's system path, so the HR-space download is audited."""
+    from app.matcha.services.drive import drive_service
+    from app.matcha.services.drive.drive_service import DriveError
 
     company_id = await _business_company(current_user)
     async with get_connection() as conn:
@@ -440,16 +442,16 @@ async def signed_download(case_id: UUID, current_user: CurrentUser = Depends(req
                                                  actor_user_id=current_user.id, actor_is_hr=is_hr)
         except CaseError as exc:
             _raise(exc)
-        row = await conn.fetchrow(
-            "SELECT filename, storage_path FROM drive_files WHERE id = $1 AND company_id = $2 AND deleted_at IS NULL",
-            case.get("signed_file_id"), company_id,
-        ) if case.get("signed_file_id") else None
-    if not row:
-        raise HTTPException(status_code=404, detail="There's no signed copy on this case yet.")
-    url = get_storage().get_presigned_download_url(row["storage_path"], expires_in=300)
-    if not url:
-        raise HTTPException(status_code=503, detail="That file can't be downloaded right now.")
-    return {"url": url, "filename": row["filename"], "expires_in": 300}
+        if not case.get("signed_file_id"):
+            raise HTTPException(status_code=404, detail="There's no signed copy on this case yet.")
+        try:
+            return await drive_service.presign_download(
+                conn, company_id=company_id, file_id=case["signed_file_id"], actor=None,
+                on_behalf_of=current_user.id, audit_details={"via": "hr_case", "case_id": str(case_id)},
+            )
+        except DriveError as exc:
+            detail = "There's no signed copy on this case yet." if exc.status == 404 else exc.detail
+            raise HTTPException(status_code=exc.status, detail=detail) from exc
 
 
 @router.post("/{case_id}/acknowledge")
@@ -468,7 +470,9 @@ async def recheck(case_id: UUID, current_user: CurrentUser = Depends(require_adm
     company_id = await _business_company(current_user)
     async with get_connection() as conn:
         await _require_hr(conn, current_user, company_id)
-        try:
-            return await workflow.recheck_signed(conn, company_id=company_id, case_id=case_id, actor_user_id=current_user.id)
-        except CaseError as exc:
-            _raise(exc)
+    # Its own short connections: the model read must not pin one.
+    try:
+        return await workflow.recheck_signed(get_connection, company_id=company_id, case_id=case_id,
+                                             actor_user_id=current_user.id)
+    except CaseError as exc:
+        _raise(exc)

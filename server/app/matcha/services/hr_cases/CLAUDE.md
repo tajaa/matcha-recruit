@@ -145,13 +145,33 @@ After delivery the manager or HR uploads the signed copy (PDF, PNG or JPG).
 It is filed at once in Drive `HR / Discipline / Signed / <Last, First>` under
 the company's `hr_case_settings.filename_template` — the format is produced,
 not checked — and the case moves to `verifying`. The check then runs after the
-response (REST: `BackgroundTasks`; Huume: the executor's `bg_tasks`):
+response (REST: `BackgroundTasks`; Huume: a detached task, see below):
 
 - `inspect_pdf` (PyMuPDF, deterministic) → `read_signed_copy` (one Gemini
   multimodal read, parse-only) → `decide` (pure) → `verified` (case `closed`)
   or `needs_attention` with reason codes (`REASON_TEXT`).
 - **A check that couldn't run is never a pass** (`check_unavailable`). HR can
   `recheck` it; HR closes a flagged case with `acknowledge`.
+- **Nothing stays in `verifying`.** A crashed check is recorded as
+  `check_unavailable`; a check whose process died (a deploy, a cancelled
+  Huume turn) leaves `verifying` past `VERIFYING_STALE_SECONDS` (300s; the
+  read times out at 90s), which `serialize` reports as `check_stale` and HR
+  can `recheck` from. A live check can't be re-run over.
+- **No connection across the model read.** `verification.run_check` takes a
+  connection factory: inputs on one connection, the read on none, the result
+  on another. A result is applied only if the case is still `verifying` on
+  the same `signed_file_id` (`apply_check`), so a stale result can't land on
+  a newer copy. Notices go out after the connection is released.
+- **A copy waiting on HR can't be replaced by the manager.** In
+  `needs_attention` the manager may re-upload only when every reason is
+  theirs to fix (`manager_can_reupload`); comments, a noted refusal or a
+  check that couldn't run keep it with HR (409; `can_upload_signed` false).
+  HR may replace it. A re-upload clears `verification`/`attention_reasons`
+  and keeps the old result in the `signed_uploaded` event's
+  `previous_verification` (HR-only history).
+- **Huume doesn't wait for the check**: `file_signed_write_up` starts it with
+  `workflow.spawn_signed_check` (a detached task), not a `bg_task`, which the
+  loop would await inline.
 - **Employee comments always go to HR**, and their text lives only in
   `hr_cases.verification.reading.employee_comments_text` for the HR panel.
   Notifications say only that there are comments.
@@ -162,4 +182,6 @@ response (REST: `BackgroundTasks`; Huume: the executor's `bg_tasks`):
   refused when the template is saved (`PUT /hr-cases/settings`), and a stored
   bad template falls back to the default rather than leaking braces.
 - Huume: `file_signed_write_up` (staged, `hr_case_signed`) pins a thread
-  attachment or Drive file; the confirm turn files it and queues the check.
+  attachment or Drive file; the confirm turn files it and starts the check.
+- The signed-copy download, like the draft's, goes through Drive's presign
+  system path so the HR-space read is audited.

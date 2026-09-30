@@ -33,7 +33,7 @@ from typing import Any, AsyncContextManager, Callable, Iterable, Optional
 from uuid import UUID
 
 from . import case_service, draft_review, notifications
-from .case_service import ACTION_TYPES, CaseError
+from .case_service import ACTION_TYPES, CaseError, verifying_is_stale
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ def manager_view(case: dict[str, Any]) -> dict[str, Any]:
         "has_draft": bool(case.get("draft_file_id")),
         "can_submit_draft": stage in DRAFTABLE_STAGES,
         "can_mark_delivered": stage == "approved",
-        "can_upload_signed": stage in ("delivered", "needs_attention"),
+        "can_upload_signed": stage == "delivered" or manager_can_reupload(case),
         "signed_check": manager_signed_check(case),
         "updated_at": case.get("updated_at"),
     }
@@ -376,6 +376,20 @@ MANAGER_FIXABLE_REASONS = (
     "employee_signature_missing", "signature_name_mismatch", "letter_mismatch", "pages_missing",
 )
 
+def manager_can_reupload(case: dict[str, Any]) -> bool:
+    """A flagged copy goes back to the manager only when a new upload is the
+    whole fix. If anything on it is HR's (comments, a noted refusal, a check
+    that couldn't run), the copy stays as filed until HR deals with it."""
+    reasons = case.get("attention_reasons") or []
+    return (case.get("stage") == "needs_attention" and bool(reasons)
+            and all(r in MANAGER_FIXABLE_REASONS for r in reasons))
+
+
+def _default_connect() -> Connect:
+    from app.database import get_connection
+
+    return get_connection
+
 
 async def upload_signed(
     conn, *, company_id: UUID, case_id: UUID, actor_user_id: UUID, actor_is_hr: bool,
@@ -393,6 +407,10 @@ async def upload_signed(
                                 actor_user_id=actor_user_id, actor_is_hr=actor_is_hr)
     if "signed_uploaded" not in (case.get("allowed_events") or []):
         raise CaseError(409, f"This case is {case['stage_label'].lower()} — a signed copy can't be added now.")
+    if case["stage"] == "needs_attention" and not actor_is_hr and not manager_can_reupload(case):
+        # Replacing it would overwrite what HR hasn't seen yet (the comment
+        # text lives only in `verification`) and could auto-close the case.
+        raise CaseError(409, "HR is reviewing this signed copy, so it can't be replaced right now.")
     try:
         ext, mime = verification.validate_signed_upload(filename, data)
     except ValueError as exc:
@@ -416,53 +434,141 @@ async def upload_signed(
         )
     except DriveError as exc:
         raise CaseError(exc.status, exc.detail) from None
+    details = {"file_id": str(stored["id"]), "filename": name}
+    if case.get("verification"):
+        # The old result is cleared so nobody reads it as this copy's; the
+        # event keeps it (HR-only history).
+        details["previous_verification"] = case["verification"]
     case = await case_service.apply_event(
         conn, company_id=company_id, case_id=case_id, event="signed_uploaded", actor_user_id=actor_user_id,
-        sets={"signed_file_id": stored["id"]}, details={"file_id": str(stored["id"]), "filename": name},
+        sets={"signed_file_id": stored["id"], "verification": None, "attention_reasons": []}, details=details,
     )
     return {"case": case, "mime_type": mime}
 
 
-async def check_signed_and_notify(
-    *, company_id: UUID, case_id: UUID, data: bytes, mime_type: str, actor_user_id: Optional[UUID],
-) -> None:
-    """Background step after `upload_signed`. Never raises."""
-    from app.database import get_connection
-
+async def _record_check_failure(connect: Connect, *, company_id: UUID, case_id: UUID,
+                                actor_user_id: Optional[UUID]) -> Optional[dict[str, Any]]:
+    """A check that crashed must not leave the case in `verifying`: record it
+    as one that couldn't run, which HR can re-check. None if that fails too
+    (then the stale-verifying re-check is the way out)."""
     from . import verification
 
+    result = {
+        "checked_at": datetime.now(timezone.utc).isoformat(), "inspection": None,
+        "reading": {"available": False}, **verification.decide(None, {"available": False}),
+    }
     try:
-        async with get_connection() as conn:
-            case = await verification.run_check(
-                conn, company_id=company_id, case_id=case_id, data=data, mime_type=mime_type,
-                actor_user_id=actor_user_id,
+        async with connect() as conn:
+            case = await case_service.get_case(conn, company_id=company_id, case_id=case_id)
+            return await verification.apply_check(
+                conn, company_id=company_id, case_id=case_id, verification=result,
+                signed_file_id=case.get("signed_file_id"), actor_user_id=actor_user_id,
             )
-            await notifications.notify_signed(conn, case=case, actor_user_id=actor_user_id)
+    except Exception:
+        logger.exception("[hr_cases] could not record the failed check for case %s", case_id)
+        return None
+
+
+async def _notify_signed(connect: Connect, case: dict[str, Any]) -> None:
+    async with connect() as conn:
+        hr_ids = await notifications.signed_recipients(conn, case=case)
+    await notifications.send_signed(case=case, hr_ids=hr_ids)
+
+
+async def check_signed_and_notify(
+    *, company_id: UUID, case_id: UUID, data: bytes, mime_type: str, actor_user_id: Optional[UUID],
+    connect: Optional[Connect] = None,
+) -> None:
+    """Background step after `upload_signed`. Never raises. Holds no
+    connection across the model read or the notices."""
+    from . import verification
+
+    connect = connect or _default_connect()
+    try:
+        case = await verification.run_check(
+            connect, company_id=company_id, case_id=case_id, data=data, mime_type=mime_type,
+            actor_user_id=actor_user_id,
+        )
     except Exception:
         logger.exception("[hr_cases] signed-copy check failed for case %s", case_id)
+        case = await _record_check_failure(connect, company_id=company_id, case_id=case_id,
+                                           actor_user_id=actor_user_id)
+    if case is None:
+        return
+    try:
+        await _notify_signed(connect, case)
+    except Exception:
+        logger.exception("[hr_cases] signed-copy notices failed for case %s", case_id)
 
 
-async def recheck_signed(conn, *, company_id: UUID, case_id: UUID, actor_user_id: UUID) -> dict[str, Any]:
-    """HR: run the check again on the filed copy (e.g. after check_unavailable)."""
+def spawn_signed_check(**kwargs: Any) -> None:
+    """Run `check_signed_and_notify` without making the caller wait (Huume
+    replies "I'm checking it now" before the read). Outside a running loop
+    it does nothing; a lost task leaves a stale `verifying` HR can re-check."""
+    import asyncio
+
+    try:
+        task = asyncio.get_running_loop().create_task(check_signed_and_notify(**kwargs))
+    except RuntimeError:
+        return
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+
+
+_BG_TASKS: set = set()
+
+
+async def recheck_signed(connect: Connect, *, company_id: UUID, case_id: UUID, actor_user_id: UUID) -> dict[str, Any]:
+    """HR: run the check again on the filed copy — after one that couldn't
+    run, or one that never finished (`verifying` past VERIFYING_STALE_SECONDS,
+    e.g. a deploy restarted the process mid-check)."""
     from app.core.services.storage import get_storage
 
     from . import verification
 
-    case = await case_service.get_case(conn, company_id=company_id, case_id=case_id)
-    if case["stage"] != "needs_attention" or not case.get("signed_file_id"):
-        raise CaseError(409, "There's no signed copy waiting on a re-check.")
-    row = await conn.fetchrow(
-        "SELECT filename, storage_path, content_type FROM drive_files WHERE id = $1 AND company_id = $2",
-        case["signed_file_id"], company_id,
-    )
-    if not row:
-        raise CaseError(404, "The signed copy is no longer in Drive.")
-    data = await get_storage().download_file(row["storage_path"])
-    await case_service.apply_event(conn, company_id=company_id, case_id=case_id, event="signed_uploaded",
-                                   actor_user_id=actor_user_id, details={"recheck": True})
-    case = await verification.run_check(conn, company_id=company_id, case_id=case_id, data=data,
-                                        mime_type=row["content_type"] or "application/pdf", actor_user_id=actor_user_id)
-    await notifications.notify_signed(conn, case=case, actor_user_id=actor_user_id)
+    async with connect() as conn:
+        case = await case_service.get_case(conn, company_id=company_id, case_id=case_id)
+        if not case.get("signed_file_id"):
+            raise CaseError(409, "There's no signed copy waiting on a re-check.")
+        if case["stage"] == "verifying" and not verifying_is_stale(case):
+            raise CaseError(409, "That signed copy is still being checked. Try again in a few minutes.")
+        if case["stage"] not in ("needs_attention", "verifying"):
+            raise CaseError(409, "There's no signed copy waiting on a re-check.")
+        row = await conn.fetchrow(
+            "SELECT filename, storage_path, content_type FROM drive_files WHERE id = $1 AND company_id = $2",
+            case["signed_file_id"], company_id,
+        )
+        if not row:
+            raise CaseError(404, "The signed copy is no longer in Drive.")
+        if case["stage"] == "needs_attention":
+            await case_service.apply_event(
+                conn, company_id=company_id, case_id=case_id, event="signed_uploaded", actor_user_id=actor_user_id,
+                sets={"verification": None, "attention_reasons": []},
+                details={"recheck": True, "previous_verification": case.get("verification")},
+            )
+        else:
+            # Restart the stale clock so a second click doesn't start another.
+            await case_service.set_fields(
+                conn, company_id=company_id, case_id=case_id, sets={"attention_reasons": []},
+                event="signed_recheck", actor_user_id=actor_user_id, details={"stale": True},
+                require_stages=("verifying",),
+            )
+    try:
+        data = await get_storage().download_file(row["storage_path"])
+    except RuntimeError:
+        data = None
+    if data is None:
+        case = await _record_check_failure(connect, company_id=company_id, case_id=case_id, actor_user_id=actor_user_id)
+    else:
+        case = await verification.run_check(
+            connect, company_id=company_id, case_id=case_id, data=data,
+            mime_type=row["content_type"] or "application/pdf", actor_user_id=actor_user_id,
+        )
+    async with connect() as conn:
+        if case is None:
+            return await case_service.get_case(conn, company_id=company_id, case_id=case_id)
+        hr_ids = await notifications.signed_recipients(conn, case=case)
+    await notifications.send_signed(case=case, hr_ids=hr_ids)
     return case
 
 
@@ -476,14 +582,15 @@ async def acknowledge(conn, *, company_id: UUID, case_id: UUID, actor_user_id: U
 
 def manager_signed_check(case: dict[str, Any]) -> Optional[dict[str, Any]]:
     """What the manager hears about the signed-copy check: only the problems
-    a new upload can fix."""
+    a new upload can fix, and nothing while a check is running."""
     from . import verification
 
     v = case.get("verification")
-    if not v:
+    if not v or case.get("stage") not in ("needs_attention", "closed"):
         return None
-    fixable = [r for r in v.get("reasons") or [] if r in MANAGER_FIXABLE_REASONS]
-    return {
-        "outcome": "verified" if v.get("outcome") == "verified" else ("fix_needed" if fixable else "with_hr"),
-        "problems": [verification.REASON_TEXT[r] for r in fixable],
-    }
+    if v.get("outcome") == "verified":
+        return {"outcome": "verified", "problems": []}
+    if manager_can_reupload(case):
+        return {"outcome": "fix_needed",
+                "problems": [verification.REASON_TEXT[r] for r in case.get("attention_reasons") or []]}
+    return {"outcome": "with_hr", "problems": []}

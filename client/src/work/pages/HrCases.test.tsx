@@ -199,6 +199,26 @@ describe('HrCases signed copy', () => {
     await waitFor(() => expect(api.acknowledgeHrCase).toHaveBeenCalledWith('c1'))
   })
 
+  it('offers a re-check when a check never finished, and not while one is running', async () => {
+    const stuck = hrCase({ stage: 'verifying', stage_label: 'Checking signed copy', allowed_events: [], signed_file_id: 's1', check_stale: true })
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [] })
+    api.getHrCase.mockResolvedValue(stuck)
+    api.recheckHrCase.mockResolvedValue({ ...stuck, stage: 'closed', check_stale: false })
+    renderAt('/work/hr-cases/c1')
+    expect(await screen.findByText(/didn’t finish/)).toBeTruthy()
+    expect(screen.queryByText('Checking the signed copy…')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(api.recheckHrCase).toHaveBeenCalledWith('c1'))
+  })
+
+  it('shows a running check without a re-check button', async () => {
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [] })
+    api.getHrCase.mockResolvedValue(hrCase({ stage: 'verifying', stage_label: 'Checking signed copy', allowed_events: [], signed_file_id: 's1', check_stale: false }))
+    renderAt('/work/hr-cases/c1')
+    expect(await screen.findByText('Checking the signed copy…')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull()
+  })
+
   it('HR can upload the signed copy after delivery', async () => {
     const delivered = hrCase({ stage: 'delivered', stage_label: 'Delivered', allowed_events: ['signed_uploaded'] })
     api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [] })

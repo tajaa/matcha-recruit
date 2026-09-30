@@ -232,7 +232,9 @@ async def test_notify_step_skips_the_actor_and_survives_failures(monkeypatch):
 @pytest.mark.parametrize("stage,reasons,expect_hr,expect_gm", [
     ("closed", [], "hr_case_signed_filed", False),
     ("needs_attention", ["employee_comments"], "hr_case_signed_attention", False),
-    ("needs_attention", ["illegible_scan", "employee_comments"], "hr_case_signed_attention", True),
+    # Anything of HR's on it: the manager isn't asked to replace it.
+    ("needs_attention", ["illegible_scan", "employee_comments"], "hr_case_signed_attention", False),
+    ("needs_attention", ["illegible_scan"], "hr_case_signed_attention", True),
     ("verifying", [], None, False),
 ])
 async def test_notify_signed(monkeypatch, stage, reasons, expect_hr, expect_gm):
@@ -259,7 +261,7 @@ async def test_notify_signed(monkeypatch, stage, reasons, expect_hr, expect_gm):
         assert hr_sent == []
     assert bool(gm_sent) is expect_gm
     if gm_sent:
-        assert "comments" not in gm_sent[0]["body"].lower() and "legible" not in gm_sent[0]["body"]
+        assert "comments" not in gm_sent[0]["body"].lower()
         assert "hard to read" in gm_sent[0]["body"]
 
 

@@ -252,14 +252,24 @@ async def notify_signed(conn, *, case: dict[str, Any], actor_user_id: Optional[U
     """After the signed-copy check. HR hears every outcome; the manager hears
     only problems a new upload can fix. The employee's comment text is never
     put in a notification — HR reads it on the case. Never raises."""
-    from .workflow import MANAGER_FIXABLE_REASONS
-    from .verification import REASON_TEXT
+    hr_ids = await signed_recipients(conn, case=case)
+    await send_signed(case=case, hr_ids=hr_ids)
 
+
+async def signed_recipients(conn, *, case: dict[str, Any]) -> list:
     try:
-        hr_ids = [r["user_id"] for r in await hr_recipients(conn, case["company_id"])]
+        return [r["user_id"] for r in await hr_recipients(conn, case["company_id"])]
     except Exception:
         logger.exception("[hr_cases] could not resolve HR for case %s", case.get("id"))
-        hr_ids = []
+        return []
+
+
+async def send_signed(*, case: dict[str, Any], hr_ids: list) -> None:
+    """The sending half of `notify_signed`; needs no connection of the
+    caller's. Never raises."""
+    from .workflow import manager_can_reupload
+    from .verification import REASON_TEXT
+
     number = case["case_number"]
     meta = {"hr_case_id": str(case["id"])}
     reasons = case.get("attention_reasons") or []
@@ -275,10 +285,11 @@ async def notify_signed(conn, *, case: dict[str, Any], actor_user_id: Optional[U
                title=f"{number}: signed copy needs attention",
                body=" ".join(REASON_TEXT.get(r, r) for r in reasons),
                link=hr_link(case), metadata=meta)
-    fixable = [REASON_TEXT[r] for r in reasons if r in MANAGER_FIXABLE_REASONS]
     gm = case.get("gm_user_id")
-    if fixable and gm and gm not in hr_ids:
+    # Only when a new upload is the whole fix: comments or a noted refusal
+    # stay with HR, and the manager can't replace that copy.
+    if manager_can_reupload(case) and gm and gm not in hr_ids:
         await send(user_ids=[gm], company_id=case["company_id"], type="hr_case_signed_attention",
                    title=f"{number}: please upload the signed copy again",
-                   body=" ".join(fixable) + " Upload a new copy on the Write-ups page.",
+                   body=" ".join(REASON_TEXT[r] for r in reasons) + " Upload a new copy on the Write-ups page.",
                    link=manager_link(case), metadata=meta)

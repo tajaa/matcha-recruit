@@ -524,6 +524,51 @@ async def test_upload_signed_files_under_template(signed_env):
     assert stored["folder_id"] == signed_env["folder"] and stored["actor"] is None
     assert stored["linked_type"] == "hr_case"
     assert signed_env["events"][0][0] == "signed_uploaded"
+    assert signed_env["events"][0][1]["verification"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_reupload_clears_the_old_result_but_keeps_it_in_the_trail(signed_env, monkeypatch):
+    old = {"outcome": "needs_attention", "reasons": ["illegible_scan"]}
+    signed_env["case"] = case(stage="needs_attention", stage_label="Needs attention", allowed_events=["signed_uploaded"],
+                              employee_id=EMPLOYEE, verification=old, attention_reasons=["illegible_scan"])
+    seen = {}
+
+    async def apply_event(conn, **kw):
+        seen.update(kw)
+        return {**signed_env["case"], "stage": "verifying"}
+    monkeypatch.setattr(case_service, "apply_event", apply_event)
+    await workflow.upload_signed(signed_conn(), company_id=COMPANY, case_id=uuid4(), actor_user_id=GM,
+                                 actor_is_hr=False, filename="s.pdf", data=b"%PDF")
+    assert seen["sets"]["verification"] is None and seen["sets"]["attention_reasons"] == []
+    assert seen["details"]["previous_verification"] == old
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reasons", [["employee_comments"], ["refusal_noted"], ["check_unavailable"],
+                                     ["illegible_scan", "employee_comments"]])
+async def test_a_manager_cannot_replace_a_copy_waiting_on_hr(signed_env, reasons):
+    signed_env["case"] = case(stage="needs_attention", stage_label="Needs attention", allowed_events=["signed_uploaded"],
+                              employee_id=EMPLOYEE, attention_reasons=reasons,
+                              verification={"outcome": "needs_attention", "reasons": reasons})
+    with pytest.raises(CaseError) as exc:
+        await workflow.upload_signed(signed_conn(), company_id=COMPANY, case_id=uuid4(), actor_user_id=GM,
+                                     actor_is_hr=False, filename="s.pdf", data=b"%PDF")
+    assert exc.value.status == 409 and "HR" in exc.value.detail
+    assert signed_env["events"] == [] and "stored" not in signed_env
+    assert workflow.manager_view(signed_env["case"])["can_upload_signed"] is False
+    # HR has seen it and may replace it.
+    await workflow.upload_signed(signed_conn(), company_id=COMPANY, case_id=uuid4(), actor_user_id=OTHER,
+                                 actor_is_hr=True, filename="s.pdf", data=b"%PDF")
+    assert signed_env["events"][0][0] == "signed_uploaded"
+
+
+def test_manager_can_reupload_only_when_every_problem_is_theirs():
+    assert workflow.manager_can_reupload(case(stage="needs_attention", attention_reasons=["illegible_scan", "pages_missing"]))
+    assert not workflow.manager_can_reupload(case(stage="needs_attention", attention_reasons=[]))
+    assert not workflow.manager_can_reupload(case(stage="closed", attention_reasons=["illegible_scan"]))
+    view = workflow.manager_view(case(stage="needs_attention", attention_reasons=["illegible_scan"]))
+    assert view["can_upload_signed"] is True
 
 
 @pytest.mark.asyncio
@@ -557,78 +602,242 @@ async def test_upload_signed_maps_drive_errors(signed_env, monkeypatch):
     assert exc.value.status == 503
 
 
-@pytest.mark.asyncio
-async def test_check_signed_and_notify_never_raises(monkeypatch):
-    from contextlib import asynccontextmanager
+def _signed_notices(monkeypatch, seen):
+    async def recipients(conn, *, case):
+        return ["hr"]
 
-    from app import database
+    async def send_signed(*, case, hr_ids):
+        seen.append(case["stage"])
+    monkeypatch.setattr(notifications, "signed_recipients", recipients)
+    monkeypatch.setattr(notifications, "send_signed", send_signed)
+
+
+@pytest.mark.asyncio
+async def test_check_signed_and_notify_holds_no_connection_while_sending(monkeypatch):
     from app.matcha.services.hr_cases import verification
 
-    @asynccontextmanager
-    async def get_connection(*a, **k):
-        yield QueryConn()
-    monkeypatch.setattr(database, "get_connection", get_connection)
-    seen = []
+    connect = Connect(QueryConn())
+    seen, open_during = [], []
 
-    async def run_check(conn, **kw):
+    async def run_check(conn_factory, **kw):
+        assert conn_factory is connect
         return {"id": "c1", "stage": "closed"}
 
-    async def notify(conn, *, case, actor_user_id):
+    async def send_signed(*, case, hr_ids):
+        open_during.append(connect.open)
         seen.append(case["stage"])
+    _signed_notices(monkeypatch, seen)
+    monkeypatch.setattr(notifications, "send_signed", send_signed)
     monkeypatch.setattr(verification, "run_check", run_check)
-    monkeypatch.setattr(notifications, "notify_signed", notify)
     await workflow.check_signed_and_notify(company_id=COMPANY, case_id=uuid4(), data=b"x",
-                                           mime_type="application/pdf", actor_user_id=GM)
-    assert seen == ["closed"]
-
-    async def broken(conn, **kw):
-        raise RuntimeError("model down")
-    monkeypatch.setattr(verification, "run_check", broken)
-    await workflow.check_signed_and_notify(company_id=COMPANY, case_id=uuid4(), data=b"x",
-                                           mime_type="application/pdf", actor_user_id=GM)
+                                           mime_type="application/pdf", actor_user_id=GM, connect=connect)
+    assert seen == ["closed"] and open_during == [0]
 
 
 @pytest.mark.asyncio
-async def test_recheck_and_acknowledge(env, monkeypatch):
+async def test_a_crashed_check_is_recorded_as_one_that_could_not_run(monkeypatch):
+    from app.matcha.services.hr_cases import verification
+
+    seen, applied = [], {}
+
+    async def broken(connect, **kw):
+        raise RuntimeError("db went away")
+
+    async def apply_check(conn, **kw):
+        applied.update(kw)
+        return {"id": "c1", "stage": "needs_attention", "attention_reasons": kw["verification"]["reasons"]}
+
+    async def get_case(conn, **kw):
+        return {"id": "c1", "stage": "verifying", "signed_file_id": "f1"}
+    _signed_notices(monkeypatch, seen)
+    monkeypatch.setattr(verification, "run_check", broken)
+    monkeypatch.setattr(verification, "apply_check", apply_check)
+    monkeypatch.setattr(case_service, "get_case", get_case)
+    await workflow.check_signed_and_notify(company_id=COMPANY, case_id=uuid4(), data=b"x",
+                                           mime_type="application/pdf", actor_user_id=GM, connect=Connect(QueryConn()))
+    assert applied["verification"]["reasons"] == ["check_unavailable"] and applied["signed_file_id"] == "f1"
+    assert seen == ["needs_attention"]
+
+    async def also_broken(conn, **kw):
+        raise RuntimeError("still down")
+    monkeypatch.setattr(verification, "apply_check", also_broken)
+    seen.clear()
+    await workflow.check_signed_and_notify(company_id=COMPANY, case_id=uuid4(), data=b"x",
+                                           mime_type="application/pdf", actor_user_id=GM, connect=Connect(QueryConn()))
+    assert seen == []  # nothing to say; HR's stale-check re-run is the way out
+
+
+@pytest.mark.asyncio
+async def test_a_superseded_check_sends_nothing(monkeypatch):
+    from app.matcha.services.hr_cases import verification
+
+    seen = []
+
+    async def superseded(connect, **kw):
+        return None
+    _signed_notices(monkeypatch, seen)
+    monkeypatch.setattr(verification, "run_check", superseded)
+    await workflow.check_signed_and_notify(company_id=COMPANY, case_id=uuid4(), data=b"x",
+                                           mime_type="application/pdf", actor_user_id=GM, connect=Connect(QueryConn()))
+    assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_check_signed_and_notify_survives_a_notice_failure(monkeypatch):
+    from app.matcha.services.hr_cases import verification
+
+    async def run_check(connect, **kw):
+        return {"id": "c1", "stage": "closed"}
+
+    async def boom(conn, *, case):
+        raise RuntimeError("db")
+    monkeypatch.setattr(verification, "run_check", run_check)
+    monkeypatch.setattr(notifications, "signed_recipients", boom)
+    await workflow.check_signed_and_notify(company_id=COMPANY, case_id=uuid4(), data=b"x",
+                                           mime_type="application/pdf", actor_user_id=GM, connect=Connect(QueryConn()))
+
+
+@pytest.mark.asyncio
+async def test_spawn_signed_check_runs_detached(monkeypatch):
+    import asyncio
+
+    ran = asyncio.Event()
+
+    async def check(**kw):
+        ran.set()
+    monkeypatch.setattr(workflow, "check_signed_and_notify", check)
+    workflow.spawn_signed_check(company_id=COMPANY, case_id=uuid4(), data=b"x", mime_type="application/pdf",
+                                actor_user_id=GM)
+    assert not ran.is_set()  # the caller didn't wait for it
+    await asyncio.wait_for(ran.wait(), 1)
+
+
+def test_spawn_signed_check_outside_a_loop_does_nothing():
+    workflow.spawn_signed_check(company_id=COMPANY, case_id=uuid4(), data=b"x", mime_type="application/pdf",
+                                actor_user_id=GM)
+
+
+@pytest.fixture
+def recheck_env(env, monkeypatch):
     from app.core.services import storage
     from app.matcha.services.hr_cases import verification
 
     async def download(path):
+        if env.get("storage_down"):
+            raise RuntimeError("Failed to download from S3")
         return b"%PDF"
     monkeypatch.setattr(storage, "get_storage", lambda: SimpleNamespace(download_file=download))
 
-    async def run_check(conn, **kw):
+    async def run_check(connect, **kw):
         env["check_kw"] = kw
         return {"id": "c1", "stage": "closed"}
 
-    async def notify(conn, **kw):
-        env["notified"] = True
+    async def failure(connect, **kw):
+        env["failure_recorded"] = True
+        return {"id": "c1", "stage": "needs_attention"}
+    env["notices"] = []
+    _signed_notices(monkeypatch, env["notices"])
     monkeypatch.setattr(verification, "run_check", run_check)
-    monkeypatch.setattr(notifications, "notify_signed", notify)
+    monkeypatch.setattr(workflow, "_record_check_failure", failure)
+    return env
 
+
+FILE_ROW = {"FROM drive_files": {"filename": "s.png", "storage_path": "s3://b/k", "content_type": "image/png"}}
+
+
+@pytest.mark.asyncio
+async def test_recheck_and_acknowledge(recheck_env):
+    env = recheck_env
     env["case"] = case(stage="delivered")
     with pytest.raises(CaseError):
-        await workflow.recheck_signed(QueryConn(), company_id=COMPANY, case_id=uuid4(), actor_user_id=OTHER)
-    env["case"] = case(stage="needs_attention", signed_file_id=uuid4())
+        await workflow.recheck_signed(Connect(QueryConn()), company_id=COMPANY, case_id=uuid4(), actor_user_id=OTHER)
+    env["case"] = case(stage="delivered", signed_file_id=uuid4())
+    with pytest.raises(CaseError):
+        await workflow.recheck_signed(Connect(QueryConn()), company_id=COMPANY, case_id=uuid4(), actor_user_id=OTHER)
+    env["case"] = case(stage="needs_attention", signed_file_id=uuid4(), verification={"outcome": "needs_attention"})
     with pytest.raises(CaseError) as exc:
-        await workflow.recheck_signed(QueryConn(fetchrow={"FROM drive_files": None}), company_id=COMPANY,
+        await workflow.recheck_signed(Connect(QueryConn(fetchrow={"FROM drive_files": None})), company_id=COMPANY,
                                       case_id=uuid4(), actor_user_id=OTHER)
     assert exc.value.status == 404
-    conn = QueryConn(fetchrow={"FROM drive_files": {"filename": "s.png", "storage_path": "s3://b/k", "content_type": "image/png"}})
-    out = await workflow.recheck_signed(conn, company_id=COMPANY, case_id=uuid4(), actor_user_id=OTHER)
-    assert out["stage"] == "closed" and env["check_kw"]["mime_type"] == "image/png" and env["notified"]
-    assert env["events"][-1][0] == "signed_uploaded"
+    connect = Connect(QueryConn(fetchrow=FILE_ROW))
+    out = await workflow.recheck_signed(connect, company_id=COMPANY, case_id=uuid4(), actor_user_id=OTHER)
+    assert out["stage"] == "closed" and env["check_kw"]["mime_type"] == "image/png" and env["notices"] == ["closed"]
+    event, sets = env["events"][-1]
+    assert event == "signed_uploaded" and sets["verification"] is None
 
     await workflow.acknowledge(QueryConn(), company_id=COMPANY, case_id=uuid4(), actor_user_id=OTHER)
     assert env["events"][-1][0] == "acknowledge" and "attention_acknowledged_at" in env["events"][-1][1]
 
 
+@pytest.mark.asyncio
+async def test_recheck_rescues_a_check_that_never_finished(recheck_env):
+    env = recheck_env
+    now = datetime.now(timezone.utc)
+    env["case"] = case(stage="verifying", signed_file_id=uuid4(), updated_at=now - timedelta(seconds=30))
+    with pytest.raises(CaseError) as exc:
+        await workflow.recheck_signed(Connect(QueryConn(fetchrow=FILE_ROW)), company_id=COMPANY,
+                                      case_id=uuid4(), actor_user_id=OTHER)
+    assert exc.value.status == 409 and "still being checked" in exc.value.detail
+
+    env["case"] = case(stage="verifying", signed_file_id=uuid4(),
+                       updated_at=now - timedelta(seconds=case_service.VERIFYING_STALE_SECONDS + 1))
+    out = await workflow.recheck_signed(Connect(QueryConn(fetchrow=FILE_ROW)), company_id=COMPANY,
+                                        case_id=uuid4(), actor_user_id=OTHER)
+    assert out["stage"] == "closed"
+    assert env["sets"][-1]["event"] == "signed_recheck" and env["sets"][-1]["require_stages"] == ("verifying",)
+    assert env["events"] == []  # no stage move: it's already verifying
+
+
+@pytest.mark.asyncio
+async def test_recheck_with_the_file_unreadable_records_a_failed_check(recheck_env):
+    env = recheck_env
+    env["storage_down"] = True
+    env["case"] = case(stage="needs_attention", signed_file_id=uuid4())
+    out = await workflow.recheck_signed(Connect(QueryConn(fetchrow=FILE_ROW)), company_id=COMPANY,
+                                        case_id=uuid4(), actor_user_id=OTHER)
+    assert env["failure_recorded"] and out["stage"] == "needs_attention" and "check_kw" not in env
+
+
+@pytest.mark.asyncio
+async def test_a_superseded_recheck_returns_the_case_as_it_is(recheck_env, monkeypatch):
+    from app.matcha.services.hr_cases import verification
+
+    env = recheck_env
+
+    async def superseded(connect, **kw):
+        return None
+    monkeypatch.setattr(verification, "run_check", superseded)
+    env["case"] = case(stage="needs_attention", signed_file_id=uuid4())
+    out = await workflow.recheck_signed(Connect(QueryConn(fetchrow=FILE_ROW)), company_id=COMPANY,
+                                        case_id=uuid4(), actor_user_id=OTHER)
+    assert out is env["case"] and env["notices"] == []
+
+
+def test_verifying_is_stale():
+    now = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
+    old = now - timedelta(seconds=case_service.VERIFYING_STALE_SECONDS + 1)
+    assert case_service.verifying_is_stale({"stage": "verifying", "updated_at": old}, now=now)
+    assert case_service.verifying_is_stale({"stage": "verifying", "updated_at": old.replace(tzinfo=None)}, now=now)
+    assert not case_service.verifying_is_stale({"stage": "verifying", "updated_at": now}, now=now)
+    assert not case_service.verifying_is_stale({"stage": "needs_attention", "updated_at": old}, now=now)
+    assert not case_service.verifying_is_stale({"stage": "verifying", "updated_at": None}, now=now)
+
+
 def test_manager_signed_check_only_shows_fixable_problems():
     assert workflow.manager_signed_check(case()) is None
-    view = workflow.manager_signed_check(case(verification={"outcome": "needs_attention",
-                                                            "reasons": ["employee_signature_missing", "employee_comments"]}))
+    both = ["employee_signature_missing", "employee_comments"]
+    view = workflow.manager_signed_check(case(stage="needs_attention", attention_reasons=both,
+                                              verification={"outcome": "needs_attention", "reasons": both}))
+    assert view == {"outcome": "with_hr", "problems": []}  # comments: HR first, no re-upload
+    fixable = ["employee_signature_missing"]
+    view = workflow.manager_signed_check(case(stage="needs_attention", attention_reasons=fixable,
+                                              verification={"outcome": "needs_attention", "reasons": fixable}))
     assert view == {"outcome": "fix_needed", "problems": ["There's no employee signature on it."]}
-    view = workflow.manager_signed_check(case(verification={"outcome": "needs_attention", "reasons": ["employee_comments"]}))
-    assert view == {"outcome": "with_hr", "problems": []}
-    assert workflow.manager_signed_check(case(verification={"outcome": "verified", "reasons": []}))["outcome"] == "verified"
+    assert workflow.manager_signed_check(case(stage="closed", verification={"outcome": "verified", "reasons": []}))["outcome"] == "verified"
     assert "signed_check" in workflow.manager_view(case())
+
+
+def test_manager_sees_no_old_problems_while_a_new_copy_is_checked():
+    stale = {"outcome": "needs_attention", "reasons": ["illegible_scan"]}
+    assert workflow.manager_signed_check(case(stage="verifying", attention_reasons=["illegible_scan"],
+                                              verification=stale)) is None

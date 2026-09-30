@@ -184,12 +184,25 @@ async def test_ensure_employee_folder_reuses_or_creates(monkeypatch):
     ({**CLEAN, "employee_comments_present": True, "employee_comments_text": "I disagree"}, "attention"),
 ])
 async def test_run_check_moves_case(monkeypatch, reading, event):
+    from contextlib import asynccontextmanager
+
     from app.matcha.services.hr_cases import case_service
 
-    cid = uuid4()
+    cid, fid = uuid4(), uuid4()
+    conn = QueryConn(fetchrow={"FROM employees": {"first_name": "Jane", "last_name": "Doe"}},
+                     fetchval={"SELECT extracted_text": "Dear Jane"})
+    held = {"open": 0}
+
+    @asynccontextmanager
+    async def connect():
+        held["open"] += 1
+        try:
+            yield conn
+        finally:
+            held["open"] -= 1
 
     async def get_case(conn, **kw):
-        return {"id": cid, "employee_id": uuid4(), "draft_file_id": uuid4()}
+        return {"id": cid, "employee_id": uuid4(), "draft_file_id": uuid4(), "stage": "verifying", "signed_file_id": fid}
     seen = {}
 
     async def apply_event(conn, **kw):
@@ -197,14 +210,35 @@ async def test_run_check_moves_case(monkeypatch, reading, event):
         return {"id": cid, "stage": "closed" if kw["event"] == "verified" else "needs_attention"}
 
     async def read(data, **kw):
+        seen["open_during_read"] = held["open"]
+        seen["read_kw"] = kw
         return reading
     monkeypatch.setattr(case_service, "get_case", get_case)
     monkeypatch.setattr(case_service, "apply_event", apply_event)
     monkeypatch.setattr(v, "read_signed_copy", read)
-    conn = QueryConn(fetchrow={"FROM employees": {"first_name": "Jane", "last_name": "Doe"}},
-                     fetchval={"SELECT extracted_text": "Dear Jane"})
-    await v.run_check(conn, company_id=uuid4(), case_id=cid, data=_pdf(), mime_type="application/pdf", actor_user_id=None)
+    await v.run_check(connect, company_id=uuid4(), case_id=cid, data=_pdf(), mime_type="application/pdf", actor_user_id=None)
     assert seen["event"] == event
+    assert seen["open_during_read"] == 0  # no connection across the model read
+    assert seen["read_kw"] == {"mime_type": "application/pdf", "employee_name": "Jane Doe", "letter_text": "Dear Jane"}
     if event == "attention":
         assert seen["sets"]["attention_reasons"] == ["employee_comments"]
         assert seen["sets"]["verification"]["reading"]["employee_comments_text"] == "I disagree"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("current", [{"stage": "needs_attention", "signed_file_id": "f1"},
+                                     {"stage": "verifying", "signed_file_id": "f2"}])
+async def test_a_result_for_a_copy_the_case_no_longer_holds_is_dropped(monkeypatch, current):
+    from app.matcha.services.hr_cases import case_service
+
+    async def get_case(conn, **kw):
+        return current
+
+    async def apply_event(conn, **kw):
+        raise AssertionError("must not apply")
+    monkeypatch.setattr(case_service, "get_case", get_case)
+    monkeypatch.setattr(case_service, "apply_event", apply_event)
+    out = await v.apply_check(QueryConn(), company_id=uuid4(), case_id=uuid4(),
+                              verification={"outcome": "verified", "reasons": []}, signed_file_id="f1",
+                              actor_user_id=None)
+    assert out is None

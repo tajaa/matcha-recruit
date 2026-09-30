@@ -294,10 +294,9 @@ def validate_signed_upload(filename: str, data: bytes) -> tuple[str, str]:
     return ext, SIGNED_EXTENSIONS[ext]
 
 
-async def run_check(conn, *, company_id: UUID, case_id: UUID, data: bytes, mime_type: str,
-                    actor_user_id: Optional[UUID]) -> dict[str, Any]:
-    """Read the signed copy and move the case to closed or needs_attention.
-    Returns the updated case. Notifications are sent by the caller's layer."""
+async def load_check_inputs(conn, *, company_id: UUID, case_id: UUID) -> dict[str, Any]:
+    """Everything the read needs from the database: the employee's name, the
+    approved letter's text, and which filed copy is being checked."""
     from . import case_service
 
     case = await case_service.get_case(conn, company_id=company_id, case_id=case_id)
@@ -308,22 +307,56 @@ async def run_check(conn, *, company_id: UUID, case_id: UUID, data: bytes, mime_
     letter_text = None
     if case.get("draft_file_id"):
         letter_text = await conn.fetchval("SELECT extracted_text FROM drive_files WHERE id = $1", case["draft_file_id"])
+    return {"employee_name": employee_name, "letter_text": letter_text, "signed_file_id": case.get("signed_file_id")}
+
+
+async def read_and_decide(data: bytes, *, mime_type: str, employee_name: Optional[str],
+                          letter_text: Optional[str]) -> dict[str, Any]:
+    """The model read plus the pure verdict. Takes no connection: the read
+    can run for `_READ_TIMEOUT` seconds."""
     inspection = inspect_pdf(data) if mime_type == "application/pdf" else None
     reading = await read_signed_copy(data, mime_type=mime_type, employee_name=employee_name, letter_text=letter_text)
     verdict = decide(inspection, reading)
-    verification = {
+    return {
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "inspection": inspection,
         "reading": {k: v for k, v in reading.items()},
         **verdict,
     }
-    if verdict["outcome"] == "verified":
+
+
+async def apply_check(conn, *, company_id: UUID, case_id: UUID, verification: dict[str, Any],
+                      signed_file_id: Any, actor_user_id: Optional[UUID]) -> Optional[dict[str, Any]]:
+    """Move the case to closed or needs_attention. None when the result is
+    for a copy the case no longer holds, or the case already left
+    `verifying` (a newer upload, or a re-check that finished first)."""
+    from . import case_service
+
+    case = await case_service.get_case(conn, company_id=company_id, case_id=case_id)
+    if case["stage"] != "verifying" or case.get("signed_file_id") != signed_file_id:
+        return None
+    if verification["outcome"] == "verified":
         return await case_service.apply_event(
             conn, company_id=company_id, case_id=case_id, event="verified", actor_user_id=actor_user_id,
             sets={"verification": verification, "attention_reasons": []},
         )
     return await case_service.apply_event(
         conn, company_id=company_id, case_id=case_id, event="attention", actor_user_id=actor_user_id,
-        sets={"verification": verification, "attention_reasons": verdict["reasons"]},
-        details={"reasons": verdict["reasons"]},
+        sets={"verification": verification, "attention_reasons": verification["reasons"]},
+        details={"reasons": verification["reasons"]},
     )
+
+
+async def run_check(connect, *, company_id: UUID, case_id: UUID, data: bytes, mime_type: str,
+                    actor_user_id: Optional[UUID]) -> Optional[dict[str, Any]]:
+    """Read the signed copy and move the case to closed or needs_attention.
+    `connect` is a connection factory: no connection is held across the
+    model read. Returns the updated case (None if superseded, see
+    `apply_check`). Notifications are sent by the caller's layer."""
+    async with connect() as conn:
+        inputs = await load_check_inputs(conn, company_id=company_id, case_id=case_id)
+    verification = await read_and_decide(data, mime_type=mime_type, employee_name=inputs["employee_name"],
+                                         letter_text=inputs["letter_text"])
+    async with connect() as conn:
+        return await apply_check(conn, company_id=company_id, case_id=case_id, verification=verification,
+                                 signed_file_id=inputs["signed_file_id"], actor_user_id=actor_user_id)

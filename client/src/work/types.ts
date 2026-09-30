@@ -1507,6 +1507,8 @@ export type HrCase = {
   column: string
   checklist: { key: string; label: string; done: boolean }[]
   allowed_events: string[]
+  /** A signed-copy check that never finished (the process running it died); HR can re-run it. */
+  check_stale?: boolean
   source_incident_id: string | null
   incident_number: string | null
   incident_title: string | null

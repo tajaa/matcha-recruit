@@ -333,15 +333,17 @@ async def execute(*, company_id: UUID, actor_user_id: Optional[UUID], action: di
                     actor_user_id=actor_user_id, actor_is_hr=is_hr, filename=name, data=data,
                 )
                 case = out["case"]
+                # Detached, not a bg_task: the loop awaits bg_tasks inline, so
+                # the reply would wait out the whole model read.
+                workflow.spawn_signed_check(
+                    company_id=company_id, case_id=case["id"], data=data,
+                    mime_type=out["mime_type"], actor_user_id=actor_user_id,
+                )
                 return {
                     "status": "created",
                     "message": f"{case['case_number']}: signed copy filed. I'm checking it now — "
                                "you'll get a notice if anything needs fixing.",
                     "record_id": str(case["id"]), "record_label": case["case_number"],
-                    "bg_tasks": [(workflow.check_signed_and_notify, (), {
-                        "company_id": company_id, "case_id": case["id"], "data": data,
-                        "mime_type": out["mime_type"], "actor_user_id": actor_user_id,
-                    })],
                 }
             if atype == "hr_case_delivered":
                 delivered_on = _date.fromisoformat(action["delivered_on"]) if action.get("delivered_on") else None

@@ -447,17 +447,30 @@ def test_signed_upload_error_maps(mod, scope, monkeypatch):
         assert client.post(f"/hr-cases/{uuid4()}/signed", files={"file": ("s.pdf", b"%PDF", "application/pdf")}).status_code == 409
 
 
-def test_signed_download(mod, scope, monkeypatch):
-    from app.core.services import storage
+def test_signed_download_goes_through_drive_and_is_audited(mod, scope, monkeypatch):
+    from app.matcha.services.drive import drive_service
+    from app.matcha.services.drive.drive_service import DriveError
+
+    signed, case_id = uuid4(), uuid4()
 
     async def load(conn, **kw):
-        return {"signed_file_id": uuid4()}
+        return {"signed_file_id": signed}
+    seen = {}
+
+    async def presign(conn, **kw):
+        seen.update(kw)
+        return {"url": "https://s3/signed", "filename": "Doe.pdf", "expires_in": 300}
     monkeypatch.setattr(mod.workflow, "load_for_actor", load)
-    monkeypatch.setattr(storage, "get_storage", lambda: SimpleNamespace(get_presigned_download_url=lambda p, expires_in: "https://s3/signed"))
-    scope["conn"] = QueryConn(fetchval={"is_personal": False},
-                              fetchrow={"FROM drive_files": {"filename": "Doe.pdf", "storage_path": "s3://b/k"}})
+    monkeypatch.setattr(drive_service, "presign_download", presign)
     with _client(mod, USER) as client:
-        assert client.get(f"/hr-cases/{uuid4()}/signed").json()["filename"] == "Doe.pdf"
+        assert client.get(f"/hr-cases/{case_id}/signed").json()["filename"] == "Doe.pdf"
+    assert seen["file_id"] == signed and seen["actor"] is None and seen["on_behalf_of"] == USER.id
+
+    async def gone(conn, **kw):
+        raise DriveError(404, "That file doesn't exist.")
+    monkeypatch.setattr(drive_service, "presign_download", gone)
+    with _client(mod, USER) as client:
+        assert client.get(f"/hr-cases/{case_id}/signed").status_code == 404
 
     async def none(conn, **kw):
         return {"signed_file_id": None}
@@ -469,11 +482,23 @@ def test_signed_download(mod, scope, monkeypatch):
 def test_acknowledge_and_recheck_are_hr_only(mod, scope, monkeypatch):
     async def ok(conn, **kw):
         return {"id": "c1", "stage": "closed"}
+    seen = {}
+
+    async def recheck(connect, **kw):
+        seen["connect"] = connect
+        return {"id": "c1", "stage": "closed"}
     monkeypatch.setattr(mod.workflow, "acknowledge", ok)
-    monkeypatch.setattr(mod.workflow, "recheck_signed", ok)
+    monkeypatch.setattr(mod.workflow, "recheck_signed", recheck)
     with _client(mod, USER) as client:
         assert client.post(f"/hr-cases/{uuid4()}/acknowledge").json()["stage"] == "closed"
         assert client.post(f"/hr-cases/{uuid4()}/recheck").json()["stage"] == "closed"
+    assert seen["connect"] is mod.get_connection  # a factory: no connection across the model read
+
+    async def still_checking(connect, **kw):
+        raise mod.CaseError(409, "That signed copy is still being checked.")
+    monkeypatch.setattr(mod.workflow, "recheck_signed", still_checking)
+    with _client(mod, USER) as client:
+        assert client.post(f"/hr-cases/{uuid4()}/recheck").status_code == 409
     scope["hr"] = False
     with _client(mod, USER) as client:
         assert client.post(f"/hr-cases/{uuid4()}/acknowledge").status_code == 404
