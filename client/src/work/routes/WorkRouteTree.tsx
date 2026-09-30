@@ -27,6 +27,7 @@ import SymChatList from '../pages/SymChat/SymChatList'
 import SymChatDetail from '../pages/SymChat/SymChatDetail'
 import Drive from '../pages/Drive'
 import HrCases from '../pages/HrCases'
+import WriteUps from '../pages/WriteUps'
 import { FeatureGate } from '../../components/shared/FeatureGate'
 import { WorkSurfaceProvider, type WorkSurface } from './WorkSurfaceContext'
 
@@ -142,6 +143,8 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
             >
               <Route path="hr-cases" element={<HrCases />} />
               <Route path="hr-cases/:caseId" element={<HrCases />} />
+              <Route path="write-ups" element={<WriteUps />} />
+              <Route path="write-ups/:caseId" element={<WriteUps />} />
             </Route>
           )}
           <Route path="journals" element={<Journals />} />

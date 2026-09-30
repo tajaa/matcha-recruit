@@ -138,7 +138,17 @@ _HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
     "meal_break_waiver": "employee_schedule",
     "work_permit": "employee_schedule",
     "eligibility_case_decision": "employee_schedule",
+    # HR cases (services/huume/hr_case_skill.py). Who may act — HR vs the
+    # case's own manager — is decided by services/hr_cases/workflow.py.
+    "hr_case_draft": "hr_cases",
+    "hr_case_decision": "hr_cases",
+    "hr_case_delivered": "hr_cases",
 }
+
+_HR_CASE_ACTIONS = frozenset({"hr_case_draft", "hr_case_decision", "hr_case_delivered"})
+_HR_CASE_ACTION_TYPES = frozenset({"verbal_warning", "written_warning", "final_warning", "suspension", "pip", "other"})
+_HR_CASE_INFRACTIONS = frozenset({"attendance", "performance", "conduct", "safety", "policy_violation"})
+_HR_CASE_SOURCES = {"attachment": "attachment_url", "drive": "drive_file_id", "google": "google_file_id"}
 
 # discipline_from_incident / discipline_decision — the incident-triggered
 # discipline skill's two staged action types, routed to discipline_skill.py
@@ -324,6 +334,15 @@ def evaluate_huume_action(
 
     if action_type == "discipline_from_incident":
         return _validate_discipline_from_incident(staged_action)
+
+    if action_type == "hr_case_draft":
+        return _validate_hr_case_draft(staged_action)
+
+    if action_type == "hr_case_decision":
+        return _validate_hr_case_decision(staged_action)
+
+    if action_type == "hr_case_delivered":
+        return _validate_hr_case_delivered(staged_action)
 
     if action_type == "discipline_decision":
         return _validate_discipline_decision(staged_action)
@@ -952,6 +971,73 @@ def _validate_discipline_from_incident(staged: dict[str, Any]) -> HuumeVerdict:
     })
 
 
+def _validate_hr_case_draft(staged: dict[str, Any]) -> HuumeVerdict:
+    """Confirm-turn validation for a staged write-up. The source reference was
+    pinned at stage time (hr_case_skill.resolve_draft_args); the confirm turn
+    submits exactly that reference."""
+    source = staged.get("source")
+    ref_key = _HR_CASE_SOURCES.get(source)
+    if not ref_key or not staged.get(ref_key):
+        return HuumeVerdict(kind="refuse", message="I've lost track of which file is the write-up — attach or name it again.")
+    if not _is_uuid(staged.get("employee_id")):
+        return HuumeVerdict(kind="refuse", message="Who is the write-up for?")
+    action_type = str(staged.get("action_type") or "").strip().lower()
+    if action_type not in _HR_CASE_ACTION_TYPES:
+        return HuumeVerdict(kind="refuse", message="What kind of action is it — verbal, written or final warning, suspension, PIP, or other?")
+    infraction = str(staged.get("infraction_type") or "").strip().lower()
+    if infraction not in _HR_CASE_INFRACTIONS:
+        return HuumeVerdict(kind="refuse", message="What's it about — attendance, performance, conduct, safety, or a policy violation?")
+    dates: list[str] = []
+    for value in staged.get("occurrence_dates") or []:
+        parsed = _parse_iso_date(value)
+        if parsed is None:
+            return HuumeVerdict(kind="refuse", message="I couldn't read one of those dates — use YYYY-MM-DD.")
+        dates.append(parsed.isoformat())
+    if len(dates) > _MAX_OCCURRENCE_DATES:
+        return HuumeVerdict(kind="refuse", message="That's a lot of dates for one write-up — list the specific occurrences.")
+    for key in ("case_id", "incident_id"):
+        if staged.get(key) not in (None, "") and not _is_uuid(staged.get(key)):
+            return HuumeVerdict(kind="refuse", message=f"That {key.replace('_', ' ')} doesn't look valid.")
+    action = {
+        "type": "hr_case_draft", "source": source, ref_key: str(staged[ref_key]),
+        "filename": staged.get("filename"),
+        "employee_id": str(staged["employee_id"]), "action_type": action_type,
+        "infraction_type": infraction, "occurrence_dates": dates,
+        "case_id": str(staged["case_id"]) if staged.get("case_id") else None,
+        "incident_id": str(staged["incident_id"]) if staged.get("incident_id") else None,
+        "confirm_id": staged.get("confirm_id"),
+    }
+    return HuumeVerdict(kind="proceed", message="", action=action)
+
+
+def _validate_hr_case_decision(staged: dict[str, Any]) -> HuumeVerdict:
+    if not _is_uuid(staged.get("case_id")):
+        return HuumeVerdict(kind="refuse", message="Which case? I need its case_id — list_write_ups has it.")
+    decision = str(staged.get("decision") or "").strip().lower()
+    if decision not in ("approve", "request_changes"):
+        return HuumeVerdict(kind="refuse", message="Approve it, or send it back with what to change?")
+    reason = str(staged.get("reason") or "").strip()
+    if decision == "request_changes" and len(reason) < _MIN_DENIAL_REASON_CHARS:
+        return HuumeVerdict(kind="refuse", message=f"Tell the manager what to change (at least {_MIN_DENIAL_REASON_CHARS} characters).")
+    return HuumeVerdict(kind="proceed", message="", action={
+        "type": "hr_case_decision", "case_id": str(staged["case_id"]), "decision": decision, "reason": reason or None,
+    })
+
+
+def _validate_hr_case_delivered(staged: dict[str, Any]) -> HuumeVerdict:
+    if not _is_uuid(staged.get("case_id")):
+        return HuumeVerdict(kind="refuse", message="Which case? I need its case_id — list_write_ups has it.")
+    delivered_on = None
+    if staged.get("delivered_on") not in (None, ""):
+        parsed = _parse_iso_date(staged["delivered_on"])
+        if parsed is None:
+            return HuumeVerdict(kind="refuse", message="I couldn't read that delivery date — use YYYY-MM-DD.")
+        delivered_on = parsed.isoformat()
+    return HuumeVerdict(kind="proceed", message="", action={
+        "type": "hr_case_delivered", "case_id": str(staged["case_id"]), "delivered_on": delivered_on,
+    })
+
+
 def _validate_discipline_decision(staged: dict[str, Any]) -> HuumeVerdict:
     """Confirm-turn validation for approving/denying/revising a pending
     discipline record. 'deny' and 'revise' both require a reason of at
@@ -1274,6 +1360,11 @@ async def execute_huume_action(
     elif action.get("type") in _DISCIPLINE_SKILL_ACTIONS:
         from app.matcha.services.huume import discipline_skill
         result = await discipline_skill.execute(
+            company_id=company_id, actor_user_id=actor_user_id, action=action,
+        )
+    elif action.get("type") in _HR_CASE_ACTIONS:
+        from app.matcha.services.huume import hr_case_skill
+        result = await hr_case_skill.execute(
             company_id=company_id, actor_user_id=actor_user_id, action=action,
         )
     elif action.get("type") == "ems_promote":

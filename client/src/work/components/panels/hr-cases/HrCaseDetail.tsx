@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { CheckCircle2, Circle, ExternalLink, Loader2, X } from 'lucide-react'
 import type { HrCase } from '../../../types'
+import HrCaseReviewSection from './HrCaseReviewSection'
 
 const ORIGIN_LABEL: Record<HrCase['origin'], string> = {
   intake_triage: 'Flagged when the incident was reported',
@@ -17,6 +18,11 @@ const EVENT_LABEL: Record<string, string> = {
   intake_check_clean: 'Intake check: no match',
   close_check_match: 'Close check: policy match',
   close_check_clean: 'Close check: no match',
+  draft_submitted: 'Write-up sent to HR',
+  draft_held: 'Write-up held by the leave check',
+  approve: 'Approved to deliver',
+  request_changes: 'Sent back for changes',
+  delivered: 'Delivered to employee',
 }
 
 function when(iso: string | null): string {
@@ -27,9 +33,12 @@ interface Props {
   hrCase: HrCase
   onClose: () => void
   onDismiss: (reason: string) => Promise<void>
+  onOpenDraft: () => Promise<void>
+  onDecide: (decision: 'approve' | 'request_changes', reason: string) => Promise<void>
+  onDelivered: (deliveredOn: string) => Promise<void>
 }
 
-export default function HrCaseDetail({ hrCase, onClose, onDismiss }: Props) {
+export default function HrCaseDetail({ hrCase, onClose, onDismiss, onOpenDraft, onDecide, onDelivered }: Props) {
   const [dismissing, setDismissing] = useState(false)
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
@@ -94,6 +103,8 @@ export default function HrCaseDetail({ hrCase, onClose, onDismiss }: Props) {
             ))}
           </ul>
         </section>
+
+        <HrCaseReviewSection hrCase={hrCase} onOpenDraft={onOpenDraft} onDecide={onDecide} onDelivered={onDelivered} />
 
         {matches.length > 0 && (
           <section>

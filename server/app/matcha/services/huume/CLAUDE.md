@@ -143,6 +143,20 @@ assistant voice endpoint; the old `/employee-schedule/chat` parser route and
 client are retired. The Huume loop remains bounded at eight model calls and a
 300-second wall-clock limit, with the existing per-company turn rate limit.
 
+## Write-ups / HR cases (2026-09-29)
+
+`services/huume/hr_case_skill.py` carries the `hr_cases` write-up workflow into
+threads: `list_write_ups`, `search_drive`, `read_drive_file` (read) and
+`submit_write_up` / `decide_write_up` / `mark_write_up_delivered` (staged via
+`_HR_OPS_TOOL_SPECS`). All three executors call `services/hr_cases/workflow.py`,
+the same code as the REST routes, so HR-vs-manager authorization and the
+protected-leave check are identical. `submit_write_up` has a stage-time arm
+that resolves the employee and pins one source reference (a thread attachment
+from the new `attachment_refs` parameter, a Drive file id, or a Google file
+id); the confirm turn re-fetches the bytes. `decide_write_up` is refused at
+stage time for non-HR. None of these are assets (`_NO_ASSET_TYPES`). Full spec:
+`services/hr_cases/CLAUDE.md`.
+
 ## The loop runs on OpenAI, and now says so (2026-09-10)
 
 `agent.py`'s bounded loop has run on **OpenAI Luna** (`gpt-5.6-luna`, Responses API) since

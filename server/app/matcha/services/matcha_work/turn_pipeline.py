@@ -518,6 +518,7 @@ class TurnContext:
     dyn_ctx: str = ""
     msg_dicts: list = field(default_factory=list)
     file_context_parts: list = field(default_factory=list)
+    file_attachment_refs: list = field(default_factory=list)
     context_summary: str | None = None
     summary_at_count: int | None = None
     project_meta: dict | None = None
@@ -992,6 +993,7 @@ async def _run_huume_dispatch(tc: TurnContext):
             history=tc.msg_dicts, current_state=current_state,
             company_name=(tc.profile or {}).get("name") or "",
             attachment_texts=tc.file_context_parts,
+            attachment_refs=tc.file_attachment_refs,
             features=features, integrations=integrations, run_id=run_id,
             surface_context=surface_context,
         ):
