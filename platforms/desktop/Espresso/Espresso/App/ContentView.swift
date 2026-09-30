@@ -266,7 +266,8 @@ struct ContentView: View {
     private var sidebarHomeButton: some View {
         let isHomeActive = !appState.showJournalsHub && !appState.showProjectsHub
             && !appState.showThreadsHub && !appState.showChannelsHub
-            && !appState.showProductivityHub && !appState.showEmailHub && (appState.showHome || (
+            && !appState.showProductivityHub && !appState.showEmailHub
+            && !appState.showAssistantHub && (appState.showHome || (
             appState.selectedThreadId == nil &&
             appState.selectedProjectId == nil &&
             appState.selectedChannelId == nil &&
@@ -365,6 +366,7 @@ struct ContentView: View {
         case .productivity: productivitySidebarSection
         case .threads:  threadsSidebarSection
         case .email:    emailSidebarSection
+        case .assistant: assistantSidebarSection
         }
     }
 
@@ -460,6 +462,7 @@ struct ContentView: View {
     private func openChannelsHub()  { appState.clearPrimaryNav(); appState.showChannelsHub = true }
     private func openProductivityHub() { appState.clearPrimaryNav(); appState.showProductivityHub = true }
     private func openEmailHub()     { appState.clearPrimaryNav(); appState.showEmailHub = true }
+    private func openAssistantHub() { appState.clearPrimaryNav(); appState.showAssistantHub = true }
 
     /// Nav-only row — opens the full-pane Notes-style Journals workspace
     /// (folders · note list · editor). Browsing/organizing lives in the
@@ -491,6 +494,19 @@ struct ContentView: View {
         sidebarNavRow(title: "Email", icon: "envelope",
                       isActive: appState.showEmailHub,
                       onOpen: openEmailHub)
+    }
+
+    /// Nav-only row — opens the person's private conversation with Espresso.
+    /// Shown only when the workspace has the assistant switched on; on a plan
+    /// without it the row opens the paywall instead.
+    @ViewBuilder
+    private var assistantSidebarSection: some View {
+        if appState.assistantEnabled {
+            sidebarNavRow(title: "Espresso", icon: "sparkles",
+                          isActive: appState.showAssistantHub,
+                          lockedFeature: appState.canAssistant ? nil : "assistant",
+                          onOpen: openAssistantHub)
+        }
     }
 
     private func setThreadFilter(_ status: String?) {

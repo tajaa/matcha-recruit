@@ -173,3 +173,26 @@ async def test_connect_asks_google_for_the_named_abilities_incrementally(monkeyp
     assert query["include_granted_scopes"] == ["true"] and query["state"] == ["state-1"]
     plain = await workspace.agent_email_connect(_user())
     assert parse_qs(urlsplit(plain["auth_url"]).query)["scope"][0].split() == GMAIL_SCOPES
+
+
+@pytest.mark.asyncio
+async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
+    from app.matcha.services.matcha_work.agent_runtime import enqueue, quota
+
+    monkeypatch.setattr(entitlements_service, "resolve_plan_for_user", AsyncMock(return_value="pro"))
+    monkeypatch.setattr(quota, "assistant_usage", AsyncMock(return_value={"limit": 30, "used": 2, "remaining": 28}))
+    enabled = AsyncMock(return_value=True)
+    monkeypatch.setattr(enqueue, "workspace_enabled", enabled)
+    company = uuid4()
+    out = await entitlements_service.resolve_entitlements(uuid4(), company)
+    assert out["workspace"] == {"espresso_assistant": True}
+    assert out["features"]["assistant"] is True
+    assert out["quotas"]["assistant_runs"] == {"limit": 30, "used": 2, "remaining": 28}
+    enabled.assert_awaited_once_with(company)
+
+    # No workspace, or a lookup that fails: off, and the read still answers.
+    assert (await entitlements_service.resolve_entitlements(uuid4(), None))["workspace"] == {
+        "espresso_assistant": False}
+    enabled.side_effect = RuntimeError("db down")
+    assert (await entitlements_service.resolve_entitlements(uuid4(), company))["workspace"] == {
+        "espresso_assistant": False}

@@ -8,6 +8,12 @@ struct ChannelDetailView: View {
     /// channels must NOT claim the workspace-tab active context — the
     /// enclosing project owns it (otherwise the collab project can't be pinned).
     var isEmbedded: Bool = false
+    /// True for a person's private conversation with Espresso. It is a channel
+    /// underneath, but there is nobody else in it: the header drops everything
+    /// about members, invites and calls.
+    var isAssistant: Bool = false
+    /// Shown in the assistant header ("What it can do").
+    var onOpenAbilities: (() -> Void)? = nil
 
     @Environment(AppState.self) var appState
     @State var vm = ChannelChatViewModel()
@@ -18,9 +24,12 @@ struct ChannelDetailView: View {
     @State var composerSeedNonce = 0
 
     @MainActor
-    init(channelId: String, isEmbedded: Bool = false) {
+    init(channelId: String, isEmbedded: Bool = false, isAssistant: Bool = false,
+         onOpenAbilities: (() -> Void)? = nil) {
         self.channelId = channelId
         self.isEmbedded = isEmbedded
+        self.isAssistant = isAssistant
+        self.onOpenAbilities = onOpenAbilities
         // Main-window tabs share a cached VM for instant warm re-entry; embedded
         // channels (collab project chat panel) keep a private VM so they never
         // share WS callbacks with a main tab on the same channel.
@@ -83,7 +92,7 @@ struct ChannelDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            if isAssistant { assistantHeader } else { header }
             Divider()
             if vm.isLoading && vm.channel == nil {
                 // Cold load only — warm re-entry keeps the prior messages
@@ -152,7 +161,8 @@ struct ChannelDetailView: View {
                     userHandle: userHandle,
                     members: vm.channel?.members ?? [],
                     currentUserId: appState.currentUser?.id ?? "",
-                    supportsEspressoAgent: vm.channel?.projectId != nil,
+                    // In its own conversation every message is already Espresso's.
+                    supportsEspressoAgent: vm.channel?.projectId != nil && !isAssistant,
                     maxAttachments: maxAttachments,
                     typingPing: { ws.sendTyping(channelId: channelId) },
                     onSend: { send($0) },
@@ -246,6 +256,42 @@ struct ChannelDetailView: View {
     }
 
     // MARK: - Header
+
+    /// The private conversation's header: what this is, how many requests are
+    /// left today, and the way in to what Espresso may do.
+    var assistantHeader: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 13))
+                .foregroundColor(appState.themeAccent)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Espresso")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(appState.themeText.opacity(0.95))
+                Text(assistantSubtitle)
+                    .font(.system(size: 10))
+                    .foregroundColor(appState.themeText.opacity(0.5))
+                    .lineLimit(1)
+            }
+            Spacer()
+            if let onOpenAbilities {
+                Button(action: onOpenAbilities) {
+                    Label("What it can do", systemImage: "slider.horizontal.3")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private var assistantSubtitle: String {
+        let base = "Private to you. Ask it to look something up, or to do something for you."
+        guard let runs = appState.entitlements?.quotas?.assistantRuns else { return base }
+        return "\(base) \(runs.remaining) of \(runs.limit) requests left today."
+    }
 
     var header: some View {
         VStack(alignment: .leading, spacing: 2) {

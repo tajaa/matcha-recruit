@@ -47,6 +47,8 @@ async def build_history(
            LEFT JOIN employees e ON e.user_id = m.sender_id
            WHERE m.channel_id = $1 AND m.deleted_at IS NULL
              AND COALESCE(m.message_type, 'message') = 'message'
+             -- "On it." is a progress card, not something that was said.
+             AND COALESCE(m.metadata->>'kind', '') <> 'agent_progress'
            ORDER BY m.created_at DESC
            LIMIT $2""",
         channel_id, limit + 1,

@@ -84,6 +84,7 @@ extension AppState {
         selectedChannelId = nil
         selectedJournalId = nil
         showEmailHub = false
+        showAssistantHub = false
         showInbox = false
         showPeople = false
         showHome = false

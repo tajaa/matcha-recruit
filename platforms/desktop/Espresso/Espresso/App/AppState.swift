@@ -89,6 +89,9 @@ class AppState {
     /// Full-pane Email hub (mailbox · message list · reader). Same nav-only
     /// model; the hub itself owns which message is open.
     var showEmailHub: Bool = false
+    /// Full-pane private conversation with Espresso (the assistant). Same
+    /// nav-only model; the pane owns its conversation.
+    var showAssistantHub: Bool = false
     /// Full-pane "Browse Channels" surface. Reached from the sidebar Channels
     /// section header. Mutually exclusive with thread/project/channel/journal
     /// selection — toggling on clears those.
@@ -115,6 +118,7 @@ class AppState {
         showChannelsHub = false
         showProductivityHub = false
         showEmailHub = false
+        showAssistantHub = false
     }
 
     var onlineUsers: [MWOnlineUser] = []
@@ -147,6 +151,13 @@ class AppState {
     var canGoLive: Bool { can("go_live") }
     var canPaidChannels: Bool { can("paid_channels") }
     var canProModel: Bool { can("ai_model_pro") }
+    var canAgentCards: Bool { can("agent_cards") }
+    var canAssistant: Bool { can("assistant") }
+    /// Whether the WORKSPACE has the assistant switched on. Unlike the plan
+    /// gates above this defaults CLOSED while unknown: the row is a whole
+    /// surface, and one that appears and then vanishes is worse than one that
+    /// appears a moment late.
+    var assistantEnabled: Bool { entitlements?.workspace?.espressoAssistant == true }
 
     /// Raise the paywall for a specific locked feature.
     func presentPaywall(for feature: String?) {

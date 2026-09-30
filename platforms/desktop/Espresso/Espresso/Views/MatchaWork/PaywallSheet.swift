@@ -21,6 +21,8 @@ struct PaywallSheet: View {
         case "paid_channels": return "Creator monetization needs Pro"
         case "ai_model_pro": return "The Pro AI model needs Pro"
         case "ai_quota": return "You've used your free AI for now"
+        case "agent_cards": return "Agent cards need Pro"
+        case "assistant": return "The Espresso assistant needs Pro"
         default: return "Upgrade Werk"
         }
     }

@@ -11,9 +11,13 @@ import AppKit
 ///             exactly as if it were typed;
 /// * receipt — the purchase outcome (Stripe test charge, handoff, failure).
 ///
+/// The Espresso assistant's messages render here too (progress, answer,
+/// receipt, and the confirmation that shows what a yes will carry out): see
+/// AgentAssistantCards.swift.
+///
 /// Photos are server-rehosted CDN URLs; links open in the browser.
 struct AgentCardMessageView: View {
-    @Environment(AppState.self) private var appState
+    @Environment(AppState.self) var appState
     let meta: ChannelMessageMetadata
     /// Message text without the leading ticket marker (used for a question's
     /// heading when the payload has none).
@@ -30,6 +34,8 @@ struct AgentCardMessageView: View {
     @State private var sending: String?
     @State private var offline = false
     @State private var expired = false
+    /// Whether a run's progress card shows all of its steps.
+    @State var showAllSteps = false
     private static let sendingWindow: Duration = .seconds(8)
 
     var body: some View {
@@ -40,6 +46,12 @@ struct AgentCardMessageView: View {
                 promptCard(view)
             } else if let receipt = meta.receipt, meta.kind == "agent_card_receipt" {
                 receiptCard(receipt)
+            } else if meta.kind == "agent_progress" {
+                progressCard(meta.progress)
+            } else if let result = meta.resultV2, meta.kind == "agent_result" {
+                resultV2Card(result)
+            } else if let receipt = meta.actionReceipt, meta.kind == "agent_receipt" {
+                actionReceiptCard(receipt)
             }
         }
         .frame(maxWidth: 540, alignment: .leading)
@@ -85,7 +97,7 @@ struct AgentCardMessageView: View {
         }
     }
 
-    private func topPick(_ pick: AgentChatPick) -> some View {
+    func topPick(_ pick: AgentChatPick) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
                 photo(pick.imageUrl, size: 104)
@@ -146,7 +158,7 @@ struct AgentCardMessageView: View {
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(appState.themeText.opacity(0.04)))
     }
 
-    private func alternativeRow(_ alt: AgentChatPick) -> some View {
+    func alternativeRow(_ alt: AgentChatPick) -> some View {
         HStack(spacing: 10) {
             photo(alt.imageUrl, size: 40)
             VStack(alignment: .leading, spacing: 1) {
@@ -221,6 +233,12 @@ struct AgentCardMessageView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(appState.themeText)
                     .fixedSize(horizontal: false, vertical: true)
+                if let action = view.action, !action.lines.isEmpty {
+                    actionLines(action.lines)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(appState.themeText.opacity(0.04)))
+                }
                 if let offer = view.offer {
                     HStack(spacing: 10) {
                         photo(offer.imageUrl, size: 56)
@@ -253,7 +271,12 @@ struct AgentCardMessageView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(appState.themeTextSecondary)
                 } else if forSomeoneElse {
-                    Text("Waiting for the buyer to answer.")
+                    Text(meta.isAssistantPrompt ? "Waiting for the person who asked." : "Waiting for the buyer to answer.")
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeTextSecondary)
+                } else if view.buttons.isEmpty {
+                    // An open question with no suggested answers: the reply is whatever they type.
+                    Label("Reply to answer.", systemImage: "questionmark.circle")
                         .font(.system(size: 11))
                         .foregroundColor(appState.themeTextSecondary)
                 } else {
@@ -286,7 +309,8 @@ struct AgentCardMessageView: View {
     private func closedText(_ status: String) -> String {
         switch status {
         case "answered": return meta.answerText ?? "Answered"
-        case "superseded": return "Replaced by a newer result"
+        case "superseded":
+            return meta.isAssistantPrompt ? "You moved on to something else" : "Replaced by a newer result"
         case "expired": return "This question expired"
         default: return "Closed"
         }
@@ -452,7 +476,7 @@ struct AgentCardMessageView: View {
 
     // MARK: - Shared
 
-    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+    func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
             .padding(12)
             .background(
@@ -494,7 +518,7 @@ struct AgentCardMessageView: View {
         }
     }
 
-    private func httpURL(_ string: String?) -> URL? {
+    func httpURL(_ string: String?) -> URL? {
         guard let string, let url = URL(string: string),
               ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
         return url

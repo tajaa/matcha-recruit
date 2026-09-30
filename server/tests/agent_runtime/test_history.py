@@ -65,3 +65,13 @@ async def test_history_is_bounded():
     )
     assert [i["content"][0]["text"] for i in limited] == ["m2", "m1", "m0"]
     assert conn.ran("FROM channel_messages")[0][2][1] == history.DEFAULT_LIMIT + 1
+
+
+@pytest.mark.asyncio
+async def test_progress_cards_and_deleted_messages_are_not_part_of_the_conversation():
+    conn = FakeConn([("FROM channel_messages", [])])
+    items, own = await history.build_history(conn, channel_id=uuid4(), requester_id=uuid4())
+    assert items == [] and own == ()
+    query = conn.calls[0][1]
+    assert "m.deleted_at IS NULL" in query
+    assert "<> 'agent_progress'" in query

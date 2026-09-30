@@ -5,6 +5,8 @@ export type WorkPlan = 'free' | 'lite' | 'pro' | 'business'
 export type WorkEntitlements = {
   plan: WorkPlan
   features: Record<string, boolean>
+  /** What the workspace has switched on, as opposed to what the plan allows. */
+  workspace?: { espresso_assistant?: boolean }
   quotas: {
     token_limit: number
     window_hours: number

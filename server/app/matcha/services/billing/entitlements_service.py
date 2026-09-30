@@ -248,10 +248,24 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
     except Exception:
         pass
 
+    # What the WORKSPACE has switched on, as opposed to what the plan allows.
+    # The desktop app has no other view of company flags, and it must not
+    # offer a surface the workspace has off.
+    workspace = {"espresso_assistant": False}
+    if company_id is not None:
+        try:
+            from ..matcha_work.agent_runtime.enqueue import workspace_enabled
+
+            workspace["espresso_assistant"] = await workspace_enabled(company_id)
+        except Exception:
+            # Informational, like the quotas above.
+            pass
+
     return {
         "plan": plan,
         "features": features_for_plan(plan),
         "quotas": quotas,
+        "workspace": workspace,
     }
 
 
