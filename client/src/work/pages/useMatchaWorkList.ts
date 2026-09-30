@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { MWThread } from '../types'
 import { listChannels } from '../api/channels'
@@ -24,12 +24,13 @@ export function useMatchaWorkList() {
   const [tab, setTab] = useState<Tab>('all')
   const [query, setQuery] = useState('')
   const [error, setError] = useState('')
-  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false)
 
-  useEffect(() => {
-    if (me?.user?.role !== 'individual') return
+  // Derived, not stored: whether this person still needs the first-run wizard.
+  const needsOnboarding = useMemo(() => {
+    if (me?.user?.role !== 'individual') return false
     // Backend flag is the source of truth — survives storage wipes across browsers/devices.
-    if (me.user.work_onboarded) return
+    if (me.user.work_onboarded) return false
     let seen = false
     try {
       seen = !!localStorage.getItem(ONBOARDING_STORAGE_KEY)
@@ -43,8 +44,10 @@ export function useMatchaWorkList() {
         /* sessionStorage may be blocked too */
       }
     }
-    if (!seen) setShowOnboarding(true)
+    return !seen
   }, [me])
+  const showOnboarding = needsOnboarding && !onboardingDismissed
+  const setShowOnboarding = (show: boolean) => setOnboardingDismissed(!show)
 
   async function load() {
     setLoading(true)
@@ -60,7 +63,9 @@ export function useMatchaWorkList() {
     }
   }
 
-  useEffect(() => { load() }, [tab])
+  // Reload whenever the filter tab changes; `load` reads `tab` itself.
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps -- async fetch keyed on tab
+  useEffect(() => { void load() }, [tab])
 
   useEffect(() => {
     listChannels().then(setChannels).catch(() => {})
@@ -105,7 +110,9 @@ export function useMatchaWorkList() {
       setThreads((prev) =>
         prev.map((x) => (x.id === t.id ? { ...x, is_pinned: !x.is_pinned } : x))
       )
-    } catch {}
+    } catch {
+      // The list keeps its current state; pin again to retry.
+    }
   }
 
   async function handleArchive(e: React.MouseEvent, t: MWThread) {
@@ -113,7 +120,9 @@ export function useMatchaWorkList() {
     try {
       await archiveThread(t.id)
       setThreads((prev) => prev.filter((x) => x.id !== t.id))
-    } catch {}
+    } catch {
+      // The chat stays in the list; archive again to retry.
+    }
   }
 
   const tabs: { key: Tab; label: string }[] = [
@@ -150,6 +159,7 @@ export function useMatchaWorkList() {
     tabs,
     firstName,
     searching,
+    threads,
     matchedProjects,
     matchedChannels,
     matchedThreads,

@@ -3,6 +3,8 @@ import { Link, type NavigateFunction } from 'react-router-dom'
 import { MessageSquare, ChevronDown, Pencil, Plus, Users, Archive } from 'lucide-react'
 import type { MWThread } from '../../../types'
 import { formatDateTimePacific } from '../../../../utils/dateFormat'
+import { relativeTime, shortDate } from '../../../../utils/format'
+import { chatLabel } from '../../../utils/chatLabel'
 import type { SidebarRename } from './useSidebarRename'
 import RenameInput from './RenameInput'
 
@@ -51,13 +53,14 @@ export default function ChatsSection({
       >
         <span className="flex items-center gap-1.5">
           <MessageSquare size={12} />
-          Huume Workspaces
+          Chats
         </span>
         <div className="flex items-center gap-1">
           <span
             onClick={(e) => { e.stopPropagation(); onNewChat() }}
             className="hover:text-w-accent cursor-pointer"
-            title="New workspace"
+            title="New chat"
+            aria-label="New chat"
           >
             <Plus size={12} />
           </span>
@@ -68,7 +71,7 @@ export default function ChatsSection({
         const filtered = threads.filter((t) => t.title.toLowerCase().includes(filter.toLowerCase()))
 
         if (filtered.length === 0) {
-          return <p className="px-2.5 py-1 text-[11px] text-w-faint">No workspaces</p>
+          return <p className="px-2.5 py-1 text-[11px] text-w-faint">{filter ? 'No chats match' : 'No chats yet'}</p>
         }
 
         // Filtering implies the admin is searching for something specific —
@@ -81,39 +84,45 @@ export default function ChatsSection({
             {visible.map((t) => (
               <div
                 key={t.id}
-                className={`group w-full flex items-start gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+                className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
                   isActive(`${base}/${t.id}`)
                     ? 'bg-w-surface2 text-white font-medium'
                     : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
                 }`}
               >
-                <MessageSquare size={14} className="text-w-dim shrink-0 mt-0.5" strokeWidth={1.6} />
+                <MessageSquare size={14} className="text-w-dim shrink-0" strokeWidth={1.6} />
                 {renaming?.type === 'thread' && renaming.id === t.id ? (
                   <RenameInput rename={rename} />
                 ) : (
                   <>
-                    <Link to={`${base}/${t.id}`} className="flex-1 min-w-0 text-left">
-                      <div className="truncate">{t.title}</div>
-                      <div className="truncate text-[10px] text-w-faint font-normal" title="Created (Pacific time)">
-                        {formatDateTimePacific(t.created_at)}
-                      </div>
+                    <Link to={`${base}/${t.id}`} className="flex-1 min-w-0 truncate text-left" title={t.title}>
+                      {chatLabel(t.title)}
                     </Link>
                     {t.collaborator_count > 0 && (
-                      <span title="Shared" className="shrink-0 text-w-faint mt-0.5">
+                      <span title="Shared" className="shrink-0 text-w-faint">
                         <Users size={11} />
                       </span>
                     )}
+                    {/* When, until hover swaps it for the row's actions. */}
+                    <span
+                      className="shrink-0 text-[10px] font-normal text-w-faint group-hover:hidden"
+                      title={`Created ${formatDateTimePacific(t.created_at)}`}
+                    >
+                      {relativeTime(t.updated_at ?? t.created_at, { empty: '', justNowLabel: 'now', maxRelativeDays: 7, absolute: shortDate }).replace(' ago', '')}
+                    </span>
                     <button
                       onClick={(e) => { e.stopPropagation(); startRename('thread', t.id, t.title) }}
-                      className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-w-dim hover:text-w-text transition-all mt-0.5"
+                      className="hidden group-hover:block shrink-0 p-0.5 text-w-dim hover:text-w-text"
                       title="Rename"
+                      aria-label={`Rename ${chatLabel(t.title)}`}
                     >
                       <Pencil size={11} />
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); onArchive(t) }}
-                      className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-w-dim hover:text-w-text transition-all mt-0.5"
+                      className="hidden group-hover:block shrink-0 p-0.5 text-w-dim hover:text-w-text"
                       title="Archive"
+                      aria-label={`Archive ${chatLabel(t.title)}`}
                     >
                       <Archive size={11} />
                     </button>

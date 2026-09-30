@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
-import { Loader2, SlidersHorizontal, Sparkles } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { Loader2, Maximize2, SlidersHorizontal, Sparkles, X } from 'lucide-react'
 import { ensureAssistantChannel } from '../api/matchaWork/assistant'
 import AssistantAbilities from '../components/assistant/AssistantAbilities'
 import { useEntitlements } from '../hooks/useEntitlements'
@@ -8,6 +9,11 @@ import { apiErrorText } from '../utils/apiErrorText'
 import MessageComposer from './ChannelView/MessageComposer'
 import MessageList from './ChannelView/MessageList'
 import { useChannelView } from './ChannelView/useChannelView'
+import { useWorkBase } from '../routes/WorkSurfaceContext'
+
+/** Something typed outside the conversation (Home's "Ask Espresso") to send
+ *  into it. `id` changes per ask, so the same words can be asked twice. */
+export type AssistantAsk = { id: number; text: string }
 
 /**
  * A person's private conversation with Espresso. It is a channel underneath,
@@ -16,11 +22,28 @@ import { useChannelView } from './ChannelView/useChannelView'
  * are none here. Every message is addressed to Espresso: no mention needed.
  */
 
-function Conversation({ channelId }: { channelId: string }) {
+function Conversation({ channelId, ask, onClose }: {
+  channelId: string
+  ask?: AssistantAsk | null
+  /** Set when shown as Home's side panel: a close button and a way to the full page. */
+  onClose?: () => void
+}) {
   const [showAbilities, setShowAbilities] = useState(false)
   const { quotas } = useEntitlements()
+  const base = useWorkBase()
   const view = useChannelView(channelId, true)
   const runs = quotas?.assistant_runs
+  const compact = !!onClose
+  // Each ask is sent once, after the conversation has loaded (StrictMode runs
+  // effects twice; the ref keeps it to one send).
+  const sentAsk = useRef<number | null>(null)
+  const { loading, sendText } = view
+
+  useEffect(() => {
+    if (loading || !ask || sentAsk.current === ask.id) return
+    sentAsk.current = ask.id
+    sendText(ask.text)
+  }, [loading, ask, sendText])
 
   if (view.loading) {
     return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-w-dim" /></div>
@@ -36,18 +59,39 @@ function Conversation({ channelId }: { channelId: string }) {
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-w-text">Espresso</p>
             <p className="truncate text-[11px] text-w-dim">
-              Private to you. Ask it to look something up, or to do something for you.
+              {compact ? 'Private to you.' : 'Private to you. Ask it to look something up, or to do something for you.'}
               {runs ? ` ${runs.remaining} of ${runs.limit} requests left today.` : ''}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowAbilities((v) => !v)}
-            aria-pressed={showAbilities}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-w-line px-2.5 py-1.5 text-xs font-semibold text-w-text hover:bg-w-surface2"
-          >
-            <SlidersHorizontal size={13} /> What it can do
-          </button>
+          {compact ? (
+            <>
+              <Link
+                to={`${base}/assistant`}
+                aria-label="Open the full conversation"
+                title="Open the full conversation"
+                className="rounded-md p-1.5 text-w-dim hover:bg-w-surface2 hover:text-w-text"
+              >
+                <Maximize2 size={14} />
+              </Link>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close Espresso"
+                className="rounded-md p-1.5 text-w-dim hover:bg-w-surface2 hover:text-w-text"
+              >
+                <X size={15} />
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowAbilities((v) => !v)}
+              aria-pressed={showAbilities}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-w-line px-2.5 py-1.5 text-xs font-semibold text-w-text hover:bg-w-surface2"
+            >
+              <SlidersHorizontal size={13} /> What it can do
+            </button>
+          )}
         </header>
         <MessageList
           messages={view.messages}
@@ -82,7 +126,7 @@ function Conversation({ channelId }: { channelId: string }) {
           onClearReply={() => view.setReplyTo(null)}
         />
       </div>
-      {showAbilities && <AssistantAbilities onClose={() => setShowAbilities(false)} />}
+      {showAbilities && !compact && <AssistantAbilities onClose={() => setShowAbilities(false)} />}
     </div>
   )
 }
@@ -96,10 +140,12 @@ export default function Assistant() {
       </p>
     )
   }
-  return <PersonalAssistant />
+  return <AssistantConversation />
 }
 
-function PersonalAssistant() {
+/** The person's private conversation with Espresso: the full page, or (with
+ *  `onClose`) the panel that slides in on Home when they ask from there. */
+export function AssistantConversation({ ask, onClose }: { ask?: AssistantAsk | null; onClose?: () => void } = {}) {
   const [channelId, setChannelId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -117,5 +163,5 @@ function PersonalAssistant() {
   if (!channelId) {
     return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-w-dim" /></div>
   }
-  return <Conversation channelId={channelId} />
+  return <Conversation channelId={channelId} ask={ask} onClose={onClose} />
 }
