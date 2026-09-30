@@ -126,8 +126,31 @@ struct MWEntitlements: Codable {
     let plan: MWPlan
     let features: [String: Bool]
     let quotas: MWEntitlementQuotas?
+    /// What the workspace has switched on, as opposed to what the plan allows.
+    let workspace: MWWorkspaceFlags?
 
     func has(_ feature: String) -> Bool { features[feature] == true }
+}
+
+struct MWWorkspaceFlags: Codable {
+    let espressoAssistant: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case espressoAssistant = "espresso_assistant"
+    }
+}
+
+/// A counted allowance (agent-card runs this month, assistant requests today).
+struct MWRunQuota: Codable, Hashable {
+    let limit: Int
+    let used: Int
+    let remaining: Int
+    let resetsAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case limit, used, remaining
+        case resetsAt = "resets_at"
+    }
 }
 
 struct MWEntitlementQuotas: Codable {
@@ -136,11 +159,17 @@ struct MWEntitlementQuotas: Codable {
     let used: Int?
     let remaining: Int?
     let resetsAt: String?
+    /// Agent-card runs this UTC month.
+    let agentRuns: MWRunQuota?
+    /// Espresso assistant requests this UTC day.
+    let assistantRuns: MWRunQuota?
 
     enum CodingKeys: String, CodingKey {
         case tokenLimit = "token_limit"
         case windowHours = "window_hours"
         case used, remaining
         case resetsAt = "resets_at"
+        case agentRuns = "agent_runs"
+        case assistantRuns = "assistant_runs"
     }
 }

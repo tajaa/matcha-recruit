@@ -105,12 +105,187 @@ struct MWAgentResult: Decodable, Hashable {
     let sources: [MWAgentSource]
     let confidence: String
     let changesFromPrevious: String?
+    /// A flight search's chosen offers (answer_type "flights").
+    let flights: MWAgentFlights?
 
     enum CodingKeys: String, CodingKey {
-        case headline, summary, criteria, alternatives, sections, caveats, sources, confidence
+        case headline, summary, criteria, alternatives, sections, caveats, sources, confidence, flights
         case answerType = "answer_type"
         case topPick = "top_pick"
         case changesFromPrevious = "changes_from_previous"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        headline = try c.decode(String.self, forKey: .headline)
+        summary = try c.decode(String.self, forKey: .summary)
+        answerType = try c.decode(String.self, forKey: .answerType)
+        criteria = try c.decode([MWAgentCriterion].self, forKey: .criteria)
+        topPick = try c.decodeIfPresent(MWAgentPick.self, forKey: .topPick)
+        alternatives = try c.decode([MWAgentPick].self, forKey: .alternatives)
+        sections = try c.decode([MWAgentSection].self, forKey: .sections)
+        caveats = try c.decode([String].self, forKey: .caveats)
+        sources = try c.decode([MWAgentSource].self, forKey: .sources)
+        confidence = try c.decode(String.self, forKey: .confidence)
+        changesFromPrevious = try c.decodeIfPresent(String.self, forKey: .changesFromPrevious)
+        // Lenient: an odd flights block never costs the rest of the result.
+        flights = try? c.decodeIfPresent(MWAgentFlights.self, forKey: .flights)
+    }
+}
+
+// MARK: - Flights (server: agent_card/flights.py)
+// Every field except label/why is the server's own Duffel search data.
+
+struct MWFlightSegment: Decodable, Hashable {
+    let carrier: String
+    let flightNumber: String
+    let origin: String
+    let destination: String
+    let departingAt: String
+    let arrivingAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case carrier, origin, destination
+        case flightNumber = "flight_number"
+        case departingAt = "departing_at"
+        case arrivingAt = "arriving_at"
+    }
+}
+
+struct MWFlightSlice: Decodable, Hashable {
+    let origin: String
+    let destination: String
+    /// The airport's local wall-clock time, no offset: "2026-11-12T07:05:00".
+    let departingAt: String
+    let arrivingAt: String
+    let durationMinutes: Int?
+    let stops: Int
+    let segments: [MWFlightSegment]
+
+    enum CodingKeys: String, CodingKey {
+        case origin, destination, stops, segments
+        case departingAt = "departing_at"
+        case arrivingAt = "arriving_at"
+        case durationMinutes = "duration_minutes"
+    }
+}
+
+struct MWFlightOption: Decodable, Hashable, Identifiable {
+    struct Bags: Decodable, Hashable {
+        let checked: Int
+        let carryOn: Int
+        enum CodingKeys: String, CodingKey { case checked; case carryOn = "carry_on" }
+    }
+    struct Conditions: Decodable, Hashable {
+        let refundable: Bool?
+        let changeable: Bool?
+    }
+
+    let id: String
+    let label: String?
+    let why: [String]
+    /// "single", or "separate" for a round trip priced as two one-way tickets.
+    let ticketing: String
+    let totalAmount: String
+    let currency: String
+    let trueTotalAmount: String?
+    let bagNote: String?
+    let carriers: [String]
+    let slices: [MWFlightSlice]
+    let bagsIncluded: Bags
+    let conditions: Conditions
+    let warnings: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, why, ticketing, currency, carriers, slices, conditions, warnings
+        case totalAmount = "total_amount"
+        case trueTotalAmount = "true_total_amount"
+        case bagNote = "bag_note"
+        case bagsIncluded = "bags_included"
+    }
+}
+
+struct MWAgentFlights: Decodable, Hashable {
+    struct Privacy: Decodable, Hashable {
+        let via: String
+        let sent: [String]
+        let notSent: [String]
+        enum CodingKeys: String, CodingKey { case via, sent; case notSent = "not_sent" }
+    }
+
+    let querySummary: String
+    let options: [MWFlightOption]
+    let searchedAt: String?
+    /// Duffel sandbox fares: not real prices.
+    let testData: Bool
+    let privacy: Privacy?
+
+    enum CodingKeys: String, CodingKey {
+        case options, privacy
+        case querySummary = "query_summary"
+        case searchedAt = "searched_at"
+        case testData = "test_data"
+    }
+}
+
+/// Flight times are airport-local wall-clock strings; they're read as text,
+/// never through Date and the viewer's time zone.
+enum FlightFormat {
+    private static let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    private static let weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+    private static func parts(_ iso: String) -> (y: Int, m: Int, d: Int, h: Int?, min: Int?)? {
+        let chars = Array(iso)
+        guard chars.count >= 10, let y = Int(String(chars[0..<4])), let m = Int(String(chars[5..<7])),
+              let d = Int(String(chars[8..<10])), (1...12).contains(m) else { return nil }
+        if chars.count >= 16, let h = Int(String(chars[11..<13])), let mi = Int(String(chars[14..<16])) {
+            return (y, m, d, h, mi)
+        }
+        return (y, m, d, nil, nil)
+    }
+
+    /// "2026-11-12T13:40:00" → "1:40pm"
+    static func clock(_ iso: String) -> String {
+        guard let p = parts(iso), let h = p.h, let mi = p.min else { return "" }
+        return "\(h % 12 == 0 ? 12 : h % 12):\(String(format: "%02d", mi))\(h < 12 ? "am" : "pm")"
+    }
+
+    private static func dayNumber(_ p: (y: Int, m: Int, d: Int, h: Int?, min: Int?)) -> Int? {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        guard let date = utc.date(from: DateComponents(year: p.y, month: p.m, day: p.d)) else { return nil }
+        return Int(date.timeIntervalSince1970 / 86_400)
+    }
+
+    /// "2026-11-12T07:05:00" → "Thu, Nov 12"
+    static func day(_ iso: String) -> String {
+        guard let p = parts(iso), let n = dayNumber(p) else { return "" }
+        // 1970-01-01 was a Thursday.
+        return "\(weekdays[((n % 7) + 7 + 4) % 7]), \(months[p.m - 1]) \(p.d)"
+    }
+
+    /// Calendar days from departure to arrival: the "+1" on a red-eye.
+    static func dayOffset(_ departing: String, _ arriving: String) -> Int {
+        guard let a = parts(departing).flatMap(dayNumber), let b = parts(arriving).flatMap(dayNumber) else { return 0 }
+        return b - a
+    }
+
+    static func duration(_ minutes: Int?) -> String {
+        guard let minutes else { return "" }
+        let h = minutes / 60, m = minutes % 60
+        return h > 0 ? (m > 0 ? "\(h)h \(m)m" : "\(h)h") : "\(m)m"
+    }
+
+    static func stops(_ n: Int) -> String {
+        n == 0 ? "Nonstop" : "\(n) stop\(n == 1 ? "" : "s")"
+    }
+
+    static func fare(_ amount: String?, _ currency: String) -> String {
+        guard let amount, let value = Double(amount) else { return amount ?? "" }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = currency.isEmpty ? "USD" : currency
+        return formatter.string(from: NSNumber(value: value)) ?? "\(amount) \(currency)"
     }
 }
 

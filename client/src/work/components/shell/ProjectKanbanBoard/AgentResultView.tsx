@@ -8,6 +8,8 @@ import {
   type AgentPick, type AgentResult, type AgentRun,
 } from '../../../api/matchaWork'
 import type { AgentPurchase } from '../../../types'
+import AgentFlightsView from './AgentFlightsView'
+import { formatMoney } from '../../../utils/money'
 
 const POLL_MS = 4000
 const EXTERNAL = { target: '_blank', rel: 'noopener noreferrer nofollow' } as const
@@ -17,14 +19,6 @@ function host(url: string): string {
     return new URL(url).hostname.replace(/^www\./, '')
   } catch {
     return url
-  }
-}
-
-function money(amount: number, currency: string) {
-  try {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency || 'USD' }).format(amount)
-  } catch {
-    return `${amount.toFixed(2)} ${currency}`
   }
 }
 
@@ -77,7 +71,7 @@ function PickCard({ pick, hero }: { pick: AgentPick; hero?: boolean }) {
               {pick.brand && <span className="text-xs text-w-dim">{pick.brand}</span>}
               {pick.price && (
                 <a {...EXTERNAL} href={pick.price.source_url} className="text-xs font-medium text-w-text hover:underline">
-                  {money(pick.price.amount, pick.price.currency)}
+                  {formatMoney(pick.price.amount, pick.price.currency)}
                 </a>
               )}
               {pick.rating && <Rating rating={pick.rating} />}
@@ -111,7 +105,7 @@ function PickCard({ pick, hero }: { pick: AgentPick; hero?: boolean }) {
                 >
                   <ShoppingCart className="h-3 w-3" />
                   {link.retailer || host(link.url)}
-                  {link.price != null && ` · ${money(link.price, pick.price?.currency ?? 'USD')}`}
+                  {link.price != null && ` · ${formatMoney(link.price, pick.price?.currency ?? 'USD')}`}
                 </a>
               ))}
             </div>
@@ -135,6 +129,7 @@ export function AgentResultBody({ result }: { result: AgentResult }) {
         <p className="text-base font-semibold text-w-text">{result.headline}</p>
         <p className="mt-1 text-sm text-w-dim">{result.summary}</p>
       </div>
+      {result.flights && result.flights.options.length > 0 && <AgentFlightsView flights={result.flights} />}
       {result.top_pick && <PickCard pick={result.top_pick} hero />}
       {result.criteria.length > 0 && (
         <div>
@@ -204,7 +199,7 @@ function Purchases({ purchases }: { purchases: AgentPurchase[] }) {
           <span className="text-w-text">
             {p.item_name}
             {p.retailer ? ` at ${p.retailer}` : ''}
-            {p.amount != null ? ` · ${money(p.amount, p.currency ?? 'USD')}` : ''}
+            {p.amount != null ? ` · ${formatMoney(p.amount, p.currency ?? 'USD')}` : ''}
             <span className="text-w-faint"> · card ending {p.card_last4}</span>
             {p.status === 'test_charged' && <span className="text-emerald-300"> · Stripe test charge succeeded</span>}
             {p.status === 'test_failed' && (

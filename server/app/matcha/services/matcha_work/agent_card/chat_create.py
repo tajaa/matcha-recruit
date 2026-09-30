@@ -22,7 +22,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
-from . import chat_flow
+from . import chat_flow, flights
 from ..project_agent.chat import post_as_espresso, strip_espresso_mention
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,10 @@ _ERRAND_START = re.compile(
 # question about the business ("research why signups dropped"), and an errand
 # spends one of the user's monthly agent runs. Deliberately narrow: "order",
 # "review", "best" and "deal" are everyday code words ("find where the order
-# total is computed").
+# total is computed"). An unmistakable trip counts too (`flights.is_trip`:
+# "flights to Denver", "airfare", "one-way tickets"), never a bare "flight" or
+# "round-trip": this codebase has flight search code, an HR "flight risk"
+# feature and JSON round-trip tests.
 _SHOPPING = re.compile(
     r"\b(?:buy|buying|purchase|shop|shopping|for sale|price|prices|priced|cheap|cheaper|cheapest|"
     r"affordable|online|in stock|amazon|order me|ship(?:ped|ping)? (?:to|home)|deliver(?:ed|y)? to)\b"
@@ -71,7 +74,7 @@ def errand_request(text: str) -> str | None:
     request = " ".join(strip_espresso_mention(text).split())
     if len(request.split()) < _MIN_WORDS or not _ERRAND_START.search(request):
         return None
-    if _CODE_TALK.search(request) or not _SHOPPING.search(request):
+    if _CODE_TALK.search(request) or not (_SHOPPING.search(request) or flights.is_trip(request)):
         return None
     return request
 

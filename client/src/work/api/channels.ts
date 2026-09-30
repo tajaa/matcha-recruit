@@ -6,7 +6,7 @@ export interface ChannelSummary {
   slug: string
   description: string | null
   visibility: string
-  channel_scope?: 'operations' | 'project_discussion' | 'community'
+  channel_scope?: 'operations' | 'project_discussion' | 'community' | 'assistant'
   category?: string | null
   location_id?: string | null
   location_name?: string | null
@@ -141,7 +141,7 @@ export interface ChannelDetail {
   slug: string
   description: string | null
   visibility: string
-  channel_scope?: 'operations' | 'project_discussion' | 'community'
+  channel_scope?: 'operations' | 'project_discussion' | 'community' | 'assistant'
   category?: string | null
   location_id?: string | null
   location_name?: string | null
