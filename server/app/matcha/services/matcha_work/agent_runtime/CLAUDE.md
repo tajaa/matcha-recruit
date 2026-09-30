@@ -111,7 +111,12 @@ it otherwise), and should declare `resolve`.
   what the model put in the block is ignored; `picks`, `sections` and
   `sources` go through the agent-card provenance gates.
 - **Runs that can read mail are not stored by the provider.** `RunContext.
-  store_responses` is False when any private-only ability is in the run.
+  store_responses` is False when any private-only ability is in the run. Such a
+  run cannot chain on `previous_response_id` (there is nothing stored to chain
+  onto), so the runner sends `chain=False` and resends the whole conversation
+  every call: the request, each response's output items as returned (reasoning
+  comes back as `reasoning.encrypted_content` and goes back as is), and the
+  tool outputs. A stored run sends only what is new.
 - **Card runs store `agent_result.v1`, byte for byte.** `agent_card/agent.py`
   keeps its limits and collaborators as module attributes read at call time,
   because its tests patch them there. Do not move them behind a re-export.

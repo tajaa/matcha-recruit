@@ -66,6 +66,9 @@ async def test_the_browser_only_reaches_the_network_through_the_proxy(chromium):
         assert opened.proxy.url.startswith("http://127.0.0.1:")
         # Loopback included: by default Chromium would go direct for localhost.
         assert "--proxy-bypass-list=<-loopback>" in chromium.launch["args"]
+        # Nothing reaches the network around the proxy: no QUIC, no direct WebRTC UDP.
+        assert "--disable-quic" in chromium.launch["args"]
+        assert "--webrtc-ip-handling-policy=disable_non_proxied_udp" in chromium.launch["args"]
         assert chromium.launch["headless"] is True
         assert chromium.context["service_workers"] == "block"
         assert chromium.context["accept_downloads"] is False
@@ -100,7 +103,7 @@ async def test_a_main_frame_navigation_off_the_allowlist_is_aborted(chromium):
 @pytest.mark.asyncio
 async def test_the_browser_is_closed_when_the_work_inside_raises(chromium):
     with pytest.raises(RuntimeError, match="boom"):
-        async with session.open_page(BrowsePolicy()) as opened:
+        async with session.open_page(BrowsePolicy()):
             route = _Route("https://anywhere.example/", frame=chromium.main_frame)
             await chromium.guard(route)
             assert route.outcome == ("continue", None)  # no allowlist: research goes anywhere public

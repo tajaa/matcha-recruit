@@ -67,7 +67,14 @@ async def open_page(policy: BrowsePolicy) -> AsyncIterator[PageSession]:
             proxy={"server": proxy.url},
             # Nothing skips the proxy, loopback included: by default Chromium
             # goes direct for localhost, which is exactly what must not happen.
-            args=["--proxy-bypass-list=<-loopback>", "--disable-quic"],
+            # WebRTC can send UDP straight past an HTTP proxy; this keeps
+            # it to the proxy too. QUIC is UDP as well.
+            args=[
+                "--proxy-bypass-list=<-loopback>",
+                "--disable-quic",
+                "--force-webrtc-ip-handling-policy",
+                "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+            ],
         )
         try:
             context = await browser.new_context(

@@ -242,7 +242,7 @@ async def test_a_threaded_reply_to_a_question_starts_the_next_run(wired):
     _script(wired, prompt, surface="project_chat")
     # Reached the way a project chat reaches it: by the question's id alone.
     handled = await chat_entry.handle_prompt_reply(
-        channel_id=prompt["channel_id"], user=user, content="Friday at 7", prompt_id=prompt["id"],
+        channel_id=prompt["channel_id"], user=user, content="@espresso Friday at 7", prompt_id=prompt["id"],
         message_id=uuid4(),
     )
     assert handled is True

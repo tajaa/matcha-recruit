@@ -26,7 +26,9 @@ from app.matcha.services.matcha_work.agent_runtime.context import RunContext, Ru
 from app.matcha.services.matcha_work.project_agent import store
 from app.matcha.services.matcha_work.project_agent.agent import _safe_for_audit
 
-from . import board, images
+# `board` is read through `progress.CardProgress`; the card tests patch
+# `agent.board.*`, so it stays importable from here.
+from . import board, images  # noqa: F401
 from .page_extract import extract_page, page_urls
 from .progress import CardProgress
 from .prompt import build_system_prompt

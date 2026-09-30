@@ -261,6 +261,51 @@ async def test_a_private_run_does_not_store_responses(monkeypatch):
     client = FakeClient([response(call("finish", {"answer": "ok"}))])
     await run(client, [], ctx=context(store_responses=False))
     assert client.calls[0]["store"] is False
+    # Nothing is stored, so there is nothing to chain onto.
+    assert client.calls[0]["chain"] is False
+    assert "reasoning.encrypted_content" in client.calls[0]["include"]
+
+
+@pytest.mark.asyncio
+async def test_an_unstored_run_resends_the_whole_conversation_every_call(monkeypatch):
+    wire_store(monkeypatch)
+    reasoning = {"type": "reasoning", "id": "rs_1", "encrypted_content": "opaque"}
+    searched = {"type": "web_search_call", "id": "ws_1", "status": "completed",
+                "action": {"type": "search", "query": "desks", "sources": [{"type": "url", "url": "https://a.example"}]}}
+    first = call("lookup", {"q": "x"})
+    fc_item = {"type": "function_call", "call_id": first["call_id"], "name": "lookup", "arguments": '{"q":"x"}'}
+    client = FakeClient([
+        response(first, output=[reasoning, searched, fc_item]),
+        response(text="prose, no tool call"),
+        response(call("finish", {"answer": "ok"})),
+    ])
+    request = {"role": "user", "content": [{"type": "input_text", "text": "find a desk"}]}
+    out = await runner.run_agent(
+        context(store_responses=False), client=client, abilities=[ability(read_tool("lookup"))],
+        contract=contract(), instructions="sys", first_input=[request],
+    )
+    assert out.result == {"answer": "ok"}
+    second = client.calls[1]["input"]
+    # The request, then everything the model produced, then the tool's answer.
+    assert second[0] == request
+    assert second[1] == reasoning
+    # The sources the provider attached on request are not part of the item.
+    assert second[2] == {**searched, "action": {"type": "search", "query": "desks"}}
+    assert second[3] == fc_item
+    assert second[4]["type"] == "function_call_output" and second[4]["call_id"] == first["call_id"]
+    third = client.calls[2]["input"]
+    assert third[:5] == second and third[5]["content"][0]["text"] == runner.FINISH_NUDGE
+    assert all(c["chain"] is False and c["store"] is False for c in client.calls)
+
+
+@pytest.mark.asyncio
+async def test_a_stored_run_sends_only_what_is_new(monkeypatch):
+    wire_store(monkeypatch)
+    first = call("lookup", {"q": "x"})
+    client = FakeClient([response(first), response(call("finish", {"answer": "ok"}))])
+    await run(client, [ability(read_tool("lookup"))])
+    assert [item["type"] for item in client.calls[1]["input"]] == ["function_call_output"]
+    assert "chain" not in client.calls[1] and "store" not in client.calls[1]
 
 
 @pytest.mark.asyncio

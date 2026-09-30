@@ -194,8 +194,12 @@ struct ChannelDetailView: View {
             // REST fallback so a viewer who navigates into the channel mid-stream
             // (or whose WS dropped before the broadcast.started fan-out) still
             // sees the Watch-feed banner without depending on the WS event.
-            await broadcast.fetchBroadcastStatus(channelId: channelId)
-            await call.fetchCallStatus(channelId: channelId)
+            // A private conversation with Espresso has no calls or broadcasts
+            // (the server refuses both there), so there is nothing to ask.
+            if !isAssistant {
+                await broadcast.fetchBroadcastStatus(channelId: channelId)
+                await call.fetchCallStatus(channelId: channelId)
+            }
             if !isEmbedded {
                 appState.setActiveContext(WorkTab(kind: .channel, entityId: channelId,
                                                   title: vm.channel?.name ?? "Channel"))

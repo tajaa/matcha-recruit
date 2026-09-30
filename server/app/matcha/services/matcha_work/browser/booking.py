@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Callable
+from typing import Awaitable, Callable
 
 from app.config import get_settings
 from app.core.services import card_vault

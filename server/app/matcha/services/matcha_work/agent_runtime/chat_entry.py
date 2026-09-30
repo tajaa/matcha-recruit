@@ -152,7 +152,8 @@ async def _answer_prompt(*, prompt: dict, channel_id: UUID, company_id: UUID, us
         elif prompt["kind"] == prompts.ASK_USER:
             if await prompts.claim(conn, prompt, user.id, "text"):
                 events.append(prompts.update_event(prompt, "answered", "text"))
-                next_request = content
+                # In a project chat the answer may carry the mention it was sent with.
+                next_request = " ".join(strip_espresso_mention(content).split()) or content
             else:
                 await say(CLOSED)
         else:

@@ -605,3 +605,45 @@ async def test_two_calls_to_the_same_tool_keep_distinct_call_ids(monkeypatch):
                for c in result.function_calls]
     assert [o["call_id"] for o in outputs] == ["c1", "c2"]
     assert outputs[0]["output"] == '{"id":"a"}' and outputs[1]["output"] == '{"id":"b"}'
+
+
+@pytest.mark.asyncio
+async def test_an_unchained_call_neither_sends_nor_adopts_a_previous_response(monkeypatch):
+    """`store=False` needs `chain=False`: the provider cannot chain onto a
+    response it did not keep, so the caller resends the conversation instead."""
+    sent = []
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, _url, *, headers, json):
+            sent.append(json)
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+                json={"id": f"resp_{len(sent)}", "output": [], "usage": {}},
+            )
+
+    async def record(**_kwargs):
+        return None
+
+    monkeypatch.setattr(luna_client, "get_settings", lambda: SimpleNamespace(openai_api_key="test-key"))
+    monkeypatch.setattr(luna_client.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(luna_client, "record_openai_response", record)
+
+    session = LunaSession()
+    kwargs = dict(model="gpt-5.6-luna", input=[text_item("user", "Help")], instructions="Be useful")
+    await session.create_response(**kwargs, store=False, chain=False)
+    await session.create_response(**kwargs, store=False, chain=False)
+    assert all("previous_response_id" not in body for body in sent)
+    assert all(body["store"] is False for body in sent)
+    assert session.previous_response_id is None
+    # A chained call on the same session still chains from here on.
+    await session.create_response(**kwargs)
+    await session.create_response(**kwargs)
+    assert "previous_response_id" not in sent[2]
+    assert sent[3]["previous_response_id"] == "resp_3"

@@ -275,3 +275,32 @@ async def test_thread_participants_read_in_this_run_only_count_when_pointed_at(m
     out = await run(client, [ability(read_tool("read_email", handler=read), commit_tool(), private_only=True)],
                     context(policy=policy_ctx("summarise my inbox"), commit_mode="live"))
     assert out.kind == "confirmation"
+
+
+@pytest.mark.asyncio
+async def test_a_commit_that_needs_more_time_than_is_left_is_not_started(monkeypatch):
+    record, claim, _ = wire_store(monkeypatch)
+    sent = []
+    tool = commit_tool(handler=recording_handler(sent), min_seconds_left=10_000,
+                       too_late_message="Not enough time to book; give them the link.")
+    client = FakeClient([response(call("send_email", {"to": ["alice@example.com"]})),
+                         response(call("finish", {"answer": "ok"}))])
+    out = await run(client, [ability(tool, private_only=True)],
+                    context(policy=policy_ctx("send to alice@example.com"), commit_mode="live"))
+    assert sent == [] and claim.await_count == 0 and out.receipts == []
+    assert "Not enough time to book" in client.calls[1]["input"][0]["output"]
+    assert record.await_args_list[0].args[3] == "policy" and record.await_args_list[0].args[7] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_an_approved_action_is_carried_out_even_late(monkeypatch):
+    # The person said yes; a resume starts with the whole budget ahead of it,
+    # and the yes is not refused on a timing rule meant for fresh actions.
+    _, claim, _ = wire_store(monkeypatch)
+    sent = []
+    tool = commit_tool(handler=recording_handler(sent), min_seconds_left=10_000)
+    frozen = FrozenAction(tool="send_email", args={"to": ["eve@attacker.test"]},
+                          targets=(Target("email", "eve@attacker.test"),), preview={"title": "Email"})
+    await run(FakeClient([response(call("finish", {"answer": "ok"}))]), [ability(tool, private_only=True)],
+              context(policy=policy_ctx("x"), commit_mode="live", resume=frozen))
+    assert sent == [{"to": ["eve@attacker.test"]}] and claim.await_count == 1
