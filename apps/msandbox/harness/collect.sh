@@ -77,7 +77,7 @@ for project_id in "${PROJECT_IDS[@]}"; do
               )
             )
             and .status != "cancelled"
-            # Agent cards are answered by the matcha server's own web agent
+            # Agent cards are answered by the matcha server web agent
             # (services/matcha_work/agent_card/). Unknown categories default to
             # the code lane here, so without this an agent card assigned to
             # the bot would get a code PR.
