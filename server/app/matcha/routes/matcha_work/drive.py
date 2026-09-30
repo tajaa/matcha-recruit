@@ -149,13 +149,13 @@ def _popup(message: str, text: str, status_code: int = 200) -> Response:
 
 
 @router.get("/google/status")
-async def google_status(current_user: CurrentUser = Depends(require_admin_or_client)):
+async def google_status(current_user: CurrentUser = Depends(require_company_member)):
     await _business_company(current_user)
     return await GoogleDriveService(current_user.id).get_status()
 
 
 @router.post("/google/connect")
-async def google_connect(current_user: CurrentUser = Depends(require_admin_or_client)):
+async def google_connect(current_user: CurrentUser = Depends(require_company_member)):
     await _business_company(current_user)
     try:
         creds = gdrive._client_credentials()
@@ -179,14 +179,14 @@ async def google_connect(current_user: CurrentUser = Depends(require_admin_or_cl
 
 
 @router.delete("/google/disconnect")
-async def google_disconnect(current_user: CurrentUser = Depends(require_admin_or_client)):
+async def google_disconnect(current_user: CurrentUser = Depends(require_company_member)):
     await _business_company(current_user)
     await GoogleDriveService(current_user.id).disconnect()
     return {"connected": False}
 
 
 @router.post("/google/import", status_code=201)
-async def google_import(body: GoogleImport, current_user: CurrentUser = Depends(require_admin_or_client)):
+async def google_import(body: GoogleImport, current_user: CurrentUser = Depends(require_company_member)):
     company_id = await _business_company(current_user)
     file_id = gdrive.parse_file_id(body.url)
     if not file_id:
