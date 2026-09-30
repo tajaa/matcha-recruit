@@ -5,13 +5,11 @@ AI-authored HTML (handbooks, offer letters, ER/IR/discipline docs), so an
 `<img src="file:///etc/passwd">` an author controls becomes a server-side
 fetch unless `safe_url_fetcher` refuses it.
 
-This file also pins the import itself. `default_url_fetcher` used to be
-imported from the top-level `weasyprint` package; WeasyPrint 70.0 dropped that
-re-export and, because `requirements.txt` had an unbounded `weasyprint>=69.0`,
-74 test modules stopped importing with no change on our side — and the next
-backend image would have shipped a PDF path that raised at import. The symbol
-now comes from its stable `weasyprint.urls` home, and a test that merely
-imports this module is enough to catch the next move.
+This file also pins the import and a real render. WeasyPrint 70 removed
+`default_url_fetcher` altogether (fetchers became `URLFetcher` objects), and
+the 2026-09-30 backend image crash-looped the worker at import. `pdf.py` now
+works on 69 and 70; the render test below also catches the quieter 70 break,
+where a function fetcher that refuses a URL crashes the render.
 
     cd server && ./venv/bin/python -m pytest tests/core/test_pdf_fetcher.py -q
 """
@@ -30,6 +28,23 @@ class TestImportContract:
     def test_render_helpers_are_exported(self):
         assert callable(pdf.render_pdf)
         assert callable(pdf.safe_url_fetcher)
+
+
+class TestRealRender:
+    def test_blocked_links_are_skipped_and_inline_images_render(self):
+        # A 1x1 PNG, inlined the way the PDF paths inline their images.
+        png = (
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4"
+            "nGNgYPj/HwADAgH/eL9GtQAAAABJRU5ErkJggg=="
+        )
+        html = (
+            f'<p>ok</p><img src="{png}">'
+            '<img src="file:///etc/passwd"><img src="http://169.254.169.254/x">'
+            '<link rel="stylesheet" href="http://evil.test/x.css">'
+        )
+        out = pdf.render_pdf(html)
+        assert out.startswith(b"%PDF")
+        assert b"root:" not in out
 
 
 class TestSafeUrlFetcher:
@@ -65,7 +80,7 @@ class TestSafeUrlFetcher:
         # to the real fetcher — that is the one scheme the guard permits.
         seen = {}
         monkeypatch.setattr(
-            pdf, "default_url_fetcher", lambda url: seen.setdefault("url", url) or {"string": b""}
+            pdf, "default_url_fetcher", lambda url: seen.setdefault("url", url)
         )
         tiny_png = "data:image/png;base64,iVBORw0KGgo="
         pdf.safe_url_fetcher(tiny_png)
