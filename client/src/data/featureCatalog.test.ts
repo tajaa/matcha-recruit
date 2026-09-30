@@ -117,3 +117,12 @@ describe('espresso assistant feature', () => {
     expect(FEATURE_REQUIRES.espresso_assistant).toEqual(['matcha_work'])
   })
 })
+
+describe('matcha drive feature', () => {
+  it('is togglable in admin and requires matcha_work', () => {
+    const work = FEATURE_GROUPS.find((group) => group.label === 'Matcha Work')
+    expect(work?.features.matcha_drive).toContain('Matcha Drive')
+    expect(FEATURE_KEYS).toContain('matcha_drive')
+    expect(FEATURE_REQUIRES.matcha_drive).toEqual(['matcha_work'])
+  })
+})

@@ -438,6 +438,13 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # matcha_work; Pro/Business plan on top; default off; admin-toggle; NOT
     # in any tier overlay.
     "espresso_assistant": False,
+    # Matcha Drive — company document store on the business /work surface
+    # (services/drive/). Two spaces: `general` (company-wide) and `hr`
+    # (Work admin only; HR approvers get a seeded, revocable grant), plus
+    # per-folder user grants (view / upload drop-box / edit). Private bucket;
+    # downloads are presigned. Gates /matcha-work/drive/* + the /work/drive
+    # page. Requires matcha_work; default off; admin-toggle; NOT bundled.
+    "matcha_drive": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,
@@ -848,6 +855,7 @@ FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "matcha_ops_calls_all_members": ("matcha_ops",),
     "sym_chat": ("matcha_work",),
     "espresso_assistant": ("matcha_work",),
+    "matcha_drive": ("matcha_work",),
 }
 
 
