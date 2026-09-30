@@ -1420,3 +1420,58 @@ export type AgentChatMetadata = {
   result?: AgentChatResult
   receipt?: AgentChatReceipt
 }
+
+// ── Matcha Drive (backend: server/app/matcha/routes/matcha_work/drive.py) ──
+
+export type DriveSpace = 'general' | 'hr'
+export type DriveCap = 'list' | 'read' | 'add' | 'manage' | 'grant'
+export type DriveGrantPermission = 'view' | 'upload' | 'edit'
+
+export type DriveFolder = {
+  id: string
+  parent_id: string | null
+  space: DriveSpace
+  name: string
+  system_key: string | null
+  is_system: boolean
+  caps: DriveCap[]
+  created_at: string
+}
+
+export type DriveFile = {
+  id: string
+  folder_id: string
+  filename: string
+  content_type: string | null
+  file_size: number
+  text_status: 'pending' | 'ok' | 'empty' | 'failed' | 'unsupported'
+  source: 'upload' | 'google_drive' | 'huume' | 'system'
+  linked_type: string | null
+  linked_id: string | null
+  uploaded_by: string | null
+  created_at: string
+  updated_at: string
+  folder_name?: string | null
+  space?: DriveSpace | null
+}
+
+export type DriveTree = {
+  spaces: Record<DriveSpace, { visible: boolean; root_folder_id: string; folders: DriveFolder[] }>
+}
+
+export type DriveFolderView = {
+  folder: DriveFolder
+  breadcrumbs: { id: string; name: string }[]
+  folders: DriveFolder[]
+  files: DriveFile[]
+}
+
+export type DriveGrant = {
+  user_id: string
+  permission: DriveGrantPermission
+  email: string
+  name: string
+  created_at: string
+}
+
+export type DrivePerson = { id: string; name: string; email: string; kind: 'business' | 'employee' }

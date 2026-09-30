@@ -64,3 +64,53 @@ grant removal and is never re-seeded.
   capability check. Routes always pass an actor.
 - HR-space adds/reads/downloads/moves/deletes and every grant change write
   `drive_audit_log` on the caller's connection.
+
+## Google Drive import (`google_drive_service.py`, migration `mdrive02`)
+
+Per-user, read-only (`drive.readonly`). A person connects their own Google
+account, pastes a Doc / Sheet / Slides / Drive file link, and Matcha stores a
+**snapshot** in Matcha Drive (`source='google_drive'`, `source_ref=<file id>`).
+Review never depends on later Google access.
+
+- **The pasted URL is never fetched.** `parse_file_id` accepts only
+  `docs.google.com` / `drive.google.com` links and extracts an id matching
+  `^[A-Za-z0-9_-]{10,100}$`; only `www.googleapis.com` is called with it.
+- `users.gdrive_token` (JSONB) holds encrypted access/refresh tokens
+  (`secret_crypto`), expiry and the Google account email. The OAuth client
+  secret is read from the shared credentials file (`GOOGLE_OAUTH_CREDENTIALS_PATH`,
+  same as Gmail) at use time, never copied into user rows. Separate from
+  `users.gmail_token` on purpose.
+- Google-native files export: Docs → DOCX, Sheets → XLSX, Slides → PDF. Other
+  `vnd.google-apps.*` types are refused. 25 MB cap, checked from metadata AND
+  while streaming.
+- `POST /drive/google/import` checks the destination folder's ADD cap
+  **before** calling Google, and is rate-limited per user (30/hour).
+- OAuth state is `services/matcha_work/oauth_state.py` (prefix
+  `gdrive_oauth_state`), the same one-time Redis handle mechanism as Gmail's.
+  The callback `GET /matcha-work/drive/google/callback` sits on the package's
+  ungated `oauth_callback_router`; it only consumes the handle and stores the
+  caller's own token.
+- **The handle is bound to the browser that pressed Connect.** `POST
+  /google/connect` sets an HttpOnly, SameSite=Lax cookie (`gdrive_oauth_bind`,
+  path = the callback) holding a random nonce, and the handle stores its hash;
+  the callback redeems only with the matching cookie. Without it, anyone who
+  opened a sender's auth URL would connect THEIR Drive to the sender's
+  account. Gmail's flow can't do the same (the macOS app opens it in the system
+  browser), so it keeps its unbound copy in `routes/matcha_work/workspace.py`.
+- Every callback outcome returns the popup page, which posts
+  `gdrive-connected|cancelled|error` to our own origin only. The dialog also
+  polls `/google/status` while the popup is open, since Google's pages can
+  sever `window.opener`.
+- Token writes never rewrite the row from a stale copy: a refresh stores only
+  `access_token`/`expires_at`, and only while the same refresh token is still
+  stored, so a disconnect or account switch mid-import wins. `invalid_grant`
+  clears the connection (same condition). A Drive 401 on a cached token
+  refreshes once, then asks to reconnect. A re-consent without a refresh token
+  reuses the old one only for the same Google account email.
+- Drive refusals map by reason: rate limits → 429, `exportSizeLimitExceeded`
+  (Google's ~10 MB export cap, below our 25 MB) → 413, lost scope → 409
+  reconnect, else 404 / 502. Transport errors are 502, never a 500. A plain
+  download with no known extension takes one from its mime type.
+- `drive.readonly` is a Google **restricted** scope: it works for the OAuth
+  app's test users immediately and needs Google's verification before general
+  availability. The redirect URI above must be registered on the OAuth client.

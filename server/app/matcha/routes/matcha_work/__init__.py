@@ -140,8 +140,9 @@ from .sym_chat import router as _sym_chat_router
 
 router.include_router(_sym_chat_router)
 
-from .drive import router as _drive_router
+from .drive import router as _drive_router, oauth_callback_router as _drive_oauth_callback_router
 
 router.include_router(_drive_router)
+oauth_callback_router.include_router(_drive_oauth_callback_router)
 
 __all__ = ["router", "oauth_callback_router", "public_router", "presence_router"]

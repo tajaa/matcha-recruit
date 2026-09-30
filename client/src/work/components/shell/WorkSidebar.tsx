@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare, Star, MessagesSquare, Sparkles } from 'lucide-react'
+import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare, Star, MessagesSquare, Sparkles, HardDrive } from 'lucide-react'
 import { logoutSession } from '../../../api/client'
 import type { ChannelSummary } from '../../api/channels'
 import { createProjectNew, createThread, archiveThread, notifyThreadsChanged } from '../../api/matchaWork'
@@ -50,6 +50,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const showInventory = surface !== 'matcha-work' && canReviewEvents(opsAccess) && hasFeature('inventory')
   const showAssets = canReviewEvents(me?.work_access) && hasFeature('huume')
   const showSymChat = surface === 'matcha-work' && !isPersonal && hasFeature('sym_chat')
+  const showDrive = surface === 'matcha-work' && !isPersonal && hasFeature('matcha_drive')
   // Shown to anyone whose workspace has it; a plan that doesn't include it
   // gets the paywall when they ask for something, like the other Pro features.
   const showAssistant = hasFeature('espresso_assistant')
@@ -223,6 +224,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         showWaste={showInventory && hasFeature('inventory_waste')}
         showChannels={showChannels}
         showSymChat={showSymChat}
+        showDrive={showDrive}
         loggedEventsCount={loggedEventsCount}
       />
     )
@@ -260,6 +262,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           <SidebarNavButton icon={NotebookPen} label="Journals" active={location.pathname.startsWith(`${base}/journals`)} onClick={() => navigate(`${base}/journals`)} />
           <SidebarNavButton icon={CheckSquare} label="To-dos" active={location.pathname.startsWith(`${base}/productivity`)} onClick={() => navigate(`${base}/productivity`)} />
           {showSymChat && <SidebarNavButton icon={MessagesSquare} label="Sym-chats" active={location.pathname.startsWith(`${base}/sym-chat`)} onClick={() => navigate(`${base}/sym-chat`)} />}
+          {showDrive && <SidebarNavButton icon={HardDrive} label="Drive" active={location.pathname.startsWith(`${base}/drive`)} onClick={() => navigate(`${base}/drive`)} />}
 
           {/* Events (HR admin review of @huume-logged events) */}
           {showEvents && (

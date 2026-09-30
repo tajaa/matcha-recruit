@@ -25,6 +25,7 @@ import AssetsHub from '../pages/AssetsHub'
 import Assistant from '../pages/Assistant'
 import SymChatList from '../pages/SymChat/SymChatList'
 import SymChatDetail from '../pages/SymChat/SymChatDetail'
+import Drive from '../pages/Drive'
 import { FeatureGate } from '../../components/shared/FeatureGate'
 import { WorkSurfaceProvider, type WorkSurface } from './WorkSurfaceContext'
 
@@ -114,6 +115,19 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
             >
               <Route path="sym-chat" element={<SymChatList />} />
               <Route path="sym-chat/:chatId" element={<SymChatDetail />} />
+            </Route>
+          )}
+          {/* Drive is business-only too (company + HR document store). */}
+          {businessWork && (
+            <Route
+              element={
+                <FeatureGate feature="matcha_drive" label="Drive">
+                  <Outlet />
+                </FeatureGate>
+              }
+            >
+              <Route path="drive" element={<Drive />} />
+              <Route path="drive/:folderId" element={<Drive />} />
             </Route>
           )}
           <Route path="journals" element={<Journals />} />

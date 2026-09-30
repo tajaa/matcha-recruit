@@ -4,8 +4,12 @@ Thin HTTP layer over `services/drive/drive_service.py`; every capability
 check lives there. Gated on `matcha_drive` (+ the package-level
 `matcha_work` gate) and business workspaces only.
 
-Static paths (`/drive/tree`, `/drive/search`) are declared before any
-`{folder_id}` / `{file_id}` route.
+Static paths (`/drive/tree`, `/drive/search`, `/drive/people`,
+`/drive/google/*`) are declared before any `{folder_id}` / `{file_id}` route.
+
+Google's OAuth callback lives on `oauth_callback_router` (no bearer token, no
+feature gate), included into the package's ungated callback router — it only
+consumes a one-time state handle and stores the caller's own token.
 """
 
 from __future__ import annotations
@@ -13,16 +17,34 @@ from __future__ import annotations
 from typing import Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+import html
+import json
+import logging
+import secrets
+import urllib.parse
+
+from fastapi import APIRouter, Cookie, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 
+from app.config import get_settings
 from app.core.models.auth import CurrentUser
+from app.core.services.redis_cache import check_rate_limit
 from app.database import get_connection
 from app.matcha.dependencies import require_company_member, require_feature, resolve_accessible_company_scope
 from app.matcha.services.drive import drive_service as svc
+from app.matcha.services.drive import google_drive_service as gdrive
 from app.matcha.services.drive.drive_service import DriveError
+from app.matcha.services.drive.google_drive_service import GoogleDriveError, GoogleDriveService
+from app.matcha.services.matcha_work import oauth_state
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/drive", dependencies=[Depends(require_feature("matcha_drive"))])
+oauth_callback_router = APIRouter()
+
+GOOGLE_IMPORT_LIMIT = (30, 3600)  # per user per hour
+# Ties the OAuth handle to the browser that pressed Connect (oauth_state).
+GDRIVE_BIND_COOKIE = "gdrive_oauth_bind"
 
 
 class FolderCreate(BaseModel):
@@ -38,6 +60,11 @@ class FolderUpdate(BaseModel):
 class FileUpdate(BaseModel):
     filename: Optional[str] = Field(None, min_length=1, max_length=255)
     folder_id: Optional[UUID] = None
+
+
+class GoogleImport(BaseModel):
+    url: str = Field(..., min_length=10, max_length=2000)
+    folder_id: UUID
 
 
 class GrantSet(BaseModel):
@@ -93,6 +120,149 @@ async def search_files(
             return {"results": await svc.search(conn, company_id=company_id, q=q, actor=actor, space=space, limit=limit)}
         except DriveError as exc:
             _raise(exc)
+
+
+@router.get("/people")
+async def search_people(
+    q: Optional[str] = Query(None, max_length=100),
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    company_id = await _business_company(current_user)
+    async with get_connection() as conn:
+        actor = await svc.load_actor(conn, user=current_user, company_id=company_id)
+        try:
+            return {"people": await svc.search_members(conn, company_id=company_id, q=q, actor=actor)}
+        except DriveError as exc:
+            _raise(exc)
+
+
+def _google_redirect_uri() -> str:
+    return f"{get_settings().app_base_url}{gdrive.CALLBACK_PATH}"
+
+
+def _popup(message: str, text: str, status_code: int = 200) -> Response:
+    # `message` is one of a fixed set of literals, never request input; the
+    # target origin is ours, so the result never reaches another page.
+    origin = get_settings().app_base_url.rstrip("/")
+    response = Response(
+        content=(
+            "<!DOCTYPE html><html><body><script>window.opener && "
+            f"window.opener.postMessage('{message}', {json.dumps(origin)}); window.close();</script>"
+            f"<p>{html.escape(text)}</p></body></html>"
+        ),
+        media_type="text/html",
+        status_code=status_code,
+    )
+    response.delete_cookie(GDRIVE_BIND_COOKIE, path=gdrive.CALLBACK_PATH)
+    return response
+
+
+@router.get("/google/status")
+async def google_status(current_user: CurrentUser = Depends(require_company_member)):
+    await _business_company(current_user)
+    return await GoogleDriveService(current_user.id).get_status()
+
+
+@router.post("/google/connect")
+async def google_connect(response: Response, current_user: CurrentUser = Depends(require_company_member)):
+    await _business_company(current_user)
+    nonce = secrets.token_urlsafe(32)
+    try:
+        creds = gdrive._client_credentials()
+        state = await oauth_state.issue_state(
+            gdrive.OAUTH_STATE_PREFIX, current_user.id, binding=oauth_state.binding_hash(nonce),
+        )
+    except GoogleDriveError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    except oauth_state.OAuthStateUnavailable as exc:
+        logger.error("[gdrive] cannot issue OAuth state: %s", exc)
+        raise HTTPException(status_code=503, detail="Google connection is temporarily unavailable. Please try again.") from exc
+    params = {
+        "client_id": creds["client_id"],
+        "redirect_uri": _google_redirect_uri(),
+        "response_type": "code",
+        "scope": " ".join(gdrive.GDRIVE_SCOPES),
+        "access_type": "offline",
+        "prompt": "consent",
+        "include_granted_scopes": "false",
+        "state": state,
+    }
+    # Sent back by this browser only, and only to the callback. Lax still
+    # rides along on Google's top-level redirect back to us.
+    response.set_cookie(
+        GDRIVE_BIND_COOKIE, nonce, max_age=oauth_state.STATE_TTL_SECONDS, path=gdrive.CALLBACK_PATH,
+        httponly=True, secure=_google_redirect_uri().startswith("https://"), samesite="lax",
+    )
+    return {"auth_url": f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"}
+
+
+@router.delete("/google/disconnect")
+async def google_disconnect(current_user: CurrentUser = Depends(require_company_member)):
+    await _business_company(current_user)
+    await GoogleDriveService(current_user.id).disconnect()
+    return {"connected": False}
+
+
+@router.post("/google/import", status_code=201)
+async def google_import(body: GoogleImport, current_user: CurrentUser = Depends(require_company_member)):
+    company_id = await _business_company(current_user)
+    file_id = gdrive.parse_file_id(body.url)
+    if not file_id:
+        raise HTTPException(status_code=400, detail="Paste a link to a Google Doc, Sheet, Slides deck or Drive file.")
+    await check_rate_limit(str(current_user.id), "drive_google_import", *GOOGLE_IMPORT_LIMIT)
+    # Check the destination before calling Google: a person who can't add
+    # here shouldn't spend a Google fetch finding that out.
+    async with get_connection() as conn:
+        actor = await svc.load_actor(conn, user=current_user, company_id=company_id)
+        try:
+            await svc.assert_can_add(conn, company_id=company_id, folder_id=body.folder_id, actor=actor)
+        except DriveError as exc:
+            _raise(exc)
+    try:
+        fetched = await GoogleDriveService(current_user.id).fetch_file(file_id)
+    except GoogleDriveError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    try:
+        prepared = await svc.prepare_file(fetched.name, fetched.data)
+    except DriveError as exc:
+        _raise(exc)
+    async with get_connection() as conn:
+        try:
+            return await svc.store_file(
+                conn, company_id=company_id, folder_id=body.folder_id, prepared=prepared,
+                uploaded_by=current_user.id, actor=actor,
+                source="google_drive", source_ref=fetched.file_id,
+            )
+        except DriveError as exc:
+            _raise(exc)
+
+
+@oauth_callback_router.get("/drive/google/callback", include_in_schema=False)
+async def google_callback(
+    state: str = Query(""),
+    code: str | None = Query(None),
+    error: str | None = Query(None),
+    bind: str | None = Cookie(None, alias=GDRIVE_BIND_COOKIE),
+):
+    # Every outcome answers with the popup page, so the opener always hears back.
+    try:
+        user_id = await oauth_state.consume_state(
+            gdrive.OAUTH_STATE_PREFIX, state, binding=oauth_state.binding_hash(bind) if bind else None,
+        )
+    except ValueError:
+        return _popup("gdrive-error", "This connection link expired or was opened in another browser. Close this window and press Connect again.", 400)
+    except oauth_state.OAuthStateUnavailable as exc:
+        logger.error("[gdrive] cannot consume OAuth state: %s", exc)
+        return _popup("gdrive-error", "Google connection is temporarily unavailable. Please try again.", 503)
+    if error == "access_denied":
+        return _popup("gdrive-cancelled", "Google Drive connection canceled. You can close this window.")
+    if error or not code:
+        return _popup("gdrive-error", "Google couldn't complete the connection. Close this window and try again.", 400)
+    try:
+        await GoogleDriveService(user_id).exchange_code(code, _google_redirect_uri())
+    except GoogleDriveError as exc:
+        return _popup("gdrive-error", exc.detail, exc.status)
+    return _popup("gdrive-connected", "Google Drive connected. You can close this window.")
 
 
 @router.post("/folders", status_code=201)
