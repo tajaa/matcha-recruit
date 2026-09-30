@@ -7,11 +7,17 @@ model only REPORTS candidate policy matches; whether that opens a case is
 the deterministic `decide_flag` rule, and a person decides everything after.
 
 Invariants:
-  - One check per (incident, phase) ever: the `hr_case_triage_log` row is
-    claimed BEFORE the model call, so a retried background task or a second
-    close never re-checks or re-notifies.
+  - One check per (incident, phase): the `hr_case_triage_log` row is claimed
+    BEFORE the model call, so a second close never re-checks or re-notifies.
+    A check that couldn't run is retried once in the same run; if it still
+    can't, its row is re-claimable by a later trigger, up to MAX_ATTEMPTS.
   - A check that couldn't run is stored as implicated=NULL and opens nothing.
     "Couldn't check" is never read as "clean".
+  - No connection is held across the model call: the flag, the claim and the
+    handbook corpus are read on a short pooled connection, released, and the
+    result written on another.
+  - An incident whose case HR already closed or dismissed is never reopened
+    by a later check: the finding is recorded on that case, nobody notified.
   - Nothing here stores or forwards the incident narrative; the case keeps
     policy titles, relevance and confidence only.
   - Never raises (it runs after the response, as a background task).
@@ -29,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 PHASES = ("intake", "close")
 FLAG_RELEVANCE = ("violated", "bent")
+MAX_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 5.0
 
 # Strong refs to fire-and-forget close checks (the event loop only keeps weak
 # ones); same pattern as compliance_pilot/core.py.
@@ -62,8 +70,9 @@ def summarize(result: dict[str, Any], *, phase: str) -> dict[str, Any]:
             }
             for v in (result.get("violations") or []) if isinstance(v, dict)
         ],
+        # Deliberately no `summary`: that is model free text about the
+        # incident, and nothing narrative leaves the incident.
         "citation_count": len(result.get("citations") or []),
-        "summary": result.get("summary"),
     }
 
 
@@ -105,32 +114,33 @@ def schedule_close_check(company_id: Any, incident_id: Any) -> None:
     task.add_done_callback(_BG_TASKS.discard)
 
 
+_CLAIM_SQL = """
+    INSERT INTO hr_case_triage_log (incident_id, phase, company_id, result)
+    VALUES ($1, $2, $3, '{"attempts": 1}'::jsonb)
+    ON CONFLICT (incident_id, phase) DO UPDATE
+        SET result = jsonb_build_object(
+            'attempts', COALESCE((hr_case_triage_log.result->>'attempts')::int, 1) + 1)
+        WHERE hr_case_triage_log.implicated IS NULL
+          AND hr_case_triage_log.result->>'available' = 'false'
+          AND COALESCE((hr_case_triage_log.result->>'attempts')::int, 1) < $4
+    RETURNING (result->>'attempts')::int
+"""
+
+
 async def _triage(incident_id: UUID, company_id: UUID, phase: str) -> dict[str, Any]:
     from app.core.feature_flags import get_company_features
     from app.core.services.ai_usage import feature_scope
     from app.database.pool import connection_or_direct
-    from app.matcha.services.discipline.discipline_policy_check import check_incident_against_handbook
+    from app.matcha.services.discipline.discipline_policy_check import build_check_corpus, check_with_corpus
 
-    from . import case_service, notifications
-
-    # A raw connection: it is held across a ~60s grounded model call, and a
-    # pooled one held that long starves request traffic (same reasoning as
-    # huume/discipline_skill.check_incident_policy).
-    async with connection_or_direct(force_direct=True) as conn:
+    # Short, pooled: nothing below holds a connection across the model call.
+    async with connection_or_direct() as conn:
         features = await get_company_features(company_id, conn=conn)
         if not features.get("hr_cases"):
             return {"status": "module_off"}
-
-        claimed = await conn.fetchval(
-            """
-            INSERT INTO hr_case_triage_log (incident_id, phase, company_id)
-            VALUES ($1, $2, $3) ON CONFLICT DO NOTHING RETURNING incident_id
-            """,
-            incident_id, phase, company_id,
-        )
-        if not claimed:
+        attempts = await conn.fetchval(_CLAIM_SQL, incident_id, phase, company_id, MAX_ATTEMPTS)
+        if not attempts:
             return {"status": "already_checked"}
-
         row = await conn.fetchrow(
             """
             SELECT id, company_id, incident_number, title, description, incident_type, severity,
@@ -142,56 +152,77 @@ async def _triage(incident_id: UUID, company_id: UUID, phase: str) -> dict[str, 
         if not row:
             return {"status": "not_found"}
         incident = dict(row)
+        corpus = await build_check_corpus(conn, company_id)
 
-        with feature_scope("matcha.hr_cases.triage"):
-            result = await check_incident_against_handbook(conn, company_id=company_id, incident=incident)
+    with feature_scope("matcha.hr_cases.triage"):
+        result = await check_with_corpus(corpus, incident)
+        if not result.get("available") and corpus is not None:
+            # One retry for a transient model failure; no corpus won't improve.
+            await asyncio.sleep(RETRY_DELAY_SECONDS)
+            result = await check_with_corpus(corpus, incident)
 
-        if not result.get("available"):
-            await conn.execute(
-                "UPDATE hr_case_triage_log SET implicated = NULL, result = $3::jsonb "
-                "WHERE incident_id = $1 AND phase = $2",
-                incident_id, phase, json.dumps({"available": False}),
-            )
-            return {"status": "unavailable"}
+    async with connection_or_direct() as conn:
+        return await _record(conn, incident=incident, company_id=company_id, phase=phase,
+                             result=result, attempts=int(attempts))
 
-        settings = await case_service.get_settings(conn, company_id)
-        implicated = decide_flag(result, min_confidence=float(settings["triage_min_confidence"]))
-        summary = summarize(result, phase=phase)
+
+async def _record(conn, *, incident: dict[str, Any], company_id: UUID, phase: str,
+                  result: dict[str, Any], attempts: int) -> dict[str, Any]:
+    from . import case_service, notifications
+
+    incident_id = incident["id"]
+    if not result.get("available"):
         await conn.execute(
-            "UPDATE hr_case_triage_log SET implicated = $3, result = $4::jsonb "
+            "UPDATE hr_case_triage_log SET implicated = NULL, result = $3::jsonb "
             "WHERE incident_id = $1 AND phase = $2",
-            incident_id, phase, implicated, json.dumps(summary),
+            incident_id, phase, json.dumps({"available": False, "attempts": attempts}),
         )
+        return {"status": "unavailable", "attempts": attempts}
 
-        existing = await case_service.find_open_case_for_incident(conn, company_id=company_id, incident_id=incident_id)
-        if existing:
-            # The case already exists (flagged on intake, or opened by a GM
-            # draft): record what this check found; a clean close-time check
-            # is information for HR, not an automatic dismissal.
-            await case_service.record_event(
-                conn, case_id=existing["id"],
-                event=f"{phase}_check_{'match' if implicated else 'clean'}",
-                details=summary,
-            )
-            return {"status": "recorded", "case_id": str(existing["id"]), "implicated": implicated}
+    settings = await case_service.get_settings(conn, company_id)
+    implicated = decide_flag(result, min_confidence=float(settings["triage_min_confidence"]))
+    summary = summarize(result, phase=phase)
+    await conn.execute(
+        "UPDATE hr_case_triage_log SET implicated = $3, result = $4::jsonb "
+        "WHERE incident_id = $1 AND phase = $2",
+        incident_id, phase, implicated, json.dumps(summary),
+    )
 
-        if not implicated:
-            return {"status": "clean"}
-
-        gm_user_id = await notifications.resolve_gm_user_id(conn, company_id=company_id, incident=incident)
-        case, created = await case_service.open_case(
-            conn,
-            company_id=company_id,
-            origin="intake_triage" if phase == "intake" else "close_check",
-            incident_id=incident_id,
-            triage=summary,
-            gm_user_id=gm_user_id,
-            employee_id=_single_involved_employee(incident),
+    existing = await case_service.find_open_case_for_incident(conn, company_id=company_id, incident_id=incident_id)
+    if existing is None:
+        # A case HR already closed or dismissed stays that way: a later check
+        # is information on it, not a new case and a second round of emails.
+        existing = await case_service.find_latest_case_for_incident(
+            conn, company_id=company_id, incident_id=incident_id,
         )
-        if created:
-            await notifications.notify_flagged(
-                conn, case=case, incident=incident,
-                policy_titles=[v["policy_title"] for v in summary["violations"]
-                               if v.get("policy_title") and v.get("relevance") in FLAG_RELEVANCE],
-            )
-        return {"status": "flagged", "case_id": str(case["id"]), "created": created}
+    if existing:
+        # The case already exists (flagged on intake, or opened by a GM
+        # draft): record what this check found; a clean close-time check
+        # is information for HR, not an automatic dismissal.
+        await case_service.record_event(
+            conn, case_id=existing["id"],
+            event=f"{phase}_check_{'match' if implicated else 'clean'}",
+            details=summary,
+        )
+        return {"status": "recorded", "case_id": str(existing["id"]), "implicated": implicated}
+
+    if not implicated:
+        return {"status": "clean"}
+
+    gm_user_id = await notifications.resolve_gm_user_id(conn, company_id=company_id, incident=incident)
+    case, created = await case_service.open_case(
+        conn,
+        company_id=company_id,
+        origin="intake_triage" if phase == "intake" else "close_check",
+        incident_id=incident_id,
+        triage=summary,
+        gm_user_id=gm_user_id,
+        employee_id=_single_involved_employee(incident),
+    )
+    if created:
+        await notifications.notify_flagged(
+            conn, case=case, incident=incident,
+            policy_titles=[v["policy_title"] for v in summary["violations"]
+                           if v.get("policy_title") and v.get("relevance") in FLAG_RELEVANCE],
+        )
+    return {"status": "flagged", "case_id": str(case["id"]), "created": created}

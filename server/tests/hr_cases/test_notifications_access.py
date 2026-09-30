@@ -51,10 +51,51 @@ async def test_gm_resolution_prefers_creator_then_email():
 
 
 @pytest.mark.asyncio
-async def test_hr_recipients_fall_back():
-    owner = {"user_id": uuid4(), "name": "Owner"}
+async def test_hr_recipients_fall_back(monkeypatch):
+    owner = {"user_id": uuid4(), "role": "client", "name": "Owner"}
+
+    async def everyone(conn, *, user, company_id):
+        return True
+    monkeypatch.setattr(access, "has_hr_access", everyone)
     conn = QueryConn(fetch={"FROM clients c JOIN users u": Queue([[], []]), "FROM companies co": [owner]})
-    assert await notifications.hr_recipients(conn, COMPANY) == [owner]
+    assert await notifications.hr_recipients(conn, COMPANY) == [{"user_id": owner["user_id"], "name": "Owner"}]
+
+
+@pytest.mark.asyncio
+async def test_only_people_with_hr_access_are_told(monkeypatch):
+    # No approvers; the owner has no HR access; of everyone else only the Work
+    # admin does. The plain member must not hear about an HR matter.
+    owner = {"user_id": uuid4(), "role": "client", "name": "Owner"}
+    admin = {"user_id": uuid4(), "role": "client", "name": "Admin"}
+    member = {"user_id": uuid4(), "role": "client", "name": "Member"}
+
+    async def only_admin(conn, *, user, company_id):
+        return user.id == admin["user_id"]
+    monkeypatch.setattr(access, "has_hr_access", only_admin)
+    conn = QueryConn(fetch={
+        "FROM clients c JOIN users u": Queue([[], [admin, member]]),
+        "FROM companies co": [owner],
+    })
+    assert await notifications.hr_recipients(conn, COMPANY) == [{"user_id": admin["user_id"], "name": "Admin"}]
+
+
+@pytest.mark.asyncio
+async def test_nobody_with_access_means_nobody_is_told(monkeypatch):
+    async def nobody(conn, *, user, company_id):
+        return False
+    monkeypatch.setattr(access, "has_hr_access", nobody)
+    member = {"user_id": uuid4(), "role": "client", "name": "Member"}
+    conn = QueryConn(fetch={"FROM clients c JOIN users u": Queue([[member], [member]]), "FROM companies co": [member]})
+    assert await notifications.hr_recipients(conn, COMPANY) == []
+
+
+def test_a_reporter_who_left_is_not_called_anonymous():
+    msgs = notifications.flagged_messages(
+        case_number="HRC-1", incident_number="IR-3", policy_titles=["Attendance"],
+        hr_names=["Dana"], gm_name=None, has_reporter=True,
+    )
+    assert "anonymously" not in msgs["hr"]["body"]
+    assert "isn't an active member" in msgs["hr"]["body"]
 
 
 @pytest.mark.asyncio
