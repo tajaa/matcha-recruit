@@ -3,6 +3,7 @@ import { Loader2, SlidersHorizontal, Sparkles } from 'lucide-react'
 import { ensureAssistantChannel } from '../api/matchaWork/assistant'
 import AssistantAbilities from '../components/assistant/AssistantAbilities'
 import { useEntitlements } from '../hooks/useEntitlements'
+import { useMe } from '../../hooks/useMe'
 import { apiErrorText } from '../utils/apiErrorText'
 import MessageComposer from './ChannelView/MessageComposer'
 import MessageList from './ChannelView/MessageList'
@@ -87,6 +88,18 @@ function Conversation({ channelId }: { channelId: string }) {
 }
 
 export default function Assistant() {
+  const { isPersonal } = useMe()
+  if (!isPersonal) {
+    return (
+      <p className="p-6 text-sm text-w-dim">
+        The Espresso assistant comes with a personal Espresso account.
+      </p>
+    )
+  }
+  return <PersonalAssistant />
+}
+
+function PersonalAssistant() {
   const [channelId, setChannelId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 

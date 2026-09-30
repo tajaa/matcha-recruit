@@ -113,5 +113,5 @@ def test_the_mention_dispatcher_tries_the_card_then_the_assistant_then_the_repo_
     ours = source.index("chat_entry.assistant_request(")
     repo = source.index('if not project["github_repo"]')
     assert card < ours < repo
-    assert 'features.get("espresso_assistant")' in source[card:ours]
+    assert "assistant_available(" in source[card:ours]
     assert 'surface="project_chat"' in source[ours:repo]

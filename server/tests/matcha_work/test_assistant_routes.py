@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from app.core.feature_flags import DEFAULT_COMPANY_FEATURES, FEATURE_REQUIRES
+from app.core.feature_flags import DEFAULT_COMPANY_FEATURES, FEATURE_REQUIRES, RETIRED_COMPANY_FEATURES
 from app.matcha.models.matcha_work.assistant import AbilityEnableRequest, GoogleConnectRequest
 from app.matcha.routes.matcha_work import assistant as routes
 from app.matcha.services.billing import entitlements_service
@@ -44,9 +44,11 @@ def wired(monkeypatch):
     return SimpleNamespace(company=company, conn=conn, gmail=Gmail)
 
 
-def test_the_flag_is_off_by_default_and_needs_matcha_work():
-    assert DEFAULT_COMPANY_FEATURES["espresso_assistant"] is False
-    assert FEATURE_REQUIRES["espresso_assistant"] == ("matcha_work",)
+def test_there_is_no_company_flag_and_plans_still_apply():
+    # Personal accounts get the assistant; no business switch exists.
+    assert "espresso_assistant" not in DEFAULT_COMPANY_FEATURES
+    assert "espresso_assistant" not in FEATURE_REQUIRES
+    assert "espresso_assistant" in RETIRED_COMPANY_FEATURES
     assert entitlements_service.features_for_plan("pro")["assistant"] is True
     assert entitlements_service.features_for_plan("business")["assistant"] is True
     assert entitlements_service.features_for_plan("lite")["assistant"] is False
@@ -64,6 +66,23 @@ def test_the_router_is_gated_and_mounted():
         ("DELETE", "/assistant/abilities/{key}"),
     }
     assert routes.router.prefix == "/assistant" and len(routes.router.dependencies) == 1
+
+
+@pytest.mark.asyncio
+async def test_only_a_personal_workspace_gets_the_routes(monkeypatch):
+    from app.matcha.services.matcha_work.agent_runtime import enqueue
+
+    user = _user()
+    monkeypatch.setattr(routes, "get_client_company_id", AsyncMock(return_value=uuid4()))
+    monkeypatch.setattr(enqueue, "workspace_enabled", AsyncMock(return_value=True))
+    assert await routes.require_personal_workspace(current_user=user) is user
+    monkeypatch.setattr(enqueue, "workspace_enabled", AsyncMock(return_value=False))
+    with pytest.raises(HTTPException) as exc:
+        await routes.require_personal_workspace(current_user=user)
+    assert exc.value.status_code == 403 and exc.value.detail["code"] == "feature_disabled"
+    monkeypatch.setattr(routes, "get_client_company_id", AsyncMock(return_value=None))
+    with pytest.raises(HTTPException):
+        await routes.require_personal_workspace(current_user=user)
 
 
 @pytest.mark.asyncio

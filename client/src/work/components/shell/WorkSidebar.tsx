@@ -50,9 +50,10 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const showInventory = surface !== 'matcha-work' && canReviewEvents(opsAccess) && hasFeature('inventory')
   const showAssets = canReviewEvents(me?.work_access) && hasFeature('huume')
   const showSymChat = surface === 'matcha-work' && !isPersonal && hasFeature('sym_chat')
-  // Shown to anyone whose workspace has it; a plan that doesn't include it
-  // gets the paywall when they ask for something, like the other Pro features.
-  const showAssistant = hasFeature('espresso_assistant')
+  // Espresso's assistant comes with a personal account, never a business
+  // workspace. A plan that doesn't include it gets the paywall when they ask
+  // for something, like the other Pro features.
+  const showAssistant = isPersonal
 
   const {
     channels, setChannels,

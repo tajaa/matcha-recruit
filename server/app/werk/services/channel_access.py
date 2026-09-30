@@ -43,6 +43,7 @@ class ChannelAccess:
     is_platform_admin: bool
     user_id: UUID | None = None
     assistant_user_id: UUID | None = None
+    is_personal: bool = False
 
 
 def capability_allowed(
@@ -53,8 +54,11 @@ def capability_allowed(
     is_platform_admin: bool = False,
     user_id: UUID | None = None,
     assistant_user_id: UUID | None = None,
+    is_personal: bool = False,
 ) -> bool:
     if scope is ChannelScope.ASSISTANT:
+        from app.matcha.services.matcha_work.agent_runtime.eligibility import assistant_available
+
         # Decided BEFORE the platform-admin bypass, on purpose: this
         # conversation can hold a person's email and calendar, so it is its
         # owner's alone. Chat only, no calls, no automation, no managing.
@@ -62,8 +66,7 @@ def capability_allowed(
             capability is ChannelCapability.CHAT
             and user_id is not None
             and user_id == assistant_user_id
-            and bool(features.get("espresso_assistant"))
-            and bool(features.get("matcha_work"))
+            and assistant_available(is_personal=is_personal, features=features)
         )
     if is_platform_admin:
         return True
@@ -87,6 +90,7 @@ async def load_channel_access(
         """
         SELECT ch.id, ch.company_id, COALESCE(ch.channel_scope, 'operations') AS channel_scope,
                comp.enabled_features, comp.signup_source,
+               COALESCE(comp.is_personal, false) AS is_personal,
                ch.assistant_user_id,
                cm.role AS member_role,
                cm.removed_for_inactivity IS NOT TRUE AS is_member
@@ -114,6 +118,7 @@ async def load_channel_access(
         is_platform_admin=user_role == "admin",
         user_id=user_id,
         assistant_user_id=row.get("assistant_user_id"),
+        is_personal=bool(row.get("is_personal")),
     )
 
 
@@ -140,6 +145,7 @@ def assert_channel_capability(access: ChannelAccess, capability: ChannelCapabili
         is_platform_admin=access.is_platform_admin,
         user_id=access.user_id,
         assistant_user_id=access.assistant_user_id,
+        is_personal=access.is_personal,
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

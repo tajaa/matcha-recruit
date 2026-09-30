@@ -24,7 +24,7 @@ The reverse edge (`matcha → werk`) is exactly 2 sites, both lazy in-function i
 
 `assistant` is one person's private conversation with Espresso (`channels.assistant_user_id`, migration `agentrt02`). It is unlike the other three in two ways, and both are load-bearing:
 
-- `capability_allowed` decides it **before** the platform-admin bypass: chat only, its owner only, `espresso_assistant` on. It can hold a person's email, so an admin gets a 403 like anyone else.
+- `capability_allowed` decides it **before** the platform-admin bypass: chat only, its owner only, a personal account (`agent_runtime/eligibility.assistant_available`, imported lazily). It can hold a person's email, so an admin gets a 403 like anyone else.
 - It has one member and stays that way. Every route in `routes/channels.py` that changes who is in a channel or what the channel is calls `_require_shared_channel`, which refuses this scope. A new route of that kind must call it too; `tests/werk/test_channel_access.py` walks the route table.
 
 In the socket send path a message in this scope goes to `_bg_assistant_message` and to nothing else: the dispatchers after it are gated on `dispatch_new`, which is False here.

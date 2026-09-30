@@ -18,9 +18,9 @@ def _user(role="client"):
     return SimpleNamespace(id=uuid4(), role=role)
 
 
-def _features(**flags):
-    return {"enabled_features": {"matcha_work": True, "espresso_assistant": True, **flags},
-            "signup_source": "bespoke"}
+def _features(is_personal=True, **flags):
+    return {"enabled_features": {"matcha_work": True, **flags},
+            "signup_source": "bespoke", "is_personal": is_personal}
 
 
 @pytest.fixture
@@ -48,14 +48,15 @@ def _kwargs(user, **over):
 # ── preflight ──────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_preflight_needs_the_workspace_flag(wired, monkeypatch):
+async def test_preflight_needs_a_personal_workspace(wired, monkeypatch):
     conn, _ = wired
-    for row in (None, _features(espresso_assistant=False), _features(matcha_work=False)):
+    # A business workspace never has it, whatever its stored flags say.
+    for row in (None, _features(is_personal=False, espresso_assistant=True), _features(matcha_work=False)):
         conn.on("FROM companies", row)
         with pytest.raises(HTTPException) as exc:
             await enqueue.preflight(_user(), uuid4())
         assert exc.value.status_code == 403 and exc.value.detail["code"] == "feature_disabled"
-    # The flag gates admins too: it is the workspace's switch, not a plan.
+    # It gates admins too: it is about the workspace, not a plan.
     with pytest.raises(HTTPException):
         await enqueue.preflight(_user("admin"), uuid4())
 

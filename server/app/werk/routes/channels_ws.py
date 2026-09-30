@@ -472,7 +472,8 @@ async def _bg_dispatch_espresso_mention(
         async with get_connection() as conn:
             project = await conn.fetchrow(
                 """SELECT p.id, p.company_id, p.github_repo,
-                          c.enabled_features, c.signup_source
+                          c.enabled_features, c.signup_source,
+                          COALESCE(c.is_personal, false) AS is_personal
                    FROM mw_projects p
                    JOIN companies c ON c.id=p.company_id
                    WHERE p.project_data->>'discussion_channel_id'=$1""",
@@ -529,7 +530,9 @@ async def _bg_dispatch_espresso_mention(
             return True
         # Anything else that reads as a request, and is not about the code,
         # goes to the assistant: read-only here, since a project chat is shared.
-        if features.get("espresso_assistant"):
+        from app.matcha.services.matcha_work.agent_runtime.eligibility import assistant_available
+
+        if assistant_available(is_personal=project.get("is_personal"), features=features):
             from app.matcha.services.matcha_work.agent_runtime import chat_entry
 
             if chat_entry.assistant_request(content, repo_connected=bool(project["github_repo"])):

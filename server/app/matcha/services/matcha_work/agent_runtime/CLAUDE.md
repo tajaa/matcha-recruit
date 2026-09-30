@@ -1,4 +1,4 @@
-# Agent runtime (`espresso_assistant`)
+# Agent runtime (the Espresso assistant)
 
 One bounded agent loop, and a registry of abilities it can use. A person asks
 Espresso in chat ("reply to the landlord and say Friday works", "book Nopa for
@@ -149,8 +149,14 @@ them in that order: card, assistant, repository agent.
 
 ## Limits and gating
 
-- **Flag:** `espresso_assistant` (requires `matcha_work`), checked in
-  `enqueue.preflight` and on the REST router. Admins are gated by it too.
+- **Who gets it:** every personal Espresso account (`companies.is_personal`,
+  with `matcha_work`), never a business workspace. There is no company flag:
+  `eligibility.assistant_available` is the one rule, used by
+  `enqueue.workspace_enabled` (preflight, the REST router, entitlements'
+  `workspace.espresso_assistant` both apps read), the channel access check and
+  the project-chat mention route. `espresso_assistant` is in
+  `RETIRED_COMPANY_FEATURES`, so a stale stored value is dropped. Admins are
+  gated by it too.
 - **Plan:** Pro/Business (`features_for_plan()["assistant"]`). Admins bypass.
 - **Daily allowance per person:** `ASSISTANT_DAILY_RUNS` (Pro 30 / Business
   60), UTC day, counted apart from the monthly agent-card allowance. Only

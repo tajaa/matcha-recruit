@@ -92,16 +92,9 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
             <Route path="assets" element={<AssetsHub />} />
           <Route path="assets/:assetId" element={<AssetsHub />} />
           </Route>
-          {/* The Espresso assistant: a private conversation per person, on
-              both surfaces. */}
-          <Route
-            path="assistant"
-            element={
-              <FeatureGate feature="espresso_assistant" label="Espresso Assistant">
-                <Assistant />
-              </FeatureGate>
-            }
-          />
+          {/* The Espresso assistant: a private conversation per person, for
+              personal accounts (the page says so to anyone else). */}
+          <Route path="assistant" element={<Assistant />} />
           {/* Sym-chat is business-only: the backend 403s personal workspaces,
               so the /espresso tree doesn't mount it at all. */}
           {businessWork && (

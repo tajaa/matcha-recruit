@@ -73,13 +73,13 @@ from app.werk.services.channel_access import (  # noqa: E402
     refuse_membership_change,
 )
 
-ASSISTANT_ON = {"matcha_work": True, "espresso_assistant": True}
+ASSISTANT_ON = {"matcha_work": True}
 
 
 def _allowed(capability=ChannelCapability.CHAT, features=None, **over):
     owner = uuid4()
     kwargs = dict(scope=ChannelScope.ASSISTANT, features=ASSISTANT_ON if features is None else features,
-                  capability=capability, user_id=owner, assistant_user_id=owner)
+                  capability=capability, user_id=owner, assistant_user_id=owner, is_personal=True)
     kwargs.update(over)
     return capability_allowed(**kwargs)
 
@@ -104,9 +104,9 @@ def test_platform_admin_does_not_bypass_the_assistant_scope():
     assert source.index("ChannelScope.ASSISTANT") < source.index("if is_platform_admin")
 
 
-def test_assistant_scope_needs_the_flag():
-    assert not _allowed(features={"matcha_work": True})
-    assert not _allowed(features={"espresso_assistant": True})
+def test_assistant_scope_needs_a_personal_account():
+    # A business workspace never gets it, even with a stale stored flag.
+    assert not _allowed(is_personal=False, features={"matcha_work": True, "espresso_assistant": True})
     assert not _allowed(features={})
 
 
@@ -114,7 +114,8 @@ def _access(scope, **over):
     owner = uuid4()
     base = dict(channel_id=uuid4(), company_id=uuid4(), scope=scope, features=ASSISTANT_ON,
                 is_member=True, member_role="owner", is_platform_admin=False,
-                user_id=owner, assistant_user_id=owner if scope is ChannelScope.ASSISTANT else None)
+                user_id=owner, assistant_user_id=owner if scope is ChannelScope.ASSISTANT else None,
+                is_personal=True)
     base.update(over)
     return ChannelAccess(**base)
 
@@ -149,10 +150,14 @@ async def test_loading_access_carries_the_owner_and_an_unknown_scope_fails_close
 
     row = {"id": channel, "company_id": uuid4(), "channel_scope": "assistant",
            "enabled_features": ASSISTANT_ON, "signup_source": "bespoke",
-           "assistant_user_id": owner, "member_role": "owner", "is_member": True}
+           "assistant_user_id": owner, "member_role": "owner", "is_member": True, "is_personal": True}
     access = await load_channel_access(Conn(row), channel_id=channel, user_id=owner, user_role="client")
     assert access.scope is ChannelScope.ASSISTANT
-    assert access.user_id == owner and access.assistant_user_id == owner
+    assert access.user_id == owner and access.assistant_user_id == owner and access.is_personal
+    business = await load_channel_access(Conn({**row, "is_personal": False}), channel_id=channel,
+                                         user_id=owner, user_role="client")
+    with pytest.raises(HTTPException):
+        assert_channel_capability(business, ChannelCapability.CHAT)
     # A scope this code has never heard of is treated as the most locked-down shared one.
     future = await load_channel_access(
         Conn({**row, "channel_scope": "something_new", "assistant_user_id": None}),
