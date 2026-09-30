@@ -312,14 +312,25 @@ def test_connect_builds_offline_readonly_url(monkeypatch, mod):
     user = SimpleNamespace(id=uuid4(), role="client")
     monkeypatch.setattr(mod.gdrive, "_client_credentials", lambda: {"client_id": "cid", "client_secret": "s"})
 
-    async def issue(prefix, user_id, ttl_seconds=0):
+    bindings = []
+
+    async def issue(prefix, user_id, ttl_seconds=0, *, binding=None):
         assert prefix == "gdrive_oauth_state"
+        bindings.append(binding)
         return "S" * 43
     monkeypatch.setattr(mod.oauth_state, "issue_state", issue)
     with _client(mod, user) as client:
-        url = client.post("/drive/google/connect").json()["auth_url"]
+        resp = client.post("/drive/google/connect")
+    url = resp.json()["auth_url"]
     assert "drive.readonly" in url and "access_type=offline" in url and "state=" + "S" * 43 in url
     assert "client_secret" not in url
+    # The handle is bound to a nonce only this browser holds, in a cookie
+    # scoped to the callback.
+    cookie = resp.headers["set-cookie"]
+    nonce = resp.cookies[mod.GDRIVE_BIND_COOKIE]
+    assert bindings == [mod.oauth_state.binding_hash(nonce)]
+    assert "HttpOnly" in cookie and "Path=/api/matcha-work/drive/google/callback" in cookie
+    assert "samesite=lax" in cookie.lower() and "Secure" in cookie
 
 
 def test_connect_503_when_state_store_down(monkeypatch, mod):
@@ -327,7 +338,7 @@ def test_connect_503_when_state_store_down(monkeypatch, mod):
     user = SimpleNamespace(id=uuid4(), role="client")
     monkeypatch.setattr(mod.gdrive, "_client_credentials", lambda: {"client_id": "cid", "client_secret": "s"})
 
-    async def issue(prefix, user_id, ttl_seconds=0):
+    async def issue(prefix, user_id, ttl_seconds=0, *, binding=None):
         raise mod.oauth_state.OAuthStateUnavailable("down")
     monkeypatch.setattr(mod.oauth_state, "issue_state", issue)
     with _client(mod, user) as client:
@@ -361,7 +372,7 @@ def test_callback_success_and_errors(monkeypatch, mod):
     user_id = uuid4()
     calls = []
 
-    async def consume(prefix, state):
+    async def consume(prefix, state, *, binding=None):
         if state == "replayed" + "x" * 35:
             raise ValueError("Invalid or expired OAuth state")
         return user_id
@@ -382,11 +393,37 @@ def test_callback_success_and_errors(monkeypatch, mod):
         bad = client.get("/drive/google/callback", params={"state": "s" * 43, "code": "bad"})
         assert bad.status_code == 400 and "gdrive-error" in bad.text
         replay = client.get("/drive/google/callback", params={"state": "replayed" + "x" * 35, "code": "good"})
-        assert replay.status_code == 400
+        # Still the popup page, so the dialog hears about it.
+        assert replay.status_code == 400 and "gdrive-error" in replay.text
+        # The result only ever goes to our own origin.
+        assert "'*'" not in ok.text and '"https://app.test"' in ok.text
 
 
 def test_callback_503_when_state_store_down(monkeypatch, mod):
-    async def consume(prefix, state):
+    async def consume(prefix, state, *, binding=None):
         raise mod.oauth_state.OAuthStateUnavailable("down")
     with _callback(mod, monkeypatch, consume=consume) as client:
-        assert client.get("/drive/google/callback", params={"state": "s" * 43, "code": "c"}).status_code == 503
+        resp = client.get("/drive/google/callback", params={"state": "s" * 43, "code": "c"})
+        assert resp.status_code == 503 and "gdrive-error" in resp.text
+
+
+def test_callback_passes_the_browser_binding(monkeypatch, mod):
+    seen = []
+
+    async def consume(prefix, state, *, binding=None):
+        seen.append(binding)
+        if binding != mod.oauth_state.binding_hash("nonce-1"):
+            raise ValueError("OAuth state was started in another browser")
+        return uuid4()
+
+    async def exchange(self, code, redirect_uri):
+        return None
+
+    with _callback(mod, monkeypatch, consume=consume, exchange=exchange) as client:
+        # A victim opening the sender's auth URL has no cookie (or another one).
+        stranger = client.get("/drive/google/callback", params={"state": "s" * 43, "code": "c"})
+        assert stranger.status_code == 400 and "another browser" in stranger.text
+        client.cookies.set(mod.GDRIVE_BIND_COOKIE, "nonce-1")
+        own = client.get("/drive/google/callback", params={"state": "s" * 43, "code": "c"})
+        assert own.status_code == 200 and "gdrive-connected" in own.text
+    assert seen == [None, mod.oauth_state.binding_hash("nonce-1")]

@@ -39,6 +39,52 @@ describe('DriveGoogleImportDialog', () => {
     expect(await screen.findByText(/Connected as gm@example.com/)).toBeTruthy()
   })
 
+  it('notices the connection even when the popup never posts back', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    api.getGoogleDriveStatus
+      .mockResolvedValueOnce({ connected: false, email: null })
+      .mockResolvedValue({ connected: true, email: 'gm@example.com' })
+    api.connectGoogleDrive.mockResolvedValue({ auth_url: 'https://accounts.google.com/x' })
+    const popup = { closed: false } as Window
+    const open = vi.spyOn(window, 'open').mockReturnValue(popup)
+    render(<DriveGoogleImportDialog folder={folder} onImported={vi.fn()} onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Google Drive' }))
+    await waitFor(() => expect(open).toHaveBeenCalled())
+    await vi.advanceTimersByTimeAsync(1600)
+    expect(await screen.findByText(/Connected as gm@example.com/)).toBeTruthy()
+    const calls = api.getGoogleDriveStatus.mock.calls.length
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(api.getGoogleDriveStatus.mock.calls.length).toBe(calls) // stopped once connected
+    open.mockRestore()
+    vi.useRealTimers()
+  })
+
+  it('stops watching when the popup is closed without connecting', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    api.getGoogleDriveStatus.mockResolvedValue({ connected: false, email: null })
+    api.connectGoogleDrive.mockResolvedValue({ auth_url: 'https://accounts.google.com/x' })
+    const popup = { closed: true } as Window
+    const open = vi.spyOn(window, 'open').mockReturnValue(popup)
+    render(<DriveGoogleImportDialog folder={folder} onImported={vi.fn()} onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Google Drive' }))
+    await waitFor(() => expect(open).toHaveBeenCalled())
+    await vi.advanceTimersByTimeAsync(1600)
+    const calls = api.getGoogleDriveStatus.mock.calls.length
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(api.getGoogleDriveStatus.mock.calls.length).toBe(calls)
+    open.mockRestore()
+    vi.useRealTimers()
+  })
+
+  it('keeps showing connected when disconnect fails', async () => {
+    api.getGoogleDriveStatus.mockResolvedValue({ connected: true, email: 'gm@example.com' })
+    api.disconnectGoogleDrive.mockRejectedValue(new Error('Server error'))
+    render(<DriveGoogleImportDialog folder={folder} onImported={vi.fn()} onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Disconnect' }))
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Server error')
+    expect(screen.getByText(/Connected as gm@example.com/)).toBeTruthy()
+  })
+
   it('refuses a non-Google link without calling the server', async () => {
     api.getGoogleDriveStatus.mockResolvedValue({ connected: true, email: 'gm@example.com' })
     render(<DriveGoogleImportDialog folder={folder} onImported={vi.fn()} onClose={vi.fn()} />)
