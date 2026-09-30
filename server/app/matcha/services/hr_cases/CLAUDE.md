@@ -53,3 +53,43 @@ skip a step.
 - **Not in the HR Pilot corpus, deliberately.** That corpus is served to every
   business supervisor with no per-viewer access check; adding case records
   there would bypass HR access.
+
+## Write-up workflow (5/6: `workflow.py`, `draft_review.py`)
+
+A manager sends a letter (upload, a Drive file they can read, or a Google Doc
+link) → it is stored in Drive `HR / Discipline / Drafts` through the system
+path (the manager needs no HR Drive access) → reviewed → either
+`draft_submitted` (to `hr_review`) or **held** (`set_fields` + event
+`draft_held`, stage unchanged) when the leave check blocks → HR approves or
+sends back (reason ≥ 20 chars, shown to the manager) → manager or HR marks it
+delivered.
+
+- **Authorization is in `workflow.py`, shared by REST and Huume**: HR on any
+  case; the case's manager (`gm_user_id`) on their own case; any business user
+  may start a case by submitting a draft and becomes its manager (or claims a
+  flagged case with no manager). Decisions are HR-only.
+- **Review layers** (`draft_review.py`): (1) protected-leave gate
+  `discipline_compliance.check_discipline_compliance` — deterministic, reads
+  leave/PTO/incidents/ER only, a block cannot be overridden; (2) ladder fit vs
+  this employee's delivered HR cases in the last year; (3) letter structure
+  (name, date, length, expectation, consequence, signature line); (4) one
+  Gemini wording pass of this module's own. It deliberately does NOT use
+  `discipline_ai`: that corpus build seeds rows into the retired
+  `discipline_policy_mapping` table.
+- **Approval re-runs the leave gate** from the inputs frozen in
+  `review.input` — leave records can change between review and approval.
+- **Two audiences.** A manager only ever gets `workflow.manager_view`:
+  structure notes, a generic "held for HR" message, HR's send-back reason. Never
+  the leave findings (medical-adjacent), triage matches, or HR's history.
+- Notification types `hr_case_draft_submitted`/`_draft_held`/`_approved`/
+  `_changes_requested`/`_delivered`; managers are linked to `/work/write-ups/…`,
+  HR to `/work/hr-cases/…`.
+- **Huume** (`services/huume/hr_case_skill.py`): `list_write_ups`,
+  `search_drive`, `read_drive_file` (read) and `submit_write_up` /
+  `decide_write_up` / `mark_write_up_delivered` (staged, action types
+  `hr_case_draft`/`_decision`/`_delivered`, feature `hr_cases`). The staged
+  draft pins a REFERENCE (thread attachment URL, Drive file id, or Google file
+  id) at stage time; the confirm turn re-fetches those bytes. Thread
+  attachments reach the loop as `attachment_refs` (`messaging.py` →
+  `turn_pipeline` → `run_huume_turn`). HR case actions are in
+  `assets._NO_ASSET_TYPES` — the asset panel has no HR-access check.

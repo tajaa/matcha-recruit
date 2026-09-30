@@ -163,8 +163,13 @@ ASSET_SPECS: dict[str, AssetSpec] = {
 # record_id (it applies a recommendation to inventory_items in place), so
 # record_asset has nothing to link — same shape as amend_handbook above.
 # Listed here so the drift-guard test has a documented reason, not a gap.
+# HR case actions are deliberately not assets: the thread's asset panel has
+# no HR-access check, and an HR case (who, what, the leave review) must only
+# be visible on the HR Cases page (services/hr_cases/access.py) or, for its
+# own manager, the Write-ups page.
 _NO_ASSET_TYPES: frozenset[str] = frozenset(
-    {"amend_handbook", "schedule_location_profile", "waste_par_change"}
+    {"amend_handbook", "schedule_location_profile", "waste_par_change",
+     "hr_case_draft", "hr_case_decision", "hr_case_delivered"}
 )
 
 

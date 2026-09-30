@@ -201,6 +201,31 @@ async def apply_event(
     return await get_case(conn, company_id=company_id, case_id=case_id)
 
 
+async def set_fields(
+    conn, *, company_id: UUID, case_id: UUID, sets: dict[str, Any],
+    event: Optional[str] = None, actor_user_id: Optional[UUID] = None,
+    details: Optional[dict[str, Any]] = None,
+) -> None:
+    """Write allow-listed columns WITHOUT a stage change (e.g. a draft held by
+    the leave check stays where it is but keeps the file and review)."""
+    unknown = set(sets) - _SETTABLE
+    if unknown:
+        raise ValueError(f"Not settable on an HR case: {sorted(unknown)}")
+    if not sets:
+        return
+    values: list[Any] = [case_id, company_id]
+    assignments = ["updated_at = NOW()"]
+    for col, val in sets.items():
+        values.append(json.dumps(val, default=str) if col in _JSON_COLUMNS and val is not None else val)
+        assignments.append(f"{col} = ${len(values)}{'::jsonb' if col in _JSON_COLUMNS else ''}")
+    async with conn.transaction():
+        await conn.execute(
+            f"UPDATE hr_cases SET {', '.join(assignments)} WHERE id = $1 AND company_id = $2", *values,
+        )
+        if event:
+            await record_event(conn, case_id=case_id, event=event, actor_user_id=actor_user_id, details=details)
+
+
 async def get_case(conn, *, company_id: UUID, case_id: UUID, with_events: bool = False) -> dict[str, Any]:
     row = await conn.fetchrow(_CASE_SELECT + " WHERE c.id = $1 AND c.company_id = $2", case_id, company_id)
     if not row:

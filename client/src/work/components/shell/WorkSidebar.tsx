@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare, Star, MessagesSquare, HardDrive, Briefcase } from 'lucide-react'
+import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare, Star, MessagesSquare, HardDrive, Briefcase, FileSignature } from 'lucide-react'
 import { logoutSession } from '../../../api/client'
 import type { ChannelSummary } from '../../api/channels'
 import { createProjectNew, createThread, archiveThread, notifyThreadsChanged } from '../../api/matchaWork'
@@ -53,6 +53,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const showSymChat = surface === 'matcha-work' && !isPersonal && hasFeature('sym_chat')
   const showDrive = surface === 'matcha-work' && !isPersonal && hasFeature('matcha_drive')
   const showHrCases = useHrCaseAccess(userId, surface === 'matcha-work' && !isPersonal && hasFeature('hr_cases'))
+  const showWriteUps = surface === 'matcha-work' && !isPersonal && hasFeature('hr_cases')
 
   const {
     channels, setChannels,
@@ -225,6 +226,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         showSymChat={showSymChat}
         showDrive={showDrive}
         showHrCases={showHrCases}
+        showWriteUps={showWriteUps}
         loggedEventsCount={loggedEventsCount}
       />
     )
@@ -263,6 +265,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           {showSymChat && <SidebarNavButton icon={MessagesSquare} label="Sym-chats" active={location.pathname.startsWith(`${base}/sym-chat`)} onClick={() => navigate(`${base}/sym-chat`)} />}
           {showDrive && <SidebarNavButton icon={HardDrive} label="Drive" active={location.pathname.startsWith(`${base}/drive`)} onClick={() => navigate(`${base}/drive`)} />}
           {showHrCases && <SidebarNavButton icon={Briefcase} label="HR Cases" active={location.pathname.startsWith(`${base}/hr-cases`)} onClick={() => navigate(`${base}/hr-cases`)} />}
+          {showWriteUps && <SidebarNavButton icon={FileSignature} label="Write-ups" active={location.pathname.startsWith(`${base}/write-ups`)} onClick={() => navigate(`${base}/write-ups`)} />}
 
           {/* Events (HR admin review of @huume-logged events) */}
           {showEvents && (

@@ -147,3 +147,71 @@ async def notify_flagged(
             )
         except Exception:
             logger.exception("[hr_cases] notification to %s failed for case %s", user_id, case.get("id"))
+
+
+async def send(
+    *, user_ids: list, company_id: UUID, type: str, title: str, body: str, link: str,
+    metadata: Optional[dict[str, Any]] = None, skip_user_id: Optional[UUID] = None,
+) -> None:
+    """Bell + email to each user once. Never raises."""
+    from app.matcha.services import notification_service
+
+    seen = set()
+    for uid in user_ids:
+        if not uid or uid in seen or uid == skip_user_id:
+            continue
+        seen.add(uid)
+        try:
+            await notification_service.create_notification(
+                user_id=uid, company_id=company_id, type=type, title=title, body=body,
+                link=link, metadata=metadata or {}, send_email=True,
+            )
+        except Exception:
+            logger.exception("[hr_cases] %s notification to %s failed", type, uid)
+
+
+def hr_link(case: dict[str, Any]) -> str:
+    return f"/work/hr-cases/{case['id']}"
+
+
+def manager_link(case: dict[str, Any]) -> str:
+    return f"/work/write-ups/{case['id']}"
+
+
+async def notify_step(conn, *, case: dict[str, Any], step: str, actor_user_id: Optional[UUID], reason: Optional[str] = None) -> None:
+    """Fixed-template notice for a workflow step. HR gets the HR link; the
+    manager gets the write-ups link. The acting person is never notified of
+    their own action. Never raises."""
+    try:
+        hr_ids = [r["user_id"] for r in await hr_recipients(conn, case["company_id"])]
+    except Exception:
+        logger.exception("[hr_cases] could not resolve HR for case %s", case.get("id"))
+        hr_ids = []
+    number = case["case_number"]
+    meta = {"hr_case_id": str(case["id"])}
+    gm = case.get("gm_user_id")
+    if step == "draft_submitted":
+        await send(user_ids=hr_ids, company_id=case["company_id"], type="hr_case_draft_submitted",
+                   title=f"{number}: write-up ready for review",
+                   body="A manager sent a write-up. It passed the protected-leave check and is waiting for HR approval.",
+                   link=hr_link(case), metadata=meta, skip_user_id=actor_user_id)
+    elif step == "draft_held":
+        await send(user_ids=hr_ids, company_id=case["company_id"], type="hr_case_draft_held",
+                   title=f"{number}: write-up held",
+                   body="A write-up conflicts with a protected-leave rule and can't go forward as written. Open the case for details.",
+                   link=hr_link(case), metadata=meta, skip_user_id=actor_user_id)
+    elif step == "approved":
+        await send(user_ids=[gm], company_id=case["company_id"], type="hr_case_approved",
+                   title=f"{number}: approved to deliver",
+                   body="HR approved the write-up. Deliver it to the employee, then mark it delivered and upload the signed copy.",
+                   link=manager_link(case), metadata=meta, skip_user_id=actor_user_id)
+    elif step == "changes_requested":
+        await send(user_ids=[gm], company_id=case["company_id"], type="hr_case_changes_requested",
+                   title=f"{number}: HR asked for changes",
+                   body=(f"HR's note: {reason}" if reason else "HR asked for changes to the write-up."),
+                   link=manager_link(case), metadata=meta, skip_user_id=actor_user_id)
+    elif step == "delivered":
+        await send(user_ids=hr_ids, company_id=case["company_id"], type="hr_case_delivered",
+                   title=f"{number}: delivered",
+                   body="The write-up was delivered to the employee. The signed copy is next.",
+                   link=hr_link(case), metadata=meta, skip_user_id=actor_user_id)

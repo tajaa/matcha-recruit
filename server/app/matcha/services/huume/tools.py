@@ -511,6 +511,82 @@ TOOLS: tuple[HuumeTool, ...] = (
         discovery=True,
         intent_hints=("pending approvals", "awaiting approval", "waiting for approval", "approval queue"),
     ),
+    # ---- HR cases: write-ups (feature `hr_cases`) + Matcha Drive -------------
+    _tool(
+        "list_write_ups", "read",
+        "List write-ups (HR cases). HR sees every open case with its stage and "
+        "the actions allowed next; a manager sees only their own write-ups — "
+        "what stage each is at, whether HR is holding one, and what HR asked "
+        "them to change. Call this before deciding or marking delivery when "
+        "you don't have the case_id.",
+        discovery=True,
+        intent_hints=("write-ups", "write ups", "writeups", "hr cases", "my write-up", "write-up status"),
+    ),
+    _tool(
+        "submit_write_up", "staged",
+        "Send a manager's written warning / corrective-action letter to HR. "
+        "STAGES it for confirmation; nothing is sent until the user confirms on "
+        "a LATER turn (pass confirm_id back exactly as given). Give exactly ONE "
+        "source: attachment_index (0 = the most recent file attached in this "
+        "chat), drive_file_id (from search_drive), or google_url. On confirm the "
+        "letter is saved to HR's private Drive folder, checked against leave "
+        "protections and the employee's history, and either goes to HR for "
+        "approval or is held for HR — say which, never that it was 'approved'.",
+        properties={
+            "employee_name": _s(type="string", description="Who the write-up is for, as the user said it."),
+            "employee_id": _s(type="string", description="Use instead of employee_name if you already have it."),
+            "action_type": _s(type="string", enum=["verbal_warning", "written_warning", "final_warning", "suspension", "pip", "other"]),
+            "infraction_type": _s(type="string", enum=["attendance", "performance", "conduct", "safety", "policy_violation"]),
+            "occurrence_dates": _s(type="array", items=_s(type="string"), description="ISO dates YYYY-MM-DD the conduct happened."),
+            "incident_id": _s(type="string", description="The incident this is about, if any."),
+            "case_id": _s(type="string", description="An existing case (e.g. a revised draft after HR asked for changes)."),
+            "attachment_index": _s(type="integer", description="0 = newest file attached in this chat."),
+            "drive_file_id": _s(type="string"),
+            "google_url": _s(type="string"),
+            "confirm_id": _s(type="string", description="Omit when staging. On the confirm turn pass back EXACTLY the confirm_id from 'Current staged state'."),
+        },
+        required=["action_type", "infraction_type"],
+        intent_hints=("here's the write-up", "send this write-up", "write-up to hr", "written warning", "final warning"),
+    ),
+    _tool(
+        "decide_write_up", "staged",
+        "HR only: approve a write-up for delivery, or send it back to the "
+        "manager with what to change (reason of at least 20 characters, which "
+        "the manager sees). STAGES the decision; nothing changes until HR "
+        "confirms on a LATER turn. Approval re-checks leave protections and can "
+        "still be refused.",
+        properties={
+            "case_id": _s(type="string"),
+            "decision": _s(type="string", enum=["approve", "request_changes"]),
+            "reason": _s(type="string", description="Required for request_changes (at least 20 characters)."),
+        },
+        required=["case_id", "decision"],
+    ),
+    _tool(
+        "mark_write_up_delivered", "staged",
+        "Record that an approved write-up was delivered to the employee. The "
+        "case's manager or HR may do this. STAGES it; confirm on a LATER turn.",
+        properties={
+            "case_id": _s(type="string"),
+            "delivered_on": _s(type="string", description="YYYY-MM-DD; today if omitted. Not in the future."),
+        },
+        required=["case_id"],
+    ),
+    _tool(
+        "search_drive", "read",
+        "Search the company's Matcha Drive by file name and text. Only returns "
+        "files the user can open. Use drive_file_id with read_drive_file or "
+        "submit_write_up.",
+        properties={"query": _s(type="string")},
+        required=["query"],
+        intent_hints=("in drive", "matcha drive", "find the file", "find the doc"),
+    ),
+    _tool(
+        "read_drive_file", "read",
+        "Read the text of one Matcha Drive file the user can open (first 20,000 characters).",
+        properties={"drive_file_id": _s(type="string")},
+        required=["drive_file_id"],
+    ),
     # ---- Legal Pilot skill (feature `legal_defense`) -------------------------
     _tool(
         "list_legal_matters", "read",

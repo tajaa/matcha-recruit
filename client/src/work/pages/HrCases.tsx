@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Briefcase, Loader2 } from 'lucide-react'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
-import { dismissHrCase, getHrCase, listHrCases } from '../api/hrCases'
+import { decideHrCase, dismissHrCase, getHrCase, getWriteUpDraftUrl, listHrCases, markWriteUpDelivered } from '../api/hrCases'
 import type { HrCase, HrCaseColumn } from '../types'
 import HrCaseDetail from '../components/panels/hr-cases/HrCaseDetail'
 
@@ -50,11 +50,32 @@ export default function HrCases() {
 
   const shown = caseId && detail?.id === caseId ? detail : null
 
+  async function refreshCase(id: string) {
+    await Promise.all([load(), loadDetail(id)])
+  }
+
   async function dismiss(reason: string) {
     if (!shown) return
-    const updated = await dismissHrCase(shown.id, reason)
-    setDetail({ ...updated, events: shown.events })
-    await Promise.all([load(), loadDetail(shown.id)])
+    await dismissHrCase(shown.id, reason)
+    await refreshCase(shown.id)
+  }
+
+  async function openDraft() {
+    if (!shown) return
+    const { url } = await getWriteUpDraftUrl(shown.id)
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  async function decide(decision: 'approve' | 'request_changes', reason: string) {
+    if (!shown) return
+    await decideHrCase(shown.id, decision, reason)
+    await refreshCase(shown.id)
+  }
+
+  async function delivered(deliveredOn: string) {
+    if (!shown) return
+    await markWriteUpDelivered(shown.id, deliveredOn)
+    await refreshCase(shown.id)
   }
 
   return (
@@ -111,7 +132,7 @@ export default function HrCases() {
 
       {caseId && (
         shown ? (
-          <HrCaseDetail hrCase={shown} onClose={() => navigate(`${base}/hr-cases`)} onDismiss={dismiss} />
+          <HrCaseDetail hrCase={shown} onClose={() => navigate(`${base}/hr-cases`)} onDismiss={dismiss} onOpenDraft={openDraft} onDecide={decide} onDelivered={delivered} />
         ) : detailError?.id === caseId ? (
           <aside className="w-96 border-l border-w-line p-4 text-sm text-red-300" role="alert">{detailError.message}</aside>
         ) : (

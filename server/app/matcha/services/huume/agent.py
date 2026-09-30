@@ -429,6 +429,47 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         "failed_label": "Discipline decision not recorded",
         "done_status": "decided",
     },
+    # HR cases (services/huume/hr_case_skill.py, feature `hr_cases`).
+    # submit_write_up has a stage-time arm below that resolves the employee
+    # and pins the draft's source to a concrete reference.
+    "submit_write_up": {
+        "action_type": "hr_case_draft",
+        "match_key": "confirm_id",
+        "mints_confirm_id": True,
+        "fields": (
+            "employee_name", "employee_id", "action_type", "infraction_type", "occurrence_dates",
+            "incident_id", "case_id", "attachment_index", "drive_file_id", "google_url",
+        ),
+        "decision_fields": ("action_type", "infraction_type"),
+        "staged_label": "Staged: write-up for HR",
+        "refused_label": "Write-up not staged",
+        "done_label": "Sent write-up to HR",
+        "failed_label": "Write-up not sent",
+        "done_status": "submitted",
+    },
+    "decide_write_up": {
+        "action_type": "hr_case_decision",
+        "match_key": "case_id",
+        "mints_confirm_id": False,
+        "fields": ("case_id", "decision", "reason"),
+        "decision_fields": ("decision",),
+        "staged_label": "Staged: write-up decision",
+        "refused_label": "Write-up decision refused",
+        "done_label": "Recorded write-up decision",
+        "failed_label": "Write-up decision not recorded",
+        "done_status": "decided",
+    },
+    "mark_write_up_delivered": {
+        "action_type": "hr_case_delivered",
+        "match_key": "case_id",
+        "mints_confirm_id": False,
+        "fields": ("case_id", "delivered_on"),
+        "staged_label": "Staged: write-up delivered",
+        "refused_label": "Delivery not recorded",
+        "done_label": "Recorded delivery",
+        "failed_label": "Delivery not recorded",
+        "done_status": "delivered",
+    },
     "promote_ems_event": {
         "action_type": "ems_promote",
         "match_key": "event_id",
@@ -711,6 +752,7 @@ async def run_huume_turn(
     integrations: Optional[dict[str, bool]] = None,
     run_id: Optional[UUID] = None,
     surface_context: HuumeSurfaceContext | None = None,
+    attachment_refs: Optional[list[dict[str, Any]]] = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run one Huume turn. Yields `status`/`step`/`error` frames, then
     exactly one final `huume_result` frame:
@@ -796,6 +838,9 @@ async def run_huume_turn(
         return {
             "send_offer": "offer send",
             "discipline_from_incident": "disciplinary action",
+            "hr_case_draft": "write-up for HR",
+            "hr_case_decision": "write-up decision",
+            "hr_case_delivered": "write-up delivery",
             "discipline_draft": "discipline write-up",
             "schedule_change": "schedule change",
             "schedule_week_draft": "generated weekly schedule",
@@ -1156,6 +1201,27 @@ async def run_huume_turn(
                     tool=name, kind="write", label="Sent offer to candidate" if result.get("status") == "created" else "Failed to send offer",
                     status="ok" if result.get("status") == "created" else "error", detail=result.get("message"),
                 )
+                return _json_safe(result), step
+
+            if name in ("list_write_ups", "search_drive", "read_drive_file"):
+                from app.matcha.services.huume import hr_case_skill
+                if name == "list_write_ups":
+                    result = await hr_case_skill.list_write_ups(company_id=company_id, user_id=user_id, features=features)
+                    label = "Listed write-ups"
+                elif name == "search_drive":
+                    result = await hr_case_skill.search_drive(
+                        company_id=company_id, user_id=user_id, features=features, query=str(args.get("query") or ""),
+                    )
+                    label = "Searched Drive"
+                else:
+                    result = await hr_case_skill.read_drive_file(
+                        company_id=company_id, user_id=user_id, features=features,
+                        file_id=str(args.get("drive_file_id") or ""),
+                    )
+                    label = "Read a Drive file"
+                ok = result.get("status") == "ok"
+                step = recorder.record(tool=name, kind="read", label=label if ok else f"{label} — unavailable",
+                                       status="ok" if ok else "rejected", detail=result.get("message"))
                 return _json_safe(result), step
 
             if name == "find_discipline_candidates":
@@ -1598,6 +1664,29 @@ async def run_huume_turn(
                         )
                         return {"status": "refused", "message": parsed["error"]}, step
                     staged.update({k: v for k, v in parsed.items() if k != "error"})
+                if name == "submit_write_up" and not confirming:
+                    # Resolve the employee and pin the draft to ONE concrete
+                    # source now; the confirm turn re-fetches exactly that.
+                    from app.matcha.services.huume import hr_case_skill
+                    resolved = await hr_case_skill.resolve_draft_args(
+                        company_id=company_id, args=args, attachment_refs=attachment_refs or [],
+                    )
+                    if resolved.get("status") != "ok":
+                        message = str(resolved.get("message") or "That write-up could not be staged.")
+                        step = recorder.record(tool=name, kind="staged", label="Write-up not staged",
+                                               status="rejected", detail=message)
+                        return {"status": "refused", "message": message}, step
+                    staged.update({k: v for k, v in resolved.items() if k != "status"})
+                if name == "decide_write_up" and not confirming:
+                    from app.database import get_connection as _get_connection
+                    from app.matcha.services.huume import hr_case_skill
+                    async with _get_connection() as _conn:
+                        _hr = await hr_case_skill._is_hr(_conn, company_id=company_id, user_id=user_id)
+                    if not _hr:
+                        message = "Only HR can approve or send back a write-up."
+                        step = recorder.record(tool=name, kind="staged", label="Write-up decision refused",
+                                               status="rejected", detail=message)
+                        return {"status": "refused", "message": message}, step
                 if name == "propose_schedule_change" and not confirming:
                     # Same shape as the receipt special-case above: resolve
                     # the request into a real proposal row NOW (dry-run

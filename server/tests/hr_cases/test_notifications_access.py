@@ -124,3 +124,64 @@ async def test_has_hr_access(drive, level, caps, error, expected):
     drive.update(level=level, caps=caps, error=error)
     user = SimpleNamespace(id=uuid4(), role="client")
     assert await access.has_hr_access(QueryConn(), user=user, company_id=COMPANY) is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("step,to_hr,type_", [
+    ("draft_submitted", True, "hr_case_draft_submitted"),
+    ("draft_held", True, "hr_case_draft_held"),
+    ("approved", False, "hr_case_approved"),
+    ("changes_requested", False, "hr_case_changes_requested"),
+    ("delivered", True, "hr_case_delivered"),
+])
+async def test_notify_step_routes_to_the_right_people(monkeypatch, step, to_hr, type_):
+    from app.matcha.services import notification_service
+
+    sent = []
+
+    async def create(**kw):
+        sent.append(kw)
+    monkeypatch.setattr(notification_service, "create_notification", create)
+    hr, gm = uuid4(), uuid4()
+
+    async def recips(conn, company_id):
+        return [{"user_id": hr, "name": "Dana"}]
+    monkeypatch.setattr(notifications, "hr_recipients", recips)
+    case = {"id": uuid4(), "company_id": COMPANY, "case_number": "HRC-9", "gm_user_id": gm}
+    await notifications.notify_step(QueryConn(), case=case, step=step, actor_user_id=None, reason="Add dates")
+    assert [s["user_id"] for s in sent] == [hr if to_hr else gm]
+    assert sent[0]["type"] == type_
+    assert sent[0]["link"].startswith("/work/hr-cases/" if to_hr else "/work/write-ups/")
+    if step == "changes_requested":
+        assert "Add dates" in sent[0]["body"]
+
+
+@pytest.mark.asyncio
+async def test_notify_step_skips_the_actor_and_survives_failures(monkeypatch):
+    from app.matcha.services import notification_service
+
+    hr = uuid4()
+
+    async def recips(conn, company_id):
+        return [{"user_id": hr, "name": "Dana"}]
+
+    async def boom(**kw):
+        raise RuntimeError("smtp")
+    monkeypatch.setattr(notifications, "hr_recipients", recips)
+    monkeypatch.setattr(notification_service, "create_notification", boom)
+    case = {"id": uuid4(), "company_id": COMPANY, "case_number": "HRC-9", "gm_user_id": None}
+    await notifications.notify_step(QueryConn(), case=case, step="delivered", actor_user_id=None)
+
+    async def fail_recips(conn, company_id):
+        raise RuntimeError("db")
+    sent = []
+
+    async def create(**kw):
+        sent.append(kw)
+    monkeypatch.setattr(notifications, "hr_recipients", fail_recips)
+    monkeypatch.setattr(notification_service, "create_notification", create)
+    await notifications.notify_step(QueryConn(), case=case, step="delivered", actor_user_id=None)
+    assert sent == []
+    await notifications.send(user_ids=[hr, hr, None], company_id=COMPANY, type="t", title="x", body="y",
+                             link="/l", skip_user_id=None)
+    assert len(sent) == 1

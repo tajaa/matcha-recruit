@@ -1427,6 +1427,12 @@ export type HrCase = {
   gm_name: string | null
   action_type: string | null
   triage: HrCaseTriage | null
+  review: HrCaseReview | null
+  decision: 'approved' | 'changes_requested' | null
+  decision_reason: string | null
+  decided_at: string | null
+  delivered_at: string | null
+  draft_file_id: string | null
   dismissed_reason: string | null
   created_at: string
   updated_at: string
@@ -1435,3 +1441,52 @@ export type HrCase = {
 }
 
 export type HrCaseColumn = { key: string; label: string; stages: HrCaseStage[] }
+
+export type HrCaseReviewItem = { source: 'compliance' | 'ladder' | 'structure' | 'ai'; code: string; detail: string }
+
+export type HrCaseReview = {
+  checked_at: string
+  blocks: { source: string; code: string; detail: string; statute?: string | null }[]
+  advisories: HrCaseReviewItem[]
+  input?: { infraction_type: string; action_type: string; occurrence_dates: string[]; file_id: string }
+}
+
+/** What the manager on a case sees (server: workflow.manager_view). */
+export type ManagerCase = {
+  id: string
+  case_number: string
+  stage: HrCaseStage
+  stage_label: string
+  checklist: { key: string; label: string; done: boolean }[]
+  incident_id: string | null
+  incident_number: string | null
+  incident_title: string | null
+  employee_id: string | null
+  employee_name: string | null
+  action_type: string | null
+  review: { held_for_hr: boolean; message: string | null; notes: { code: string; detail: string }[] } | null
+  decision: 'approved' | 'changes_requested' | null
+  decision_reason: string | null
+  delivered_at: string | null
+  has_draft: boolean
+  can_submit_draft: boolean
+  can_mark_delivered: boolean
+  can_upload_signed: boolean
+  updated_at: string | null
+}
+
+export type HrCaseEmployee = { id: string; name: string | null; job_title: string | null }
+export type HrCaseIncident = { id: string; incident_number: string | null; title: string | null; occurred_at: string | null }
+
+/** Form payload for POST /hr-cases/drafts (exactly one of file / googleUrl / driveFileId). */
+export type DraftSubmission = {
+  employeeId: string
+  actionType: string
+  infractionType: string
+  occurrenceDates: string[]
+  caseId?: string
+  incidentId?: string
+  file?: File
+  googleUrl?: string
+  driveFileId?: string
+}

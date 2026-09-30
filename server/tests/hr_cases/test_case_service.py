@@ -179,3 +179,19 @@ async def test_list_cases_scopes_and_hides_old_closed():
     conn2 = QueryConn(fetch={"FROM hr_cases c": Queue([[]])})
     await svc.list_cases(conn2, company_id=COMPANY, include_closed=True)
     assert "30 days" not in conn2.sql_for("fetch")[0]
+
+
+@pytest.mark.asyncio
+async def test_set_fields_writes_without_stage_change():
+    cid = uuid4()
+    conn = TxConn()
+    await svc.set_fields(conn, company_id=COMPANY, case_id=cid, sets={"review": {"a": 1}, "action_type": "pip"},
+                         event="draft_held", actor_user_id=uuid4(), details={"x": 1})
+    update = [s for s in conn.sql_for("execute") if s.startswith("UPDATE hr_cases")][0]
+    assert "stage" not in update and "review = $3::jsonb" in update
+    assert conn.args_for("INSERT INTO hr_case_events")[2] == "draft_held"
+    with pytest.raises(ValueError):
+        await svc.set_fields(conn, company_id=COMPANY, case_id=cid, sets={"stage": "closed"})
+    before = len(conn.calls)
+    await svc.set_fields(conn, company_id=COMPANY, case_id=cid, sets={})
+    assert len(conn.calls) == before
