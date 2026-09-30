@@ -18,6 +18,14 @@ describe('resolveLegacyChannelTarget', () => {
     )).toBe('/work/projects/project-1?tab=chat')
   })
 
+  it('routes a private conversation with Espresso to its own page', () => {
+    expect(resolveLegacyChannelTarget(
+      { channel_scope: 'assistant' },
+      'channel-1',
+      '?message=msg-1',
+    )).toBe('/work/assistant?message=msg-1')
+  })
+
   it('keeps community channels in the current shell', () => {
     expect(resolveLegacyChannelTarget(
       { channel_scope: 'community' },

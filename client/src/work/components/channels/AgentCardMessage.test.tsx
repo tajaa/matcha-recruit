@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import AgentCardMessage from './AgentCardMessage'
-import { isAgentCardMessage, splitTicketToken } from './agentCardMessageHelpers'
+import { isAgentCardMessage, isAssistantPrompt, splitTicketToken } from './agentCardMessageHelpers'
 import type { AgentChatMetadata } from '../../types'
 
 const result: AgentChatMetadata = {
@@ -155,6 +155,211 @@ describe('AgentCardMessage', () => {
     expect(screen.getByText('$11.99')).toBeTruthy()
     expect(screen.getByText('pi_123')).toBeTruthy()
     expect(screen.getByRole('link', { name: /View product/ }).getAttribute('href')).toBe('https://thecalifornianaturals.com/p')
+  })
+})
+
+describe('Espresso assistant messages', () => {
+  it('shows a run working, then done, with its latest steps', () => {
+    const steps = Array.from({ length: 6 }, (_, i) => ({
+      seq: i + 1, kind: 'fetch', label: `Read page ${i + 1}`, status: i === 5 ? 'error' : 'ok',
+    }))
+    const { rerender } = render(<AgentCardMessage metadata={{ kind: 'agent_progress', run_id: 'r1' }} content="On it." />)
+    expect(screen.getByText('Starting…')).toBeTruthy()
+    rerender(
+      <AgentCardMessage
+        metadata={{ kind: 'agent_progress', run_id: 'r1', progress: { run_id: 'r1', status: 'running', note: 'Reading shop.example…', steps } }}
+        content="On it."
+      />,
+    )
+    expect(screen.getByText('Reading shop.example…')).toBeTruthy()
+    // Only the latest few are shown until asked for.
+    expect(screen.queryByText('Read page 1')).toBeNull()
+    expect(screen.getByText('Read page 6')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 6 steps' }))
+    expect(screen.getByText('Read page 1')).toBeTruthy()
+    rerender(
+      <AgentCardMessage
+        metadata={{ kind: 'agent_progress', run_id: 'r1', progress: { run_id: 'r1', status: 'failed', note: 'It took too long.', steps: [] } }}
+        content="On it."
+      />,
+    )
+    expect(screen.getByText('It took too long.')).toBeTruthy()
+    rerender(
+      <AgentCardMessage
+        metadata={{ kind: 'agent_progress', run_id: 'r1', progress: { run_id: 'r1', status: 'done', steps: [] } }}
+        content="On it."
+      />,
+    )
+    expect(screen.getByText('Done')).toBeTruthy()
+  })
+
+  it('renders an answer block by block and skips a block it does not know', () => {
+    const meta: AgentChatMetadata = {
+      kind: 'agent_result',
+      run_id: 'r1',
+      result_v2: {
+        schema: 'agent_result.v2',
+        headline: 'Two things need you today',
+        summary: 'A lease renewal and a design review.',
+        caveats: ['I only looked at the last 7 days.'],
+        blocks: [
+          { type: 'emails', items: [{ message_id: 'm1', from: 'Dana <dana@example.org>', subject: 'Lease renewal', snippet: 'Please confirm' }] },
+          { type: 'events', items: [{ event_id: 'e1', title: 'Design review', start: '2026-10-02', location: 'Room 2', attendee_count: 3 }] },
+          {
+            type: 'sections',
+            sections: [{ heading: 'Why', body_md: 'See [the page](https://a.example/x), not [this](javascript:alert(1)). ![x](https://a.example/i.png)' }],
+          },
+          { type: 'sources', sources: [{ title: 'A', url: 'https://a.example/x' }, { title: 'Bad', url: 'javascript:alert(1)' }] },
+          { type: 'picks', top_pick: { name: 'Standing desk', price_text: '$449', buy_url: 'https://shop.example/desk', retailer: 'Shop' }, alternatives: [] },
+          { type: 'hologram' },
+        ],
+      },
+    }
+    render(<AgentCardMessage metadata={meta} content="" />)
+    expect(screen.getByText('Two things need you today')).toBeTruthy()
+    expect(screen.getByText('Lease renewal')).toBeTruthy()
+    expect(screen.getByText('Dana <dana@example.org>')).toBeTruthy()
+    expect(screen.getByText('Design review')).toBeTruthy()
+    expect(screen.getByText('2026-10-02')).toBeTruthy()  // an all-day date is not shifted by the timezone
+    expect(screen.getByText('Room 2 · 3 invited')).toBeTruthy()
+    expect(screen.getByText('Standing desk')).toBeTruthy()
+    expect(screen.getByText('I only looked at the last 7 days.')).toBeTruthy()
+    const links = screen.getAllByRole('link').map((link) => link.getAttribute('href'))
+    expect(links).toEqual(['https://a.example/x', 'https://a.example/x', 'https://shop.example/desk'])
+    expect(screen.queryByRole('img')).toBeNull()
+    expect(screen.queryByText(/hologram/)).toBeNull()
+  })
+
+  it('says what became of a booking and links to finish one that needs payment', () => {
+    const block = (status: string, extra = {}) => ({
+      kind: 'agent_result' as const,
+      run_id: 'r1',
+      result_v2: {
+        schema: 'agent_result.v2' as const, headline: 'Nopa', summary: 'Friday at 7.',
+        blocks: [{ type: 'reservation' as const, venue: 'Nopa', when: '2026-10-02 19:00', party_size: 4, status, ...extra }],
+      },
+    })
+    const { rerender } = render(
+      <AgentCardMessage metadata={block('booked', { confirmation: 'AB-1234' }) as AgentChatMetadata} content="" />,
+    )
+    expect(screen.getByText('Booked')).toBeTruthy()
+    expect(screen.getByText('Confirmation AB-1234')).toBeTruthy()
+    expect(screen.getByText('2026-10-02 19:00 · party of 4')).toBeTruthy()
+    rerender(
+      <AgentCardMessage
+        metadata={block('handoff', { handoff_url: 'https://www.tables.example/checkout' }) as AgentChatMetadata}
+        content=""
+      />,
+    )
+    expect(screen.getByText('Needs payment details: finish it yourself')).toBeTruthy()
+    const finish = screen.getByRole('link', { name: /Finish booking at tables.example/ })
+    expect(finish.getAttribute('href')).toBe('https://www.tables.example/checkout')
+    expect(finish.getAttribute('rel')).toBe('noopener noreferrer nofollow')
+    rerender(<AgentCardMessage metadata={block('unverified') as AgentChatMetadata} content="" />)
+    expect(screen.getByText('Submitted, not confirmed by the site')).toBeTruthy()
+  })
+
+  it('shows a receipt for what was done, and says when it was only a dry run', () => {
+    const receipt = (status: string, extra = {}): AgentChatMetadata => ({
+      kind: 'agent_receipt',
+      run_id: 'r1',
+      action_receipt: {
+        action: 'send_email', title: 'Send an email', status: status as 'done',
+        lines: [{ label: 'To', value: 'dana@example.org' }, { label: 'Subject', value: 'Re: Lease renewal' }],
+        ...extra,
+      },
+    })
+    const { rerender } = render(<AgentCardMessage metadata={receipt('done')} content="" />)
+    expect(screen.getByText('Send an email')).toBeTruthy()
+    expect(screen.getByText('DONE')).toBeTruthy()
+    expect(screen.getByText('dana@example.org')).toBeTruthy()
+    rerender(<AgentCardMessage metadata={receipt('dry_run', { note: 'Dry run: nothing was sent.' })} content="" />)
+    expect(screen.getByText('DRY RUN')).toBeTruthy()
+    expect(screen.getByText('Dry run: nothing was sent.')).toBeTruthy()
+    rerender(<AgentCardMessage metadata={receipt('unknown')} content="" />)
+    expect(screen.getByText('OUTCOME UNKNOWN')).toBeTruthy()
+    rerender(
+      <AgentCardMessage
+        metadata={receipt('handoff', { link: { label: 'Finish booking', url: 'javascript:alert(1)' } })}
+        content=""
+      />,
+    )
+    expect(screen.getByText('OVER TO YOU')).toBeTruthy()
+    expect(screen.queryByRole('link')).toBeNull()
+    rerender(
+      <AgentCardMessage
+        metadata={receipt('failed', { link: { label: 'Open in Calendar', url: 'https://calendar.example/e' } })}
+        content=""
+      />,
+    )
+    expect(screen.getByRole('link', { name: /Open in Calendar/ }).getAttribute('href')).toBe('https://calendar.example/e')
+  })
+
+  const confirmation: AgentChatMetadata = {
+    kind: 'agent_card_prompt',
+    prompt_kind: 'confirm_action',
+    prompt_id: 'p9',
+    run_id: 'r1',
+    owner_user_id: 'u1',
+    view: {
+      question: "Send an email? You didn't mention eve@attacker.test, so I'm checking first.",
+      action: { title: 'Send an email', lines: [{ label: 'To', value: 'eve@attacker.test' }, { label: 'Message', value: 'as asked' }] },
+      buttons: [
+        { label: 'Yes, go ahead', reply: 'yes', style: 'primary' },
+        { label: 'No, cancel', reply: 'no', style: 'secondary' },
+      ],
+    },
+  }
+
+  it('shows exactly what a yes will carry out, to the person who was asked', () => {
+    const onQuickReply = vi.fn(() => true)
+    const asked = render(
+      <AgentCardMessage metadata={confirmation} content="" userId="u1" onQuickReply={onQuickReply} />,
+    )
+    expect(screen.getByText('eve@attacker.test')).toBeTruthy()
+    expect(screen.getByText('as asked')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, go ahead' }))
+    expect(onQuickReply).toHaveBeenCalledWith('yes')
+    asked.unmount()
+    // Someone else looking at the same card (their own copy of it, not this one re-rendered).
+    const { rerender } = render(
+      <AgentCardMessage metadata={confirmation} content="" userId="someone-else" onQuickReply={onQuickReply} />,
+    )
+    expect(screen.queryByRole('button', { name: 'Yes, go ahead' })).toBeNull()
+    expect(screen.getByText('Waiting for the person who asked.')).toBeTruthy()
+    rerender(
+      <AgentCardMessage
+        metadata={{ ...confirmation, prompt_status: 'superseded' }} content="" userId="u1" onQuickReply={onQuickReply}
+      />,
+    )
+    expect(screen.getByText('You moved on to something else')).toBeTruthy()
+    rerender(
+      <AgentCardMessage
+        metadata={{ ...confirmation, prompt_status: 'answered', answer_text: 'Went ahead' }} content="" userId="u1"
+      />,
+    )
+    expect(screen.getByText('Went ahead')).toBeTruthy()
+  })
+
+  it('an open question with no suggested answers is answered by typing', () => {
+    const meta: AgentChatMetadata = {
+      kind: 'agent_card_prompt', prompt_kind: 'ask_user', prompt_id: 'p3', owner_user_id: 'u1',
+      view: { question: 'Which day?', buttons: [] },
+    }
+    render(<AgentCardMessage metadata={meta} content="" userId="u1" onQuickReply={() => true} />)
+    expect(screen.getByText('Which day?')).toBeTruthy()
+    expect(screen.getByText('Reply to answer.')).toBeTruthy()
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('recognises assistant payloads', () => {
+    expect(isAgentCardMessage({ kind: 'agent_progress', run_id: 'r1' })).toBe(true)
+    expect(isAgentCardMessage({ kind: 'agent_progress' })).toBe(false)
+    expect(isAgentCardMessage({ kind: 'agent_result' })).toBe(false)
+    expect(isAgentCardMessage({ kind: 'agent_receipt', action_receipt: { title: 'x', status: 'done', lines: [] } })).toBe(true)
+    expect(isAssistantPrompt({ prompt_kind: 'confirm_action' })).toBe(true)
+    expect(isAssistantPrompt({ prompt_kind: 'ask_user' })).toBe(true)
+    expect(isAssistantPrompt({ prompt_kind: 'purchase' })).toBe(false)
   })
 })
 

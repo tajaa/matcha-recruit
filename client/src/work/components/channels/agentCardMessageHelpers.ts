@@ -9,7 +9,17 @@ export function isAgentCardMessage(metadata: unknown): metadata is AgentChatMeta
     (m.kind === 'agent_card_result' && !!m.result)
     || (m.kind === 'agent_card_prompt' && !!m.view)
     || (m.kind === 'agent_card_receipt' && !!m.receipt)
+    // Espresso assistant
+    || (m.kind === 'agent_progress' && !!m.run_id)
+    || (m.kind === 'agent_result' && !!m.result_v2)
+    || (m.kind === 'agent_receipt' && !!m.action_receipt)
   )
+}
+
+/** Whether a question was asked by the assistant (answered by its owner),
+ *  not by an agent card (a buy / card question, answered by the buyer). */
+export function isAssistantPrompt(metadata: AgentChatMetadata): boolean {
+  return metadata.prompt_kind === 'ask_user' || metadata.prompt_kind === 'confirm_action'
 }
 
 /** Strip the leading `⟦ticket:id|title|column⟧` marker; returns the title too. */

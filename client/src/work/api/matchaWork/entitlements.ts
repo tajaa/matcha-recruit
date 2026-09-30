@@ -13,6 +13,8 @@ export type WorkEntitlements = {
     resets_at?: string | null
     /** Agent-card runs this UTC month (server: agent_card/quota.py). */
     agent_runs?: { limit: number; used: number; remaining: number; resets_at: string }
+    /** Espresso assistant requests this UTC day (server: agent_runtime/quota.py). */
+    assistant_runs?: { limit: number; used: number; remaining: number; resets_at: string }
   }
 }
 
