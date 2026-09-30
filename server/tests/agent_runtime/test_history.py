@@ -75,3 +75,14 @@ async def test_progress_cards_and_deleted_messages_are_not_part_of_the_conversat
     query = conn.calls[0][1]
     assert "m.deleted_at IS NULL" in query
     assert "<> 'agent_progress'" in query
+
+
+def test_query_keeps_user_messages_and_drops_system_notices():
+    # channel_messages.message_type is 'user' or 'system' (ems01). Filtering on
+    # a 'message' value that never exists replayed nothing, so "buy it" after
+    # a result reached the model with no idea what "it" was.
+    import inspect
+
+    source = inspect.getsource(history.build_history)
+    assert "message_type IS DISTINCT FROM 'system'" in source
+    assert "= 'message'" not in source

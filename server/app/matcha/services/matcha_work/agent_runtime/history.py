@@ -46,7 +46,9 @@ async def build_history(
            LEFT JOIN clients c ON c.user_id = m.sender_id
            LEFT JOIN employees e ON e.user_id = m.sender_id
            WHERE m.channel_id = $1 AND m.deleted_at IS NULL
-             AND COALESCE(m.message_type, 'message') = 'message'
+             -- The column holds 'user' or 'system' (ems01); anything that is
+             -- not a system notice is part of the conversation.
+             AND m.message_type IS DISTINCT FROM 'system'
              -- "On it." is a progress card, not something that was said.
              AND COALESCE(m.metadata->>'kind', '') <> 'agent_progress'
            ORDER BY m.created_at DESC
