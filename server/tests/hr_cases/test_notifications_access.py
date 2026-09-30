@@ -226,3 +226,49 @@ async def test_notify_step_skips_the_actor_and_survives_failures(monkeypatch):
     await notifications.send(user_ids=[hr, hr, None], company_id=COMPANY, type="t", title="x", body="y",
                              link="/l", skip_user_id=None)
     assert len(sent) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage,reasons,expect_hr,expect_gm", [
+    ("closed", [], "hr_case_signed_filed", False),
+    ("needs_attention", ["employee_comments"], "hr_case_signed_attention", False),
+    # Anything of HR's on it: the manager isn't asked to replace it.
+    ("needs_attention", ["illegible_scan", "employee_comments"], "hr_case_signed_attention", False),
+    ("needs_attention", ["illegible_scan"], "hr_case_signed_attention", True),
+    ("verifying", [], None, False),
+])
+async def test_notify_signed(monkeypatch, stage, reasons, expect_hr, expect_gm):
+    from app.matcha.services import notification_service
+
+    sent = []
+
+    async def create(**kw):
+        sent.append(kw)
+    monkeypatch.setattr(notification_service, "create_notification", create)
+    hr, gm = uuid4(), uuid4()
+
+    async def recips(conn, company_id):
+        return [{"user_id": hr, "name": "Dana"}]
+    monkeypatch.setattr(notifications, "hr_recipients", recips)
+    case = {"id": uuid4(), "company_id": COMPANY, "case_number": "HRC-9", "gm_user_id": gm,
+            "stage": stage, "attention_reasons": reasons}
+    await notifications.notify_signed(QueryConn(), case=case, actor_user_id=None)
+    hr_sent = [s for s in sent if s["user_id"] == hr]
+    gm_sent = [s for s in sent if s["user_id"] == gm]
+    if expect_hr:
+        assert hr_sent[0]["type"] == expect_hr
+    else:
+        assert hr_sent == []
+    assert bool(gm_sent) is expect_gm
+    if gm_sent:
+        assert "comments" not in gm_sent[0]["body"].lower()
+        assert "hard to read" in gm_sent[0]["body"]
+
+
+@pytest.mark.asyncio
+async def test_notify_signed_survives_recipient_failure(monkeypatch):
+    async def boom(conn, company_id):
+        raise RuntimeError("db")
+    monkeypatch.setattr(notifications, "hr_recipients", boom)
+    await notifications.notify_signed(QueryConn(), case={"id": uuid4(), "company_id": COMPANY, "case_number": "H",
+                                                         "stage": "closed", "gm_user_id": None}, actor_user_id=None)

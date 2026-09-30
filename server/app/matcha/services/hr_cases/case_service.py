@@ -58,6 +58,21 @@ def _json(value: Any) -> Any:
     return value
 
 
+# A signed-copy check that hasn't finished this long after it started never
+# will (the model read times out at 90s): the process running it died, and HR
+# may re-run it (`workflow.recheck_signed`).
+VERIFYING_STALE_SECONDS = 300
+
+
+def verifying_is_stale(case: dict[str, Any], *, now: Optional[datetime] = None) -> bool:
+    updated = case.get("updated_at")
+    if case.get("stage") != "verifying" or not isinstance(updated, datetime):
+        return False
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    return ((now or datetime.now(timezone.utc)) - updated).total_seconds() > VERIFYING_STALE_SECONDS
+
+
 def serialize(row: Any) -> dict[str, Any]:
     case = dict(row)
     for col in _JSON_COLUMNS:
@@ -67,6 +82,7 @@ def serialize(row: Any) -> dict[str, Any]:
     case["column"] = stages.COLUMN_OF.get(stage)
     case["checklist"] = stages.checklist(stage)
     case["allowed_events"] = stages.allowed_events(stage)
+    case["check_stale"] = verifying_is_stale(case)
     return case
 
 

@@ -75,6 +75,8 @@ TYPES = {
     "hr_case_approved": "Write-up Approved",
     "hr_case_changes_requested": "Write-up Needs Changes",
     "hr_case_delivered": "Write-up Delivered",
+    "hr_case_signed_filed": "Signed Copy Filed",
+    "hr_case_signed_attention": "Signed Copy Needs Attention",
 }
 
 

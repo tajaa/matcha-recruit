@@ -49,7 +49,7 @@ def _uses(dependant, call) -> bool:
 
 MANAGER_ROUTES = {
     "/hr-cases/mine", "/hr-cases/employees", "/hr-cases/incidents", "/hr-cases/drafts",
-    "/hr-cases/{case_id}/delivered", "/hr-cases/{case_id}/draft",
+    "/hr-cases/{case_id}/delivered", "/hr-cases/{case_id}/draft", "/hr-cases/{case_id}/signed",
 }
 
 
@@ -416,6 +416,104 @@ def test_draft_download_goes_through_drive_and_is_audited(mod, scope, monkeypatc
     monkeypatch.setattr(mod.workflow, "load_for_actor", no_draft)
     with _client(mod, USER) as client:
         assert client.get(f"/hr-cases/{uuid4()}/draft").status_code == 404
+
+
+# ── Signed copy + template ──────────────────────────────────────────────
+
+
+def test_signed_upload_schedules_check_and_redacts_for_manager(mod, scope, monkeypatch):
+    queued = []
+
+    async def upload(conn, **kw):
+        return {"case": {"id": "c1", "case_number": "HRC-1", "stage": "verifying", "triage": {"x": 1}},
+                "mime_type": "application/pdf"}
+
+    async def check(**kw):
+        queued.append(kw)
+    monkeypatch.setattr(mod.workflow, "upload_signed", upload)
+    monkeypatch.setattr(mod.workflow, "check_signed_and_notify", check)
+    scope["hr"] = False
+    with _client(mod, USER) as client:
+        body = client.post(f"/hr-cases/{uuid4()}/signed", files={"file": ("s.pdf", b"%PDF", "application/pdf")}).json()
+    assert "triage" not in body and body["stage"] == "verifying"
+    assert queued and queued[0]["mime_type"] == "application/pdf"
+
+
+def test_signed_upload_error_maps(mod, scope, monkeypatch):
+    async def upload(conn, **kw):
+        raise mod.CaseError(409, "Can't add a signed copy now.")
+    monkeypatch.setattr(mod.workflow, "upload_signed", upload)
+    with _client(mod, USER) as client:
+        assert client.post(f"/hr-cases/{uuid4()}/signed", files={"file": ("s.pdf", b"%PDF", "application/pdf")}).status_code == 409
+
+
+def test_signed_download_goes_through_drive_and_is_audited(mod, scope, monkeypatch):
+    from app.matcha.services.drive import drive_service
+    from app.matcha.services.drive.drive_service import DriveError
+
+    signed, case_id = uuid4(), uuid4()
+
+    async def load(conn, **kw):
+        return {"signed_file_id": signed}
+    seen = {}
+
+    async def presign(conn, **kw):
+        seen.update(kw)
+        return {"url": "https://s3/signed", "filename": "Doe.pdf", "expires_in": 300}
+    monkeypatch.setattr(mod.workflow, "load_for_actor", load)
+    monkeypatch.setattr(drive_service, "presign_download", presign)
+    with _client(mod, USER) as client:
+        assert client.get(f"/hr-cases/{case_id}/signed").json()["filename"] == "Doe.pdf"
+    assert seen["file_id"] == signed and seen["actor"] is None and seen["on_behalf_of"] == USER.id
+
+    async def gone(conn, **kw):
+        raise DriveError(404, "That file doesn't exist.")
+    monkeypatch.setattr(drive_service, "presign_download", gone)
+    with _client(mod, USER) as client:
+        assert client.get(f"/hr-cases/{case_id}/signed").status_code == 404
+
+    async def none(conn, **kw):
+        return {"signed_file_id": None}
+    monkeypatch.setattr(mod.workflow, "load_for_actor", none)
+    with _client(mod, USER) as client:
+        assert client.get(f"/hr-cases/{uuid4()}/signed").status_code == 404
+
+
+def test_acknowledge_and_recheck_are_hr_only(mod, scope, monkeypatch):
+    async def ok(conn, **kw):
+        return {"id": "c1", "stage": "closed"}
+    seen = {}
+
+    async def recheck(connect, **kw):
+        seen["connect"] = connect
+        return {"id": "c1", "stage": "closed"}
+    monkeypatch.setattr(mod.workflow, "acknowledge", ok)
+    monkeypatch.setattr(mod.workflow, "recheck_signed", recheck)
+    with _client(mod, USER) as client:
+        assert client.post(f"/hr-cases/{uuid4()}/acknowledge").json()["stage"] == "closed"
+        assert client.post(f"/hr-cases/{uuid4()}/recheck").json()["stage"] == "closed"
+    assert seen["connect"] is mod.get_connection  # a factory: no connection across the model read
+
+    async def still_checking(connect, **kw):
+        raise mod.CaseError(409, "That signed copy is still being checked.")
+    monkeypatch.setattr(mod.workflow, "recheck_signed", still_checking)
+    with _client(mod, USER) as client:
+        assert client.post(f"/hr-cases/{uuid4()}/recheck").status_code == 409
+    scope["hr"] = False
+    with _client(mod, USER) as client:
+        assert client.post(f"/hr-cases/{uuid4()}/acknowledge").status_code == 404
+        assert client.post(f"/hr-cases/{uuid4()}/recheck").status_code == 404
+
+
+def test_filename_template_setting(mod, scope, monkeypatch):
+    async def settings(conn, company_id):
+        return {"triage_min_confidence": 0.6, "filename_template": "{last_name}_{case_number}"}
+    monkeypatch.setattr(mod.case_service, "get_settings", settings)
+    with _client(mod, USER) as client:
+        assert "case_number" in client.get("/hr-cases/settings").json()["filename_tokens"]
+        assert client.put("/hr-cases/settings", json={"filename_template": "{ssn}"}).status_code == 400
+        assert client.put("/hr-cases/settings", json={"filename_template": "{last_name}_{case_number}"}).status_code == 200
+    assert scope["conn"].args_for("filename_template = EXCLUDED")[1] == "{last_name}_{case_number}"
 
 
 def test_platform_admin_is_refused(mod, scope):

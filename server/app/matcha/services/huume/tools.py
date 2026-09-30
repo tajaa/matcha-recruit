@@ -573,6 +573,22 @@ TOOLS: tuple[HuumeTool, ...] = (
         required=["case_id"],
     ),
     _tool(
+        "file_signed_write_up", "staged",
+        "File the SIGNED copy of a delivered write-up: an attachment in this "
+        "chat (attachment_index 0 = newest) or a Drive file. STAGES it; on "
+        "confirm it's filed in HR's Drive under the company's naming format "
+        "and checked for a signature, legibility and employee comments. Tell "
+        "the user the check is running — never that it passed.",
+        properties={
+            "case_id": _s(type="string"),
+            "attachment_index": _s(type="integer"),
+            "drive_file_id": _s(type="string"),
+            "confirm_id": _s(type="string", description="Omit when staging. On the confirm turn pass back EXACTLY the confirm_id from 'Current staged state'."),
+        },
+        required=["case_id"],
+        intent_hints=("signed copy", "signed write-up", "they signed it"),
+    ),
+    _tool(
         "search_drive", "read",
         "Search the company's Matcha Drive by file name and text. Only returns "
         "files the user can open. Use drive_file_id with read_drive_file or "

@@ -12,6 +12,10 @@ const api = vi.hoisted(() => ({
   decideHrCase: vi.fn(),
   getWriteUpDraftUrl: vi.fn(),
   markWriteUpDelivered: vi.fn(),
+  getSignedCopyUrl: vi.fn(),
+  uploadSignedCopy: vi.fn(),
+  acknowledgeHrCase: vi.fn(),
+  recheckHrCase: vi.fn(),
 }))
 vi.mock('../api/hrCases', () => api)
 
@@ -35,6 +39,7 @@ function hrCase(overrides: Partial<HrCase> = {}): HrCase {
     action_type: null,
     triage: { phase: 'intake', violations: [{ policy_title: 'Attendance policy', relevance: 'violated', confidence: 0.82 }], citation_count: 1, summary: null },
     review: null, decision: null, decision_reason: null, decided_at: null, delivered_at: null, draft_file_id: null,
+    signed_file_id: null, verification: null, attention_reasons: [],
     dismissed_reason: null, created_at: '2026-09-29T00:00:00Z', updated_at: '2026-09-29T00:00:00Z', closed_at: null,
     events: [{ event: 'opened', from_stage: null, to_stage: 'flagged', details: {}, created_at: '2026-09-29T00:00:00Z', actor_name: null }],
     ...overrides,
@@ -166,6 +171,76 @@ describe('HrCases review and decisions', () => {
     fireEvent.change(screen.getByLabelText('Delivered on'), { target: { value: '2026-09-28' } })
     fireEvent.click(screen.getByRole('button', { name: 'Mark delivered' }))
     await waitFor(() => expect(api.markWriteUpDelivered).toHaveBeenCalledWith('c1', '2026-09-28'))
+    open.mockRestore()
+  })
+})
+
+describe('HrCases signed copy', () => {
+  const verification = {
+    checked_at: '2026-09-29T00:00:00Z', outcome: 'needs_attention' as const,
+    reasons: ['employee_comments', 'check_unavailable'],
+    reason_text: ['The employee wrote comments on it.', "The automatic check couldn't run, so a person needs to look at it."],
+    flag_hr_comments: true,
+    reading: { employee_comments_text: 'I was told I could leave early.' },
+  }
+
+  it('shows reasons and the employee comment, and closes or re-checks', async () => {
+    const attention = hrCase({ stage: 'needs_attention', stage_label: 'Needs attention', allowed_events: ['signed_uploaded', 'acknowledge'], signed_file_id: 's1', verification })
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [] })
+    api.getHrCase.mockResolvedValue(attention)
+    api.acknowledgeHrCase.mockResolvedValue(attention)
+    api.recheckHrCase.mockResolvedValue(attention)
+    renderAt('/work/hr-cases/c1')
+    expect(await screen.findByText('I was told I could leave early.')).toBeTruthy()
+    expect(screen.getByText('The employee wrote comments on it.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(api.recheckHrCase).toHaveBeenCalledWith('c1'))
+    fireEvent.click(screen.getByRole('button', { name: 'Handled — close case' }))
+    await waitFor(() => expect(api.acknowledgeHrCase).toHaveBeenCalledWith('c1'))
+  })
+
+  it('offers a re-check when a check never finished, and not while one is running', async () => {
+    const stuck = hrCase({ stage: 'verifying', stage_label: 'Checking signed copy', allowed_events: [], signed_file_id: 's1', check_stale: true })
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [] })
+    api.getHrCase.mockResolvedValue(stuck)
+    api.recheckHrCase.mockResolvedValue({ ...stuck, stage: 'closed', check_stale: false })
+    renderAt('/work/hr-cases/c1')
+    expect(await screen.findByText(/didn’t finish/)).toBeTruthy()
+    expect(screen.queryByText('Checking the signed copy…')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(api.recheckHrCase).toHaveBeenCalledWith('c1'))
+  })
+
+  it('shows a running check without a re-check button', async () => {
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [] })
+    api.getHrCase.mockResolvedValue(hrCase({ stage: 'verifying', stage_label: 'Checking signed copy', allowed_events: [], signed_file_id: 's1', check_stale: false }))
+    renderAt('/work/hr-cases/c1')
+    expect(await screen.findByText('Checking the signed copy…')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull()
+  })
+
+  it('HR can upload the signed copy after delivery', async () => {
+    const delivered = hrCase({ stage: 'delivered', stage_label: 'Delivered', allowed_events: ['signed_uploaded'] })
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [] })
+    api.getHrCase.mockResolvedValue(delivered)
+    api.uploadSignedCopy.mockResolvedValue(delivered)
+    renderAt('/work/hr-cases/c1')
+    const file = new File(['%PDF'], 'signed.pdf', { type: 'application/pdf' })
+    fireEvent.change(await screen.findByLabelText('Signed copy'), { target: { files: [file] } })
+    await waitFor(() => expect(api.uploadSignedCopy).toHaveBeenCalledWith('c1', file))
+  })
+
+  it('opens a filed signed copy', async () => {
+    const closed = hrCase({ stage: 'closed', stage_label: 'Closed', allowed_events: [], signed_file_id: 's1',
+      verification: { ...verification, outcome: 'verified', reasons: [], reason_text: [], flag_hr_comments: false, reading: {} } })
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [] })
+    api.getHrCase.mockResolvedValue(closed)
+    api.getSignedCopyUrl.mockResolvedValue({ url: 'https://s3/signed', filename: 'Doe.pdf', expires_in: 300 })
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    renderAt('/work/hr-cases/c1')
+    expect(await screen.findByText('Signed, readable and filed.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Open the signed copy/ }))
+    await waitFor(() => expect(open).toHaveBeenCalledWith('https://s3/signed', '_blank', 'noopener,noreferrer'))
     open.mockRestore()
   })
 })

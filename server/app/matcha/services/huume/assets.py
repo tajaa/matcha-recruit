@@ -169,7 +169,7 @@ ASSET_SPECS: dict[str, AssetSpec] = {
 # own manager, the Write-ups page.
 _NO_ASSET_TYPES: frozenset[str] = frozenset(
     {"amend_handbook", "schedule_location_profile", "waste_par_change",
-     "hr_case_draft", "hr_case_decision", "hr_case_delivered"}
+     "hr_case_draft", "hr_case_decision", "hr_case_delivered", "hr_case_signed"}
 )
 
 

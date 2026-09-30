@@ -1507,6 +1507,8 @@ export type HrCase = {
   column: string
   checklist: { key: string; label: string; done: boolean }[]
   allowed_events: string[]
+  /** A signed-copy check that never finished (the process running it died); HR can re-run it. */
+  check_stale?: boolean
   source_incident_id: string | null
   incident_number: string | null
   incident_title: string | null
@@ -1522,6 +1524,9 @@ export type HrCase = {
   decided_at: string | null
   delivered_at: string | null
   draft_file_id: string | null
+  signed_file_id: string | null
+  verification: HrCaseVerification | null
+  attention_reasons: string[]
   dismissed_reason: string | null
   created_at: string
   updated_at: string
@@ -1564,6 +1569,7 @@ export type ManagerCase = {
   can_submit_draft: boolean
   can_mark_delivered: boolean
   can_upload_signed: boolean
+  signed_check: { outcome: 'verified' | 'fix_needed' | 'with_hr'; problems: string[] } | null
   updated_at: string | null
 }
 
@@ -1581,4 +1587,13 @@ export type DraftSubmission = {
   file?: File
   googleUrl?: string
   driveFileId?: string
+}
+
+export type HrCaseVerification = {
+  checked_at: string
+  outcome: 'verified' | 'needs_attention'
+  reasons: string[]
+  reason_text: string[]
+  flag_hr_comments: boolean
+  reading?: { employee_comments_text?: string | null; employee_signature_date?: string | null; available?: boolean }
 }

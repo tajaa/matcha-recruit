@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { CheckCircle2, Circle, ExternalLink, Loader2, X } from 'lucide-react'
 import type { HrCase } from '../../../types'
 import HrCaseReviewSection from './HrCaseReviewSection'
+import HrCaseSignedSection from './HrCaseSignedSection'
 
 const ORIGIN_LABEL: Record<HrCase['origin'], string> = {
   intake_triage: 'Flagged when the incident was reported',
@@ -23,6 +24,10 @@ const EVENT_LABEL: Record<string, string> = {
   approve: 'Approved to deliver',
   request_changes: 'Sent back for changes',
   delivered: 'Delivered to employee',
+  signed_uploaded: 'Signed copy uploaded',
+  verified: 'Signed copy checked and filed',
+  attention: 'Signed copy needs attention',
+  acknowledge: 'Closed by HR',
 }
 
 function when(iso: string | null): string {
@@ -36,9 +41,15 @@ interface Props {
   onOpenDraft: () => Promise<void>
   onDecide: (decision: 'approve' | 'request_changes', reason: string) => Promise<void>
   onDelivered: (deliveredOn: string) => Promise<void>
+  onOpenSigned: () => Promise<void>
+  onUploadSigned: (file: File) => Promise<void>
+  onAcknowledge: () => Promise<void>
+  onRecheck: () => Promise<void>
 }
 
-export default function HrCaseDetail({ hrCase, onClose, onDismiss, onOpenDraft, onDecide, onDelivered }: Props) {
+export default function HrCaseDetail({
+  hrCase, onClose, onDismiss, onOpenDraft, onDecide, onDelivered, onOpenSigned, onUploadSigned, onAcknowledge, onRecheck,
+}: Props) {
   const [dismissing, setDismissing] = useState(false)
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
@@ -105,6 +116,8 @@ export default function HrCaseDetail({ hrCase, onClose, onDismiss, onOpenDraft, 
         </section>
 
         <HrCaseReviewSection hrCase={hrCase} onOpenDraft={onOpenDraft} onDecide={onDecide} onDelivered={onDelivered} />
+
+        <HrCaseSignedSection hrCase={hrCase} onOpenSigned={onOpenSigned} onUploadSigned={onUploadSigned} onAcknowledge={onAcknowledge} onRecheck={onRecheck} />
 
         {matches.length > 0 && (
           <section>
