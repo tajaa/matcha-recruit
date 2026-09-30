@@ -20,7 +20,7 @@ import pytest  # noqa: E402
 
 from app.cappe.services import domain_register as mod  # noqa: E402
 from app.cappe.services.cloudfront_tenants import CappeEdgeError, CfTenant  # noqa: E402
-from app.cappe.services.porkbun import PorkbunError  # noqa: E402
+from app.core.services.porkbun import PorkbunError  # noqa: E402
 
 # `provision_domain_edge` claims the row too (RETURNING kind).
 EDGE_CLAIM = {"kind": "register"}

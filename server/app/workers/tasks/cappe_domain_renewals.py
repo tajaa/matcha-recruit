@@ -68,7 +68,7 @@ async def _dispatch_cappe_domain_renewals() -> dict:
         await conn.close()
 
     from app.cappe.services.stripe_connect import CappeStripeError, get_cappe_stripe
-    from app.cappe.services.porkbun import PorkbunError, get_porkbun
+    from app.core.services.porkbun import PorkbunError, get_porkbun
 
     stop_billing = {r["domain"] for r in leaving}
     stop_billing |= {r["domain"] for r in lapsed_transfers if r["kind"] == "register"}

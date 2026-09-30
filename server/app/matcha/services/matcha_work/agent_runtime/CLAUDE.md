@@ -16,7 +16,7 @@ loop in this package and no other: do not add a second.
 | Policy | `policy.py` | `evaluate_commit`: allow / confirm / deny. Pure: no I/O, no clock, no model |
 | Result | `result.py` | `agent_result.v2` (headline, summary, typed blocks); reads v1 as v2 |
 | Catalog | `catalog.py` | Every ability, and `abilities_for`: the only filter on what a run gets |
-| Abilities | `abilities/*.py` | `web`, `shopping`, `flights`, `email`, `calendar`, `reservations`, `purchase` |
+| Abilities | `abilities/*.py` | `web`, `shopping`, `flights`, `email`, `calendar`, `reservations`, `purchase`, `domains` |
 | Chat entry | `chat_entry.py` | A chat message on its way to a run; answers to questions |
 | Enqueue | `enqueue.py`, `quota.py` | Gates, the daily allowance, one live run per person per conversation |
 | The run | `assistant.py` | Builds the context, runs the loop, posts what came of it |
@@ -28,7 +28,8 @@ loop in this package and no other: do not add a second.
 Worker: `workers/tasks/assistant.py`. REST: `routes/matcha_work/assistant.py`.
 Browser: `../browser/`. Migrations: `agentrt01` (run kind, steps, prompts),
 `agentrt02` (channel scope), `agentrt03` (grants), `assistbuy01` (shipping
-addresses, card billing address, purchases without a project/task).
+addresses, card billing address, purchases without a project/task),
+`assistdom01` (domain registrations).
 
 ## Adding an ability
 
@@ -181,6 +182,29 @@ showed.
   `ASSISTANT_COMMIT_MODE` still applies: unset, a yes gives a dry-run receipt.
 - Real checkout (sending the address to a merchant) needs a new disclosure
   version before it ships.
+
+## Domains (`abilities/domains.py`)
+
+`check_domains` (read) asks Porkbun for availability and the live first-year
+price of up to four registrable names per call and keeps what it saw in the
+run. `register_domain` (commit, `always_confirm`) takes a name the run saw
+free; `resolve` freezes `{domain, cost_cents}` from that check, never from
+the model, and Porkbun itself refuses a `cost` that doesn't match its live
+price.
+
+- **Real money.** Unlike `purchase`, nothing is test mode: registration draws
+  on Matcha's funded Porkbun balance and the domain is held in that account
+  (WHOIS private, renews yearly). Gates: Porkbun keys set (`env_ready`), the
+  `purchases` allowance, the `domains-1` disclosure, private conversation,
+  `ASSISTANT_COMMIT_MODE=live`, a ceiling of 2 a day, and
+  `ASSISTANT_DOMAIN_MAX_CENTS` (default 5000) on price.
+- **One yes registers once.** `mw_agent_domain_registrations` is UNIQUE on
+  the confirmation; `registering` until Porkbun's answer is written; the
+  Porkbun idempotency key is `espresso-domain-<row id>`. A `PorkbunError`
+  caused by a transport error is `unknown` and leaves the row `registering`;
+  a refusal marks it `failed` and is not retried on a repeat of that yes.
+- The client is `core/services/porkbun.py`, shared with Cappe's domain
+  reselling. DNS and hosting are not part of this ability.
 
 ## Conversation model
 

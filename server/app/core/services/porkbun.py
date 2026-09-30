@@ -1,5 +1,7 @@
-"""Porkbun registrar client for Cappe domain reselling.
+"""Porkbun registrar client: Cappe domain reselling and the Espresso
+assistant's `domains` ability.
 
+Lives in core because two products use it (cappe imports only from core).
 We hold ONE funded Porkbun account and register domains on behalf of tenants,
 reselling at wholesale + a flat markup (`settings.cappe_domain_markup_cents`).
 Domains are registered under our account's default WHOIS-private contact — the
