@@ -4,7 +4,7 @@ Thin HTTP layer over `services/drive/drive_service.py`; every capability
 check lives there. Gated on `matcha_drive` (+ the package-level
 `matcha_work` gate) and business workspaces only.
 
-Static paths (`/drive/tree`, `/drive/search`) are declared before any
+Static paths (`/drive/tree`, `/drive/search`, `/drive/people`) are declared before any
 `{folder_id}` / `{file_id}` route.
 """
 
@@ -86,6 +86,20 @@ async def search_files(
         actor = await svc.load_actor(conn, user=current_user, company_id=company_id)
         try:
             return {"results": await svc.search(conn, company_id=company_id, q=q, actor=actor, space=space, limit=limit)}
+        except DriveError as exc:
+            _raise(exc)
+
+
+@router.get("/people")
+async def search_people(
+    q: Optional[str] = Query(None, max_length=100),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await _business_company(current_user)
+    async with get_connection() as conn:
+        actor = await svc.load_actor(conn, user=current_user, company_id=company_id)
+        try:
+            return {"people": await svc.search_members(conn, company_id=company_id, q=q, actor=actor)}
         except DriveError as exc:
             _raise(exc)
 

@@ -796,6 +796,41 @@ async def remove_grant(conn, *, company_id: UUID, folder_id: UUID, user_id: UUID
                       folder_id=folder_id, details={"user_id": str(user_id)})
 
 
+async def search_members(
+    conn, *, company_id: UUID, q: Optional[str], actor: DriveActor, limit: int = 20,
+) -> list[dict[str, Any]]:
+    """People a grant can name: active business users and roster employees
+    with a login, in this company. Only a Work admin (the only role that
+    manages grants) may enumerate them here."""
+    if actor.work_level != "admin":
+        raise DriveError(403, "Only a workspace admin can manage folder access.")
+    term = (q or "").strip()[:100]
+    pattern = "%" + _like_escape(term) + "%"
+    rows = await conn.fetch(
+        """
+        SELECT DISTINCT ON (u.id) u.id, u.email,
+               COALESCE(NULLIF(c.name, ''),
+                        NULLIF(TRIM(COALESCE(e.first_name, '') || ' ' || COALESCE(e.last_name, '')), ''),
+                        u.email) AS name,
+               CASE WHEN c.user_id IS NOT NULL THEN 'business' ELSE 'employee' END AS kind
+        FROM users u
+        LEFT JOIN clients c ON c.user_id = u.id AND c.company_id = $1
+        LEFT JOIN employees e ON e.user_id = u.id AND e.org_id = $1 AND e.termination_date IS NULL
+        WHERE (c.user_id IS NOT NULL OR e.user_id IS NOT NULL)
+          AND u.is_active IS NOT FALSE
+          AND ($2 = '' OR u.email ILIKE $3 ESCAPE '\\' OR c.name ILIKE $3 ESCAPE '\\'
+               OR (COALESCE(e.first_name, '') || ' ' || COALESCE(e.last_name, '')) ILIKE $3 ESCAPE '\\')
+        ORDER BY u.id
+        LIMIT $4
+        """,
+        company_id, term, pattern, min(max(int(limit or 20), 1), 50),
+    )
+    return sorted(
+        ({"id": r["id"], "name": r["name"], "email": r["email"], "kind": r["kind"]} for r in rows),
+        key=lambda r: (r["name"] or "").lower(),
+    )
+
+
 # ── Audit ───────────────────────────────────────────────────────────────
 
 
