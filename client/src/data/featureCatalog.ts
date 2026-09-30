@@ -56,6 +56,7 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       sym_chat: 'Sym-chat (private-tunnel group chats that settle a meeting time or a decision) — needs Matcha Work too',
       espresso_assistant: 'Espresso assistant (one agent you ask from chat: web, shopping, email, calendar, reservations) — needs Matcha Work too',
       matcha_drive: 'Matcha Drive (company + HR document store with per-folder access) — needs Matcha Work too',
+      hr_cases: 'HR Cases (incident → write-up → approval → signed copy) — needs Matcha Work and Matcha Drive',
     },
   },
   {
@@ -114,6 +115,7 @@ export const FEATURE_REQUIRES: Record<string, string[]> = {
   sym_chat: ['matcha_work'],
   espresso_assistant: ['matcha_work'],
   matcha_drive: ['matcha_work'],
+  hr_cases: ['matcha_work', 'matcha_drive'],
   ems: ['matcha_ops'],
   inventory: ['matcha_ops'],
   inventory_voice: ['inventory'],

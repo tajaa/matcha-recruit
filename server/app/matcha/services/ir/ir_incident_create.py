@@ -219,5 +219,9 @@ async def create_incident_core(
             (str(row["id"]), str(company_id)),
             {},
         ))
+        # HR cases intake triage (no-op unless the company has `hr_cases`;
+        # one check per incident ever — see services/hr_cases/triage.py).
+        from app.matcha.services.hr_cases.triage import triage_incident_task
+        bg_tasks.append((triage_incident_task, (str(row["id"]), str(company_id)), {"phase": "intake"}))
 
     return response_row, bg_tasks

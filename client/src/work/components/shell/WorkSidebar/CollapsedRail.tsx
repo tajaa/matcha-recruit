@@ -1,4 +1,4 @@
-import { Hash, FolderOpen, MessageSquare, PanelLeftClose, Mail, MailOpen, Home, Users, ClipboardList, BookOpenCheck, Package, NotebookPen, CheckSquare, MessagesSquare, HardDrive } from 'lucide-react'
+import { Hash, FolderOpen, MessageSquare, PanelLeftClose, Mail, MailOpen, Home, Users, ClipboardList, BookOpenCheck, Package, NotebookPen, CheckSquare, MessagesSquare, HardDrive, Briefcase } from 'lucide-react'
 import type { NavigateFunction } from 'react-router-dom'
 import { formatEventsBadge } from '../../../hooks/useLoggedEventsCount'
 import { RailNavButton } from './SidebarNavButton'
@@ -23,6 +23,7 @@ interface Props {
   showChannels: boolean
   showSymChat: boolean
   showDrive: boolean
+  showHrCases: boolean
   loggedEventsCount: number
 }
 
@@ -47,6 +48,7 @@ export default function CollapsedRail({
   showChannels,
   showSymChat,
   showDrive,
+  showHrCases,
   loggedEventsCount,
 }: Props) {
   return (
@@ -66,6 +68,7 @@ export default function CollapsedRail({
       <RailNavButton icon={CheckSquare} label="To-dos" active={pathname.startsWith(`${base}/productivity`)} onClick={() => navigate(`${base}/productivity`)} />
       {showSymChat && <RailNavButton icon={MessagesSquare} label="Sym-chats" active={pathname.startsWith(`${base}/sym-chat`)} onClick={() => navigate(`${base}/sym-chat`)} />}
       {showDrive && <RailNavButton icon={HardDrive} label="Drive" active={pathname.startsWith(`${base}/drive`)} onClick={() => navigate(`${base}/drive`)} />}
+      {showHrCases && <RailNavButton icon={Briefcase} label="HR Cases" active={pathname.startsWith(`${base}/hr-cases`)} onClick={() => navigate(`${base}/hr-cases`)} />}
       <RailNavButton icon={MailOpen} label="Email" active={isActive(`${base}/email`)} onClick={() => navigate(`${base}/email`)} />
 
       {showEvents && (
@@ -110,7 +113,7 @@ export default function CollapsedRail({
 
       <button
         onClick={() => { onToggle(); openChats() }}
-        className={`p-2 rounded-lg transition-colors ${new RegExp(`^${base}/[^/]+$`).test(pathname) && !pathname.includes('/channels/') && !pathname.includes('/projects/') && !pathname.startsWith(`${base}/sym-chat`) && !pathname.startsWith(`${base}/drive`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
+        className={`p-2 rounded-lg transition-colors ${new RegExp(`^${base}/[^/]+$`).test(pathname) && !pathname.includes('/channels/') && !pathname.includes('/projects/') && !pathname.startsWith(`${base}/sym-chat`) && !pathname.startsWith(`${base}/drive`) && !pathname.startsWith(`${base}/hr-cases`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
         title="Huume Workspaces"
       >
         <MessageSquare size={16} />
