@@ -5,10 +5,56 @@ import {
   agentErrorMessage,
   deletePaymentCard,
   listPaymentCards,
+  setCardBillingAddress,
 } from '../../api/matchaWork'
 import type { PaymentCard, PostalAddress } from '../../types'
 import AddressFields from './AddressFields'
 import { EMPTY_ADDRESS, addressLine, useScrollToHash } from './addressHelpers'
+
+/** Change where one saved card bills to: its own address, or the shipping
+ *  address. Cards saved before billing addresses existed start as "same as
+ *  shipping" and can be given their own here without re-adding them. */
+function CardBillingEditor({
+  card, onSaved, onCancel,
+}: { card: PaymentCard; onSaved: () => Promise<void>; onCancel: () => void }) {
+  const [same, setSame] = useState(!card.billing_address)
+  const [address, setAddress] = useState<PostalAddress>(card.billing_address ?? EMPTY_ADDRESS)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      await setCardBillingAddress(card.id, same ? null : { ...address, country: address.country.trim().toUpperCase() })
+      await onSaved()
+    } catch (e) {
+      setError(agentErrorMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form onSubmit={(event) => void submit(event)} className="mt-2 space-y-3 rounded-lg border border-w-line p-3">
+      <label className="flex items-center gap-2 text-xs text-w-dim">
+        <input type="checkbox" checked={same} onChange={(event) => setSame(event.target.checked)} className="accent-[var(--color-w-accent)]" />
+        Billing address is the same as shipping
+      </label>
+      {!same && <AddressFields value={address} onChange={setAddress} idPrefix={`card-${card.id}-billing`} />}
+      <div className="flex gap-2">
+        <button type="submit" disabled={busy} className="rounded-md bg-w-accent px-3 py-1.5 text-xs font-semibold text-w-on-accent disabled:opacity-50">
+          {busy ? 'Saving…' : 'Save billing address'}
+        </button>
+        <button type="button" onClick={onCancel} className="rounded-md border border-w-line px-3 py-1.5 text-xs text-w-text hover:bg-w-surface2">
+          Cancel
+        </button>
+      </div>
+      {error && <p role="status" className="text-xs text-orange-300">{error}</p>}
+    </form>
+  )
+}
 
 const BRAND: Record<PaymentCard['brand'], string> = {
   visa: 'Visa',
@@ -34,6 +80,7 @@ export default function PaymentCardsSettings({ isAdmin = false }: { isAdmin?: bo
   const [label, setLabel] = useState('')
   const [sameAsShipping, setSameAsShipping] = useState(true)
   const [billing, setBilling] = useState<PostalAddress>(EMPTY_ADDRESS)
+  const [editingBilling, setEditingBilling] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
 
@@ -133,26 +180,47 @@ export default function PaymentCardsSettings({ isAdmin = false }: { isAdmin?: bo
       {state.cards.length > 0 && (
         <ul className="mb-4 divide-y divide-w-line rounded-lg border border-w-line">
           {state.cards.map((card) => (
-            <li key={card.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
-              <span className="text-w-text">
-                {BRAND[card.brand] ?? 'Card'} ending {card.last4}
-                {card.label && <span className="text-w-dim"> · {card.label}</span>}
-                <span className="text-xs text-w-faint">
-                  {' '}
-                  · {String(card.exp_month).padStart(2, '0')}/{String(card.exp_year).slice(-2)}
+            <li key={card.id} className="px-3 py-2 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-w-text">
+                  {BRAND[card.brand] ?? 'Card'} ending {card.last4}
+                  {card.label && <span className="text-w-dim"> · {card.label}</span>}
+                  <span className="text-xs text-w-faint">
+                    {' '}
+                    · {String(card.exp_month).padStart(2, '0')}/{String(card.exp_year).slice(-2)}
+                  </span>
+                  <span className="block text-xs text-w-faint">
+                    Bills to {card.billing_address ? addressLine(card.billing_address) : 'your shipping address'}
+                  </span>
                 </span>
-                <span className="block text-xs text-w-faint">
-                  Bills to {card.billing_address ? addressLine(card.billing_address) : 'your shipping address'}
+                <span className="flex shrink-0 items-center gap-1">
+                  {state.enabled && editingBilling !== card.id && (
+                    <button
+                      type="button"
+                      onClick={() => { setMessage(''); setEditingBilling(card.id) }}
+                      aria-label={`Change billing address for card ending ${card.last4}`}
+                      className="rounded px-1.5 py-0.5 text-xs text-w-dim hover:bg-w-surface2 hover:text-w-text"
+                    >
+                      Billing
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void remove(card)}
+                    aria-label={`Remove card ending ${card.last4}`}
+                    className="rounded p-1 text-w-dim hover:bg-w-surface2 hover:text-w-text"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
                 </span>
-              </span>
-              <button
-                type="button"
-                onClick={() => void remove(card)}
-                aria-label={`Remove card ending ${card.last4}`}
-                className="rounded p-1 text-w-dim hover:bg-w-surface2 hover:text-w-text"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              </div>
+              {editingBilling === card.id && (
+                <CardBillingEditor
+                  card={card}
+                  onCancel={() => setEditingBilling(null)}
+                  onSaved={async () => { setEditingBilling(null); setMessage('Billing address saved.'); await load() }}
+                />
+              )}
             </li>
           ))}
         </ul>

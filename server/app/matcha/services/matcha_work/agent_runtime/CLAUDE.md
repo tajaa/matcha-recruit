@@ -104,8 +104,10 @@ it otherwise), and should declare `resolve`.
   exactly one member.
 - **An ability can be per-account.** `Ability.allowance` names an allowance
   the run's `Situation.allowed` must carry (`catalog.allowances_for(user)`;
-  `purchases` = `chat_flow.purchases_allowed`). Without it the ability is not
-  in the run and not listed by `GET /assistant/abilities` at all.
+  `purchases` = `chat_flow.purchases_allowed`). `catalog.offered` is the one
+  rule: an ability not offered is not in the run, not listed by
+  `GET /assistant/abilities`, not hinted at, and `PUT /abilities/{key}` 404s.
+  The worker's claim query carries `requester_role` and `requester_email`.
 - **The model is told what is off, not left to say "I can't".**
   `catalog.switch_on_hints` lists abilities this person could use but can't in
   this run (not switched on, private-only, needs Google) with what would turn
@@ -164,6 +166,16 @@ showed.
   project/task), then charges through `agent_card/test_charge.py`: a Stripe
   **test-mode** charge with a verified price and a test key, else a handoff
   (checkout link). No real money moves.
+- **One yes buys once.** The row's `prompt_id` is the approved confirmation
+  (`RunContext.resume_prompt_id`, UNIQUE, `ON CONFLICT`): a second run of the
+  same yes reports the first outcome and never inserts or charges again; the
+  Stripe idempotency key is the row id. A row is `charging` from before the
+  Stripe call until its outcome is written; a crash or timeout in between is
+  an `unknown` receipt (`TransportUncertain`), and the next attempt on that
+  approval re-charges under the same key, which settles it.
+- **Buyable = an https buy link.** "It" is the latest *answer* (a run with a
+  headline; question-only and held runs don't count). When that answer had
+  nothing to buy, the model is told to ask rather than buy an older pick.
 - Gated three ways: `purchases_allowed` (allowance), the `purchase-1`
   disclosure (switched on in Espresso's settings), private conversation only.
   `ASSISTANT_COMMIT_MODE` still applies: unset, a yes gives a dry-run receipt.

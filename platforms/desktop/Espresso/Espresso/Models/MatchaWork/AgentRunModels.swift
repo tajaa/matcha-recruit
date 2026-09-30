@@ -473,6 +473,22 @@ extension MatchaWorkService {
         )
     }
 
+    /// Give a saved card its own billing address, or nil to bill to the shipping address.
+    func setCardBillingAddress(id: String, billing: MWPostalAddress?) async throws -> MWPaymentCard {
+        struct Body: Encodable {
+            let billing: MWPostalAddress?
+
+            func encode(to encoder: Encoder) throws {
+                enum Keys: String, CodingKey { case billing_address }
+                var c = encoder.container(keyedBy: Keys.self)
+                try c.encode(billing, forKey: .billing_address)  // null clears it
+            }
+        }
+        return try await client.request(
+            method: "PUT", path: "\(basePath)/payment-cards/\(id)/billing-address", body: Body(billing: billing)
+        )
+    }
+
     // Shipping addresses for assistant purchases (server: payment_cards.py).
 
     func shippingAddresses() async throws -> MWShippingAddressesState {

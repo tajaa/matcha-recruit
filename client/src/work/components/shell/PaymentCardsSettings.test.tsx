@@ -3,12 +3,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import PaymentCardsSettings from './PaymentCardsSettings'
 import { ApiError } from '../../../api/client'
 
-const mock = vi.hoisted(() => ({ list: vi.fn(), add: vi.fn(), remove: vi.fn() }))
+const mock = vi.hoisted(() => ({ list: vi.fn(), add: vi.fn(), remove: vi.fn(), billing: vi.fn() }))
 vi.mock('../../api/matchaWork', async () => ({
   ...(await vi.importActual<typeof import('../../api/matchaWork/agentCards')>('../../api/matchaWork/agentCards')),
   listPaymentCards: mock.list,
   addPaymentCard: mock.add,
   deletePaymentCard: mock.remove,
+  setCardBillingAddress: mock.billing,
 }))
 
 const card = { id: 'c1', label: 'Mercury test', brand: 'visa', last4: '4242', exp_month: 3, exp_year: 2031, created_at: null }
@@ -64,6 +65,27 @@ describe('PaymentCardsSettings', () => {
     await waitFor(() => expect(mock.add).toHaveBeenCalledWith(expect.objectContaining({
       billing_address: expect.objectContaining({ line1: '9 Bank St', country: 'US', region: 'CA' }),
     })))
+  })
+
+  it('gives an existing card its own billing address, or puts it back to shipping', async () => {
+    mock.list.mockResolvedValue({ enabled: true, configured: true, cards: [card] })
+    mock.billing.mockResolvedValue(card)
+    render(<PaymentCardsSettings isAdmin />)
+    fireEvent.click(await screen.findByLabelText('Change billing address for card ending 4242'))
+    fireEvent.click(screen.getAllByLabelText('Billing address is the same as shipping')[0])
+    const editor = screen.getByText('Save billing address').closest('form') as HTMLFormElement
+    const field = (label: string) => editor.querySelector(`input[id="card-c1-billing-${label}"]`) as HTMLInputElement
+    fireEvent.change(field('name'), { target: { value: 'Haley Smith' } })
+    fireEvent.change(field('line1'), { target: { value: '9 Bank St' } })
+    fireEvent.change(field('city'), { target: { value: 'Oakland' } })
+    fireEvent.change(field('region'), { target: { value: 'CA' } })
+    fireEvent.change(field('postal'), { target: { value: '94607' } })
+    fireEvent.click(screen.getByText('Save billing address'))
+    await waitFor(() => expect(mock.billing).toHaveBeenCalledWith('c1', expect.objectContaining({ line1: '9 Bank St' })))
+    expect(await screen.findByText('Billing address saved.')).toBeTruthy()
+    fireEvent.click(screen.getByLabelText('Change billing address for card ending 4242'))
+    fireEvent.click(screen.getByText('Save billing address'))
+    await waitFor(() => expect(mock.billing).toHaveBeenLastCalledWith('c1', null))
   })
 
   it('checks the expiry format before sending anything', async () => {

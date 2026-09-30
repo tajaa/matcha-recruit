@@ -22,12 +22,35 @@ enum SettingsTab: String {
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     /// Whether the server lets this account buy (admins plus an allowlist),
-    /// or it already has saved cards.
+    /// or it already has saved cards / addresses. Each tab shows on its own
+    /// evidence, so someone with addresses and no cards still sees Shipping.
     @State private var paymentCardsAvailable = false
+    @State private var shippingAvailable = false
     @AppStorage(SettingsTab.storageKey) private var tab = SettingsTab.notifications.rawValue
 
+    private var isAdmin: Bool { appState.currentUser?.role == "admin" }
+    private var showsCards: Bool { isAdmin || paymentCardsAvailable }
+    private var showsShipping: Bool { isAdmin || shippingAvailable }
+
+    /// The stored tab, or Notifications while it names a tab that isn't
+    /// showing (yet): a chat card may pick Payment Cards before the
+    /// availability check has come back, and it takes over once it has.
+    private var selection: Binding<String> {
+        Binding(
+            get: {
+                switch SettingsTab(rawValue: tab) {
+                case .paymentCards where !showsCards, .shipping where !showsShipping, .none:
+                    return SettingsTab.notifications.rawValue
+                default:
+                    return tab
+                }
+            },
+            set: { tab = $0 }
+        )
+    }
+
     var body: some View {
-        TabView(selection: $tab) {
+        TabView(selection: selection) {
             NotificationsSettingsTab()
                 .tabItem { Label("Notifications", systemImage: "bell") }
                 .tag(SettingsTab.notifications.rawValue)
@@ -41,10 +64,12 @@ struct SettingsView: View {
                 .tabItem { Label("AI Connectors", systemImage: "powerplug") }
                 .tag(SettingsTab.connectors.rawValue)
             // Purchases are internal-only in v1; the server decides who.
-            if appState.currentUser?.role == "admin" || paymentCardsAvailable {
+            if showsCards {
                 PaymentCardsSettingsTab()
                     .tabItem { Label("Payment Cards", systemImage: "creditcard") }
                     .tag(SettingsTab.paymentCards.rawValue)
+            }
+            if showsShipping {
                 ShippingAddressesSettingsTab()
                     .tabItem { Label("Shipping", systemImage: "shippingbox") }
                     .tag(SettingsTab.shipping.rawValue)
@@ -55,8 +80,14 @@ struct SettingsView: View {
         }
         .frame(width: 520, height: 460)
         .task(id: appState.currentUser?.email) {
-            guard let state = try? await MatchaWorkService.shared.paymentCards() else { return }
-            paymentCardsAvailable = state.enabled || !state.cards.isEmpty
+            async let cards = try? MatchaWorkService.shared.paymentCards()
+            async let shipping = try? MatchaWorkService.shared.shippingAddresses()
+            if let state = await cards {
+                paymentCardsAvailable = state.enabled || !state.cards.isEmpty
+            }
+            if let state = await shipping {
+                shippingAvailable = state.enabled || !state.addresses.isEmpty
+            }
         }
     }
 }
@@ -75,6 +106,10 @@ private struct PaymentCardsSettingsTab: View {
     @State private var label = ""
     @State private var sameAsShipping = true
     @State private var billing = MWPostalAddress()
+    /// The saved card whose billing address is being changed.
+    @State private var billingCard: MWPaymentCard?
+    @State private var editSame = true
+    @State private var editBilling = MWPostalAddress()
     @State private var busy = false
     @State private var message: String?
 
@@ -92,6 +127,15 @@ private struct PaymentCardsSettingsTab: View {
                                 Text(Self.caption(card)).font(.caption).foregroundColor(.secondary)
                             }
                             Spacer()
+                            if state.enabled {
+                                Button("Billing…") {
+                                    billingCard = card
+                                    editSame = card.billingAddress == nil
+                                    editBilling = card.billingAddress ?? MWPostalAddress()
+                                    message = nil
+                                }
+                                .disabled(busy)
+                            }
                             Button("Remove") { Task { await remove(card) } }
                                 .disabled(busy)
                         }
@@ -104,6 +148,21 @@ private struct PaymentCardsSettingsTab: View {
             } footer: {
                 Text("Espresso always shows the card, item and address and waits for your yes before buying. Never paste a card number in chat.")
                     .font(.caption).foregroundColor(.secondary)
+            }
+            if let card = billingCard {
+                Section {
+                    Toggle("Billing address is the same as shipping", isOn: $editSame)
+                    if !editSame {
+                        AddressFormFields(address: $editBilling)
+                    }
+                    HStack {
+                        Button(busy ? "Saving…" : "Save billing address") { Task { await saveBilling(card) } }
+                            .disabled(busy)
+                        Button("Cancel") { billingCard = nil }
+                    }
+                } header: {
+                    Text("Billing for \(card.brandName) ending \(card.last4)").font(.subheadline).bold()
+                }
             }
             if let state, state.enabled {
                 Section {
@@ -202,11 +261,31 @@ private struct PaymentCardsSettingsTab: View {
         }
     }
 
+    private func saveBilling(_ card: MWPaymentCard) async {
+        busy = true
+        message = nil
+        defer { busy = false }
+        var address: MWPostalAddress?
+        if !editSame {
+            address = editBilling
+            address?.country = editBilling.country.trimmingCharacters(in: .whitespaces).uppercased()
+        }
+        do {
+            _ = try await MatchaWorkService.shared.setCardBillingAddress(id: card.id, billing: address)
+            billingCard = nil
+            message = "Billing address saved."
+            await load()
+        } catch {
+            message = (error as? APIError)?.serverDetail ?? error.localizedDescription
+        }
+    }
+
     private func remove(_ card: MWPaymentCard) async {
         busy = true
         defer { busy = false }
         do {
             try await MatchaWorkService.shared.deletePaymentCard(id: card.id)
+            if billingCard?.id == card.id { billingCard = nil }
             await load()
         } catch {
             message = (error as? APIError)?.serverDetail ?? error.localizedDescription
