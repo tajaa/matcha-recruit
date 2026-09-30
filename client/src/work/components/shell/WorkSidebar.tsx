@@ -253,18 +253,27 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-2 space-y-1 pb-3">
+        {/* Find anything in the lists below */}
+        <div className="px-2 pb-2">
+          <div className="relative">
+          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-w-faint pointer-events-none" />
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Find a chat, channel or workspace"
+            aria-label="Filter the sidebar"
+            className="w-full pl-7 pr-2 py-1.5 rounded-md bg-w-surface2/60 border border-w-line text-[12px] text-w-text placeholder:text-w-faint outline-none focus:border-w-accent/50 transition-colors"
+          />
+          </div>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto px-2 space-y-0.5 pb-3">
           <SidebarNavButton icon={Home} label="Home" active={location.pathname === base} onClick={() => navigate(base)} />
 
-          {(pinnedChannels.length > 0 || pinnedJournals.length > 0 || pinnedFiles.length > 0) && <div className="mt-3 border-t border-w-line pt-2">
-            <p className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-w-faint"><Star size={11} /> Starred</p>
-            {pinnedChannels.map((channel) => <button key={`channel:${channel.id}`} onClick={() => navigate(`${base}/channels/${channel.id}`)} className="block w-full truncate rounded px-2.5 py-1 text-left text-xs text-w-dim hover:bg-w-surface2"># {channel.name}</button>)}
-            {pinnedJournals.map((journal) => <button key={`journal:${journal.id}`} onClick={() => navigate(`${base}/journals/${journal.id}`)} className="block w-full truncate rounded px-2.5 py-1 text-left text-xs text-w-dim hover:bg-w-surface2">{journal.title}</button>)}
-            {pinnedFiles.map((file) => <button key={`file:${file.id}`} onClick={() => { setStarredFileError(false); void openProjectFile(file.projectId, file.id).then((opened) => { if (!opened) setStarredFileError(true) }) }} className="block w-full truncate rounded px-2.5 py-1 text-left text-xs text-w-dim hover:bg-w-surface2">{file.name}</button>)}
-            {starredFileError && <p role="alert" className="px-2.5 py-1 text-xs text-red-400">File unavailable. Open its project to check access.</p>}
-          </div>}
+          {showAssistant && <SidebarNavButton icon={Sparkles} label="Ask Espresso" active={location.pathname.startsWith(`${base}/assistant`)} onClick={() => navigate(`${base}/assistant`)} />}
 
-          {showAssistant && <SidebarNavButton icon={Sparkles} label="Espresso" active={location.pathname.startsWith(`${base}/assistant`)} onClick={() => navigate(`${base}/assistant`)} />}
+          {/* Your own tools, then the company's */}
+          <div className="h-3" aria-hidden />
           <SidebarNavButton icon={NotebookPen} label="Journals" active={location.pathname.startsWith(`${base}/journals`)} onClick={() => navigate(`${base}/journals`)} />
           <SidebarNavButton icon={CheckSquare} label="To-dos" active={location.pathname.startsWith(`${base}/productivity`)} onClick={() => navigate(`${base}/productivity`)} />
           {showSymChat && <SidebarNavButton icon={MessagesSquare} label="Sym-chats" active={location.pathname.startsWith(`${base}/sym-chat`)} onClick={() => navigate(`${base}/sym-chat`)} />}
@@ -297,17 +306,15 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           {/* Assets (company-wide feed of everything Huume has created) */}
           {showAssets && <SidebarNavButton icon={Archive} label="Assets" active={location.pathname.startsWith(`${base}/assets`)} onClick={() => navigate(`${base}/assets`)} />}
 
-          {/* Filter sidebar */}
-          <div className="relative mt-1 mb-1.5">
-            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-w-faint pointer-events-none" />
-            <input
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter sidebar…"
-              className="w-full pl-7 pr-2 py-1.5 rounded-md bg-w-surface2/60 border border-w-line text-[12px] text-w-text placeholder:text-w-faint outline-none focus:border-w-accent/50 transition-colors"
-            />
-          </div>
+          {(pinnedChannels.length > 0 || pinnedJournals.length > 0 || pinnedFiles.length > 0) && <div className="pt-3">
+            <p className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-w-faint"><Star size={11} /> Starred</p>
+            {pinnedChannels.map((channel) => <button key={`channel:${channel.id}`} onClick={() => navigate(`${base}/channels/${channel.id}`)} className="block w-full truncate rounded px-2.5 py-1 text-left text-xs text-w-dim hover:bg-w-surface2"># {channel.name}</button>)}
+            {pinnedJournals.map((journal) => <button key={`journal:${journal.id}`} onClick={() => navigate(`${base}/journals/${journal.id}`)} className="block w-full truncate rounded px-2.5 py-1 text-left text-xs text-w-dim hover:bg-w-surface2">{journal.title}</button>)}
+            {pinnedFiles.map((file) => <button key={`file:${file.id}`} onClick={() => { setStarredFileError(false); void openProjectFile(file.projectId, file.id).then((opened) => { if (!opened) setStarredFileError(true) }) }} className="block w-full truncate rounded px-2.5 py-1 text-left text-xs text-w-dim hover:bg-w-surface2">{file.name}</button>)}
+            {starredFileError && <p role="alert" className="px-2.5 py-1 text-xs text-red-400">File unavailable. Open its project to check access.</p>}
+          </div>}
 
+          <div className="h-2" aria-hidden />
           {/* Chats */}
           <ChatsSection
             threads={threads}

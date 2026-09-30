@@ -570,6 +570,8 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
     canModerate,
     handleDeleteMessage,
     handleSend,
+    /** Send a message that was typed somewhere else (Home's "Ask Espresso"). */
+    sendText: (content: string) => { const text = content.trim(); if (text) sendChannelMessage(text) },
     handleRetryMessage,
     hasMore,
     loadingOlder,

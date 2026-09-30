@@ -117,7 +117,8 @@ export default function CollapsedRail({
       <button
         onClick={() => { onToggle(); openChats() }}
         className={`p-2 rounded-lg transition-colors ${new RegExp(`^${base}/[^/]+$`).test(pathname) && !pathname.includes('/channels/') && !pathname.includes('/projects/') && !pathname.startsWith(`${base}/sym-chat`) && !pathname.startsWith(`${base}/drive`) && !pathname.startsWith(`${base}/hr-cases`) && !pathname.startsWith(`${base}/write-ups`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
-        title="Huume Workspaces"
+        title="Chats"
+        aria-label="Chats"
       >
         <MessageSquare size={16} />
       </button>
