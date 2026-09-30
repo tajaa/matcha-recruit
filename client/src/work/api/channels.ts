@@ -93,6 +93,8 @@ export interface ChannelMessage {
   // 'system' = a Huume-posted confirmation (EMS). Absent/undefined on
   // messages fetched before this field shipped — treat as 'user'.
   message_type?: 'user' | 'system'
+  /** Written by Espresso, not a person: shown on the other side of the chat. */
+  sender_is_agent?: boolean
   /** Structured pointer to an actionable domain record, when present. */
   metadata?: {
     action?: {
