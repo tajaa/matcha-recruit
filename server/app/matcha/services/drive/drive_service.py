@@ -44,6 +44,7 @@ from .drive_access import (
     caps_list,
     effective_caps,
     folder_caps_map,
+    visible_in_tree,
 )
 
 logger = logging.getLogger(__name__)
@@ -281,8 +282,9 @@ async def _folder_with_caps(
             FROM drive_folders f JOIN chain c ON f.id = c.parent_id
             WHERE c.depth < 64
         )
-        SELECT c.id, c.depth, g.permission
+        SELECT c.id, c.depth, d.name, g.permission
         FROM chain c
+        JOIN drive_folders d ON d.id = c.id
         LEFT JOIN drive_folder_grants g ON g.folder_id = c.id AND g.user_id = $3
         ORDER BY c.depth
         """,
@@ -294,10 +296,31 @@ async def _folder_with_caps(
         f"SELECT {_FOLDER_COLS} FROM drive_folders WHERE id = $1", folder_id,
     )
     folder = dict(folder)
+    # Folder-first chain (depth 0 = this folder), kept for breadcrumbs and
+    # child capabilities; never serialized (`_folder_out` picks its fields).
+    folder["_chain"] = [
+        {"id": r["id"], "name": r["name"], "permission": r["permission"]} for r in rows
+    ]
     if actor is None:
         return folder, frozenset(DriveCap)
     caps = effective_caps(actor, folder["space"], [r["permission"] for r in rows])
     return folder, caps
+
+
+def _visible_breadcrumbs(folder: dict[str, Any], actor: Optional[DriveActor]) -> list[dict[str, Any]]:
+    """Root→folder crumbs, but only the ancestors the actor could list. A
+    view grant deep in HR must not reveal the names of the folders above it.
+    Listing rights only grow downward, so the visible crumbs are a suffix."""
+    chain = folder.get("_chain") or []
+    out: list[dict[str, Any]] = []
+    for i in range(len(chain) - 1, -1, -1):  # root first
+        node = chain[i]
+        if actor is not None:
+            caps = effective_caps(actor, folder["space"], [c["permission"] for c in chain[i:]])
+            if DriveCap.LIST not in caps:
+                continue
+        out.append({"id": node["id"], "name": node["name"]})
+    return out
 
 
 async def folder_caps(conn, *, company_id: UUID, folder_id: UUID, actor: Optional[DriveActor]):
@@ -315,6 +338,13 @@ async def _require(conn, *, company_id, folder_id, actor, cap: DriveCap) -> tupl
     except DrivePermissionDenied as exc:
         raise _denied(exc) from None
     return folder, caps
+
+
+async def assert_can_add(conn, *, company_id: UUID, folder_id: UUID, actor: Optional[DriveActor]) -> dict:
+    """Pre-flight for a write that fetches bytes first (Google import): fail
+    before the expensive part, not after."""
+    folder, _ = await _require(conn, company_id=company_id, folder_id=folder_id, actor=actor, cap=DriveCap.ADD)
+    return folder
 
 
 async def _load_space(conn, *, company_id: UUID, actor: DriveActor):
@@ -346,16 +376,17 @@ def _folder_out(folder: dict, caps: frozenset[DriveCap]) -> dict[str, Any]:
 
 
 async def get_tree(conn, *, company_id: UUID, actor: DriveActor) -> dict[str, Any]:
-    """Every folder the actor has any capability on, per space. A folder
-    whose parent isn't visible is the client's root for that branch (an
-    upload-only drop-box grant deep inside HR, for instance)."""
+    """Every folder the actor can list, plus drop-box folders (an `upload`
+    grant, which is never inherited), per space. A folder whose parent isn't
+    visible is the client's root for that branch. A drop-box's subfolders
+    stay hidden: their names are HR information."""
     system = await ensure_system_folders(conn, company_id)
     folders, caps = await _load_space(conn, company_id=company_id, actor=actor)
     spaces: dict[str, Any] = {}
     for space in SPACES:
         visible = [
             _folder_out(f, caps[f["id"]]) for f in folders
-            if f["space"] == space and caps.get(f["id"])
+            if f["space"] == space and visible_in_tree(caps.get(f["id"], frozenset()))
         ]
         spaces[space] = {
             "visible": bool(visible),
@@ -363,22 +394,6 @@ async def get_tree(conn, *, company_id: UUID, actor: DriveActor) -> dict[str, An
             "folders": visible,
         }
     return {"spaces": spaces}
-
-
-async def _breadcrumbs(conn, folder_id: UUID) -> list[dict[str, Any]]:
-    rows = await conn.fetch(
-        """
-        WITH RECURSIVE chain AS (
-            SELECT id, parent_id, name, 0 AS depth FROM drive_folders WHERE id = $1
-            UNION ALL
-            SELECT f.id, f.parent_id, f.name, c.depth + 1
-            FROM drive_folders f JOIN chain c ON f.id = c.parent_id WHERE c.depth < 64
-        )
-        SELECT id, name FROM chain ORDER BY depth DESC
-        """,
-        folder_id,
-    )
-    return [{"id": r["id"], "name": r["name"]} for r in rows]
 
 
 def _file_out(row) -> dict[str, Any]:
@@ -396,12 +411,14 @@ async def list_folder(conn, *, company_id: UUID, folder_id: UUID, actor: DriveAc
     if DriveCap.LIST not in caps:
         # Drop-box: the actor may add here but sees nothing inside.
         return out
-    out["breadcrumbs"] = await _breadcrumbs(conn, folder_id)
+    out["breadcrumbs"] = _visible_breadcrumbs(folder, actor)
     children = await conn.fetch(
         f"SELECT {_FOLDER_COLS} FROM drive_folders WHERE parent_id = $1 ORDER BY lower(name)",
         folder_id,
     )
-    # Caps only grow downward, so a child inherits at least the parent's set.
+    # A child's chain is itself + this folder's chain; effective_caps drops
+    # the parent's own upload grant (drop-boxes are not inherited).
+    parent_chain = [c["permission"] for c in folder.get("_chain") or []]
     child_grants = {
         r["folder_id"]: r["permission"]
         for r in await conn.fetch(
@@ -411,7 +428,7 @@ async def list_folder(conn, *, company_id: UUID, folder_id: UUID, actor: DriveAc
         )
     } if children else {}
     out["folders"] = [
-        _folder_out(dict(c), caps | effective_caps(actor, c["space"], [child_grants.get(c["id"])]))
+        _folder_out(dict(c), effective_caps(actor, c["space"], [child_grants.get(c["id"])] + parent_chain))
         for c in children
     ]
     files = await conn.fetch(
@@ -429,20 +446,25 @@ async def create_folder(
     parent, caps = await _require(conn, company_id=company_id, folder_id=parent_id, actor=actor, cap=DriveCap.MANAGE)
     cleaned = clean_folder_name(name)
     try:
-        row = await conn.fetchrow(
-            f"""
-            INSERT INTO drive_folders (company_id, parent_id, space, name, created_by)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING {_FOLDER_COLS}
-            """,
-            company_id, parent_id, parent["space"], cleaned, actor.user_id,
-        )
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO drive_folders (company_id, parent_id, space, name, created_by)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING {_FOLDER_COLS}
+                """,
+                company_id, parent_id, parent["space"], cleaned, actor.user_id,
+            )
+            if parent["space"] == "hr":
+                await write_audit(conn, company_id=company_id, actor_user_id=actor.user_id,
+                                  action="folder_create", folder_id=row["id"], details={"name": cleaned})
     except asyncpg.UniqueViolationError:
         raise DriveError(409, "A folder with that name already exists here.") from None
-    if parent["space"] == "hr":
-        await write_audit(conn, company_id=company_id, actor_user_id=actor.user_id,
-                          action="folder_create", folder_id=row["id"], details={"name": cleaned})
-    return _folder_out(dict(row), caps)
+    except asyncpg.ForeignKeyViolationError:
+        # The parent was deleted between the check and the insert.
+        raise DriveError(404, "That folder doesn't exist.") from None
+    child_caps = effective_caps(actor, parent["space"], [None] + [c["permission"] for c in parent.get("_chain") or []])
+    return _folder_out(dict(row), child_caps)
 
 
 async def _is_descendant(conn, *, ancestor_id: UUID, candidate_id: UUID) -> bool:
@@ -477,19 +499,24 @@ async def update_folder(
             raise DriveError(400, "A folder can't move inside itself.")
         new_parent = parent_id
     try:
-        row = await conn.fetchrow(
-            f"""
-            UPDATE drive_folders SET name = $2, parent_id = $3, updated_at = NOW()
-            WHERE id = $1 RETURNING {_FOLDER_COLS}
-            """,
-            folder_id, new_name, new_parent,
-        )
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                f"""
+                UPDATE drive_folders SET name = $2, parent_id = $3, updated_at = NOW()
+                WHERE id = $1 RETURNING {_FOLDER_COLS}
+                """,
+                folder_id, new_name, new_parent,
+            )
+            if row is None:
+                raise DriveError(404, "That folder doesn't exist.")
+            if folder["space"] == "hr":
+                await write_audit(conn, company_id=company_id, actor_user_id=actor.user_id,
+                                  action="folder_update", folder_id=folder_id,
+                                  details={"name": new_name, "parent_id": str(new_parent) if new_parent else None})
     except asyncpg.UniqueViolationError:
         raise DriveError(409, "A folder with that name already exists there.") from None
-    if folder["space"] == "hr":
-        await write_audit(conn, company_id=company_id, actor_user_id=actor.user_id,
-                          action="folder_update", folder_id=folder_id,
-                          details={"name": new_name, "parent_id": str(new_parent) if new_parent else None})
+    except asyncpg.ForeignKeyViolationError:
+        raise DriveError(404, "That destination folder doesn't exist.") from None
     return _folder_out(dict(row), caps)
 
 
@@ -497,17 +524,27 @@ async def delete_folder(conn, *, company_id: UUID, folder_id: UUID, actor: Drive
     folder, _ = await _require(conn, company_id=company_id, folder_id=folder_id, actor=actor, cap=DriveCap.MANAGE)
     if folder["system_key"]:
         raise DriveError(400, "System folders can't be deleted.")
-    busy = await conn.fetchval(
-        """
-        SELECT EXISTS (SELECT 1 FROM drive_folders WHERE parent_id = $1)
-            OR EXISTS (SELECT 1 FROM drive_files WHERE folder_id = $1 AND deleted_at IS NULL)
-        """,
-        folder_id,
-    )
-    if busy:
-        raise DriveError(409, "That folder isn't empty.")
     system = await ensure_system_folders(conn, company_id)
     async with conn.transaction():
+        # Lock the folder, THEN check it's empty, in the same transaction: an
+        # insert of a child folder or file takes a key-share lock on this row,
+        # so it either committed before our lock (and the check sees it) or
+        # waits and then fails its FK (mapped to 404 at the insert).
+        locked = await conn.fetchval(
+            "SELECT id FROM drive_folders WHERE id = $1 AND company_id = $2 FOR UPDATE",
+            folder_id, company_id,
+        )
+        if not locked:
+            raise DriveError(404, "That folder doesn't exist.")
+        busy = await conn.fetchval(
+            """
+            SELECT EXISTS (SELECT 1 FROM drive_folders WHERE parent_id = $1)
+                OR EXISTS (SELECT 1 FROM drive_files WHERE folder_id = $1 AND deleted_at IS NULL)
+            """,
+            folder_id,
+        )
+        if busy:
+            raise DriveError(409, "That folder isn't empty.")
         # Soft-deleted files keep their bytes for retention; re-home them on
         # the space root so the RESTRICT FK doesn't pin an "empty" folder.
         await conn.execute(
@@ -551,30 +588,36 @@ async def store_file(
         )
     except RuntimeError:
         raise DriveError(503, "File storage isn't configured.") from None
+    # The row and its HR audit entry commit together; if either fails, the
+    # uploaded object is deleted so nothing is left in the bucket unreferenced.
     try:
-        row = await conn.fetchrow(
-            f"""
-            INSERT INTO drive_files AS f (
-                company_id, folder_id, filename, storage_path, content_type, file_size,
-                sha256, extracted_text, text_status, source, source_ref,
-                linked_type, linked_id, uploaded_by
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-            RETURNING {_FILE_COLS}
-            """,
-            company_id, folder_id, name, storage_path, prepared.content_type, len(prepared.data),
-            prepared.sha256, prepared.extracted_text, prepared.text_status, source, source_ref,
-            linked_type, linked_id, uploaded_by,
-        )
-    except Exception:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO drive_files AS f (
+                    company_id, folder_id, filename, storage_path, content_type, file_size,
+                    sha256, extracted_text, text_status, source, source_ref,
+                    linked_type, linked_id, uploaded_by
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                RETURNING {_FILE_COLS}
+                """,
+                company_id, folder_id, name, storage_path, prepared.content_type, len(prepared.data),
+                prepared.sha256, prepared.extracted_text, prepared.text_status, source, source_ref,
+                linked_type, linked_id, uploaded_by,
+            )
+            if folder["space"] == "hr":
+                await write_audit(conn, company_id=company_id, actor_user_id=uploaded_by,
+                                  action="file_add", file_id=row["id"], folder_id=folder_id,
+                                  details={"filename": name, "source": source})
+    except Exception as exc:
         try:
             await get_storage().delete_private_file(storage_path)
         except Exception:
             logger.warning("[drive] orphaned private object %s", storage_path, exc_info=True)
+        if isinstance(exc, asyncpg.ForeignKeyViolationError):
+            # The folder was deleted while the file was uploading.
+            raise DriveError(404, "That folder doesn't exist.") from None
         raise
-    if folder["space"] == "hr":
-        await write_audit(conn, company_id=company_id, actor_user_id=uploaded_by,
-                          action="file_add", file_id=row["id"], folder_id=folder_id,
-                          details={"filename": name, "source": source})
     return _file_out(row)
 
 
@@ -587,10 +630,12 @@ async def _file_with_caps(conn, *, company_id: UUID, file_id: UUID, actor: Optio
     )
     if not row:
         raise DriveError(404, "That file doesn't exist.")
-    _, caps = await _folder_with_caps(conn, company_id=company_id, folder_id=row["folder_id"], actor=actor)
+    folder, caps = await _folder_with_caps(conn, company_id=company_id, folder_id=row["folder_id"], actor=actor)
     if DriveCap.READ not in caps:
         raise DriveError(404, "That file doesn't exist.")
-    return dict(row), caps
+    out = dict(row)
+    out["_folder"] = folder
+    return out, caps
 
 
 async def get_file(conn, *, company_id: UUID, file_id: UUID, actor: DriveActor) -> dict[str, Any]:
@@ -598,7 +643,7 @@ async def get_file(conn, *, company_id: UUID, file_id: UUID, actor: DriveActor) 
     out = _file_out(row)
     out["space"] = row["space"]
     out["caps"] = caps_list(caps)
-    out["breadcrumbs"] = await _breadcrumbs(conn, row["folder_id"])
+    out["breadcrumbs"] = _visible_breadcrumbs(row["_folder"], actor)
     return out
 
 
@@ -660,15 +705,21 @@ async def update_file(
         if target["space"] != row["space"]:
             raise DriveError(400, "Files can't move between the Company and HR spaces.")
         new_folder = folder_id
-    updated = await conn.fetchrow(
-        f"UPDATE drive_files AS f SET filename = $2, folder_id = $3, updated_at = NOW() "
-        f"WHERE f.id = $1 RETURNING {_FILE_COLS}",
-        file_id, new_name, new_folder,
-    )
-    if row["space"] == "hr":
-        await write_audit(conn, company_id=company_id, actor_user_id=actor.user_id,
-                          action="file_update", file_id=file_id, folder_id=new_folder,
-                          details={"filename": new_name, "from_folder_id": str(row["folder_id"])})
+    try:
+        async with conn.transaction():
+            updated = await conn.fetchrow(
+                f"UPDATE drive_files AS f SET filename = $2, folder_id = $3, updated_at = NOW() "
+                f"WHERE f.id = $1 AND f.deleted_at IS NULL RETURNING {_FILE_COLS}",
+                file_id, new_name, new_folder,
+            )
+            if updated is None:
+                raise DriveError(404, "That file doesn't exist.")
+            if row["space"] == "hr":
+                await write_audit(conn, company_id=company_id, actor_user_id=actor.user_id,
+                                  action="file_update", file_id=file_id, folder_id=new_folder,
+                                  details={"filename": new_name, "from_folder_id": str(row["folder_id"])})
+    except asyncpg.ForeignKeyViolationError:
+        raise DriveError(404, "That destination folder doesn't exist.") from None
     return _file_out(updated)
 
 
@@ -678,11 +729,12 @@ async def soft_delete_file(conn, *, company_id: UUID, file_id: UUID, actor: Driv
         assert_cap(caps, DriveCap.MANAGE)
     except DrivePermissionDenied as exc:
         raise _denied(exc) from None
-    await conn.execute("UPDATE drive_files SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1", file_id)
-    if row["space"] == "hr":
-        await write_audit(conn, company_id=company_id, actor_user_id=actor.user_id,
-                          action="file_delete", file_id=file_id, folder_id=row["folder_id"],
-                          details={"filename": row["filename"]})
+    async with conn.transaction():
+        await conn.execute("UPDATE drive_files SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1", file_id)
+        if row["space"] == "hr":
+            await write_audit(conn, company_id=company_id, actor_user_id=actor.user_id,
+                              action="file_delete", file_id=file_id, folder_id=row["folder_id"],
+                              details={"filename": row["filename"]})
 
 
 def _like_escape(q: str) -> str:
@@ -744,11 +796,19 @@ async def list_grants(conn, *, company_id: UUID, folder_id: UUID, actor: DriveAc
     rows = await conn.fetch(
         """
         SELECT g.user_id, g.permission, g.created_at, u.email,
-               COALESCE(c.name, NULLIF(TRIM(COALESCE(e.first_name, '') || ' ' || COALESCE(e.last_name, '')), ''), u.email) AS name
+               COALESCE(
+                   NULLIF(c.name, ''),
+                   -- One name per person: a rehired employee has several rows.
+                   (SELECT NULLIF(TRIM(COALESCE(e.first_name, '') || ' ' || COALESCE(e.last_name, '')), '')
+                      FROM employees e
+                     WHERE e.user_id = g.user_id AND e.org_id = g.company_id
+                     ORDER BY e.termination_date IS NOT NULL, e.termination_date DESC NULLS LAST
+                     LIMIT 1),
+                   u.email
+               ) AS name
         FROM drive_folder_grants g
         JOIN users u ON u.id = g.user_id
         LEFT JOIN clients c ON c.user_id = g.user_id AND c.company_id = g.company_id
-        LEFT JOIN employees e ON e.user_id = g.user_id AND e.org_id = g.company_id
         WHERE g.folder_id = $1 AND g.company_id = $2
         ORDER BY lower(u.email)
         """,
@@ -772,28 +832,30 @@ async def set_grant(
     )
     if not member:
         raise DriveError(400, "That person isn't a member of this company.")
-    await conn.execute(
-        """
-        INSERT INTO drive_folder_grants (company_id, folder_id, user_id, permission, granted_by)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (folder_id, user_id)
-        DO UPDATE SET permission = EXCLUDED.permission, granted_by = EXCLUDED.granted_by
-        """,
-        company_id, folder_id, user_id, permission, actor.user_id,
-    )
-    await write_audit(conn, company_id=company_id, actor_user_id=actor.user_id, action="grant_set",
-                      folder_id=folder_id, details={"user_id": str(user_id), "permission": permission})
+    async with conn.transaction():
+        await conn.execute(
+            """
+            INSERT INTO drive_folder_grants (company_id, folder_id, user_id, permission, granted_by)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (folder_id, user_id)
+            DO UPDATE SET permission = EXCLUDED.permission, granted_by = EXCLUDED.granted_by
+            """,
+            company_id, folder_id, user_id, permission, actor.user_id,
+        )
+        await write_audit(conn, company_id=company_id, actor_user_id=actor.user_id, action="grant_set",
+                          folder_id=folder_id, details={"user_id": str(user_id), "permission": permission})
     return {"user_id": user_id, "permission": permission}
 
 
 async def remove_grant(conn, *, company_id: UUID, folder_id: UUID, user_id: UUID, actor: DriveActor) -> None:
     await _require(conn, company_id=company_id, folder_id=folder_id, actor=actor, cap=DriveCap.GRANT)
-    await conn.execute(
-        "DELETE FROM drive_folder_grants WHERE folder_id = $1 AND user_id = $2 AND company_id = $3",
-        folder_id, user_id, company_id,
-    )
-    await write_audit(conn, company_id=company_id, actor_user_id=actor.user_id, action="grant_remove",
-                      folder_id=folder_id, details={"user_id": str(user_id)})
+    async with conn.transaction():
+        await conn.execute(
+            "DELETE FROM drive_folder_grants WHERE folder_id = $1 AND user_id = $2 AND company_id = $3",
+            folder_id, user_id, company_id,
+        )
+        await write_audit(conn, company_id=company_id, actor_user_id=actor.user_id, action="grant_remove",
+                          folder_id=folder_id, details={"user_id": str(user_id)})
 
 
 async def search_members(

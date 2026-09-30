@@ -59,13 +59,13 @@ def test_every_route_is_flag_gated_authenticated_and_business_scoped(mod):
     for route in iter_api_routes(mod.router):
         label = f"{sorted(route.methods)} {route.path}"
         assert "matcha_drive" in _feature_of(route.dependant), f"{label} not behind matcha_drive"
-        assert _uses(route.dependant, mod.require_admin_or_client), f"{label} has no auth dependency"
+        assert _uses(route.dependant, mod.require_company_member), f"{label} has no auth dependency"
         assert "await _business_company(current_user)" in inspect.getsource(route.endpoint), label
 
 
 def _client(mod, user):
     feature_gate = mod.router.dependencies[0].dependency
-    return route_client(mod.router, overrides={mod.require_admin_or_client: user, feature_gate: user})
+    return route_client(mod.router, overrides={mod.require_company_member: user, feature_gate: user})
 
 
 def _patch_scope(monkeypatch, mod, *, is_personal):
@@ -106,20 +106,62 @@ def test_service_errors_map_to_status(monkeypatch, mod):
     assert seen["company"] == company
 
 
-def test_upload_validation_runs_before_connection(monkeypatch, mod):
+def test_upload_checks_permission_before_reading_the_file(monkeypatch, mod):
     _patch_scope(monkeypatch, mod, is_personal=False)
     user = SimpleNamespace(id=uuid4(), role="client")
 
-    async def load_actor(*a, **k):
-        raise AssertionError("must not reach the DB for an invalid file")
+    async def load_actor(conn, *, user, company_id):
+        return SimpleNamespace(user_id=user.id, work_level="member")
+
+    async def deny(conn, *, company_id, folder_id, actor):
+        raise mod.DriveError(404, "That folder doesn't exist.")
+
+    async def prepare(*a, **k):
+        raise AssertionError("must not parse the file before the permission check")
     monkeypatch.setattr(mod.svc, "load_actor", load_actor)
+    monkeypatch.setattr(mod.svc, "assert_can_add", deny)
+    monkeypatch.setattr(mod.svc, "prepare_file", prepare)
     with _client(mod, user) as client:
-        resp = client.post(
-            "/drive/files",
-            data={"folder_id": str(uuid4())},
-            files={"file": ("malware.exe", b"MZ", "application/octet-stream")},
-        )
+        resp = client.post("/drive/files", data={"folder_id": str(uuid4())},
+                           files={"file": ("big.pdf", b"%PDF-1.7", "application/pdf")})
+    assert resp.status_code == 404
+
+
+def test_upload_bad_file_after_permission_is_400(monkeypatch, mod):
+    _patch_scope(monkeypatch, mod, is_personal=False)
+    user = SimpleNamespace(id=uuid4(), role="client")
+
+    async def load_actor(conn, *, user, company_id):
+        return SimpleNamespace(user_id=user.id, work_level="operator")
+
+    async def allow(conn, **kw):
+        return {}
+    monkeypatch.setattr(mod.svc, "load_actor", load_actor)
+    monkeypatch.setattr(mod.svc, "assert_can_add", allow)
+    with _client(mod, user) as client:
+        resp = client.post("/drive/files", data={"folder_id": str(uuid4())},
+                           files={"file": ("malware.exe", b"MZ", "application/octet-stream")})
     assert resp.status_code == 400
+
+
+def test_platform_admin_is_refused(monkeypatch, mod):
+    _patch_scope(monkeypatch, mod, is_personal=False)
+    with _client(mod, SimpleNamespace(id=uuid4(), role="admin")) as client:
+        assert client.get("/drive/tree").status_code == 403
+
+
+def test_employees_reach_drive(monkeypatch, mod):
+    _patch_scope(monkeypatch, mod, is_personal=False)
+
+    async def load_actor(conn, *, user, company_id):
+        return SimpleNamespace(user_id=user.id, work_level="member")
+
+    async def tree(conn, *, company_id, actor):
+        return {"spaces": {}}
+    monkeypatch.setattr(mod.svc, "load_actor", load_actor)
+    monkeypatch.setattr(mod.svc, "get_tree", tree)
+    with _client(mod, SimpleNamespace(id=uuid4(), role="employee")) as client:
+        assert client.get("/drive/tree").status_code == 200
 
 
 def test_grant_permission_enum_validated(monkeypatch, mod):

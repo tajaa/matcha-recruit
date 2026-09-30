@@ -14,11 +14,13 @@ get access through an ordinary, visible, revocable `edit` grant on the HR root
 that `drive_service.ensure_system_folders` seeds once when the folders are
 first created.
 
-Grants are strictly additive: nothing here can take a default away. 'upload'
-is a drop-box (ADD only — no LIST, no READ), the case where a GM submits a
-draft into HR without being able to browse HR. GRANT (managing grants) is
-never conferred by a grant; only Work `admin` holds it, so a folder 'edit'
-grantee cannot hand out access.
+Grants are strictly additive: nothing here can take a default away. 'view'
+and 'edit' apply to the granted folder and every descendant. 'upload' is a
+drop-box (ADD only — no LIST, no READ) for the GRANTED FOLDER ONLY: it is not
+inherited, so a drop-box on `HR` doesn't reveal or accept files into
+`HR / Investigations / <name>`. GRANT (managing grants) is never conferred by
+a grant; only Work `admin` holds it, so a folder 'edit' grantee cannot hand
+out access.
 """
 
 from __future__ import annotations
@@ -81,13 +83,22 @@ def space_default_caps(actor: DriveActor, space: str) -> frozenset[DriveCap]:
 def effective_caps(
     actor: DriveActor, space: str, ancestor_grants: Iterable[Optional[str]] = (),
 ) -> frozenset[DriveCap]:
-    """Space default ∪ every grant on the folder's ancestor chain (inclusive).
-    Unknown/None grant strings are ignored rather than trusted."""
+    """Space default ∪ the grants on the folder's chain, folder FIRST then its
+    ancestors. An 'upload' grant counts only at position 0 (the folder
+    itself). Unknown/None grant strings are ignored rather than trusted."""
     caps = set(space_default_caps(actor, space))
-    for perm in ancestor_grants:
-        if perm:
-            caps |= GRANT_CAPS.get(perm, _NONE)
+    for position, perm in enumerate(ancestor_grants):
+        if not perm or (perm == "upload" and position > 0):
+            continue
+        caps |= GRANT_CAPS.get(perm, _NONE)
     return frozenset(caps)
+
+
+def visible_in_tree(caps: frozenset[DriveCap]) -> bool:
+    """A folder appears in the tree only when it can be listed or is itself a
+    drop-box. Inherited upload access is already excluded by effective_caps,
+    so an ADD-only folder here is always the one the grant sits on."""
+    return DriveCap.LIST in caps or DriveCap.ADD in caps
 
 
 def folder_caps_map(
