@@ -101,13 +101,13 @@ async def generate_impact_summary(
     -------
     str  Plain-English summary (2-3 sentences).
     """
-    # Count employees at this location for context
+    # Count active company employees for context
     employee_count = 0
     if location.get("id"):
         count = await conn.fetchval(
             """SELECT COUNT(*) FROM employees
-               WHERE company_id = (SELECT company_id FROM business_locations WHERE id = $1)
-                 AND status = 'active'""",
+               WHERE org_id = (SELECT company_id FROM business_locations WHERE id = $1)
+                 AND termination_date IS NULL""",
             location["id"],
         )
         employee_count = count or 0
