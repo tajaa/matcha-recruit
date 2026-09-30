@@ -12,16 +12,23 @@ import pytest
 from app.matcha.services.drive import drive_service as svc
 from app.matcha.services.drive.drive_access import DriveActor, DriveCap
 from app.matcha.services.drive.drive_service import DriveError
-from tests._helpers.routes import QueryConn, Queue
+from tests._helpers.routes import QueryConn as _BaseConn, Queue
+
+
+class QueryConn(_BaseConn):
+    """Every drive write runs in a transaction; the fake is its own context."""
+
+    def transaction(self):
+        return self
+
+
+TxConn = QueryConn
 
 COMPANY = uuid4()
 NOW = datetime(2026, 9, 29, tzinfo=timezone.utc)
 ALL = frozenset(DriveCap)
 
 
-class TxConn(QueryConn):
-    def transaction(self):
-        return self
 
 
 def actor(level="operator"):
@@ -139,8 +146,8 @@ async def test_folder_with_caps_unions_chain_grants():
     f = folder(space="hr")
     conn = QueryConn(
         fetch={"WITH RECURSIVE chain": [
-            {"id": f["id"], "depth": 0, "permission": "upload"},
-            {"id": uuid4(), "depth": 1, "permission": None},
+            {"id": f["id"], "depth": 0, "name": "Drafts", "permission": "upload"},
+            {"id": uuid4(), "depth": 1, "name": "HR", "permission": None},
         ]},
         fetchrow={"FROM drive_folders WHERE id": f},
     )
@@ -159,7 +166,7 @@ async def test_folder_with_caps_missing_is_404():
 @pytest.mark.asyncio
 async def test_system_path_has_every_cap():
     f = folder()
-    conn = QueryConn(fetch={"WITH RECURSIVE chain": [{"id": f["id"], "depth": 0, "permission": None}]},
+    conn = QueryConn(fetch={"WITH RECURSIVE chain": [{"id": f["id"], "depth": 0, "name": "Company", "permission": None}]},
                      fetchrow={"FROM drive_folders WHERE id": f})
     _, caps = await svc._folder_with_caps(conn, company_id=COMPANY, folder_id=f["id"], actor=None)
     assert caps == ALL
@@ -274,10 +281,17 @@ async def test_folder_move_into_own_descendant_refused(monkeypatch):
 async def test_delete_non_empty_folder_refused(monkeypatch):
     f = folder()
     patch_caps(monkeypatch, {f["id"]: (f, ALL)})
-    conn = QueryConn(fetchval={"EXISTS (SELECT 1 FROM drive_folders WHERE parent_id": True})
+
+    async def seeded(conn, company_id):
+        return {"general_root": uuid4(), "hr_root": uuid4()}
+    monkeypatch.setattr(svc, "ensure_system_folders", seeded)
+    conn = QueryConn(fetchval={"FOR UPDATE": f["id"], "EXISTS (SELECT 1 FROM drive_folders WHERE parent_id": True})
     with pytest.raises(DriveError) as exc:
         await svc.delete_folder(conn, company_id=COMPANY, folder_id=f["id"], actor=actor("admin"))
     assert exc.value.status == 409
+    # The emptiness check runs AFTER the row lock, inside the transaction.
+    sqls = conn.sql_for("fetchval")
+    assert "FOR UPDATE" in sqls[0] and "EXISTS" in sqls[1]
 
 
 @pytest.mark.asyncio
@@ -289,7 +303,7 @@ async def test_delete_folder_rehomes_soft_deleted_files(monkeypatch):
     async def seeded(conn, company_id):
         return {"hr_root": root, "general_root": uuid4()}
     monkeypatch.setattr(svc, "ensure_system_folders", seeded)
-    conn = TxConn(fetchval={"EXISTS (SELECT 1 FROM drive_folders WHERE parent_id": False})
+    conn = TxConn(fetchval={"FOR UPDATE": f["id"], "EXISTS (SELECT 1 FROM drive_folders WHERE parent_id": False})
     await svc.delete_folder(conn, company_id=COMPANY, folder_id=f["id"], actor=actor("admin"))
     assert conn.args_for("UPDATE drive_files SET folder_id") == (f["id"], root)
     assert any("DELETE FROM drive_folders" in s for s in conn.sql_for("execute"))
@@ -637,3 +651,152 @@ async def test_search_members_escapes_and_sorts():
     out = await svc.search_members(conn, company_id=COMPANY, q="a%b", actor=actor("admin"))
     assert [p["name"] for p in out] == ["amy", "Zed"]
     assert conn.args_for("FROM users u")[2] == "%a\\%b%"
+
+
+# ── Review fixes (PR #639) ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_tree_hides_subfolder_names_behind_a_drop_box(monkeypatch):
+    hr = folder(space="hr", system_key="hr_root", name="HR")
+    secret = folder(space="hr", parent_id=hr["id"], name="Termination - Jane Doe")
+
+    async def seeded(conn, company_id):
+        return {"general_root": uuid4(), "hr_root": hr["id"]}
+    monkeypatch.setattr(svc, "ensure_system_folders", seeded)
+    conn = QueryConn(fetch={
+        "FROM drive_folders WHERE company_id": [hr, secret],
+        "FROM drive_folder_grants": [{"folder_id": hr["id"], "permission": "upload"}],
+    })
+    out = await svc.get_tree(conn, company_id=COMPANY, actor=actor("operator"))
+    names = [f["name"] for f in out["spaces"]["hr"]["folders"]]
+    assert names == ["HR"] and "Termination - Jane Doe" not in str(out)
+
+
+def test_breadcrumbs_only_show_listable_ancestors():
+    deep = folder(space="hr", name="Jane Doe")
+    deep["_chain"] = [
+        {"id": deep["id"], "name": "Jane Doe", "permission": "view"},
+        {"id": uuid4(), "name": "Investigations", "permission": None},
+        {"id": uuid4(), "name": "HR", "permission": None},
+    ]
+    assert svc._visible_breadcrumbs(deep, actor("operator")) == [{"id": deep["id"], "name": "Jane Doe"}]
+    assert [c["name"] for c in svc._visible_breadcrumbs(deep, actor("admin"))] == ["HR", "Investigations", "Jane Doe"]
+    assert [c["name"] for c in svc._visible_breadcrumbs(deep, None)] == ["HR", "Investigations", "Jane Doe"]
+
+
+@pytest.mark.asyncio
+async def test_list_folder_breadcrumbs_come_from_the_checked_chain(monkeypatch):
+    f = folder(space="hr", name="Jane Doe")
+    f["_chain"] = [
+        {"id": f["id"], "name": "Jane Doe", "permission": "view"},
+        {"id": uuid4(), "name": "Investigations", "permission": None},
+    ]
+    patch_caps(monkeypatch, {f["id"]: (f, frozenset({DriveCap.LIST, DriveCap.READ}))})
+    conn = QueryConn(fetch={"WHERE parent_id = $1": [], "FROM drive_files f": []})
+    out = await svc.list_folder(conn, company_id=COMPANY, folder_id=f["id"], actor=actor("operator"))
+    assert out["breadcrumbs"] == [{"id": f["id"], "name": "Jane Doe"}]
+
+
+@pytest.mark.asyncio
+async def test_child_of_drop_box_does_not_inherit_add(monkeypatch):
+    parent = folder(space="hr", name="HR")
+    parent["_chain"] = [{"id": parent["id"], "name": "HR", "permission": "upload"}]
+    child = folder(space="hr", parent_id=parent["id"], name="Sub")
+    # LIST from somewhere above is needed to list at all; model it on the caps.
+    patch_caps(monkeypatch, {parent["id"]: (parent, frozenset({DriveCap.LIST, DriveCap.READ, DriveCap.ADD}))})
+    conn = QueryConn(fetch={"WHERE parent_id = $1": [child], "FROM drive_folder_grants": [], "FROM drive_files f": []})
+    out = await svc.list_folder(conn, company_id=COMPANY, folder_id=parent["id"], actor=actor("operator"))
+    assert "add" not in out["folders"][0]["caps"]
+
+
+@pytest.mark.asyncio
+async def test_store_file_folder_deleted_mid_upload_is_404(monkeypatch, storage):
+    import asyncpg
+
+    f = folder()
+    patch_caps(monkeypatch, {f["id"]: (f, ALL)})
+
+    class Gone(QueryConn):
+        async def fetchrow(self, sql, *args):
+            raise asyncpg.ForeignKeyViolationError("fk")
+    with pytest.raises(DriveError) as exc:
+        await svc.store_file(Gone(), company_id=COMPANY, folder_id=f["id"], prepared=prepared(),
+                             uploaded_by=None, actor=None)
+    assert exc.value.status == 404
+    assert storage.deleted  # no orphaned object
+
+
+@pytest.mark.asyncio
+async def test_store_file_audit_failure_rolls_back_and_cleans_up(monkeypatch, storage):
+    f = folder(space="hr")
+    patch_caps(monkeypatch, {f["id"]: (f, ALL)})
+
+    class AuditDown(QueryConn):
+        async def execute(self, sql, *args):
+            if "drive_audit_log" in sql:
+                raise RuntimeError("audit insert failed")
+            return "OK"
+    conn = AuditDown(fetchrow={"INSERT INTO drive_files": file_row(f["id"], space="hr")})
+    with pytest.raises(RuntimeError):
+        await svc.store_file(conn, company_id=COMPANY, folder_id=f["id"], prepared=prepared(),
+                             uploaded_by=None, actor=None)
+    assert storage.deleted
+
+
+@pytest.mark.asyncio
+async def test_create_folder_parent_deleted_is_404(monkeypatch):
+    import asyncpg
+
+    parent = folder()
+    patch_caps(monkeypatch, {parent["id"]: (parent, ALL)})
+
+    class Gone(QueryConn):
+        async def fetchrow(self, sql, *args):
+            raise asyncpg.ForeignKeyViolationError("fk")
+    with pytest.raises(DriveError) as exc:
+        await svc.create_folder(Gone(), company_id=COMPANY, parent_id=parent["id"], name="X", actor=actor("admin"))
+    assert exc.value.status == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_folder_already_gone_is_404(monkeypatch):
+    f = folder()
+    patch_caps(monkeypatch, {f["id"]: (f, ALL)})
+
+    async def seeded(conn, company_id):
+        return {"general_root": uuid4(), "hr_root": uuid4()}
+    monkeypatch.setattr(svc, "ensure_system_folders", seeded)
+    with pytest.raises(DriveError) as exc:
+        await svc.delete_folder(QueryConn(fetchval={"FOR UPDATE": None}), company_id=COMPANY,
+                                folder_id=f["id"], actor=actor("admin"))
+    assert exc.value.status == 404
+
+
+@pytest.mark.asyncio
+async def test_list_grants_one_row_per_person(monkeypatch):
+    f = folder(space="hr")
+    patch_caps(monkeypatch, {f["id"]: (f, ALL)})
+    conn = QueryConn(fetch={"FROM drive_folder_grants g": []})
+    await svc.list_grants(conn, company_id=COMPANY, folder_id=f["id"], actor=actor("admin"))
+    sql = conn.sql_for("fetch")[0]
+    assert "LEFT JOIN employees" not in sql and "LIMIT 1" in sql
+
+
+@pytest.mark.asyncio
+async def test_move_to_deleted_destination_is_404(monkeypatch):
+    import asyncpg
+
+    f = folder()
+    dst = folder()
+    patch_caps(monkeypatch, {f["id"]: (f, ALL), dst["id"]: (dst, ALL)})
+
+    class Gone(QueryConn):
+        async def fetchrow(self, sql, *args):
+            if sql.lstrip().startswith("UPDATE drive_files"):
+                raise asyncpg.ForeignKeyViolationError("fk")
+            return await super().fetchrow(sql, *args)
+    conn = Gone(fetchrow={"FROM drive_files f": file_row(f["id"])})
+    with pytest.raises(DriveError) as exc:
+        await svc.update_file(conn, company_id=COMPANY, file_id=uuid4(), actor=actor("admin"), folder_id=dst["id"])
+    assert exc.value.status == 404

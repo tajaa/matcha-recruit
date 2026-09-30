@@ -68,7 +68,10 @@ def upgrade():
         CREATE TABLE IF NOT EXISTS drive_files (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-            folder_id UUID NOT NULL REFERENCES drive_folders(id) ON DELETE RESTRICT,
+            -- NO ACTION, not RESTRICT: checked at end of statement, so a company
+                -- delete (which cascades both tables) succeeds. Folder deletes
+                -- are refused while non-empty in app code (drive_service).
+                folder_id UUID NOT NULL REFERENCES drive_folders(id),
             filename TEXT NOT NULL,
             storage_path TEXT NOT NULL,
             content_type VARCHAR(150),
