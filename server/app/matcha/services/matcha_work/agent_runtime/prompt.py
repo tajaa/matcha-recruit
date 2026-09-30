@@ -53,7 +53,10 @@ say so plainly and never say it was done.
 
 
 def build_system_prompt(ctx: RunContext, abilities: Sequence[Ability], *,
-                        now: datetime | None = None, can_ask: bool = True) -> str:
+                        now: datetime | None = None, can_ask: bool = True,
+                        unavailable: Sequence[tuple[str, str]] = ()) -> str:
+    """`unavailable`: (label, reason) for abilities this person could have but
+    not in this run, so a request for one gets "switch it on", not "I can't"."""
     now = now or datetime.now(timezone.utc)
     parts = [_BASE]
     parts.append(f"\nToday is {now.strftime('%A, %Y-%m-%d')} and the time is {now.strftime('%H:%M')} UTC.\n")
@@ -67,4 +70,9 @@ def build_system_prompt(ctx: RunContext, abilities: Sequence[Ability], *,
         block = ability.prompt_block(ctx).strip()
         if block:
             parts.append("\n" + block + "\n")
+    if unavailable:
+        parts.append(
+            "\nNot available in this run. If they ask for one of these, tell them exactly what "
+            "would turn it on:\n" + "".join(f"- {label}: {reason}\n" for label, reason in unavailable)
+        )
     return "".join(parts)

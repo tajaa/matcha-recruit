@@ -6,49 +6,110 @@ import AppKit
 /// Macos Settings scene — opened via Cmd+, or the "Werk → Settings…"
 /// menu. Three tabs: Notifications, Account, About. Surfaces toggles
 /// that were previously only flippable via UserDefaults directly.
+/// Which Settings tab is showing. Stored so a chat card ("Add a payment
+/// card") can pick the tab before it opens the Settings window, and so an
+/// already-open window switches to it.
+enum SettingsTab: String {
+    case notifications, appearance, account, connectors, paymentCards, shipping, about
+
+    static let storageKey = "espresso.settingsTab"
+
+    static func select(_ tab: SettingsTab) {
+        UserDefaults.standard.set(tab.rawValue, forKey: storageKey)
+    }
+}
+
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
-    /// Whether the server lets this account buy through agent cards (admins
-    /// plus an allowlist), or it already has saved cards.
+    /// Whether the server lets this account buy (admins plus an allowlist),
+    /// or it already has saved cards / addresses. Each tab shows on its own
+    /// evidence, so someone with addresses and no cards still sees Shipping.
     @State private var paymentCardsAvailable = false
+    @State private var shippingAvailable = false
+    @AppStorage(SettingsTab.storageKey) private var tab = SettingsTab.notifications.rawValue
+
+    private var isAdmin: Bool { appState.currentUser?.role == "admin" }
+    private var showsCards: Bool { isAdmin || paymentCardsAvailable }
+    private var showsShipping: Bool { isAdmin || shippingAvailable }
+
+    /// The stored tab, or Notifications while it names a tab that isn't
+    /// showing (yet): a chat card may pick Payment Cards before the
+    /// availability check has come back, and it takes over once it has.
+    private var selection: Binding<String> {
+        Binding(
+            get: {
+                switch SettingsTab(rawValue: tab) {
+                case .paymentCards where !showsCards, .shipping where !showsShipping, .none:
+                    return SettingsTab.notifications.rawValue
+                default:
+                    return tab
+                }
+            },
+            set: { tab = $0 }
+        )
+    }
 
     var body: some View {
-        TabView {
+        TabView(selection: selection) {
             NotificationsSettingsTab()
                 .tabItem { Label("Notifications", systemImage: "bell") }
+                .tag(SettingsTab.notifications.rawValue)
             AppearanceSettingsTab()
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
+                .tag(SettingsTab.appearance.rawValue)
             AccountSettingsTab()
                 .tabItem { Label("Account", systemImage: "person.circle") }
+                .tag(SettingsTab.account.rawValue)
             ConnectorsSettingsTab()
                 .tabItem { Label("AI Connectors", systemImage: "powerplug") }
-            // Agent-card purchases are internal-only in v1; the server decides who.
-            if appState.currentUser?.role == "admin" || paymentCardsAvailable {
+                .tag(SettingsTab.connectors.rawValue)
+            // Purchases are internal-only in v1; the server decides who.
+            if showsCards {
                 PaymentCardsSettingsTab()
                     .tabItem { Label("Payment Cards", systemImage: "creditcard") }
+                    .tag(SettingsTab.paymentCards.rawValue)
+            }
+            if showsShipping {
+                ShippingAddressesSettingsTab()
+                    .tabItem { Label("Shipping", systemImage: "shippingbox") }
+                    .tag(SettingsTab.shipping.rawValue)
             }
             AboutSettingsTab()
                 .tabItem { Label("About", systemImage: "info.circle") }
+                .tag(SettingsTab.about.rawValue)
         }
-        .frame(width: 480, height: 360)
+        .frame(width: 520, height: 460)
         .task(id: appState.currentUser?.email) {
-            guard let state = try? await MatchaWorkService.shared.paymentCards() else { return }
-            paymentCardsAvailable = state.enabled || !state.cards.isEmpty
+            async let cards = try? MatchaWorkService.shared.paymentCards()
+            async let shipping = try? MatchaWorkService.shared.shippingAddresses()
+            if let state = await cards {
+                paymentCardsAvailable = state.enabled || !state.cards.isEmpty
+            }
+            if let state = await shipping {
+                shippingAvailable = state.enabled || !state.addresses.isEmpty
+            }
         }
     }
 }
 
 // MARK: - Payment Cards
 
-/// Saved cards for agent-card purchases. When Espresso asks in a project chat
-/// "want me to buy it?", you reply with a card's last 4 digits. The number is
-/// sent once, encrypted on the server and never shown again; there is no
-/// security-code field, and card numbers never go through chat.
+/// Saved cards for purchases: agent-card buys in a project chat (reply with a
+/// card's last 4) and the Espresso assistant ("buy it", confirmed on a card
+/// first). The number is sent once, encrypted on the server and never shown
+/// again; there is no security-code field, and card numbers never go through
+/// chat. A card bills to the shipping address unless it has its own.
 private struct PaymentCardsSettingsTab: View {
     @State private var state: MWPaymentCardsState?
     @State private var number = ""
     @State private var expiry = ""
     @State private var label = ""
+    @State private var sameAsShipping = true
+    @State private var billing = MWPostalAddress()
+    /// The saved card whose billing address is being changed.
+    @State private var billingCard: MWPaymentCard?
+    @State private var editSame = true
+    @State private var editBilling = MWPostalAddress()
     @State private var busy = false
     @State private var message: String?
 
@@ -66,6 +127,15 @@ private struct PaymentCardsSettingsTab: View {
                                 Text(Self.caption(card)).font(.caption).foregroundColor(.secondary)
                             }
                             Spacer()
+                            if state.enabled {
+                                Button("Billing…") {
+                                    billingCard = card
+                                    editSame = card.billingAddress == nil
+                                    editBilling = card.billingAddress ?? MWPostalAddress()
+                                    message = nil
+                                }
+                                .disabled(busy)
+                            }
                             Button("Remove") { Task { await remove(card) } }
                                 .disabled(busy)
                         }
@@ -76,8 +146,23 @@ private struct PaymentCardsSettingsTab: View {
             } header: {
                 Text("Saved cards").font(.subheadline).bold()
             } footer: {
-                Text("When Espresso asks in a project chat whether to buy something, reply with a card's last 4 digits. Never paste a card number in chat.")
+                Text("Espresso always shows the card, item and address and waits for your yes before buying. Never paste a card number in chat.")
                     .font(.caption).foregroundColor(.secondary)
+            }
+            if let card = billingCard {
+                Section {
+                    Toggle("Billing address is the same as shipping", isOn: $editSame)
+                    if !editSame {
+                        AddressFormFields(address: $editBilling)
+                    }
+                    HStack {
+                        Button(busy ? "Saving…" : "Save billing address") { Task { await saveBilling(card) } }
+                            .disabled(busy)
+                        Button("Cancel") { billingCard = nil }
+                    }
+                } header: {
+                    Text("Billing for \(card.brandName) ending \(card.last4)").font(.subheadline).bold()
+                }
             }
             if let state, state.enabled {
                 Section {
@@ -91,6 +176,10 @@ private struct PaymentCardsSettingsTab: View {
                             .textFieldStyle(.roundedBorder)
                         TextField("Label", text: $label, prompt: Text("Optional, e.g. Stripe test"))
                             .textFieldStyle(.roundedBorder)
+                        Toggle("Billing address is the same as shipping", isOn: $sameAsShipping)
+                        if !sameAsShipping {
+                            AddressFormFields(address: $billing)
+                        }
                         // Always pressable: save() says what's missing
                         // instead of a silently grayed-out button.
                         Button(busy ? "Saving…" : "Save card") { Task { await save() } }
@@ -116,7 +205,9 @@ private struct PaymentCardsSettingsTab: View {
 
     private static func caption(_ card: MWPaymentCard) -> String {
         let expiry = String(format: "%02d/%02d", card.expMonth, card.expYear % 100)
-        return card.label.isEmpty ? "Expires \(expiry)" : "\(card.label) · expires \(expiry)"
+        let base = card.label.isEmpty ? "Expires \(expiry)" : "\(card.label) · expires \(expiry)"
+        let bills = card.billingAddress.map { "Bills to \($0.oneLine)" } ?? "Bills to your shipping address"
+        return "\(base)\n\(bills)"
     }
 
     /// "03/31" or "3/2031" → (3, 2031).
@@ -150,13 +241,39 @@ private struct PaymentCardsSettingsTab: View {
         message = nil
         defer { busy = false }
         do {
+            var billingAddress: MWPostalAddress?
+            if !sameAsShipping {
+                billingAddress = billing
+                billingAddress?.country = billing.country.trimmingCharacters(in: .whitespaces).uppercased()
+            }
             _ = try await MatchaWorkService.shared.addPaymentCard(
-                number: number, expMonth: month, expYear: year, label: label
+                number: number, expMonth: month, expYear: year, label: label, billing: billingAddress
             )
             number = ""
             expiry = ""
             label = ""
+            sameAsShipping = true
+            billing = MWPostalAddress()
             message = "Card saved."
+            await load()
+        } catch {
+            message = (error as? APIError)?.serverDetail ?? error.localizedDescription
+        }
+    }
+
+    private func saveBilling(_ card: MWPaymentCard) async {
+        busy = true
+        message = nil
+        defer { busy = false }
+        var address: MWPostalAddress?
+        if !editSame {
+            address = editBilling
+            address?.country = editBilling.country.trimmingCharacters(in: .whitespaces).uppercased()
+        }
+        do {
+            _ = try await MatchaWorkService.shared.setCardBillingAddress(id: card.id, billing: address)
+            billingCard = nil
+            message = "Billing address saved."
             await load()
         } catch {
             message = (error as? APIError)?.serverDetail ?? error.localizedDescription
@@ -168,6 +285,165 @@ private struct PaymentCardsSettingsTab: View {
         defer { busy = false }
         do {
             try await MatchaWorkService.shared.deletePaymentCard(id: card.id)
+            if billingCard?.id == card.id { billingCard = nil }
+            await load()
+        } catch {
+            message = (error as? APIError)?.serverDetail ?? error.localizedDescription
+        }
+    }
+}
+
+// MARK: - Address fields
+
+/// Bordered fields for a postal address. The server validates (a US address
+/// needs a state and ZIP); these only help.
+private struct AddressFormFields: View {
+    @Binding var address: MWPostalAddress
+
+    var body: some View {
+        TextField("Full name", text: $address.name).textFieldStyle(.roundedBorder)
+        TextField("Street address", text: $address.line1).textFieldStyle(.roundedBorder)
+        TextField("Apt, suite", text: $address.line2, prompt: Text("Optional")).textFieldStyle(.roundedBorder)
+        TextField("City", text: $address.city).textFieldStyle(.roundedBorder)
+        HStack {
+            TextField(address.isUS ? "State" : "Region", text: $address.region).textFieldStyle(.roundedBorder)
+            TextField(address.isUS ? "ZIP" : "Postal code", text: $address.postal_code).textFieldStyle(.roundedBorder)
+        }
+        TextField("Country code", text: $address.country, prompt: Text("US")).textFieldStyle(.roundedBorder)
+        TextField("Phone", text: $address.phone, prompt: Text("Optional, for delivery")).textFieldStyle(.roundedBorder)
+    }
+}
+
+// MARK: - Shipping addresses
+
+/// Where Espresso ships what it buys for you. The default is used unless you
+/// name another in chat; the confirmation card always shows the address.
+private struct ShippingAddressesSettingsTab: View {
+    private static let maxAddresses = 5
+
+    @State private var state: MWShippingAddressesState?
+    @State private var draft = MWPostalAddress()
+    /// nil: not editing; "" : a new address; otherwise the id being edited.
+    @State private var editing: String?
+    @State private var busy = false
+    @State private var message: String?
+
+    var body: some View {
+        Form {
+            Section {
+                if let state {
+                    if state.addresses.isEmpty {
+                        Text("No saved addresses.").foregroundColor(.secondary)
+                    }
+                    ForEach(state.addresses) { saved in
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(saved.address.oneLine).fixedSize(horizontal: false, vertical: true)
+                                if saved.isDefault {
+                                    Text("Default").font(.caption).foregroundColor(.accentColor)
+                                }
+                            }
+                            Spacer()
+                            if state.enabled {
+                                if !saved.isDefault {
+                                    Button("Make default") { Task { await makeDefault(saved) } }
+                                        .disabled(busy)
+                                }
+                                Button("Edit") {
+                                    draft = saved.address
+                                    editing = saved.id
+                                    message = nil
+                                }
+                                .disabled(busy)
+                            }
+                            Button("Remove") { Task { await remove(saved) } }
+                                .disabled(busy)
+                        }
+                    }
+                } else if message == nil {
+                    ProgressView().controlSize(.small)
+                }
+            } header: {
+                Text("Shipping addresses").font(.subheadline).bold()
+            } footer: {
+                Text("Where Espresso ships what it buys for you. It uses your default unless you name another.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+            if let state, state.enabled {
+                Section {
+                    if editing != nil {
+                        AddressFormFields(address: $draft)
+                        HStack {
+                            Button(busy ? "Saving…" : "Save address") { Task { await save() } }
+                                .disabled(busy)
+                                .keyboardShortcut(.defaultAction)
+                            Button("Cancel") { editing = nil }
+                        }
+                    } else if state.addresses.count < Self.maxAddresses {
+                        Button("Add an address") {
+                            draft = MWPostalAddress()
+                            editing = ""
+                            message = nil
+                        }
+                    }
+                } header: {
+                    Text(editing.map { $0.isEmpty ? "New address" : "Edit address" } ?? "Add").font(.subheadline).bold()
+                }
+            }
+            if let message {
+                Text(message).font(.caption).foregroundColor(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .task { await load() }
+    }
+
+    private func load() async {
+        do {
+            state = try await MatchaWorkService.shared.shippingAddresses()
+        } catch {
+            message = (error as? APIError)?.serverDetail ?? error.localizedDescription
+        }
+    }
+
+    private func save() async {
+        guard let editing else { return }
+        busy = true
+        message = nil
+        defer { busy = false }
+        var address = draft
+        address.country = draft.country.trimmingCharacters(in: .whitespaces).uppercased()
+        do {
+            if editing.isEmpty {
+                _ = try await MatchaWorkService.shared.addShippingAddress(address)
+            } else {
+                _ = try await MatchaWorkService.shared.updateShippingAddress(id: editing, address)
+            }
+            self.editing = nil
+            message = "Address saved."
+            await load()
+        } catch {
+            message = (error as? APIError)?.serverDetail ?? error.localizedDescription
+        }
+    }
+
+    private func makeDefault(_ saved: MWShippingAddress) async {
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await MatchaWorkService.shared.updateShippingAddress(id: saved.id, saved.address, isDefault: true)
+            await load()
+        } catch {
+            message = (error as? APIError)?.serverDetail ?? error.localizedDescription
+        }
+    }
+
+    private func remove(_ saved: MWShippingAddress) async {
+        busy = true
+        defer { busy = false }
+        do {
+            try await MatchaWorkService.shared.deleteShippingAddress(id: saved.id)
+            if editing == saved.id { editing = nil }
             await load()
         } catch {
             message = (error as? APIError)?.serverDetail ?? error.localizedDescription

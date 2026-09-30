@@ -9,7 +9,8 @@ could only refuse:
   * it needs no consent, or the person switched it on and agreed to the
     current disclosure;
   * it needs no connection, or the person's Google account is connected with
-    the scopes the ability needs.
+    the scopes the ability needs;
+  * it needs no allowance, or the person has it (buying: `purchases_allowed`).
 
 Reading the web and comparing things to buy need nothing switched on.
 """
@@ -18,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
-from .abilities import calendar, email, flights, reservations, shopping, web
+from .abilities import calendar, email, flights, purchase, reservations, shopping, web
 from .registry import Ability, validate_catalog
 
 ALWAYS_ON = ("web", "shopping")
@@ -47,6 +48,8 @@ class Situation:
     grants: dict[str, dict] = field(default_factory=dict)  # active grants only
     google_connected: bool = False
     granted_scopes: frozenset[str] = frozenset()
+    # Per-person allowances (`Ability.allowance`), e.g. "purchases".
+    allowed: frozenset[str] = frozenset()
 
 
 def build_catalog(*, fetch_page, max_fetches: int = 10, fetch_seconds: float = 25.0,
@@ -68,15 +71,32 @@ def build_catalog(*, fetch_page, max_fetches: int = 10, fetch_seconds: float = 2
             (lambda ctx: GoogleCalendarService(ctx.user_id, gmail=gmail)) if gmail is not None else None
         )),
         reservations.build(),
+        purchase.build(),
     ]
     validate_catalog(abilities)
     return abilities
+
+
+def allowances_for(user) -> frozenset[str]:
+    """The per-person allowances `user` (anything with `role` and `email`) has."""
+    from ..agent_card.chat_flow import purchases_allowed
+
+    return frozenset({purchase.ALLOWANCE}) if purchases_allowed(user) else frozenset()
+
+
+def offered(ability: Ability, situation: Situation) -> bool:
+    """Whether this account may have the ability at all. The one place the
+    allowance rule lives: an ability that is not offered is not in a run, not
+    listed, not hinted at and cannot be switched on."""
+    return ability.allowance is None or ability.allowance in situation.allowed
 
 
 def availability(ability: Ability, situation: Situation) -> Availability:
     base = dict(key=ability.key, label=ability.label, private_only=ability.private_only)
     if not ability.env_ready():
         return Availability(**base, available=False, reason="Not set up on this server yet.")
+    if not offered(ability, situation):
+        return Availability(**base, available=False, reason="Not available on this account yet.")
     if ability.private_only and not situation.private:
         return Availability(**base, available=False,
                             reason="Only in your private conversation with Espresso.")
@@ -100,3 +120,16 @@ def availability(ability: Ability, situation: Situation) -> Availability:
 
 def abilities_for(catalog: Sequence[Ability], situation: Situation) -> list[Ability]:
     return [ability for ability in catalog if availability(ability, situation).available]
+
+
+def switch_on_hints(catalog: Sequence[Ability], situation: Situation) -> list[tuple[str, str]]:
+    """(label, what would turn it on) for abilities this person could use but
+    cannot in this run. Leaves out what the server lacks and what the account
+    is not allowed: those are not the person's to fix, and not worth advertising."""
+    hints = []
+    for ability in catalog:
+        state = availability(ability, situation)
+        if state.available or not ability.env_ready() or not offered(ability, situation):
+            continue
+        hints.append((ability.label, state.reason or "Not available here."))
+    return hints

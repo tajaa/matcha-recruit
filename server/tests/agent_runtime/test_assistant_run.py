@@ -90,6 +90,37 @@ FINISH = {"headline": "Standing desk", "summary": "The sturdy one.", "confidence
 
 
 @pytest.mark.asyncio
+async def test_buying_is_offered_from_the_claimed_requester_with_no_extra_lookup(wired, monkeypatch):
+    monkeypatch.setenv("AGENT_PURCHASE_ALLOWED_EMAILS", "haley@example.com")
+    monkeypatch.setattr(grants, "load_grants", AsyncMock(return_value={"purchase": {}}))
+    client = wired.client(response(call("finish", FINISH)))
+    await assistant.run_assistant(_run(requester_email="haley@example.com"))
+    names = [t.get("name") or t.get("type") for t in client.calls[0]["tools"]]
+    assert "prepare_purchase" in names and "buy_item" in names
+    assert wired.conn.ran("SELECT role, email FROM users") == []
+    client = wired.client(response(call("finish", FINISH)))
+    await assistant.run_assistant(_run(requester_email="someone@example.com"))
+    names = [t.get("name") or t.get("type") for t in client.calls[0]["tools"]]
+    assert "buy_item" not in names
+
+
+@pytest.mark.asyncio
+async def test_the_approved_confirmation_reaches_the_run(wired, monkeypatch):
+    seen = {}
+
+    async def fake_run_agent(ctx, **_kwargs):
+        seen["prompt"] = ctx.resume_prompt_id
+        return runner.RunOutcome(kind="result", result={"schema": "agent_result.v2", "headline": "h",
+                                                        "summary": "s", "blocks": []})
+
+    monkeypatch.setattr(runner, "run_agent", fake_run_agent)
+    prompt_id = uuid4()
+    wired.conn.on("FROM mw_agent_card_prompts", {"tool": "buy_item", "args": {}, "targets": [], "preview": {}})
+    await assistant.run_assistant(_run(resume_prompt_id=prompt_id))
+    assert seen["prompt"] == prompt_id
+
+
+@pytest.mark.asyncio
 async def test_an_answer_is_stored_and_posted_as_a_card(wired):
     client = wired.client(response(call("finish", FINISH)))
     run = _run()
@@ -453,3 +484,10 @@ def test_the_disclosures_say_where_the_data_goes():
     assert "Gemini" in " ".join(consent.DISCLOSURES["reservations"].body)
     assert "never enters payment" in " ".join(consent.DISCLOSURES["reservations"].body)
     assert result.SCHEMA_VERSION == "agent_result.v2"
+
+
+def test_the_claim_query_carries_who_asked():
+    import inspect
+
+    source = inspect.getsource(task)
+    assert "AS requester_role" in source and "AS requester_email" in source

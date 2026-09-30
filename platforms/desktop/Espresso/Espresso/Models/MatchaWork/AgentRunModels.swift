@@ -353,11 +353,14 @@ struct MWPaymentCard: Decodable, Identifiable, Hashable {
     let last4: String
     let expMonth: Int
     let expYear: Int
+    /// nil: bills to the shipping address. Optional so an older server decodes.
+    let billingAddress: MWPostalAddress?
 
     enum CodingKeys: String, CodingKey {
         case id, label, brand, last4
         case expMonth = "exp_month"
         case expYear = "exp_year"
+        case billingAddress = "billing_address"
     }
 
     var brandName: String {
@@ -375,6 +378,54 @@ struct MWPaymentCardsState: Decodable {
     let enabled: Bool
     let configured: Bool
     let cards: [MWPaymentCard]
+}
+
+/// A postal address: shipping, or a card's own billing address (server:
+/// services/matcha_work/shipping_addresses.py validates it). Field names
+/// match the JSON, so no coding keys.
+struct MWPostalAddress: Codable, Hashable {
+    var name = ""
+    var line1 = ""
+    var line2 = ""
+    var city = ""
+    /// State / province; required for US.
+    var region = ""
+    var postal_code = ""
+    /// Two-letter country code.
+    var country = "US"
+    var phone = ""
+
+    /// "Haley Smith, 1 Main St, Oakland, CA 94607, US": how the confirmation card shows it.
+    var oneLine: String {
+        let locality = [region, postal_code].filter { !$0.isEmpty }.joined(separator: " ")
+        return [name, line1, line2, city, locality, country].filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
+    var isUS: Bool { country.trimmingCharacters(in: .whitespaces).uppercased() == "US" }
+}
+
+/// Where the Espresso assistant ships a purchase. Up to five, one default.
+struct MWShippingAddress: Decodable, Identifiable, Hashable {
+    let id: String
+    let isDefault: Bool
+    let address: MWPostalAddress
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case isDefault = "is_default"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        isDefault = (try? c.decode(Bool.self, forKey: .isDefault)) ?? false
+        address = try MWPostalAddress(from: decoder)
+    }
+}
+
+struct MWShippingAddressesState: Decodable {
+    let enabled: Bool
+    let addresses: [MWShippingAddress]
 }
 
 struct MWAgentRunQueued: Decodable {
@@ -404,18 +455,74 @@ extension MatchaWorkService {
         try await client.request(method: "GET", path: "\(basePath)/payment-cards")
     }
 
-    func addPaymentCard(number: String, expMonth: Int, expYear: Int, label: String) async throws -> MWPaymentCard {
+    /// `billing` nil: the card bills to the shipping address.
+    func addPaymentCard(number: String, expMonth: Int, expYear: Int, label: String,
+                        billing: MWPostalAddress? = nil) async throws -> MWPaymentCard {
         struct Body: Encodable {
             let number: String
             let exp_month: Int
             let exp_year: Int
             let label: String
+            let billing_address: MWPostalAddress?
         }
         return try await client.request(
             method: "POST",
             path: "\(basePath)/payment-cards",
-            body: Body(number: number, exp_month: expMonth, exp_year: expYear, label: label)
+            body: Body(number: number, exp_month: expMonth, exp_year: expYear, label: label,
+                       billing_address: billing)
         )
+    }
+
+    /// Give a saved card its own billing address, or nil to bill to the shipping address.
+    func setCardBillingAddress(id: String, billing: MWPostalAddress?) async throws -> MWPaymentCard {
+        struct Body: Encodable {
+            let billing: MWPostalAddress?
+
+            func encode(to encoder: Encoder) throws {
+                enum Keys: String, CodingKey { case billing_address }
+                var c = encoder.container(keyedBy: Keys.self)
+                try c.encode(billing, forKey: .billing_address)  // null clears it
+            }
+        }
+        return try await client.request(
+            method: "PUT", path: "\(basePath)/payment-cards/\(id)/billing-address", body: Body(billing: billing)
+        )
+    }
+
+    // Shipping addresses for assistant purchases (server: payment_cards.py).
+
+    func shippingAddresses() async throws -> MWShippingAddressesState {
+        try await client.request(method: "GET", path: "\(basePath)/shipping-addresses")
+    }
+
+    private struct AddressBody: Encodable {
+        let address: MWPostalAddress
+        let isDefault: Bool
+
+        func encode(to encoder: Encoder) throws {
+            try address.encode(to: encoder)
+            enum Keys: String, CodingKey { case is_default }
+            var c = encoder.container(keyedBy: Keys.self)
+            try c.encode(isDefault, forKey: .is_default)
+        }
+    }
+
+    func addShippingAddress(_ address: MWPostalAddress, isDefault: Bool = false) async throws -> MWShippingAddress {
+        try await client.request(
+            method: "POST", path: "\(basePath)/shipping-addresses",
+            body: AddressBody(address: address, isDefault: isDefault)
+        )
+    }
+
+    func updateShippingAddress(id: String, _ address: MWPostalAddress, isDefault: Bool = false) async throws -> MWShippingAddress {
+        try await client.request(
+            method: "PUT", path: "\(basePath)/shipping-addresses/\(id)",
+            body: AddressBody(address: address, isDefault: isDefault)
+        )
+    }
+
+    func deleteShippingAddress(id: String) async throws {
+        _ = try await client.requestData(method: "DELETE", path: "\(basePath)/shipping-addresses/\(id)")
     }
 
     func deletePaymentCard(id: String) async throws {

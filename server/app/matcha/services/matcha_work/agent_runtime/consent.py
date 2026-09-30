@@ -57,6 +57,20 @@ DISCLOSURES: dict[str, Disclosure] = {
             "you the link.",
         ),
     ),
+    "purchase": Disclosure(
+        version="purchase-1",
+        title="Let Espresso buy things for you",
+        body=(
+            "When you ask, Espresso buys something it found for you with a card you saved in "
+            "Settings, shipped to an address you saved there.",
+            "It always shows you the item, price, store, card and address and waits for your yes "
+            "before buying. You can say no.",
+            "Your card number stays encrypted on our servers. It is never shown in chat or sent to "
+            "an AI model, and Espresso never asks for it in chat.",
+            "Purchases are in test mode for now: no real money moves. When a price can't be "
+            "confirmed you get a link to finish checkout at the store yourself.",
+        ),
+    ),
 }
 
 

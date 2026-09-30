@@ -314,6 +314,20 @@ struct AgentReservation: Codable, Hashable {
     }
 }
 
+/// Buying needs something saved first. Server-written (`purchase.setup_block`).
+struct AgentPurchaseSetup: Codable, Hashable {
+    struct Step: Codable, Hashable {
+        /// payment_card / shipping_address
+        let key: String
+        let label: String
+        let `where`: String
+        let detail: String?
+    }
+
+    let missing: [String]
+    let steps: [Step]
+}
+
 /// One typed part of an answer. A block type this build doesn't know decodes
 /// to `.unknown` and is skipped: the server can add one before the app does.
 enum AgentResultBlock: Codable, Hashable {
@@ -324,6 +338,7 @@ enum AgentResultBlock: Codable, Hashable {
     case emails([AgentEmailItem])
     case events([AgentEventItem])
     case reservation(AgentReservation)
+    case purchaseSetup(AgentPurchaseSetup)
     case unknown(String)
 
     private enum CodingKeys: String, CodingKey {
@@ -360,6 +375,12 @@ enum AgentResultBlock: Codable, Hashable {
             } else {
                 self = .unknown(type)
             }
+        case "purchase_setup":
+            if let setup = try? AgentPurchaseSetup(from: decoder) {
+                self = .purchaseSetup(setup)
+            } else {
+                self = .unknown(type)
+            }
         default:
             self = .unknown(type)
         }
@@ -391,6 +412,9 @@ enum AgentResultBlock: Codable, Hashable {
         case .reservation(let booking):
             try booking.encode(to: encoder)
             try c.encode("reservation", forKey: .type)
+        case .purchaseSetup(let setup):
+            try setup.encode(to: encoder)
+            try c.encode("purchase_setup", forKey: .type)
         case .unknown(let type):
             try c.encode(type, forKey: .type)
         }

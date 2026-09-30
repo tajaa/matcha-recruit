@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from types import SimpleNamespace
 from uuid import UUID
 
 from app.database import connection_or_direct, decode_jsonb
@@ -137,6 +138,10 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         situation = catalog.Situation(
             private=private, grants=active,
             google_connected=gmail.is_configured, granted_scopes=gmail.granted_scopes,
+            # The worker's claim query carries who asked (role, email).
+            allowed=catalog.allowances_for(SimpleNamespace(
+                role=run.get("requester_role"), email=run.get("requester_email"),
+            )),
         )
         everything = catalog.build_catalog(
             fetch_page=lambda url: card_agent.fetch_page_tool(url), gmail=gmail,
@@ -181,7 +186,8 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
             grounding=policy.Grounding(user_texts=own_texts, own_addresses=own),
         ),
         granted_scopes=situation.granted_scopes, grants=active,
-        commit_mode=commit_mode(), resume=frozen, on_receipt=on_receipt,
+        commit_mode=commit_mode(), resume=frozen, resume_prompt_id=run.get("resume_prompt_id"),
+        on_receipt=on_receipt,
         # Nothing from the private conversation is stored by the provider: even
         # a run without mail or calendar replays earlier answers built from them.
         store_responses=not private and not any(a.private_only for a in abilities),
@@ -197,7 +203,9 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         client=get_luna_client(),
         abilities=abilities,
         contract=contract,
-        instructions=build_system_prompt(ctx, abilities),
+        instructions=build_system_prompt(
+            ctx, abilities, unavailable=catalog.switch_on_hints(everything, situation),
+        ),
         first_input=[*replay, text_item("user", run["prompt"])],
         first_note="Working on it…",
         extra_tools=[ASK_USER],

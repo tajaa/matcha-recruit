@@ -8,6 +8,7 @@ import { useWorkSurface } from '../routes/WorkSurfaceContext'
 import { avatarValidationError } from '../utils/avatarValidation'
 import AiConnectorsSettings from '../components/shell/AiConnectorsSettings'
 import PaymentCardsSettings from '../components/shell/PaymentCardsSettings'
+import ShippingAddressesSettings from '../components/shell/ShippingAddressesSettings'
 
 export function AccountSettings({ me, refresh }: { me: MeResponse; refresh: () => Promise<void> }) {
   const [name, setName] = useState(me.profile?.name ?? '')
@@ -87,9 +88,10 @@ export default function WorkSettings() {
     {me && <AccountSettings me={me} refresh={refresh} />}
     {surface === 'espresso' && <AppearanceSettings />}
     {me && <AiConnectorsSettings />}
-    {/* Agent-card purchases are internal-only in v1; the server decides who
-        (admins plus an allowlist). Everyone else sees nothing. */}
+    {/* Purchases are internal-only in v1; the server decides who (admins plus
+        an allowlist). Everyone else sees neither section. */}
     {me && <PaymentCardsSettings isAdmin={me.user.role === 'admin'} />}
+    {me && <ShippingAddressesSettings isAdmin={me.user.role === 'admin'} />}
     <section className="rounded-xl border border-w-line bg-w-surface p-5"><h2 className="text-sm font-semibold text-w-text">About</h2><p className="mt-2 text-xs text-w-dim">{surface === 'espresso' ? 'Espresso' : 'Matcha Work'} brings your projects, notes, and conversations together.</p></section>
   </div>
 }

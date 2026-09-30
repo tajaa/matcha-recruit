@@ -10,7 +10,8 @@ asking. Two things override that default:
 
   deny     a ceiling was reached, or a private-only tool ran outside the
            person's private conversation
-  confirm  the action reaches someone or somewhere the person never named
+  confirm  the action reaches someone or somewhere the person never named,
+           or the tool always asks (`always_confirm`: spending money)
 
 "Named" is strict. A recipient is grounded when the person typed the address,
 when it is their own, or when it sits on a thread or event they pointed at. A
@@ -205,6 +206,11 @@ def evaluate_commit(
             )
     if ctx.approved:
         return Decision("allow", "approved")
+    if tool.always_confirm:
+        return Decision(
+            "confirm", "always_confirm",
+            message="Waiting for the person to confirm. Stop here; do not look for another way.",
+        )
     ungrounded = tuple(t for t in targets if not is_grounded(t, ctx.grounding))
     if ungrounded:
         return Decision(

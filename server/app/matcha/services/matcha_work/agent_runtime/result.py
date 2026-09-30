@@ -96,6 +96,14 @@ def normalize(args: Any, state: RunState, abilities: Sequence[Ability]) -> tuple
         if block is not None:
             seen.add(kind)
             blocks.append({**block, "type": kind})
+    for ability in abilities:
+        if ability.auto_blocks is None:
+            continue
+        for block in ability.auto_blocks(state):
+            kind = block.get("type")
+            if kind in ability.block_schemas and kind not in seen:
+                seen.add(kind)
+                blocks.append(block)
     if len(blocks) > MAX_BLOCKS:
         warnings.append(f"Trimmed blocks to {MAX_BLOCKS}")
     confidence = args.get("confidence")
