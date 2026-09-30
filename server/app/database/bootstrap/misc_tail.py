@@ -42,7 +42,10 @@ async def create_misc_tail(conn):
                 is_archived BOOLEAN DEFAULT false,
                  visibility VARCHAR(20) DEFAULT 'public',
                  channel_scope TEXT NOT NULL DEFAULT 'operations'
-                     CHECK (channel_scope IN ('operations', 'project_discussion', 'community')),
+                     CHECK (channel_scope IN ('operations', 'project_discussion', 'community', 'assistant')),
+                 -- A fresh database only. An existing one gets this column and
+                 -- the wider CHECK from migration agentrt02.
+                 assistant_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 updated_at TIMESTAMPTZ DEFAULT NOW(),
                 UNIQUE(company_id, slug)

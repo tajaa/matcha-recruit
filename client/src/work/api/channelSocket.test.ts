@@ -157,6 +157,35 @@ describe('ChannelSocket outbox', () => {
     expect(received).toHaveLength(1)
   })
 
+  it('dispatches assistant run progress to listeners and drops malformed frames', () => {
+    const s = new ChannelSocket()
+    const received: unknown[] = []
+    const handler = (event: unknown) => received.push(event)
+    s.addAgentRunProgressListener(handler)
+    s.connect()
+    latest().receive({
+      type: 'agent_run_progress', channel_id: 'ch-1', run_id: 'r-1', status: 'running', note: 'Reading…',
+      steps: [
+        { seq: 1, kind: 'search', label: 'Searched: desks', status: 'ok' },
+        { seq: 'two', label: 'malformed step' },
+        null,
+      ],
+    })
+    latest().receive({ type: 'agent_run_progress', channel_id: 'ch-1', run_id: 'r-1', status: 'exploded' })
+    latest().receive({ type: 'agent_run_progress', channel_id: 'ch-1', status: 'done' })
+    latest().receive({ type: 'agent_run_progress', channel_id: 'ch-1', run_id: 'r-1', status: 'done' })
+    expect(received).toEqual([
+      {
+        channel_id: 'ch-1', run_id: 'r-1', status: 'running', note: 'Reading…',
+        steps: [{ seq: 1, kind: 'search', label: 'Searched: desks', status: 'ok' }],
+      },
+      { channel_id: 'ch-1', run_id: 'r-1', status: 'done', note: null, steps: [] },
+    ])
+    s.removeAgentRunProgressListener(handler)
+    latest().receive({ type: 'agent_run_progress', channel_id: 'ch-1', run_id: 'r-1', status: 'failed' })
+    expect(received).toHaveLength(2)
+  })
+
   it('dispatches notification frames to listeners and supports cleanup', () => {
     const s = new ChannelSocket()
     const received: string[] = []

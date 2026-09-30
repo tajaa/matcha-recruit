@@ -14,6 +14,8 @@ const copy: Record<string, string> = {
   paid_channels: 'Creator monetization needs Pro',
   ai_model_pro: 'The Pro AI model needs Pro',
   ai_quota: "You've used your free AI for now",
+  agent_cards: 'Agent cards need Pro',
+  assistant: 'The Espresso assistant needs Pro',
 }
 
 const plans: { plan: CheckoutPlan; price: string; features: string[] }[] = [

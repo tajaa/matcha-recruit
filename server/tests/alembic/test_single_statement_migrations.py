@@ -24,6 +24,9 @@ from sqlalchemy import text
 
 VERSIONS = Path(__file__).parents[2] / "alembic" / "versions"
 MIGRATIONS = (
+    "agentrt01_assistant_runs.py",
+    "agentrt02_assistant_channels.py",
+    "agentrt03_ability_grants.py",
     "autopilot01_location_weather.py",
     "autopilot02_autopilot_mode.py",
     "autopilot03_sales_hourly.py",

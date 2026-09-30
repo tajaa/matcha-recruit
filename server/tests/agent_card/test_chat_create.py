@@ -19,6 +19,16 @@ from app.matcha.services.matcha_work.agent_card import chat_create, chat_flow, e
     ("@espresso buy me a 6 ft braided usb-c cable", "buy me a 6 ft braided usb-c cable"),
     ("@espresso find the best espresso machine under $500", "find the best espresso machine under $500"),
     ("@espresso research standing desks, ship to Oakland", "research standing desks, ship to Oakland"),
+    # An unmistakable trip counts as spending money.
+    ("@espresso find a flight to Denver next Friday", "find a flight to Denver next Friday"),
+    ("@espresso research round-trip flights to Lisbon in May", "research round-trip flights to Lisbon in May"),
+    ("@espresso find airfare to Tokyo for two", "find airfare to Tokyo for two"),
+    # A bare "flight" or "round-trip" doesn't: "flight risk" is an HR feature,
+    # and this codebase has flight search code and JSON round-trip tests.
+    ("@espresso find the flight risk scores for the team", None),
+    ("@espresso find the JSON round-trip test that fails", None),
+    ("@espresso find the flight search timeout", None),
+    ("@espresso find flights from the retry queue", None),
     # Repo questions stay with the repo agent.
     ("@espresso how does the auth middleware work", None),
     ("@espresso find where we validate the webhook signature", None),
