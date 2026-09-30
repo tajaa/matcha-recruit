@@ -45,8 +45,8 @@ export default function WriteUpForm({ existing, onSubmitted, onCancel }: Props) 
   const [incident, setIncident] = useState<HrCaseIncident | null>(null)
   const [incidentQuery, setIncidentQuery] = useState('')
   const [actionType, setActionType] = useState(existing?.action_type ?? 'written_warning')
-  const [infraction, setInfraction] = useState('attendance')
-  const [dates, setDates] = useState<string[]>([])
+  const [infraction, setInfraction] = useState(existing?.infraction_type ?? 'attendance')
+  const [dates, setDates] = useState<string[]>(existing?.occurrence_dates ?? [])
   const [dateInput, setDateInput] = useState('')
   const [sourceKind, setSourceKind] = useState<'file' | 'google'>('file')
   const [file, setFile] = useState<File | null>(null)
@@ -65,6 +65,9 @@ export default function WriteUpForm({ existing, onSubmitted, onCancel }: Props) 
   async function submit(e: FormEvent) {
     e.preventDefault()
     if (!employee) return setError('Pick the employee this write-up is for.')
+    // A date picked but not yet added still counts.
+    const occurrenceDates = dateInput && !dates.includes(dateInput) ? [...dates, dateInput].sort() : dates
+    if (occurrenceDates.length === 0) return setError('Add the date it happened. The leave check runs against it.')
     if (sourceKind === 'file' && !file) return setError('Attach the write-up.')
     if (sourceKind === 'google' && !GOOGLE_LINK.test(googleUrl.trim())) return setError('Paste a Google Doc link.')
     setBusy(true)
@@ -74,7 +77,7 @@ export default function WriteUpForm({ existing, onSubmitted, onCancel }: Props) 
         employeeId: employee.id,
         actionType,
         infractionType: infraction,
-        occurrenceDates: dates,
+        occurrenceDates,
         caseId: existing?.id,
         incidentId: existing ? undefined : incident?.id,
         file: sourceKind === 'file' ? file ?? undefined : undefined,

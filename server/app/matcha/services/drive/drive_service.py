@@ -665,14 +665,24 @@ async def read_file_bytes(conn, *, company_id: UUID, file_id: UUID, actor: Optio
     from app.core.services.storage import get_storage
 
     row, _ = await _file_with_caps(conn, company_id=company_id, file_id=file_id, actor=actor)
-    data = await get_storage().download_file(row["storage_path"])
+    try:
+        data = await get_storage().download_file(row["storage_path"])
+    except RuntimeError as exc:  # storage reports every S3 failure this way
+        logger.warning("[drive] could not read %s: %s", file_id, exc)
+        raise DriveError(502, "That file can't be read right now. Try again in a moment.") from None
     if row["space"] == "hr":
         await write_audit(conn, company_id=company_id, actor_user_id=actor.user_id if actor else None,
                           action="file_read", file_id=file_id, folder_id=row["folder_id"])
     return _file_out(row), data
 
 
-async def presign_download(conn, *, company_id: UUID, file_id: UUID, actor: DriveActor) -> dict[str, Any]:
+async def presign_download(
+    conn, *, company_id: UUID, file_id: UUID, actor: Optional[DriveActor],
+    on_behalf_of: Optional[UUID] = None, audit_details: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """`actor=None` is the system path (a feature that has already authorized
+    the reader, e.g. an HR case's manager fetching their own draft); pass
+    `on_behalf_of` so the HR-space audit row still names the person."""
     from app.core.services.storage import get_storage
 
     row, _ = await _file_with_caps(conn, company_id=company_id, file_id=file_id, actor=actor)
@@ -680,8 +690,9 @@ async def presign_download(conn, *, company_id: UUID, file_id: UUID, actor: Driv
     if not url:
         raise DriveError(503, "That file can't be downloaded right now.")
     if row["space"] == "hr":
-        await write_audit(conn, company_id=company_id, actor_user_id=actor.user_id,
-                          action="file_download", file_id=file_id, folder_id=row["folder_id"])
+        await write_audit(conn, company_id=company_id, actor_user_id=actor.user_id if actor else on_behalf_of,
+                          action="file_download", file_id=file_id, folder_id=row["folder_id"],
+                          details=audit_details)
     return {"url": url, "filename": row["filename"], "expires_in": PRESIGN_SECONDS}
 
 

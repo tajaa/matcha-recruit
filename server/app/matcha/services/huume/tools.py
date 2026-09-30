@@ -537,7 +537,7 @@ TOOLS: tuple[HuumeTool, ...] = (
             "employee_id": _s(type="string", description="Use instead of employee_name if you already have it."),
             "action_type": _s(type="string", enum=["verbal_warning", "written_warning", "final_warning", "suspension", "pip", "other"]),
             "infraction_type": _s(type="string", enum=["attendance", "performance", "conduct", "safety", "policy_violation"]),
-            "occurrence_dates": _s(type="array", items=_s(type="string"), description="ISO dates YYYY-MM-DD the conduct happened."),
+            "occurrence_dates": _s(type="array", items=_s(type="string"), description="ISO dates YYYY-MM-DD the conduct happened. Required: ask for them if the user hasn't said."),
             "incident_id": _s(type="string", description="The incident this is about, if any."),
             "case_id": _s(type="string", description="An existing case (e.g. a revised draft after HR asked for changes)."),
             "attachment_index": _s(type="integer", description="0 = newest file attached in this chat."),
@@ -545,7 +545,7 @@ TOOLS: tuple[HuumeTool, ...] = (
             "google_url": _s(type="string"),
             "confirm_id": _s(type="string", description="Omit when staging. On the confirm turn pass back EXACTLY the confirm_id from 'Current staged state'."),
         },
-        required=["action_type", "infraction_type"],
+        required=["action_type", "infraction_type", "occurrence_dates"],
         intent_hints=("here's the write-up", "send this write-up", "write-up to hr", "written warning", "final warning"),
     ),
     _tool(

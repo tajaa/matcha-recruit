@@ -17,17 +17,20 @@ from __future__ import annotations
 from typing import Literal, Optional
 from uuid import UUID
 
+import html
+import json
 import logging
+import secrets
 import urllib.parse
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Cookie, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.core.models.auth import CurrentUser
 from app.core.services.redis_cache import check_rate_limit
 from app.database import get_connection
-from app.matcha.dependencies import require_company_member, require_feature, resolve_accessible_company_scope
+from app.matcha.dependencies import require_business_company, require_company_member, require_feature
 from app.matcha.services.drive import drive_service as svc
 from app.matcha.services.drive import google_drive_service as gdrive
 from app.matcha.services.drive.drive_service import DriveError
@@ -40,6 +43,8 @@ router = APIRouter(prefix="/drive", dependencies=[Depends(require_feature("match
 oauth_callback_router = APIRouter()
 
 GOOGLE_IMPORT_LIMIT = (30, 3600)  # per user per hour
+# Ties the OAuth handle to the browser that pressed Connect (oauth_state).
+GDRIVE_BIND_COOKIE = "gdrive_oauth_bind"
 
 
 class FolderCreate(BaseModel):
@@ -68,22 +73,7 @@ class GrantSet(BaseModel):
 
 
 async def _business_company(current_user: CurrentUser) -> UUID:
-    # A platform admin has no company of their own: scope resolution would
-    # silently pick the oldest tenant and hand them admin rights over its HR
-    # space. Drive is per-company, so they're refused here.
-    if current_user.role == "admin":
-        raise HTTPException(status_code=403, detail="Drive is only available inside a company workspace")
-    scope = await resolve_accessible_company_scope(current_user)
-    company_id = scope.get("company_id")
-    if not company_id:
-        raise HTTPException(status_code=403, detail="No company associated with this account")
-    async with get_connection() as conn:
-        is_personal = await conn.fetchval(
-            "SELECT COALESCE(is_personal, false) FROM companies WHERE id = $1", company_id,
-        )
-    if is_personal:
-        raise HTTPException(status_code=403, detail="Drive is only available in business workspaces")
-    return company_id
+    return await require_business_company(current_user, product="Drive")
 
 
 def _raise(exc: DriveError):
@@ -136,16 +126,20 @@ def _google_redirect_uri() -> str:
 
 
 def _popup(message: str, text: str, status_code: int = 200) -> Response:
-    # `message` is one of a fixed set of literals, never request input.
-    return Response(
+    # `message` is one of a fixed set of literals, never request input; the
+    # target origin is ours, so the result never reaches another page.
+    origin = get_settings().app_base_url.rstrip("/")
+    response = Response(
         content=(
             "<!DOCTYPE html><html><body><script>window.opener && "
-            f"window.opener.postMessage('{message}', '*'); window.close();</script>"
-            f"<p>{text}</p></body></html>"
+            f"window.opener.postMessage('{message}', {json.dumps(origin)}); window.close();</script>"
+            f"<p>{html.escape(text)}</p></body></html>"
         ),
         media_type="text/html",
         status_code=status_code,
     )
+    response.delete_cookie(GDRIVE_BIND_COOKIE, path=gdrive.CALLBACK_PATH)
+    return response
 
 
 @router.get("/google/status")
@@ -155,11 +149,14 @@ async def google_status(current_user: CurrentUser = Depends(require_company_memb
 
 
 @router.post("/google/connect")
-async def google_connect(current_user: CurrentUser = Depends(require_company_member)):
+async def google_connect(response: Response, current_user: CurrentUser = Depends(require_company_member)):
     await _business_company(current_user)
+    nonce = secrets.token_urlsafe(32)
     try:
         creds = gdrive._client_credentials()
-        state = await oauth_state.issue_state(gdrive.OAUTH_STATE_PREFIX, current_user.id)
+        state = await oauth_state.issue_state(
+            gdrive.OAUTH_STATE_PREFIX, current_user.id, binding=oauth_state.binding_hash(nonce),
+        )
     except GoogleDriveError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
     except oauth_state.OAuthStateUnavailable as exc:
@@ -175,6 +172,12 @@ async def google_connect(current_user: CurrentUser = Depends(require_company_mem
         "include_granted_scopes": "false",
         "state": state,
     }
+    # Sent back by this browser only, and only to the callback. Lax still
+    # rides along on Google's top-level redirect back to us.
+    response.set_cookie(
+        GDRIVE_BIND_COOKIE, nonce, max_age=oauth_state.STATE_TTL_SECONDS, path=gdrive.CALLBACK_PATH,
+        httponly=True, secure=_google_redirect_uri().startswith("https://"), samesite="lax",
+    )
     return {"auth_url": f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"}
 
 
@@ -221,17 +224,21 @@ async def google_import(body: GoogleImport, current_user: CurrentUser = Depends(
 
 @oauth_callback_router.get("/drive/google/callback", include_in_schema=False)
 async def google_callback(
-    state: str = Query(...),
+    state: str = Query(""),
     code: str | None = Query(None),
     error: str | None = Query(None),
+    bind: str | None = Cookie(None, alias=GDRIVE_BIND_COOKIE),
 ):
+    # Every outcome answers with the popup page, so the opener always hears back.
     try:
-        user_id = await oauth_state.consume_state(gdrive.OAUTH_STATE_PREFIX, state)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        user_id = await oauth_state.consume_state(
+            gdrive.OAUTH_STATE_PREFIX, state, binding=oauth_state.binding_hash(bind) if bind else None,
+        )
+    except ValueError:
+        return _popup("gdrive-error", "This connection link expired or was opened in another browser. Close this window and press Connect again.", 400)
     except oauth_state.OAuthStateUnavailable as exc:
         logger.error("[gdrive] cannot consume OAuth state: %s", exc)
-        raise HTTPException(status_code=503, detail="Google connection is temporarily unavailable. Please try again.") from exc
+        return _popup("gdrive-error", "Google connection is temporarily unavailable. Please try again.", 503)
     if error == "access_denied":
         return _popup("gdrive-cancelled", "Google Drive connection canceled. You can close this window.")
     if error or not code:

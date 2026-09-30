@@ -28,9 +28,9 @@ from pydantic import BaseModel, Field
 from app.core.models.auth import CurrentUser
 from app.core.services.redis_cache import check_rate_limit
 from app.database import get_connection
-from app.matcha.dependencies import require_admin_or_client, require_feature, resolve_accessible_company_scope
+from app.matcha.dependencies import require_admin_or_client, require_business_company, require_feature
 from app.matcha.services.hr_cases import case_service, stages, workflow
-from app.matcha.services.hr_cases.access import has_hr_access
+from app.matcha.services.hr_cases.access import can_change_hr_settings, has_hr_access
 from app.matcha.services.hr_cases.case_service import CaseError
 
 router = APIRouter(prefix="/hr-cases", dependencies=[Depends(require_feature("hr_cases"))])
@@ -62,21 +62,7 @@ class SettingsUpdate(BaseModel):
 
 
 async def _business_company(current_user: CurrentUser) -> UUID:
-    # A platform admin has no company: scope resolution would drop them into
-    # the oldest tenant as its Work admin, i.e. with HR access to its cases.
-    if current_user.role == "admin":
-        raise HTTPException(status_code=403, detail="HR cases are only available inside a company workspace")
-    scope = await resolve_accessible_company_scope(current_user)
-    company_id = scope.get("company_id")
-    if not company_id:
-        raise HTTPException(status_code=403, detail="No company associated with this account")
-    async with get_connection() as conn:
-        is_personal = await conn.fetchval(
-            "SELECT COALESCE(is_personal, false) FROM companies WHERE id = $1", company_id,
-        )
-    if is_personal:
-        raise HTTPException(status_code=403, detail="HR cases are only available in business workspaces")
-    return company_id
+    return await require_business_company(current_user, product="HR cases")
 
 
 async def _require_hr(conn, current_user: CurrentUser, company_id: UUID) -> None:
@@ -115,6 +101,8 @@ async def update_settings(body: SettingsUpdate, current_user: CurrentUser = Depe
     company_id = await _business_company(current_user)
     async with get_connection() as conn:
         await _require_hr(conn, current_user, company_id)
+        if not await can_change_hr_settings(conn, user=current_user, company_id=company_id):
+            raise HTTPException(status_code=403, detail="Only a Work admin or someone who manages the HR folder can change HR settings.")
         if body.filename_template is not None:
             from app.matcha.services.hr_cases.verification import TemplateError, validate_template
 
@@ -189,21 +177,33 @@ async def recent_incidents(
     q: Optional[str] = Query(None, max_length=100),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
+    """Incidents a write-up can be linked to: any, for HR; otherwise only the
+    ones the caller reported (the same rule `workflow.submit_draft` enforces)."""
+    from app.matcha.services.hr_cases.notifications import resolve_gm_user_id
+
     company_id = await _business_company(current_user)
     term = (q or "").strip()
     pattern = "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
     async with get_connection() as conn:
+        is_hr = await has_hr_access(conn, user=current_user, company_id=company_id)
         rows = await conn.fetch(
             """
-            SELECT id, incident_number, title, occurred_at FROM ir_incidents
+            SELECT id, incident_number, title, occurred_at, created_by, reported_by_email FROM ir_incidents
             WHERE company_id = $1
               AND ($2 = '' OR title ILIKE $3 ESCAPE '\\' OR incident_number ILIKE $3 ESCAPE '\\')
+              AND ($4 OR created_by = $5 OR lower(reported_by_email) = lower($6))
             ORDER BY occurred_at DESC NULLS LAST
             LIMIT 20
             """,
-            company_id, term, pattern,
+            company_id, term, pattern, is_hr, current_user.id, current_user.email,
         )
-    return {"incidents": [dict(r) for r in rows]}
+        if not is_hr:
+            rows = [r for r in rows
+                    if await resolve_gm_user_id(conn, company_id=company_id, incident=dict(r)) == current_user.id]
+    return {"incidents": [
+        {"id": r["id"], "incident_number": r["incident_number"], "title": r["title"], "occurred_at": r["occurred_at"]}
+        for r in rows
+    ]}
 
 
 @router.post("/drafts", status_code=201)
@@ -261,15 +261,19 @@ async def submit_draft(
 
     async with get_connection() as conn:
         is_hr = await has_hr_access(conn, user=current_user, company_id=company_id)
-        try:
-            result = await workflow.submit_draft(
-                conn, company_id=company_id, actor_user_id=current_user.id, actor_is_hr=is_hr,
-                prepared=prepared, employee_id=employee_id, action_type=action_type,
-                infraction_type=infraction_type, occurrence_dates=dates,
-                case_id=case_id, incident_id=incident_id, source=source, source_ref=source_ref,
-            )
-        except CaseError as exc:
-            _raise(exc)
+    # submit_draft takes its own short connections: its model review and
+    # notification emails must not pin a pool connection.
+    try:
+        result = await workflow.submit_draft(
+            get_connection, company_id=company_id, actor_user_id=current_user.id, actor_is_hr=is_hr,
+            prepared=prepared, employee_id=employee_id, action_type=action_type,
+            infraction_type=infraction_type, occurrence_dates=dates,
+            case_id=case_id, incident_id=incident_id, source=source, source_ref=source_ref,
+        )
+    except CaseError as exc:
+        _raise(exc)
+    except DriveError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
     return {"status": result["status"], "case": result["manager_view"]}
 
 
@@ -368,8 +372,10 @@ async def mark_delivered(case_id: UUID, body: Delivered, current_user: CurrentUs
 
 @router.get("/{case_id}/draft")
 async def draft_download(case_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
-    """Short-lived link to the case's current draft — HR or the case's manager."""
-    from app.core.services.storage import get_storage
+    """Short-lived link to the case's current draft — HR or the case's manager.
+    Goes through Drive's system path so the HR-space download is audited."""
+    from app.matcha.services.drive import drive_service
+    from app.matcha.services.drive.drive_service import DriveError
 
     company_id = await _business_company(current_user)
     async with get_connection() as conn:
@@ -381,16 +387,14 @@ async def draft_download(case_id: UUID, current_user: CurrentUser = Depends(requ
             _raise(exc)
         if not case.get("draft_file_id"):
             raise HTTPException(status_code=404, detail="There's no draft on this case yet.")
-        row = await conn.fetchrow(
-            "SELECT filename, storage_path FROM drive_files WHERE id = $1 AND company_id = $2 AND deleted_at IS NULL",
-            case["draft_file_id"], company_id,
-        )
-    if not row:
-        raise HTTPException(status_code=404, detail="The draft file is no longer available.")
-    url = get_storage().get_presigned_download_url(row["storage_path"], expires_in=300)
-    if not url:
-        raise HTTPException(status_code=503, detail="That file can't be downloaded right now.")
-    return {"url": url, "filename": row["filename"], "expires_in": 300}
+        try:
+            return await drive_service.presign_download(
+                conn, company_id=company_id, file_id=case["draft_file_id"], actor=None,
+                on_behalf_of=current_user.id, audit_details={"via": "hr_case", "case_id": str(case_id)},
+            )
+        except DriveError as exc:
+            detail = "The draft file is no longer available." if exc.status == 404 else exc.detail
+            raise HTTPException(status_code=exc.status, detail=detail) from exc
 
 
 @router.post("/{case_id}/signed")

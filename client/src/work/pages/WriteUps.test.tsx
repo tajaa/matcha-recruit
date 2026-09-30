@@ -19,7 +19,7 @@ function mcase(overrides: Partial<ManagerCase> = {}): ManagerCase {
     id: 'c1', case_number: 'HRC-2026-0001', stage: 'flagged', stage_label: 'Flagged',
     checklist: [{ key: 'flagged', label: 'Incident reviewed', done: true }],
     incident_id: 'i1', incident_number: 'IR-7', incident_title: 'Late', employee_id: 'e1', employee_name: 'Jane Doe',
-    action_type: null, review: null, decision: null, decision_reason: null, delivered_at: null,
+    action_type: null, infraction_type: null, occurrence_dates: [], review: null, decision: null, decision_reason: null, delivered_at: null,
     has_draft: false, can_submit_draft: true, can_mark_delivered: false, can_upload_signed: false, signed_check: null, updated_at: null,
     ...overrides,
   }
@@ -88,6 +88,51 @@ describe('WriteUps', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send to HR' }))
     expect(await screen.findByText('Pick the employee this write-up is for.')).toBeTruthy()
     expect(api.submitWriteUp).not.toHaveBeenCalled()
+  })
+
+  it('refuses a write-up with no date', async () => {
+    api.listMyWriteUps.mockResolvedValue({ cases: [] })
+    renderAt('/work/write-ups')
+    fireEvent.click(await screen.findByRole('button', { name: /New write-up/ }))
+    fireEvent.change(screen.getByLabelText('Employee'), { target: { value: 'ja' } })
+    fireEvent.click(await screen.findByRole('button', { name: /Jane Doe/ }))
+    fireEvent.change(screen.getByLabelText('Write-up file'), { target: { files: [new File(['%PDF'], 'w.pdf')] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send to HR' }))
+    expect(await screen.findByText(/Add the date it happened/)).toBeTruthy()
+    expect(api.submitWriteUp).not.toHaveBeenCalled()
+  })
+
+  it('counts a picked date that was never added', async () => {
+    api.listMyWriteUps.mockResolvedValue({ cases: [] })
+    api.submitWriteUp.mockResolvedValue({ status: 'submitted', case: mcase() })
+    renderAt('/work/write-ups')
+    fireEvent.click(await screen.findByRole('button', { name: /New write-up/ }))
+    fireEvent.change(screen.getByLabelText('Employee'), { target: { value: 'ja' } })
+    fireEvent.click(await screen.findByRole('button', { name: /Jane Doe/ }))
+    fireEvent.change(screen.getByLabelText('When it happened'), { target: { value: '2026-09-04' } })
+    fireEvent.change(screen.getByLabelText('Write-up file'), { target: { files: [new File(['%PDF'], 'w.pdf')] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send to HR' }))
+    await waitFor(() => expect(api.submitWriteUp).toHaveBeenCalled())
+    expect(api.submitWriteUp.mock.calls[0][0].occurrenceDates).toEqual(['2026-09-04'])
+  })
+
+  it('starts a revision from what the manager sent last time', async () => {
+    api.listMyWriteUps.mockResolvedValue({ cases: [mcase({
+      stage: 'changes_requested', stage_label: 'Changes requested', decision: 'changes_requested',
+      decision_reason: 'Add the dates.', has_draft: true, action_type: 'final_warning',
+      infraction_type: 'conduct', occurrence_dates: ['2026-09-01', '2026-09-02'],
+    })] })
+    api.submitWriteUp.mockResolvedValue({ status: 'submitted', case: mcase() })
+    renderAt('/work/write-ups/c1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Send a revised draft' }))
+    expect((screen.getByLabelText('About') as HTMLSelectElement).value).toBe('conduct')
+    expect(screen.getByText('2026-09-02')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Write-up file'), { target: { files: [new File(['%PDF'], 'w.pdf')] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send to HR' }))
+    await waitFor(() => expect(api.submitWriteUp).toHaveBeenCalled())
+    expect(api.submitWriteUp.mock.calls[0][0]).toMatchObject({
+      caseId: 'c1', actionType: 'final_warning', infractionType: 'conduct', occurrenceDates: ['2026-09-01', '2026-09-02'],
+    })
   })
 
   it('marks an approved write-up delivered', async () => {

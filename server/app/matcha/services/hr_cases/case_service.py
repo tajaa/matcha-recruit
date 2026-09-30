@@ -118,6 +118,17 @@ async def find_open_case_for_incident(conn, *, company_id: UUID, incident_id: UU
     return serialize(row) if row else None
 
 
+async def find_latest_case_for_incident(conn, *, company_id: UUID, incident_id: UUID) -> Optional[dict[str, Any]]:
+    """The most recent case on an incident in ANY stage, closed and dismissed
+    included."""
+    row = await conn.fetchrow(
+        _CASE_SELECT + " WHERE c.company_id = $1 AND c.source_incident_id = $2 "
+        "ORDER BY c.created_at DESC LIMIT 1",
+        company_id, incident_id,
+    )
+    return serialize(row) if row else None
+
+
 async def open_case(
     conn,
     *,
@@ -133,6 +144,16 @@ async def open_case(
     case with created=False — the intake flag, close re-check, a GM draft and
     Huume all converge on one case per incident."""
     async with conn.transaction():
+        if incident_id is not None:
+            # Serialize opens for one incident, then look before numbering: a
+            # duplicate open returns the existing case without burning a case
+            # number. ON CONFLICT below stays as the backstop.
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext($1))", f"hr_case_open:{incident_id}",
+            )
+            existing = await find_open_case_for_incident(conn, company_id=company_id, incident_id=incident_id)
+            if existing is not None:
+                return existing, False
         case_number = await next_case_number(conn, company_id)
         case_id = await conn.fetchval(
             """
@@ -205,9 +226,13 @@ async def set_fields(
     conn, *, company_id: UUID, case_id: UUID, sets: dict[str, Any],
     event: Optional[str] = None, actor_user_id: Optional[UUID] = None,
     details: Optional[dict[str, Any]] = None,
+    require_stages: Optional[tuple[str, ...]] = None,
 ) -> None:
     """Write allow-listed columns WITHOUT a stage change (e.g. a draft held by
-    the leave check stays where it is but keeps the file and review)."""
+    the leave check stays where it is but keeps the file and review).
+    `require_stages` makes the write conditional on the case still being in
+    one of them — 409 otherwise, so a stale writer can't overwrite a case
+    that moved on."""
     unknown = set(sets) - _SETTABLE
     if unknown:
         raise ValueError(f"Not settable on an HR case: {sorted(unknown)}")
@@ -218,12 +243,31 @@ async def set_fields(
     for col, val in sets.items():
         values.append(json.dumps(val, default=str) if col in _JSON_COLUMNS and val is not None else val)
         assignments.append(f"{col} = ${len(values)}{'::jsonb' if col in _JSON_COLUMNS else ''}")
+    where = "id = $1 AND company_id = $2"
+    if require_stages:
+        values.append(list(require_stages))
+        where += f" AND stage = ANY(${len(values)}::text[])"
     async with conn.transaction():
-        await conn.execute(
-            f"UPDATE hr_cases SET {', '.join(assignments)} WHERE id = $1 AND company_id = $2", *values,
+        updated = await conn.fetchval(
+            f"UPDATE hr_cases SET {', '.join(assignments)} WHERE {where} RETURNING id", *values,
         )
+        if updated is None:
+            if require_stages:
+                raise CaseError(409, "This case moved on while that was being checked. Reload it and try again.")
+            raise CaseError(404, "That case doesn't exist.")
         if event:
             await record_event(conn, case_id=case_id, event=event, actor_user_id=actor_user_id, details=details)
+
+
+async def claim_manager(conn, *, company_id: UUID, case_id: UUID, user_id: UUID) -> bool:
+    """Make `user_id` the case's manager if it still has none. False when
+    someone else got there first."""
+    claimed = await conn.fetchval(
+        "UPDATE hr_cases SET gm_user_id = $3, updated_at = NOW() "
+        "WHERE id = $1 AND company_id = $2 AND gm_user_id IS NULL RETURNING id",
+        case_id, company_id, user_id,
+    )
+    return claimed is not None
 
 
 async def get_case(conn, *, company_id: UUID, case_id: UUID, with_events: bool = False) -> dict[str, Any]:

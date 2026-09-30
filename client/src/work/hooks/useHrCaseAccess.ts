@@ -15,7 +15,16 @@ export function useHrCaseAccess(userId: string | undefined, enabled: boolean): b
     let alive = true
     let pending = cache.get(key)
     if (!pending) {
-      pending = getHrCaseAccess().then((r) => r.hr_access, () => false)
+      const request = getHrCaseAccess().then(
+        (r) => r.hr_access,
+        () => {
+          // A failed check isn't an answer: forget it so the next mount asks
+          // again, instead of hiding HR Cases until a full reload.
+          if (cache.get(key) === request) cache.delete(key)
+          return false
+        },
+      )
+      pending = request
       cache.set(key, pending)
     }
     void pending.then((allowed) => { if (alive) setState({ key, allowed }) })

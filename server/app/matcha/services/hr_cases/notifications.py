@@ -5,7 +5,9 @@
   has no GM; HR alone is told.
 - HR: `clients.is_hr_approver` users (the column's documented purpose is
   exactly this: notification targeting), falling back to the company owner,
-  then every active business user so a flag never notifies nobody.
+  then everyone else in the company. Every tier is filtered through
+  `access.has_hr_access`, the same rule as the HR Cases page: nobody is told
+  about an HR matter they couldn't open, and nobody gets a link that 404s.
 
 Bodies are fixed templates: incident number, case number, policy titles and
 names of the people copied. Never the incident narrative, never the
@@ -15,6 +17,7 @@ employee's name, never model text.
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from typing import Any, Optional
 from uuid import UUID
 
@@ -46,32 +49,39 @@ async def resolve_gm_user_id(conn, *, company_id: UUID, incident: dict[str, Any]
 
 
 async def hr_recipients(conn, company_id: UUID) -> list[dict[str, Any]]:
-    """[{user_id, name}] — designated HR approvers, else owner, else all
-    active business users."""
+    """[{user_id, name}] with HR access — designated HR approvers, else the
+    owner, else anyone in the company who has HR access. Empty when nobody
+    does (then nobody is told, rather than the wrong people)."""
+    from .access import has_hr_access
+
     queries = (
         """
-        SELECT u.id AS user_id, COALESCE(NULLIF(c.name, ''), u.email) AS name
+        SELECT u.id AS user_id, u.role, COALESCE(NULLIF(c.name, ''), u.email) AS name
         FROM clients c JOIN users u ON u.id = c.user_id
         WHERE c.company_id = $1 AND c.is_hr_approver AND u.is_active IS NOT FALSE
         ORDER BY name
         """,
         """
-        SELECT u.id AS user_id, COALESCE(NULLIF(c.name, ''), u.email) AS name
+        SELECT u.id AS user_id, u.role, COALESCE(NULLIF(c.name, ''), u.email) AS name
         FROM companies co JOIN users u ON u.id = co.owner_id
         LEFT JOIN clients c ON c.user_id = u.id
         WHERE co.id = $1 AND u.is_active IS NOT FALSE
         """,
         """
-        SELECT u.id AS user_id, COALESCE(NULLIF(c.name, ''), u.email) AS name
+        SELECT u.id AS user_id, u.role, COALESCE(NULLIF(c.name, ''), u.email) AS name
         FROM clients c JOIN users u ON u.id = c.user_id
         WHERE c.company_id = $1 AND u.is_active IS NOT FALSE
         ORDER BY name
         """,
     )
     for sql in queries:
-        rows = await conn.fetch(sql, company_id)
-        if rows:
-            return [dict(r) for r in rows]
+        allowed = []
+        for r in await conn.fetch(sql, company_id):
+            user = SimpleNamespace(id=r["user_id"], role=r["role"])
+            if await has_hr_access(conn, user=user, company_id=company_id):
+                allowed.append({"user_id": r["user_id"], "name": r["name"]})
+        if allowed:
+            return allowed
     return []
 
 
@@ -84,7 +94,7 @@ def _join_names(names: list[str]) -> str:
 
 def flagged_messages(
     *, case_number: str, incident_number: Optional[str], policy_titles: list[str],
-    hr_names: list[str], gm_name: Optional[str],
+    hr_names: list[str], gm_name: Optional[str], has_reporter: bool = False,
 ) -> dict[str, dict[str, str]]:
     """Pure: the two notification bodies for a newly flagged case."""
     incident = incident_number or "A recent incident"
@@ -102,7 +112,11 @@ def flagged_messages(
             "title": f"{case_number}: incident flagged",
             "body": (
                 f"{incident} looks like it may involve {policies}."
-                + (f" {gm_name}, who reported it, was notified." if gm_name else " It was reported anonymously.")
+                + (
+                    f" {gm_name}, who reported it, was notified." if gm_name
+                    else " Whoever reported it isn't an active member here, so only HR was notified." if has_reporter
+                    else " It was reported anonymously."
+                )
             ),
         },
     }
@@ -127,6 +141,7 @@ async def notify_flagged(
         msgs = flagged_messages(
             case_number=case["case_number"], incident_number=incident.get("incident_number"),
             policy_titles=policy_titles, hr_names=[r["name"] for r in hr], gm_name=gm_name,
+            has_reporter=bool(incident.get("created_by") or incident.get("reported_by_email")),
         )
     except Exception:
         logger.exception("[hr_cases] could not build notifications for case %s", case.get("id"))
@@ -178,15 +193,31 @@ def manager_link(case: dict[str, Any]) -> str:
     return f"/work/write-ups/{case['id']}"
 
 
+async def step_recipients(conn, *, case: dict[str, Any], step: str) -> list:
+    """HR user ids for a step's notice (empty for steps that only tell the
+    manager). The only part of a notice that needs the database."""
+    if step not in ("draft_submitted", "draft_held", "delivered"):
+        return []
+    try:
+        return [r["user_id"] for r in await hr_recipients(conn, case["company_id"])]
+    except Exception:
+        logger.exception("[hr_cases] could not resolve HR for case %s", case.get("id"))
+        return []
+
+
 async def notify_step(conn, *, case: dict[str, Any], step: str, actor_user_id: Optional[UUID], reason: Optional[str] = None) -> None:
     """Fixed-template notice for a workflow step. HR gets the HR link; the
     manager gets the write-ups link. The acting person is never notified of
     their own action. Never raises."""
-    try:
-        hr_ids = [r["user_id"] for r in await hr_recipients(conn, case["company_id"])]
-    except Exception:
-        logger.exception("[hr_cases] could not resolve HR for case %s", case.get("id"))
-        hr_ids = []
+    hr_ids = await step_recipients(conn, case=case, step=step)
+    await send_step(case=case, step=step, hr_ids=hr_ids, actor_user_id=actor_user_id, reason=reason)
+
+
+async def send_step(
+    *, case: dict[str, Any], step: str, hr_ids: list, actor_user_id: Optional[UUID], reason: Optional[str] = None,
+) -> None:
+    """The sending half of `notify_step`; holds no connection of the caller's
+    (bell + email go through notification_service's own). Never raises."""
     number = case["case_number"]
     meta = {"hr_case_id": str(case["id"])}
     gm = case.get("gm_user_id")

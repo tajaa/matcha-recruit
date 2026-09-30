@@ -1556,6 +1556,9 @@ export type ManagerCase = {
   employee_id: string | null
   employee_name: string | null
   action_type: string | null
+  /** The manager's own last submission, so a revision starts from it. */
+  infraction_type: string | null
+  occurrence_dates: string[]
   review: { held_for_hr: boolean; message: string | null; notes: { code: string; detail: string }[] } | null
   decision: 'approved' | 'changes_requested' | null
   decision_reason: string | null
