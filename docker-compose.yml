@@ -121,6 +121,46 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  # Agent worker: agent-card runs, Espresso assistant runs, and the guarded
+  # browser that books reservations. Kept apart from matcha-worker because a
+  # Chromium does not fit in its 768M, and a multi-minute run would block its
+  # single slot.
+  # Start with: docker-compose --profile agent-worker up -d
+  # Then set on the API (.env.backend):
+  #   AGENT_CARD_QUEUE=agent_cards  AGENT_BROWSER_QUEUE=agent_browser
+  # Until both are set, runs share matcha-worker and reservations are not offered.
+  matcha-agent-worker:
+    image: ${MATCHA_BACKEND_IMAGE:-010438494410.dkr.ecr.us-west-1.amazonaws.com/matcha-backend:latest}
+    container_name: matcha-agent-worker
+    profiles:
+      - agent-worker
+    env_file:
+      - .env.backend
+    volumes:
+      - ./credentials:/app/credentials:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - matcha-network
+    # One task at a time and a fresh process for each: a browser's memory is
+    # given back when the task ends, whatever state it died in. It consumes
+    # only its own queues, so on_worker_ready skips the scheduler dispatch
+    # (see _serves_default_queue) and nothing is scheduled twice.
+    command: python -m celery -A app.workers.celery_app worker --loglevel=info -Q agent_cards,agent_browser --concurrency=1 --max-tasks-per-child=1
+    # Chromium's shared memory. Docker's 64M default crashes tabs on real pages.
+    shm_size: 256m
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       disable: true
 
