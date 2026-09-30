@@ -798,6 +798,9 @@ async def update_incident(
                 )
             except Exception:
                 logger.exception("Failed to auto-assign incident training for %s", incident_id)
+            # HR cases close re-check (fire-and-forget; no-op without `hr_cases`).
+            from app.matcha.services.hr_cases.triage import schedule_close_check
+            schedule_close_check(row["company_id"], row["id"])
 
         # Re-sync per-person identity when the people-bearing fields change.
         # Gather from the returned row so the reporter (not editable here) is

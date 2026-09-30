@@ -135,6 +135,37 @@ def build_state_block(current_state: dict[str, Any], *, schedule_surface: bool =
                 f"with EXACTLY this confirm_id after the admin confirms stages it for approval; "
                 f"omitting confirm_id (or a different one) stages a NEW proposal instead."
             )
+        elif action.get("type") == "hr_case_draft":
+            source = {"attachment": f"the attached file {action.get('filename') or ''}".strip(),
+                      "drive": "a Drive file", "google": "a Google Doc"}.get(action.get("source"), "a file")
+            lines.append(
+                f"- STAGED ACTION awaiting confirmation: send a write-up to HR — "
+                f"{(action.get('action_type') or 'action').replace('_', ' ')} for {action.get('employee_name') or 'the employee'} "
+                f"({(action.get('infraction_type') or '').replace('_', ' ')}), from {source}, "
+                f"confirm_id={action.get('confirm_id')}. Calling submit_write_up again with EXACTLY this "
+                f"confirm_id after the user confirms sends it; omitting confirm_id (or a different one) stages "
+                f"a NEW proposal instead."
+            )
+        elif action.get("type") == "hr_case_decision":
+            verb = "approve for delivery" if action.get("decision") == "approve" else "send back to the manager"
+            lines.append(
+                f"- STAGED ACTION awaiting HR's confirmation: {verb} write-up case_id={action.get('case_id')}. "
+                f"Calling decide_write_up again with EXACTLY this case_id and the same decision after "
+                f"HR confirms applies it; a different case_id or decision stages a NEW proposal instead."
+            )
+        elif action.get("type") == "hr_case_signed":
+            source = f"the attached file {action.get('filename') or ''}".strip() if action.get("source") == "attachment" else "a Drive file"
+            lines.append(
+                f"- STAGED ACTION awaiting confirmation: file {source} as the signed copy for write-up "
+                f"case_id={action.get('case_id')}, confirm_id={action.get('confirm_id')}. Calling "
+                f"file_signed_write_up again with EXACTLY this confirm_id after the user confirms files it."
+            )
+        elif action.get("type") == "hr_case_delivered":
+            lines.append(
+                f"- STAGED ACTION awaiting confirmation: mark write-up case_id={action.get('case_id')} delivered"
+                f"{' on ' + str(action.get('delivered_on')) if action.get('delivered_on') else ' today'}. "
+                f"Calling mark_write_up_delivered again with EXACTLY this case_id after the user confirms records it."
+            )
         elif action.get("type") == "discipline_decision":
             decision = action.get("decision")
             decision_label = {
@@ -538,6 +569,12 @@ draft_disciplinary_action is DIFFERENT from draft_discipline: a record filed her
 Safety conduct: when you pass an incident_id, safety infractions ARE in scope here — the incident is already filed as the company's legal record of what happened, and an approver reviews the write-up before anything is issued. WITHOUT an incident_id the same exclusion as draft_discipline applies: no safety, harassment, discrimination, or leave/medical topics — tell the admin to file the incident first, then draft from it. Harassment and discrimination stay out of scope either way; those go to corporate HR.
 
 decide_disciplinary_action approves or denies a record awaiting HR approval — call list_pending_approvals first if you don't have the record_id. A denial REQUIRES a written reason of at least 20 characters; ask the admin why if they didn't give one, and relay it plainly since it becomes part of the record. Approving is not the same as a routine confirm — say what happens next (a meeting gets scheduled) so the admin isn't surprised.
+
+## Write-ups (HR cases)
+
+When a manager hands you a written warning or other corrective-action letter ("here's the write-up for Jane"), use submit_write_up — not draft_discipline or draft_disciplinary_action. Point it at exactly one file: the attachment in this chat (attachment_index 0 is the newest), a Drive file from search_drive, or a Google Doc link. It stages; on confirm the letter goes to HR's private Drive folder and is checked against leave protections and the employee's history. Report the outcome in plain words: "sent to HR for review" or "HR needs to look at this one first". Never say a write-up was approved, issued or cleared unless decide_write_up actually approved it. If it's held, don't guess why — the leave details are HR's, not the manager's.
+
+decide_write_up is HR's approve / send-back; sending back needs a note for the manager of at least 20 characters. mark_write_up_delivered records that the approved letter was handed to the employee. file_signed_write_up files the signed copy and starts a check (signature, legibility, employee comments); say the check is running, never that it passed. list_write_ups shows where things stand — HR sees every case, a manager only their own.
 
 ## Incidents, ER cases, training and PTO
 

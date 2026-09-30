@@ -148,6 +148,9 @@ async def send_message_stream(
     is_first_exchange = not messages
     msg_dicts = []
     file_context_parts: list[str] = []
+    # References (not text) to the same files, oldest first — Huume tools that
+    # need the original bytes (a write-up sent to HR) re-fetch by URL.
+    file_attachment_refs: list[dict] = []
     for m in messages:
         entry = {"role": m["role"], "content": m["content"]}
         meta = m.get("metadata")
@@ -171,9 +174,14 @@ async def send_message_stream(
                     file_context_parts.append(
                         f"[{a.get('filename') or 'file'}]\n{a['text']}"
                     )
+                if isinstance(a, dict) and a.get("kind") == "file" and a.get("url"):
+                    file_attachment_refs.append({
+                        "url": a["url"], "filename": a.get("filename"), "content_type": a.get("content_type"),
+                    })
         msg_dicts.append(entry)
     tc.msg_dicts = msg_dicts
     tc.file_context_parts = file_context_parts
+    tc.file_attachment_refs = file_attachment_refs
 
     # Inject selected slide content into the AI-facing message (not saved to DB)
     _inject_slide_context(msg_dicts, thread["current_state"], body.slide_index)

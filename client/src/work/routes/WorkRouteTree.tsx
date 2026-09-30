@@ -25,6 +25,9 @@ import AssetsHub from '../pages/AssetsHub'
 import Assistant from '../pages/Assistant'
 import SymChatList from '../pages/SymChat/SymChatList'
 import SymChatDetail from '../pages/SymChat/SymChatDetail'
+import Drive from '../pages/Drive'
+import HrCases from '../pages/HrCases'
+import WriteUps from '../pages/WriteUps'
 import { FeatureGate } from '../../components/shared/FeatureGate'
 import { WorkSurfaceProvider, type WorkSurface } from './WorkSurfaceContext'
 
@@ -107,6 +110,34 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
             >
               <Route path="sym-chat" element={<SymChatList />} />
               <Route path="sym-chat/:chatId" element={<SymChatDetail />} />
+            </Route>
+          )}
+          {/* Drive is business-only too (company + HR document store). */}
+          {businessWork && (
+            <Route
+              element={
+                <FeatureGate feature="matcha_drive" label="Drive">
+                  <Outlet />
+                </FeatureGate>
+              }
+            >
+              <Route path="drive" element={<Drive />} />
+              <Route path="drive/:folderId" element={<Drive />} />
+            </Route>
+          )}
+          {/* HR Cases: business-only, HR-only (the page 404s for anyone else). */}
+          {businessWork && (
+            <Route
+              element={
+                <FeatureGate feature="hr_cases" label="HR Cases">
+                  <Outlet />
+                </FeatureGate>
+              }
+            >
+              <Route path="hr-cases" element={<HrCases />} />
+              <Route path="hr-cases/:caseId" element={<HrCases />} />
+              <Route path="write-ups" element={<WriteUps />} />
+              <Route path="write-ups/:caseId" element={<WriteUps />} />
             </Route>
           )}
           <Route path="journals" element={<Journals />} />

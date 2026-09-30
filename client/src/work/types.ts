@@ -1420,3 +1420,180 @@ export type AgentChatMetadata = {
   result?: AgentChatResult
   receipt?: AgentChatReceipt
 }
+
+// ── Matcha Drive (backend: server/app/matcha/routes/matcha_work/drive.py) ──
+
+export type DriveSpace = 'general' | 'hr'
+export type DriveCap = 'list' | 'read' | 'add' | 'manage' | 'grant'
+export type DriveGrantPermission = 'view' | 'upload' | 'edit'
+
+export type DriveFolder = {
+  id: string
+  parent_id: string | null
+  space: DriveSpace
+  name: string
+  system_key: string | null
+  is_system: boolean
+  caps: DriveCap[]
+  created_at: string
+}
+
+export type DriveFile = {
+  id: string
+  folder_id: string
+  filename: string
+  content_type: string | null
+  file_size: number
+  text_status: 'pending' | 'ok' | 'empty' | 'failed' | 'unsupported'
+  source: 'upload' | 'google_drive' | 'huume' | 'system'
+  linked_type: string | null
+  linked_id: string | null
+  uploaded_by: string | null
+  created_at: string
+  updated_at: string
+  folder_name?: string | null
+  space?: DriveSpace | null
+}
+
+export type DriveTree = {
+  spaces: Record<DriveSpace, { visible: boolean; root_folder_id: string; folders: DriveFolder[] }>
+}
+
+export type DriveFolderView = {
+  folder: DriveFolder
+  breadcrumbs: { id: string; name: string }[]
+  folders: DriveFolder[]
+  files: DriveFile[]
+}
+
+export type DriveGrant = {
+  user_id: string
+  permission: DriveGrantPermission
+  email: string
+  name: string
+  created_at: string
+}
+
+export type DrivePerson = { id: string; name: string; email: string; kind: 'business' | 'employee' }
+
+// ── HR cases (backend: server/app/matcha/routes/matcha_work/hr_cases.py) ──
+
+export type HrCaseStage =
+  | 'flagged' | 'drafting' | 'hr_review' | 'changes_requested' | 'approved'
+  | 'delivered' | 'verifying' | 'needs_attention' | 'closed' | 'dismissed'
+
+export type HrCaseTriage = {
+  phase: 'intake' | 'close'
+  violations: { policy_title: string | null; relevance: string | null; confidence: number | null }[]
+  citation_count: number
+  summary: string | null
+}
+
+export type HrCaseEvent = {
+  event: string
+  from_stage: HrCaseStage | null
+  to_stage: HrCaseStage | null
+  details: Record<string, unknown>
+  created_at: string | null
+  actor_name: string | null
+}
+
+export type HrCase = {
+  id: string
+  case_number: string
+  origin: 'intake_triage' | 'close_check' | 'gm_draft' | 'huume' | 'manual'
+  stage: HrCaseStage
+  stage_label: string
+  column: string
+  checklist: { key: string; label: string; done: boolean }[]
+  allowed_events: string[]
+  /** A signed-copy check that never finished (the process running it died); HR can re-run it. */
+  check_stale?: boolean
+  source_incident_id: string | null
+  incident_number: string | null
+  incident_title: string | null
+  employee_id: string | null
+  employee_name: string | null
+  gm_user_id: string | null
+  gm_name: string | null
+  action_type: string | null
+  triage: HrCaseTriage | null
+  review: HrCaseReview | null
+  decision: 'approved' | 'changes_requested' | null
+  decision_reason: string | null
+  decided_at: string | null
+  delivered_at: string | null
+  draft_file_id: string | null
+  signed_file_id: string | null
+  verification: HrCaseVerification | null
+  attention_reasons: string[]
+  dismissed_reason: string | null
+  created_at: string
+  updated_at: string
+  closed_at: string | null
+  events?: HrCaseEvent[]
+}
+
+export type HrCaseColumn = { key: string; label: string; stages: HrCaseStage[] }
+
+export type HrCaseReviewItem = { source: 'compliance' | 'ladder' | 'structure' | 'ai'; code: string; detail: string }
+
+export type HrCaseReview = {
+  checked_at: string
+  blocks: { source: string; code: string; detail: string; statute?: string | null }[]
+  advisories: HrCaseReviewItem[]
+  input?: { infraction_type: string; action_type: string; occurrence_dates: string[]; file_id: string }
+}
+
+/** What the manager on a case sees (server: workflow.manager_view). */
+export type ManagerCase = {
+  id: string
+  case_number: string
+  stage: HrCaseStage
+  stage_label: string
+  checklist: { key: string; label: string; done: boolean }[]
+  incident_id: string | null
+  incident_number: string | null
+  incident_title: string | null
+  employee_id: string | null
+  employee_name: string | null
+  action_type: string | null
+  /** The manager's own last submission, so a revision starts from it. */
+  infraction_type: string | null
+  occurrence_dates: string[]
+  review: { held_for_hr: boolean; message: string | null; notes: { code: string; detail: string }[] } | null
+  decision: 'approved' | 'changes_requested' | null
+  decision_reason: string | null
+  delivered_at: string | null
+  has_draft: boolean
+  can_submit_draft: boolean
+  can_mark_delivered: boolean
+  can_upload_signed: boolean
+  signed_check: { outcome: 'verified' | 'fix_needed' | 'with_hr'; problems: string[] } | null
+  updated_at: string | null
+}
+
+export type HrCaseEmployee = { id: string; name: string | null; job_title: string | null }
+export type HrCaseIncident = { id: string; incident_number: string | null; title: string | null; occurred_at: string | null }
+
+/** Form payload for POST /hr-cases/drafts (exactly one of file / googleUrl / driveFileId). */
+export type DraftSubmission = {
+  employeeId: string
+  actionType: string
+  infractionType: string
+  occurrenceDates: string[]
+  caseId?: string
+  incidentId?: string
+  file?: File
+  googleUrl?: string
+  driveFileId?: string
+}
+
+export type HrCaseVerification = {
+  checked_at: string
+  outcome: 'verified' | 'needs_attention'
+  reasons: string[]
+  reason_text: string[]
+  flag_hr_comments: boolean
+  reading?: { employee_comments_text?: string | null; employee_signature_date?: string | null; available?: boolean }
+}

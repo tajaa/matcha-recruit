@@ -68,6 +68,15 @@ TYPES = {
     # consensus (the "invite" — sent to every participant, with email).
     "sym_chat_invited": "Sym-chat Invite",
     "sym_chat_resolved": "Sym-chat Decided",
+    # HR cases (services/hr_cases/): an incident was flagged for HR review.
+    "hr_case_flagged": "Incident Flagged for HR",
+    "hr_case_draft_submitted": "Write-up Ready for Review",
+    "hr_case_draft_held": "Write-up Held",
+    "hr_case_approved": "Write-up Approved",
+    "hr_case_changes_requested": "Write-up Needs Changes",
+    "hr_case_delivered": "Write-up Delivered",
+    "hr_case_signed_filed": "Signed Copy Filed",
+    "hr_case_signed_attention": "Signed Copy Needs Attention",
 }
 
 

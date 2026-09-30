@@ -55,6 +55,7 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       huume: 'Huume (agentic thread mode — offer letters, onboarding plans, HR-ops actions, Legal/Handbook Pilot in chat) — needs Matcha Work too',
       sym_chat: 'Sym-chat (private-tunnel group chats that settle a meeting time or a decision) — needs Matcha Work too',
       matcha_drive: 'Matcha Drive (company + HR document store with per-folder access) — needs Matcha Work too',
+      hr_cases: 'HR Cases (incident → write-up → approval → signed copy) — needs Matcha Work and Matcha Drive',
     },
   },
   {
@@ -112,6 +113,7 @@ export const FEATURE_REQUIRES: Record<string, string[]> = {
   huume: ['matcha_work'],
   sym_chat: ['matcha_work'],
   matcha_drive: ['matcha_work'],
+  hr_cases: ['matcha_work', 'matcha_drive'],
   ems: ['matcha_ops'],
   inventory: ['matcha_ops'],
   inventory_voice: ['inventory'],

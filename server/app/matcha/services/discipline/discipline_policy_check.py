@@ -268,6 +268,17 @@ async def check_incident_against_handbook(conn, *, company_id: UUID, incident: d
     that as "couldn't check", never as "checked, nothing found".
     """
     corpus = await _build_check_corpus(conn, company_id)
+    return await check_with_corpus(corpus, incident)
+
+
+async def build_check_corpus(conn, company_id: UUID):
+    """The DB half of `check_incident_against_handbook`, for a caller that
+    must not hold a connection across the model call. None = no corpus."""
+    return await _build_check_corpus(conn, company_id)
+
+
+async def check_with_corpus(corpus, incident: dict[str, Any]) -> dict[str, Any]:
+    """The model half: no connection needed. Same result contract."""
     if corpus is None:
         return _unavailable_result()
     return await _check_one(corpus, incident)

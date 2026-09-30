@@ -460,6 +460,32 @@ async def test_presign_download_audits_hr(monkeypatch, storage):
 
 
 @pytest.mark.asyncio
+async def test_presign_system_path_audits_the_person_it_serves(monkeypatch, storage):
+    f = folder(space="hr")
+    patch_caps(monkeypatch, {f["id"]: (f, ALL)})
+    conn = QueryConn(fetchrow={"FROM drive_files f": file_row(f["id"], space="hr")})
+    reader = uuid4()
+    await svc.presign_download(conn, company_id=COMPANY, file_id=uuid4(), actor=None,
+                               on_behalf_of=reader, audit_details={"via": "hr_case"})
+    audit = conn.args_for("drive_audit_log")
+    assert reader in audit and "file_download" in audit
+
+
+@pytest.mark.asyncio
+async def test_read_file_bytes_storage_failure_is_a_502(monkeypatch, storage):
+    f = folder()
+    patch_caps(monkeypatch, {f["id"]: (f, ALL)})
+
+    async def broken(path):
+        raise RuntimeError("Failed to download from S3: NoSuchKey")
+    storage.download_file = broken
+    conn = QueryConn(fetchrow={"FROM drive_files f": file_row(f["id"])})
+    with pytest.raises(DriveError) as exc:
+        await svc.read_file_bytes(conn, company_id=COMPANY, file_id=uuid4(), actor=actor("admin"))
+    assert exc.value.status == 502
+
+
+@pytest.mark.asyncio
 async def test_presign_unavailable_is_503(monkeypatch, storage):
     f = folder()
     patch_caps(monkeypatch, {f["id"]: (f, ALL)})
@@ -629,6 +655,28 @@ async def test_get_tree_groups_visible_folders_by_space(monkeypatch):
     hr_space = out["spaces"]["hr"]
     assert [f["id"] for f in hr_space["folders"]] == [drafts["id"]]
     assert hr_space["folders"][0]["caps"] == ["add"]
+
+
+# ── People search ───────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_search_members_admin_only():
+    with pytest.raises(DriveError) as exc:
+        await svc.search_members(QueryConn(), company_id=COMPANY, q="ja", actor=actor("operator"))
+    assert exc.value.status == 403
+
+
+@pytest.mark.asyncio
+async def test_search_members_escapes_and_sorts():
+    rows = [
+        {"id": uuid4(), "email": "zed@example.com", "name": "Zed", "kind": "employee"},
+        {"id": uuid4(), "email": "amy@example.com", "name": "amy", "kind": "business"},
+    ]
+    conn = QueryConn(fetch={"FROM users u": rows})
+    out = await svc.search_members(conn, company_id=COMPANY, q="a%b", actor=actor("admin"))
+    assert [p["name"] for p in out] == ["amy", "Zed"]
+    assert conn.args_for("FROM users u")[2] == "%a\\%b%"
 
 
 # ── Review fixes (PR #639) ──────────────────────────────────────────────
