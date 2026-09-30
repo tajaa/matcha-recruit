@@ -40,6 +40,7 @@ def wired(monkeypatch):
     monkeypatch.setattr(routes, "GmailService", Gmail)
     monkeypatch.delenv("ASSISTANT_COMMIT_MODE", raising=False)
     monkeypatch.delenv("AGENT_BROWSER_QUEUE", raising=False)
+    monkeypatch.delenv("DUFFEL_ACCESS_TOKEN", raising=False)
     return SimpleNamespace(company=company, conn=conn, gmail=Gmail)
 
 
@@ -110,7 +111,11 @@ async def test_abilities_say_what_stands_in_the_way(wired, monkeypatch):
     }))
     out = await routes.list_abilities(current_user=_user())
     by_key = {a["key"]: a for a in out["abilities"]}
-    assert list(by_key) == ["web", "shopping", "email", "calendar", "reservations"]
+    assert list(by_key) == ["web", "shopping", "flights", "email", "calendar", "reservations"]
+    # Read-only, no consent needed; offered only where a Duffel token is set.
+    assert by_key["flights"]["always_on"] and not by_key["flights"]["acts"]
+    assert not by_key["flights"]["private_only"]
+    assert by_key["flights"]["reason"] == "Not set up on this server yet."
     assert by_key["web"]["always_on"] and by_key["web"]["enabled"] and not by_key["web"]["acts"]
     assert by_key["web"]["disclosure"] is None
     email = by_key["email"]

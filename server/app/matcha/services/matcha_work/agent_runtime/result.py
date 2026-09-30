@@ -150,7 +150,7 @@ def picks_block(result: dict) -> dict | None:
 
 def chat_view(result: dict) -> dict:
     """What the chat card carries. Bounded: a chat message is not a page."""
-    from app.matcha.services.matcha_work.agent_card.chat_flow import _http_url, _pick_view, _short
+    from app.matcha.services.matcha_work.agent_card.chat_flow import _http_url, _pick_view, _short, flights_view
 
     blocks: list[dict] = []
     for block in result.get("blocks") or []:
@@ -170,6 +170,11 @@ def chat_view(result: dict) -> dict:
                     for s in (block.get("sections") or [])[:4]
                 ],
             })
+        elif kind == "flights":
+            # The same compact rows the agent-card chat card shows.
+            view = flights_view(block.get("flights"))
+            if view:
+                blocks.append({"type": "flights", "flights": view})
         elif kind == "sources":
             sources = [
                 {"title": _short(s.get("title") or "", 80), "url": _http_url(s.get("url"))}

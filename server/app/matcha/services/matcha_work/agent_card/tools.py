@@ -1,8 +1,9 @@
 """Responses tools for the agent-card loop.
 
-One hosted tool (OpenAI `web_search`, run on the provider's side) and two
+One hosted tool (OpenAI `web_search`, run on the provider's side) and the
 function tools we execute: `fetch_page` (SSRF-guarded GET + structured page
-extraction) and `finish` (the structured result, validated by
+extraction), `search_flights` (Duffel, only for travel requests when a token is
+configured; see `flights.py`) and `finish` (the structured result, validated by
 `schema.normalize_result`). There are no write tools — the only effect a run
 has is the result shown to the person who asked.
 
@@ -15,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.matcha.services.matcha_work.agent_runtime import registry
+from app.matcha.services.matcha_work.agent_runtime.abilities import flights as flights_ability
 from app.matcha.services.matcha_work.agent_runtime.abilities import web
 
 from .schema import RESULT_SCHEMA
@@ -43,6 +45,11 @@ async def _unused_fetch(_url: str) -> tuple[dict, set[str]]:  # pragma: no cover
     raise RuntimeError("declarations() renders tools; it does not run them")
 
 
-def declarations() -> list[dict[str, Any]]:
+def declarations(*, flights: bool = False) -> list[dict[str, Any]]:
+    """The card's tools as the loop offers them: hosted search first, then
+    `search_flights` when offered, then `fetch_page`, then `finish`."""
     ability = web.build(fetch_page=_unused_fetch, max_fetches=0, fetch_seconds=0)
-    return registry.declarations([*ability.tools, FINISH_TOOL])
+    tools = list(ability.tools)
+    if flights:
+        tools.insert(1, flights_ability.search_tool(max_searches=0, search_seconds=0, min_seconds=0))
+    return registry.declarations([*tools, FINISH_TOOL])

@@ -1,7 +1,9 @@
 """Bounded web agent that answers one agent card with a structured result.
 
 Hosted web_search (provider side) + our `fetch_page` + a `finish` tool whose
-payload goes through `schema.normalize_result`'s provenance gate. Read-only:
+payload goes through `schema.normalize_result`'s provenance gate. A travel
+request also gets `search_flights` (Duffel, `flights.py`) when a token is
+configured. Read-only:
 no tool here writes anywhere except the run's own audit rows and the card's
 progress line.
 
@@ -21,6 +23,7 @@ from app.core.services.safe_fetch import UnsafeURL, fetch_public
 from app.matcha.services.huume.luna_client import get_luna_client, text_item
 from app.matcha.services.huume.routing import LUNA
 from app.matcha.services.matcha_work.agent_runtime import runner
+from app.matcha.services.matcha_work.agent_runtime.abilities import flights as flights_ability
 from app.matcha.services.matcha_work.agent_runtime.abilities import shopping, web
 from app.matcha.services.matcha_work.agent_runtime.context import RunContext, RunLimits
 from app.matcha.services.matcha_work.project_agent import store
@@ -28,7 +31,7 @@ from app.matcha.services.matcha_work.project_agent.agent import _safe_for_audit
 
 # `board` is read through `progress.CardProgress`; the card tests patch
 # `agent.board.*`, so it stays importable from here.
-from . import board, images  # noqa: F401
+from . import board, flights, images  # noqa: F401
 from .page_extract import extract_page, page_urls
 from .progress import CardProgress
 from .prompt import build_system_prompt
@@ -50,6 +53,11 @@ _FETCH_SECONDS = 25.0
 _PHOTO_SECONDS = 60.0
 _MAX_TOOL_OUTPUT_CHARS = 12_000
 _MAX_REPAIRS = 1
+_MAX_FLIGHT_SEARCHES = 3
+# One search's time budget. The search itself stops at it and keeps whatever
+# finished (flights.SEARCH_SECONDS); the runner's timeout is only a backstop.
+_FLIGHT_SEARCH_SECONDS = 100.0
+_MIN_FLIGHT_SEARCH_SECONDS = 30.0
 _AI_USAGE_FEATURE = "matcha.espresso.agent_card"
 
 
@@ -158,7 +166,19 @@ async def run_card_agent(
         project_id=project_id,
         task_id=task_id,
     )
-    abilities = [
+    travel = flights.is_travel_ask(ask)
+    flight_token = flights.token() if travel else None
+    abilities = []
+    if flight_token:
+        # Listed first: its tool is offered right after the hosted search.
+        abilities.append(flights_ability.build(
+            token=lambda: flight_token,
+            session=lambda token: flights.FlightSession(token),
+            max_searches=_MAX_FLIGHT_SEARCHES,
+            search_seconds=_FLIGHT_SEARCH_SECONDS,
+            min_seconds=_MIN_FLIGHT_SEARCH_SECONDS,
+        ))
+    abilities += [
         # Resolved through this module on every call, so the page loader and the
         # budgets are whatever this module holds when the page is asked for.
         web.build(
@@ -170,7 +190,9 @@ async def run_card_agent(
     ]
     contract = runner.ResultContract(
         finish=FINISH_TOOL,
-        normalize=lambda args, state: normalize_result(args.get("result"), state.provenance),
+        normalize=lambda args, state: normalize_result(
+            args.get("result"), state.provenance, flights=flights_ability.session_of(state),
+        ),
     )
     try:
         outcome = await runner.run_agent(
@@ -178,7 +200,7 @@ async def run_card_agent(
             client=get_luna_client(),
             abilities=abilities,
             contract=contract,
-            instructions=build_system_prompt(round),
+            instructions=build_system_prompt(round, travel=travel, flight_search=bool(flight_token)),
             first_input=[text_item("user", _user_turn(ask, review_note, previous_result))],
             first_note="Searching the web…" if round == 1 else "Working on your feedback…",
             seed_provenance=provenance,

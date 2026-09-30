@@ -16,7 +16,7 @@ loop in this package and no other: do not add a second.
 | Policy | `policy.py` | `evaluate_commit`: allow / confirm / deny. Pure: no I/O, no clock, no model |
 | Result | `result.py` | `agent_result.v2` (headline, summary, typed blocks); reads v1 as v2 |
 | Catalog | `catalog.py` | Every ability, and `abilities_for`: the only filter on what a run gets |
-| Abilities | `abilities/*.py` | `web`, `shopping`, `email`, `calendar`, `reservations` |
+| Abilities | `abilities/*.py` | `web`, `shopping`, `flights`, `email`, `calendar`, `reservations` |
 | Chat entry | `chat_entry.py` | A chat message on its way to a run; answers to questions |
 | Enqueue | `enqueue.py`, `quota.py` | Gates, the daily allowance, one live run per person per conversation |
 | The run | `assistant.py` | Builds the context, runs the loop, posts what came of it |
@@ -107,7 +107,9 @@ it otherwise), and should declare `resolve`.
   model wrapped as data with a note. The audit row for `read_email` keeps who
   and what, never the body.
 - **Result blocks are rebuilt, not trusted.** `emails` and `events` are built
-  from the run's session by id; `reservation` is written by the server and
+  from the run's session by id, and so is `flights` (each offer from the run's
+  `FlightSession`, through `agent_card.schema.gate_flights`; the model's prices
+  are ignored); `reservation` is written by the server and
   what the model put in the block is ignored; `picks`, `sections` and
   `sources` go through the agent-card provenance gates.
 - **Private-conversation runs are not stored by the provider.** `RunContext.

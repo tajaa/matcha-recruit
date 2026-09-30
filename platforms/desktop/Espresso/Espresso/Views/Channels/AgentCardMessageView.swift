@@ -74,6 +74,9 @@ struct AgentCardMessageView: View {
                         .lineLimit(5)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if let flights = result.flights, !flights.options.isEmpty {
+                    flightRows(flights)
+                }
                 if let pick = result.topPick {
                     topPick(pick)
                 }
@@ -215,6 +218,67 @@ struct AgentCardMessageView: View {
             if let sources, sources > 0 {
                 Text("· \(sources) sources").font(.system(size: 11)).foregroundColor(appState.themeTextSecondary)
             }
+        }
+    }
+
+    // MARK: - Flights
+
+    // Not private: the assistant's v2 `flights` block renders the same rows
+    // (AgentAssistantCards.swift).
+    @ViewBuilder
+    func flightRows(_ flights: AgentChatFlights) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if flights.testData == true {
+                Text("TEST DATA · NOT REAL FARES")
+                    .font(.system(size: 9, weight: .bold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Capsule().fill(Color.orange.opacity(0.18)))
+                    .foregroundColor(.orange)
+            }
+            ForEach(Array(flights.options.enumerated()), id: \.offset) { _, option in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .top) {
+                        if let label = option.label {
+                            Text(label.uppercased())
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(appState.themeAccent)
+                        }
+                        Text(option.carriers.joined(separator: " + "))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(appState.themeText)
+                            .lineLimit(1)
+                        if option.ticketing == "separate" {
+                            Label("2 tickets", systemImage: "ticket").font(.system(size: 10)).foregroundColor(.orange)
+                        }
+                        Spacer(minLength: 6)
+                        VStack(alignment: .trailing, spacing: 0) {
+                            Text(option.totalWithBagsText ?? option.priceText ?? "")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(appState.themeText)
+                            if option.totalWithBagsText != nil {
+                                Text("with bags").font(.system(size: 9)).foregroundColor(appState.themeTextSecondary)
+                            }
+                        }
+                    }
+                    ForEach(Array(option.slices.enumerated()), id: \.offset) { _, slice in
+                        let plus = FlightFormat.dayOffset(slice.departingAt, slice.arrivingAt)
+                        Text("\(FlightFormat.day(slice.departingAt)) · \(FlightFormat.clock(slice.departingAt)) \(slice.origin) → \(FlightFormat.clock(slice.arrivingAt)) \(slice.destination)\(plus > 0 ? " +\(plus)" : "") · \([FlightFormat.duration(slice.durationMinutes), FlightFormat.stops(slice.stops)].filter { !$0.isEmpty }.joined(separator: " · "))")
+                            .font(.system(size: 11))
+                            .foregroundColor(appState.themeTextSecondary)
+                    }
+                    if let warning = option.warning {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(.orange)
+                    }
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(appState.themeText.opacity(0.04)))
+            }
+            Label("Searched from our server: no location, device, cookies or history sent.",
+                  systemImage: "checkmark.shield.fill")
+                .font(.system(size: 10))
+                .foregroundColor(appState.themeTextSecondary)
         }
     }
 

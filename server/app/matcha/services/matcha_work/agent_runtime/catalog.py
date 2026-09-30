@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
-from .abilities import calendar, email, reservations, shopping, web
+from .abilities import calendar, email, flights, reservations, shopping, web
 from .registry import Ability, validate_catalog
 
 ALWAYS_ON = ("web", "shopping")
@@ -60,6 +60,9 @@ def build_catalog(*, fetch_page, max_fetches: int = 10, fetch_seconds: float = 2
         web.build(fetch_page=fetch_page, max_fetches=max_fetches, fetch_seconds=fetch_seconds,
                   untrusted=True),
         shopping.build(),
+        # Live fares when DUFFEL_ACCESS_TOKEN is set; read-only, so project
+        # chats get it too.
+        flights.build(),
         email.build(gmail_factory=(lambda _ctx: gmail) if gmail is not None else None),
         calendar.build(calendar_factory=(
             (lambda ctx: GoogleCalendarService(ctx.user_id, gmail=gmail)) if gmail is not None else None

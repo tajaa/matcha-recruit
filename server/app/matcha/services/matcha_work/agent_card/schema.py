@@ -9,12 +9,18 @@ wrote reaches the user until `normalize_result` has:
 
 So the model can summarise and rank, but it cannot mint a buy link, a review
 quote's source or a rating the run never saw.
+
+Flight results work the same way with offers instead of URLs: the model names
+offers by id and `_flights` rebuilds each one (price, times, flights, bags,
+warnings) from the run's `FlightSession`, dropping any id it never returned.
 """
 from __future__ import annotations
 
 import re
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from .flights import privacy_disclosure
 
 SCHEMA_VERSION = "agent_result.v1"
 
@@ -29,7 +35,9 @@ MAX_CRITERIA = 6
 MAX_CAVEATS = 5
 _CONFIDENCE = {"high", "medium", "low"}
 _SENTIMENT = {"pos", "neg", "mixed"}
-_ANSWER_TYPES = {"recommendation", "answer"}
+_ANSWER_TYPES = {"recommendation", "answer", "flights"}
+MAX_FLIGHT_OPTIONS = 5
+FLIGHT_LABELS = {"Cheapest", "Best value", "Fastest", "Fewest stops", "Most flexible"}
 _TRACKING_PARAMS = {"gclid", "fbclid", "mc_cid", "mc_eid", "ref_", "srsltid"}
 
 
@@ -115,6 +123,25 @@ RESULT_SCHEMA: dict[str, Any] = {
         },
         "confidence": {"type": "string", "enum": sorted(_CONFIDENCE)},
         "changes_from_previous": {"type": ["string", "null"]},
+        "flights": {
+            "type": ["object", "null"],
+            "description": "Only with answer_type flights: the offers you chose from search_flights",
+            "properties": {
+                "query_summary": _s("The trip searched, in a few words"),
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "offer_id": _s("An offer_id search_flights returned"),
+                            "label": {"type": "string", "enum": sorted(FLIGHT_LABELS)},
+                            "why": {"type": "array", "items": _s(), "description": "1-3 short reasons"},
+                        },
+                        "required": ["offer_id"],
+                    },
+                },
+            },
+        },
     },
     "required": ["headline", "summary", "answer_type", "confidence"],
 }
@@ -372,12 +399,55 @@ gate_sources = _sources
 gate_criteria = _criteria
 
 
-def normalize_result(raw: Any, provenance: set[str]) -> tuple[dict, list[str]]:
+def _flights(raw: Any, session: Any, gate: _Gate) -> dict | None:
+    """The chosen flight offers, each rebuilt from the run's own search data.
+    None when no chosen offer survives."""
+    if not isinstance(raw, dict):
+        return None
+    options: list[dict] = []
+    seen: set[str] = set()
+    for item in _list(raw.get("options")):
+        if not isinstance(item, dict):
+            continue
+        offer_id = _text(item.get("offer_id"), 200)
+        option = session.option(offer_id) if offer_id else None
+        if option is None:
+            gate.warnings.append(f"Dropped flight option {offer_id[:60] or '(no id)'}: not an offer this run's search returned")
+            continue
+        if offer_id in seen:
+            continue
+        seen.add(offer_id)
+        label = item.get("label")
+        options.append({
+            **option,
+            "label": label if label in FLIGHT_LABELS else None,
+            "why": [w for w in (_text(x, 240) for x in _list(item.get("why"))) if w][:3],
+        })
+    if not options:
+        return None
+    if len(options) > MAX_FLIGHT_OPTIONS:
+        gate.warnings.append(f"Trimmed flight options to {MAX_FLIGHT_OPTIONS}")
+    return {
+        "query_summary": _text(raw.get("query_summary"), 200) or session.query_summary or "",
+        "options": options[:MAX_FLIGHT_OPTIONS],
+        "searched_at": session.searched_at,
+        "test_data": bool(session.test_data),
+        "privacy": privacy_disclosure(),
+    }
+
+
+gate_flights = _flights
+
+
+def normalize_result(raw: Any, provenance: set[str], *, flights: Any = None) -> tuple[dict, list[str]]:
     """Coerce and provenance-gate a `finish` payload.
 
     Raises ValueError when the payload is unusable (not an object, or missing
-    the headline/summary every result must carry) so the loop can ask once for
-    a repair. Everything else degrades by dropping, recorded in warnings.
+    the headline/summary every result must carry, or a flights answer with no
+    offer this run found) so the loop can ask once for a repair. Everything
+    else degrades by dropping, recorded in warnings.
+
+    `flights` is the run's `FlightSession` when `search_flights` was offered.
     """
     if not isinstance(raw, dict):
         raise ValueError("finish.result must be an object")
@@ -393,6 +463,18 @@ def normalize_result(raw: Any, provenance: set[str]) -> tuple[dict, list[str]]:
         gate.warnings.append(f"Trimmed alternatives to {MAX_ALTERNATIVES}")
     sources = _sources(raw.get("sources"), gate)
     answer_type = raw.get("answer_type")
+    flight_block = _flights(raw.get("flights"), flights, gate) if flights is not None else None
+    if flight_block is not None:
+        # A flight answer is never a product pick, so it never reaches the
+        # "want me to buy it?" flow (`chat_flow.purchase_offer`).
+        answer_type = "flights"
+        if top_pick or alternatives:
+            gate.warnings.append("Dropped product picks from a flight result")
+        top_pick, alternatives = None, []
+    elif answer_type == "flights":
+        if flights is not None:
+            raise ValueError("answer_type flights needs flights.options with offer_ids from search_flights")
+        answer_type = "answer"
     if answer_type not in _ANSWER_TYPES:
         answer_type = "recommendation" if top_pick else "answer"
     confidence = raw.get("confidence")
@@ -410,4 +492,6 @@ def normalize_result(raw: Any, provenance: set[str]) -> tuple[dict, list[str]]:
         "confidence": confidence if confidence in _CONFIDENCE else "low",
         "changes_from_previous": _text(raw.get("changes_from_previous"), 800) or None,
     }
+    if flight_block is not None:
+        result["flights"] = flight_block
     return result, gate.warnings

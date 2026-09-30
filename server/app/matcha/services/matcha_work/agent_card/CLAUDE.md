@@ -7,7 +7,7 @@ It is not the MCP connector either: that is push-only, so it can't advance a car
 
 ## The loop is the agent runtime's
 
-`agent.py` no longer holds a loop of its own. `run_card_agent` builds the card's limits, abilities (`web` + `shopping`) and result contract, and calls `agent_runtime/runner.run_agent`. The tools are declared in the runtime's registry (`agent_runtime/abilities/web.py`); `tools.py` holds the card's `finish` and renders the list.
+`agent.py` no longer holds a loop of its own. `run_card_agent` builds the card's limits, abilities (`web` + `shopping`, plus `flights` first for a travel ask when a Duffel token is set) and result contract, and calls `agent_runtime/runner.run_agent`. The tools are declared in the runtime's registry (`agent_runtime/abilities/web.py`, `abilities/flights.py`); the Duffel client itself stays in `flights.py` here; `tools.py` holds the card's `finish` and renders the list.
 
 Two things follow:
 
@@ -44,7 +44,7 @@ Two things follow:
   The model can rank and summarise. It cannot mint a link.
 - **Images are rehosted, never hotlinked.** `images.rehost_images` fetches each image through `core/services/safe_fetch.fetch_public`, verifies and re-encodes it with Pillow (WebP, ≤1200px, metadata stripped), and uploads it. Any failure drops the image. The dev local-storage path is not a client URL, so it drops too.
 - **Every model-chosen URL goes through `safe_fetch.fetch_public`.** It resolves the host once, requires public IPs only, pins the IP (Host header + SNI), and re-validates each redirect hop. Default ports only.
-- **Read-only agent.** The tools are hosted `web_search`, `fetch_page` and `finish`. The prompt treats page content as untrusted data.
+- **Read-only agent.** The tools are hosted `web_search`, `fetch_page`, `finish` and, for travel requests, `search_flights` (search only; it never books). The prompt treats page content as untrusted data.
 - **AutoPR must never pick these up.** AutoPR maps unknown categories to the code lane. The server refuses them (`project_task_service._AUTOPR_EXCLUDED_CATEGORIES`): `request_autopr_run` and `request_autopr_reconsideration` raise, `claim_autopr_run` returns `ok: False`, and `list_autopr_run_requests` filters them out, so no harness version can queue or claim one. `apps/msandbox/harness/collect.sh` and halion's `collect.sh` also drop `category == "agent"`, as a cheaper first filter.
 - **A refusal never strands a card.** Send-back runs every gate *before* `reject_project_task` moves the card, so a 403/429 leaves it in Review with the reviewer's note unspent. If the queue refuses after the move (a live run, the broker down) the card sits in Changes requested with its note saved, `agent_run_error` in the response, and "Run again" visible: the clients offer it in any open column with no live run.
 - **A dead worker can't block reruns.** `enqueue` fails runs still `queued`/`running` past 11 minutes (Celery's hard limit is 600s) inside the same transaction, before the one-live-run index can 409. The worker also wraps the run in a 420s backstop, and `reconcile_stale_runs` covers the rest. A broker failure at dispatch fails the just-inserted row (it would hold the index and count against the cap).
@@ -68,6 +68,48 @@ Two things follow:
   - 300s of model turns, 60s of photo work, 420s overall backstop in the worker.
 - **Last turn:** forces `tool_choice=finish` with no search tool.
 - **Bad finish:** one repair turn, then fail.
+
+## Flights (`flights.py`, Duffel)
+
+A travel request gets the `search_flights` tool when `DUFFEL_ACCESS_TOKEN` is set. `flights.is_travel_ask` is a trip said plainly (`is_trip`: "flights to Denver", "fly to", airfare, "one-way tickets", "round trip to Lisbon") or, on a card, "flight" itself, except the other flights ("flight risk", "wine flight", "flight simulator", "flight jacket"). Bare "fly", "one-way" and "nonstop" never count, so "fly fishing rod" and "one-way valve" keep the shopping flow and its buy question. As the money word a chat errand needs, only `is_trip` counts, never a bare "flight" or "round-trip": this codebase has flight search code and JSON round-trip tests. Without a token the prompt says fares weren't checked live, and the run researches with web search as an `answer`.
+
+**Why an API.** Airline and Google Flights pages need JavaScript and block bots, so `fetch_page` never sees a fare. Amadeus Self-Service closed 2026-07-17.
+
+**Private by construction.** Requests carry only the itinerary: airports, dates, passenger count (children and lap infants as fixed pricing ages 8 and 1), cabin and bags to price. Nothing about the person is sent: no location, device, browser, cookies, account or search history. `privacy_disclosure()` is server text on every flight result, never the model's. There is no proxy rotation or fingerprint spoofing; a neutral API makes it pointless.
+
+**One call does the cheap-fare work, in code** (`plan_variants`), within `MAX_OFFER_REQUESTS = 16` per run and `MAX_REQUESTS_PER_SEARCH = 10` per call, so a refining search always has room:
+1. the exact trip;
+2. for a round trip, each direction as its own one-way ticket (paired into `ticketing: "separate"` options, never across currencies). Duffel's own `include_split_ticket` needs support-granted access, so the pairing is ours;
+3. then `flexible_days` (0–2) shifts and `nearby_airports` (on the exact dates) **take turns**, nearest date first and one changed airport before two, so a tight budget tries some of each. What didn't fit comes back as `not_searched`, and the model is told it can search again narrower.
+
+Nearby airports come from Duffel `/places/suggestions` (~100 mi, at most 2 per end). A city code (NYC) already covers its own airports, so its nearby ones are the airports around it. An airport that is, or is near, the other end is dropped, so a short hop never plans SJC→SJC.
+
+Run with at most 4 concurrent requests.
+
+**Time budget.** One call has `SEARCH_SECONDS` (100 s; the agent passes what's left of its wall clock, and won't start a search with under 30 s). Nearby lookups get ≤10 s and bag pricing keeps 15 s back. Requests still running when time runs out are cancelled and whatever finished is kept; requests that never reached Duffel are given back to the budget (`requests_used` is reserved up front and refunded, even on cancel).
+
+**True total.** For options missing the bags asked for, up to 6 offers per call are re-read with `return_available_services`, concurrently, and the listed bag prices added (`bag_cost`: per-slice or whole-trip bag services). Lap infants carry no bags: they're skipped both in what the fare includes and in what's bought, whether Duffel returns their type or only the age we sent. An option whose bags can't be priced says so (`bag_note`).
+
+**Ranking** (`_rank`): offers in the search's main currency (the exact trip's) first, since amounts in different currencies are never compared; then totals that cover the bags ahead of fares whose bag fees couldn't be priced; then price, then time in the air. The tool output names the currency and says when either rule reordered things.
+
+**Warnings are computed, not written by the model:**
+- separate tickets;
+- a connection under 60 min (a separate-ticket pair splits by direction, so each connection stays inside one ticket);
+- an overnight or 6 h+ layover;
+- basic economy, or a fare that can't be changed;
+- no carry-on;
+- a different airport or date.
+
+**The offer-id gate** (`schema._flights`). The model's `finish` names offers by `offer_id` with a label and reasons. Every other field is rebuilt from the run's `FlightSession`, so a price or time the model wrote is ignored and an id the search never returned is dropped. `answer_type: "flights"` with no surviving option gets one repair. A flight result never carries `top_pick`, so `chat_flow.purchase_offer` never asks "want me to buy it?". Booking through Duffel orders is a later change.
+
+**Limits:**
+- 3 `search_flights` calls per run, 100 s each;
+- a Duffel 429/5xx retried once;
+- `supplier_timeout` 15 s.
+
+The step kind is `search`, so no migration is needed. **`duffel_test_` tokens return Duffel Airways sandbox fares**, and the result, chat card and plain text all label them TEST DATA.
+
+**Never suggest hidden-city tickets.** They break the airline's contract of carriage, and the prompt forbids them.
 
 ## Queue
 
@@ -150,7 +192,7 @@ Every Espresso message in this flow carries structured `metadata` that both apps
 - **What counts as an errand (`errand_request`).** It is deterministic:
   - the message has at least 3 words and starts with find / buy / order / compare / research / recommend / "what's the best" / …;
   - it isn't code talk (`_CODE_TALK`: code/repo/function/endpoint/…, "where is", "how does", "is computed", "our … auth/flow/api"), repo-connected or not, since a web search on it would spend a monthly run;
-  - it needs a word that means spending money (buy, price, cheap, online, $…, ship to/home, …), **repo-connected or not**: "research why signups dropped" or "compare our Q3 numbers" alone would spend a monthly run on a web search. "best", "compare", "order", "review" and "deal" deliberately don't count: they are everyday code words, so "@espresso compare our two auth flows" and "find where the order total is computed" still go to the repo agent. With no repo connected, a mention that isn't an errand gets the "connect a repo" reply, which says how to phrase one and that it uses a monthly run.
+  - it needs a word that means spending money (buy, price, cheap, online, $…, ship to/home, …, or an unmistakable trip: `flights.is_trip`), **repo-connected or not**: "research why signups dropped" or "compare our Q3 numbers" alone would spend a monthly run on a web search. "best", "compare", "order", "review" and "deal" deliberately don't count: they are everyday code words, so "@espresso compare our two auth flows" and "find where the order total is computed" still go to the repo agent. With no repo connected, a mention that isn't an errand gets the "connect a repo" reply, which says how to phrase one and that it uses a monthly run.
 - **The mention dispatcher holds no connection while it runs the handler.** `_bg_dispatch_espresso_mention` releases its lookup connection before any post, the agent-card handler, or the run insert, each of which takes its own; holding one across them starves the pool under a burst of mentions.
 - **An answer is never an errand.** "@espresso buy it", "@espresso yes" and "@espresso 2" (`might_answer_plain`) go to Espresso's open question exactly like the same words without the mention. With nothing open (answered, expired) Espresso says so: an expired "buy the top pick" never becomes a new card, and "yes" never goes to the repo agent.
 - **Buy phrases.** A buy phrase only ever answers a question when the whole message is a short command aimed back at the pick ("buy it", "yes, buy the best one", "purchase this") or a bare "buy" / "place the order". "Find me socks to buy" is always a new errand.

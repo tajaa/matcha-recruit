@@ -174,6 +174,8 @@ extension AgentCardMessageView {
                         detail: [item.location, item.attendeeCount.flatMap { $0 > 0 ? "\($0) invited" : nil }]
                             .compactMap { $0 }.joined(separator: " \u{00B7} "))
             }
+        case .flights(let flights):
+            if !flights.options.isEmpty { flightRows(flights) }
         case .reservation(let booking):
             reservationView(booking)
         case .unknown:

@@ -275,10 +275,74 @@ def _pick_view(pick: dict, *, full: bool) -> dict:
     return view
 
 
+def _clock(iso: str | None) -> str:
+    """"2026-11-12T07:05:00" → "7:05am" (the airport's local time)."""
+    try:
+        hour, minute = int(iso[11:13]), int(iso[14:16])
+    except (TypeError, ValueError, IndexError):
+        return ""
+    return f"{(hour % 12) or 12}:{minute:02d}{'am' if hour < 12 else 'pm'}"
+
+
+def _flight_option_view(option: dict) -> dict:
+    return {
+        "label": option.get("label"),
+        "price_text": format_money(option.get("total_amount"), option.get("currency")),
+        "total_with_bags_text": (
+            format_money(option.get("true_total_amount"), option.get("currency"))
+            if option.get("true_total_amount") and option.get("true_total_amount") != option.get("total_amount")
+            else None
+        ),
+        "bag_note": option.get("bag_note"),
+        "carriers": list(option.get("carriers") or [])[:3],
+        "ticketing": option.get("ticketing") or "single",
+        "slices": [
+            {
+                "origin": sl.get("origin"), "destination": sl.get("destination"),
+                "departing_at": sl.get("departing_at"), "arriving_at": sl.get("arriving_at"),
+                "stops": sl.get("stops"), "duration_minutes": sl.get("duration_minutes"),
+                "flight_numbers": [s.get("flight_number") for s in sl.get("segments") or []][:4],
+            }
+            for sl in option.get("slices") or []
+        ],
+        "warning": (option.get("warnings") or [None])[0],
+    }
+
+
+def flights_view(flights: dict | None) -> dict | None:
+    """The chat card's flight rows: the top 3 chosen offers, compact."""
+    if not isinstance(flights, dict) or not flights.get("options"):
+        return None
+    return {
+        "query_summary": flights.get("query_summary") or "",
+        "test_data": bool(flights.get("test_data")),
+        "searched_at": flights.get("searched_at"),
+        "options": [_flight_option_view(o) for o in flights["options"][:3] if isinstance(o, dict)],
+    }
+
+
+def _flight_line(option: dict) -> str:
+    view = _flight_option_view(option)
+    price = view["price_text"] or ""
+    if view["total_with_bags_text"]:
+        price += f" ({view['total_with_bags_text']} with bags)"
+    legs = [
+        f"{sl['origin']} {_clock(sl['departing_at'])} → {sl['destination']} {_clock(sl['arriving_at'])}, "
+        + ("nonstop" if not sl["stops"] else f"{sl['stops']} stop{'s' if sl['stops'] != 1 else ''}")
+        for sl in view["slices"]
+    ]
+    parts = [price, ", ".join(view["carriers"]), " / ".join(legs)]
+    if view["ticketing"] == "separate":
+        parts.append("separate tickets")
+    return f"{view['label'] or 'Option'}: " + " · ".join(p for p in parts if p)
+
+
 def result_view(result: dict) -> dict:
     """What the chat card renders: headline, a short summary, the top pick
-    (photo, price, rating, reasons, buy link) and up to 3 alternatives."""
+    (photo, price, rating, reasons, buy link) and up to 3 alternatives, or,
+    for a flight search, the top 3 chosen offers."""
     pick = result.get("top_pick") if isinstance(result.get("top_pick"), dict) else None
+    flights = flights_view(result.get("flights"))
     return {
         "headline": result.get("headline") or "",
         "summary": _short(result.get("summary") or "", 420),
@@ -287,9 +351,10 @@ def result_view(result: dict) -> dict:
         "alternatives": [
             _pick_view(a, full=False) for a in (result.get("alternatives") or [])[:3] if isinstance(a, dict)
         ],
-        "sections": [] if pick else [
+        "sections": [] if pick or flights else [
             s["heading"] for s in (result.get("sections") or [])[:6] if isinstance(s, dict) and s.get("heading")
         ],
+        "flights": flights,
         "source_count": len(result.get("sources") or []),
         "confidence": result.get("confidence"),
     }
@@ -310,7 +375,13 @@ def format_result(result: dict, *, task_id, title: str, column: str | None) -> s
     alternatives = [a["name"] for a in (result.get("alternatives") or [])[:3]]
     if alternatives:
         lines.append("Also compared: " + ", ".join(alternatives))
-    if not pick and result.get("sections"):
+    flights = result.get("flights") if isinstance(result.get("flights"), dict) else None
+    if flights and flights.get("options"):
+        lines.append("")
+        if flights.get("test_data"):
+            lines.append("TEST DATA: sandbox fares, not real prices.")
+        lines += [_flight_line(o) for o in flights["options"][:3] if isinstance(o, dict)]
+    elif not pick and result.get("sections"):
         lines += ["", "Covers: " + ", ".join(s["heading"] for s in result["sections"][:6] if s.get("heading"))]
     lines += ["", "The full page, with photos, reviews and sources, is on the card."]
     text = "\n".join(lines).strip()
