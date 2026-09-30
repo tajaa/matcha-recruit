@@ -68,13 +68,17 @@ async def test_settings_default_when_missing():
 @pytest.mark.asyncio
 async def test_open_case_creates_and_records_event():
     new_id = uuid4()
+    incident = uuid4()
     conn = TxConn(
         fetchval={"INSERT INTO hr_case_settings": 1, "INSERT INTO hr_cases": new_id},
-        fetchrow={"FROM hr_cases c": case_row(id=new_id)},
+        # No open case yet, then the new one read back.
+        fetchrow={"FROM hr_cases c": Queue([None, case_row(id=new_id)])},
     )
-    case, created = await svc.open_case(conn, company_id=COMPANY, origin="manual", incident_id=uuid4())
+    case, created = await svc.open_case(conn, company_id=COMPANY, origin="manual", incident_id=incident)
     assert created is True and case["id"] == new_id
     assert conn.args_for("INSERT INTO hr_case_events")[2] == "opened"
+    # Opens for one incident are serialized before anything is looked up.
+    assert conn.args_for("pg_advisory_xact_lock")[0] == f"hr_case_open:{incident}"
 
 
 @pytest.mark.asyncio
@@ -87,6 +91,8 @@ async def test_open_case_converges_on_existing_open_case():
     case, created = await svc.open_case(conn, company_id=COMPANY, origin="close_check", incident_id=uuid4())
     assert created is False and case["case_number"] == "HRC-2026-0003"
     assert not any("hr_case_events" in s for s in conn.sql_for("execute"))
+    # Found before numbering: no case number is burned on a duplicate open.
+    assert not any("hr_case_settings" in s for s in conn.sql_for("fetchval"))
 
 
 @pytest.mark.asyncio
@@ -195,3 +201,13 @@ async def test_set_fields_writes_without_stage_change():
     before = len(conn.calls)
     await svc.set_fields(conn, company_id=COMPANY, case_id=cid, sets={})
     assert len(conn.calls) == before
+
+
+@pytest.mark.asyncio
+async def test_latest_case_includes_closed_and_dismissed():
+    row = case_row(stage="dismissed")
+    conn = TxConn(fetchrow={"FROM hr_cases c": row})
+    got = await svc.find_latest_case_for_incident(conn, company_id=COMPANY, incident_id=uuid4())
+    assert got["stage"] == "dismissed"
+    sql = conn.sql_for("fetchrow")[0]
+    assert "NOT IN ('closed', 'dismissed')" not in sql and "ORDER BY c.created_at DESC" in sql

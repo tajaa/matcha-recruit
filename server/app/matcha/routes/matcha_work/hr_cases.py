@@ -28,9 +28,9 @@ from pydantic import BaseModel, Field
 from app.core.models.auth import CurrentUser
 from app.core.services.redis_cache import check_rate_limit
 from app.database import get_connection
-from app.matcha.dependencies import require_admin_or_client, require_feature, resolve_accessible_company_scope
+from app.matcha.dependencies import require_admin_or_client, require_business_company, require_feature
 from app.matcha.services.hr_cases import case_service, stages, workflow
-from app.matcha.services.hr_cases.access import has_hr_access
+from app.matcha.services.hr_cases.access import can_change_hr_settings, has_hr_access
 from app.matcha.services.hr_cases.case_service import CaseError
 
 router = APIRouter(prefix="/hr-cases", dependencies=[Depends(require_feature("hr_cases"))])
@@ -61,21 +61,7 @@ class SettingsUpdate(BaseModel):
 
 
 async def _business_company(current_user: CurrentUser) -> UUID:
-    # A platform admin has no company: scope resolution would drop them into
-    # the oldest tenant as its Work admin, i.e. with HR access to its cases.
-    if current_user.role == "admin":
-        raise HTTPException(status_code=403, detail="HR cases are only available inside a company workspace")
-    scope = await resolve_accessible_company_scope(current_user)
-    company_id = scope.get("company_id")
-    if not company_id:
-        raise HTTPException(status_code=403, detail="No company associated with this account")
-    async with get_connection() as conn:
-        is_personal = await conn.fetchval(
-            "SELECT COALESCE(is_personal, false) FROM companies WHERE id = $1", company_id,
-        )
-    if is_personal:
-        raise HTTPException(status_code=403, detail="HR cases are only available in business workspaces")
-    return company_id
+    return await require_business_company(current_user, product="HR cases")
 
 
 async def _require_hr(conn, current_user: CurrentUser, company_id: UUID) -> None:
@@ -111,6 +97,8 @@ async def update_settings(body: SettingsUpdate, current_user: CurrentUser = Depe
     company_id = await _business_company(current_user)
     async with get_connection() as conn:
         await _require_hr(conn, current_user, company_id)
+        if not await can_change_hr_settings(conn, user=current_user, company_id=company_id):
+            raise HTTPException(status_code=403, detail="Only a Work admin or someone who manages the HR folder can change HR settings.")
         if body.triage_min_confidence is not None:
             await conn.execute(
                 """

@@ -310,6 +310,26 @@ async def resolve_accessible_company_scope(
     }
 
 
+
+async def require_business_company(current_user, *, product: str) -> UUID:
+    """The caller's company, for a surface that exists only in business
+    workspaces (Drive, HR cases). Refuses a platform admin, who has no company
+    of their own: scope resolution would silently pick the oldest tenant and
+    make them its Work admin. Refuses personal workspaces."""
+    if current_user.role == "admin":
+        raise HTTPException(status_code=403, detail=f"{product} is only available inside a company workspace")
+    scope = await resolve_accessible_company_scope(current_user)
+    company_id = scope.get("company_id")
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    async with get_connection() as conn:
+        is_personal = await conn.fetchval(
+            "SELECT COALESCE(is_personal, false) FROM companies WHERE id = $1", company_id,
+        )
+    if is_personal:
+        raise HTTPException(status_code=403, detail=f"{product} is only available in business workspaces")
+    return company_id
+
 async def get_accessible_company_scope(
     current_user=Depends(get_current_user),
 ) -> dict:

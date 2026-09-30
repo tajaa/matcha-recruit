@@ -30,4 +30,17 @@ describe('useHrCaseAccess', () => {
     await waitFor(() => expect(api.getHrCaseAccess).toHaveBeenCalled())
     expect(result.current).toBe(false)
   })
+
+  it('asks again after a failed check instead of caching the failure', async () => {
+    api.getHrCaseAccess
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValueOnce({ hr_access: true })
+    const first = renderHook(() => useHrCaseAccess('u3', true))
+    await waitFor(() => expect(api.getHrCaseAccess).toHaveBeenCalledTimes(1))
+    expect(first.result.current).toBe(false)
+    await Promise.resolve()
+    const second = renderHook(() => useHrCaseAccess('u3', true))
+    await waitFor(() => expect(second.result.current).toBe(true))
+    expect(api.getHrCaseAccess).toHaveBeenCalledTimes(2)
+  })
 })

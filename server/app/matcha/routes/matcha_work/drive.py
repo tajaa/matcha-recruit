@@ -30,7 +30,7 @@ from app.config import get_settings
 from app.core.models.auth import CurrentUser
 from app.core.services.redis_cache import check_rate_limit
 from app.database import get_connection
-from app.matcha.dependencies import require_company_member, require_feature, resolve_accessible_company_scope
+from app.matcha.dependencies import require_business_company, require_company_member, require_feature
 from app.matcha.services.drive import drive_service as svc
 from app.matcha.services.drive import google_drive_service as gdrive
 from app.matcha.services.drive.drive_service import DriveError
@@ -73,22 +73,7 @@ class GrantSet(BaseModel):
 
 
 async def _business_company(current_user: CurrentUser) -> UUID:
-    # A platform admin has no company of their own: scope resolution would
-    # silently pick the oldest tenant and hand them admin rights over its HR
-    # space. Drive is per-company, so they're refused here.
-    if current_user.role == "admin":
-        raise HTTPException(status_code=403, detail="Drive is only available inside a company workspace")
-    scope = await resolve_accessible_company_scope(current_user)
-    company_id = scope.get("company_id")
-    if not company_id:
-        raise HTTPException(status_code=403, detail="No company associated with this account")
-    async with get_connection() as conn:
-        is_personal = await conn.fetchval(
-            "SELECT COALESCE(is_personal, false) FROM companies WHERE id = $1", company_id,
-        )
-    if is_personal:
-        raise HTTPException(status_code=403, detail="Drive is only available in business workspaces")
-    return company_id
+    return await require_business_company(current_user, product="Drive")
 
 
 def _raise(exc: DriveError):

@@ -87,8 +87,16 @@ def scope(monkeypatch, mod):
     async def hr(conn, *, user, company_id):
         return state["hr"]
 
-    monkeypatch.setattr(mod, "resolve_accessible_company_scope", resolve)
+    from app.matcha import dependencies
+
+    async def manage(conn, *, user, company_id):
+        return state.get("manage", True)
+
+    # The business-workspace guard is shared (matcha/dependencies.py).
+    monkeypatch.setattr(dependencies, "resolve_accessible_company_scope", resolve)
+    monkeypatch.setattr(dependencies, "get_connection", lambda *a, **k: state["conn"])
     monkeypatch.setattr(mod, "has_hr_access", hr)
+    monkeypatch.setattr(mod, "can_change_hr_settings", manage)
     monkeypatch.setattr(mod, "get_connection", lambda *a, **k: state["conn"])
     state["company"] = company
     return state
@@ -354,3 +362,11 @@ def test_platform_admin_is_refused(mod, scope):
     with _client(mod, SimpleNamespace(id=uuid4(), role="admin")) as client:
         assert client.get("/hr-cases").status_code == 403
         assert client.get("/hr-cases/access").status_code == 403
+
+
+def test_a_read_only_hr_grant_cannot_change_settings(mod, scope):
+    scope["manage"] = False
+    with _client(mod, USER) as client:
+        resp = client.put("/hr-cases/settings", json={"triage_min_confidence": 0.9})
+    assert resp.status_code == 403
+    assert not any("hr_case_settings" in sql for sql in scope["conn"].sql_for("execute"))
