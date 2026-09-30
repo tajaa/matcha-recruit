@@ -74,7 +74,11 @@ def _patch_scope(monkeypatch, mod, *, is_personal):
     async def scope(user, requested=None):
         return {"company_id": company}
 
-    monkeypatch.setattr(mod, "resolve_accessible_company_scope", scope)
+    from app.matcha import dependencies
+
+    # The business-workspace guard is shared (matcha/dependencies.py).
+    monkeypatch.setattr(dependencies, "resolve_accessible_company_scope", scope)
+    monkeypatch.setattr(dependencies, "get_connection", lambda *a, **k: QueryConn(fetchval={"is_personal": is_personal}))
     monkeypatch.setattr(mod, "get_connection", lambda *a, **k: QueryConn(fetchval={"is_personal": is_personal}))
     return company
 

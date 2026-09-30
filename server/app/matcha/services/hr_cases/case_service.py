@@ -118,6 +118,17 @@ async def find_open_case_for_incident(conn, *, company_id: UUID, incident_id: UU
     return serialize(row) if row else None
 
 
+async def find_latest_case_for_incident(conn, *, company_id: UUID, incident_id: UUID) -> Optional[dict[str, Any]]:
+    """The most recent case on an incident in ANY stage, closed and dismissed
+    included."""
+    row = await conn.fetchrow(
+        _CASE_SELECT + " WHERE c.company_id = $1 AND c.source_incident_id = $2 "
+        "ORDER BY c.created_at DESC LIMIT 1",
+        company_id, incident_id,
+    )
+    return serialize(row) if row else None
+
+
 async def open_case(
     conn,
     *,
@@ -133,6 +144,16 @@ async def open_case(
     case with created=False — the intake flag, close re-check, a GM draft and
     Huume all converge on one case per incident."""
     async with conn.transaction():
+        if incident_id is not None:
+            # Serialize opens for one incident, then look before numbering: a
+            # duplicate open returns the existing case without burning a case
+            # number. ON CONFLICT below stays as the backstop.
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext($1))", f"hr_case_open:{incident_id}",
+            )
+            existing = await find_open_case_for_incident(conn, company_id=company_id, incident_id=incident_id)
+            if existing is not None:
+                return existing, False
         case_number = await next_case_number(conn, company_id)
         case_id = await conn.fetchval(
             """

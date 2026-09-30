@@ -30,3 +30,20 @@ async def has_hr_access(conn, *, user, company_id: UUID) -> bool:
     except DriveError:
         return False
     return DriveCap.READ in caps
+
+
+async def can_change_hr_settings(conn, *, user, company_id: UUID) -> bool:
+    """Company-wide HR settings (the triage threshold) need more than seeing
+    cases: Work `admin`, or MANAGE on the HR / Discipline folder. A read-only
+    grant lets someone view cases, not change what gets flagged."""
+    actor = await drive_service.load_actor(conn, user=user, company_id=company_id)
+    if actor.work_level == "admin":
+        return True
+    folders = await drive_service.ensure_system_folders(conn, company_id)
+    try:
+        _, caps = await drive_service.folder_caps(
+            conn, company_id=company_id, folder_id=folders["hr_discipline"], actor=actor,
+        )
+    except DriveError:
+        return False
+    return DriveCap.MANAGE in caps

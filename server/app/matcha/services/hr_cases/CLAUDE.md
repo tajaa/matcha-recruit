@@ -31,14 +31,22 @@ skip a step.
   (`ir_incident_create.create_incident_core`) and fire-and-forget on close
   (both close paths: `routes/ir_incidents/crud.update_incident` and
   `ir_copilot_flow._close_incident_via_copilot`). One check per
-  `(incident, phase)` ever — the `hr_case_triage_log` row is claimed before the
+  `(incident, phase)` — the `hr_case_triage_log` row is claimed before the
   model call. A check that couldn't run is `implicated = NULL` and opens
-  nothing; it is never read as clean. The model only reports matches; the flag
+  nothing; it is never read as clean. It is retried once in the same run, and
+  a finished "couldn't check" row stays re-claimable by a later trigger up to
+  `MAX_ATTEMPTS` (3; the count lives in `result.attempts`). No connection is
+  held across the model call: flag, claim, incident and handbook corpus are
+  read on a short pooled connection (`discipline_policy_check.build_check_corpus`
+  / `check_with_corpus`), then the result is written on another.
+- **A case HR closed or dismissed stays closed.** A later check on that
+  incident records `<phase>_check_match|clean` on it; it never opens a new
+  case or notifies anyone again. The model only reports matches; the flag
   is the deterministic `decide_flag` (violated/bent ≥ company threshold,
   default 0.60). A clean close check on an existing case is an event for HR,
   never an auto-dismissal.
 - **No narrative leaves the incident.** Cases store policy titles, relevance
-  and confidence (`triage.summarize`). Notification bodies are fixed templates
+  and confidence (`triage.summarize`) — not the model's free-text summary. Notification bodies are fixed templates
   (incident number, case number, policy titles, names copied).
 - **HR access** (`access.has_hr_access`) = Work `admin`, or READ on Drive's
   `HR / Discipline` folder. Every route re-checks it; non-HR gets **404**.
@@ -48,8 +56,17 @@ skip a step.
 - **Who is told**: the GM (incident `created_by`, else the member matching
   `reported_by_email`; anonymous intake has none) and HR
   (`clients.is_hr_approver` — its documented notification-targeting purpose —
-  else the owner, else every business user). Notification type
-  `hr_case_flagged`.
+  else the owner, else anyone in the company), **every tier filtered through
+  `has_hr_access`**, so nobody hears about an HR matter they couldn't open and
+  no link 404s. Nobody with access means nobody is told. Notification type
+  `hr_case_flagged`. A reporter who isn't an active member is said so, not
+  called anonymous.
+- **Settings** (`PUT /hr-cases/settings`, the company-wide triage threshold)
+  need Work `admin` or MANAGE on `HR / Discipline`
+  (`access.can_change_hr_settings`); seeing cases isn't enough.
+- **Case numbers** don't burn on a duplicate open: `open_case` takes a
+  per-incident advisory lock and returns an existing open case before
+  drawing a number.
 - **Not in the HR Pilot corpus, deliberately.** That corpus is served to every
   business supervisor with no per-viewer access check; adding case records
   there would bypass HR access.
