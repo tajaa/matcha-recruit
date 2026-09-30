@@ -6,7 +6,7 @@ account, resold at wholesale + a flat markup) or **connect** one they already ow
 through a **CloudFront distribution tenant** with a CloudFront-managed
 certificate — see "How a custom domain goes live". Code:
 
-- `services/porkbun.py` — Porkbun v3 client (check / register / DNS).
+- `app/core/services/porkbun.py` — Porkbun v3 client (check / register / DNS). Shared: the Espresso assistant's `domains` ability uses it too.
 - `services/stripe_connect.py` — `create_platform_checkout_session`, `refund`,
   `verify_platform_webhook` (domain charges hit OUR platform account, not Connect).
 - `services/cloudfront_tenants.py` — distribution-tenant create / status / delete.

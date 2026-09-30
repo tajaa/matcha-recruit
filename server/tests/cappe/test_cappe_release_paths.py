@@ -23,7 +23,7 @@ from app.cappe.routes.public import messages as messages_mod  # noqa: E402
 from app.cappe.models.cappe import CappeMessageCreate  # noqa: E402
 from app.cappe.models.shop import CappeOrderStatusUpdate  # noqa: E402
 from app.cappe.services import inventory as inv_mod  # noqa: E402
-from app.cappe.services import porkbun as porkbun_mod  # noqa: E402
+from app.core.services import porkbun as porkbun_mod  # noqa: E402
 from app.cappe.services.stripe_connect import CappeStripeError  # noqa: E402
 from app.workers.tasks import cappe_domain_renewals as renewals_mod  # noqa: E402
 

@@ -14,7 +14,7 @@ from uuid import UUID
 
 from ...database import connection_or_direct
 from .cloudfront_tenants import CappeEdgeError, get_cloudfront_tenants
-from .porkbun import PorkbunError, get_porkbun
+from ...core.services.porkbun import PorkbunError, get_porkbun
 from .stripe_connect import CappeStripeError, get_cappe_stripe
 
 logger = logging.getLogger("cappe.domain_register")

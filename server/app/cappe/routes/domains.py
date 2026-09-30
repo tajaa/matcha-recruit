@@ -60,7 +60,7 @@ from ..models.cappe import (
     CappeDomainSearchResult,
 )
 from ..services.email import dashboard_url
-from ..services.porkbun import PorkbunError, get_porkbun
+from ...core.services.porkbun import PorkbunError, get_porkbun
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 from ..services.domain_register import (
     finalize_domain_registration,

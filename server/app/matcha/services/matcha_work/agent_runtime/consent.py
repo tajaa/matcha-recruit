@@ -71,6 +71,18 @@ DISCLOSURES: dict[str, Disclosure] = {
             "confirmed you get a link to finish checkout at the store yourself.",
         ),
     ),
+    "domains": Disclosure(
+        version="domains-1",
+        title="Let Espresso register domains",
+        body=(
+            "Espresso checks whether domain names are free, and registers one when you ask. "
+            "The names it checks are sent to Porkbun, our registrar.",
+            "It always shows you the name and the price and waits for your yes before registering.",
+            "This is real money: registration is paid from Matcha's Porkbun account, the domain is "
+            "held there under a private WHOIS contact, and it renews every year until someone "
+            "turns renewal off. Expensive (premium) names are refused.",
+        ),
+    ),
 }
 
 
