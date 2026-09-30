@@ -94,3 +94,18 @@ def test_assert_cap_and_wire_order():
     with pytest.raises(DrivePermissionDenied):
         assert_cap(frozenset({L}), R)
     assert caps_list(frozenset({G, L, A})) == ["list", "add", "grant"]
+
+
+def test_upload_grant_is_not_inherited():
+    # Drop-box on the HR root: the root accepts files, its subfolders don't.
+    assert effective_caps(actor("operator"), "hr", ["upload"]) == {A}
+    assert effective_caps(actor("operator"), "hr", [None, "upload"]) == frozenset()
+    # view/edit still inherit.
+    assert effective_caps(actor("operator"), "hr", [None, "view"]) == {L, R}
+
+
+def test_folder_caps_map_drop_box_does_not_reach_children():
+    root, child = uuid4(), uuid4()
+    folders = [{"id": root, "parent_id": None, "space": "hr"}, {"id": child, "parent_id": root, "space": "hr"}]
+    caps = folder_caps_map(actor("operator"), folders, {root: "upload"})
+    assert caps[root] == {A} and caps[child] == frozenset()
