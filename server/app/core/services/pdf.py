@@ -7,7 +7,7 @@ PDF endpoints render user- or AI-authored HTML (project sections, handbooks,
 offer letters, ER/IR/discipline docs), so any `<img src=...>` / `<link href=...>`
 the author controls becomes a server-side fetch.
 
-`safe_url_fetcher` refuses every remote/file scheme and allows only inline
+`SafeURLFetcher` refuses every remote/file scheme and allows only inline
 `data:` URIs. Images are base64-inlined as `data:` *before* render in the paths
 that need them, so legitimate assets are unaffected. This mirrors the original
 one-off guard in `matcha/services/benefits_eligibility.py`.
@@ -16,20 +16,44 @@ one-off guard in `matcha/services/benefits_eligibility.py`.
 import asyncio
 
 from weasyprint import HTML
-from weasyprint.urls import default_url_fetcher
+from weasyprint.urls import URLFetcher
+
+# Why a URLFetcher subclass and not a plain function: WeasyPrint 70 removed
+# `default_url_fetcher` (from `weasyprint.urls` too, not only the top-level
+# re-export), and its internal `fetch()` now reads `url_fetcher._fail_on_errors`
+# when a fetch raises — a plain function has no such attribute, so the first
+# blocked URL would crash the whole render instead of being skipped. A
+# `URLFetcher` subclass works identically on 69 and 70.
+
+
+class SafeURLFetcher(URLFetcher):
+    """WeasyPrint fetcher that allows only inline `data:` URIs.
+
+    Refuses `file://`, `http(s)://` (incl. cloud metadata at 169.254.169.254
+    and RFC-1918 hosts), `ftp://`, etc. — to prevent SSRF and local-file
+    disclosure when rendering attacker-influenced HTML. The refusal is a
+    ValueError, which WeasyPrint catches: the resource is skipped with a
+    warning and the rest of the document still renders.
+    """
+
+    def __init__(self):
+        # WeasyPrint's own protocol allow-list is a second, independent guard;
+        # no redirects, and a short timeout in case either is ever widened.
+        super().__init__(allowed_protocols={"data"}, allow_redirects=False, timeout=5)
+
+    def fetch(self, url, headers=None):
+        if not str(url).startswith("data:"):
+            raise ValueError(f"Blocked non-data URL in PDF render: {str(url)[:80]}")
+        return super().fetch(url, headers)
 
 
 def safe_url_fetcher(url: str):
-    """URL fetcher for WeasyPrint that blocks all non-`data:` schemes.
+    """Fetch `url` through a fresh `SafeURLFetcher` (only `data:` passes).
 
-    Allows inline `data:` URIs (e.g. base64 images we inlined ourselves) and
-    refuses everything else — `file://`, `http(s)://` (incl. cloud metadata at
-    169.254.169.254 and RFC-1918 hosts), `ftp://`, etc. — to prevent SSRF and
-    local-file disclosure when rendering attacker-influenced HTML.
+    A new instance per call: URLFetcher is a urllib OpenerDirector and keeps
+    per-request state, and renders run concurrently on worker threads.
     """
-    if url.startswith("data:"):
-        return default_url_fetcher(url)
-    raise ValueError(f"Blocked non-data URL in PDF render: {url[:80]}")
+    return SafeURLFetcher().fetch(url)
 
 
 def render_pdf(html_string: str, **write_pdf_kwargs) -> bytes:
@@ -38,7 +62,7 @@ def render_pdf(html_string: str, **write_pdf_kwargs) -> bytes:
     Drop-in replacement for `HTML(string=html).write_pdf()`. Extra kwargs
     (e.g. `stylesheets=[...]`) are forwarded to `write_pdf`.
     """
-    return HTML(string=html_string, url_fetcher=safe_url_fetcher).write_pdf(
+    return HTML(string=html_string, url_fetcher=SafeURLFetcher()).write_pdf(
         **write_pdf_kwargs
     )
 

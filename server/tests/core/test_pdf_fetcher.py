@@ -5,13 +5,12 @@ AI-authored HTML (handbooks, offer letters, ER/IR/discipline docs), so an
 `<img src="file:///etc/passwd">` an author controls becomes a server-side
 fetch unless `safe_url_fetcher` refuses it.
 
-This file also pins the import itself. `default_url_fetcher` used to be
-imported from the top-level `weasyprint` package; WeasyPrint 70.0 dropped that
-re-export and, because `requirements.txt` had an unbounded `weasyprint>=69.0`,
-74 test modules stopped importing with no change on our side — and the next
-backend image would have shipped a PDF path that raised at import. The symbol
-now comes from its stable `weasyprint.urls` home, and a test that merely
-imports this module is enough to catch the next move.
+This file also pins the fetcher's SHAPE. WeasyPrint 70.0 removed
+`default_url_fetcher` (from `weasyprint.urls` as well as the top-level
+package), and its internal fetch loop reads `url_fetcher._fail_on_errors` when
+a fetch raises — so a plain function both fails to import and would crash a
+render on the first blocked URL. The guard is a `URLFetcher` subclass, which
+works on 69 and 70 alike.
 
     cd server && ./venv/bin/python -m pytest tests/core/test_pdf_fetcher.py -q
 """
@@ -22,10 +21,15 @@ from app.core.services import pdf
 
 
 class TestImportContract:
-    def test_module_exposes_a_callable_default_fetcher(self):
-        # The regression that started this: an ImportError here took out 74
-        # unrelated test modules at collection.
-        assert callable(pdf.default_url_fetcher)
+    def test_fetcher_is_a_weasyprint_url_fetcher(self):
+        # WeasyPrint 70 calls `url_fetcher(url)` and reads `._fail_on_errors`
+        # on failure: only a URLFetcher instance satisfies both.
+        from weasyprint.urls import URLFetcher
+
+        fetcher = pdf.SafeURLFetcher()
+        assert isinstance(fetcher, URLFetcher)
+        assert fetcher._fail_on_errors is False
+        assert callable(fetcher)
 
     def test_render_helpers_are_exported(self):
         assert callable(pdf.render_pdf)
@@ -60,19 +64,47 @@ class TestSafeUrlFetcher:
             pdf.safe_url_fetcher("http://evil.test/" + "A" * 5000)
         assert len(str(excinfo.value)) < 200
 
-    def test_inline_data_uris_are_allowed(self, monkeypatch):
-        # Images are base64-inlined before render, so `data:` must pass through
-        # to the real fetcher — that is the one scheme the guard permits.
-        seen = {}
-        monkeypatch.setattr(
-            pdf, "default_url_fetcher", lambda url: seen.setdefault("url", url) or {"string": b""}
-        )
+    def test_inline_data_uris_are_allowed(self):
+        # Images are base64-inlined before render, so `data:` must be fetched
+        # for real — that is the one scheme the guard permits.
         tiny_png = "data:image/png;base64,iVBORw0KGgo="
-        pdf.safe_url_fetcher(tiny_png)
-        assert seen["url"] == tiny_png
+        response = pdf.safe_url_fetcher(tiny_png)
+        assert response.read() == b"\x89PNG\r\n\x1a\n"
+
+    def test_weasyprint_allow_list_is_a_second_guard(self):
+        # Even calling the base-class fetch directly (bypassing our prefix
+        # check) refuses non-data schemes, via WeasyPrint's allowed_protocols.
+        from weasyprint.urls import URLFetcher
+
+        with pytest.raises(ValueError):
+            URLFetcher.fetch(pdf.SafeURLFetcher(), "file:///etc/passwd")
 
     def test_scheme_check_is_not_a_substring_match(self):
         # "data:" has to START the URL; a remote URL that merely mentions it
         # must not slip through.
         with pytest.raises(ValueError):
             pdf.safe_url_fetcher("http://evil.test/redirect?to=data:image/png;base64,AAAA")
+
+
+class TestRender:
+    def test_blocked_resources_are_skipped_not_fatal(self):
+        # The refusal is swallowed by WeasyPrint (resource skipped, warning
+        # logged); the document still renders.
+        html = (
+            '<p>Letter <img src="http://169.254.169.254/latest/meta-data/">'
+            '<img src="file:///etc/passwd"></p>'
+        )
+        assert pdf.render_pdf(html).startswith(b"%PDF")
+
+    def test_each_render_gets_its_own_fetcher(self, monkeypatch):
+        seen = []
+        real = pdf.HTML
+
+        def spy(*args, **kwargs):
+            seen.append(kwargs["url_fetcher"])
+            return real(*args, **kwargs)
+        monkeypatch.setattr(pdf, "HTML", spy)
+        pdf.render_pdf("<p>a</p>")
+        pdf.render_pdf("<p>b</p>")
+        assert len(seen) == 2 and seen[0] is not seen[1]
+        assert all(isinstance(f, pdf.SafeURLFetcher) for f in seen)

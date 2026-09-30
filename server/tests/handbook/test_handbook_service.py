@@ -165,7 +165,7 @@ def test_generate_handbook_pdf_bytes_escapes_html(monkeypatch):
     captured: dict[str, str] = {}
 
     # Capture at the renderer boundary rather than stubbing the `weasyprint`
-    # module: `core.services.pdf` imports `weasyprint.urls.default_url_fetcher`
+    # module: `core.services.pdf` imports `weasyprint.urls.URLFetcher`
     # (for the SSRF-safe fetcher), which a flat SimpleNamespace stub cannot
     # satisfy — it makes the real package look like a non-package.
     import app.core.services.pdf as pdf_module
