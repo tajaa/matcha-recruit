@@ -62,6 +62,10 @@ class SettingsUpdate(BaseModel):
 
 
 async def _business_company(current_user: CurrentUser) -> UUID:
+    # A platform admin has no company: scope resolution would drop them into
+    # the oldest tenant as its Work admin, i.e. with HR access to its cases.
+    if current_user.role == "admin":
+        raise HTTPException(status_code=403, detail="HR cases are only available inside a company workspace")
     scope = await resolve_accessible_company_scope(current_user)
     company_id = scope.get("company_id")
     if not company_id:

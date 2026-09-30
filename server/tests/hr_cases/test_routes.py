@@ -421,3 +421,9 @@ def test_filename_template_setting(mod, scope, monkeypatch):
         assert client.put("/hr-cases/settings", json={"filename_template": "{ssn}"}).status_code == 400
         assert client.put("/hr-cases/settings", json={"filename_template": "{last_name}_{case_number}"}).status_code == 200
     assert scope["conn"].args_for("filename_template = EXCLUDED")[1] == "{last_name}_{case_number}"
+
+
+def test_platform_admin_is_refused(mod, scope):
+    with _client(mod, SimpleNamespace(id=uuid4(), role="admin")) as client:
+        assert client.get("/hr-cases").status_code == 403
+        assert client.get("/hr-cases/access").status_code == 403
