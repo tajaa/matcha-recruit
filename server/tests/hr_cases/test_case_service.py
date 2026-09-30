@@ -190,10 +190,10 @@ async def test_list_cases_scopes_and_hides_old_closed():
 @pytest.mark.asyncio
 async def test_set_fields_writes_without_stage_change():
     cid = uuid4()
-    conn = TxConn()
+    conn = TxConn(fetchval={"UPDATE hr_cases": cid})
     await svc.set_fields(conn, company_id=COMPANY, case_id=cid, sets={"review": {"a": 1}, "action_type": "pip"},
                          event="draft_held", actor_user_id=uuid4(), details={"x": 1})
-    update = [s for s in conn.sql_for("execute") if s.startswith("UPDATE hr_cases")][0]
+    update = conn.sql_for("fetchval")[0]
     assert "stage" not in update and "review = $3::jsonb" in update
     assert conn.args_for("INSERT INTO hr_case_events")[2] == "draft_held"
     with pytest.raises(ValueError):
@@ -202,6 +202,32 @@ async def test_set_fields_writes_without_stage_change():
     await svc.set_fields(conn, company_id=COMPANY, case_id=cid, sets={})
     assert len(conn.calls) == before
 
+
+@pytest.mark.asyncio
+async def test_set_fields_with_required_stages_refuses_a_case_that_moved_on():
+    cid = uuid4()
+    conn = TxConn(fetchval={"UPDATE hr_cases": None})
+    with pytest.raises(CaseError) as exc:
+        await svc.set_fields(conn, company_id=COMPANY, case_id=cid, sets={"action_type": "pip"},
+                             event="draft_held", require_stages=("flagged", "drafting"))
+    assert exc.value.status == 409
+    assert "stage = ANY($4::text[])" in conn.sql_for("fetchval")[0]
+    assert conn.args_for("UPDATE hr_cases")[-1] == ["flagged", "drafting"]
+    assert not conn.sql_for("execute")  # no event row for a write that didn't happen
+    with pytest.raises(CaseError) as exc:
+        await svc.set_fields(TxConn(fetchval={"UPDATE hr_cases": None}), company_id=COMPANY, case_id=cid,
+                             sets={"action_type": "pip"})
+    assert exc.value.status == 404
+
+
+@pytest.mark.asyncio
+async def test_claim_manager_only_takes_an_unmanaged_case():
+    cid, user = uuid4(), uuid4()
+    conn = TxConn(fetchval={"UPDATE hr_cases SET gm_user_id": cid})
+    assert await svc.claim_manager(conn, company_id=COMPANY, case_id=cid, user_id=user) is True
+    assert "gm_user_id IS NULL" in conn.sql_for("fetchval")[0]
+    assert await svc.claim_manager(TxConn(fetchval={"UPDATE hr_cases SET gm_user_id": None}),
+                                   company_id=COMPANY, case_id=cid, user_id=user) is False
 
 @pytest.mark.asyncio
 async def test_latest_case_includes_closed_and_dismissed():

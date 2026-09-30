@@ -102,7 +102,7 @@ def scope(monkeypatch, mod):
     return state
 
 
-USER = SimpleNamespace(id=uuid4(), role="client")
+USER = SimpleNamespace(id=uuid4(), role="client", email="gm@example.com")
 
 
 def test_personal_workspace_refused(mod, scope):
@@ -220,12 +220,39 @@ def test_employee_and_incident_pickers(mod, scope):
     scope["conn"] = QueryConn(
         fetchval={"is_personal": False},
         fetch={"FROM employees": [{"id": "e1", "name": "Jane Doe", "job_title": "Barista"}],
-               "FROM ir_incidents": [{"id": "i1", "incident_number": "IR-1", "title": "Late", "occurred_at": None}]},
+               "FROM ir_incidents": [{"id": "i1", "incident_number": "IR-1", "title": "Late", "occurred_at": None,
+                                      "created_by": None, "reported_by_email": "x@example.com"}]},
     )
     with _client(mod, USER) as client:
         assert client.get("/hr-cases/employees?q=ja_").json()["employees"][0]["name"] == "Jane Doe"
-        assert client.get("/hr-cases/incidents").json()["incidents"][0]["incident_number"] == "IR-1"
+        incidents = client.get("/hr-cases/incidents").json()["incidents"]
+    assert incidents == [{"id": "i1", "incident_number": "IR-1", "title": "Late", "occurred_at": None}]
     assert scope["conn"].args_for("FROM employees")[2] == "%ja\\_%"
+    assert scope["conn"].args_for("FROM ir_incidents")[3] is True  # HR sees every incident
+
+
+def test_a_manager_only_sees_incidents_they_reported(mod, scope, monkeypatch):
+    from app.matcha.services.hr_cases import notifications
+
+    mine, theirs = uuid4(), uuid4()
+    scope["hr"] = False
+    scope["conn"] = QueryConn(
+        fetchval={"is_personal": False},
+        fetch={"FROM ir_incidents": [
+            {"id": mine, "incident_number": "IR-1", "title": "a", "occurred_at": None, "created_by": USER.id, "reported_by_email": None},
+            # Reported by the same address, but credited to another active member.
+            {"id": theirs, "incident_number": "IR-2", "title": "b", "occurred_at": None, "created_by": uuid4(), "reported_by_email": USER.email},
+        ]},
+    )
+
+    async def reporter(conn, *, company_id, incident):
+        return incident["created_by"]
+    monkeypatch.setattr(notifications, "resolve_gm_user_id", reporter)
+    with _client(mod, USER) as client:
+        incidents = client.get("/hr-cases/incidents").json()["incidents"]
+    assert [i["id"] for i in incidents] == [str(mine)]
+    args = scope["conn"].args_for("FROM ir_incidents")
+    assert args[3:] == (False, USER.id, USER.email)
 
 
 DRAFT_FORM = {"employee_id": str(uuid4()), "action_type": "written_warning", "infraction_type": "attendance",
@@ -249,8 +276,8 @@ def test_draft_upload_submits_and_returns_manager_view(mod, scope, monkeypatch):
         return SimpleNamespace(filename=name, text_status="ok", extracted_text="t")
     seen = {}
 
-    async def submit(conn, **kw):
-        seen.update(kw)
+    async def submit(connect, **kw):
+        seen.update(kw, connect=connect)
         return {"status": "submitted", "case": {"id": "c1"}, "manager_view": {"id": "c1", "stage": "hr_review"}}
     monkeypatch.setattr(drive_service, "prepare_file", prepare)
     monkeypatch.setattr(mod.workflow, "submit_draft", submit)
@@ -260,6 +287,24 @@ def test_draft_upload_submits_and_returns_manager_view(mod, scope, monkeypatch):
     assert resp.status_code == 201
     assert resp.json() == {"status": "submitted", "case": {"id": "c1", "stage": "hr_review"}}
     assert seen["actor_is_hr"] is False and seen["occurrence_dates"][0].isoformat() == "2026-09-03"
+    assert seen["connect"] is mod.get_connection  # a factory, not a held connection
+
+
+def test_draft_drive_errors_while_filing_map_to_their_status(mod, scope, monkeypatch):
+    _no_limit(monkeypatch, mod)
+    from app.matcha.services.drive import drive_service
+    from app.matcha.services.drive.drive_service import DriveError
+
+    async def prepare(name, data):
+        return SimpleNamespace(filename=name, text_status="ok", extracted_text="t")
+
+    async def submit(connect, **kw):
+        raise DriveError(503, "Storage is unavailable.")
+    monkeypatch.setattr(drive_service, "prepare_file", prepare)
+    monkeypatch.setattr(mod.workflow, "submit_draft", submit)
+    with _client(mod, USER) as client:
+        resp = client.post("/hr-cases/drafts", data=DRAFT_FORM, files={"file": ("w.pdf", b"%PDF-1.7", "application/pdf")})
+    assert resp.status_code == 503 and resp.json()["detail"] == "Storage is unavailable."
 
 
 def test_draft_from_google_link(mod, scope, monkeypatch):
@@ -273,7 +318,7 @@ def test_draft_from_google_link(mod, scope, monkeypatch):
         return SimpleNamespace(filename=name, text_status="ok", extracted_text="t")
     seen = {}
 
-    async def submit(conn, **kw):
+    async def submit(connect, **kw):
         seen.update(kw)
         return {"status": "held", "case": {}, "manager_view": {"id": "c1"}}
     monkeypatch.setattr(google_drive_service.GoogleDriveService, "fetch_file", fetch)
@@ -339,17 +384,32 @@ def test_delivered_returns_manager_view_for_managers(mod, scope, monkeypatch):
         assert "triage" in client.post(f"/hr-cases/{uuid4()}/delivered", json={}).json()
 
 
-def test_draft_download(mod, scope, monkeypatch):
-    from app.core.services import storage
+def test_draft_download_goes_through_drive_and_is_audited(mod, scope, monkeypatch):
+    from app.matcha.services.drive import drive_service
+    from app.matcha.services.drive.drive_service import DriveError
+
+    draft, case_id = uuid4(), uuid4()
 
     async def load(conn, **kw):
-        return {"draft_file_id": uuid4()}
+        return {"draft_file_id": draft}
+    seen = {}
+
+    async def presign(conn, **kw):
+        seen.update(kw)
+        return {"url": "https://s3/x", "filename": "d.pdf", "expires_in": 300}
     monkeypatch.setattr(mod.workflow, "load_for_actor", load)
-    monkeypatch.setattr(storage, "get_storage", lambda: SimpleNamespace(get_presigned_download_url=lambda p, expires_in: "https://s3/x"))
-    scope["conn"] = QueryConn(fetchval={"is_personal": False},
-                              fetchrow={"FROM drive_files": {"filename": "d.pdf", "storage_path": "s3://b/k"}})
+    monkeypatch.setattr(drive_service, "presign_download", presign)
     with _client(mod, USER) as client:
-        assert client.get(f"/hr-cases/{uuid4()}/draft").json()["url"] == "https://s3/x"
+        assert client.get(f"/hr-cases/{case_id}/draft").json()["url"] == "https://s3/x"
+    assert seen["file_id"] == draft and seen["actor"] is None and seen["on_behalf_of"] == USER.id
+    assert seen["audit_details"] == {"via": "hr_case", "case_id": str(case_id)}
+
+    async def gone(conn, **kw):
+        raise DriveError(404, "That file doesn't exist.")
+    monkeypatch.setattr(drive_service, "presign_download", gone)
+    with _client(mod, USER) as client:
+        resp = client.get(f"/hr-cases/{case_id}/draft")
+    assert resp.status_code == 404 and resp.json()["detail"] == "The draft file is no longer available."
 
     async def no_draft(conn, **kw):
         return {"draft_file_id": None}

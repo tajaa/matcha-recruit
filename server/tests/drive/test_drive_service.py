@@ -460,6 +460,32 @@ async def test_presign_download_audits_hr(monkeypatch, storage):
 
 
 @pytest.mark.asyncio
+async def test_presign_system_path_audits_the_person_it_serves(monkeypatch, storage):
+    f = folder(space="hr")
+    patch_caps(monkeypatch, {f["id"]: (f, ALL)})
+    conn = QueryConn(fetchrow={"FROM drive_files f": file_row(f["id"], space="hr")})
+    reader = uuid4()
+    await svc.presign_download(conn, company_id=COMPANY, file_id=uuid4(), actor=None,
+                               on_behalf_of=reader, audit_details={"via": "hr_case"})
+    audit = conn.args_for("drive_audit_log")
+    assert reader in audit and "file_download" in audit
+
+
+@pytest.mark.asyncio
+async def test_read_file_bytes_storage_failure_is_a_502(monkeypatch, storage):
+    f = folder()
+    patch_caps(monkeypatch, {f["id"]: (f, ALL)})
+
+    async def broken(path):
+        raise RuntimeError("Failed to download from S3: NoSuchKey")
+    storage.download_file = broken
+    conn = QueryConn(fetchrow={"FROM drive_files f": file_row(f["id"])})
+    with pytest.raises(DriveError) as exc:
+        await svc.read_file_bytes(conn, company_id=COMPANY, file_id=uuid4(), actor=actor("admin"))
+    assert exc.value.status == 502
+
+
+@pytest.mark.asyncio
 async def test_presign_unavailable_is_503(monkeypatch, storage):
     f = folder()
     patch_caps(monkeypatch, {f["id"]: (f, ALL)})

@@ -1675,7 +1675,11 @@ async def run_huume_turn(
                         message = str(resolved.get("message") or "That write-up could not be staged.")
                         step = recorder.record(tool=name, kind="staged", label="Write-up not staged",
                                                status="rejected", detail=message)
-                        return {"status": "refused", "message": message}, step
+                        refusal = {"status": "refused", "message": message}
+                        if resolved.get("candidates"):
+                            # Ids, so the retry can name one person.
+                            refusal["candidates"] = resolved["candidates"]
+                        return refusal, step
                     staged.update({k: v for k, v in resolved.items() if k != "status"})
                 if name == "decide_write_up" and not confirming:
                     from app.database import get_connection as _get_connection

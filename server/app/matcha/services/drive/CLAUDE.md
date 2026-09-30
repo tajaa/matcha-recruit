@@ -60,8 +60,12 @@ grant removal and is never re-seeded.
 - Text extraction (`ERDocumentParser`, pdf/docx/txt/md/csv, 200k chars) runs
   in `prepare_file` **before** a connection is taken, and never fails an
   upload (`text_status` = ok/empty/failed/unsupported).
-- `store_file(actor=None)` is the system path (HR case filing) and skips the
-  capability check. Routes always pass an actor.
+- `store_file(actor=None)` / `presign_download(actor=None, on_behalf_of=…)`
+  are the system path (HR case filing, a case manager fetching their draft)
+  and skip the capability check; the audit row names `on_behalf_of`. Drive's
+  own routes always pass an actor.
+- `read_file_bytes` maps a storage failure (`RuntimeError` from
+  `storage.download_file`) to `DriveError(502)`, never a 500.
 - HR-space adds/reads/downloads/moves/deletes and every grant change write
   `drive_audit_log` on the caller's connection.
 

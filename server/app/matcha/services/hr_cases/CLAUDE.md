@@ -83,8 +83,32 @@ delivered.
 
 - **Authorization is in `workflow.py`, shared by REST and Huume**: HR on any
   case; the case's manager (`gm_user_id`) on their own case; any business user
-  may start a case by submitting a draft and becomes its manager (or claims a
-  flagged case with no manager). Decisions are HR-only.
+  may start a NEW case by submitting a draft and becomes its manager.
+  **Naming an incident** needs HR or being its reporter
+  (`notifications.resolve_gm_user_id`), and only that person can claim a
+  flagged case with no manager (`case_service.claim_manager`, conditional on
+  `gm_user_id IS NULL`, and only after the stage check passes). Anyone else
+  gets 404, and `GET /incidents` lists only the caller's own reports to
+  non-HR. Decisions are HR-only.
+- **A draft needs at least one occurrence date** (REST, Huume stage time, and
+  the form). The leave gate is a date-overlap check: with no dates it passes
+  vacuously. Approval refuses (409) a draft whose frozen `review.input` has
+  none.
+- **No connection across the model call or the emails.** `submit_draft`
+  takes a connection factory: checks + filing on one short connection, the
+  Gemini wording pass on none, the write on another, and
+  `notifications.send_step` after it's released (`step_recipients` is the
+  only DB part of a notice). The write re-checks the stage: a held draft
+  goes through `set_fields(require_stages=DRAFTABLE_STAGES)`, a submitted
+  one through `apply_event`'s row lock, so a draft that raced another into
+  HR review 409s instead of overwriting it.
+- **Dates a person types are calendar dates in their own zone**, which the
+  server doesn't know: "future" means past today in UTC+14, and "before HR
+  approved" means before the approval's date in UTC-12
+  (`workflow.latest_local_today` / `earliest_local_date`).
+- **The draft download** goes through `drive_service.presign_download`'s
+  system path (`actor=None, on_behalf_of=<reader>`), so the HR-space read is
+  in `drive_audit_log` like any other.
 - **Review layers** (`draft_review.py`): (1) protected-leave gate
   `discipline_compliance.check_discipline_compliance` — deterministic, reads
   leave/PTO/incidents/ER only, a block cannot be overridden; (2) ladder fit vs
@@ -96,7 +120,9 @@ delivered.
 - **Approval re-runs the leave gate** from the inputs frozen in
   `review.input` — leave records can change between review and approval.
 - **Two audiences.** A manager only ever gets `workflow.manager_view`:
-  structure notes, a generic "held for HR" message, HR's send-back reason. Never
+  structure notes, a generic "held for HR" message, HR's send-back reason, and
+  their own last `infraction_type`/`occurrence_dates` (so a revision starts
+  from them). Never
   the leave findings (medical-adjacent), triage matches, or HR's history.
 - Notification types `hr_case_draft_submitted`/`_draft_held`/`_approved`/
   `_changes_requested`/`_delivered`; managers are linked to `/work/write-ups/…`,
@@ -106,7 +132,9 @@ delivered.
   `decide_write_up` / `mark_write_up_delivered` (staged, action types
   `hr_case_draft`/`_decision`/`_delivered`, feature `hr_cases`). The staged
   draft pins a REFERENCE (thread attachment URL, Drive file id, or Google file
-  id) at stage time; the confirm turn re-fetches those bytes. Thread
+  id) at stage time; the confirm turn re-fetches those bytes. An ambiguous
+  employee name refuses with each match's `employee_id` (a name typed in full
+  wins outright), so the model can retry with an id instead of the same name. Thread
   attachments reach the loop as `attachment_refs` (`messaging.py` →
   `turn_pipeline` → `run_huume_turn`). HR case actions are in
   `assets._NO_ASSET_TYPES` — the asset panel has no HR-access check.

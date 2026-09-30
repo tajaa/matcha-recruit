@@ -140,6 +140,8 @@ async def resolve_draft_args(
     {"status": "ok", ...fields} or {"status": "refused", "message": ...}."""
     from app.database import get_connection
     from app.matcha.services.drive.google_drive_service import parse_file_id
+    from app.matcha.services.hr_cases.case_service import CaseError
+    from app.matcha.services.hr_cases.workflow import parse_occurrence_dates
 
     out: dict[str, Any] = {}
     sources = [k for k in ("attachment_index", "drive_file_id", "google_url") if args.get(k) not in (None, "")]
@@ -164,6 +166,15 @@ async def resolve_draft_args(
             return {"status": "refused", "message": "That isn't a Google Doc or Drive file link."}
         out.update(source="google", google_file_id=gid)
 
+    try:
+        dates = parse_occurrence_dates(args.get("occurrence_dates") or [])
+    except CaseError as exc:
+        return {"status": "refused", "message": exc.detail}
+    if not dates:
+        return {"status": "refused", "message": "What date or dates did it happen? The leave check runs against them, "
+                                                "so I can't send a write-up without them."}
+    out["occurrence_dates"] = [d.isoformat() for d in dates]
+
     employee_id = args.get("employee_id")
     name = str(args.get("employee_name") or "").strip()
     async with get_connection() as conn:
@@ -175,19 +186,29 @@ async def resolve_draft_args(
             rows = [row] if row else []
         elif name:
             rows = await conn.fetch(
-                "SELECT id, TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) AS name "
+                "SELECT id, TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) AS name, job_title "
                 "FROM employees WHERE org_id = $1 AND termination_date IS NULL "
                 "AND (COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) ILIKE $2 ESCAPE '\\' "
                 "ORDER BY last_name, first_name LIMIT 5",
                 company_id, "%" + name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%",
             )
+            # "Sam Lee" also matches "Sam Leeds"; a name typed in full wins.
+            exact = [r for r in rows if (r["name"] or "").strip().lower() == name.lower()]
+            if len(exact) == 1:
+                rows = exact
         else:
             rows = []
     if not rows:
         return {"status": "refused", "message": "Who is the write-up for? I couldn't find that employee on the roster."}
     if len(rows) > 1:
-        return {"status": "refused", "message": "More than one employee matches: "
-                + ", ".join(r["name"] for r in rows) + ". Which one?"}
+        # Hand back ids: without them the model can only retry the same name.
+        return {
+            "status": "refused",
+            "message": "More than one employee matches: "
+            + "; ".join(f"{r['name']}{' (' + r['job_title'] + ')' if r.get('job_title') else ''}" for r in rows)
+            + ". Ask which one, then call again with that person's employee_id.",
+            "candidates": [{"employee_id": str(r["id"]), "name": r["name"], "job_title": r.get("job_title")} for r in rows],
+        }
     out.update(employee_id=str(rows[0]["id"]), employee_name=rows[0]["name"])
     return {"status": "ok", **out}
 
@@ -199,11 +220,16 @@ async def _fetch_source(conn, *, company_id: UUID, user_id: UUID, action: dict[s
     """(prepared, source, source_ref) for the staged reference."""
     from app.core.services.storage import get_storage
     from app.matcha.services.drive import drive_service
+    from app.matcha.services.drive.drive_service import DriveError
     from app.matcha.services.drive.google_drive_service import GoogleDriveService
 
     source = action.get("source")
     if source == "attachment":
-        data = await get_storage().download_file(action["attachment_url"])
+        try:
+            data = await get_storage().download_file(action["attachment_url"])
+        except RuntimeError:  # storage reports every S3 failure this way
+            logger.warning("[huume] write-up attachment unreadable", exc_info=True)
+            raise DriveError(502, "I couldn't read that attachment again. Attach the write-up once more and ask me to send it.") from None
         return await drive_service.prepare_file(action.get("filename") or "write-up", data), "huume", None
     if source == "drive":
         actor = await drive_service.load_actor(conn, user=await _actor(conn, user_id), company_id=company_id)
@@ -226,34 +252,37 @@ async def execute(*, company_id: UUID, actor_user_id: Optional[UUID], action: di
 
     atype = action.get("type")
     try:
-        async with get_connection() as conn:
-            is_hr = await _is_hr(conn, company_id=company_id, user_id=actor_user_id)
-            if atype == "hr_case_draft":
+        if atype == "hr_case_draft":
+            async with get_connection() as conn:
+                is_hr = await _is_hr(conn, company_id=company_id, user_id=actor_user_id)
                 prepared, source, source_ref = await _fetch_source(
                     conn, company_id=company_id, user_id=actor_user_id, action=action,
                 )
-                result = await workflow.submit_draft(
-                    conn, company_id=company_id, actor_user_id=actor_user_id, actor_is_hr=is_hr,
-                    prepared=prepared, employee_id=UUID(action["employee_id"]),
-                    action_type=action["action_type"], infraction_type=action["infraction_type"],
-                    occurrence_dates=workflow.parse_occurrence_dates(action.get("occurrence_dates") or []),
-                    case_id=UUID(action["case_id"]) if action.get("case_id") else None,
-                    incident_id=UUID(action["incident_id"]) if action.get("incident_id") else None,
-                    source=source, source_ref=source_ref, origin="huume",
-                )
-                case = result["case"]
-                if result["status"] == "held":
-                    msg = (f"{case['case_number']}: that write-up can't go forward as written — it conflicts "
-                           "with a protected-leave rule. HR has the details and has been told.")
-                    if is_hr:
-                        msg += " " + " ".join(b["detail"] for b in (case.get("review") or {}).get("blocks") or [])
-                else:
-                    notes = [n["detail"] for n in (result["manager_view"].get("review") or {}).get("notes") or []]
-                    msg = f"{case['case_number']}: sent to HR for review."
-                    if notes:
-                        msg += " A few things HR will likely ask about: " + " ".join(notes)
-                return {"status": "created", "message": msg, "record_id": str(case["id"]),
-                        "record_label": case["case_number"], "case_view": result["manager_view"]}
+            # Its own short connections: the model review must not pin one.
+            result = await workflow.submit_draft(
+                get_connection, company_id=company_id, actor_user_id=actor_user_id, actor_is_hr=is_hr,
+                prepared=prepared, employee_id=UUID(action["employee_id"]),
+                action_type=action["action_type"], infraction_type=action["infraction_type"],
+                occurrence_dates=workflow.parse_occurrence_dates(action.get("occurrence_dates") or []),
+                case_id=UUID(action["case_id"]) if action.get("case_id") else None,
+                incident_id=UUID(action["incident_id"]) if action.get("incident_id") else None,
+                source=source, source_ref=source_ref, origin="huume",
+            )
+            case = result["case"]
+            if result["status"] == "held":
+                msg = (f"{case['case_number']}: that write-up can't go forward as written — it conflicts "
+                       "with a protected-leave rule. HR has the details and has been told.")
+                if is_hr:
+                    msg += " " + " ".join(b["detail"] for b in (case.get("review") or {}).get("blocks") or [])
+            else:
+                notes = [n["detail"] for n in (result["manager_view"].get("review") or {}).get("notes") or []]
+                msg = f"{case['case_number']}: sent to HR for review."
+                if notes:
+                    msg += " A few things HR will likely ask about: " + " ".join(notes)
+            return {"status": "created", "message": msg, "record_id": str(case["id"]),
+                    "record_label": case["case_number"], "case_view": result["manager_view"]}
+        async with get_connection() as conn:
+            is_hr = await _is_hr(conn, company_id=company_id, user_id=actor_user_id)
             if atype == "hr_case_decision":
                 if not is_hr:
                     return {"status": "refused", "message": "Only HR can approve or send back a write-up."}

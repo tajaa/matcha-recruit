@@ -193,15 +193,31 @@ def manager_link(case: dict[str, Any]) -> str:
     return f"/work/write-ups/{case['id']}"
 
 
+async def step_recipients(conn, *, case: dict[str, Any], step: str) -> list:
+    """HR user ids for a step's notice (empty for steps that only tell the
+    manager). The only part of a notice that needs the database."""
+    if step not in ("draft_submitted", "draft_held", "delivered"):
+        return []
+    try:
+        return [r["user_id"] for r in await hr_recipients(conn, case["company_id"])]
+    except Exception:
+        logger.exception("[hr_cases] could not resolve HR for case %s", case.get("id"))
+        return []
+
+
 async def notify_step(conn, *, case: dict[str, Any], step: str, actor_user_id: Optional[UUID], reason: Optional[str] = None) -> None:
     """Fixed-template notice for a workflow step. HR gets the HR link; the
     manager gets the write-ups link. The acting person is never notified of
     their own action. Never raises."""
-    try:
-        hr_ids = [r["user_id"] for r in await hr_recipients(conn, case["company_id"])]
-    except Exception:
-        logger.exception("[hr_cases] could not resolve HR for case %s", case.get("id"))
-        hr_ids = []
+    hr_ids = await step_recipients(conn, case=case, step=step)
+    await send_step(case=case, step=step, hr_ids=hr_ids, actor_user_id=actor_user_id, reason=reason)
+
+
+async def send_step(
+    *, case: dict[str, Any], step: str, hr_ids: list, actor_user_id: Optional[UUID], reason: Optional[str] = None,
+) -> None:
+    """The sending half of `notify_step`; holds no connection of the caller's
+    (bell + email go through notification_service's own). Never raises."""
     number = case["case_number"]
     meta = {"hr_case_id": str(case["id"])}
     gm = case.get("gm_user_id")
