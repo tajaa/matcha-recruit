@@ -631,6 +631,28 @@ async def test_get_tree_groups_visible_folders_by_space(monkeypatch):
     assert hr_space["folders"][0]["caps"] == ["add"]
 
 
+# ── People search ───────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_search_members_admin_only():
+    with pytest.raises(DriveError) as exc:
+        await svc.search_members(QueryConn(), company_id=COMPANY, q="ja", actor=actor("operator"))
+    assert exc.value.status == 403
+
+
+@pytest.mark.asyncio
+async def test_search_members_escapes_and_sorts():
+    rows = [
+        {"id": uuid4(), "email": "zed@example.com", "name": "Zed", "kind": "employee"},
+        {"id": uuid4(), "email": "amy@example.com", "name": "amy", "kind": "business"},
+    ]
+    conn = QueryConn(fetch={"FROM users u": rows})
+    out = await svc.search_members(conn, company_id=COMPANY, q="a%b", actor=actor("admin"))
+    assert [p["name"] for p in out] == ["amy", "Zed"]
+    assert conn.args_for("FROM users u")[2] == "%a\\%b%"
+
+
 # ── Review fixes (PR #639) ──────────────────────────────────────────────
 
 

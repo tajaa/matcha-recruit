@@ -177,3 +177,29 @@ def test_flag_registered_default_off_and_requires_matcha_work():
 
     assert DEFAULT_COMPANY_FEATURES["matcha_drive"] is False
     assert FEATURE_REQUIRES["matcha_drive"] == ("matcha_work",)
+
+
+def test_people_route_passes_query_and_maps_refusal(monkeypatch, mod):
+    _patch_scope(monkeypatch, mod, is_personal=False)
+    user = SimpleNamespace(id=uuid4(), role="client")
+    seen = {}
+
+    async def load_actor(conn, *, user, company_id):
+        return SimpleNamespace(user_id=user.id, work_level="operator")
+
+    async def search_members(conn, *, company_id, q, actor):
+        seen["q"] = q
+        raise mod.DriveError(403, "Only a workspace admin can manage folder access.")
+
+    monkeypatch.setattr(mod.svc, "load_actor", load_actor)
+    monkeypatch.setattr(mod.svc, "search_members", search_members)
+    with _client(mod, user) as client:
+        resp = client.get("/drive/people?q=jan")
+    assert resp.status_code == 403
+    assert seen["q"] == "jan"
+
+
+def test_people_declared_before_params(mod):
+    order = [r.path for r in iter_api_routes(mod.router)]
+    first_param = min(i for i, p in enumerate(order) if "{" in p)
+    assert order.index("/drive/people") < first_param
