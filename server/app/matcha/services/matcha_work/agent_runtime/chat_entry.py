@@ -140,6 +140,15 @@ async def _answer_prompt(*, prompt: dict, channel_id: UUID, company_id: UUID, us
     events: list[dict] = []
     resume: UUID | None = None
     next_request: str | None = None
+    if (prompt["kind"] != prompts.ASK_USER and prompt["owner_user_id"] == user.id and prompt["live"]
+            and prompts.parse_confirmation(content) == "yes"):
+        # Refuse before the yes is recorded: a yes that cannot run must leave
+        # the question open, not flip the card to "Went ahead".
+        try:
+            await enqueue.preflight(user, company_id)
+        except HTTPException as exc:
+            await post_as_espresso(company_id, channel_id, _reason(exc))
+            return True
     async with get_connection() as conn, conn.transaction():
 
         async def say(text: str) -> None:
@@ -170,11 +179,16 @@ async def _answer_prompt(*, prompt: dict, channel_id: UUID, company_id: UUID, us
                     await say(CANCELLED)
     await _flush(messages, events)
     if resume is not None:
-        await start_run(
+        started = await start_run(
             channel_id=channel_id, company_id=company_id, user=user,
             request="Yes, go ahead.", message_id=message_id, surface=surface,
             project_id=project_id, resume_prompt_id=resume,
         )
+        if not started:
+            async with get_connection() as conn:
+                reopened = await prompts.reopen(conn, prompt, user.id)
+            if reopened:
+                await _flush([], [prompts.update_event(prompt, "open")])
     elif next_request is not None:
         await start_run(
             channel_id=channel_id, company_id=company_id, user=user, request=next_request,

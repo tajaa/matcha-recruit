@@ -75,23 +75,20 @@ async def _page_text(page) -> str:
         return ""
 
 
-def _frame_hosts(page) -> list[str]:
-    from urllib.parse import urlsplit
-
-    hosts = []
+def _frame_urls(page) -> list[str]:
+    urls = []
     for frame in getattr(page, "frames", []) or []:
-        try:
-            hosts.append((urlsplit(frame.url).hostname or "").lower())
-        except ValueError:
-            continue
-    return hosts
+        url = getattr(frame, "url", "") or ""
+        if url and url != "about:blank":
+            urls.append(url)
+    return urls
 
 
 def guard_for(request: forms.ReservationRequest) -> computer_use.BeforeAction:
     """The hook that sees every browser action before it happens."""
 
     async def before_action(page, name: str, args: dict) -> ActionVerdict | None:
-        if forms.looks_like_captcha(await _page_text(page), _frame_hosts(page)):
+        if forms.looks_like_captcha(await _page_text(page), _frame_urls(page)):
             return ActionVerdict(stop="blocked")
         if name in ("navigate", "search"):
             return None  # the navigation allowlist decides
@@ -122,13 +119,15 @@ def outcome_of(result: computer_use.Outcome, page_text: str, url: str | None) ->
     base = {"url": url, "turns": result.turns}
     if result.stopped in ("handoff", "blocked"):
         return {**base, "status": result.stopped}
-    confirmed, code = forms.confirmation_in(page_text)
-    if confirmed:
-        return {**base, "status": "booked", "confirmation": code}
     if "UNAVAILABLE" in (result.text or "").upper():
         return {**base, "status": "unavailable", "note": (result.text or "")[:400]}
+    confirmed, code = forms.confirmation_in(page_text)
     if result.error or result.stopped in ("time", "turns"):
-        return {**base, "status": "failed"}
+        # Cut off. A page that reads as confirmed may still be one step short,
+        # so it is reported as something to check, never as booked.
+        return {**base, "status": "unverified" if confirmed else "failed"}
+    if confirmed:
+        return {**base, "status": "booked", "confirmation": code}
     # The model says it is done, but the page never said the booking went
     # through. That is not a booking anyone should rely on.
     return {**base, "status": "unverified"}

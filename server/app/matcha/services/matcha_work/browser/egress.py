@@ -16,6 +16,12 @@ the address that was checked is the address that is dialled.
 
 The proxy never reads or changes TLS traffic. It only decides where a tunnel
 may go.
+
+A plain-http request gets its own connection, both ways: the proxy sends the
+origin `Connection: close`, forwards exactly that one request's body, and
+closes the browser's side when the origin is done. Otherwise a browser reusing
+the connection for a second request, to another host, would have it delivered
+to the first host's address, never checked.
 """
 from __future__ import annotations
 
@@ -33,6 +39,8 @@ _MAX_HEAD_BYTES = 64 * 1024
 _HEAD_SECONDS = 15.0
 _CONNECT_SECONDS = 15.0
 _IDLE_SECONDS = 120.0
+_MAX_PLAIN_BODY_BYTES = 10 * 1024 * 1024
+_HOP_BY_HOP = ("proxy-connection:", "proxy-authorization:", "connection:", "keep-alive:")
 
 Resolver = Callable[[str], Awaitable[str]]
 
@@ -71,6 +79,24 @@ def parse_target(request_line: str) -> tuple[str, str, int, str]:
     if url.query:
         path = f"{path}?{url.query}"
     return method.upper(), url.hostname.lower(), port, f"{method} {path} {version}"
+
+
+def _plain_body_length(header_lines: list[str]) -> int:
+    """Bytes of body that belong to this one plain-http request."""
+    length = 0
+    for line in header_lines:
+        name, _, value = line.partition(":")
+        name = name.strip().lower()
+        if name == "transfer-encoding":
+            raise EgressRefused(411, "Chunked request bodies are not proxied")
+        if name == "content-length":
+            value = value.strip()
+            if not value.isdigit():
+                raise EgressRefused(400, "Invalid Content-Length")
+            length = int(value)
+    if length > _MAX_PLAIN_BODY_BYTES:
+        raise EgressRefused(413, "Request body too large")
+    return length
 
 
 async def resolve_target(host: str, port: int, *, resolver: Resolver = resolve_public_ip) -> str:
@@ -143,6 +169,8 @@ class EgressProxy:
                 raise EgressRefused(431, "Request head too large")
             request_line, _, rest = head.decode("latin-1").partition("\r\n")
             method, host, port, upstream_line = parse_target(request_line)
+            lines = [line for line in rest.split("\r\n") if line]
+            body_length = 0 if method == "CONNECT" else _plain_body_length(lines)
             address = await resolve_target(host, port, resolver=self._resolver)
             upstream_reader, upstream_writer = await asyncio.wait_for(
                 asyncio.open_connection(address, port), timeout=_CONNECT_SECONDS,
@@ -150,14 +178,19 @@ class EgressProxy:
             if method == "CONNECT":
                 writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
                 await writer.drain()
-            else:
-                headers = "\r\n".join(
-                    line for line in rest.split("\r\n")
-                    if line and not line.lower().startswith(("proxy-connection:", "proxy-authorization:"))
-                )
-                upstream_writer.write(f"{upstream_line}\r\n{headers}\r\n\r\n".encode("latin-1"))
-                await upstream_writer.drain()
-            await asyncio.gather(_pipe(reader, upstream_writer), _pipe(upstream_reader, writer))
+                await asyncio.gather(_pipe(reader, upstream_writer), _pipe(upstream_reader, writer))
+                return
+            headers = "\r\n".join(
+                [line for line in lines if not line.lower().startswith(_HOP_BY_HOP)] + ["Connection: close"]
+            )
+            upstream_writer.write(f"{upstream_line}\r\n{headers}\r\n\r\n".encode("latin-1"))
+            if body_length:
+                upstream_writer.write(await asyncio.wait_for(
+                    reader.readexactly(body_length), timeout=_IDLE_SECONDS))
+            await upstream_writer.drain()
+            # Nothing more is read from the browser on this connection: its
+            # next request, to whatever host, comes on a new one.
+            await _pipe(upstream_reader, writer)
         except EgressRefused as exc:
             self.refused.append((host, port, exc.reason))
             logger.info("browser egress refused %s:%s (%s)", host, port, exc.reason)

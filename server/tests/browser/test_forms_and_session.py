@@ -46,9 +46,19 @@ def test_login_walls_and_captchas_are_recognised():
     assert not forms.is_login_field({"type": "text", "autocomplete": "email"})
     assert not forms.is_login_field(None)
     assert forms.looks_like_captcha("Please verify you are human to continue")
-    assert forms.looks_like_captcha("", ["www.google.com", "challenges.cloudflare.com/turnstile"])
-    assert forms.looks_like_captcha("", ["newassets.hcaptcha.com"])
-    assert not forms.looks_like_captcha("Pick a time for your table", ["www.tables.example"])
+    assert forms.looks_like_captcha("", ["https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha.html"])
+    assert forms.looks_like_captcha("", ["https://www.google.com/recaptcha/api2/anchor?ar=1&k=x&size=normal"])
+    assert forms.looks_like_captcha("", ["https://www.google.com/recaptcha/api2/bframe?k=x"])
+    assert not forms.looks_like_captcha("Pick a time for your table", ["https://www.tables.example/book"])
+
+
+def test_a_recaptcha_notice_is_not_a_challenge():
+    # Invisible reCAPTCHA v3: the mandated footer line and its hidden anchor
+    # frame are on the page, and nobody is being asked anything.
+    footer = "Book a table. This site is protected by reCAPTCHA and the Google Privacy Policy applies."
+    invisible = ["https://www.google.com/recaptcha/api2/anchor?ar=1&k=x&size=invisible&cb=y"]
+    assert not forms.looks_like_captcha(footer, invisible)
+    assert not forms.looks_like_captcha("Powered by hCaptcha and Turnstile", [])
 
 
 def test_booked_means_the_page_said_so():
@@ -56,7 +66,12 @@ def test_booked_means_the_page_said_so():
     assert forms.confirmation_in("You're all set. See you on Friday.") == (True, None)
     assert forms.confirmation_in("Booking confirmed") == (True, None)
     assert forms.confirmation_in("Select a time to continue") == (False, None)
-    assert forms.confirmation_in("Enter your confirmation code to look up a booking")[0] is True
+    # A site asking for a verification code, or a footer, confirms nothing.
+    assert forms.confirmation_in("Enter the confirmation code we sent to your phone") == (False, None)
+    assert forms.confirmation_in("Thanks for visiting. See you soon!") == (False, None)
+    # A code needs a digit, so a word after "confirmation code" is never one.
+    assert forms.confirmation_in("Your booking is confirmed. Confirmation code sent by text") == (True, None)
+    assert forms.confirmation_in("Reservation has been confirmed. Confirmation #: 7QX2") == (True, "7QX2")
     assert forms.confirmation_in("") == (False, None) and forms.confirmation_in(None) == (False, None)
 
 

@@ -31,21 +31,36 @@ _PAYMENT_FRAME = re.compile(
     r"authorize\.net|worldpay\.com|cybersource\.com)$",
     re.IGNORECASE,
 )
-_CAPTCHA = re.compile(
-    r"recaptcha|hcaptcha|turnstile|arkoselabs|funcaptcha|are you a robot|verify you are human|"
-    r"press and hold|unusual traffic|confirm you(?:'|’)?re not a robot",
+# What a challenge SAYS. Vendor names are not enough: every site on invisible
+# reCAPTCHA v3 must print "This site is protected by reCAPTCHA" in its footer,
+# and nothing is being asked of anyone there.
+_CAPTCHA_TEXT = re.compile(
+    r"are you a robot|verify you are (?:a )?human|i(?:'|’)?m not a robot|"
+    r"press and hold|unusual traffic|confirm you(?:'|’)?re not a robot|"
+    r"complete the security check|select all (?:images|squares)",
+    re.IGNORECASE,
+)
+# Frames that ARE a challenge. reCAPTCHA's anchor frame is the visible
+# checkbox unless it is the invisible kind; bframe is the image challenge.
+_CAPTCHA_FRAME = re.compile(
+    r"(?:^|\.)(?:hcaptcha\.com|arkoselabs\.com|funcaptcha\.com)(?:[/:?#]|$)"
+    r"|/recaptcha/(?:api2|enterprise)/bframe"
+    r"|/recaptcha/(?:api2|enterprise)/anchor(?![^#]*size=invisible)",
     re.IGNORECASE,
 )
 _LOGIN_FIELD = re.compile(r"\bpassword\b|current-password|new-password", re.IGNORECASE)
+# Only a statement that the booking went through counts. "Confirmation code"
+# alone is how a site asks for a verification code, and "see you soon" sits in
+# footers, so neither decides anything.
 _CONFIRMED = re.compile(
-    r"(?:reservation|booking|table|appointment)\s+(?:is\s+)?(?:confirmed|booked|complete|reserved)"
-    r"|you(?:'|’)?re\s+(?:all\s+set|booked|confirmed)"
-    r"|confirmation\s+(?:number|code|#)"
-    r"|see\s+you\s+(?:on|at|soon)",
+    r"(?:reservation|booking|table|appointment)\s+(?:is\s+|has\s+been\s+)?(?:confirmed|booked|complete|reserved)"
+    r"|you(?:'|’)?re\s+(?:all\s+set|booked|confirmed)",
     re.IGNORECASE,
 )
+# A code has at least one digit, so a word like "CODE" or "SENT" is never one.
 _CONFIRMATION_CODE = re.compile(
-    r"confirmation\s*(?:number|code|#)?\s*[:#]?\s*([A-Z0-9][A-Z0-9\-]{3,19})\b", re.IGNORECASE,
+    r"confirmation\s*(?:number|code|#|no\.?)\s*(?:is\s*)?[:#]?\s*((?=[A-Z0-9\-]*\d)[A-Z0-9][A-Z0-9\-]{3,19})\b",
+    re.IGNORECASE,
 )
 
 
@@ -109,10 +124,11 @@ def is_login_field(attrs: dict) -> bool:
     return bool(_LOGIN_FIELD.search(str(attrs.get("autocomplete") or "")))
 
 
-def looks_like_captcha(page_text: str, frame_hosts: list[str] | tuple[str, ...] = ()) -> bool:
-    if _CAPTCHA.search(page_text or ""):
+def looks_like_captcha(page_text: str, frame_urls: list[str] | tuple[str, ...] = ()) -> bool:
+    """Whether the page is putting a human check in front of the booking."""
+    if _CAPTCHA_TEXT.search(page_text or ""):
         return True
-    return any(_CAPTCHA.search(host or "") for host in frame_hosts)
+    return any(_CAPTCHA_FRAME.search(url or "") for url in frame_urls)
 
 
 def confirmation_in(page_text: str) -> tuple[bool, str | None]:

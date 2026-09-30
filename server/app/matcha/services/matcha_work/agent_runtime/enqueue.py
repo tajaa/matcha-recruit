@@ -35,6 +35,7 @@ _BROWSER_QUEUE_ENV = "AGENT_BROWSER_QUEUE"
 # lost its worker. Older than this it stops blocking the next message.
 _STALE_RUN_INTERVAL = "11 minutes"
 STILL_WORKING = "I'm still working on your last request. Ask me again when that one lands."
+INTERRUPTED = "It was interrupted. Ask me again."
 
 
 def _is_admin(user) -> bool:
@@ -126,13 +127,14 @@ async def enqueue_assistant_run(
             await conn.execute(
                 "SELECT pg_advisory_xact_lock(hashtext($1))", f"{channel_id}:{user.id}:assistant",
             )
-            await conn.execute(
+            swept = await conn.fetch(
                 f"""UPDATE mw_project_agent_runs
                     SET status = 'failed', completed_at = NOW(),
                         error = COALESCE(error, 'Interrupted before completion.')
                     WHERE channel_id = $1 AND requested_by = $2 AND kind = 'assistant'
                       AND status IN ('queued', 'running')
-                      AND COALESCE(started_at, created_at) < NOW() - INTERVAL '{_STALE_RUN_INTERVAL}'""",
+                      AND COALESCE(started_at, created_at) < NOW() - INTERVAL '{_STALE_RUN_INTERVAL}'
+                    RETURNING id, channel_id, company_id""",
                 channel_id, user.id,
             )
             if limit is not None:
@@ -152,6 +154,13 @@ async def enqueue_assistant_run(
                 )
             except asyncpg.UniqueViolationError:
                 raise HTTPException(status_code=409, detail=STILL_WORKING)
+    if swept:
+        # Swept here, the reconciler never sees these rows move, so it is here
+        # that the dead run's progress card is closed and the person told.
+        from .assistant import report_failure
+
+        for row in swept:
+            await report_failure(dict(row), INTERRUPTED)
     if run_id is None:
         # The same message delivered twice: the first delivery owns the run.
         return {"run_id": None, "status": "duplicate"}

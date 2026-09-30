@@ -201,7 +201,9 @@ def _tools(booker: Booker) -> tuple[AgentTool, ...]:
                 "time": {"type": "string", "description": "HH:MM, 24 hour, venue local time"},
                 "special_requests": {"type": "string"},
             }, "required": ["url", "venue_name", "party_size", "date", "time"]},
-            timeout_seconds=BOOKING_SECONDS + 20, min_seconds_left=60,
+            # Never start a booking the run could cut off halfway: the whole
+            # budget has to be there before the first click.
+            timeout_seconds=BOOKING_SECONDS + 20, min_seconds_left=BOOKING_SECONDS + 20,
             too_late_message="Not enough time left to book; give the person the booking link instead.",
             resolve=resolve_booking, targets=_targets, preview=_preview,
             ceilings=((5, 3600), (15, 86400)),

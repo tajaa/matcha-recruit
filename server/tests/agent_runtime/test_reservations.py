@@ -235,3 +235,12 @@ def test_no_code_path_calls_decrypt_pan():
         and path.name != "card_vault.py"
     ]
     assert callers == [], f"decrypt_pan must have no caller in app/: {callers}"
+
+
+def test_a_booking_only_starts_with_its_whole_budget_left():
+    from app.matcha.services.matcha_work.agent_runtime.assistant import LIMITS
+
+    tool = next(t for t in reservations.build().tools if t.name == "book_reservation")
+    # The runner would otherwise hand it min(timeout, time left) and cancel it mid-form.
+    assert tool.min_seconds_left >= tool.timeout_seconds > reservations.BOOKING_SECONDS
+    assert LIMITS.wall_seconds > tool.min_seconds_left

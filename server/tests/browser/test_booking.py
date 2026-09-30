@@ -88,6 +88,11 @@ def test_the_status_comes_from_what_the_page_shows():
     assert booking.outcome_of(_result(stopped="blocked"), "", url)["status"] == "blocked"
     for stuck in (_result(stopped="turns"), _result(stopped="time"), _result(error="model_timeout")):
         assert booking.outcome_of(stuck, "Pick a time", url)["status"] == "failed"
+        # Cut off on a page that reads as confirmed: something to check, never "booked".
+        assert booking.outcome_of(stuck, confirmed, url)["status"] == "unverified"
+    # A verification-code step that timed out is not a booking.
+    code_step = "Enter the confirmation code we sent to your phone"
+    assert booking.outcome_of(_result(stopped="time"), code_step, url)["status"] == "failed"
 
 
 @pytest.mark.asyncio

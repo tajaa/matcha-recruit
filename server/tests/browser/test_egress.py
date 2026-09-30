@@ -193,3 +193,80 @@ async def test_an_unreachable_origin_is_a_502():
         writer.close()
     assert reply.startswith(b"HTTP/1.1 502")
     await proxy.stop()  # stopping twice is harmless
+
+
+@pytest.mark.asyncio
+async def test_a_plain_request_gets_its_own_connection_both_ways():
+    """A browser reusing the proxy connection for a second host must not have
+    that request delivered to the first host's pinned address."""
+    requests = []
+
+    async def origin(reader, writer):
+        head = await reader.readuntil(b"\r\n\r\n")
+        body = await reader.readexactly(4) if b"Content-Length: 4" in head else b""
+        requests.append((head, body))
+        writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+        await writer.drain()
+        # A keep-alive origin would wait here for more; anything that arrives
+        # is recorded as a leak.
+        try:
+            extra = await asyncio.wait_for(reader.read(65536), timeout=0.3)
+            if extra:
+                requests.append((extra, b""))
+        except asyncio.TimeoutError:
+            pass
+        writer.close()
+
+    server = await asyncio.start_server(origin, "127.0.0.1", 0)
+    origin_port = server.sockets[0].getsockname()[1]
+    real_open = asyncio.open_connection
+
+    async def open_connection(host, port, *a, **k):
+        return await real_open(host, origin_port, *a, **k)
+
+    async def resolver(host):
+        return "127.0.0.1"
+
+    import unittest.mock as mock
+
+    try:
+        async with EgressProxy(resolver=resolver) as proxy:
+            reader, writer = await real_open("127.0.0.1", proxy.port)
+            with mock.patch.object(egress.asyncio, "open_connection", open_connection):
+                writer.write(b"POST http://a.example/form HTTP/1.1\r\nHost: a.example\r\n"
+                             b"Connection: keep-alive\r\nKeep-Alive: timeout=5\r\n"
+                             b"Content-Length: 4\r\n\r\nx=12"
+                             b"GET http://cdn.b.example/x.js HTTP/1.1\r\nHost: cdn.b.example\r\n\r\n")
+                await writer.drain()
+                reply = await asyncio.wait_for(reader.read(65536), timeout=5)
+                closed = await asyncio.wait_for(reader.read(1), timeout=5)
+            writer.close()
+    finally:
+        server.close()
+        await server.wait_closed()
+    assert reply.endswith(b"ok") and closed == b""
+    assert len(requests) == 1
+    head, body = requests[0]
+    assert body == b"x=12"
+    assert head.endswith(b"Content-Length: 4\r\nConnection: close\r\n\r\n")
+    assert b"keep-alive" not in head.lower() and b"cdn.b.example" not in head
+
+
+@pytest.mark.asyncio
+async def test_a_chunked_or_oversized_plain_body_is_refused():
+    dialled = []
+
+    async def resolver(host):
+        dialled.append(host)
+        return "127.0.0.1"
+
+    async with EgressProxy(resolver=resolver) as proxy:
+        chunked = await _exchange(proxy, b"POST http://a.example/ HTTP/1.1\r\n"
+                                         b"Transfer-Encoding: chunked\r\n\r\n")
+        huge = await _exchange(proxy, b"POST http://a.example/ HTTP/1.1\r\n"
+                                      b"Content-Length: 999999999\r\n\r\n")
+        bad = await _exchange(proxy, b"POST http://a.example/ HTTP/1.1\r\n"
+                                     b"Content-Length: nope\r\n\r\n")
+    assert chunked.startswith(b"HTTP/1.1 411")
+    assert huge.startswith(b"HTTP/1.1 413") and bad.startswith(b"HTTP/1.1 400")
+    assert dialled == []  # refused before anything was resolved or dialled

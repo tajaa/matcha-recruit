@@ -1743,7 +1743,7 @@ async def edit_channel_message(
         raise HTTPException(status_code=400, detail="Message too long")
 
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        access = await _require_channel_capability(conn, channel_id, current_user)
         msg = await conn.fetchrow(
             """SELECT m.id, m.sender_id, m.deleted_at, m.created_at, m.message_type,
                       r.metadata AS reply_metadata
@@ -1771,10 +1771,20 @@ async def edit_channel_message(
             redact_card_numbers,
         )
         replied_prompt_id = prompt_reference(msg["reply_metadata"])
-        new_content, card_number_removed = await redact_card_numbers(
-            conn, channel_id=channel_id, user_id=current_user.id,
-            replied_prompt_id=replied_prompt_id, content=new_content,
-        )
+        if access.scope is ChannelScope.ASSISTANT:
+            # A private conversation with Espresso is replayed to the model on
+            # every run, so a card number is removed whatever it replies to
+            # (the same rule the socket applies to a new message here).
+            from app.core.services import card_vault
+
+            if card_vault.contains_pan(new_content):
+                new_content = card_vault.redact_pans(new_content)
+            card_number_removed = False
+        else:
+            new_content, card_number_removed = await redact_card_numbers(
+                conn, channel_id=channel_id, user_id=current_user.id,
+                replied_prompt_id=replied_prompt_id, content=new_content,
+            )
 
         edited_at = await conn.fetchval(
             "UPDATE channel_messages SET content = $2, edited_at = NOW() WHERE id = $1 RETURNING edited_at",

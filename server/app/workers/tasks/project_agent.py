@@ -46,8 +46,9 @@ async def _reconcile() -> None:
         if row["kind"] == "assistant" and row["channel_id"] is not None:
             # The progress card in the chat would otherwise spin forever.
             from app.matcha.services.matcha_work.agent_runtime import assistant
+            from app.matcha.services.matcha_work.agent_runtime.enqueue import INTERRUPTED
 
-            await assistant.report_failure(dict(row), "It was interrupted. Ask me again.")
+            await assistant.report_failure(dict(row), INTERRUPTED)
             continue
         if row["kind"] != "card_agent" or row["task_id"] is None:
             continue

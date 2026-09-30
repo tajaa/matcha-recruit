@@ -284,6 +284,9 @@ class GmailService:
         async with httpx.AsyncClient() as client:
             resp = await client.post(f"{GMAIL_API_BASE}{path}", headers=headers, json=body, timeout=30.0)
             resp.raise_for_status()
+            # batchModify (and other void methods) answer 200/204 with no body.
+            if not resp.content.strip():
+                return {}
             return resp.json()
 
     async def _gmail_delete(self, path: str) -> None:

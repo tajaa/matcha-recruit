@@ -18,7 +18,6 @@ from typing import Any, Callable
 
 import httpx
 
-from app.database import connection_or_direct
 from app.matcha.services.matcha_work.gmail_service import SCOPE_CALENDAR_EVENTS
 from app.matcha.services.matcha_work.google_calendar_service import (
     GoogleCalendarService,
@@ -197,33 +196,12 @@ async def _guarded(call):
 
 
 async def _insert_reminder(user_id, company_id, title: str, due: date) -> str:
-    """A dated to-do on the person's default board. Written here, on a
-    connection that works in a worker, rather than through the pooled service."""
-    async with connection_or_direct() as conn, conn.transaction():
-        board_id = await conn.fetchval(
-            """SELECT id FROM mw_productivity_boards
-               WHERE user_id = $1 AND is_default = TRUE AND status = 'active'
-               ORDER BY created_at LIMIT 1""",
-            user_id,
-        )
-        if board_id is None:
-            board_id = await conn.fetchval(
-                """INSERT INTO mw_productivity_boards (user_id, company_id, title, is_default)
-                   VALUES ($1, $2, 'My To-Dos', TRUE) RETURNING id""",
-                user_id, company_id,
-            )
-        position = await conn.fetchval(
-            """SELECT COALESCE(MAX(position), -1) + 1 FROM mw_productivity_cards
-               WHERE board_id = $1 AND board_column = 'todo'""",
-            board_id,
-        )
-        card_id = await conn.fetchval(
-            """INSERT INTO mw_productivity_cards
-                   (board_id, user_id, title, board_column, position, due_date)
-               VALUES ($1, $2, $3, 'todo', $4, $5) RETURNING id""",
-            board_id, user_id, title, position, due,
-        )
-    return str(card_id)
+    """A dated to-do on the person's default board, through the same service
+    the journal's "Add to calendar" uses."""
+    from ...productivity_service import quick_todo
+
+    card = await quick_todo(user_id, company_id, title=title, due_date=due)
+    return card["id"]
 
 
 def _tools(insert_reminder) -> tuple[AgentTool, ...]:

@@ -121,6 +121,9 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    # Celery serves no HTTP; the image HEALTHCHECK probes the API port.
+    healthcheck:
+      disable: true
 
   # Agent worker: agent-card runs, Espresso assistant runs, and the guarded
   # browser that books reservations. Kept apart from matcha-worker because a

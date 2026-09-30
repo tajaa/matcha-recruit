@@ -156,3 +156,28 @@ async def test_a_message_carries_who_it_was_sent_to(monkeypatch):
                                                   {"name": "Cc", "value": "sam@example.net"}]}}})
     message = await gmail.get_message("m1")
     assert message["to"] == "me@example.com" and message["cc"] == "sam@example.net"
+
+
+@pytest.mark.asyncio
+async def test_an_empty_success_body_is_not_a_failure(monkeypatch):
+    """batchModify answers 200 with no body; the change already happened."""
+    import httpx
+
+    seen = []
+
+    def handler(request):
+        seen.append(request.url.path)
+        return httpx.Response(200, content=b"")
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(gmail_service.httpx, "AsyncClient",
+                        lambda *a, **kw: real_client(transport=transport))
+    gmail = GmailService(uuid4())
+
+    async def headers():
+        return {"Authorization": "Bearer t"}
+
+    monkeypatch.setattr(gmail, "_get_headers", headers)
+    await gmail.modify_labels(["abc123"], remove=["INBOX"])
+    assert seen == ["/gmail/v1/users/me/messages/batchModify"]

@@ -213,21 +213,32 @@ async def test_add_reminder_writes_only_the_requesters_board(monkeypatch):
     assert out.kind == "result" and claim.await_count == 0
 
 
+class _Row(dict):
+    def keys(self):
+        return list(super().keys())
+
+
 @pytest.mark.asyncio
 async def test_the_reminder_insert_is_the_requesters_own_default_board(monkeypatch):
-    user, company, board = uuid4(), uuid4(), uuid4()
+    from app.matcha.services.matcha_work import productivity_service
+
+    user, company, board, card = uuid4(), uuid4(), uuid4(), uuid4()
+    row = _Row({"id": card, "board_id": board, "title": "Renew lease", "notes": None, "board_column": "todo",
+            "position": 3, "due_date": date(2026, 10, 2), "source_journal_id": None, "source_excerpt": None,
+            "completed_at": None, "created_at": None, "updated_at": None})
     conn = FakeConn([("SELECT id FROM mw_productivity_boards", board), ("COALESCE(MAX(position)", 3),
-                     ("INSERT INTO mw_productivity_cards", uuid4())])
-    monkeypatch.setattr(calendar, "connection_or_direct", connection(conn))
-    await calendar._insert_reminder(user, company, "Renew lease", date(2026, 10, 2))
+                     ("INSERT INTO mw_productivity_cards", row)])
+    monkeypatch.setattr(productivity_service, "connection_or_direct", connection(conn))
+    assert await calendar._insert_reminder(user, company, "Renew lease", date(2026, 10, 2)) == str(card)
     assert conn.ran("SELECT id FROM mw_productivity_boards")[0][2] == (user,)
-    assert conn.ran("INSERT INTO mw_productivity_cards")[0][2] == (board, user, "Renew lease", 3, date(2026, 10, 2))
+    assert conn.ran("INSERT INTO mw_productivity_cards")[0][2][:5] == (
+        board, user, "Renew lease", 3, date(2026, 10, 2))
     assert conn.ran("INSERT INTO mw_productivity_boards") == []
 
     fresh = FakeConn([("SELECT id FROM mw_productivity_boards", None),
                       ("INSERT INTO mw_productivity_boards", board),
-                      ("INSERT INTO mw_productivity_cards", uuid4())])
-    monkeypatch.setattr(calendar, "connection_or_direct", connection(fresh))
+                      ("INSERT INTO mw_productivity_cards", row)])
+    monkeypatch.setattr(productivity_service, "connection_or_direct", connection(fresh))
     await calendar._insert_reminder(user, company, "Renew lease", date(2026, 10, 2))
     assert fresh.ran("INSERT INTO mw_productivity_boards")[0][2] == (user, company)
 

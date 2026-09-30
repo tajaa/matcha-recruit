@@ -36,6 +36,8 @@ from .registry import Ability, AgentTool, ToolOutput, declarations, offered_tool
 
 logger = logging.getLogger(__name__)
 
+FINISH_AFTER_ACTION = ("Not accepted: an action in this same turn had not finished yet. "
+                       "Read its outcome, then call finish again.")
 FINISH_NUDGE = "Call the finish tool with the structured result now."
 # Without stored responses there is no chain to follow, so every call resends
 # the whole conversation. Reasoning comes back encrypted and goes back as is.
@@ -271,6 +273,11 @@ async def run_agent(
             out = {"error": decision.message or "That action is not allowed."}
             await step(tool.name, "policy", f"Denied: {preview.get('title') or tool.name}", args,
                        {**shown, "reason": decision.reason}, "denied")
+            if approved:
+                # The person said yes to this exact action; they see why it
+                # did not happen, not just whatever the model makes of it.
+                await post_receipt({"action": tool.name, "status": "failed", **preview,
+                                    "note": out["error"][:300]})
             return out, None
         if decision.verdict == "confirm":
             await step(tool.name, "policy", f"Held for a yes: {preview.get('title') or tool.name}", args,
@@ -328,13 +335,16 @@ async def run_agent(
                            "note": f"It did not go through ({type(exc).__name__})."}
         await store.resolve_step(step_id, status=status, result=_safe_for_audit(audit_for(tool, payload)))
         await ctx.progress.step(seq, "commit", title[:200], status)
+        await post_receipt(receipt)
+        return for_model(tool, payload), None
+
+    async def post_receipt(receipt: dict) -> None:
         state.receipts.append(receipt)
         if ctx.on_receipt is not None:
             try:
                 await ctx.on_receipt(receipt)
             except Exception:
                 logger.warning("agent receipt could not be posted", exc_info=True)
-        return for_model(tool, payload), None
 
     input_items = list(first_input)
     if ctx.resume is not None:
@@ -342,11 +352,7 @@ async def run_agent(
         if owned is None or owned[1].effect != "commit":
             raise AgentRunError("That action is no longer available.")
         approved_out, _ended = await commit(owned[0], owned[1], dict(ctx.resume.args), frozen=ctx.resume)
-        input_items.append(text_item(
-            "user",
-            "I approved the action you asked about. It has already been carried out by the system; "
-            "do not repeat it. Outcome:\n" + json.dumps(approved_out, default=str)[:2000],
-        ))
+        input_items.append(text_item("user", _resume_note(approved_out)))
 
     if first_note:
         await ctx.progress.note(first_note, force=True)
@@ -415,8 +421,17 @@ async def run_agent(
             continue
 
         outputs: list[dict[str, Any]] = []
+        # A result written in the same turn as an action was written before
+        # the action's outcome existed, so it cannot be trusted to describe it.
+        acts = any(
+            name_owner is not None and name_owner[1].effect == "commit"
+            for name_owner in (owners.get(c["name"]) for c in response.function_calls)
+        )
         for call in response.function_calls:
             name, args = call["name"], dict(call["arguments"] or {})
+            if name == contract.finish.name and acts:
+                outputs.append(tool_output_item(call["call_id"], {"error": FINISH_AFTER_ACTION}))
+                continue
             if name == contract.finish.name:
                 try:
                     normalized, warnings = contract.normalize(args, state)
@@ -461,6 +476,20 @@ async def run_agent(
         raise AgentRunError("The agent ran out of time before finishing. Try again, or narrow the request.")
     state.warnings.extend(warnings)
     return outcome("result", result=result)
+
+
+def _resume_note(outcome_payload: dict) -> str:
+    """What the model is told about an action the person approved, which the
+    system has already tried before the model runs."""
+    shown = json.dumps(outcome_payload, default=str)[:2000]
+    if outcome_payload.get("unknown"):
+        verdict = "The system tried it, but whether it went through is UNKNOWN."
+    elif "error" in outcome_payload:
+        verdict = "The system did NOT carry it out."
+    else:
+        verdict = "The system has already carried it out."
+    return (f"I approved the action you asked about. {verdict} Do not try it again. "
+            f"Outcome:\n{shown}")
 
 
 def _includes(abilities: Sequence[Ability]) -> list[str] | None:

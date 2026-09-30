@@ -214,6 +214,20 @@ async def claim(conn, prompt: dict, user_id: UUID, answer: str) -> bool:
     ))
 
 
+async def reopen(conn, prompt: dict, user_id: UUID) -> bool:
+    """Undo a yes whose run could not be queued (a cap, a rate limit, a run
+    already live), so the frozen action is not lost and can be approved again
+    once whatever refused it clears. Only while it would still be claimable."""
+    return bool(await conn.fetchval(
+        """UPDATE mw_agent_card_prompts
+           SET status = 'open', answer = NULL, answered_by = NULL, answered_at = NULL
+           WHERE id = $1 AND status = 'answered' AND answer = 'yes' AND answered_by = $2
+             AND expires_at > NOW()
+           RETURNING TRUE""",
+        prompt["id"], user_id,
+    ))
+
+
 async def overlay_statuses(conn, messages, *, channel_id: UUID) -> list:
     """`chat_flow.overlay_prompt_statuses` words every answer the agent-card
     way; restamp the assistant's own questions with their own wording."""

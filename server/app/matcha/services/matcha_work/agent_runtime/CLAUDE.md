@@ -110,8 +110,10 @@ it otherwise), and should declare `resolve`.
   from the run's session by id; `reservation` is written by the server and
   what the model put in the block is ignored; `picks`, `sections` and
   `sources` go through the agent-card provenance gates.
-- **Runs that can read mail are not stored by the provider.** `RunContext.
-  store_responses` is False when any private-only ability is in the run. Such a
+- **Private-conversation runs are not stored by the provider.** `RunContext.
+  store_responses` is False for every run in the private conversation (its
+  replayed history can hold earlier mail and calendar answers, even when this
+  run has no such ability) and for any run with a private-only ability. Such a
   run cannot chain on `previous_response_id` (there is nothing stored to chain
   onto), so the runner sends `chain=False` and resends the whole conversation
   every call: the request, each response's output items as returned (reasoning

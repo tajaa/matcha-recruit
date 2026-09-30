@@ -339,3 +339,33 @@ async def test_a_project_chat_gets_no_private_ability_whatever_is_switched_on(mo
     private.return_value = False  # someone else got into the conversation
     assert await chat_entry.ability_keys(user, uuid4(), uuid4(), "assistant") == ["web", "shopping"]
     assert isinstance(await chat_entry._situation(user, uuid4(), uuid4(), "assistant"), catalog.Situation)
+
+
+@pytest.mark.asyncio
+async def test_a_yes_refused_up_front_leaves_the_question_open(wired):
+    user = _user()
+    prompt = _prompt(user.id)
+    _script(wired, prompt)
+    enqueue.preflight.side_effect = HTTPException(429, {"message": "You've used all 30 for today."})
+    await chat_entry.handle_message(**_message(
+        user, content="yes", reply_prompt_id=prompt["id"], channel_id=prompt["channel_id"]))
+    # Never claimed, never "Went ahead", nothing queued: it can be approved later.
+    assert not wired.conn.ran("SET status = 'answered'")
+    wired.broadcast.assert_not_awaited()
+    wired.queued.assert_not_awaited()
+    assert wired.posted[-1][0] == "You've used all 30 for today."
+
+
+@pytest.mark.asyncio
+async def test_a_yes_that_cannot_be_queued_is_reopened(wired):
+    user = _user()
+    prompt = _prompt(user.id)
+    _script(wired, prompt)
+    wired.conn.on("SET status = 'open'", True)
+    wired.queued.side_effect = HTTPException(409, enqueue.STILL_WORKING)
+    await chat_entry.handle_message(**_message(
+        user, content="yes", reply_prompt_id=prompt["id"], channel_id=prompt["channel_id"]))
+    events = [call.args[0][0] for call in wired.broadcast.await_args_list]
+    assert [e["status"] for e in events] == ["answered", "open"]
+    assert events[-1]["answer"] is None and events[-1]["answer_text"] is None
+    assert wired.posted[-1][0] == enqueue.STILL_WORKING

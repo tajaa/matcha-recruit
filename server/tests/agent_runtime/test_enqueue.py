@@ -223,3 +223,17 @@ async def test_the_card_cap_does_not_count_assistant_runs_and_the_reverse(monkey
     monkeypatch.setattr(quota, "resolve_plan_for_user", AsyncMock(return_value="business"))
     usage = await quota.assistant_usage(uuid4())
     assert usage["limit"] == 60 and usage["used"] == 4 and usage["remaining"] == 56
+
+
+@pytest.mark.asyncio
+async def test_a_dead_run_swept_here_has_its_card_closed(wired, monkeypatch):
+    from app.matcha.services.matcha_work.agent_runtime import assistant
+
+    conn, _dispatch = wired
+    dead = {"id": uuid4(), "channel_id": uuid4(), "company_id": uuid4()}
+    conn.on("SET status = 'failed'", [dead])
+    reported = AsyncMock()
+    monkeypatch.setattr(assistant, "report_failure", reported)
+    await enqueue.enqueue_assistant_run(**_kwargs(_user()), skip_preflight=True)
+    # The reconciler never sees this row move, so the sweep reports it.
+    reported.assert_awaited_once_with(dead, enqueue.INTERRUPTED)

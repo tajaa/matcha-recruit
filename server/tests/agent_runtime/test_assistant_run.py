@@ -108,7 +108,9 @@ async def test_an_answer_is_stored_and_posted_as_a_card(wired):
     assert names == ["web_search", "fetch_page", "ask_user", "finish"]
     assert client.calls[0]["input"][-1]["content"][0]["text"] == "find a standing desk"
     assert client.calls[0]["feature"] == assistant.USAGE_FEATURE
-    assert "store" not in client.calls[0]
+    # The private conversation is never stored by the provider, even with no
+    # mail or calendar in this run: its replayed history may hold them.
+    assert client.calls[0]["store"] is False and client.calls[0]["chain"] is False
 
 
 @pytest.mark.asyncio
@@ -262,7 +264,7 @@ async def test_a_yes_is_carried_out_from_the_frozen_payload(wired, monkeypatch):
     lookup = wired.conn.ran("SELECT payload FROM mw_agent_card_prompts")[0]
     assert lookup[2] == (run["resume_prompt_id"], run["requested_by"])
     assert "status = 'answered' AND answer = 'yes'" in lookup[1]
-    assert "The system has already carried it out" in client.calls[0]["instructions"]
+    assert "never say it was done" in client.calls[0]["instructions"]
 
 
 @pytest.mark.asyncio

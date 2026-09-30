@@ -45,9 +45,10 @@ you there.
 """
 
 _RESUME = """
-The person was just asked to confirm an action and said yes. The system has already carried \
-it out and the first message tells you how it went. Do not do it again. Finish by telling \
-them what happened.
+The person was just asked to confirm an action and said yes. The system then tried it itself, \
+before this conversation, and the first message says whether it went through. Do not do it \
+again. Finish by telling them what actually happened: if the outcome is an error or unknown, \
+say so plainly and never say it was done.
 """
 
 

@@ -88,9 +88,10 @@ def test_a_display_name_never_grounds_an_address():
 
 
 def test_lookalike_and_idn_domains_do_not_match():
-    g = Grounding(user_texts=("email pay@example.com and book on shop.example",))
-    assert decide(ctx(g), "pay@examp1e.com").verdict == "confirm"
-    assert decide(ctx(g), "pay@exаmple.com").verdict == "confirm"  # Cyrillic а
+    # Reserved names only (RFC 2606/6761): the lookalikes live under .test too.
+    g = Grounding(user_texts=("email pay@shop.test and book on shop.example",))
+    assert decide(ctx(g), "pay@sh0p.test").verdict == "confirm"
+    assert decide(ctx(g), "pay@shоp.test").verdict == "confirm"  # Cyrillic о
     assert not is_grounded(Target("domain", "shop.examp1e"), g)
     assert not is_grounded(Target("domain", "evil-shop.example"), g)
 

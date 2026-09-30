@@ -182,8 +182,9 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         ),
         granted_scopes=situation.granted_scopes, grants=active,
         commit_mode=commit_mode(), resume=frozen, on_receipt=on_receipt,
-        # A run that may read a person's mail or calendar is not stored by the provider.
-        store_responses=not any(a.private_only for a in abilities),
+        # Nothing from the private conversation is stored by the provider: even
+        # a run without mail or calendar replays earlier answers built from them.
+        store_responses=not private and not any(a.private_only for a in abilities),
     )
     contract = runner.ResultContract(
         finish=result.finish_tool(abilities),

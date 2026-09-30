@@ -68,7 +68,7 @@ async def test_a_yes_executes_exactly_the_frozen_args(monkeypatch):
     assert claim.await_count == 1 and resolve.await_args.kwargs["status"] == "ok"
     # The model is told it already happened, and only then gets a turn.
     told = client.calls[0]["input"][-1]["content"][0]["text"]
-    assert "already been carried out" in told
+    assert "has already carried it out" in told
     assert out.kind == "result" and out.receipts[0]["status"] == "done"
 
 
@@ -304,3 +304,44 @@ async def test_an_approved_action_is_carried_out_even_late(monkeypatch):
     await run(FakeClient([response(call("finish", {"answer": "ok"}))]), [ability(tool, private_only=True)],
               context(policy=policy_ctx("x"), commit_mode="live", resume=frozen))
     assert sent == [{"to": ["eve@attacker.test"]}] and claim.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_an_approved_action_denied_at_the_ceiling_says_so(monkeypatch):
+    _, claim, _ = wire_store(monkeypatch)
+    sent = []
+    frozen = FrozenAction(tool="send_email", args={"to": ["eve@attacker.test"], "body": "hi"},
+                          targets=(Target("email", "eve@attacker.test"),), preview={"title": "Email"})
+    client = FakeClient([response(call("finish", {"answer": "It was not sent."}))])
+    tool = commit_tool(handler=recording_handler(sent), ceilings=((1, 3600),))
+    ctx = context(policy=policy_ctx("reply", counts={("send_email", 3600): 1}),
+                  commit_mode="live", resume=frozen)
+    out = await run(client, [ability(tool, private_only=True)], ctx)
+    assert sent == [] and claim.await_count == 0
+    told = client.calls[0]["input"][-1]["content"][0]["text"]
+    assert "did NOT carry it out" in told and "already carried it out" not in told
+    # The person sees why, not only the model's account of it.
+    assert out.receipts and out.receipts[0]["status"] == "failed"
+
+
+def test_an_unknown_approved_outcome_is_not_reported_as_done():
+    note = runner._resume_note({"error": "The outcome is unknown.", "unknown": True})
+    assert "UNKNOWN" in note and "already carried it out" not in note
+
+
+@pytest.mark.asyncio
+async def test_a_result_written_alongside_an_action_is_sent_back(monkeypatch):
+    wire_store(monkeypatch)
+    tool = commit_tool(ceilings=((1, 3600),))
+    ctx = context(policy=policy_ctx("send to alice@example.com", counts={("send_email", 3600): 1}),
+                  commit_mode="live")
+    client = FakeClient([
+        response(call("send_email", {"to": ["alice@example.com"]}),
+                 call("finish", {"answer": "Sent!"})),
+        response(call("finish", {"answer": "Not sent: hourly limit."})),
+    ])
+    out = await run(client, [ability(tool, private_only=True)], ctx)
+    # The first finish was written before the send was denied; the second saw it.
+    assert out.result["answer"] == "Not sent: hourly limit."
+    second_input = client.calls[1]["input"]
+    assert any(runner.FINISH_AFTER_ACTION in str(item) for item in second_input)
