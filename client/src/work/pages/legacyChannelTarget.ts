@@ -1,11 +1,18 @@
 export function resolveLegacyChannelTarget(
-  channel: { channel_scope?: 'operations' | 'project_discussion' | 'community'; project_id?: string | null },
+  channel: {
+    channel_scope?: 'operations' | 'project_discussion' | 'community' | 'assistant'
+    project_id?: string | null
+  },
   channelId: string,
   search: string,
 ): string | null {
   if (channel.channel_scope === 'project_discussion' && channel.project_id) {
     const suffix = search ? `${search}&tab=chat` : '?tab=chat'
     return `/work/projects/${channel.project_id}${suffix}`
+  }
+  if (channel.channel_scope === 'assistant') {
+    // A private conversation with Espresso has its own page, not a channel view.
+    return `/work/assistant${search}`
   }
   if (channel.channel_scope === 'operations') {
     return `/ops/channels/${channelId}${search}`

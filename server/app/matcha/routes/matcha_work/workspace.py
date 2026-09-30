@@ -23,6 +23,7 @@ from app.core.models.auth import CurrentUser
 from app.core.services.redis_cache import get_redis_cache
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.models.matcha_work.assistant import GoogleConnectRequest
 from app.matcha.models.matcha_work.matcha_work import UsageSummaryResponse
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 
@@ -395,10 +396,13 @@ async def agent_email_status(
 @router.post("/agent/email/connect")
 async def agent_email_connect(
     current_user: CurrentUser = Depends(require_admin_or_client),
+    body: GoogleConnectRequest | None = None,
 ):
     """Start Google OAuth flow. Returns an auth_url to open in a popup."""
-    from app.matcha.services.matcha_work.gmail_service import get_oauth_credentials, GMAIL_SCOPES
+    from app.matcha.services.matcha_work.gmail_service import get_oauth_credentials, scopes_for
     import urllib.parse
+
+    requested_scopes = scopes_for(body.abilities if body else None)
 
     creds = get_oauth_credentials()
     if not creds:
@@ -422,9 +426,11 @@ async def agent_email_connect(
         "client_id": creds["client_id"],
         "redirect_uri": redirect_uri,
         "response_type": "code",
-        "scope": " ".join(GMAIL_SCOPES),
+        "scope": " ".join(requested_scopes),
         "access_type": "offline",
         "prompt": "consent",
+        # Incremental consent: what the person granted before stays granted.
+        "include_granted_scopes": "true",
         "state": state,
     }
     auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"
@@ -438,7 +444,12 @@ async def agent_email_callback(
     error: str | None = Query(None),
 ):
     """OAuth callback — exchange code for tokens, store encrypted in DB, close popup."""
-    from app.matcha.services.matcha_work.gmail_service import GmailService, get_oauth_credentials, GMAIL_SCOPES
+    from app.matcha.services.matcha_work.gmail_service import (
+        GMAIL_SCOPES,
+        GmailService,
+        get_oauth_credentials,
+        parse_granted_scopes,
+    )
 
     # Recover the initiating user without requiring a bearer token: Google
     # redirects the system browser here directly and cannot attach one.
@@ -503,7 +514,9 @@ async def agent_email_callback(
         "refresh_token": tokens.get("refresh_token"),
         "client_id": creds["client_id"],
         "client_secret": creds["client_secret"],
-        "scopes": GMAIL_SCOPES,
+        # What Google granted, not what was asked for: a person can untick a
+        # permission on the consent screen.
+        "scopes": parse_granted_scopes(tokens, GMAIL_SCOPES),
     })
 
     # Return HTML that closes the popup

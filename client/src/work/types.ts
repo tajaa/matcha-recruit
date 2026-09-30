@@ -1282,17 +1282,47 @@ export type AgentChatPick = {
   why?: string[]
 }
 
+export type AgentChatFlightOption = {
+  label?: string | null
+  price_text?: string | null
+  total_with_bags_text?: string | null
+  bag_note?: string | null
+  carriers: string[]
+  ticketing: 'single' | 'separate'
+  slices: {
+    origin: string
+    destination: string
+    departing_at: string
+    arriving_at: string
+    stops: number
+    duration_minutes?: number | null
+    flight_numbers: string[]
+  }[]
+  warning?: string | null
+}
+
+export type AgentChatFlights = {
+  query_summary?: string
+  test_data?: boolean
+  searched_at?: string | null
+  options: AgentChatFlightOption[]
+}
+
 export type AgentChatResult = {
   headline: string
   summary: string
   top_pick: AgentChatPick | null
   alternatives: AgentChatPick[]
   sections?: string[]
+  /** A flight search's top chosen offers (server: chat_flow.flights_view). */
+  flights?: AgentChatFlights | null
   source_count?: number
 }
 
 export type AgentChatPromptView = {
   question?: string | null
+  /** `confirm_action`: exactly what a yes will carry out. */
+  action?: { title?: string | null; lines: { label: string; value: string; mono?: boolean }[] } | null
   offer?: { item_name: string; brand?: string | null; retailer?: string | null; price_text?: string | null; image_url?: string | null } | null
   buttons: AgentChatButton[]
 }
@@ -1312,11 +1342,70 @@ export type AgentChatReceipt = {
   error?: string | null
 }
 
+// ── Espresso assistant: progress, answers and receipts in chat ──
+// Backend: server/app/matcha/services/matcha_work/agent_runtime/
+// (chat_progress.progress_view, result.chat_view, assistant.receipt_view).
+
+export type AgentProgressStep = { seq: number; kind: string; label: string; status: string }
+
+export type AgentRunProgress = {
+  run_id: string
+  status: 'queued' | 'running' | 'done' | 'failed'
+  note?: string | null
+  steps: AgentProgressStep[]
+}
+
+/** One typed part of an answer. A block type this build doesn't know is
+ *  skipped, never an error: the server can add one before the apps do. */
+export type AgentResultBlock =
+  | { type: 'picks'; top_pick: AgentChatPick | null; alternatives: AgentChatPick[] }
+  | { type: 'flights'; flights: AgentChatFlights }
+  | { type: 'sections'; sections: { heading: string; body_md: string }[] }
+  | { type: 'sources'; sources: { title: string; url: string }[] }
+  | { type: 'emails'; items: { message_id: string; from: string; subject: string; date?: string | null; snippet?: string | null }[] }
+  | { type: 'events'; items: { event_id: string; title: string; start: string; end?: string | null; location?: string | null; attendee_count?: number }[] }
+  | {
+      type: 'reservation'
+      venue: string
+      when: string
+      party_size: number
+      status: 'booked' | 'unverified' | 'unavailable' | 'handoff' | 'blocked' | 'failed'
+      confirmation?: string | null
+      handoff_url?: string | null
+    }
+
+export type AgentChatResultV2 = {
+  schema: 'agent_result.v2'
+  headline: string
+  summary: string
+  blocks: (AgentResultBlock | { type: string })[]
+  caveats?: string[]
+  confidence?: string | null
+}
+
+/** Something Espresso did for the person: sent, invited, booked, archived. */
+export type AgentActionReceipt = {
+  action?: string | null
+  title: string
+  status: 'done' | 'dry_run' | 'unknown' | 'failed' | 'handoff'
+  lines: { label: string; value: string; mono?: boolean }[]
+  link?: { label: string; url: string } | null
+  note?: string | null
+}
+
 export type AgentChatMetadata = {
-  kind?: 'agent_card_result' | 'agent_card_prompt' | 'agent_card_receipt'
-  prompt_kind?: 'show_result' | 'purchase' | 'pick_card'
+  kind?:
+    | 'agent_card_result' | 'agent_card_prompt' | 'agent_card_receipt'
+    | 'agent_progress' | 'agent_result' | 'agent_receipt'
+  prompt_kind?: 'show_result' | 'purchase' | 'pick_card' | 'ask_user' | 'confirm_action'
   prompt_id?: string
   task_id?: string
+  /** The assistant run this message belongs to. */
+  run_id?: string
+  /** `agent_progress`: stamped onto history, kept live by `agent_run_progress`. */
+  progress?: AgentRunProgress
+  result_v2?: AgentChatResultV2
+  action_receipt?: AgentActionReceipt
   /** Buy / card questions: only this user may answer, so only they get buttons. */
   owner_user_id?: string
   /** ISO time the question stops taking answers. */

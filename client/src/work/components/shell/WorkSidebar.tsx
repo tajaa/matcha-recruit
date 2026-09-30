@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare, Star, MessagesSquare, HardDrive, Briefcase } from 'lucide-react'
+import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare, Star, MessagesSquare, Sparkles, HardDrive, Briefcase } from 'lucide-react'
 import { logoutSession } from '../../../api/client'
 import type { ChannelSummary } from '../../api/channels'
 import { createProjectNew, createThread, archiveThread, notifyThreadsChanged } from '../../api/matchaWork'
@@ -53,6 +53,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const showSymChat = surface === 'matcha-work' && !isPersonal && hasFeature('sym_chat')
   const showDrive = surface === 'matcha-work' && !isPersonal && hasFeature('matcha_drive')
   const showHrCases = useHrCaseAccess(userId, surface === 'matcha-work' && !isPersonal && hasFeature('hr_cases'))
+  // Shown to anyone whose workspace has it; a plan that doesn't include it
+  // gets the paywall when they ask for something, like the other Pro features.
+  const showAssistant = hasFeature('espresso_assistant')
 
   const {
     channels, setChannels,
@@ -258,6 +261,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             {starredFileError && <p role="alert" className="px-2.5 py-1 text-xs text-red-400">File unavailable. Open its project to check access.</p>}
           </div>}
 
+          {showAssistant && <SidebarNavButton icon={Sparkles} label="Espresso" active={location.pathname.startsWith(`${base}/assistant`)} onClick={() => navigate(`${base}/assistant`)} />}
           <SidebarNavButton icon={NotebookPen} label="Journals" active={location.pathname.startsWith(`${base}/journals`)} onClick={() => navigate(`${base}/journals`)} />
           <SidebarNavButton icon={CheckSquare} label="To-dos" active={location.pathname.startsWith(`${base}/productivity`)} onClick={() => navigate(`${base}/productivity`)} />
           {showSymChat && <SidebarNavButton icon={MessagesSquare} label="Sym-chats" active={location.pathname.startsWith(`${base}/sym-chat`)} onClick={() => navigate(`${base}/sym-chat`)} />}

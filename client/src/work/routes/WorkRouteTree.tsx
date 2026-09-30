@@ -22,6 +22,7 @@ import InventoryForecast from '../pages/InventoryForecast'
 import InventoryWaste from '../pages/InventoryWaste'
 import InventoryBuying from '../pages/InventoryBuying'
 import AssetsHub from '../pages/AssetsHub'
+import Assistant from '../pages/Assistant'
 import SymChatList from '../pages/SymChat/SymChatList'
 import SymChatDetail from '../pages/SymChat/SymChatDetail'
 import Drive from '../pages/Drive'
@@ -93,6 +94,16 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
             <Route path="assets" element={<AssetsHub />} />
           <Route path="assets/:assetId" element={<AssetsHub />} />
           </Route>
+          {/* The Espresso assistant: a private conversation per person, on
+              both surfaces. */}
+          <Route
+            path="assistant"
+            element={
+              <FeatureGate feature="espresso_assistant" label="Espresso Assistant">
+                <Assistant />
+              </FeatureGate>
+            }
+          />
           {/* Sym-chat is business-only: the backend 403s personal workspaces,
               so the /espresso tree doesn't mount it at all. */}
           {businessWork && (

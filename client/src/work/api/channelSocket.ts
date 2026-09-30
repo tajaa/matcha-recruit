@@ -20,6 +20,14 @@ export type AgentCardPromptUpdate = {
   answer: string | null
   answer_text: string | null
 }
+/** An Espresso assistant run moved on (server: agent_runtime/chat_progress.py). */
+export type AgentRunProgressEvent = {
+  channel_id: string
+  run_id: string
+  status: 'queued' | 'running' | 'done' | 'failed'
+  note: string | null
+  steps: { seq: number; kind: string; label: string; status: string }[]
+}
 type SymChatHandler = (event: SymChatEvent) => void
 
 /** Tab-session outbox for sends attempted while the socket was down. It
@@ -94,6 +102,7 @@ export class ChannelSocket extends BaseSocket {
   private notificationListeners = new ListenerSet<MWNotification>()
   private symChatListeners = new ListenerSet<SymChatEvent>()
   private agentCardPromptListeners = new ListenerSet<AgentCardPromptUpdate>()
+  private agentRunProgressListeners = new ListenerSet<AgentRunProgressEvent>()
 
   // Deprecated single-handler; kept for backward compat. Setting this adds
   // the handler to the multi-listener set. Prefer addMessageListener.
@@ -127,6 +136,15 @@ export class ChannelSocket extends BaseSocket {
 
   removeAgentCardPromptListener(handler: (update: AgentCardPromptUpdate) => void) {
     this.agentCardPromptListeners.remove(handler)
+  }
+
+  /** An Espresso assistant run's progress changed. */
+  addAgentRunProgressListener(handler: (event: AgentRunProgressEvent) => void) {
+    this.agentRunProgressListeners.add(handler)
+  }
+
+  removeAgentRunProgressListener(handler: (event: AgentRunProgressEvent) => void) {
+    this.agentRunProgressListeners.remove(handler)
   }
 
   addNotificationListener(handler: NotificationHandler) {
@@ -340,6 +358,23 @@ export class ChannelSocket extends BaseSocket {
             status: data.status,
             answer: typeof data.answer === 'string' ? data.answer : null,
             answer_text: typeof data.answer_text === 'string' ? data.answer_text : null,
+          })
+        }
+        break
+      case 'agent_run_progress':
+        if (
+          typeof data.channel_id === 'string' && typeof data.run_id === 'string'
+          && ['queued', 'running', 'done', 'failed'].includes(data.status as string)
+        ) {
+          const steps = Array.isArray(data.steps) ? data.steps : []
+          this.agentRunProgressListeners.dispatch({
+            channel_id: data.channel_id,
+            run_id: data.run_id,
+            status: data.status as AgentRunProgressEvent['status'],
+            note: typeof data.note === 'string' ? data.note : null,
+            steps: steps.filter((step): step is AgentRunProgressEvent['steps'][number] =>
+              !!step && typeof step.seq === 'number' && typeof step.label === 'string'
+              && typeof step.kind === 'string' && typeof step.status === 'string'),
           })
         }
         break

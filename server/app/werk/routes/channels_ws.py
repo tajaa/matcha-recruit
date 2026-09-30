@@ -315,6 +315,54 @@ async def _agent_card_redaction(
     )
 
 
+def _assistant_redaction(content: Optional[str]) -> tuple[Optional[str], bool]:
+    """(content to store, whether a card number was removed), for a message in
+    a private conversation with Espresso."""
+    from app.core.services import card_vault
+
+    if not content or not card_vault.contains_pan(content):
+        return content, False
+    return card_vault.redact_pans(content), True
+
+
+_CARD_NUMBER_IN_ASSISTANT = (
+    "I removed a card number from that message. Please never send me card numbers: "
+    "I don't need them and I never enter payment details."
+)
+
+
+async def _bg_assistant_message(
+    channel_id_str: str,
+    user,
+    content: str,
+    message_id: UUID,
+    prompt_id: Optional[UUID],
+    card_number_removed: bool,
+) -> None:
+    """One message in a private conversation with Espresso: a reply to one of
+    its questions, or a new request."""
+    try:
+        from app.matcha.services.matcha_work.agent_runtime import chat_entry
+        from app.matcha.services.matcha_work.project_agent.chat import post_as_espresso
+
+        channel_id = UUID(channel_id_str)
+        async with get_connection() as conn:
+            company_id = await conn.fetchval(
+                "SELECT company_id FROM channels WHERE id = $1 AND assistant_user_id = $2",
+                channel_id, user.id,
+            )
+        if company_id is None:
+            return
+        if card_number_removed:
+            await post_as_espresso(company_id, channel_id, _CARD_NUMBER_IN_ASSISTANT)
+        await chat_entry.handle_message(
+            channel_id=channel_id, company_id=company_id, user=user, content=content,
+            message_id=message_id, surface="assistant", reply_prompt_id=prompt_id,
+        )
+    except Exception:
+        logger.warning("Espresso assistant message failed", exc_info=True)
+
+
 def _routes_to_agent_card(
     *,
     agent_prompt_id: Optional[UUID],
@@ -479,6 +527,16 @@ async def _bg_dispatch_espresso_mention(
             user=user, text=content,
         ):
             return True
+        # Anything else that reads as a request, and is not about the code,
+        # goes to the assistant: read-only here, since a project chat is shared.
+        if features.get("espresso_assistant"):
+            from app.matcha.services.matcha_work.agent_runtime import chat_entry
+
+            if chat_entry.assistant_request(content, repo_connected=bool(project["github_repo"])):
+                return await chat_entry.handle_message(
+                    channel_id=channel_id, company_id=company_id, user=user, content=content,
+                    message_id=trigger_message_id, surface="project_chat", project_id=project["id"],
+                )
         if not project["github_repo"]:
             await post_as_espresso(
                 company_id, channel_id,
@@ -4109,9 +4167,16 @@ async def channel_websocket(
                             # notified. The lookup runs only for card-shaped,
                             # Luhn-valid numbers.
                             agent_prompt_id = _agent_card_prompt_reference(reply_target_metadata)
-                            content, card_number_removed = await _agent_card_redaction(
-                                conn, ch_uuid, user.id, content, agent_prompt_id,
-                            )
+                            is_assistant = access.scope is ChannelScope.ASSISTANT
+                            if is_assistant:
+                                # Everything typed to Espresso in a private
+                                # conversation is read by a model, so a card
+                                # number is removed whatever it was a reply to.
+                                content, card_number_removed = _assistant_redaction(content)
+                            else:
+                                content, card_number_removed = await _agent_card_redaction(
+                                    conn, ch_uuid, user.id, content, agent_prompt_id,
+                                )
                             # ON CONFLICT path makes the INSERT idempotent on
                             # (sender_id, client_message_id) so a retried send
                             # returns the original row instead of inserting a
@@ -4257,7 +4322,19 @@ async def channel_websocket(
                             # Espresso is an independent read-only project agent;
                             # unlike Huume it never enters the EMS dispatch tree.
                             autopr_context_ref = _autopr_context_reference(reply_target_metadata)
-                            if is_new_message and autopr_context_ref is not None:
+                            if is_assistant:
+                                # A private conversation with Espresso: every
+                                # message is addressed to it, no mention
+                                # needed, and no other dispatcher below runs.
+                                if is_new_message:
+                                    _spawn_bg(_bg_assistant_message(
+                                        str(ch_uuid), user, row["content"], row["id"],
+                                        agent_prompt_id, card_number_removed,
+                                    ))
+                                dispatch_new = False
+                            else:
+                                dispatch_new = is_new_message
+                            if dispatch_new and autopr_context_ref is not None:
                                 # A direct reply to Espresso's decision-bound
                                 # request is card evidence, even without an
                                 # @espresso mention. Do not also send it to the
@@ -4267,7 +4344,7 @@ async def channel_websocket(
                                     broadcast_attachments,
                                 ))
                             if (
-                                is_new_message
+                                dispatch_new
                                 and autopr_context_ref is None
                                 and _routes_to_agent_card(
                                     agent_prompt_id=agent_prompt_id,
@@ -4284,7 +4361,7 @@ async def channel_websocket(
                                     bool(broadcast_attachments), card_number_removed,
                                 ))
                             if (
-                                is_new_message
+                                dispatch_new
                                 and "espresso" in mention_handles
                                 and autopr_context_ref is None
                                 and agent_prompt_id is None
@@ -4292,13 +4369,13 @@ async def channel_websocket(
                                 _spawn_bg(_bg_dispatch_espresso_mention(
                                     str(ch_uuid), user, row["content"], row["id"],
                                 ))
-                            if is_new_message and "huume" in mention_handles:
+                            if dispatch_new and "huume" in mention_handles:
                                 _spawn_bg(_bg_dispatch_huume_mention(
                                     str(ch_uuid), str(row["id"]),
                                     str(row["reply_to_id"]) if reply_to_system else None,
                                     user, row["content"],
                                 ))
-                            elif is_new_message and spawn_ems:
+                            elif dispatch_new and spawn_ems:
                                 _spawn_bg(_bg_ems_dispatch(
                                     str(ch_uuid), str(row["id"]),
                                     str(row["reply_to_id"]) if reply_to_system else None,
@@ -4307,7 +4384,7 @@ async def channel_websocket(
                                     attachments=list(broadcast_attachments) if broadcast_attachments else None,
                                 ))
                             elif (
-                                is_new_message and not row["reply_to_id"]
+                                dispatch_new and not row["reply_to_id"]
                                 and _channel_recently_ems_drafted(room_key)
                                 and _draft_reply_decision(row["content"]) is not None
                             ):
@@ -4323,7 +4400,7 @@ async def channel_websocket(
                                     str(ch_uuid), str(user.id), row["content"],
                                 ))
                             elif (
-                                is_new_message and not row["reply_to_id"]
+                                dispatch_new and not row["reply_to_id"]
                                 and len(row["content"]) <= 60
                                 and _channel_recently_clarified(room_key)
                             ):

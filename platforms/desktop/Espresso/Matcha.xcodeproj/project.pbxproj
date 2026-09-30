@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A5515700000000000000B004 /* AssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5515700000000000000F003 /* AssistantView.swift */; };
+		A5515700000000000000B003 /* AgentAssistantCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5515700000000000000F002 /* AgentAssistantCards.swift */; };
+		A5515700000000000000B001 /* AssistantModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5515700000000000000F001 /* AssistantModels.swift */; };
+		A5515700000000000000B002 /* AssistantModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5515700000000000000F001 /* AssistantModels.swift */; };
 		00618F89BD825FD664E5E906 /* MessageRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33EDBC93CD6EE7F745236720 /* MessageRow.swift */; };
 		00CEF903DB4A1BF9D6562558 /* InboxListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD59660FCE7480A023D22A14 /* InboxListViewModel.swift */; };
 		00EE63CE8D990C99711DCDAC /* DashboardModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94FBACAA706BADE04CF26DE2 /* DashboardModels.swift */; };
@@ -421,6 +425,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		A5515700000000000000F003 /* AssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantView.swift; sourceTree = "<group>"; };
+		A5515700000000000000F002 /* AgentAssistantCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentAssistantCards.swift; sourceTree = "<group>"; };
+		A5515700000000000000F001 /* AssistantModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantModels.swift; sourceTree = "<group>"; };
 		000580A972398A6D8CEB5249 /* InboxListViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InboxListViewModel.swift; sourceTree = "<group>"; };
 		0273A4834997732F3B373320 /* AppState+Theme.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "AppState+Theme.swift"; sourceTree = "<group>"; };
 		038BF0DE631CE5E12A4B6A83 /* ProjectElementsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectElementsView.swift; sourceTree = "<group>"; };
@@ -873,6 +880,7 @@
 				C6D7E8F9A0B1223C4D5E6F70 /* InventoryPanelView.swift */,
 				AA11BB22CC33DD44EE660002 /* ProjectListView.swift */,
 				AA11BB22CC33DD44EE660003 /* ProjectDetailView.swift */,
+				A5515700000000000000F003 /* AssistantView.swift */,
 				AA11BB22CC33DD44EE660DBB /* DisciplineWorkflowBar.swift */,
 				AA11BB22CC33DD44EE660DBC /* NotificationsPopoverView.swift */,
 				AA11BB22CC33DD44EE660004 /* SectionEditorView.swift */,
@@ -1103,6 +1111,7 @@
 				94FBACAA706BADE04CF26DE2 /* DashboardModels.swift */,
 				E489FA155C69897ED38F5DF8 /* ProjectTaskModels.swift */,
 				AC0D0000000000000000F001 /* AgentRunModels.swift */,
+				A5515700000000000000F001 /* AssistantModels.swift */,
 				BADA5500000000000000F001 /* ReplayModels.swift */,
 				86F9C67C0E32966EBAB0BD94 /* ProjectElementModels.swift */,
 				5C6EEE903BD7EDAD4CB23C91 /* ProjectBizModels.swift */,
@@ -1308,6 +1317,7 @@
 				BCB330C91A9BDEA760F9F330 /* PendingChannelAttachment.swift */,
 				F2122823C3D149F37FE040CC /* ChannelMessageRowView.swift */,
 				AC0D0000000000000000F003 /* AgentCardMessageView.swift */,
+				A5515700000000000000F002 /* AgentAssistantCards.swift */,
 				FF4C96E6C5F0062D21DAB318 /* ChannelMessageComposer.swift */,
 				F9D68DEBAAF0B1E63F7FE7AC /* TypingBubbleView.swift */,
 				5C3824618E8E47BA061C783C /* ChannelDetailView+Messages.swift */,
@@ -1553,6 +1563,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A5515700000000000000B001 /* AssistantModels.swift in Sources */,
 				4090F1F074C34D2ED1A08C91 /* ChannelModels.swift in Sources */,
 				678728862C31434E06B5C7AA /* AuthModels.swift in Sources */,
 				A44CAE7C8DF3D9C8A64B4D8E /* CallModels.swift in Sources */,
@@ -1653,6 +1664,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A5515700000000000000B004 /* AssistantView.swift in Sources */,
+				A5515700000000000000B003 /* AgentAssistantCards.swift in Sources */,
+				A5515700000000000000B002 /* AssistantModels.swift in Sources */,
 				CD260926000000000000B004 /* CodexControls.swift in Sources */,
 				CD260926000000000000B003 /* CodexResearchCoordinator.swift in Sources */,
 				CD260926000000000000B002 /* CodexBridge.swift in Sources */,

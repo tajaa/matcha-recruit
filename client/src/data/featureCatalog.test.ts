@@ -109,6 +109,15 @@ describe('sym-chat feature', () => {
   })
 })
 
+describe('espresso assistant feature', () => {
+  it('is togglable in admin and requires matcha_work', () => {
+    const work = FEATURE_GROUPS.find((group) => group.label === 'Matcha Work')
+    expect(work?.features.espresso_assistant).toContain('Espresso assistant')
+    expect(FEATURE_KEYS).toContain('espresso_assistant')
+    expect(FEATURE_REQUIRES.espresso_assistant).toEqual(['matcha_work'])
+  })
+})
+
 describe('matcha drive feature', () => {
   it('is togglable in admin and requires matcha_work', () => {
     const work = FEATURE_GROUPS.find((group) => group.label === 'Matcha Work')
