@@ -16,13 +16,22 @@ one-off guard in `matcha/services/benefits_eligibility.py`.
 import asyncio
 
 from weasyprint import HTML
-from weasyprint.urls import default_url_fetcher
+
+try:  # WeasyPrint 70+: fetchers are URLFetcher objects.
+    from weasyprint.urls import URLFetcher
+except ImportError:  # WeasyPrint 69: fetchers are plain functions.
+    URLFetcher = None
+
+if URLFetcher is None:
+    from weasyprint.urls import default_url_fetcher
+else:
+    # 70 removed `default_url_fetcher`. This instance is the same thing, and
+    # can only open `data:` even if something calls it directly.
+    default_url_fetcher = URLFetcher(allowed_protocols={"data"})
 
 
-def safe_url_fetcher(url: str):
-    """URL fetcher for WeasyPrint that blocks all non-`data:` schemes.
-
-    Allows inline `data:` URIs (e.g. base64 images we inlined ourselves) and
+def _fetch_data_only(url: str):
+    """Allows inline `data:` URIs (e.g. base64 images we inlined ourselves) and
     refuses everything else — `file://`, `http(s)://` (incl. cloud metadata at
     169.254.169.254 and RFC-1918 hosts), `ftp://`, etc. — to prevent SSRF and
     local-file disclosure when rendering attacker-influenced HTML.
@@ -30,6 +39,21 @@ def safe_url_fetcher(url: str):
     if url.startswith("data:"):
         return default_url_fetcher(url)
     raise ValueError(f"Blocked non-data URL in PDF render: {url[:80]}")
+
+
+if URLFetcher is None:
+    safe_url_fetcher = _fetch_data_only
+else:
+
+    class _DataOnlyFetcher(URLFetcher):
+        """70 wants a URLFetcher, not a function: when a fetch raises it reads
+        `_fail_on_errors` off the fetcher, so a bare function crashes the
+        render on the first blocked URL instead of skipping it."""
+
+        def fetch(self, url, headers=None):
+            return _fetch_data_only(url)
+
+    safe_url_fetcher = _DataOnlyFetcher(allowed_protocols={"data"})
 
 
 def render_pdf(html_string: str, **write_pdf_kwargs) -> bytes:

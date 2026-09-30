@@ -5,7 +5,6 @@ file fetch/export caps, and the import/callback routes. No network, no DB.
 """
 import json
 import time
-from types import SimpleNamespace
 from uuid import uuid4
 
 import httpx
@@ -140,8 +139,11 @@ def stored_token(**overrides):
     return base
 
 
-def conn_with(token):
-    return QueryConn(fetchval={"SELECT gdrive_token": json.dumps(token) if token else None})
+def conn_with(token, *, access_saved=True):
+    return QueryConn(fetchval={
+        "SELECT gdrive_token": json.dumps(token) if token else None,
+        "gdrive_token || $1::jsonb": True if access_saved else None,
+    })
 
 
 @pytest.mark.asyncio
@@ -183,17 +185,66 @@ async def test_expired_token_refreshes_and_persists(monkeypatch, plain_crypto):
         return httpx.Response(200, json={"access_token": "new", "expires_in": 3600})
     use_transport(monkeypatch, handler)
     assert await GoogleDriveService(uuid4())._access_token() == "new"
-    saved = json.loads(conn.args_for("UPDATE users SET gdrive_token")[0])
-    assert saved["access_token"] == "enc:new" and saved["refresh_token"] == "enc:refresh"
+    # Only the access token and expiry are written, and only onto the same
+    # connection: the refresh token and email are never rewritten from a copy.
+    kind, sql, args = next(c for c in conn.calls if "gdrive_token || $1::jsonb" in c[1])
+    patch = json.loads(args[0])
+    assert set(patch) == {"access_token", "expires_at"} and patch["access_token"] == "enc:new"
+    assert "gdrive_token->>'refresh_token' = $3" in sql and args[2] == "enc:refresh"
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_that_loses_to_a_disconnect_does_not_undo_it(monkeypatch, plain_crypto):
+    conn = conn_with(stored_token(expires_at=time.time() - 10), access_saved=False)
+    monkeypatch.setattr(gd, "get_connection", lambda *a, **k: conn)
+    use_transport(monkeypatch, lambda req: httpx.Response(200, json={"access_token": "new", "expires_in": 3600}))
+    with pytest.raises(GoogleDriveError) as exc:
+        await GoogleDriveService(uuid4())._access_token()
+    assert exc.value.status == 409
+    assert not any(sql.startswith("UPDATE users SET gdrive_token = $1") for sql in conn.sql_for("execute"))
 
 
 @pytest.mark.asyncio
 async def test_failed_refresh_asks_to_reconnect(monkeypatch, plain_crypto):
-    monkeypatch.setattr(gd, "get_connection", lambda *a, **k: conn_with(stored_token(access_token=None)))
+    conn = conn_with(stored_token(access_token=None))
+    monkeypatch.setattr(gd, "get_connection", lambda *a, **k: conn)
     use_transport(monkeypatch, lambda req: httpx.Response(400, json={"error": "invalid_grant"}))
+    service = GoogleDriveService(uuid4())
+    with pytest.raises(GoogleDriveError) as exc:
+        await service._access_token()
+    assert exc.value.status == 409
+    # A revoked grant is forgotten (unless replaced meanwhile), so status stops
+    # saying connected and the dialog offers Connect again.
+    kind, sql, args = next(c for c in conn.calls if "gdrive_token = NULL" in c[1])
+    assert "gdrive_token->>'refresh_token' = $2" in sql and args[1] == "enc:refresh"
+
+
+@pytest.mark.asyncio
+async def test_google_being_down_during_refresh_keeps_the_connection(monkeypatch, plain_crypto):
+    conn = conn_with(stored_token(access_token=None))
+    monkeypatch.setattr(gd, "get_connection", lambda *a, **k: conn)
+    use_transport(monkeypatch, lambda req: httpx.Response(503))
     with pytest.raises(GoogleDriveError) as exc:
         await GoogleDriveService(uuid4())._access_token()
-    assert exc.value.status == 409
+    assert exc.value.status == 502
+    assert not any("gdrive_token = NULL" in sql for sql in conn.sql_for("execute"))
+
+
+@pytest.mark.asyncio
+async def test_transport_errors_are_a_502_not_a_crash(monkeypatch, plain_crypto):
+    monkeypatch.setattr(gd, "get_connection", lambda *a, **k: conn_with(stored_token(access_token=None)))
+
+    def boom(req):
+        raise httpx.ConnectError("down")
+    use_transport(monkeypatch, boom)
+    for call in (lambda s: s._access_token(), lambda s: s.exchange_code("c", "https://app.test/cb")):
+        with pytest.raises(GoogleDriveError) as exc:
+            await call(GoogleDriveService(uuid4()))
+        assert exc.value.status == 502
+    monkeypatch.setattr(gd, "get_connection", lambda *a, **k: conn_with(stored_token()))
+    with pytest.raises(GoogleDriveError) as exc:
+        await GoogleDriveService(uuid4()).fetch_file(VALID_ID)
+    assert exc.value.status == 502
 
 
 @pytest.mark.asyncio
@@ -218,6 +269,21 @@ async def test_exchange_code_keeps_previous_refresh_token(monkeypatch, plain_cry
     saved = json.loads(conn.args_for("UPDATE users SET gdrive_token")[0])
     assert saved["refresh_token"] == "enc:refresh"
     assert saved["email"] == "gm@example.com"
+
+
+@pytest.mark.asyncio
+async def test_exchange_code_never_pairs_another_accounts_refresh_token(monkeypatch, plain_crypto):
+    # Connected as gm@, now connecting other@ and Google sends no refresh token.
+    monkeypatch.setattr(gd, "get_connection", lambda *a, **k: conn_with(stored_token()))
+
+    def handler(req):
+        if req.url.path == "/token":
+            return httpx.Response(200, json={"access_token": "fresh", "expires_in": 3600})
+        return httpx.Response(200, json={"user": {"emailAddress": "other@example.com"}})
+    use_transport(monkeypatch, handler)
+    with pytest.raises(GoogleDriveError) as exc:
+        await GoogleDriveService(uuid4()).exchange_code("code", "https://app.test/cb")
+    assert exc.value.status == 400
 
 
 @pytest.mark.asyncio
@@ -304,6 +370,87 @@ async def test_fetch_rejects_bad_id_and_google_error(monkeypatch, connected):
     with pytest.raises(GoogleDriveError) as exc:
         await GoogleDriveService(uuid4()).fetch_file(VALID_ID)
     assert exc.value.status == 502
+
+
+@pytest.mark.asyncio
+async def test_a_revoked_cached_token_refreshes_once_then_asks_to_reconnect(monkeypatch, plain_crypto):
+    conn = conn_with(stored_token())
+    monkeypatch.setattr(gd, "get_connection", lambda *a, **k: conn)
+    seen = []
+    mode = {"grant_gone": False}
+
+    def handler(req):
+        seen.append(req.url.path)
+        if req.url.path == "/token":
+            return httpx.Response(200, json={"access_token": "new", "expires_in": 3600})
+        if req.headers["authorization"] == "Bearer old" or mode["grant_gone"]:
+            return httpx.Response(401)
+        if req.url.params.get("alt") == "media":
+            return httpx.Response(200, content=b"%PDF-1.4")
+        return httpx.Response(200, json={"id": VALID_ID, "name": "Lease agreement", "mimeType": "application/pdf"})
+    use_transport(monkeypatch, handler)
+    got = await GoogleDriveService(uuid4()).fetch_file(VALID_ID)
+    assert seen.count("/token") == 1
+    # A Drive upload with no extension takes one from its type (finding 8).
+    assert got.name == "Lease agreement.pdf"
+
+    mode["grant_gone"] = True
+    with pytest.raises(GoogleDriveError) as exc:
+        await GoogleDriveService(uuid4()).fetch_file(VALID_ID)
+    assert exc.value.status == 409
+
+
+@pytest.mark.parametrize("status,reason,expected", [
+    (403, "rateLimitExceeded", 429),
+    (429, "", 429),
+    (403, "exportSizeLimitExceeded", 413),
+    (403, "insufficientPermissions", 409),
+    (403, "forbidden", 404),
+    (404, "notFound", 404),
+])
+@pytest.mark.asyncio
+async def test_drive_refusals_say_what_went_wrong(monkeypatch, connected, status, reason, expected):
+    body = {"error": {"errors": [{"reason": reason}]}} if reason else {}
+    use_transport(monkeypatch, lambda req: httpx.Response(status, json=body))
+    with pytest.raises(GoogleDriveError) as exc:
+        await GoogleDriveService(uuid4()).fetch_file(VALID_ID)
+    assert exc.value.status == expected
+
+
+@pytest.mark.asyncio
+async def test_an_export_over_googles_limit_says_so(monkeypatch, connected):
+    def handler(req):
+        if req.url.path.endswith("/export"):
+            return httpx.Response(403, json={"error": {"errors": [{"reason": "exportSizeLimitExceeded"}]}})
+        return httpx.Response(200, json={"id": VALID_ID, "name": "Big", "mimeType": "application/vnd.google-apps.document"})
+    use_transport(monkeypatch, handler)
+    with pytest.raises(GoogleDriveError) as exc:
+        await GoogleDriveService(uuid4()).fetch_file(VALID_ID)
+    assert exc.value.status == 413 and "10 MB" in exc.value.detail
+
+
+def test_download_extension():
+    assert gd.download_extension("Lease agreement", "application/pdf") == ".pdf"
+    assert gd.download_extension("scan.PDF", "application/pdf") == ""
+    assert gd.download_extension("photo", "image/jpeg") == ".jpg"
+    assert gd.download_extension("thing", "application/zip") == ""
+
+
+@pytest.mark.asyncio
+async def test_state_is_bound_to_the_browser_that_started_it(monkeypatch):
+    redis = FakeRedis()
+    monkeypatch.setattr(oauth_state, "get_redis_cache", lambda: redis)
+    user = uuid4()
+    mine = oauth_state.binding_hash("nonce-1")
+    state = await oauth_state.issue_state("gdrive_oauth_state", user, binding=mine)
+    assert await oauth_state.consume_state("gdrive_oauth_state", state, binding=mine) == user
+    for wrong in (None, oauth_state.binding_hash("nonce-2")):
+        state = await oauth_state.issue_state("gdrive_oauth_state", user, binding=mine)
+        with pytest.raises(ValueError):
+            await oauth_state.consume_state("gdrive_oauth_state", state, binding=wrong)
+        # Consumed by the failed attempt: no second guess.
+        with pytest.raises(ValueError):
+            await oauth_state.consume_state("gdrive_oauth_state", state, binding=mine)
 
 
 @pytest.mark.asyncio
