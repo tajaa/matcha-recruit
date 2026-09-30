@@ -317,6 +317,13 @@ async def _require(conn, *, company_id, folder_id, actor, cap: DriveCap) -> tupl
     return folder, caps
 
 
+async def assert_can_add(conn, *, company_id: UUID, folder_id: UUID, actor: Optional[DriveActor]) -> dict:
+    """Pre-flight for a write that fetches bytes first (Google import): fail
+    before the expensive part, not after."""
+    folder, _ = await _require(conn, company_id=company_id, folder_id=folder_id, actor=actor, cap=DriveCap.ADD)
+    return folder
+
+
 async def _load_space(conn, *, company_id: UUID, actor: DriveActor):
     folders = [dict(r) for r in await conn.fetch(
         f"SELECT {_FOLDER_COLS} FROM drive_folders WHERE company_id = $1 ORDER BY lower(name)",

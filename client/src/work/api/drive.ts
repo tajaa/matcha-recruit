@@ -67,3 +67,15 @@ export function searchDrivePeople(q: string) {
   if (q) params.set('q', q)
   return api.get<{ people: DrivePerson[] }>(`${BASE}/people?${params.toString()}`)
 }
+
+// Google Drive import (per-user, read-only). The pasted link is only parsed
+// for a file id server-side; the snapshot lands in Matcha Drive.
+export const getGoogleDriveStatus = () =>
+  api.get<{ connected: boolean; email: string | null }>(`${BASE}/google/status`)
+
+export const connectGoogleDrive = () => api.post<{ auth_url: string }>(`${BASE}/google/connect`)
+
+export const disconnectGoogleDrive = () => api.delete<{ connected: boolean }>(`${BASE}/google/disconnect`)
+
+export const importFromGoogleDrive = (url: string, folderId: string) =>
+  api.post<DriveFile>(`${BASE}/google/import`, { url, folder_id: folderId })

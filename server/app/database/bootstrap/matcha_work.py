@@ -886,3 +886,5 @@ async def create_matcha_work(conn):
             )
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_drive_audit_company ON drive_audit_log (company_id, created_at DESC)")
+        # Per-user Google Drive import connection (migration mdrive02).
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS gdrive_token JSONB")

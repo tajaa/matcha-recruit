@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ChevronRight, FolderPlus, HardDrive, Loader2, Search, Users, X } from 'lucide-react'
+import { ChevronRight, CloudDownload, FolderPlus, HardDrive, Loader2, Search, Users, X } from 'lucide-react'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
 import {
   createDriveFolder,
@@ -18,6 +18,7 @@ import DriveFileList from '../components/panels/drive/DriveFileList'
 import DriveUploadDropzone from '../components/panels/drive/DriveUploadDropzone'
 import DriveGrantsDialog from '../components/panels/drive/DriveGrantsDialog'
 import DriveMoveDialog from '../components/panels/drive/DriveMoveDialog'
+import DriveGoogleImportDialog from '../components/panels/drive/DriveGoogleImportDialog'
 import { DRIVE_MAX_BYTES, hasCap, spaceEntry } from '../components/panels/drive/driveTree'
 
 const SPACE_LABEL: Record<DriveSpace, string> = { general: 'Company', hr: 'HR' }
@@ -40,6 +41,7 @@ export default function Drive() {
   const [newFolder, setNewFolder] = useState<{ at: string; name: string } | null>(null)
   const [sharing, setSharing] = useState<DriveFolder | null>(null)
   const [moving, setMoving] = useState<DriveFile | null>(null)
+  const [importing, setImporting] = useState(false)
   const [query, setQuery] = useState('')
   // Tagged with the query it answers; a late response for an old query is
   // simply never shown.
@@ -258,6 +260,11 @@ export default function Drive() {
                       <Users size={13} /> Share
                     </button>
                   )}
+                  {hasCap(caps, 'add') && (
+                    <button onClick={() => setImporting(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-w-line px-2.5 py-1 text-xs text-w-dim hover:text-w-text">
+                      <CloudDownload size={13} /> From Google Drive
+                    </button>
+                  )}
                   {hasCap(caps, 'manage') && !creating && (
                     <button onClick={() => view && setNewFolder({ at: view.folder.id, name: '' })} className="inline-flex items-center gap-1.5 rounded-lg border border-w-line px-2.5 py-1 text-xs text-w-dim hover:text-w-text">
                       <FolderPlus size={13} /> New folder
@@ -308,6 +315,16 @@ export default function Drive() {
         </div>
       </div>
 
+      {importing && view && (
+        <DriveGoogleImportDialog
+          folder={view.folder}
+          onClose={() => setImporting(false)}
+          onImported={(file) => {
+            if (dropBox) setNotice(`Sent ${file.filename} to ${view.folder.name}.`)
+            else void loadFolder(view.folder.id)
+          }}
+        />
+      )}
       {sharing && <DriveGrantsDialog folder={sharing} onClose={() => { setSharing(null); void loadTree() }} />}
       {moving && (
         <DriveMoveDialog
