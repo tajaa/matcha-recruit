@@ -4,7 +4,7 @@ import { getChannelMessages } from '../../api/channels'
 import type { ChannelMessage } from '../../api/channels'
 import { mergeMessages, upsertMessage } from '../../api/channelMessages'
 import { ChannelSocket, getSharedChannelSocket } from '../../api/channelSocket'
-import type { AgentCardPromptUpdate } from '../../api/channelSocket'
+import type { AgentCardPromptUpdate, AgentRunProgressEvent } from '../../api/channelSocket'
 import { useToast } from '../../../components/ui'
 
 type OnlineUser = { id: string; name: string; avatar_url: string | null }
@@ -168,6 +168,26 @@ export function useChannelSocket({
     }
     socket.addAgentCardPromptListener(handleAgentCardPromptUpdated)
 
+    // An Espresso assistant run moved on: restamp its progress message (history
+    // carries the same state on reload, read from the run's own rows).
+    const handleAgentRunProgress = (data: AgentRunProgressEvent) => {
+      if (data.channel_id !== channelId) return
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.metadata?.kind === 'agent_progress' && message.metadata.run_id === data.run_id
+            ? {
+                ...message,
+                metadata: {
+                  ...message.metadata,
+                  progress: { run_id: data.run_id, status: data.status, note: data.note, steps: data.steps },
+                },
+              }
+            : message
+        )
+      )
+    }
+    socket.addAgentRunProgressListener(handleAgentRunProgress)
+
     // Server rejected a join_room/message send (not a member, bad channel,
     // over the length cap) — surface it instead of leaving a pending
     // optimistic row (or a stuck composer) with no explanation.
@@ -234,6 +254,7 @@ export function useChannelSocket({
       socket.onReactionUpdate = null
       socket.removeChannelActionListener(handleChannelActionUpdated)
       socket.removeAgentCardPromptListener(handleAgentCardPromptUpdated)
+      socket.removeAgentRunProgressListener(handleAgentRunProgress)
       socket.onServerError = null
       // Unsubscribe rather than nulling a shared slot: useChannelNotifications
       // and useLiveKitCall hold the same singleton, and `= null` used to remove

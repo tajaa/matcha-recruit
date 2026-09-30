@@ -11,7 +11,7 @@ from datetime import date
 from typing import Optional
 from uuid import UUID
 
-from ....database import get_connection
+from ....database import connection_or_direct, get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -219,8 +219,9 @@ async def quick_todo(
 ) -> dict:
     """Ensure the user's default board and drop a new card on it — the
     journal-selection → to-do / calendar path. A `due_date` puts it on the
-    calendar too."""
-    async with get_connection() as conn:
+    calendar too. Pool-free, so the Espresso assistant's `add_reminder` can
+    call it from a worker."""
+    async with connection_or_direct() as conn, conn.transaction():
         board_id = await _ensure_default_board(conn, user_id, company_id)
         pos = await _next_position(conn, board_id, "todo")
         row = await conn.fetchrow(

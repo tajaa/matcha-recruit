@@ -21,6 +21,8 @@ struct ChannelSubscriber {
     var onError: ((String) -> Void)?
     /// An Espresso agent-card question closed (answered / superseded).
     var onAgentCardPromptUpdated: ((AgentCardPromptUpdate) -> Void)?
+    /// An Espresso assistant run moved on (a step finished, it ended).
+    var onAgentRunProgress: ((_ channelId: String, _ progress: AgentRunProgress) -> Void)?
 }
 
 /// `agent_card_prompt_updated` (server: agent_card/chat_flow.py).
@@ -447,6 +449,13 @@ final class ChannelsWebSocket: NSObject {
                     answer: obj["answer"] as? String, answerText: obj["answer_text"] as? String,
                 )
                 dispatch { $0.onAgentCardPromptUpdated?(update) }
+            }
+        case "agent_run_progress":
+            // (server: agent_runtime/chat_progress.py)
+            if let channelId = obj["channel_id"] as? String,
+               let data = try? JSONSerialization.data(withJSONObject: obj),
+               let progress = try? JSONDecoder().decode(AgentRunProgress.self, from: data) {
+                dispatch { $0.onAgentRunProgress?(channelId, progress) }
             }
         case "reaction_update":
             if let messageId = obj["message_id"] as? String,
