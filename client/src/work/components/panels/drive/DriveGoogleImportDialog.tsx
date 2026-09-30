@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   connectGoogleDrive,
@@ -12,6 +12,9 @@ import DriveDialog from './DriveDialog'
 type Status = { connected: boolean; email: string | null }
 
 const GOOGLE_LINK = /^(https?:\/\/)?(docs|drive)\.google\.com\//i
+// The popup's postMessage is the fast path, but Google's pages can sever
+// window.opener, so the dialog also watches the popup and re-reads status.
+const POPUP_POLL_MS = 1500
 
 export default function DriveGoogleImportDialog({ folder, onImported, onClose }: {
   folder: DriveFolder
@@ -22,36 +25,64 @@ export default function DriveGoogleImportDialog({ folder, onImported, onClose }:
   const [url, setUrl] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const watcher = useRef<number | null>(null)
 
   const checkStatus = useCallback(() => getGoogleDriveStatus().then(
-    (s) => setStatus(s),
-    () => setStatus({ connected: false, email: null }),
+    (s) => { setStatus(s); return s },
+    () => { setStatus({ connected: false, email: null }); return null },
   ), [])
+
+  const stopWatching = useCallback(() => {
+    if (watcher.current !== null) window.clearInterval(watcher.current)
+    watcher.current = null
+  }, [])
 
   useEffect(() => {
     void checkStatus()
     function onMessage(e: MessageEvent) {
       if (e.origin !== window.location.origin) return
-      if (e.data === 'gdrive-connected') void checkStatus()
-      if (e.data === 'gdrive-error') setError("Google couldn't complete the connection. Try again.")
+      if (e.data === 'gdrive-connected') { stopWatching(); void checkStatus() }
+      if (e.data === 'gdrive-cancelled') stopWatching()
+      if (e.data === 'gdrive-error') {
+        stopWatching()
+        setError("Google couldn't complete the connection. Try again.")
+      }
     }
     window.addEventListener('message', onMessage)
-    return () => window.removeEventListener('message', onMessage)
-  }, [checkStatus])
+    return () => {
+      window.removeEventListener('message', onMessage)
+      stopWatching()
+    }
+  }, [checkStatus, stopWatching])
 
   async function connect() {
     setError(null)
     try {
       const { auth_url } = await connectGoogleDrive()
-      if (!window.open(auth_url, 'gdrive-oauth', 'width=600,height=700')) setError('Allow popups to connect Google Drive.')
+      const popup = window.open(auth_url, 'gdrive-oauth', 'width=600,height=700')
+      if (!popup) {
+        setError('Allow popups to connect Google Drive.')
+        return
+      }
+      stopWatching()
+      watcher.current = window.setInterval(() => {
+        const closed = popup.closed
+        void checkStatus().then((s) => { if (closed || s?.connected) stopWatching() })
+      }, POPUP_POLL_MS)
     } catch (err) {
       setError(err instanceof Error && err.message ? err.message : 'Could not start the Google connection.')
     }
   }
 
   async function disconnect() {
-    await disconnectGoogleDrive().catch(() => undefined)
-    setStatus({ connected: false, email: null })
+    setError(null)
+    try {
+      await disconnectGoogleDrive()
+      setStatus({ connected: false, email: null })
+    } catch (err) {
+      // Still connected on the server: say so rather than pretend otherwise.
+      setError(err instanceof Error && err.message ? err.message : "Couldn't disconnect Google Drive. Try again.")
+    }
   }
 
   async function submit(e: FormEvent) {
