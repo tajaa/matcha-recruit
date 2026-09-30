@@ -16,7 +16,7 @@ loop in this package and no other: do not add a second.
 | Policy | `policy.py` | `evaluate_commit`: allow / confirm / deny. Pure: no I/O, no clock, no model |
 | Result | `result.py` | `agent_result.v2` (headline, summary, typed blocks); reads v1 as v2 |
 | Catalog | `catalog.py` | Every ability, and `abilities_for`: the only filter on what a run gets |
-| Abilities | `abilities/*.py` | `web`, `shopping`, `flights`, `email`, `calendar`, `reservations` |
+| Abilities | `abilities/*.py` | `web`, `shopping`, `flights`, `email`, `calendar`, `reservations`, `purchase` |
 | Chat entry | `chat_entry.py` | A chat message on its way to a run; answers to questions |
 | Enqueue | `enqueue.py`, `quota.py` | Gates, the daily allowance, one live run per person per conversation |
 | The run | `assistant.py` | Builds the context, runs the loop, posts what came of it |
@@ -27,7 +27,8 @@ loop in this package and no other: do not add a second.
 
 Worker: `workers/tasks/assistant.py`. REST: `routes/matcha_work/assistant.py`.
 Browser: `../browser/`. Migrations: `agentrt01` (run kind, steps, prompts),
-`agentrt02` (channel scope), `agentrt03` (grants).
+`agentrt02` (channel scope), `agentrt03` (grants), `assistbuy01` (shipping
+addresses, card billing address, purchases without a project/task).
 
 ## Adding an ability
 
@@ -59,10 +60,12 @@ it otherwise), and should declare `resolve`.
 ## Invariants
 
 - **The default is allow.** A person who switched an ability on is not asked
-  before each action. Two things override it, both decided in code:
+  before each action. Three things override it, all decided in code:
   - `deny`: a ceiling was reached, or a private-only tool ran outside the
     private conversation.
   - `confirm`: the action reaches an address or a site the person never named.
+  - `confirm`: the tool is `always_confirm` (spending money: `buy_item`),
+    grounded or not. Only a commit tool may set it (`validate_tool`).
 - **Grounded means the person named it.** A target is grounded when it is
   literally in the requester's own messages, is their own address, sits on a
   thread or event they pointed at, or (domains) is a booking platform in the
@@ -99,6 +102,15 @@ it otherwise), and should declare `resolve`.
   a project chat, and `evaluate_commit` still denies one that got through.
   `conversation.is_private_conversation` also requires that the channel has
   exactly one member.
+- **An ability can be per-account.** `Ability.allowance` names an allowance
+  the run's `Situation.allowed` must carry (`catalog.allowances_for(user)`;
+  `purchases` = `chat_flow.purchases_allowed`). Without it the ability is not
+  in the run and not listed by `GET /assistant/abilities` at all.
+- **The model is told what is off, not left to say "I can't".**
+  `catalog.switch_on_hints` lists abilities this person could use but can't in
+  this run (not switched on, private-only, needs Google) with what would turn
+  them on; `build_system_prompt(unavailable=…)` puts that in the prompt.
+  Server-not-ready and not-allowed abilities are left out.
 - **The model is never offered a dead tool.** `abilities_for` drops an ability
   that cannot run; `offered_tools` drops a tool whose scope was not granted
   (archive and label without `gmail.modify`).
@@ -128,6 +140,35 @@ it otherwise), and should declare `resolve`.
   rows with the scope as a literal, and chat posts go through the existing
   `project_agent/chat.py` bridge. The matcha → werk boundary stays at the two
   fan-out imports it has.
+
+## Buying (`abilities/purchase.py`)
+
+`prepare_purchase` (read) loads, from the database, the buyable picks of the
+person's last few results **in this conversation** (`item-N`, via
+`chat_flow.pick_offer`: first verified buy link, source-checked price or
+none), their unexpired cards (`card-N`) and shipping addresses
+(`address-N`, default first). The model sees names, stores, prices, "Visa
+ending 4242" and "Haley Smith, Oakland CA" — never a card number, street or
+phone. `buy_item` (commit, `always_confirm`) names those ids; `resolve`
+freezes item, card, shipping and billing (card's own, or `None` = same as
+shipping) into the question payload, so the yes buys exactly what the card
+showed.
+
+- A missing card or address ends the run with `purchase_setup`, a
+  server-written block (`Ability.auto_blocks` adds it even when the model
+  leaves it out; what the model writes in it is ignored). Both apps render it
+  with a link to Settings. Card numbers and addresses are never collected in
+  chat.
+- The handler re-reads the card (removed/expired ⇒ nothing bought), inserts
+  `mw_agent_purchase_requests` (`channel_id` + address snapshots, no
+  project/task), then charges through `agent_card/test_charge.py`: a Stripe
+  **test-mode** charge with a verified price and a test key, else a handoff
+  (checkout link). No real money moves.
+- Gated three ways: `purchases_allowed` (allowance), the `purchase-1`
+  disclosure (switched on in Espresso's settings), private conversation only.
+  `ASSISTANT_COMMIT_MODE` still applies: unset, a yes gives a dry-run receipt.
+- Real checkout (sending the address to a merchant) needs a new disclosure
+  version before it ships.
 
 ## Conversation model
 
