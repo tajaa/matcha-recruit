@@ -285,6 +285,30 @@ describe('Espresso assistant messages', () => {
     expect(screen.getByText('Submitted, not confirmed by the site')).toBeTruthy()
   })
 
+  it('points at Settings when buying needs a card or an address first', () => {
+    const metadata = {
+      kind: 'agent_result' as const,
+      run_id: 'r1',
+      result_v2: {
+        schema: 'agent_result.v2' as const, headline: 'Add a card first', summary: 'Then I can buy it.',
+        blocks: [{
+          type: 'purchase_setup' as const,
+          missing: ['payment_card', 'shipping_address'],
+          steps: [
+            { key: 'payment_card', label: 'Add a payment card', where: 'Settings → Payment cards', detail: 'Stored encrypted.' },
+            { key: 'shipping_address', label: 'Add a shipping address', where: 'Settings → Shipping addresses' },
+          ],
+        }],
+      },
+    } as AgentChatMetadata
+    render(<AgentCardMessage metadata={metadata} content="" />)
+    expect(screen.getByText('Before I can buy it')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Add a payment card' }).getAttribute('href')).toBe('/work/settings#payment-cards')
+    expect(screen.getByRole('link', { name: 'Add a shipping address' }).getAttribute('href'))
+      .toBe('/work/settings#shipping-addresses')
+    expect(screen.getByText(/Never paste a card number in chat/)).toBeTruthy()
+  })
+
   it('shows a receipt for what was done, and says when it was only a dry run', () => {
     const receipt = (status: string, extra = {}): AgentChatMetadata => ({
       kind: 'agent_receipt',

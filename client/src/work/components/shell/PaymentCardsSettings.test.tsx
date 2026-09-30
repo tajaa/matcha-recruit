@@ -43,6 +43,29 @@ describe('PaymentCardsSettings', () => {
     expect((screen.getByLabelText('Card number') as HTMLInputElement).value).toBe('')
   })
 
+  it('bills to shipping by default and sends a separate billing address only when asked', async () => {
+    mock.list.mockResolvedValue({
+      enabled: true, configured: true,
+      cards: [{ ...card, billing_address: { name: 'Haley', line1: '9 Bank St', line2: '', city: 'Oakland', region: 'CA', postal_code: '94607', country: 'US', phone: '' } }],
+    })
+    mock.add.mockResolvedValue(card)
+    render(<PaymentCardsSettings isAdmin />)
+    expect(await screen.findByText(/Bills to Haley, 9 Bank St, Oakland, CA 94607, US/)).toBeTruthy()
+    expect(screen.queryByLabelText('Street address')).toBeNull()
+    fireEvent.click(screen.getByLabelText('Billing address is the same as shipping'))
+    fireEvent.change(screen.getByLabelText('Card number'), { target: { value: '4242 4242 4242 4242' } })
+    fireEvent.change(screen.getByLabelText('Expiry'), { target: { value: '03/31' } })
+    fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'Haley Smith' } })
+    fireEvent.change(screen.getByLabelText('Street address'), { target: { value: '9 Bank St' } })
+    fireEvent.change(screen.getByLabelText('City'), { target: { value: 'Oakland' } })
+    fireEvent.change(screen.getByLabelText('State'), { target: { value: 'CA' } })
+    fireEvent.change(screen.getByLabelText('ZIP'), { target: { value: '94607' } })
+    fireEvent.click(screen.getByText('Save card'))
+    await waitFor(() => expect(mock.add).toHaveBeenCalledWith(expect.objectContaining({
+      billing_address: expect.objectContaining({ line1: '9 Bank St', country: 'US', region: 'CA' }),
+    })))
+  })
+
   it('checks the expiry format before sending anything', async () => {
     mock.list.mockResolvedValue({ enabled: true, configured: true, cards: [] })
     render(<PaymentCardsSettings isAdmin />)

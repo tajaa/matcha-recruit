@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { Link, useInRouterContext } from 'react-router-dom'
 import {
   AlertTriangle, BadgeCheck, CalendarDays, CheckCircle2, CircleDashed, Clock, ExternalLink, HelpCircle,
-  ImageIcon, Loader2, Mail, ShieldCheck, ShoppingBag, Star, Ticket, UtensilsCrossed, XOctagon,
+  CreditCard, ImageIcon, Loader2, Mail, MapPin, ShieldCheck, ShoppingBag, Star, Ticket, UtensilsCrossed, XOctagon,
 } from 'lucide-react'
 import type {
   AgentActionReceipt, AgentChatButton, AgentChatFlights, AgentChatMetadata, AgentChatPick, AgentChatPromptView,
@@ -11,6 +12,7 @@ import type {
 } from '../../types'
 import { dayOffset, flightClock, flightDay, flightDuration, stopsText } from '../../utils/flightFormat'
 import { isAssistantPrompt } from './agentCardMessageHelpers'
+import { useWorkBase } from '../../routes/WorkSurfaceContext'
 
 /**
  * Espresso's agent-card messages in a project chat, rendered as cards instead
@@ -271,7 +273,45 @@ const RESERVATION_TEXT: Record<string, string> = {
 }
 
 function isKnownBlock(block: { type: string }): block is AgentResultBlock {
-  return ['picks', 'flights', 'sections', 'sources', 'emails', 'events', 'reservation'].includes(block.type)
+  return ['picks', 'flights', 'sections', 'sources', 'emails', 'events', 'reservation', 'purchase_setup'].includes(block.type)
+}
+
+const SETUP_ANCHOR = { payment_card: 'payment-cards', shipping_address: 'shipping-addresses' } as const
+
+/** A link into Settings: a router Link inside the app, a plain link outside it. */
+function SettingsLink({ anchor, children }: { anchor: string; children: React.ReactNode }) {
+  const base = useWorkBase()
+  const inRouter = useInRouterContext()
+  const className =
+    'inline-flex items-center gap-1.5 rounded-lg bg-w-accent px-3 py-1.5 text-xs font-semibold text-w-on-accent hover:opacity-90'
+  const to = `${base}/settings#${anchor}`
+  return inRouter ? <Link to={to} className={className}>{children}</Link> : <a href={to} className={className}>{children}</a>
+}
+
+function PurchaseSetup({ block }: { block: Extract<AgentResultBlock, { type: 'purchase_setup' }> }) {
+  return (
+    <div className="space-y-2 rounded-xl bg-w-surface2/60 p-2.5">
+      <p className="text-xs font-semibold text-w-text">Before I can buy it</p>
+      <ul className="space-y-2">
+        {block.steps.map((step) => {
+          const Icon = step.key === 'payment_card' ? CreditCard : MapPin
+          return (
+            <li key={step.key} className="flex items-start gap-2">
+              <Icon size={13} className="mt-0.5 shrink-0 text-w-accent" />
+              <div className="min-w-0 space-y-1">
+                <p className="text-xs text-w-text">
+                  {step.label} <span className="text-w-dim">in {step.where}</span>
+                </p>
+                {step.detail && <p className="text-[11px] text-w-faint">{step.detail}</p>}
+                {SETUP_ANCHOR[step.key] && <SettingsLink anchor={SETUP_ANCHOR[step.key]}>{step.label}</SettingsLink>}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+      <p className="text-[11px] text-w-faint">Then ask me again. Never paste a card number in chat.</p>
+    </div>
+  )
 }
 
 function Block({ block }: { block: AgentResultBlock }) {
@@ -354,6 +394,8 @@ function Block({ block }: { block: AgentResultBlock }) {
           ))}
         </ul>
       )
+    case 'purchase_setup':
+      return block.steps?.length ? <PurchaseSetup block={block} /> : null
     case 'reservation': {
       const link = httpUrl(block.handoff_url)
       return (

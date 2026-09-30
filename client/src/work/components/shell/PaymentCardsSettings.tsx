@@ -6,7 +6,9 @@ import {
   deletePaymentCard,
   listPaymentCards,
 } from '../../api/matchaWork'
-import type { PaymentCard } from '../../types'
+import type { PaymentCard, PostalAddress } from '../../types'
+import AddressFields from './AddressFields'
+import { EMPTY_ADDRESS, addressLine, useScrollToHash } from './addressHelpers'
 
 const BRAND: Record<PaymentCard['brand'], string> = {
   visa: 'Visa',
@@ -17,17 +19,21 @@ const BRAND: Record<PaymentCard['brand'], string> = {
 }
 
 /**
- * Saved cards for agent-card purchases. When Espresso asks "want me to buy
- * it?" in a project chat, you pick one of these by its last 4 digits.
+ * Saved cards for purchases: agent-card buys in a project chat ("want me to
+ * buy it?", then a card by its last 4) and the Espresso assistant ("buy it"
+ * in your private conversation, confirmed on a card before anything happens).
  *
  * The number is sent once and never shown again. There is no security-code
- * field, and card numbers never go through chat.
+ * field, and card numbers never go through chat. A card bills to your
+ * shipping address unless you give it its own billing address.
  */
 export default function PaymentCardsSettings({ isAdmin = false }: { isAdmin?: boolean }) {
   const [state, setState] = useState<{ enabled: boolean; configured: boolean; cards: PaymentCard[] } | null>(null)
   const [number, setNumber] = useState('')
   const [expiry, setExpiry] = useState('')
   const [label, setLabel] = useState('')
+  const [sameAsShipping, setSameAsShipping] = useState(true)
+  const [billing, setBilling] = useState<PostalAddress>(EMPTY_ADDRESS)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
 
@@ -43,6 +49,7 @@ export default function PaymentCardsSettings({ isAdmin = false }: { isAdmin?: bo
     // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch; state is set after it resolves
     void load()
   }, [load])
+  useScrollToHash('payment-cards', state !== null)
 
   async function save(event: FormEvent) {
     event.preventDefault()
@@ -55,10 +62,15 @@ export default function PaymentCardsSettings({ isAdmin = false }: { isAdmin?: bo
     setBusy(true)
     setMessage('')
     try {
-      await addPaymentCard({ number, exp_month: Number(match[1]), exp_year: year, label })
+      await addPaymentCard({
+        number, exp_month: Number(match[1]), exp_year: year, label,
+        ...(sameAsShipping ? {} : { billing_address: { ...billing, country: billing.country.trim().toUpperCase() } }),
+      })
       setNumber('')
       setExpiry('')
       setLabel('')
+      setSameAsShipping(true)
+      setBilling(EMPTY_ADDRESS)
       setMessage('Card saved.')
       await load()
     } catch (e) {
@@ -84,7 +96,7 @@ export default function PaymentCardsSettings({ isAdmin = false }: { isAdmin?: bo
     // so instead of making the section silently disappear.
     if (!isAdmin) return null
     return (
-      <section className="rounded-xl border border-w-line bg-w-surface p-5">
+      <section id="payment-cards" className="rounded-xl border border-w-line bg-w-surface p-5">
         <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-w-text">
           <CreditCard className="h-4 w-4" /> Payment cards
         </h2>
@@ -109,13 +121,13 @@ export default function PaymentCardsSettings({ isAdmin = false }: { isAdmin?: bo
 
   const input = 'mt-1 block w-full rounded-md border border-w-line bg-w-bg px-3 py-2 text-sm text-w-text outline-none focus:border-w-accent'
   return (
-    <section className="rounded-xl border border-w-line bg-w-surface p-5">
+    <section id="payment-cards" className="rounded-xl border border-w-line bg-w-surface p-5">
       <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-w-text">
         <CreditCard className="h-4 w-4" /> Payment cards
       </h2>
       <p className="mb-4 text-xs text-w-dim">
-        For agent-card purchases. When Espresso asks in a project chat whether to buy something, reply with a card's
-        last 4 digits. Numbers are encrypted and never shown again. Never paste a card number in chat.
+        For purchases Espresso makes for you. It always shows the card, item and address and waits for your yes.
+        Numbers are encrypted and never shown again. Never paste a card number in chat.
       </p>
 
       {state.cards.length > 0 && (
@@ -128,6 +140,9 @@ export default function PaymentCardsSettings({ isAdmin = false }: { isAdmin?: bo
                 <span className="text-xs text-w-faint">
                   {' '}
                   · {String(card.exp_month).padStart(2, '0')}/{String(card.exp_year).slice(-2)}
+                </span>
+                <span className="block text-xs text-w-faint">
+                  Bills to {card.billing_address ? addressLine(card.billing_address) : 'your shipping address'}
                 </span>
               </span>
               <button
@@ -174,6 +189,20 @@ export default function PaymentCardsSettings({ isAdmin = false }: { isAdmin?: bo
               className={input}
             />
           </label>
+          <label className="flex items-center gap-2 text-xs text-w-dim sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={sameAsShipping}
+              onChange={(event) => setSameAsShipping(event.target.checked)}
+              className="accent-[var(--color-w-accent)]"
+            />
+            Billing address is the same as shipping
+          </label>
+          {!sameAsShipping && (
+            <div className="sm:col-span-2">
+              <AddressFields value={billing} onChange={setBilling} idPrefix="billing" />
+            </div>
+          )}
           <div className="sm:col-span-2">
             <button
               type="submit"

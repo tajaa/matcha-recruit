@@ -1261,6 +1261,30 @@ export type PaymentCard = {
   last4: string
   exp_month: number
   exp_year: number
+  /** null: bills to the shipping address. */
+  billing_address?: PostalAddress | null
+  created_at: string | null
+}
+
+/** A postal address (shipping, or a card's own billing). Backend:
+ *  server/app/matcha/services/matcha_work/shipping_addresses.py. */
+export type PostalAddress = {
+  name: string
+  line1: string
+  line2: string
+  city: string
+  /** State / province; required for US. */
+  region: string
+  postal_code: string
+  /** Two-letter country code. */
+  country: string
+  phone: string
+}
+
+/** Where the Espresso assistant ships a purchase. Up to 5, one default. */
+export type ShippingAddress = PostalAddress & {
+  id: string
+  is_default: boolean
   created_at: string | null
 }
 
@@ -1364,6 +1388,12 @@ export type AgentResultBlock =
   | { type: 'sources'; sources: { title: string; url: string }[] }
   | { type: 'emails'; items: { message_id: string; from: string; subject: string; date?: string | null; snippet?: string | null }[] }
   | { type: 'events'; items: { event_id: string; title: string; start: string; end?: string | null; location?: string | null; attendee_count?: number }[] }
+  | {
+      /** Buying needs something saved first; server-written, never the model's. */
+      type: 'purchase_setup'
+      missing: ('payment_card' | 'shipping_address')[]
+      steps: { key: 'payment_card' | 'shipping_address'; label: string; where: string; detail?: string | null }[]
+    }
   | {
       type: 'reservation'
       venue: string

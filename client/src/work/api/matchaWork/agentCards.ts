@@ -1,5 +1,5 @@
 import { api, ApiError } from '../../../api/client'
-import type { AgentPurchase, PaymentCard } from '../../types'
+import type { AgentPurchase, PaymentCard, PostalAddress, ShippingAddress } from '../../types'
 
 // ── Agent cards (category 'agent') ──
 //
@@ -129,8 +129,38 @@ export function listPaymentCards() {
   return api.get<{ enabled: boolean; configured: boolean; cards: PaymentCard[] }>('/matcha-work/payment-cards')
 }
 
-export function addPaymentCard(body: { number: string; exp_month: number; exp_year: number; label: string }) {
+export function addPaymentCard(body: {
+  number: string
+  exp_month: number
+  exp_year: number
+  label: string
+  /** Left out: bill to the shipping address. */
+  billing_address?: PostalAddress
+}) {
   return api.post<PaymentCard>('/matcha-work/payment-cards', body)
+}
+
+/** Set a card's own billing address, or null to bill to the shipping address. */
+export function setCardBillingAddress(cardId: string, billing: PostalAddress | null) {
+  return api.put<PaymentCard>(`/matcha-work/payment-cards/${cardId}/billing-address`, { billing_address: billing })
+}
+
+// ── Shipping addresses (Espresso assistant purchases) ──
+
+export function listShippingAddresses() {
+  return api.get<{ enabled: boolean; addresses: ShippingAddress[] }>('/matcha-work/shipping-addresses')
+}
+
+export function addShippingAddress(body: PostalAddress & { is_default?: boolean }) {
+  return api.post<ShippingAddress>('/matcha-work/shipping-addresses', body)
+}
+
+export function updateShippingAddress(addressId: string, body: PostalAddress & { is_default?: boolean }) {
+  return api.put<ShippingAddress>(`/matcha-work/shipping-addresses/${addressId}`, body)
+}
+
+export function deleteShippingAddress(addressId: string) {
+  return api.delete<void>(`/matcha-work/shipping-addresses/${addressId}`)
 }
 
 export function deletePaymentCard(cardId: string) {
