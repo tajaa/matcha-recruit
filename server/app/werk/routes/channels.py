@@ -17,6 +17,7 @@ from ...core.dependencies import get_current_user
 from ...core.models.auth import CurrentUser
 from ...matcha.dependencies import resolve_accessible_company_scope, require_admin_or_client
 from ...core.services.storage import get_storage
+from ...matcha.services.matcha_work.project_agent.identity import ESPRESSO_NO_LOGIN
 from ..services.channel_access import (
     ChannelCapability,
     ChannelScope,
@@ -92,6 +93,9 @@ class ChannelMessage(BaseModel):
     deleted_at: Optional[datetime] = None
     deleted_by: Optional[UUID] = None
     message_type: str = "user"
+    # Written by Espresso (its no-login bot user), not a person. The apps put
+    # these on the other side of the conversation.
+    sender_is_agent: bool = False
     metadata: dict = Field(default_factory=dict)
     # Sender's optimistic-UI correlation id — REST now returns it so a
     # reconnect refetch can reconcile a still-pending local row against the
@@ -143,6 +147,7 @@ def _row_to_message(m, reactions_map: dict | None = None) -> "ChannelMessage":
         sender_id=m["sender_id"],
         sender_name=m["sender_name"],
         sender_avatar_url=m["sender_avatar_url"],
+        sender_is_agent=bool(m.get("sender_is_agent")),
         content="" if is_deleted else m["content"],
         attachments=attachments,
         reply_to_id=reply_to_id,
@@ -303,6 +308,7 @@ _MSG_SELECT = f"""
            m.message_type, m.metadata, m.client_message_id,
            COALESCE({_name_subquery("m.sender_id")}, 'Huume') AS sender_name,
            u.avatar_url AS sender_avatar_url,
+           COALESCE(u.password_hash = '{ESPRESSO_NO_LOGIN}', false) AS sender_is_agent,
            rm.content AS reply_content, rm.attachments AS reply_attachments,
            rm.deleted_at IS NOT NULL AS reply_deleted,
            COALESCE({_name_subquery("rm.sender_id")}, 'Huume') AS reply_sender_name

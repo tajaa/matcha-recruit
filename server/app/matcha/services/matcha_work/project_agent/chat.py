@@ -50,6 +50,7 @@ async def persist_espresso_message(
         "sender_id": str(bot_id),
         "sender_name": "Espresso",
         "sender_avatar_url": None,
+        "sender_is_agent": True,
         "content": message,
         "attachments": [],
         "reply_to_id": None,

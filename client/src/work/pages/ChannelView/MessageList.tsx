@@ -1,4 +1,4 @@
-import { FileText, Reply, Trash2 } from 'lucide-react'
+import { FileText, Reply, Sparkles, Trash2 } from 'lucide-react'
 import type { ChannelMessage, ChannelMember } from '../../api/channels'
 import { HuumeAvatar } from '../../components/channels/HuumeAvatar'
 import ChannelActionCard from '../../components/channels/actions/ChannelActionCard'
@@ -128,12 +128,19 @@ export default function MessageList({
 
         const showAuthor = i === 0 || messages[i - 1].sender_id !== msg.sender_id
         const isOwn = msg.sender_id === userId
+        // Espresso answers from the other side of the conversation: its row
+        // mirrors (avatar, name and body on the right), like Huume's above.
+        const isAgent = !!msg.sender_is_agent
         const isDeleted = !!msg.deleted_at
         const canDelete = !isDeleted && (isOwn || canModerate)
         return (
-          <div id={`channel-message-${msg.id}`} key={rowKey} className={`${showAuthor && i > 0 ? 'mt-3' : ''} flex gap-2.5 group ${msg.pending ? 'opacity-60' : ''}`}>
+          <div id={`channel-message-${msg.id}`} key={rowKey} className={`${showAuthor && i > 0 ? 'mt-3' : ''} flex gap-2.5 group ${isAgent ? 'flex-row-reverse' : ''} ${msg.pending ? 'opacity-60' : ''}`}>
             {showAuthor ? (
-              msg.sender_avatar_url ? (
+              isAgent ? (
+                <div className="w-8 h-8 rounded-full bg-w-accent/15 flex items-center justify-center shrink-0 mt-0.5" aria-hidden>
+                  <Sparkles size={15} className="text-w-accent" />
+                </div>
+              ) : msg.sender_avatar_url ? (
                 <img src={msg.sender_avatar_url} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 mt-0.5" />
               ) : (
                 <div className="w-8 h-8 rounded-full bg-w-surface2 flex items-center justify-center text-xs font-medium text-w-dim shrink-0 mt-0.5">
@@ -143,10 +150,10 @@ export default function MessageList({
             ) : (
               <div className="w-8 shrink-0" />
             )}
-            <div className="min-w-0 flex-1">
+            <div className={`min-w-0 flex-1 ${isAgent ? 'flex flex-col items-end' : ''}`}>
               {showAuthor && (
-                <div className="flex items-baseline gap-2 mb-0.5">
-                  <span className={`text-sm font-medium ${isOwn ? 'text-w-accent' : 'text-blue-400'}`}>
+                <div className={`flex items-baseline gap-2 mb-0.5 ${isAgent ? 'flex-row-reverse' : ''}`}>
+                  <span className={`text-sm font-medium ${isOwn || isAgent ? 'text-w-accent' : 'text-blue-400'}`}>
                     {msg.sender_name}
                   </span>
                   <span className="text-[10px] text-w-faint">
@@ -168,19 +175,19 @@ export default function MessageList({
                   // with the ticket marker shown as a small label.
                   const { title, body } = splitTicketToken(msg.content)
                   return (
-                    <>
-                      {title && <p className="text-[11px] font-medium text-w-accent">Card · {title}</p>}
+                    <div className={isAgent ? 'w-full max-w-2xl' : undefined}>
+                      {title && <p className={`text-[11px] font-medium text-w-accent ${isAgent ? 'text-right' : ''}`}>Card · {title}</p>}
                       <AgentCardMessage
                         metadata={msg.metadata}
                         content={body}
                         userId={userId}
                         onQuickReply={onQuickReply ? (reply) => onQuickReply(msg, reply) : undefined}
                       />
-                    </>
+                    </div>
                   )
                 })()
               ) : msg.content ? (
-                <p className="text-sm text-w-text whitespace-pre-wrap break-words">
+                <p className={`text-sm text-w-text whitespace-pre-wrap break-words ${isAgent ? 'max-w-2xl rounded-2xl rounded-tr-md bg-w-surface2/70 border border-w-line px-3 py-2' : ''}`}>
                   {renderMessageContent(
                     msg.content,
                     members,
