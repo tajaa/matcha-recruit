@@ -25,7 +25,6 @@ from .quota import assistant_usage, limit_for_plan, usage_payload, used_today
 
 logger = logging.getLogger(__name__)
 
-FEATURE_FLAG = "espresso_assistant"
 ENTITLEMENT = "assistant"
 ASSISTANT_MODEL = LUNA
 _QUEUE_ENV = "AGENT_ASSISTANT_QUEUE"
@@ -61,16 +60,22 @@ def queue_for(abilities: list[str]) -> str | None:
 
 
 async def workspace_enabled(company_id: UUID) -> bool:
+    """Whether this workspace gets the assistant: a personal account, never a
+    business one (`eligibility.assistant_available`)."""
     from app.core.feature_flags import merge_company_features
+
+    from .eligibility import assistant_available
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id,
+            """SELECT enabled_features, signup_source, COALESCE(is_personal, false) AS is_personal
+               FROM companies WHERE id = $1""",
+            company_id,
         )
     if not row:
         return False
     features = merge_company_features(row["enabled_features"], row["signup_source"])
-    return bool(features.get(FEATURE_FLAG)) and bool(features.get("matcha_work"))
+    return assistant_available(is_personal=row["is_personal"], features=features)
 
 
 async def preflight(user, company_id: UUID) -> None:
@@ -79,7 +84,7 @@ async def preflight(user, company_id: UUID) -> None:
     if not await workspace_enabled(company_id):
         raise HTTPException(status_code=403, detail={
             "code": "feature_disabled",
-            "message": "The Espresso assistant isn't switched on for this workspace.",
+            "message": "The Espresso assistant comes with a personal Espresso account.",
         })
     if _is_admin(user):
         return

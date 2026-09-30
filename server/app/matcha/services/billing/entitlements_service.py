@@ -248,9 +248,9 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
     except Exception:
         pass
 
-    # What the WORKSPACE has switched on, as opposed to what the plan allows.
-    # The desktop app has no other view of company flags, and it must not
-    # offer a surface the workspace has off.
+    # What the WORKSPACE gets, as opposed to what the plan allows. The
+    # assistant is for personal accounts only (agent_runtime/eligibility.py);
+    # both apps read this instead of guessing.
     workspace = {"espresso_assistant": False}
     if company_id is not None:
         try:

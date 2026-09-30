@@ -6,8 +6,9 @@ hands every message in a private conversation to
 open the private conversation, read a run and its steps, and switch abilities
 on and off.
 
-`espresso_assistant` gates the whole router on top of the package's
-`matcha_work` gate.
+The whole router is for personal Espresso accounts only
+(`agent_runtime.eligibility`); there is no company flag. Plan limits apply on
+top, in `enqueue.preflight`.
 """
 from __future__ import annotations
 
@@ -17,21 +18,32 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.models.auth import CurrentUser
 from app.database import decode_jsonb, get_connection
-from app.matcha.dependencies import get_client_company_id, require_admin_or_client, require_feature
+from app.matcha.dependencies import get_client_company_id, require_admin_or_client
 from app.matcha.models.matcha_work.assistant import AbilityEnableRequest
 from app.matcha.services.matcha_work.agent_runtime import (
     assistant as assistant_run,
     catalog,
     consent,
     conversation,
+    enqueue,
     grants,
     result,
 )
 from app.matcha.services.matcha_work.gmail_service import GmailService
 
+async def require_personal_workspace(current_user: CurrentUser = Depends(require_admin_or_client)):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None or not await enqueue.workspace_enabled(company_id):
+        raise HTTPException(status_code=403, detail={
+            "code": "feature_disabled",
+            "message": "The Espresso assistant comes with a personal Espresso account.",
+        })
+    return current_user
+
+
 router = APIRouter(
     prefix="/assistant",
-    dependencies=[Depends(require_feature("espresso_assistant"))],
+    dependencies=[Depends(require_personal_workspace)],
 )
 
 

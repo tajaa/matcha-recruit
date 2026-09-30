@@ -54,9 +54,10 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const showDrive = surface === 'matcha-work' && !isPersonal && hasFeature('matcha_drive')
   const showHrCases = useHrCaseAccess(userId, surface === 'matcha-work' && !isPersonal && hasFeature('hr_cases'))
   const showWriteUps = surface === 'matcha-work' && !isPersonal && hasFeature('hr_cases')
-  // Shown to anyone whose workspace has it; a plan that doesn't include it
-  // gets the paywall when they ask for something, like the other Pro features.
-  const showAssistant = hasFeature('espresso_assistant')
+  // Espresso's assistant comes with a personal account, never a business
+  // workspace. A plan that doesn't include it gets the paywall when they ask
+  // for something, like the other Pro features.
+  const showAssistant = isPersonal
 
   const {
     channels, setChannels,
