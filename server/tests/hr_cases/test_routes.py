@@ -348,3 +348,9 @@ def test_draft_download(mod, scope, monkeypatch):
     monkeypatch.setattr(mod.workflow, "load_for_actor", no_draft)
     with _client(mod, USER) as client:
         assert client.get(f"/hr-cases/{uuid4()}/draft").status_code == 404
+
+
+def test_platform_admin_is_refused(mod, scope):
+    with _client(mod, SimpleNamespace(id=uuid4(), role="admin")) as client:
+        assert client.get("/hr-cases").status_code == 403
+        assert client.get("/hr-cases/access").status_code == 403
