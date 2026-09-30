@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from types import SimpleNamespace
 from uuid import UUID
 
 from app.database import connection_or_direct, decode_jsonb
@@ -134,9 +135,12 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         active = await grants.load_grants(conn, user_id) if private else {}
         if active:
             await gmail.load_token()
+        requester = await conn.fetchrow("SELECT role, email FROM users WHERE id = $1", user_id)
         situation = catalog.Situation(
             private=private, grants=active,
             google_connected=gmail.is_configured, granted_scopes=gmail.granted_scopes,
+            # A Record has no attributes; the allowance check reads role/email off one.
+            allowed=catalog.allowances_for(SimpleNamespace(**dict(requester))) if requester else frozenset(),
         )
         everything = catalog.build_catalog(
             fetch_page=lambda url: card_agent.fetch_page_tool(url), gmail=gmail,
@@ -197,7 +201,9 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         client=get_luna_client(),
         abilities=abilities,
         contract=contract,
-        instructions=build_system_prompt(ctx, abilities),
+        instructions=build_system_prompt(
+            ctx, abilities, unavailable=catalog.switch_on_hints(everything, situation),
+        ),
         first_input=[*replay, text_item("user", run["prompt"])],
         first_note="Working on it…",
         extra_tools=[ASK_USER],

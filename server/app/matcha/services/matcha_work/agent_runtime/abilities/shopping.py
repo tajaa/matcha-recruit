@@ -11,7 +11,8 @@ _PROMPT = """Choosing something to buy:
 - Prefer primary pages (the brand, a major retailer) for prices and buy links, and independent reviews for quality claims.
 - Review quotes must be verbatim excerpts from a page you saw, at most 280 characters.
 - Images: only image URLs fetch_page reported, paired with the page_url they came from.
-- You do not buy anything. Give the best option with its exact price and buy link, and never mention payment."""
+- Researching is not buying: give the best option with its exact price and buy link. Never ask for card details.
+- Only buy when the person asks you to and a buying tool is offered; without one, say they can finish at the buy link."""
 
 
 def _picks_block() -> dict[str, Any]:

@@ -138,9 +138,12 @@ async def list_abilities(
     situation = catalog.Situation(
         private=True, grants=active,
         google_connected=gmail.is_configured, granted_scopes=gmail.granted_scopes,
+        allowed=catalog.allowances_for(current_user),
     )
     abilities = []
     for ability in catalog.build_catalog(fetch_page=_no_fetch):
+        if ability.allowance is not None and ability.allowance not in situation.allowed:
+            continue  # not offered to this account: not listed either
         state = catalog.availability(ability, situation)
         row = rows.get(ability.key)
         abilities.append({

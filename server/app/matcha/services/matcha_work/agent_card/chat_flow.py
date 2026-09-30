@@ -471,8 +471,14 @@ def purchase_offer(result: dict) -> dict | None:
     """
     if not isinstance(result, dict) or result.get("answer_type") != "recommendation":
         return None
-    pick = result.get("top_pick")
-    if not isinstance(pick, dict):
+    return pick_offer(result.get("top_pick"))
+
+
+def pick_offer(pick) -> dict | None:
+    """One gated pick as a buyable offer: its first verified buy link and its
+    source-checked price (or none). Shared with the assistant's purchase
+    ability, which offers any pick of a result, not only the top one."""
+    if not isinstance(pick, dict) or not pick.get("name"):
         return None
     link = next(
         (b for b in (pick.get("buy_links") or []) if str(b.get("url") or "").startswith(("https://", "http://"))),

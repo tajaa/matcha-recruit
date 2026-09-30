@@ -94,6 +94,7 @@ async def _situation(user, company_id: UUID, channel_id: UUID, surface: str):
         connected, scopes = gmail.is_configured, gmail.granted_scopes
     return catalog.Situation(
         private=private, grants=active, google_connected=connected, granted_scopes=scopes,
+        allowed=catalog.allowances_for(user),
     )
 
 

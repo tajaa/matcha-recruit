@@ -99,6 +99,9 @@ class AgentTool:
     weight: Callable[[dict], int] | None = None  # how many actions one call is
     ceilings: tuple[tuple[int, int], ...] = ()  # (limit, window_seconds)
     untrusted_output: bool = False
+    # Commit tools: hold every call for the person's yes, grounded or not
+    # (spending money is never done on the default allow).
+    always_confirm: bool = False
 
 
 @dataclass(frozen=True)
@@ -122,6 +125,12 @@ class Ability:
     # Domains a commit may reach without the user naming them (known booking
     # platforms, for instance).
     trusted_domains: frozenset[str] = frozenset()
+    # A per-person allowance the run's situation must carry (`Situation.allowed`),
+    # for abilities open to some accounts only.
+    allowance: str | None = None
+    # Server-authored blocks added to the result when the model left them out:
+    # (run state) -> blocks. Each type must be one of `block_schemas`.
+    auto_blocks: Callable[["RunState"], list[dict]] | None = None
 
     @property
     def block_types(self) -> tuple[str, ...]:
@@ -145,6 +154,8 @@ def validate_tool(tool: AgentTool) -> None:
         raise CatalogError(f"{tool.name}: a tool is hosted or handled, never both or neither")
     if tool.hosted is not None and tool.effect != "read":
         raise CatalogError(f"{tool.name}: a hosted tool can only read")
+    if tool.always_confirm and tool.effect != "commit":
+        raise CatalogError(f"{tool.name}: only a commit tool can always confirm")
     if tool.effect == "commit":
         if tool.targets is None:
             raise CatalogError(f"{tool.name}: a commit tool must declare its targets")

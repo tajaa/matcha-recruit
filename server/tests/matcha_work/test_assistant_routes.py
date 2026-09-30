@@ -149,6 +149,16 @@ async def test_abilities_say_what_stands_in_the_way(wired, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_buying_is_listed_only_for_accounts_allowed_to_buy(wired, monkeypatch):
+    monkeypatch.setattr(grants, "list_rows", AsyncMock(return_value={}))
+    monkeypatch.setenv("AGENT_PURCHASE_ALLOWED_EMAILS", "ana@example.com")
+    out = await routes.list_abilities(current_user=_user())
+    buying = {a["key"]: a for a in out["abilities"]}["purchase"]
+    assert buying["acts"] and buying["private_only"] and buying["needs_consent"] and not buying["enabled"]
+    assert buying["disclosure"]["version"] == "purchase-1"
+
+
+@pytest.mark.asyncio
 async def test_switching_an_ability_on_and_off(wired, monkeypatch):
     enabled = AsyncMock(return_value={"key": "email", "enabled": True, "settings": {}})
     disabled = AsyncMock(return_value={"key": "email", "enabled": False})
