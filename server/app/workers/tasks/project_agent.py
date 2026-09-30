@@ -35,7 +35,7 @@ async def _reconcile() -> None:
                    error=COALESCE(error, 'Interrupted before completion; start the task again.')
                WHERE status IN ('queued', 'running')
                  AND COALESCE(started_at, created_at) < NOW() - INTERVAL '15 minutes'
-               RETURNING kind, project_id, task_id"""
+               RETURNING kind, project_id, task_id, id, channel_id, company_id"""
         )
     # An agent card whose run died (worker restart mid-run) would otherwise sit
     # in In progress forever with a stale status line; say what happened.
@@ -43,6 +43,13 @@ async def _reconcile() -> None:
     from app.workers.tasks.agent_card import FAILED_NOTE
 
     for row in stale:
+        if row["kind"] == "assistant" and row["channel_id"] is not None:
+            # The progress card in the chat would otherwise spin forever.
+            from app.matcha.services.matcha_work.agent_runtime import assistant
+            from app.matcha.services.matcha_work.agent_runtime.enqueue import INTERRUPTED
+
+            await assistant.report_failure(dict(row), INTERRUPTED)
+            continue
         if row["kind"] != "card_agent" or row["task_id"] is None:
             continue
         task = await board.set_progress(

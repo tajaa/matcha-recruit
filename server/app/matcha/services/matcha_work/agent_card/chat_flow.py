@@ -57,6 +57,9 @@ PURCHASE_TTL = timedelta(days=2)
 PICK_CARD_TTL = timedelta(hours=2)
 MAX_MESSAGE_CHARS = 3500
 PURCHASE_KINDS = ("purchase", "pick_card")
+# Questions the Espresso assistant asks (agent_runtime/prompts.py). They share
+# this table and this message card, and are answered over there.
+ASSISTANT_KINDS = ("ask_user", "confirm_action")
 
 ADD_CARD_HINT = "Add one in Espresso under Settings → Payment cards"
 STALE_REPLY = "That result was replaced by a newer run on the card, so I've closed this question."
@@ -974,6 +977,14 @@ async def handle_chat_answer(
             prompt, plain_answer = await _plain_target(conn, channel_id, user, content)
     if prompt is None:
         return False
+    if prompt["kind"] in ASSISTANT_KINDS:
+        # A question the assistant asked is answered by the assistant's own
+        # rules (only its owner, any text for `ask_user`), not the card's.
+        from ..agent_runtime import chat_entry
+
+        return await chat_entry.answer_loaded_prompt(
+            prompt=prompt, channel_id=channel_id, user=user, content=content,
+        )
     allowed = await _can_access_project(prompt, user)
     if not allowed and not targeted:
         return False

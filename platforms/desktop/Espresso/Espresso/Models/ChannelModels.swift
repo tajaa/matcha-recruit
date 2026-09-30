@@ -98,9 +98,20 @@ struct ChannelMessageMetadata: Codable, Hashable {
     let view: AgentChatPromptView?
     let result: AgentChatResult?
     let receipt: AgentChatReceipt?
+    /// Espresso assistant payloads (server: agent_runtime/). `kind` is
+    /// agent_progress / agent_result / agent_receipt.
+    let runId: String?
+    /// A run's state: stamped onto history, and kept live by the
+    /// `agent_run_progress` socket event.
+    var progress: AgentRunProgress?
+    let resultV2: AgentChatResultV2?
+    let actionReceipt: AgentActionReceipt?
 
     enum CodingKeys: String, CodingKey {
-        case action, kind, answer, view, result, receipt
+        case action, kind, answer, view, result, receipt, progress
+        case runId = "run_id"
+        case resultV2 = "result_v2"
+        case actionReceipt = "action_receipt"
         case promptKind = "prompt_kind"
         case promptId = "prompt_id"
         case taskId = "task_id"
@@ -115,6 +126,7 @@ struct ChannelMessageMetadata: Codable, Hashable {
         kind = nil; promptKind = nil; promptId = nil; taskId = nil; ownerUserId = nil; expiresAt = nil
         promptStatus = nil; answer = nil; answerText = nil
         view = nil; result = nil; receipt = nil
+        runId = nil; progress = nil; resultV2 = nil; actionReceipt = nil
     }
 
     // Every field is optional and decoded on its own, so one odd field never
@@ -134,6 +146,10 @@ struct ChannelMessageMetadata: Codable, Hashable {
         view = try? c.decodeIfPresent(AgentChatPromptView.self, forKey: .view)
         result = try? c.decodeIfPresent(AgentChatResult.self, forKey: .result)
         receipt = try? c.decodeIfPresent(AgentChatReceipt.self, forKey: .receipt)
+        runId = try? c.decodeIfPresent(String.self, forKey: .runId)
+        progress = try? c.decodeIfPresent(AgentRunProgress.self, forKey: .progress)
+        resultV2 = try? c.decodeIfPresent(AgentChatResultV2.self, forKey: .resultV2)
+        actionReceipt = try? c.decodeIfPresent(AgentActionReceipt.self, forKey: .actionReceipt)
     }
 
     var isAgentCard: Bool {
@@ -141,8 +157,262 @@ struct ChannelMessageMetadata: Codable, Hashable {
         case "agent_card_result": return result != nil
         case "agent_card_prompt": return view != nil
         case "agent_card_receipt": return receipt != nil
+        case "agent_progress": return runId != nil
+        case "agent_result": return resultV2 != nil
+        case "agent_receipt": return actionReceipt != nil
         default: return false
         }
+    }
+
+    /// A question the assistant asked (answered by whoever it asked), not an
+    /// agent card's buy / card question (answered by the buyer).
+    var isAssistantPrompt: Bool {
+        promptKind == "ask_user" || promptKind == "confirm_action"
+    }
+}
+
+// MARK: - Espresso assistant (server: agent_runtime/)
+
+struct AgentProgressStep: Codable, Hashable {
+    let seq: Int
+    let kind: String
+    let label: String
+    let status: String
+}
+
+struct AgentRunProgress: Codable, Hashable {
+    let runId: String
+    /// queued / running / done / failed
+    let status: String
+    let note: String?
+    let steps: [AgentProgressStep]
+
+    enum CodingKeys: String, CodingKey {
+        case status, note, steps
+        case runId = "run_id"
+    }
+
+    init(runId: String, status: String, note: String?, steps: [AgentProgressStep]) {
+        self.runId = runId; self.status = status; self.note = note; self.steps = steps
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        runId = try c.decode(String.self, forKey: .runId)
+        status = (try? c.decode(String.self, forKey: .status)) ?? "running"
+        note = try? c.decodeIfPresent(String.self, forKey: .note)
+        steps = (try? c.decodeIfPresent([AgentProgressStep].self, forKey: .steps)) ?? []
+    }
+
+    var isWorking: Bool { status == "queued" || status == "running" }
+}
+
+struct AgentActionLine: Codable, Hashable {
+    let label: String
+    let value: String
+    let mono: Bool?
+}
+
+struct AgentActionLink: Codable, Hashable {
+    let label: String?
+    let url: String
+}
+
+/// Exactly what a yes will carry out (on a `confirm_action` question).
+struct AgentChatAction: Codable, Hashable {
+    let title: String?
+    let lines: [AgentActionLine]
+
+    enum CodingKeys: String, CodingKey { case title, lines }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try? c.decodeIfPresent(String.self, forKey: .title)
+        lines = (try? c.decodeIfPresent([AgentActionLine].self, forKey: .lines)) ?? []
+    }
+}
+
+/// Something Espresso did for the person: sent, invited, booked, archived.
+struct AgentActionReceipt: Codable, Hashable {
+    let action: String?
+    let title: String
+    /// done / dry_run / unknown / failed / handoff
+    let status: String
+    let lines: [AgentActionLine]
+    let link: AgentActionLink?
+    let note: String?
+
+    enum CodingKeys: String, CodingKey { case action, title, status, lines, link, note }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        action = try? c.decodeIfPresent(String.self, forKey: .action)
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        status = (try? c.decode(String.self, forKey: .status)) ?? "done"
+        lines = (try? c.decodeIfPresent([AgentActionLine].self, forKey: .lines)) ?? []
+        link = try? c.decodeIfPresent(AgentActionLink.self, forKey: .link)
+        note = try? c.decodeIfPresent(String.self, forKey: .note)
+    }
+}
+
+struct AgentSection: Codable, Hashable {
+    let heading: String
+    let bodyMd: String
+
+    enum CodingKeys: String, CodingKey {
+        case heading
+        case bodyMd = "body_md"
+    }
+}
+
+struct AgentSource: Codable, Hashable {
+    let title: String?
+    let url: String
+}
+
+struct AgentEmailItem: Codable, Hashable {
+    let messageId: String
+    let from: String
+    let subject: String
+    let date: String?
+    let snippet: String?
+
+    enum CodingKeys: String, CodingKey {
+        case from, subject, date, snippet
+        case messageId = "message_id"
+    }
+}
+
+struct AgentEventItem: Codable, Hashable {
+    let eventId: String
+    let title: String
+    let start: String
+    let end: String?
+    let location: String?
+    let attendeeCount: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case title, start, end, location
+        case eventId = "event_id"
+        case attendeeCount = "attendee_count"
+    }
+}
+
+struct AgentReservation: Codable, Hashable {
+    let venue: String
+    let when: String
+    let partySize: Int
+    /// booked / unverified / unavailable / handoff / blocked / failed
+    let status: String
+    let confirmation: String?
+    let handoffUrl: String?
+
+    enum CodingKeys: String, CodingKey {
+        case venue, when, status, confirmation
+        case partySize = "party_size"
+        case handoffUrl = "handoff_url"
+    }
+}
+
+/// One typed part of an answer. A block type this build doesn't know decodes
+/// to `.unknown` and is skipped: the server can add one before the app does.
+enum AgentResultBlock: Codable, Hashable {
+    case picks(top: AgentChatPick?, alternatives: [AgentChatPick])
+    case flights(AgentChatFlights)
+    case sections([AgentSection])
+    case sources([AgentSource])
+    case emails([AgentEmailItem])
+    case events([AgentEventItem])
+    case reservation(AgentReservation)
+    case unknown(String)
+
+    private enum CodingKeys: String, CodingKey {
+        case type, sections, sources, items, alternatives, flights
+        case topPick = "top_pick"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let type = (try? c.decode(String.self, forKey: .type)) ?? ""
+        switch type {
+        case "picks":
+            self = .picks(
+                top: try? c.decodeIfPresent(AgentChatPick.self, forKey: .topPick),
+                alternatives: (try? c.decodeIfPresent([AgentChatPick].self, forKey: .alternatives)) ?? []
+            )
+        case "flights":
+            if let flights = try? c.decode(AgentChatFlights.self, forKey: .flights) {
+                self = .flights(flights)
+            } else {
+                self = .unknown(type)
+            }
+        case "sections":
+            self = .sections((try? c.decodeIfPresent([AgentSection].self, forKey: .sections)) ?? [])
+        case "sources":
+            self = .sources((try? c.decodeIfPresent([AgentSource].self, forKey: .sources)) ?? [])
+        case "emails":
+            self = .emails((try? c.decodeIfPresent([AgentEmailItem].self, forKey: .items)) ?? [])
+        case "events":
+            self = .events((try? c.decodeIfPresent([AgentEventItem].self, forKey: .items)) ?? [])
+        case "reservation":
+            if let booking = try? AgentReservation(from: decoder) {
+                self = .reservation(booking)
+            } else {
+                self = .unknown(type)
+            }
+        default:
+            self = .unknown(type)
+        }
+    }
+
+    // Message metadata is Codable as a whole, so a block writes back what it read.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .picks(let top, let alternatives):
+            try c.encode("picks", forKey: .type)
+            try c.encodeIfPresent(top, forKey: .topPick)
+            try c.encode(alternatives, forKey: .alternatives)
+        case .flights(let flights):
+            try c.encode("flights", forKey: .type)
+            try c.encode(flights, forKey: .flights)
+        case .sections(let sections):
+            try c.encode("sections", forKey: .type)
+            try c.encode(sections, forKey: .sections)
+        case .sources(let sources):
+            try c.encode("sources", forKey: .type)
+            try c.encode(sources, forKey: .sources)
+        case .emails(let items):
+            try c.encode("emails", forKey: .type)
+            try c.encode(items, forKey: .items)
+        case .events(let items):
+            try c.encode("events", forKey: .type)
+            try c.encode(items, forKey: .items)
+        case .reservation(let booking):
+            try booking.encode(to: encoder)
+            try c.encode("reservation", forKey: .type)
+        case .unknown(let type):
+            try c.encode(type, forKey: .type)
+        }
+    }
+}
+
+struct AgentChatResultV2: Codable, Hashable {
+    let headline: String
+    let summary: String
+    let blocks: [AgentResultBlock]
+    let caveats: [String]
+    let confidence: String?
+
+    enum CodingKeys: String, CodingKey { case headline, summary, blocks, caveats, confidence }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        headline = (try? c.decode(String.self, forKey: .headline)) ?? ""
+        summary = (try? c.decode(String.self, forKey: .summary)) ?? ""
+        blocks = (try? c.decodeIfPresent([AgentResultBlock].self, forKey: .blocks)) ?? []
+        caveats = (try? c.decodeIfPresent([String].self, forKey: .caveats)) ?? []
+        confidence = try? c.decodeIfPresent(String.self, forKey: .confidence)
     }
 }
 
@@ -172,7 +442,20 @@ struct AgentChatOffer: Codable, Hashable {
 struct AgentChatPromptView: Codable, Hashable {
     let question: String?
     let offer: AgentChatOffer?
+    /// `confirm_action`: exactly what a yes will carry out.
+    let action: AgentChatAction?
     let buttons: [AgentChatButton]
+
+    enum CodingKeys: String, CodingKey { case question, offer, action, buttons }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        question = try? c.decodeIfPresent(String.self, forKey: .question)
+        offer = try? c.decodeIfPresent(AgentChatOffer.self, forKey: .offer)
+        action = try? c.decodeIfPresent(AgentChatAction.self, forKey: .action)
+        // A question with no suggested answers is answered by typing.
+        buttons = (try? c.decodeIfPresent([AgentChatButton].self, forKey: .buttons)) ?? []
+    }
 }
 
 struct AgentChatRating: Codable, Hashable {

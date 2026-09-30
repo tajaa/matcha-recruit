@@ -5,6 +5,8 @@ export type WorkPlan = 'free' | 'lite' | 'pro' | 'business'
 export type WorkEntitlements = {
   plan: WorkPlan
   features: Record<string, boolean>
+  /** What the workspace has switched on, as opposed to what the plan allows. */
+  workspace?: { espresso_assistant?: boolean }
   quotas: {
     token_limit: number
     window_hours: number
@@ -13,6 +15,8 @@ export type WorkEntitlements = {
     resets_at?: string | null
     /** Agent-card runs this UTC month (server: agent_card/quota.py). */
     agent_runs?: { limit: number; used: number; remaining: number; resets_at: string }
+    /** Espresso assistant requests this UTC day (server: agent_runtime/quota.py). */
+    assistant_runs?: { limit: number; used: number; remaining: number; resets_at: string }
   }
 }
 

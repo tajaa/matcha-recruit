@@ -393,6 +393,25 @@ grep -qF "scripts/xcode-build\\.sh\$" "$CI_WORKFLOW" || storefront_workflow_ok=1
 grep -qF './scripts/xcode-build.sh storefront build-for-testing' "$CI_WORKFLOW" || storefront_workflow_ok=1
 check "PR native CI runs Storefront build-for-testing for Storefront or helper changes" "$storefront_workflow_ok"
 
+################################################################################
+# Both Celery workers disable the image HEALTHCHECK (it probes the API port),
+# and a backend deploy updates the agent worker wherever it runs. A compose
+# block inserted mid-service once moved matcha-worker's `disable: true` onto
+# the agent worker, leaving prod matcha-worker permanently "unhealthy".
+################################################################################
+workers_ok=0
+python3 - "$REPO_ROOT/docker-compose.yml" <<'PY' || workers_ok=1
+import re, sys
+text = open(sys.argv[1]).read()
+# Split into top-level services (two-space indented keys); stdlib only.
+blocks = dict(re.findall(r"^  ([a-z][\w-]*):\n((?:(?:    .*|\s*#.*|)\n)*)", text, re.M))
+for name in ("matcha-worker", "matcha-agent-worker"):
+    assert re.search(r"^    healthcheck:\n      disable: true$", blocks[name], re.M), name
+PY
+grep -qF 'update_agent_worker' "$UPDATE_EC2" || workers_ok=1
+grep -qF -- '--profile agent-worker up -d --no-deps --force-recreate matcha-agent-worker' "$UPDATE_EC2" || workers_ok=1
+check "both Celery workers disable the API healthcheck and deploys update the agent worker" "$workers_ok"
+
 echo
 echo "----------------------------------------"
 echo "PASS: $PASS  FAIL: $FAIL"

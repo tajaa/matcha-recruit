@@ -34,6 +34,18 @@ import type { HeaderAction } from './types'
  *   rather than as the `/channels/:id` page. Suppresses actions that only make
  *   sense for a channel you navigated to on purpose — see `secondaryActions`.
  */
+/** The `@espresso` entry in a project chat's mention list. Not a channel
+ *  member: `handleFromEmail` of this address is the handle the server parses. */
+const ESPRESSO_MENTION: ChannelMember = {
+  user_id: 'espresso',
+  name: 'Espresso',
+  email: 'espresso@espresso.invalid',
+  role: 'assistant',
+  channel_role: 'member',
+  avatar_url: null,
+  joined_at: '',
+}
+
 export function useChannelView(channelIdOverride?: string | null, embedded = false) {
   const { channelId: routeChannelId } = useParams<{ channelId: string }>()
   const channelId = channelIdOverride ?? routeChannelId
@@ -365,14 +377,19 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
   const mentionMatches: ChannelMember[] = (() => {
     if (mentionQuery === null || !channel) return []
     const q = mentionQuery.toLowerCase()
-    return channel.members
+    const members = channel.members
       .filter((m) => m.user_id !== userId)
       .filter((m) => {
         const handle = handleFromEmail(m.email || '')
         const name = (m.name || '').toLowerCase()
         return handle.startsWith(q) || name.startsWith(q)
       })
-      .slice(0, 6)
+    // Espresso answers in a project's chat, so it is offered there like a
+    // member. It is not one: the server reads the mention, not a membership.
+    const espresso = channel.project_id && ESPRESSO_MENTION.name.toLowerCase().startsWith(q)
+      ? [ESPRESSO_MENTION]
+      : []
+    return [...espresso, ...members].slice(0, 6)
   })()
 
   function applyMention(member: ChannelMember) {

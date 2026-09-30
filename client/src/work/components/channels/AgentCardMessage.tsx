@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
-  AlertTriangle, BadgeCheck, CheckCircle2, Clock, ExternalLink, ImageIcon, Loader2, ShieldCheck, ShoppingBag,
-  Star, Ticket, XOctagon,
+  AlertTriangle, BadgeCheck, CalendarDays, CheckCircle2, CircleDashed, Clock, ExternalLink, HelpCircle,
+  ImageIcon, Loader2, Mail, ShieldCheck, ShoppingBag, Star, Ticket, UtensilsCrossed, XOctagon,
 } from 'lucide-react'
 import type {
-  AgentChatButton, AgentChatFlights, AgentChatMetadata, AgentChatPick, AgentChatPromptView, AgentChatReceipt,
-  AgentChatResult,
+  AgentActionReceipt, AgentChatButton, AgentChatFlights, AgentChatMetadata, AgentChatPick, AgentChatPromptView,
+  AgentChatReceipt, AgentChatResult, AgentChatResultV2, AgentResultBlock, AgentRunProgress,
 } from '../../types'
 import { dayOffset, flightClock, flightDay, flightDuration, stopsText } from '../../utils/flightFormat'
+import { isAssistantPrompt } from './agentCardMessageHelpers'
 
 /**
  * Espresso's agent-card messages in a project chat, rendered as cards instead
@@ -15,6 +18,11 @@ import { dayOffset, flightClock, flightDay, flightDuration, stopsText } from '..
  * with photo, price, rating, reasons, store link; alternatives), a question
  * with quick-reply buttons (each sends its `reply` as a threaded reply, the
  * same as typing it), and the purchase receipt.
+ *
+ * The Espresso assistant's messages too (server: agent_runtime/): a run's
+ * progress, its answer as typed blocks, a receipt for something it did, and
+ * its questions, including the confirmation card that shows exactly what a
+ * yes will carry out.
  *
  * Photos are server-rehosted https CDN URLs; links are http(s) only and open
  * in a new tab without referrer or opener.
@@ -120,72 +128,81 @@ function FlightRows({ flights }: { flights: AgentChatFlights }) {
   )
 }
 
+function TopPick({ pick }: { pick: AgentChatPick }) {
+  const buy = httpUrl(pick.buy_url)
+  return (
+    <div className="rounded-xl bg-w-surface2/60 p-2.5 space-y-2">
+      <div className="flex gap-3">
+        <Photo url={pick.image_url} size={104} alt={pick.name} />
+        <div className="min-w-0 space-y-1">
+          <p className="text-[10px] font-bold tracking-wider text-w-accent">TOP PICK</p>
+          <p className="text-sm font-semibold text-w-text leading-snug">{pick.name}</p>
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-w-dim">
+            {pick.brand && <span>{pick.brand}</span>}
+            {pick.rating && <Rating rating={pick.rating} />}
+          </div>
+          {pick.price_text && <p className="text-base font-bold text-w-text">{pick.price_text}</p>}
+        </div>
+      </div>
+      {!!pick.why?.length && (
+        <ul className="space-y-1">
+          {pick.why.map((reason) => (
+            <li key={reason} className="flex gap-1.5 text-xs text-w-text">
+              <CheckCircle2 size={12} className="mt-0.5 shrink-0 text-emerald-400" />
+              <span>{reason}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {buy && (
+        <a
+          href={buy}
+          {...EXTERNAL}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-w-accent px-3 py-1.5 text-xs font-semibold text-w-on-accent hover:opacity-90"
+        >
+          View at {pick.retailer || host(buy)} <ExternalLink size={12} />
+        </a>
+      )}
+    </div>
+  )
+}
+
+function Alternatives({ alternatives }: { alternatives: AgentChatPick[] }) {
+  if (alternatives.length === 0) return null
+  return (
+    <div className="space-y-1.5 border-t border-w-line pt-2">
+      <p className="text-[10px] font-semibold tracking-wider text-w-dim">ALSO COMPARED</p>
+      {alternatives.map((alt) => {
+        const link = httpUrl(alt.buy_url)
+        return (
+          <div key={alt.name} className="flex items-center gap-2.5">
+            <Photo url={alt.image_url} size={40} alt={alt.name} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium text-w-text">{alt.name}</p>
+              {alt.brand && <p className="truncate text-[10px] text-w-dim">{alt.brand}</p>}
+            </div>
+            {alt.price_text && <span className="text-xs font-semibold text-w-text">{alt.price_text}</span>}
+            {link && (
+              <a href={link} {...EXTERNAL} title={alt.retailer || host(link)} className="text-w-dim hover:text-w-text">
+                <ExternalLink size={12} />
+              </a>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function ResultCard({ result }: { result: AgentChatResult }) {
   const pick = result.top_pick
-  const buy = httpUrl(pick?.buy_url)
   return (
     <Card>
       <p className="text-sm font-semibold text-w-text">{result.headline}</p>
       {result.summary && <p className="text-xs text-w-dim line-clamp-5">{result.summary}</p>}
       {result.flights && result.flights.options.length > 0 && <FlightRows flights={result.flights} />}
-      {pick && (
-        <div className="rounded-xl bg-w-surface2/60 p-2.5 space-y-2">
-          <div className="flex gap-3">
-            <Photo url={pick.image_url} size={104} alt={pick.name} />
-            <div className="min-w-0 space-y-1">
-              <p className="text-[10px] font-bold tracking-wider text-w-accent">TOP PICK</p>
-              <p className="text-sm font-semibold text-w-text leading-snug">{pick.name}</p>
-              <div className="flex flex-wrap items-center gap-1.5 text-xs text-w-dim">
-                {pick.brand && <span>{pick.brand}</span>}
-                {pick.rating && <Rating rating={pick.rating} />}
-              </div>
-              {pick.price_text && <p className="text-base font-bold text-w-text">{pick.price_text}</p>}
-            </div>
-          </div>
-          {!!pick.why?.length && (
-            <ul className="space-y-1">
-              {pick.why.map((reason) => (
-                <li key={reason} className="flex gap-1.5 text-xs text-w-text">
-                  <CheckCircle2 size={12} className="mt-0.5 shrink-0 text-emerald-400" />
-                  <span>{reason}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          {buy && (
-            <a
-              href={buy}
-              {...EXTERNAL}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-w-accent px-3 py-1.5 text-xs font-semibold text-w-on-accent hover:opacity-90"
-            >
-              View at {pick.retailer || host(buy)} <ExternalLink size={12} />
-            </a>
-          )}
-        </div>
-      )}
-      {result.alternatives.length > 0 && (
-        <div className="space-y-1.5 border-t border-w-line pt-2">
-          <p className="text-[10px] font-semibold tracking-wider text-w-dim">ALSO COMPARED</p>
-          {result.alternatives.map((alt) => {
-            const link = httpUrl(alt.buy_url)
-            return (
-              <div key={alt.name} className="flex items-center gap-2.5">
-                <Photo url={alt.image_url} size={40} alt={alt.name} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-medium text-w-text">{alt.name}</p>
-                  {alt.brand && <p className="truncate text-[10px] text-w-dim">{alt.brand}</p>}
-                </div>
-                {alt.price_text && <span className="text-xs font-semibold text-w-text">{alt.price_text}</span>}
-                {link && (
-                  <a href={link} {...EXTERNAL} title={alt.retailer || host(link)} className="text-w-dim hover:text-w-text">
-                    <ExternalLink size={12} />
-                  </a>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
+      {pick && <TopPick pick={pick} />}
+      <Alternatives alternatives={result.alternatives} />
       {!pick && !!result.sections?.length && (
         <p className="text-xs text-w-dim">Covers: {result.sections.join(' · ')}</p>
       )}
@@ -196,10 +213,248 @@ function ResultCard({ result }: { result: AgentChatResult }) {
   )
 }
 
+// ── Espresso assistant ──────────────────────────────────────────────────────
+
+const STEP_ICON: Record<string, string> = {
+  ok: 'text-emerald-400', error: 'text-red-400', denied: 'text-red-400', unknown: 'text-orange-300',
+  held: 'text-orange-300', skipped: 'text-w-faint', claimed: 'text-w-dim',
+}
+
+/** How many of a run's steps the card shows before folding the rest away. */
+const VISIBLE_STEPS = 4
+
+function ProgressCard({ progress }: { progress?: AgentRunProgress }) {
+  const [open, setOpen] = useState(false)
+  const status = progress?.status ?? 'queued'
+  const working = status === 'queued' || status === 'running'
+  const steps = progress?.steps ?? []
+  const shown = open ? steps : steps.slice(-VISIBLE_STEPS)
+  const title = working
+    ? progress?.note || (status === 'queued' ? 'Starting…' : 'Working on it…')
+    : status === 'failed' ? progress?.note || 'Stopped' : progress?.note || 'Done'
+  return (
+    <Card>
+      <p className="flex items-center gap-1.5 text-xs font-medium text-w-text">
+        {working
+          ? <Loader2 size={13} className="animate-spin text-w-accent" />
+          : status === 'failed'
+            ? <XOctagon size={13} className="text-red-400" />
+            : <CheckCircle2 size={13} className="text-emerald-400" />}
+        {title}
+      </p>
+      {shown.length > 0 && (
+        <ol className="space-y-0.5">
+          {shown.map((step) => (
+            <li key={step.seq} className="flex items-start gap-1.5 text-[11px] text-w-dim">
+              <CircleDashed size={10} className={`mt-0.5 shrink-0 ${STEP_ICON[step.status] ?? 'text-w-dim'}`} />
+              <span className="min-w-0 break-words">{step.label}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {steps.length > VISIBLE_STEPS && (
+        <button type="button" onClick={() => setOpen((v) => !v)} className="text-[11px] text-w-dim hover:text-w-text">
+          {open ? 'Show fewer' : `Show all ${steps.length} steps`}
+        </button>
+      )}
+    </Card>
+  )
+}
+
+const RESERVATION_TEXT: Record<string, string> = {
+  booked: 'Booked',
+  unverified: 'Submitted, not confirmed by the site',
+  unavailable: 'That time was not available',
+  handoff: 'Needs payment details: finish it yourself',
+  blocked: 'The site asked for a login or a human check',
+  failed: 'Could not be booked',
+}
+
+function isKnownBlock(block: { type: string }): block is AgentResultBlock {
+  return ['picks', 'flights', 'sections', 'sources', 'emails', 'events', 'reservation'].includes(block.type)
+}
+
+function Block({ block }: { block: AgentResultBlock }) {
+  switch (block.type) {
+    case 'flights':
+      return block.flights?.options?.length ? <FlightRows flights={block.flights} /> : null
+    case 'picks':
+      return (
+        <>
+          {block.top_pick && <TopPick pick={block.top_pick} />}
+          <Alternatives alternatives={block.alternatives ?? []} />
+        </>
+      )
+    case 'sections':
+      return (
+        <>
+          {block.sections.map((section) => (
+            <div key={section.heading + section.body_md.slice(0, 20)} className="prose prose-sm prose-invert max-w-none text-xs">
+              {section.heading && <p className="text-xs font-semibold text-w-text">{section.heading}</p>}
+              {/* The server strips unverified links and images; this is the
+                  second lock: only http(s) links render, and never an image. */}
+              <Markdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  a: ({ href, children }) =>
+                    href && /^https?:\/\//i.test(href) ? <a {...EXTERNAL} href={href}>{children}</a> : <>{children}</>,
+                  img: () => null,
+                }}
+              >
+                {section.body_md}
+              </Markdown>
+            </div>
+          ))}
+        </>
+      )
+    case 'sources':
+      return (
+        <div className="flex flex-wrap gap-1.5 border-t border-w-line pt-2">
+          {block.sources.map((source) => {
+            const url = httpUrl(source.url)
+            return url ? (
+              <a key={url} href={url} {...EXTERNAL} className="rounded-full border border-w-line px-2 py-0.5 text-[10px] text-w-dim hover:text-w-text">
+                {source.title || host(url)}
+              </a>
+            ) : null
+          })}
+        </div>
+      )
+    case 'emails':
+      return (
+        <ul className="space-y-1.5">
+          {block.items.map((item) => (
+            <li key={item.message_id} className="flex gap-2 rounded-lg bg-w-surface2/60 p-2">
+              <Mail size={13} className="mt-0.5 shrink-0 text-w-dim" />
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold text-w-text">{item.subject || '(no subject)'}</p>
+                <p className="truncate text-[11px] text-w-dim">{item.from}</p>
+                {item.snippet && <p className="line-clamp-2 text-[11px] text-w-faint">{item.snippet}</p>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )
+    case 'events':
+      return (
+        <ul className="space-y-1.5">
+          {block.items.map((item) => (
+            <li key={item.event_id} className="flex gap-2 rounded-lg bg-w-surface2/60 p-2">
+              <CalendarDays size={13} className="mt-0.5 shrink-0 text-w-dim" />
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold text-w-text">{item.title}</p>
+                <p className="text-[11px] text-w-dim">{formatWhen(item.start, item.end)}</p>
+                {(item.location || !!item.attendee_count) && (
+                  <p className="truncate text-[11px] text-w-faint">
+                    {[item.location, item.attendee_count ? `${item.attendee_count} invited` : null].filter(Boolean).join(' · ')}
+                  </p>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )
+    case 'reservation': {
+      const link = httpUrl(block.handoff_url)
+      return (
+        <div className="rounded-xl bg-w-surface2/60 p-2.5 space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <UtensilsCrossed size={13} className="text-w-accent" />
+            <p className="text-xs font-semibold text-w-text">{block.venue}</p>
+            <span className={`ml-auto text-[10px] font-semibold ${block.status === 'booked' ? 'text-emerald-400' : 'text-orange-300'}`}>
+              {RESERVATION_TEXT[block.status] ?? block.status}
+            </span>
+          </div>
+          <p className="text-[11px] text-w-dim">{block.when} · party of {block.party_size}</p>
+          {block.confirmation && <p className="font-mono text-[11px] text-w-text">Confirmation {block.confirmation}</p>}
+          {link && (
+            <a href={link} {...EXTERNAL} className="inline-flex items-center gap-1.5 rounded-lg border border-w-line px-3 py-1.5 text-xs font-semibold text-w-text hover:bg-w-surface2">
+              Finish booking at {host(link)} <ExternalLink size={12} />
+            </a>
+          )}
+        </div>
+      )
+    }
+  }
+}
+
+function formatWhen(start: string, end?: string | null): string {
+  const from = new Date(start)
+  if (Number.isNaN(from.getTime())) return end ? `${start} to ${end}` : start
+  // A date with no time is an all-day event; don't show it shifted by the timezone.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(start)) return start
+  const to = end ? new Date(end) : null
+  const day = from.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+  const time = (d: Date) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  return to && !Number.isNaN(to.getTime()) ? `${day}, ${time(from)} to ${time(to)}` : `${day}, ${time(from)}`
+}
+
+function ResultV2Card({ result }: { result: AgentChatResultV2 }) {
+  const blocks = result.blocks.filter(isKnownBlock)
+  return (
+    <Card>
+      <p className="text-sm font-semibold text-w-text">{result.headline}</p>
+      {result.summary && <p className="whitespace-pre-line text-xs text-w-dim">{result.summary}</p>}
+      {blocks.map((block) => <Block key={block.type} block={block} />)}
+      {!!result.caveats?.length && (
+        <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-w-dim">
+          {result.caveats.map((caveat) => <li key={caveat}>{caveat}</li>)}
+        </ul>
+      )}
+    </Card>
+  )
+}
+
+const ACTION_STATUS: Record<AgentActionReceipt['status'], { label: string; tone: string }> = {
+  done: { label: 'Done', tone: 'text-emerald-400' },
+  dry_run: { label: 'Dry run', tone: 'text-orange-300' },
+  unknown: { label: 'Outcome unknown', tone: 'text-orange-300' },
+  failed: { label: 'Did not go through', tone: 'text-red-400' },
+  handoff: { label: 'Over to you', tone: 'text-w-accent' },
+}
+
+function ActionLines({ lines }: { lines: { label: string; value: string; mono?: boolean }[] }) {
+  if (lines.length === 0) return null
+  return (
+    <dl className="space-y-1 text-[11px]">
+      {lines.map((line) => (
+        <div key={line.label + line.value} className="flex gap-2">
+          <dt className="w-20 shrink-0 text-w-dim">{line.label}</dt>
+          <dd className={`min-w-0 whitespace-pre-line break-words text-w-text ${line.mono ? 'font-mono' : ''}`}>{line.value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+function ActionReceiptCard({ receipt }: { receipt: AgentActionReceipt }) {
+  const status = ACTION_STATUS[receipt.status] ?? ACTION_STATUS.done
+  const link = receipt.link ? httpUrl(receipt.link.url) : null
+  const Icon = receipt.status === 'done' ? BadgeCheck : receipt.status === 'failed' ? XOctagon : AlertTriangle
+  return (
+    <Card>
+      <div className="flex items-center gap-1.5">
+        <Icon size={15} className={status.tone} />
+        <p className="text-sm font-semibold text-w-text">{receipt.title}</p>
+        <span className={`ml-auto rounded-full bg-w-surface2 px-2 py-0.5 text-[9px] font-bold tracking-wider ${status.tone}`}>
+          {status.label.toUpperCase()}
+        </span>
+      </div>
+      <ActionLines lines={receipt.lines} />
+      {receipt.note && <p className="text-[11px] text-w-dim">{receipt.note}</p>}
+      {link && (
+        <a href={link} {...EXTERNAL} className="inline-flex items-center gap-1.5 rounded-lg border border-w-line px-3 py-1.5 text-xs font-semibold text-w-text hover:bg-w-surface2">
+          {receipt.link?.label || 'Open'} <ExternalLink size={12} />
+        </a>
+      )}
+    </Card>
+  )
+}
+
 function closedText(meta: AgentChatMetadata, status: string): string {
   switch (status) {
     case 'answered': return meta.answer_text || 'Answered'
-    case 'superseded': return 'Replaced by a newer result'
+    case 'superseded': return isAssistantPrompt(meta) ? 'You moved on to something else' : 'Replaced by a newer result'
     case 'expired': return 'This question expired'
     default: return 'Closed'
   }
@@ -266,7 +521,14 @@ function PromptCard({
       </p>
     )
   } else if (forSomeoneElse) {
-    footer = <p className="text-[11px] text-w-dim">Waiting for the buyer to answer.</p>
+    footer = (
+      <p className="text-[11px] text-w-dim">
+        {isAssistantPrompt(meta) ? 'Waiting for the person who asked.' : 'Waiting for the buyer to answer.'}
+      </p>
+    )
+  } else if (view.buttons.length === 0) {
+    // An open question with no suggested answers: the reply is whatever they type.
+    footer = <p className="flex items-center gap-1.5 text-[11px] text-w-dim"><HelpCircle size={12} />Reply to answer.</p>
   } else {
     footer = (
       <>
@@ -297,6 +559,11 @@ function PromptCard({
   return (
     <Card>
       <p className="text-sm font-semibold text-w-text">{heading}</p>
+      {view.action && (
+        <div className="rounded-xl bg-w-surface2/60 p-2.5">
+          <ActionLines lines={view.action.lines ?? []} />
+        </div>
+      )}
       {offer && (
         <div className="flex items-center gap-2.5 rounded-xl bg-w-surface2/60 p-2">
           <Photo url={offer.image_url} size={56} alt={offer.item_name} />
@@ -388,6 +655,11 @@ export default function AgentCardMessage({
 }) {
   if (metadata.kind === 'agent_card_result' && metadata.result) return <ResultCard result={metadata.result} />
   if (metadata.kind === 'agent_card_receipt' && metadata.receipt) return <ReceiptCard receipt={metadata.receipt} />
+  if (metadata.kind === 'agent_progress') return <ProgressCard progress={metadata.progress} />
+  if (metadata.kind === 'agent_result' && metadata.result_v2) return <ResultV2Card result={metadata.result_v2} />
+  if (metadata.kind === 'agent_receipt' && metadata.action_receipt) {
+    return <ActionReceiptCard receipt={metadata.action_receipt} />
+  }
   if (metadata.kind === 'agent_card_prompt' && metadata.view) {
     // The heading is the server's fixed question text; the content holds the
     // user-written card title and is never parsed for it.

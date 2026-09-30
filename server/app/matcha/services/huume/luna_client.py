@@ -217,7 +217,15 @@ class LunaSession:
         after_request: _RequestHook | None = None,
         max_tool_calls: int | None = None,
         include: list[str] | None = None,
+        chain: bool = True,
     ) -> LunaResponse:
+        """One model call.
+
+        `chain=False` sends no `previous_response_id` and adopts none: the
+        caller resends the whole conversation each call. A caller that sets
+        `store=False` must also set `chain=False`, since the provider cannot
+        chain onto a response it did not keep.
+        """
         settings = get_settings()
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is required for Huume Luna")
@@ -245,7 +253,7 @@ class LunaSession:
         # "required" is only valid alongside a non-empty tool array.
         if tool_choice and (tool_choice != "required" or payload["tools"]):
             payload["tool_choice"] = tool_choice
-        if self._previous_response_id:
+        if chain and self._previous_response_id:
             payload["previous_response_id"] = self._previous_response_id
         # Structured-output switch for tool-less callers that parse the reply
         # as JSON. Without it the model may wrap the object in prose and the
@@ -275,7 +283,8 @@ class LunaSession:
             response=data,
         )
         # An id-less response keeps the existing chain rather than resetting it.
-        self._previous_response_id = data.get("id") or self._previous_response_id
+        if chain:
+            self._previous_response_id = data.get("id") or self._previous_response_id
         calls = []
         for item in _function_call_items(data):
             call_id = str(item.get("call_id") or "")

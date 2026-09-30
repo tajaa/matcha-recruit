@@ -5,6 +5,17 @@ The matcha server answers it with a web agent and a structured result page.
 The work runs natively. It is not AutoPR/halion, which is operator tooling on one Mac.
 It is not the MCP connector either: that is push-only, so it can't advance a card by itself.
 
+## The loop is the agent runtime's
+
+`agent.py` no longer holds a loop of its own. `run_card_agent` builds the card's limits, abilities (`web` + `shopping`, plus `flights` first for a travel ask when a Duffel token is set) and result contract, and calls `agent_runtime/runner.run_agent`. The tools are declared in the runtime's registry (`agent_runtime/abilities/web.py`, `abilities/flights.py`); the Duffel client itself stays in `flights.py` here; `tools.py` holds the card's `finish` and renders the list.
+
+Two things follow:
+
+- The limits (`_MAX_*`, `_*_SECONDS`) and the collaborators (`get_luna_client`, `fetch_page_tool`, `fetch_public`, `extract_page`) stay module attributes of `agent.py`, read at call time. This suite patches them there, and a re-export would turn those patches into no-ops.
+- Card runs store `agent_result.v1` exactly as before. The chat-invoked assistant stores v2; `agent_runtime/result.read_result` reads either.
+
+→ `../agent_runtime/CLAUDE.md`
+
 ## Lifecycle
 
 | Event | Card column | Code |

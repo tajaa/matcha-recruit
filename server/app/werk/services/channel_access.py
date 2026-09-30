@@ -16,6 +16,9 @@ class ChannelScope(StrEnum):
     OPERATIONS = "operations"
     PROJECT_DISCUSSION = "project_discussion"
     COMMUNITY = "community"
+    # One person's private conversation with Espresso (the assistant). Exactly
+    # one member, its owner; nobody else can be added.
+    ASSISTANT = "assistant"
 
 
 class ChannelCapability(StrEnum):
@@ -38,6 +41,8 @@ class ChannelAccess:
     is_member: bool
     member_role: str | None
     is_platform_admin: bool
+    user_id: UUID | None = None
+    assistant_user_id: UUID | None = None
 
 
 def capability_allowed(
@@ -46,7 +51,20 @@ def capability_allowed(
     features: Mapping[str, bool],
     capability: ChannelCapability,
     is_platform_admin: bool = False,
+    user_id: UUID | None = None,
+    assistant_user_id: UUID | None = None,
 ) -> bool:
+    if scope is ChannelScope.ASSISTANT:
+        # Decided BEFORE the platform-admin bypass, on purpose: this
+        # conversation can hold a person's email and calendar, so it is its
+        # owner's alone. Chat only, no calls, no automation, no managing.
+        return (
+            capability is ChannelCapability.CHAT
+            and user_id is not None
+            and user_id == assistant_user_id
+            and bool(features.get("espresso_assistant"))
+            and bool(features.get("matcha_work"))
+        )
     if is_platform_admin:
         return True
     if scope is ChannelScope.PROJECT_DISCUSSION:
@@ -69,6 +87,7 @@ async def load_channel_access(
         """
         SELECT ch.id, ch.company_id, COALESCE(ch.channel_scope, 'operations') AS channel_scope,
                comp.enabled_features, comp.signup_source,
+               ch.assistant_user_id,
                cm.role AS member_role,
                cm.removed_for_inactivity IS NOT TRUE AS is_member
           FROM channels ch
@@ -93,7 +112,24 @@ async def load_channel_access(
         is_member=bool(row["is_member"]),
         member_role=row["member_role"],
         is_platform_admin=user_role == "admin",
+        user_id=user_id,
+        assistant_user_id=row.get("assistant_user_id"),
     )
+
+
+class ChannelIsPrivateConversation(PermissionError):
+    pass
+
+
+def refuse_membership_change(access: ChannelAccess) -> None:
+    """A private conversation with Espresso has one member and stays that way:
+    no joining, inviting, renaming, archiving, deleting, handing over or
+    charging for it."""
+    if access.scope is ChannelScope.ASSISTANT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your conversation with Espresso is private and can't be changed.",
+        )
 
 
 def assert_channel_capability(access: ChannelAccess, capability: ChannelCapability) -> None:
@@ -102,6 +138,8 @@ def assert_channel_capability(access: ChannelAccess, capability: ChannelCapabili
         features=access.features,
         capability=capability,
         is_platform_admin=access.is_platform_admin,
+        user_id=access.user_id,
+        assistant_user_id=access.assistant_user_id,
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

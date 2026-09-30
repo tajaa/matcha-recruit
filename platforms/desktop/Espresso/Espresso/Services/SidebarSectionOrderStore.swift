@@ -22,6 +22,8 @@ final class SidebarSectionOrderStore {
         case productivity
         case threads
         case email
+        /// The person's private conversation with Espresso (the assistant).
+        case assistant
 
         var id: String { rawValue }
 
@@ -34,6 +36,7 @@ final class SidebarSectionOrderStore {
             case .productivity: return "checklist"
             case .threads:  return "bubble.left.and.bubble.right"
             case .email:    return "envelope"
+            case .assistant: return "sparkles"
             }
         }
 
@@ -47,6 +50,7 @@ final class SidebarSectionOrderStore {
             case .productivity: return "Productivity"
             case .threads:  return "Threads"
             case .email:    return "Email"
+            case .assistant: return "Espresso"
             }
         }
     }

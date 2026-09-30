@@ -65,6 +65,13 @@ AGENT_CARD_MONTHLY_RUNS: dict[str, int] = {
 }
 
 # Plan ordering for ">= lite" style checks.
+# Espresso assistant runs per UTC day. Every chat message is a run, so this is
+# a daily allowance; the monthly agent-card allowance above is counted apart.
+ASSISTANT_DAILY_RUNS: dict[str, int] = {
+    PLAN_PRO: 30,
+    PLAN_BUSINESS: 60,
+}
+
 _PLAN_RANK = {PLAN_FREE: 0, PLAN_LITE: 1, PLAN_PRO: 2, PLAN_BUSINESS: 2}
 
 # Journal kinds gated to lite+ (basic note/todo/journal stay free).
@@ -198,6 +205,7 @@ def features_for_plan(plan: str) -> dict[str, bool]:
         "paid_channels": plan == PLAN_PRO,
         "business_modes": plan == PLAN_BUSINESS,
         "agent_cards": pro_plus,
+        "assistant": pro_plus,
     }
 
 
@@ -233,10 +241,31 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
         # Informational, like the token quota above.
         pass
 
+    try:
+        from ..matcha_work.agent_runtime.quota import assistant_usage
+
+        quotas["assistant_runs"] = await assistant_usage(user_id, plan=plan)
+    except Exception:
+        pass
+
+    # What the WORKSPACE has switched on, as opposed to what the plan allows.
+    # The desktop app has no other view of company flags, and it must not
+    # offer a surface the workspace has off.
+    workspace = {"espresso_assistant": False}
+    if company_id is not None:
+        try:
+            from ..matcha_work.agent_runtime.enqueue import workspace_enabled
+
+            workspace["espresso_assistant"] = await workspace_enabled(company_id)
+        except Exception:
+            # Informational, like the quotas above.
+            pass
+
     return {
         "plan": plan,
         "features": features_for_plan(plan),
         "quotas": quotas,
+        "workspace": workspace,
     }
 
 
