@@ -22,6 +22,7 @@ from ..services.channel_access import (
     ChannelScope,
     assert_channel_capability,
     load_channel_access,
+    refuse_membership_change,
 )
 
 logger = logging.getLogger(__name__)
@@ -176,6 +177,20 @@ async def _resolve_agent_card_prompt_statuses(conn, messages, *, channel_id: UUI
         return await overlay_prompt_statuses(conn, messages, channel_id=channel_id)
     except Exception:
         logger.warning("agent-card question status overlay failed", exc_info=True)
+        return messages
+
+
+async def _resolve_assistant_run_states(conn, messages, *, channel_id: UUID):
+    """Overlay each Espresso assistant run's state onto its progress message,
+    and word its own questions' answers, so a reloaded chat shows where a run
+    got to instead of a spinner. Best-effort, like the overlay above."""
+    try:
+        from app.matcha.services.matcha_work.agent_runtime import chat_progress, prompts
+
+        messages = await prompts.overlay_statuses(conn, messages, channel_id=channel_id)
+        return await chat_progress.overlay_run_progress(conn, messages, channel_id=channel_id)
+    except Exception:
+        logger.warning("assistant run state overlay failed", exc_info=True)
         return messages
 
 
@@ -486,6 +501,20 @@ async def _require_channel_capability(
     return access
 
 
+async def _require_shared_channel(
+    conn,
+    channel_id: UUID,
+    current_user: CurrentUser,
+    capability: ChannelCapability = ChannelCapability.CHAT,
+):
+    """`_require_channel_capability`, for every route that changes who is in a
+    channel or what the channel is. A private conversation with Espresso is
+    refused: see `refuse_membership_change`."""
+    access = await _require_channel_capability(conn, channel_id, current_user, capability)
+    refuse_membership_change(access)
+    return access
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -550,6 +579,9 @@ async def list_channels(
                  OR cm.user_id IS NOT NULL
                )
                AND ($4::text IS NULL OR COALESCE(ch.channel_scope, 'operations') = $4)
+               -- A private conversation with Espresso is opened from its own
+               -- entry (POST /matcha-work/assistant/channel), never listed.
+               AND COALESCE(ch.channel_scope, 'operations') <> 'assistant'
                AND (
                  $5::boolean
                  OR COALESCE(ch.channel_scope, 'operations') = 'community'
@@ -1610,6 +1642,7 @@ async def get_channel_messages(
             conn, rows, channel_id=channel_id,
         )
         rows = await _resolve_agent_card_prompt_statuses(conn, rows, channel_id=channel_id)
+        rows = await _resolve_assistant_run_states(conn, rows, channel_id=channel_id)
         msg_ids = [r["id"] for r in rows]
         reactions_map = await _fetch_reactions_map(conn, msg_ids)
         return [_row_to_message(r, reactions_map) for r in reversed(rows)]
@@ -1868,7 +1901,7 @@ async def join_channel(
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         ch = await conn.fetchrow(
             """
             SELECT ch.id, COALESCE(ch.visibility, 'public') AS visibility,
@@ -1941,7 +1974,7 @@ async def add_members(
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         # Verify channel exists + requester has permission
         member_row = await conn.fetchrow(
             """
@@ -2069,7 +2102,7 @@ async def update_channel(
 ):
     """Update a channel. Owner/moderator can change name/description. Only owner can change visibility."""
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         row = await conn.fetchrow(
             "SELECT company_id FROM channels WHERE id = $1", channel_id
         )
@@ -2173,7 +2206,7 @@ async def leave_channel(
 ):
     """Leave a channel. Owners must transfer ownership first."""
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         member = await conn.fetchrow(
             "SELECT role, stripe_subscription_id FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -2270,7 +2303,7 @@ async def set_member_role(
         raise HTTPException(status_code=400, detail="Cannot change your own role")
 
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         my_role = await conn.fetchval(
             "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -2306,7 +2339,7 @@ async def kick_member(
         raise HTTPException(status_code=400, detail="Cannot kick yourself. Use /leave instead.")
 
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         my_role = await conn.fetchval(
             "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -2356,7 +2389,7 @@ async def unarchive_channel(
 ):
     """Restore an archived channel. Owner or admin only."""
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         row = await conn.fetchrow("SELECT is_archived FROM channels WHERE id = $1", channel_id)
         if not row:
             raise HTTPException(status_code=404, detail="Channel not found")
@@ -2382,7 +2415,7 @@ async def delete_channel(
 ):
     """Soft-delete a channel (mark archived). Owner or admin only. Cancels any active paid subscriptions."""
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         row = await conn.fetchrow(
             "SELECT name, is_archived, is_paid FROM channels WHERE id = $1",
             channel_id,
@@ -2469,7 +2502,7 @@ async def transfer_ownership(
 ):
     """Transfer channel ownership to another member."""
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         my_role = await conn.fetchval(
             "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -2598,7 +2631,7 @@ async def create_channel_checkout(
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         ch = await conn.fetchrow(
             """
             SELECT ch.id, ch.name, ch.is_paid, ch.stripe_price_id, ch.created_by,
@@ -2676,7 +2709,7 @@ async def cancel_channel_subscription(
 ):
     """Cancel the current user's subscription to a paid channel."""
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         member = await conn.fetchrow(
             "SELECT stripe_subscription_id, subscription_status FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -2716,7 +2749,7 @@ async def update_channel_price_route(
     that amount to each subscription. Only new subscribers get the new price.
     """
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         ch = await conn.fetchrow(
             """
             SELECT is_paid, stripe_product_id, stripe_price_id, currency,
@@ -2773,7 +2806,7 @@ async def update_paid_settings(
 ):
     """Update inactivity settings for a paid channel. Owner only."""
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         my_role = await conn.fetchval(
             "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -3121,7 +3154,7 @@ async def create_invite(
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         # Verify channel belongs to user's company
         ch_exists = await conn.fetchval(
             "SELECT EXISTS(SELECT 1 FROM channels WHERE id = $1 AND company_id = $2)",
@@ -3174,7 +3207,7 @@ async def list_invites(
 ):
     """List active invite links for a channel. Owner/moderator only."""
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         my_role = await conn.fetchval(
             "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -3205,7 +3238,7 @@ async def revoke_invite(
 ):
     """Revoke an invite link. Owner/moderator only."""
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         my_role = await conn.fetchval(
             "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -3248,7 +3281,7 @@ async def join_by_invite(
             raise HTTPException(status_code=410, detail="This invite link has expired")
 
         channel_id = invite["channel_id"]
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
 
         # Same-company is always allowed; cross-company invite redeem is
         # allowed only for public channels in personal-account workspaces
@@ -3408,7 +3441,7 @@ async def create_email_invites(
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         ch = await conn.fetchrow(
             "SELECT id, name, company_id, COALESCE(is_paid, false) AS is_paid, is_archived "
             "FROM channels WHERE id = $1",
@@ -3720,7 +3753,7 @@ async def send_tip(
         raise HTTPException(status_code=400, detail="Message must be 200 characters or fewer")
 
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
+        await _require_shared_channel(conn, channel_id, current_user)
         # Verify membership
         is_member = await conn.fetchval(
             "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",

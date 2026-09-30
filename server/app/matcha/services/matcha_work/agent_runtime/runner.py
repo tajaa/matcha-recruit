@@ -205,25 +205,40 @@ async def run_agent(
                    audit_for(tool, payload, output), status)
         return for_model(tool, payload)
 
-    async def commit(ability: Ability, tool: AgentTool, args: dict, *, approved: bool) -> tuple[dict, RunOutcome | None]:
-        """The commit pipeline. Returns (output for the model, run-ending outcome or None)."""
+    async def commit(ability: Ability, tool: AgentTool, args: dict, *,
+                     frozen: FrozenAction | None = None) -> tuple[dict, RunOutcome | None]:
+        """The commit pipeline. Returns (output for the model, run-ending outcome or None).
+
+        `frozen` is an action the person already said yes to: its arguments,
+        targets and preview are used exactly as they were frozen.
+        """
         assert tool.targets is not None and tool.preview is not None
-        try:
-            targets = tuple(tool.targets(args, state))
-            preview = dict(tool.preview(args, state))
-        except Exception as exc:
-            out = {"error": f"Those arguments are not usable: {exc}"}
-            await step(tool.name, "policy", f"Refused {tool.name}", args, out, "error")
-            return out, None
+        approved = frozen is not None
+        if frozen is not None:
+            args, targets, preview = dict(frozen.args), frozen.targets, dict(frozen.preview)
+        else:
+            try:
+                if tool.resolve is not None:
+                    args = dict(tool.resolve(args, state))
+                targets = tuple(tool.targets(args, state))
+                preview = dict(tool.preview(args, state))
+            except Exception as exc:
+                out = {"error": f"Those arguments are not usable: {exc}"}
+                await step(tool.name, "policy", f"Refused {tool.name}", args, out, "error")
+                return out, None
         base = ctx.policy or policy.PolicyContext(
             surface=ctx.surface, private_conversation=False, grounding=policy.Grounding(),
         )
         counts = dict(base.counts)
         for _limit, window in tool.ceilings:
             counts[(tool.name, window)] = counts.get((tool.name, window), 0) + state.commits.get(tool.name, 0)
+        participants = {**dict(base.grounding.ref_participants), **state.ref_participants}
         grounding = replace(
             base.grounding,
-            ref_participants={**dict(base.grounding.ref_participants), **state.ref_participants},
+            ref_participants=participants,
+            pointed_refs=policy.pointed_refs(
+                base.grounding.user_texts, base.grounding.pointed_refs, participants,
+            ),
             trusted_domains=base.grounding.trusted_domains | ability.trusted_domains,
         )
         decision = policy.evaluate_commit(
@@ -249,7 +264,8 @@ async def run_agent(
         title = str(preview.get("title") or tool.name)
         step_id = await store.claim_step(
             ctx.run_id, seq, tool.name, "commit", title[:200],
-            _safe_for_audit(args), _safe_for_audit({**shown, "mode": ctx.commit_mode}),
+            # `weight` is what the ceilings count: one call can be many actions.
+            _safe_for_audit(args), _safe_for_audit({**shown, "mode": ctx.commit_mode, "weight": weight}),
         )
         # Counted from the claim, not the outcome: an `unknown` send may have gone out.
         state.commits[tool.name] = state.commits.get(tool.name, 0) + weight
@@ -297,7 +313,7 @@ async def run_agent(
         owned = owners.get(ctx.resume.tool)
         if owned is None or owned[1].effect != "commit":
             raise AgentRunError("That action is no longer available.")
-        approved_out, _ended = await commit(owned[0], owned[1], dict(ctx.resume.args), approved=True)
+        approved_out, _ended = await commit(owned[0], owned[1], dict(ctx.resume.args), frozen=ctx.resume)
         input_items.append(text_item(
             "user",
             "I approved the action you asked about. It has already been carried out by the system; "
@@ -393,7 +409,7 @@ async def run_agent(
                 continue
             ability, tool = owned
             if tool.effect == "commit":
-                out, ended = await commit(ability, tool, args, approved=False)
+                out, ended = await commit(ability, tool, args)
                 if ended is not None:
                     return ended
                 outputs.append(tool_output_item(call["call_id"], out))

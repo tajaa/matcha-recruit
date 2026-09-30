@@ -16,7 +16,8 @@ asking. Two things override that default:
 when it is their own, or when it sits on a thread or event they pointed at. A
 thread the agent merely READ grounds nothing: otherwise anyone who emails the
 person becomes a recipient the agent may write to unasked, which is the whole
-prompt-injection exfiltration path.
+prompt-injection exfiltration path. A typed address grounds itself only, never
+the other people on a thread it appears on.
 """
 from __future__ import annotations
 
@@ -162,20 +163,20 @@ def is_grounded(target: Target, g: Grounding) -> bool:
     return False
 
 
-def pointed_refs(user_texts: tuple[str, ...], context_refs: tuple[str, ...],
+def pointed_refs(user_texts: tuple[str, ...], context_refs: tuple[str, ...] | frozenset[str],
                  ref_participants: Mapping[str, frozenset[str]]) -> frozenset[str]:
     """The refs the person pointed at.
 
     A ref counts when the trigger message carried it as structured context, or
-    when the person's own text holds the ref id or the literal address of
-    someone on it. Reading a thread is not pointing at it.
+    when the person's own text holds the ref's id. Reading a thread is not
+    pointing at it, and neither is naming someone who happens to be on it: an
+    address the person typed grounds that address and nothing else. If it
+    pointed at every thread that address appears on, anyone could put
+    themselves on a thread with it and become a recipient.
     """
     pointed = {ref for ref in context_refs if ref}
-    typed: set[str] = set()
-    for text in user_texts:
-        typed |= extract_addresses(text)
-    for ref, participants in ref_participants.items():
-        if any(ref in text for text in user_texts) or (typed & participants):
+    for ref in ref_participants:
+        if ref and len(ref) >= 8 and any(ref in text for text in user_texts):
             pointed.add(ref)
     return frozenset(pointed)
 

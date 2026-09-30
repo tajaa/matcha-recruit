@@ -119,3 +119,62 @@ def wire_store(monkeypatch):
     monkeypatch.setattr(runner.store, "claim_step", claim)
     monkeypatch.setattr(runner.store, "resolve_step", resolve)
     return record, claim, resolve
+
+
+# ── a scripted connection ────────────────────────────────────────────────────
+from contextlib import asynccontextmanager  # noqa: E402
+
+
+class FakeConn:
+    """Answers queries by the first scripted substring they contain, and keeps
+    what was run. An unscripted read returns nothing; nothing here is a database."""
+
+    def __init__(self, script=None):
+        self.script = list(script or [])  # [(substring, value | callable(args))]
+        self.calls = []  # (method, query, args)
+        self.in_transaction = 0
+
+    def on(self, substring, value):
+        self.script.insert(0, (substring, value))
+        return self
+
+    @asynccontextmanager
+    async def transaction(self):
+        self.in_transaction += 1
+        try:
+            yield
+        finally:
+            self.in_transaction -= 1
+
+    def _answer(self, method, query, args, default):
+        self.calls.append((method, " ".join(query.split()), args))
+        for substring, value in self.script:
+            if substring in query:
+                out = value(*args) if callable(value) else value
+                if isinstance(out, Exception):
+                    raise out
+                return out
+        return default
+
+    async def execute(self, query, *args):
+        return self._answer("execute", query, args, "OK")
+
+    async def fetch(self, query, *args):
+        return self._answer("fetch", query, args, [])
+
+    async def fetchrow(self, query, *args):
+        return self._answer("fetchrow", query, args, None)
+
+    async def fetchval(self, query, *args):
+        return self._answer("fetchval", query, args, None)
+
+    def ran(self, substring):
+        return [call for call in self.calls if substring in call[1]]
+
+
+def connection(conn):
+    @asynccontextmanager
+    async def factory(*_a, **_k):
+        yield conn
+
+    return factory

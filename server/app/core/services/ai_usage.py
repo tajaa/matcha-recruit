@@ -158,6 +158,7 @@ _SPLIT_SERVICE_PACKAGES = {
     "project_agent",
     "agent_card",
     "agent_runtime",
+    "browser",
     "project_service",
     "risk_assessment_service",
 }

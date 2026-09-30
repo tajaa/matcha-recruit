@@ -20,7 +20,7 @@ from uuid import UUID
 import httpx
 
 from ....core.services.secret_crypto import encrypt_secret, decrypt_secret
-from ....database import get_connection
+from ....database import connection_or_direct
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +34,42 @@ GOOGLE_OAUTH_CREDENTIALS_PATH = os.getenv(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "agent", "workspace", "credentials.json"),
 )
 
-GMAIL_SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.compose",
-]
+SCOPE_GMAIL_READONLY = "https://www.googleapis.com/auth/gmail.readonly"
+SCOPE_GMAIL_COMPOSE = "https://www.googleapis.com/auth/gmail.compose"
+SCOPE_GMAIL_MODIFY = "https://www.googleapis.com/auth/gmail.modify"
+SCOPE_CALENDAR_EVENTS = "https://www.googleapis.com/auth/calendar.events"
+
+# What every connection asks for. Reading, drafting and sending need no more.
+GMAIL_SCOPES = [SCOPE_GMAIL_READONLY, SCOPE_GMAIL_COMPOSE]
+
+# What the Espresso assistant's abilities add on top, asked for only when the
+# person switches that ability on (incremental consent).
+ABILITY_SCOPES: dict[str, tuple[str, ...]] = {
+    "email": (SCOPE_GMAIL_READONLY, SCOPE_GMAIL_COMPOSE),
+    "email_organize": (SCOPE_GMAIL_MODIFY,),
+    "calendar": (SCOPE_CALENDAR_EVENTS,),
+}
+
+
+def scopes_for(abilities: list[str] | tuple[str, ...] | None) -> list[str]:
+    """The scopes to request: the base set plus each named ability's, in a
+    stable order. An unknown ability name adds nothing."""
+    wanted = list(GMAIL_SCOPES)
+    for ability in abilities or ():
+        for scope in ABILITY_SCOPES.get(ability, ()):
+            if scope not in wanted:
+                wanted.append(scope)
+    return wanted
+
+
+def parse_granted_scopes(tokens: dict, requested: list[str]) -> list[str]:
+    """What Google actually granted. The token response names it in `scope`;
+    a person can untick a permission on the consent screen, so the requested
+    list is only the fallback for a response that does not say."""
+    granted = tokens.get("scope")
+    if isinstance(granted, str) and granted.strip():
+        return sorted(set(granted.split()))
+    return list(requested)
 
 # A newsletter is ~100 KB of HTML. Past this the reader shows the text body.
 BODY_HTML_MAX_CHARS = 1_000_000
@@ -71,6 +103,14 @@ def _decode_header(value: str | None) -> str:
         return str(make_header(decode_header(value)))
     except (HeaderParseError, LookupError, UnicodeDecodeError, ValueError):
         return value
+
+
+_HEADER_ADDRESS = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+")
+
+
+def addresses_in(header_value: str | None) -> set[str]:
+    """The bare addresses in a From/To/Cc header value, lowercased."""
+    return {match.group(0).lower() for match in _HEADER_ADDRESS.finditer(header_value or "")}
 
 
 # (limit, window seconds, label) — per user, however many requests or workers.
@@ -107,7 +147,8 @@ class GmailService:
         """Load and decrypt token from users.gmail_token."""
         if self._loaded:
             return
-        async with get_connection() as conn:
+        # Works in the API and in a Celery worker, which has no pool.
+        async with connection_or_direct() as conn:
             row = await conn.fetchrow("SELECT gmail_token FROM users WHERE id=$1", self.user_id)
         if row and row["gmail_token"]:
             raw = row["gmail_token"] if isinstance(row["gmail_token"], dict) else json.loads(row["gmail_token"])
@@ -134,7 +175,7 @@ class GmailService:
             "client_secret": encrypt_secret(token_data["client_secret"]),
             "scopes": token_data.get("scopes", []),
         }
-        async with get_connection() as conn:
+        async with connection_or_direct() as conn:
             await conn.execute(
                 "UPDATE users SET gmail_token=$1 WHERE id=$2",
                 json.dumps(encrypted), self.user_id,
@@ -144,6 +185,22 @@ class GmailService:
     @property
     def is_configured(self) -> bool:
         return self._token_data is not None and bool(self._token_data.get("refresh_token"))
+
+    @property
+    def granted_scopes(self) -> frozenset[str]:
+        """The scopes stored with the token. Call `load_token` first."""
+        if not self.is_configured:
+            return frozenset()
+        return frozenset(self._token_data.get("scopes") or [])
+
+    def missing_scopes(self, required) -> list[str]:
+        granted = self.granted_scopes
+        return [scope for scope in required if scope not in granted]
+
+    async def access_token(self) -> str:
+        """A valid access token, for another Google API on the same grant."""
+        await self.load_token()
+        return await self._get_access_token()
 
     async def get_status(self) -> dict:
         await self.load_token()
@@ -256,6 +313,89 @@ class GmailService:
         results = await _aio.gather(*[_fetch_one(s) for s in stubs])
         return [r for r in results if r is not None]
 
+    async def search(self, query: str, max_results: int = 20) -> list[dict]:
+        """Messages matching a Gmail search (`from:dana newer_than:7d`), newest
+        first, without bodies."""
+        import asyncio as _aio
+        await self.load_token()
+        data = await self._gmail_get("/users/me/messages", params=[
+            ("maxResults", str(max(1, min(int(max_results), 50)))),
+            ("q", (query or "").strip()[:500]),
+        ])
+
+        async def _one(stub: dict) -> dict | None:
+            try:
+                return await self.get_message_headers(stub["id"])
+            except Exception as e:
+                logger.warning("Failed to fetch message %s: %s", stub.get("id"), e)
+                return None
+
+        results = await _aio.gather(*[_one(stub) for stub in data.get("messages", [])])
+        return [r for r in results if r is not None]
+
+    async def get_message_headers(self, msg_id: str) -> dict:
+        """One message's headers and preview line, no body."""
+        data = await self._gmail_get(f"/users/me/messages/{msg_id}", params=[
+            ("format", "metadata"),
+            ("metadataHeaders", "From"), ("metadataHeaders", "To"), ("metadataHeaders", "Cc"),
+            ("metadataHeaders", "Subject"), ("metadataHeaders", "Date"),
+        ])
+        headers = {h["name"].lower(): h["value"] for h in (data.get("payload") or {}).get("headers", [])}
+        return {
+            "id": msg_id,
+            "thread_id": data.get("threadId"),
+            "subject": _decode_header(headers.get("subject", "(no subject)")),
+            "from": _decode_header(headers.get("from", "unknown")),
+            "to": _decode_header(headers.get("to", "")),
+            "cc": _decode_header(headers.get("cc", "")),
+            "date": headers.get("date", ""),
+            "snippet": html.unescape(data.get("snippet") or ""),
+            "is_unread": "UNREAD" in (data.get("labelIds") or []),
+        }
+
+    async def get_thread(self, thread_id: str) -> dict:
+        """A conversation: its messages' headers, oldest first, and everyone
+        on it (`participants`, bare lowercased addresses)."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", thread_id or ""):
+            raise ValueError("Invalid thread id")
+        data = await self._gmail_get(f"/users/me/threads/{thread_id}", params=[
+            ("format", "metadata"),
+            ("metadataHeaders", "From"), ("metadataHeaders", "To"), ("metadataHeaders", "Cc"),
+            ("metadataHeaders", "Subject"), ("metadataHeaders", "Date"),
+            ("metadataHeaders", "Message-ID"),
+        ])
+        messages = []
+        participants: set[str] = set()
+        for item in data.get("messages") or []:
+            headers = {h["name"].lower(): h["value"] for h in (item.get("payload") or {}).get("headers", [])}
+            for field in ("from", "to", "cc"):
+                participants |= addresses_in(headers.get(field))
+            messages.append({
+                "id": item.get("id"),
+                "message_id_header": headers.get("message-id"),
+                "subject": _decode_header(headers.get("subject", "(no subject)")),
+                "from": _decode_header(headers.get("from", "unknown")),
+                "date": headers.get("date", ""),
+            })
+        return {"thread_id": thread_id, "messages": messages, "participants": sorted(participants)}
+
+    async def modify_labels(self, msg_ids: list[str], *, add: list[str] | None = None,
+                            remove: list[str] | None = None) -> None:
+        """Add/remove labels on up to 50 messages (archive = remove INBOX).
+        Needs gmail.modify."""
+        ids = [m for m in msg_ids if re.fullmatch(r"[A-Za-z0-9_-]{1,128}", m or "")][:50]
+        if not ids:
+            raise ValueError("No valid message ids")
+        await self._gmail_post("/users/me/messages/batchModify", {
+            "ids": ids,
+            "addLabelIds": list(add or []),
+            "removeLabelIds": list(remove or []),
+        })
+
+    async def list_labels(self) -> list[dict]:
+        data = await self._gmail_get("/users/me/labels")
+        return [{"id": l.get("id"), "name": l.get("name")} for l in data.get("labels") or []]
+
     async def get_message(self, msg_id: str, *, include_html: bool = False) -> dict:
         """One message. `include_html` adds the raw HTML part (`body_html`)
         for the reader. Nothing else needs it, and building it for a list of
@@ -273,6 +413,8 @@ class GmailService:
             "message_id_header": headers.get("message-id"),
             "subject": _decode_header(headers.get("subject", "(no subject)")),
             "from": _decode_header(headers.get("from", "unknown")),
+            "to": _decode_header(headers.get("to", "")),
+            "cc": _decode_header(headers.get("cc", "")),
             "date": headers.get("date", ""),
             # Gmail's own preview line, entity-escaped the way it arrives.
             "snippet": html.unescape(data.get("snippet") or ""),

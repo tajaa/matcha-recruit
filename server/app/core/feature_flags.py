@@ -428,6 +428,16 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # /work/sym-chat pages. Requires matcha_work; default off; admin-toggle;
     # NOT in any tier overlay.
     "sym_chat": False,
+    # Espresso assistant — one general agent a person can ask from chat
+    # (services/matcha_work/agent_runtime/): a private conversation per
+    # person, plus `@espresso` in project chats. Each message is one bounded
+    # run over the abilities that person switched on (web, shopping, email,
+    # calendar, reservations). Tools that act outward pass a deterministic
+    # policy gate, post a receipt, and run only in the private conversation.
+    # Gates /matcha-work/assistant + the Assistant pages. Requires
+    # matcha_work; Pro/Business plan on top; default off; admin-toggle; NOT
+    # in any tier overlay.
+    "espresso_assistant": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,
@@ -837,6 +847,7 @@ FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "schedule_autopilot": ("employee_schedule", "huume", "matcha_work"),
     "matcha_ops_calls_all_members": ("matcha_ops",),
     "sym_chat": ("matcha_work",),
+    "espresso_assistant": ("matcha_work",),
 }
 
 

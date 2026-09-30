@@ -86,8 +86,14 @@ class AgentTool:
     timeout_message: str = "That took too long."
     too_late_message: str = "Not enough time left; finish with what you have."
     required_scopes: tuple[str, ...] = ()
-    # Commit tools. `targets` and `preview` are pure: they read the arguments
-    # and the run's state, and touch nothing.
+    # Commit tools. `resolve` turns the model's arguments into a complete,
+    # self-contained action (a bare reply gets its recipient, thread and
+    # subject written in), using what the run has seen. Everything after it,
+    # the policy, the preview and the handler, reads only the resolved
+    # arguments. That is what lets a held action be carried out later by a
+    # different run: the frozen arguments need nothing from the run that
+    # froze them. All three are pure.
+    resolve: Callable[[dict, "RunState"], dict] | None = None
     targets: Callable[[dict, "RunState"], tuple[Target, ...]] | None = None
     preview: Callable[[dict, "RunState"], dict] | None = None
     weight: Callable[[dict], int] | None = None  # how many actions one call is

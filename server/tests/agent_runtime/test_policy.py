@@ -173,16 +173,30 @@ def test_extraction_reads_addresses_and_hosts_apart():
     assert extract_addresses("") == frozenset() and extract_domains(None) == frozenset()
 
 
-def test_pointed_refs_come_from_context_ids_or_a_typed_participant():
+def test_pointed_refs_come_from_context_or_the_refs_own_id():
     participants = {
-        "thread-1": frozenset({"dana@example.org"}),
-        "thread-2": frozenset({"eve@attacker.test"}),
-        "thread-3": frozenset({"sam@example.net"}),
+        "thread-0001": frozenset({"dana@example.org"}),
+        "thread-0002": frozenset({"eve@attacker.test"}),
+        "thread-0003": frozenset({"sam@example.net"}),
+        "t3": frozenset({"short@example.net"}),
     }
-    assert pointed_refs(("reply to dana@example.org",), (), participants) == frozenset({"thread-1"})
-    assert pointed_refs(("reply on thread-3 please",), (), participants) == frozenset({"thread-3"})
-    assert pointed_refs(("reply to my landlord",), ("thread-2", ""), participants) == frozenset({"thread-2"})
+    assert pointed_refs(("reply on thread-0003 please",), (), participants) == frozenset({"thread-0003"})
+    assert pointed_refs(("reply to my landlord",), ("thread-0002", ""), participants) == frozenset({"thread-0002"})
     assert pointed_refs(("summarise my inbox",), (), participants) == frozenset()
+    # An id short enough to turn up in ordinary words points at nothing.
+    assert pointed_refs(("meet at t3 cafe",), (), participants) == frozenset()
+
+
+def test_a_typed_address_grounds_itself_and_nobody_else_on_its_threads():
+    # The attacker put themselves on a thread with the boss. Naming the boss
+    # must not make the attacker someone the agent may write to.
+    participants = {"thread-0009": frozenset({"boss@example.com", "eve@attacker.test"})}
+    texts = ("email boss@example.com the numbers",)
+    assert pointed_refs(texts, (), participants) == frozenset()
+    g = Grounding(user_texts=texts, ref_participants=participants,
+                  pointed_refs=pointed_refs(texts, (), participants))
+    assert is_grounded(Target("email", "boss@example.com", ref="thread-0009"), g)
+    assert not is_grounded(Target("email", "eve@attacker.test", ref="thread-0009"), g)
 
 
 def test_the_policy_module_imports_nothing_that_does_io():
