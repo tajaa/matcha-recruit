@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
 import {
-  BadgeCheck, CheckCircle2, Clock, ExternalLink, ImageIcon, Loader2, ShoppingBag, Star, XOctagon,
+  AlertTriangle, BadgeCheck, CheckCircle2, Clock, ExternalLink, ImageIcon, Loader2, ShieldCheck, ShoppingBag,
+  Star, Ticket, XOctagon,
 } from 'lucide-react'
 import type {
-  AgentChatButton, AgentChatMetadata, AgentChatPick, AgentChatPromptView, AgentChatReceipt, AgentChatResult,
+  AgentChatButton, AgentChatFlights, AgentChatMetadata, AgentChatPick, AgentChatPromptView, AgentChatReceipt,
+  AgentChatResult,
 } from '../../types'
+import { dayOffset, flightClock, flightDay, flightDuration, stopsText } from '../../utils/flightFormat'
 
 /**
  * Espresso's agent-card messages in a project chat, rendered as cards instead
@@ -62,6 +65,61 @@ function Rating({ rating }: { rating: NonNullable<AgentChatPick['rating']> }) {
   )
 }
 
+function FlightRows({ flights }: { flights: AgentChatFlights }) {
+  return (
+    <div className="space-y-1.5">
+      {flights.test_data && (
+        <span className="inline-block rounded-full bg-orange-500/15 px-2 py-0.5 text-[9px] font-bold tracking-wider text-orange-300">
+          TEST DATA · NOT REAL FARES
+        </span>
+      )}
+      {flights.options.map((option, i) => (
+        <div key={i} className="space-y-1 rounded-xl bg-w-surface2/60 p-2.5">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              {option.label && (
+                <span className="text-[10px] font-bold uppercase tracking-wider text-w-accent">{option.label}</span>
+              )}
+              <span className="truncate text-xs font-semibold text-w-text">{option.carriers.join(' + ')}</span>
+              {option.ticketing === 'separate' && (
+                <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-300">
+                  <Ticket size={10} /> 2 tickets
+                </span>
+              )}
+            </div>
+            <div className="shrink-0 text-right">
+              <p className="text-sm font-bold text-w-text">{option.total_with_bags_text || option.price_text}</p>
+              {option.total_with_bags_text && <p className="text-[10px] text-w-dim">with bags</p>}
+            </div>
+          </div>
+          {option.slices.map((slice, j) => {
+            const plus = dayOffset(slice.departing_at, slice.arriving_at)
+            return (
+              <p key={j} className="text-[11px] text-w-dim">
+                <span className="text-w-faint">{flightDay(slice.departing_at)} · </span>
+                <span className="text-w-text">
+                  {flightClock(slice.departing_at)} {slice.origin} → {flightClock(slice.arriving_at)} {slice.destination}
+                  {plus > 0 && <sup className="text-amber-300">+{plus}</sup>}
+                </span>
+                {' · '}{[flightDuration(slice.duration_minutes), stopsText(slice.stops)].filter(Boolean).join(' · ')}
+              </p>
+            )
+          })}
+          {option.warning && (
+            <p className="flex gap-1 text-[10px] text-amber-300">
+              <AlertTriangle size={10} className="mt-0.5 shrink-0" /> {option.warning}
+            </p>
+          )}
+        </div>
+      ))}
+      <p className="flex items-center gap-1 text-[10px] text-w-faint">
+        <ShieldCheck size={10} className="text-emerald-400" />
+        Searched from our server: no location, device, cookies or history sent.
+      </p>
+    </div>
+  )
+}
+
 function ResultCard({ result }: { result: AgentChatResult }) {
   const pick = result.top_pick
   const buy = httpUrl(pick?.buy_url)
@@ -69,6 +127,7 @@ function ResultCard({ result }: { result: AgentChatResult }) {
     <Card>
       <p className="text-sm font-semibold text-w-text">{result.headline}</p>
       {result.summary && <p className="text-xs text-w-dim line-clamp-5">{result.summary}</p>}
+      {result.flights && result.flights.options.length > 0 && <FlightRows flights={result.flights} />}
       {pick && (
         <div className="rounded-xl bg-w-surface2/60 p-2.5 space-y-2">
           <div className="flex gap-3">

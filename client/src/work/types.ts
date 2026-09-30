@@ -1282,12 +1282,40 @@ export type AgentChatPick = {
   why?: string[]
 }
 
+export type AgentChatFlightOption = {
+  label?: string | null
+  price_text?: string | null
+  total_with_bags_text?: string | null
+  bag_note?: string | null
+  carriers: string[]
+  ticketing: 'single' | 'separate'
+  slices: {
+    origin: string
+    destination: string
+    departing_at: string
+    arriving_at: string
+    stops: number
+    duration_minutes?: number | null
+    flight_numbers: string[]
+  }[]
+  warning?: string | null
+}
+
+export type AgentChatFlights = {
+  query_summary?: string
+  test_data?: boolean
+  searched_at?: string | null
+  options: AgentChatFlightOption[]
+}
+
 export type AgentChatResult = {
   headline: string
   summary: string
   top_pick: AgentChatPick | null
   alternatives: AgentChatPick[]
   sections?: string[]
+  /** A flight search's top chosen offers (server: chat_flow.flights_view). */
+  flights?: AgentChatFlights | null
   source_count?: number
 }
 
