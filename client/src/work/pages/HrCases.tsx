@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Briefcase, Loader2 } from 'lucide-react'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
-import { decideHrCase, dismissHrCase, getHrCase, getWriteUpDraftUrl, listHrCases, markWriteUpDelivered } from '../api/hrCases'
+import {
+  acknowledgeHrCase, decideHrCase, dismissHrCase, getHrCase, getSignedCopyUrl, getWriteUpDraftUrl, listHrCases,
+  markWriteUpDelivered, recheckHrCase, uploadSignedCopy,
+} from '../api/hrCases'
 import type { HrCase, HrCaseColumn } from '../types'
 import HrCaseDetail from '../components/panels/hr-cases/HrCaseDetail'
 
@@ -72,6 +75,30 @@ export default function HrCases() {
     await refreshCase(shown.id)
   }
 
+  async function openSigned() {
+    if (!shown) return
+    const { url } = await getSignedCopyUrl(shown.id)
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  async function uploadSigned(file: File) {
+    if (!shown) return
+    await uploadSignedCopy(shown.id, file)
+    await refreshCase(shown.id)
+  }
+
+  async function acknowledge() {
+    if (!shown) return
+    await acknowledgeHrCase(shown.id)
+    await refreshCase(shown.id)
+  }
+
+  async function recheck() {
+    if (!shown) return
+    await recheckHrCase(shown.id)
+    await refreshCase(shown.id)
+  }
+
   async function delivered(deliveredOn: string) {
     if (!shown) return
     await markWriteUpDelivered(shown.id, deliveredOn)
@@ -132,7 +159,8 @@ export default function HrCases() {
 
       {caseId && (
         shown ? (
-          <HrCaseDetail hrCase={shown} onClose={() => navigate(`${base}/hr-cases`)} onDismiss={dismiss} onOpenDraft={openDraft} onDecide={decide} onDelivered={delivered} />
+          <HrCaseDetail hrCase={shown} onClose={() => navigate(`${base}/hr-cases`)} onDismiss={dismiss} onOpenDraft={openDraft} onDecide={decide} onDelivered={delivered}
+            onOpenSigned={openSigned} onUploadSigned={uploadSigned} onAcknowledge={acknowledge} onRecheck={recheck} />
         ) : detailError?.id === caseId ? (
           <aside className="w-96 border-l border-w-line p-4 text-sm text-red-300" role="alert">{detailError.message}</aside>
         ) : (

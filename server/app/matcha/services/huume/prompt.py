@@ -153,6 +153,13 @@ def build_state_block(current_state: dict[str, Any], *, schedule_surface: bool =
                 f"Calling decide_write_up again with EXACTLY this case_id and the same decision after "
                 f"HR confirms applies it; a different case_id or decision stages a NEW proposal instead."
             )
+        elif action.get("type") == "hr_case_signed":
+            source = f"the attached file {action.get('filename') or ''}".strip() if action.get("source") == "attachment" else "a Drive file"
+            lines.append(
+                f"- STAGED ACTION awaiting confirmation: file {source} as the signed copy for write-up "
+                f"case_id={action.get('case_id')}, confirm_id={action.get('confirm_id')}. Calling "
+                f"file_signed_write_up again with EXACTLY this confirm_id after the user confirms files it."
+            )
         elif action.get("type") == "hr_case_delivered":
             lines.append(
                 f"- STAGED ACTION awaiting confirmation: mark write-up case_id={action.get('case_id')} delivered"
@@ -567,7 +574,7 @@ decide_disciplinary_action approves or denies a record awaiting HR approval — 
 
 When a manager hands you a written warning or other corrective-action letter ("here's the write-up for Jane"), use submit_write_up — not draft_discipline or draft_disciplinary_action. Point it at exactly one file: the attachment in this chat (attachment_index 0 is the newest), a Drive file from search_drive, or a Google Doc link. It stages; on confirm the letter goes to HR's private Drive folder and is checked against leave protections and the employee's history. Report the outcome in plain words: "sent to HR for review" or "HR needs to look at this one first". Never say a write-up was approved, issued or cleared unless decide_write_up actually approved it. If it's held, don't guess why — the leave details are HR's, not the manager's.
 
-decide_write_up is HR's approve / send-back; sending back needs a note for the manager of at least 20 characters. mark_write_up_delivered records that the approved letter was handed to the employee. list_write_ups shows where things stand — HR sees every case, a manager only their own.
+decide_write_up is HR's approve / send-back; sending back needs a note for the manager of at least 20 characters. mark_write_up_delivered records that the approved letter was handed to the employee. file_signed_write_up files the signed copy and starts a check (signature, legibility, employee comments); say the check is running, never that it passed. list_write_ups shows where things stand — HR sees every case, a manager only their own.
 
 ## Incidents, ER cases, training and PTO
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { CheckCircle2, Circle, FileSignature, Loader2, Plus } from 'lucide-react'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
-import { listMyWriteUps, markWriteUpDelivered } from '../api/hrCases'
+import { listMyWriteUps, markWriteUpDelivered, uploadSignedCopy } from '../api/hrCases'
 import type { ManagerCase } from '../types'
 import WriteUpForm from '../components/panels/hr-cases/WriteUpForm'
 
@@ -40,6 +40,19 @@ export default function WriteUps() {
       : `${result.case.case_number}: sent to HR for review.`)
     void load()
     navigate(`${base}/write-ups/${result.case.id}`)
+  }
+
+  async function uploadSigned(c: ManagerCase, file: File) {
+    setBusy(true)
+    try {
+      await uploadSignedCopy(c.id, file)
+      setNotice(`${c.case_number}: signed copy filed. It's being checked now — you'll hear back if anything needs fixing.`)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : 'Could not upload the signed copy')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function delivered(c: ManagerCase) {
@@ -113,6 +126,31 @@ export default function WriteUps() {
                     {c.can_submit_draft && (revising
                       ? <WriteUpForm existing={c} onSubmitted={submitted} onCancel={() => setRevising(false)} />
                       : <button onClick={() => setRevising(true)} className="rounded-lg border border-w-line px-3 py-1.5 text-sm text-w-dim hover:text-w-text">{c.has_draft ? 'Send a revised draft' : 'Send the write-up'}</button>)}
+                    {c.signed_check?.outcome === 'fix_needed' && (
+                      <div className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                        <p className="font-medium">The signed copy needs another upload:</p>
+                        <ul className="list-disc pl-4">{c.signed_check.problems.map((p) => <li key={p}>{p}</li>)}</ul>
+                      </div>
+                    )}
+                    {c.signed_check?.outcome === 'with_hr' && <p className="text-xs text-w-dim">HR is reviewing the signed copy.</p>}
+                    {c.signed_check?.outcome === 'verified' && <p className="text-xs text-emerald-300">Signed copy checked and filed.</p>}
+                    {c.can_upload_signed && c.signed_check?.outcome !== 'with_hr' && (
+                      <label className="block text-xs text-w-dim">
+                        Upload the signed copy
+                        <input
+                          type="file"
+                          accept=".pdf,.png,.jpg,.jpeg"
+                          aria-label="Signed copy"
+                          disabled={busy}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            e.target.value = ''
+                            if (file) void uploadSigned(c, file)
+                          }}
+                          className="mt-1 block text-sm"
+                        />
+                      </label>
+                    )}
                     {c.can_mark_delivered && (
                       <div className="flex flex-wrap items-center gap-2">
                         <label htmlFor={`wu-delivered-${c.id}`} className="text-xs text-w-dim">Delivered on</label>

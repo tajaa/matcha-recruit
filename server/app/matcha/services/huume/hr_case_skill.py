@@ -1,11 +1,12 @@
 """Huume HR-case skill: write-ups and Matcha Drive from a Huume thread.
 
-Read tools (`list_write_ups`, `search_drive`, `read_drive_file`) and three
+Read tools (`list_write_ups`, `search_drive`, `read_drive_file`) and four
 staged actions:
 
-  - `hr_case_draft`     (submit_write_up)       — manager or HR
-  - `hr_case_decision`  (decide_write_up)       — HR only
+  - `hr_case_draft`     (submit_write_up)         — manager or HR
+  - `hr_case_decision`  (decide_write_up)         — HR only
   - `hr_case_delivered` (mark_write_up_delivered) — the case's manager or HR
+  - `hr_case_signed`    (file_signed_write_up)    — the case's manager or HR
 
 Everything funnels into `services/hr_cases/workflow.py`, the same code the
 REST routes use, so authorization (HR vs the case's own manager) and the
@@ -195,8 +196,8 @@ async def resolve_draft_args(
 # ── Execution ──────────────────────────────────────────────────────────
 
 
-async def _fetch_source(conn, *, company_id: UUID, user_id: UUID, action: dict[str, Any]):
-    """(prepared, source, source_ref) for the staged reference."""
+async def _fetch_bytes(conn, *, company_id: UUID, user_id: UUID, action: dict[str, Any]) -> tuple[str, bytes, str, Optional[str]]:
+    """(filename, bytes, source, source_ref) for a staged reference."""
     from app.core.services.storage import get_storage
     from app.matcha.services.drive import drive_service
     from app.matcha.services.drive.google_drive_service import GoogleDriveService
@@ -204,15 +205,45 @@ async def _fetch_source(conn, *, company_id: UUID, user_id: UUID, action: dict[s
     source = action.get("source")
     if source == "attachment":
         data = await get_storage().download_file(action["attachment_url"])
-        return await drive_service.prepare_file(action.get("filename") or "write-up", data), "huume", None
+        return action.get("filename") or "write-up", data, "huume", None
     if source == "drive":
         actor = await drive_service.load_actor(conn, user=await _actor(conn, user_id), company_id=company_id)
         meta, data = await drive_service.read_file_bytes(
             conn, company_id=company_id, file_id=UUID(action["drive_file_id"]), actor=actor,
         )
-        return await drive_service.prepare_file(meta["filename"], data), "huume", f"drive:{action['drive_file_id']}"
+        return meta["filename"], data, "huume", f"drive:{action['drive_file_id']}"
     fetched = await GoogleDriveService(user_id).fetch_file(action["google_file_id"])
-    return await drive_service.prepare_file(fetched.name, fetched.data), "google_drive", fetched.file_id
+    return fetched.name, fetched.data, "google_drive", fetched.file_id
+
+
+async def _fetch_source(conn, *, company_id: UUID, user_id: UUID, action: dict[str, Any]):
+    """(prepared, source, source_ref) for the staged reference."""
+    from app.matcha.services.drive import drive_service
+
+    name, data, source, ref = await _fetch_bytes(conn, company_id=company_id, user_id=user_id, action=action)
+    return await drive_service.prepare_file(name, data), source, ref
+
+
+def resolve_signed_args(*, args: dict[str, Any], attachment_refs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Pure. Pin the signed copy to one attachment or Drive file."""
+    try:
+        UUID(str(args.get("case_id") or ""))
+    except (TypeError, ValueError):
+        return {"status": "refused", "message": "Which write-up is this the signed copy for? list_write_ups has the case_id."}
+    sources = [k for k in ("attachment_index", "drive_file_id") if args.get(k) not in (None, "")]
+    if len(sources) != 1:
+        return {"status": "refused", "message": "Attach the signed copy here (or name the Drive file) and I'll file it."}
+    if sources[0] == "drive_file_id":
+        return {"status": "ok", "source": "drive", "drive_file_id": str(args["drive_file_id"])}
+    try:
+        idx = int(args["attachment_index"])
+    except (TypeError, ValueError):
+        return {"status": "refused", "message": "Which attachment is the signed copy?"}
+    newest_first = list(reversed(attachment_refs or []))
+    if not 0 <= idx < len(newest_first):
+        return {"status": "refused", "message": "I don't see that attachment in this chat. Attach the signed copy and try again."}
+    ref = newest_first[idx]
+    return {"status": "ok", "source": "attachment", "attachment_url": ref["url"], "filename": ref.get("filename")}
 
 
 async def execute(*, company_id: UUID, actor_user_id: Optional[UUID], action: dict[str, Any]) -> dict[str, Any]:
@@ -264,6 +295,25 @@ async def execute(*, company_id: UUID, actor_user_id: Optional[UUID], action: di
                 verb = "Approved to deliver" if action["decision"] == "approve" else "Sent back to the manager"
                 return {"status": "created", "message": f"{case['case_number']}: {verb.lower()}.",
                         "record_id": str(case["id"]), "record_label": case["case_number"]}
+            if atype == "hr_case_signed":
+                name, data, _source, _ref = await _fetch_bytes(
+                    conn, company_id=company_id, user_id=actor_user_id, action=action,
+                )
+                out = await workflow.upload_signed(
+                    conn, company_id=company_id, case_id=UUID(action["case_id"]),
+                    actor_user_id=actor_user_id, actor_is_hr=is_hr, filename=name, data=data,
+                )
+                case = out["case"]
+                return {
+                    "status": "created",
+                    "message": f"{case['case_number']}: signed copy filed. I'm checking it now — "
+                               "you'll get a notice if anything needs fixing.",
+                    "record_id": str(case["id"]), "record_label": case["case_number"],
+                    "bg_tasks": [(workflow.check_signed_and_notify, (), {
+                        "company_id": company_id, "case_id": case["id"], "data": data,
+                        "mime_type": out["mime_type"], "actor_user_id": actor_user_id,
+                    })],
+                }
             if atype == "hr_case_delivered":
                 delivered_on = _date.fromisoformat(action["delivered_on"]) if action.get("delivered_on") else None
                 case = await workflow.mark_delivered(

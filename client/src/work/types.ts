@@ -1433,6 +1433,9 @@ export type HrCase = {
   decided_at: string | null
   delivered_at: string | null
   draft_file_id: string | null
+  signed_file_id: string | null
+  verification: HrCaseVerification | null
+  attention_reasons: string[]
   dismissed_reason: string | null
   created_at: string
   updated_at: string
@@ -1472,6 +1475,7 @@ export type ManagerCase = {
   can_submit_draft: boolean
   can_mark_delivered: boolean
   can_upload_signed: boolean
+  signed_check: { outcome: 'verified' | 'fix_needed' | 'with_hr'; problems: string[] } | null
   updated_at: string | null
 }
 
@@ -1489,4 +1493,13 @@ export type DraftSubmission = {
   file?: File
   googleUrl?: string
   driveFileId?: string
+}
+
+export type HrCaseVerification = {
+  checked_at: string
+  outcome: 'verified' | 'needs_attention'
+  reasons: string[]
+  reason_text: string[]
+  flag_hr_comments: boolean
+  reading?: { employee_comments_text?: string | null; employee_signature_date?: string | null; available?: boolean }
 }

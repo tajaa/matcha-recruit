@@ -21,7 +21,7 @@ USER = uuid4()
 EMP = str(uuid4())
 FEATURES = {"huume": True, "matcha_work": True, "hr_cases": True, "matcha_drive": True}
 
-STAGED_TOOLS = ("submit_write_up", "decide_write_up", "mark_write_up_delivered")
+STAGED_TOOLS = ("submit_write_up", "decide_write_up", "mark_write_up_delivered", "file_signed_write_up")
 READ_TOOLS = ("list_write_ups", "search_drive", "read_drive_file")
 
 
@@ -467,3 +467,61 @@ async def test_loop_read_tools(monkeypatch):
     assert ("list_write_ups", "ok") in statuses
     assert ("search_drive", "rejected") in statuses
     assert ("read_drive_file", "ok") in statuses
+
+
+# ── Signed copy ─────────────────────────────────────────────────────────
+
+
+def test_resolve_signed_args():
+    cid = str(uuid4())
+    assert skill.resolve_signed_args(args={"case_id": "x"}, attachment_refs=REFS)["status"] == "refused"
+    assert skill.resolve_signed_args(args={"case_id": cid}, attachment_refs=REFS)["status"] == "refused"
+    assert skill.resolve_signed_args(args={"case_id": cid, "attachment_index": 3}, attachment_refs=REFS)["status"] == "refused"
+    assert skill.resolve_signed_args(args={"case_id": cid, "attachment_index": "a"}, attachment_refs=REFS)["status"] == "refused"
+    assert skill.resolve_signed_args(args={"case_id": cid, "attachment_index": 1}, attachment_refs=REFS) == {
+        "status": "ok", "source": "attachment", "attachment_url": "https://cdn/old.pdf", "filename": "old.pdf"}
+    assert skill.resolve_signed_args(args={"case_id": cid, "drive_file_id": "d"}, attachment_refs=[]) == {
+        "status": "ok", "source": "drive", "drive_file_id": "d"}
+
+
+def test_signed_validator_and_state_block():
+    cid = str(uuid4())
+    staged = {"type": "hr_case_signed", "status": "proposed", "case_id": cid, "source": "attachment",
+              "attachment_url": "https://cdn/s.pdf", "filename": "s.pdf", "confirm_id": "zz"}
+    ok = evaluate(staged)
+    assert ok.ok and ok.action["attachment_url"] == "https://cdn/s.pdf"
+    assert not evaluate({**staged, "source": "google", "google_file_id": "g"}).ok
+    assert not evaluate({**staged, "case_id": "x"}).ok
+    block = build_state_block({"huume_action": staged})
+    assert "confirm_id=zz" in block and f"case_id={cid}" in block and "s.pdf" in block
+
+
+@pytest.mark.asyncio
+async def test_execute_signed_files_and_queues_check(exec_env, monkeypatch):
+    from app.matcha.services.hr_cases import workflow
+
+    async def fetch_bytes(conn, **kw):
+        return "s.pdf", b"%PDF", "huume", None
+
+    async def upload(conn, **kw):
+        exec_env["upload_kw"] = kw
+        return {"case": {"id": uuid4(), "case_number": "HRC-3"}, "mime_type": "application/pdf"}
+    monkeypatch.setattr(skill, "_fetch_bytes", fetch_bytes)
+    monkeypatch.setattr(workflow, "upload_signed", upload)
+    action = {"type": "hr_case_signed", "case_id": str(uuid4()), "source": "attachment", "attachment_url": "u"}
+    out = await skill.execute(company_id=COMPANY, actor_user_id=USER, action=action)
+    assert out["status"] == "created" and "checking it now" in out["message"]
+    fn, args, kwargs = out["bg_tasks"][0]
+    assert fn is workflow.check_signed_and_notify and kwargs["data"] == b"%PDF"
+    assert exec_env["upload_kw"]["filename"] == "s.pdf"
+
+
+@pytest.mark.asyncio
+async def test_loop_stages_signed_copy(monkeypatch):
+    cid = str(uuid4())
+    result = await _turn(monkeypatch, [("file_signed_write_up", {"case_id": cid, "attachment_index": 0})],
+                         attachment_refs=REFS)
+    staged = result["state_updates"]["huume_action"]
+    assert staged["type"] == "hr_case_signed" and staged["attachment_url"] == "https://cdn/new.pdf"
+    result = await _turn(monkeypatch, [("file_signed_write_up", {"case_id": cid})], attachment_refs=[])
+    assert ("file_signed_write_up", "rejected") in [(s["tool"], s["status"]) for s in result["steps"]]

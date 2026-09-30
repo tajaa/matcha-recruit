@@ -470,6 +470,17 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         "failed_label": "Delivery not recorded",
         "done_status": "delivered",
     },
+    "file_signed_write_up": {
+        "action_type": "hr_case_signed",
+        "match_key": "confirm_id",
+        "mints_confirm_id": True,
+        "fields": ("case_id", "attachment_index", "drive_file_id"),
+        "staged_label": "Staged: signed copy",
+        "refused_label": "Signed copy not staged",
+        "done_label": "Filed signed copy",
+        "failed_label": "Signed copy not filed",
+        "done_status": "filed",
+    },
     "promote_ems_event": {
         "action_type": "ems_promote",
         "match_key": "event_id",
@@ -841,6 +852,7 @@ async def run_huume_turn(
             "hr_case_draft": "write-up for HR",
             "hr_case_decision": "write-up decision",
             "hr_case_delivered": "write-up delivery",
+            "hr_case_signed": "signed copy",
             "discipline_draft": "discipline write-up",
             "schedule_change": "schedule change",
             "schedule_week_draft": "generated weekly schedule",
@@ -1674,6 +1686,15 @@ async def run_huume_turn(
                     if resolved.get("status") != "ok":
                         message = str(resolved.get("message") or "That write-up could not be staged.")
                         step = recorder.record(tool=name, kind="staged", label="Write-up not staged",
+                                               status="rejected", detail=message)
+                        return {"status": "refused", "message": message}, step
+                    staged.update({k: v for k, v in resolved.items() if k != "status"})
+                if name == "file_signed_write_up" and not confirming:
+                    from app.matcha.services.huume import hr_case_skill
+                    resolved = hr_case_skill.resolve_signed_args(args=args, attachment_refs=attachment_refs or [])
+                    if resolved.get("status") != "ok":
+                        message = str(resolved.get("message") or "That signed copy could not be staged.")
+                        step = recorder.record(tool=name, kind="staged", label="Signed copy not staged",
                                                status="rejected", detail=message)
                         return {"status": "refused", "message": message}, step
                     staged.update({k: v for k, v in resolved.items() if k != "status"})

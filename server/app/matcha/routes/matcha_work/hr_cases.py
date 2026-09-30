@@ -9,7 +9,7 @@ Two audiences:
   - HR routes call `_require_hr` (list, detail, settings, open, dismiss,
     decision).
   - Manager routes (`/mine`, `/employees`, `/incidents`, `/drafts`,
-    `/{case_id}/delivered`, `/{case_id}/draft`) authorize in
+    `/{case_id}/delivered`, `/{case_id}/draft`, `/{case_id}/signed`) authorize in
     `services/hr_cases/workflow.py`: HR, or the case's own manager. A manager
     only ever receives `workflow.manager_view`, never the HR case record.
 
@@ -22,7 +22,7 @@ from datetime import date
 from typing import Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from app.core.models.auth import CurrentUser
@@ -58,6 +58,7 @@ DRAFT_LIMIT = (30, 3600)  # per user per hour: each draft runs a model review
 
 class SettingsUpdate(BaseModel):
     triage_min_confidence: Optional[float] = Field(None, ge=0.3, le=0.95)
+    filename_template: Optional[str] = Field(None, max_length=200)
 
 
 async def _business_company(current_user: CurrentUser) -> UUID:
@@ -96,9 +97,12 @@ async def get_settings(current_user: CurrentUser = Depends(require_admin_or_clie
     async with get_connection() as conn:
         await _require_hr(conn, current_user, company_id)
         settings = await case_service.get_settings(conn, company_id)
+    from app.matcha.services.hr_cases.verification import FILENAME_TOKENS
+
     return {
         "triage_min_confidence": float(settings["triage_min_confidence"]),
         "filename_template": settings["filename_template"],
+        "filename_tokens": list(FILENAME_TOKENS),
     }
 
 
@@ -107,6 +111,23 @@ async def update_settings(body: SettingsUpdate, current_user: CurrentUser = Depe
     company_id = await _business_company(current_user)
     async with get_connection() as conn:
         await _require_hr(conn, current_user, company_id)
+        if body.filename_template is not None:
+            from app.matcha.services.hr_cases.verification import TemplateError, validate_template
+
+            try:
+                template = validate_template(body.filename_template)
+            except TemplateError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            await conn.execute(
+                """
+                INSERT INTO hr_case_settings (company_id, filename_template, updated_by)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (company_id) DO UPDATE
+                SET filename_template = EXCLUDED.filename_template,
+                    updated_by = EXCLUDED.updated_by, updated_at = NOW()
+                """,
+                company_id, template, current_user.id,
+            )
         if body.triage_min_confidence is not None:
             await conn.execute(
                 """
@@ -366,3 +387,80 @@ async def draft_download(case_id: UUID, current_user: CurrentUser = Depends(requ
     if not url:
         raise HTTPException(status_code=503, detail="That file can't be downloaded right now.")
     return {"url": url, "filename": row["filename"], "expires_in": 300}
+
+
+@router.post("/{case_id}/signed")
+async def upload_signed(
+    case_id: UUID,
+    background: BackgroundTasks,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """The signed copy — HR or the case's manager. Filed at once; the check
+    runs after the response and notifies HR (and the manager if they need to
+    re-upload)."""
+    from app.matcha.services.drive.drive_service import MAX_FILE_BYTES
+
+    company_id = await _business_company(current_user)
+    data = await file.read(MAX_FILE_BYTES + 1)
+    async with get_connection() as conn:
+        is_hr = await has_hr_access(conn, user=current_user, company_id=company_id)
+        try:
+            out = await workflow.upload_signed(
+                conn, company_id=company_id, case_id=case_id, actor_user_id=current_user.id,
+                actor_is_hr=is_hr, filename=file.filename or "signed.pdf", data=data,
+            )
+        except CaseError as exc:
+            _raise(exc)
+    background.add_task(
+        workflow.check_signed_and_notify, company_id=company_id, case_id=case_id,
+        data=data, mime_type=out["mime_type"], actor_user_id=current_user.id,
+    )
+    return out["case"] if is_hr else workflow.manager_view(out["case"])
+
+
+@router.get("/{case_id}/signed")
+async def signed_download(case_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
+    """Short-lived link to the filed signed copy — HR or the case's manager."""
+    from app.core.services.storage import get_storage
+
+    company_id = await _business_company(current_user)
+    async with get_connection() as conn:
+        is_hr = await has_hr_access(conn, user=current_user, company_id=company_id)
+        try:
+            case = await workflow.load_for_actor(conn, company_id=company_id, case_id=case_id,
+                                                 actor_user_id=current_user.id, actor_is_hr=is_hr)
+        except CaseError as exc:
+            _raise(exc)
+        row = await conn.fetchrow(
+            "SELECT filename, storage_path FROM drive_files WHERE id = $1 AND company_id = $2 AND deleted_at IS NULL",
+            case.get("signed_file_id"), company_id,
+        ) if case.get("signed_file_id") else None
+    if not row:
+        raise HTTPException(status_code=404, detail="There's no signed copy on this case yet.")
+    url = get_storage().get_presigned_download_url(row["storage_path"], expires_in=300)
+    if not url:
+        raise HTTPException(status_code=503, detail="That file can't be downloaded right now.")
+    return {"url": url, "filename": row["filename"], "expires_in": 300}
+
+
+@router.post("/{case_id}/acknowledge")
+async def acknowledge(case_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
+    company_id = await _business_company(current_user)
+    async with get_connection() as conn:
+        await _require_hr(conn, current_user, company_id)
+        try:
+            return await workflow.acknowledge(conn, company_id=company_id, case_id=case_id, actor_user_id=current_user.id)
+        except CaseError as exc:
+            _raise(exc)
+
+
+@router.post("/{case_id}/recheck")
+async def recheck(case_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
+    company_id = await _business_company(current_user)
+    async with get_connection() as conn:
+        await _require_hr(conn, current_user, company_id)
+        try:
+            return await workflow.recheck_signed(conn, company_id=company_id, case_id=case_id, actor_user_id=current_user.id)
+        except CaseError as exc:
+            _raise(exc)

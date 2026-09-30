@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   searchCaseEmployees: vi.fn(),
   searchCaseIncidents: vi.fn(),
   submitWriteUp: vi.fn(),
+  uploadSignedCopy: vi.fn(),
 }))
 vi.mock('../api/hrCases', () => api)
 
@@ -19,7 +20,7 @@ function mcase(overrides: Partial<ManagerCase> = {}): ManagerCase {
     checklist: [{ key: 'flagged', label: 'Incident reviewed', done: true }],
     incident_id: 'i1', incident_number: 'IR-7', incident_title: 'Late', employee_id: 'e1', employee_name: 'Jane Doe',
     action_type: null, review: null, decision: null, decision_reason: null, delivered_at: null,
-    has_draft: false, can_submit_draft: true, can_mark_delivered: false, can_upload_signed: false, updated_at: null,
+    has_draft: false, can_submit_draft: true, can_mark_delivered: false, can_upload_signed: false, signed_check: null, updated_at: null,
     ...overrides,
   }
 }
@@ -95,5 +96,33 @@ describe('WriteUps', () => {
     renderAt('/work/write-ups/c1')
     fireEvent.click(await screen.findByRole('button', { name: 'Mark delivered' }))
     await waitFor(() => expect(api.markWriteUpDelivered).toHaveBeenCalledWith('c1', expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/)))
+  })
+})
+
+describe('WriteUps signed copy', () => {
+  it('uploads the signed copy after delivery', async () => {
+    api.listMyWriteUps.mockResolvedValue({ cases: [mcase({ stage: 'delivered', stage_label: 'Delivered', can_submit_draft: false, can_upload_signed: true })] })
+    api.uploadSignedCopy.mockResolvedValue(mcase())
+    renderAt('/work/write-ups/c1')
+    const file = new File(['%PDF'], 'signed.pdf', { type: 'application/pdf' })
+    fireEvent.change(await screen.findByLabelText('Signed copy'), { target: { files: [file] } })
+    await waitFor(() => expect(api.uploadSignedCopy).toHaveBeenCalledWith('c1', file))
+    expect(await screen.findByText(/signed copy filed/)).toBeTruthy()
+  })
+
+  it('tells the manager what to fix, and nothing about comments', async () => {
+    api.listMyWriteUps.mockResolvedValue({ cases: [mcase({ stage: 'needs_attention', stage_label: 'Needs attention', can_submit_draft: false, can_upload_signed: true,
+      signed_check: { outcome: 'fix_needed', problems: ["There's no employee signature on it."] } })] })
+    renderAt('/work/write-ups/c1')
+    expect(await screen.findByText("There's no employee signature on it.")).toBeTruthy()
+    expect(screen.getByLabelText('Signed copy')).toBeTruthy()
+  })
+
+  it('hides the upload while HR reviews the signed copy', async () => {
+    api.listMyWriteUps.mockResolvedValue({ cases: [mcase({ stage: 'needs_attention', stage_label: 'Needs attention', can_submit_draft: false, can_upload_signed: true,
+      signed_check: { outcome: 'with_hr', problems: [] } })] })
+    renderAt('/work/write-ups/c1')
+    expect(await screen.findByText('HR is reviewing the signed copy.')).toBeTruthy()
+    expect(screen.queryByLabelText('Signed copy')).toBeNull()
   })
 })

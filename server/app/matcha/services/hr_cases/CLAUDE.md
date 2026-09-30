@@ -93,3 +93,28 @@ delivered.
   attachments reach the loop as `attachment_refs` (`messaging.py` →
   `turn_pipeline` → `run_huume_turn`). HR case actions are in
   `assets._NO_ASSET_TYPES` — the asset panel has no HR-access check.
+
+## Signed copy (6/6: `verification.py`)
+
+After delivery the manager or HR uploads the signed copy (PDF, PNG or JPG).
+It is filed at once in Drive `HR / Discipline / Signed / <Last, First>` under
+the company's `hr_case_settings.filename_template` — the format is produced,
+not checked — and the case moves to `verifying`. The check then runs after the
+response (REST: `BackgroundTasks`; Huume: the executor's `bg_tasks`):
+
+- `inspect_pdf` (PyMuPDF, deterministic) → `read_signed_copy` (one Gemini
+  multimodal read, parse-only) → `decide` (pure) → `verified` (case `closed`)
+  or `needs_attention` with reason codes (`REASON_TEXT`).
+- **A check that couldn't run is never a pass** (`check_unavailable`). HR can
+  `recheck` it; HR closes a flagged case with `acknowledge`.
+- **Employee comments always go to HR**, and their text lives only in
+  `hr_cases.verification.reading.employee_comments_text` for the HR panel.
+  Notifications say only that there are comments.
+- **The manager hears only fixable problems** (`MANAGER_FIXABLE_REASONS`:
+  unreadable, illegible, unsigned, wrong name, wrong letter, missing pages)
+  and is asked to upload again; comments and a noted refusal stay with HR.
+- Filename tokens are a closed set (`FILENAME_TOKENS`); unknown tokens are
+  refused when the template is saved (`PUT /hr-cases/settings`), and a stored
+  bad template falls back to the default rather than leaking braces.
+- Huume: `file_signed_write_up` (staged, `hr_case_signed`) pins a thread
+  attachment or Drive file; the confirm turn files it and queues the check.

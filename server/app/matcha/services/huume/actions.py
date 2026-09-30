@@ -143,9 +143,10 @@ _HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
     "hr_case_draft": "hr_cases",
     "hr_case_decision": "hr_cases",
     "hr_case_delivered": "hr_cases",
+    "hr_case_signed": "hr_cases",
 }
 
-_HR_CASE_ACTIONS = frozenset({"hr_case_draft", "hr_case_decision", "hr_case_delivered"})
+_HR_CASE_ACTIONS = frozenset({"hr_case_draft", "hr_case_decision", "hr_case_delivered", "hr_case_signed"})
 _HR_CASE_ACTION_TYPES = frozenset({"verbal_warning", "written_warning", "final_warning", "suspension", "pip", "other"})
 _HR_CASE_INFRACTIONS = frozenset({"attendance", "performance", "conduct", "safety", "policy_violation"})
 _HR_CASE_SOURCES = {"attachment": "attachment_url", "drive": "drive_file_id", "google": "google_file_id"}
@@ -343,6 +344,9 @@ def evaluate_huume_action(
 
     if action_type == "hr_case_delivered":
         return _validate_hr_case_delivered(staged_action)
+
+    if action_type == "hr_case_signed":
+        return _validate_hr_case_signed(staged_action)
 
     if action_type == "discipline_decision":
         return _validate_discipline_decision(staged_action)
@@ -1035,6 +1039,20 @@ def _validate_hr_case_delivered(staged: dict[str, Any]) -> HuumeVerdict:
         delivered_on = parsed.isoformat()
     return HuumeVerdict(kind="proceed", message="", action={
         "type": "hr_case_delivered", "case_id": str(staged["case_id"]), "delivered_on": delivered_on,
+    })
+
+
+def _validate_hr_case_signed(staged: dict[str, Any]) -> HuumeVerdict:
+    if not _is_uuid(staged.get("case_id")):
+        return HuumeVerdict(kind="refuse", message="Which write-up is this for? I need its case_id — list_write_ups has it.")
+    source = staged.get("source")
+    ref_key = _HR_CASE_SOURCES.get(source)
+    if source not in ("attachment", "drive") or not ref_key or not staged.get(ref_key):
+        return HuumeVerdict(kind="refuse", message="I've lost track of which file is the signed copy — attach it again.")
+    return HuumeVerdict(kind="proceed", message="", action={
+        "type": "hr_case_signed", "case_id": str(staged["case_id"]), "source": source,
+        ref_key: str(staged[ref_key]), "filename": staged.get("filename"),
+        "confirm_id": staged.get("confirm_id"),
     })
 
 

@@ -77,6 +77,7 @@ def manager_view(case: dict[str, Any]) -> dict[str, Any]:
         "can_submit_draft": stage in DRAFTABLE_STAGES,
         "can_mark_delivered": stage == "approved",
         "can_upload_signed": stage in ("delivered", "needs_attention"),
+        "signed_check": manager_signed_check(case),
         "updated_at": case.get("updated_at"),
     }
 
@@ -290,3 +291,125 @@ async def mark_delivered(
     )
     await notifications.notify_step(conn, case=case, step="delivered", actor_user_id=actor_user_id)
     return case
+
+
+# ── Signed copy (6/6) ───────────────────────────────────────────────────
+
+# Reasons the manager can fix by uploading again. Comments and a noted refusal
+# are HR's to handle, so they don't go back to the manager.
+MANAGER_FIXABLE_REASONS = (
+    "unreadable_pdf", "encrypted_pdf", "empty_pdf", "illegible_scan",
+    "employee_signature_missing", "signature_name_mismatch", "letter_mismatch", "pages_missing",
+)
+
+
+async def upload_signed(
+    conn, *, company_id: UUID, case_id: UUID, actor_user_id: UUID, actor_is_hr: bool,
+    filename: str, data: bytes,
+) -> dict[str, Any]:
+    """File the signed copy under the company's filename template in
+    `HR / Discipline / Signed / <Last, First>` and move the case to
+    `verifying`. Returns {case, mime_type}; the caller then runs the check."""
+    from app.matcha.services.drive import drive_service
+    from app.matcha.services.drive.drive_service import DriveError
+
+    from . import verification
+
+    case = await load_for_actor(conn, company_id=company_id, case_id=case_id,
+                                actor_user_id=actor_user_id, actor_is_hr=actor_is_hr)
+    if "signed_uploaded" not in (case.get("allowed_events") or []):
+        raise CaseError(409, f"This case is {case['stage_label'].lower()} — a signed copy can't be added now.")
+    try:
+        ext, mime = verification.validate_signed_upload(filename, data)
+    except ValueError as exc:
+        raise CaseError(400, str(exc)) from None
+    employee = await conn.fetchrow(
+        "SELECT first_name, last_name FROM employees WHERE id = $1 AND org_id = $2",
+        case.get("employee_id"), company_id,
+    ) if case.get("employee_id") else None
+    employee = dict(employee) if employee else {}
+    settings = await case_service.get_settings(conn, company_id)
+    name = verification.render_filename(
+        settings.get("filename_template") or verification.DEFAULT_TEMPLATE,
+        values=verification.filename_values(case, employee), extension=ext,
+    )
+    folder_id = await verification.ensure_employee_folder(conn, company_id=company_id, employee=employee)
+    try:
+        prepared = await drive_service.prepare_file(name, data)
+        stored = await drive_service.store_file(
+            conn, company_id=company_id, folder_id=folder_id, prepared=prepared, uploaded_by=actor_user_id,
+            actor=None, source="upload", linked_type="hr_case", linked_id=case_id, filename=name,
+        )
+    except DriveError as exc:
+        raise CaseError(exc.status, exc.detail) from None
+    case = await case_service.apply_event(
+        conn, company_id=company_id, case_id=case_id, event="signed_uploaded", actor_user_id=actor_user_id,
+        sets={"signed_file_id": stored["id"]}, details={"file_id": str(stored["id"]), "filename": name},
+    )
+    return {"case": case, "mime_type": mime}
+
+
+async def check_signed_and_notify(
+    *, company_id: UUID, case_id: UUID, data: bytes, mime_type: str, actor_user_id: Optional[UUID],
+) -> None:
+    """Background step after `upload_signed`. Never raises."""
+    from app.database import get_connection
+
+    from . import verification
+
+    try:
+        async with get_connection() as conn:
+            case = await verification.run_check(
+                conn, company_id=company_id, case_id=case_id, data=data, mime_type=mime_type,
+                actor_user_id=actor_user_id,
+            )
+            await notifications.notify_signed(conn, case=case, actor_user_id=actor_user_id)
+    except Exception:
+        logger.exception("[hr_cases] signed-copy check failed for case %s", case_id)
+
+
+async def recheck_signed(conn, *, company_id: UUID, case_id: UUID, actor_user_id: UUID) -> dict[str, Any]:
+    """HR: run the check again on the filed copy (e.g. after check_unavailable)."""
+    from app.core.services.storage import get_storage
+
+    from . import verification
+
+    case = await case_service.get_case(conn, company_id=company_id, case_id=case_id)
+    if case["stage"] != "needs_attention" or not case.get("signed_file_id"):
+        raise CaseError(409, "There's no signed copy waiting on a re-check.")
+    row = await conn.fetchrow(
+        "SELECT filename, storage_path, content_type FROM drive_files WHERE id = $1 AND company_id = $2",
+        case["signed_file_id"], company_id,
+    )
+    if not row:
+        raise CaseError(404, "The signed copy is no longer in Drive.")
+    data = await get_storage().download_file(row["storage_path"])
+    await case_service.apply_event(conn, company_id=company_id, case_id=case_id, event="signed_uploaded",
+                                   actor_user_id=actor_user_id, details={"recheck": True})
+    case = await verification.run_check(conn, company_id=company_id, case_id=case_id, data=data,
+                                        mime_type=row["content_type"] or "application/pdf", actor_user_id=actor_user_id)
+    await notifications.notify_signed(conn, case=case, actor_user_id=actor_user_id)
+    return case
+
+
+async def acknowledge(conn, *, company_id: UUID, case_id: UUID, actor_user_id: UUID) -> dict[str, Any]:
+    """HR has dealt with what the check flagged; close the case."""
+    return await case_service.apply_event(
+        conn, company_id=company_id, case_id=case_id, event="acknowledge", actor_user_id=actor_user_id,
+        sets={"attention_acknowledged_by": actor_user_id, "attention_acknowledged_at": datetime.now(timezone.utc)},
+    )
+
+
+def manager_signed_check(case: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """What the manager hears about the signed-copy check: only the problems
+    a new upload can fix."""
+    from . import verification
+
+    v = case.get("verification")
+    if not v:
+        return None
+    fixable = [r for r in v.get("reasons") or [] if r in MANAGER_FIXABLE_REASONS]
+    return {
+        "outcome": "verified" if v.get("outcome") == "verified" else ("fix_needed" if fixable else "with_hr"),
+        "problems": [verification.REASON_TEXT[r] for r in fixable],
+    }

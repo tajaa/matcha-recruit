@@ -49,3 +49,17 @@ export const getWriteUpDraftUrl = (caseId: string) =>
 // HR side.
 export const decideHrCase = (caseId: string, decision: 'approve' | 'request_changes', reason?: string) =>
   api.post<HrCase>(`${BASE}/${caseId}/decision`, { decision, reason: reason || null })
+
+// Signed copy — the manager or HR uploads; the check runs after the response.
+export function uploadSignedCopy(caseId: string, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return api.upload<ManagerCase | HrCase>(`${BASE}/${caseId}/signed`, form)
+}
+
+export const getSignedCopyUrl = (caseId: string) =>
+  api.get<{ url: string; filename: string; expires_in: number }>(`${BASE}/${caseId}/signed`)
+
+export const acknowledgeHrCase = (caseId: string) => api.post<HrCase>(`${BASE}/${caseId}/acknowledge`)
+
+export const recheckHrCase = (caseId: string) => api.post<HrCase>(`${BASE}/${caseId}/recheck`)

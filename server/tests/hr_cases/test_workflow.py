@@ -57,7 +57,8 @@ def env(monkeypatch):
     async def apply_event(conn, *, company_id, case_id, event, actor_user_id, sets=None, details=None):
         state["events"].append((event, sets or {}))
         return {**state["case"], "stage": {"draft_submitted": "hr_review", "approve": "approved",
-                                            "request_changes": "changes_requested", "delivered": "delivered"}[event]}
+                                            "request_changes": "changes_requested", "delivered": "delivered",
+                                            "signed_uploaded": "verifying", "acknowledge": "closed"}[event]}
 
     async def review(conn, **kw):
         state["review_kw"] = kw
@@ -306,3 +307,160 @@ async def test_store_draft_file_goes_to_hr_drafts_via_system_path(monkeypatch):
                                     prepared=prepared(), uploaded_by=GM)
     assert seen["folder_id"] == drafts and seen["actor"] is None
     assert seen["filename"] == "HRC-2026-0002 - draft - w.pdf"
+
+
+# ── Signed copy ─────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def signed_env(env, monkeypatch):
+    from app.matcha.services.drive import drive_service
+    from app.matcha.services.hr_cases import verification
+
+    env["case"] = case(stage="delivered", stage_label="Delivered", allowed_events=["signed_uploaded"],
+                       employee_id=EMPLOYEE, action_type="written_warning",
+                       delivered_at=datetime(2026, 9, 28, tzinfo=timezone.utc))
+    folder = uuid4()
+
+    async def ensure(conn, **kw):
+        return folder
+
+    async def prepare(name, data):
+        return SimpleNamespace(filename=name)
+
+    async def store(conn, **kw):
+        env["stored"] = kw
+        return {"id": uuid4()}
+
+    async def settings(conn, company_id):
+        return {"filename_template": "{last_name}_{case_number}"}
+    monkeypatch.setattr(verification, "ensure_employee_folder", ensure)
+    monkeypatch.setattr(drive_service, "prepare_file", prepare)
+    monkeypatch.setattr(drive_service, "store_file", store)
+    monkeypatch.setattr(case_service, "get_settings", settings)
+    env["folder"] = folder
+    return env
+
+
+def signed_conn():
+    return QueryConn(fetchrow={"FROM employees": {"first_name": "Jane", "last_name": "Doe"}})
+
+
+@pytest.mark.asyncio
+async def test_upload_signed_files_under_template(signed_env):
+    out = await workflow.upload_signed(signed_conn(), company_id=COMPANY, case_id=uuid4(), actor_user_id=GM,
+                                       actor_is_hr=False, filename="IMG_0042.JPG", data=b"jpeg")
+    assert out["mime_type"] == "image/jpeg"
+    stored = signed_env["stored"]
+    assert stored["filename"] == "Doe_HRC-2026-0001.jpg"
+    assert stored["folder_id"] == signed_env["folder"] and stored["actor"] is None
+    assert stored["linked_type"] == "hr_case"
+    assert signed_env["events"][0][0] == "signed_uploaded"
+
+
+@pytest.mark.asyncio
+async def test_upload_signed_refusals(signed_env):
+    with pytest.raises(CaseError) as exc:
+        await workflow.upload_signed(signed_conn(), company_id=COMPANY, case_id=uuid4(), actor_user_id=GM,
+                                     actor_is_hr=False, filename="letter.docx", data=b"x")
+    assert exc.value.status == 400
+    with pytest.raises(CaseError) as exc:
+        await workflow.upload_signed(signed_conn(), company_id=COMPANY, case_id=uuid4(), actor_user_id=OTHER,
+                                     actor_is_hr=False, filename="s.pdf", data=b"%PDF")
+    assert exc.value.status == 404
+    signed_env["case"] = case(stage="approved", stage_label="Approved to deliver", allowed_events=["delivered"])
+    with pytest.raises(CaseError) as exc:
+        await workflow.upload_signed(signed_conn(), company_id=COMPANY, case_id=uuid4(), actor_user_id=GM,
+                                     actor_is_hr=False, filename="s.pdf", data=b"%PDF")
+    assert exc.value.status == 409
+
+
+@pytest.mark.asyncio
+async def test_upload_signed_maps_drive_errors(signed_env, monkeypatch):
+    from app.matcha.services.drive import drive_service
+    from app.matcha.services.drive.drive_service import DriveError
+
+    async def boom(conn, **kw):
+        raise DriveError(503, "File storage isn't configured.")
+    monkeypatch.setattr(drive_service, "store_file", boom)
+    with pytest.raises(CaseError) as exc:
+        await workflow.upload_signed(signed_conn(), company_id=COMPANY, case_id=uuid4(), actor_user_id=GM,
+                                     actor_is_hr=True, filename="s.pdf", data=b"%PDF")
+    assert exc.value.status == 503
+
+
+@pytest.mark.asyncio
+async def test_check_signed_and_notify_never_raises(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from app import database
+    from app.matcha.services.hr_cases import verification
+
+    @asynccontextmanager
+    async def get_connection(*a, **k):
+        yield QueryConn()
+    monkeypatch.setattr(database, "get_connection", get_connection)
+    seen = []
+
+    async def run_check(conn, **kw):
+        return {"id": "c1", "stage": "closed"}
+
+    async def notify(conn, *, case, actor_user_id):
+        seen.append(case["stage"])
+    monkeypatch.setattr(verification, "run_check", run_check)
+    monkeypatch.setattr(notifications, "notify_signed", notify)
+    await workflow.check_signed_and_notify(company_id=COMPANY, case_id=uuid4(), data=b"x",
+                                           mime_type="application/pdf", actor_user_id=GM)
+    assert seen == ["closed"]
+
+    async def broken(conn, **kw):
+        raise RuntimeError("model down")
+    monkeypatch.setattr(verification, "run_check", broken)
+    await workflow.check_signed_and_notify(company_id=COMPANY, case_id=uuid4(), data=b"x",
+                                           mime_type="application/pdf", actor_user_id=GM)
+
+
+@pytest.mark.asyncio
+async def test_recheck_and_acknowledge(env, monkeypatch):
+    from app.core.services import storage
+    from app.matcha.services.hr_cases import verification
+
+    async def download(path):
+        return b"%PDF"
+    monkeypatch.setattr(storage, "get_storage", lambda: SimpleNamespace(download_file=download))
+
+    async def run_check(conn, **kw):
+        env["check_kw"] = kw
+        return {"id": "c1", "stage": "closed"}
+
+    async def notify(conn, **kw):
+        env["notified"] = True
+    monkeypatch.setattr(verification, "run_check", run_check)
+    monkeypatch.setattr(notifications, "notify_signed", notify)
+
+    env["case"] = case(stage="delivered")
+    with pytest.raises(CaseError):
+        await workflow.recheck_signed(QueryConn(), company_id=COMPANY, case_id=uuid4(), actor_user_id=OTHER)
+    env["case"] = case(stage="needs_attention", signed_file_id=uuid4())
+    with pytest.raises(CaseError) as exc:
+        await workflow.recheck_signed(QueryConn(fetchrow={"FROM drive_files": None}), company_id=COMPANY,
+                                      case_id=uuid4(), actor_user_id=OTHER)
+    assert exc.value.status == 404
+    conn = QueryConn(fetchrow={"FROM drive_files": {"filename": "s.png", "storage_path": "s3://b/k", "content_type": "image/png"}})
+    out = await workflow.recheck_signed(conn, company_id=COMPANY, case_id=uuid4(), actor_user_id=OTHER)
+    assert out["stage"] == "closed" and env["check_kw"]["mime_type"] == "image/png" and env["notified"]
+    assert env["events"][-1][0] == "signed_uploaded"
+
+    await workflow.acknowledge(QueryConn(), company_id=COMPANY, case_id=uuid4(), actor_user_id=OTHER)
+    assert env["events"][-1][0] == "acknowledge" and "attention_acknowledged_at" in env["events"][-1][1]
+
+
+def test_manager_signed_check_only_shows_fixable_problems():
+    assert workflow.manager_signed_check(case()) is None
+    view = workflow.manager_signed_check(case(verification={"outcome": "needs_attention",
+                                                            "reasons": ["employee_signature_missing", "employee_comments"]}))
+    assert view == {"outcome": "fix_needed", "problems": ["There's no employee signature on it."]}
+    view = workflow.manager_signed_check(case(verification={"outcome": "needs_attention", "reasons": ["employee_comments"]}))
+    assert view == {"outcome": "with_hr", "problems": []}
+    assert workflow.manager_signed_check(case(verification={"outcome": "verified", "reasons": []}))["outcome"] == "verified"
+    assert "signed_check" in workflow.manager_view(case())
