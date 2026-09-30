@@ -107,6 +107,53 @@ class MatchaWorkService {
         try await client.request(method: "GET", path: "\(basePath)/presence/online")
     }
 
+    // MARK: - Espresso assistant
+
+    /// The caller's private conversation with Espresso, created on first use.
+    func ensureAssistantChannel() async throws -> String {
+        struct Res: Codable { let channel_id: String }
+        let res: Res = try await client.request(method: "POST", path: "\(basePath)/assistant/channel")
+        return res.channel_id
+    }
+
+    func assistantAbilities() async throws -> AssistantAbilities {
+        try await client.request(method: "GET", path: "\(basePath)/assistant/abilities")
+    }
+
+    func enableAssistantAbility(_ key: String, consentVersion: String?,
+                                contact: AssistantContact?) async throws {
+        struct Settings: Encodable { let contact: AssistantContact? }
+        struct Body: Encodable {
+            let consent_version: String?
+            let settings: Settings
+        }
+        struct Res: Decodable { let enabled: Bool }
+        let _: Res = try await client.request(
+            method: "PUT", path: "\(basePath)/assistant/abilities/\(key)",
+            body: Body(consent_version: consentVersion, settings: Settings(contact: contact))
+        )
+    }
+
+    func disableAssistantAbility(_ key: String) async throws {
+        struct Res: Decodable { let enabled: Bool }
+        let _: Res = try await client.request(
+            method: "DELETE", path: "\(basePath)/assistant/abilities/\(key)"
+        )
+    }
+
+    /// Start Google's consent for what `key` needs on top of reading and
+    /// sending mail. Returns the URL to open in the browser.
+    func connectGoogle(forAbility key: String) async throws -> String {
+        struct Body: Encodable { let abilities: [String] }
+        struct Res: Decodable { let auth_url: String }
+        let extra: [String: [String]] = ["email": ["email_organize"], "calendar": ["calendar"]]
+        let res: Res = try await client.request(
+            method: "POST", path: "\(basePath)/agent/email/connect",
+            body: Body(abilities: extra[key] ?? [])
+        )
+        return res.auth_url
+    }
+
     // MARK: - Collab Discussion Channel
 
     func ensureProjectDiscussionChannel(projectId: String) async throws -> String {

@@ -296,3 +296,19 @@ async def test_editing_by_the_purchase_owner_is_redacted_and_ordinary_edits_are_
     await _edit(edit_env, user, f"here {VISA}", owns_purchase=False)
     assert edit_env["conn"].stored == f"here {VISA}"
     edit_env["warn"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_editing_a_card_number_into_a_private_assistant_message_is_always_redacted(edit_env, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.werk.services.channel_access import ChannelScope
+
+    monkeypatch.setattr(edit_env["channels"], "_require_channel_capability",
+                        AsyncMock(return_value=SimpleNamespace(scope=ChannelScope.ASSISTANT)))
+    user = _user()
+    # Not a reply to any question and no purchase open: redacted anyway, since
+    # this conversation is replayed to the model on the next run.
+    await _edit(edit_env, user, f"book it, card {VISA}", owns_purchase=False)
+    assert edit_env["conn"].stored == f"book it, card {card_vault.REDACTED}"
+    edit_env["warn"].assert_not_awaited()

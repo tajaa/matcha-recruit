@@ -11,9 +11,13 @@ import AppKit
 ///             exactly as if it were typed;
 /// * receipt — the purchase outcome (Stripe test charge, handoff, failure).
 ///
+/// The Espresso assistant's messages render here too (progress, answer,
+/// receipt, and the confirmation that shows what a yes will carry out): see
+/// AgentAssistantCards.swift.
+///
 /// Photos are server-rehosted CDN URLs; links open in the browser.
 struct AgentCardMessageView: View {
-    @Environment(AppState.self) private var appState
+    @Environment(AppState.self) var appState
     let meta: ChannelMessageMetadata
     /// Message text without the leading ticket marker (used for a question's
     /// heading when the payload has none).
@@ -30,6 +34,8 @@ struct AgentCardMessageView: View {
     @State private var sending: String?
     @State private var offline = false
     @State private var expired = false
+    /// Whether a run's progress card shows all of its steps.
+    @State var showAllSteps = false
     private static let sendingWindow: Duration = .seconds(8)
 
     var body: some View {
@@ -40,6 +46,12 @@ struct AgentCardMessageView: View {
                 promptCard(view)
             } else if let receipt = meta.receipt, meta.kind == "agent_card_receipt" {
                 receiptCard(receipt)
+            } else if meta.kind == "agent_progress" {
+                progressCard(meta.progress)
+            } else if let result = meta.resultV2, meta.kind == "agent_result" {
+                resultV2Card(result)
+            } else if let receipt = meta.actionReceipt, meta.kind == "agent_receipt" {
+                actionReceiptCard(receipt)
             }
         }
         .frame(maxWidth: 540, alignment: .leading)
@@ -61,6 +73,9 @@ struct AgentCardMessageView: View {
                         .foregroundColor(appState.themeTextSecondary)
                         .lineLimit(5)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                if let flights = result.flights, !flights.options.isEmpty {
+                    flightRows(flights)
                 }
                 if let pick = result.topPick {
                     topPick(pick)
@@ -85,7 +100,7 @@ struct AgentCardMessageView: View {
         }
     }
 
-    private func topPick(_ pick: AgentChatPick) -> some View {
+    func topPick(_ pick: AgentChatPick) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
                 photo(pick.imageUrl, size: 104)
@@ -146,7 +161,7 @@ struct AgentCardMessageView: View {
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(appState.themeText.opacity(0.04)))
     }
 
-    private func alternativeRow(_ alt: AgentChatPick) -> some View {
+    func alternativeRow(_ alt: AgentChatPick) -> some View {
         HStack(spacing: 10) {
             photo(alt.imageUrl, size: 40)
             VStack(alignment: .leading, spacing: 1) {
@@ -206,6 +221,67 @@ struct AgentCardMessageView: View {
         }
     }
 
+    // MARK: - Flights
+
+    // Not private: the assistant's v2 `flights` block renders the same rows
+    // (AgentAssistantCards.swift).
+    @ViewBuilder
+    func flightRows(_ flights: AgentChatFlights) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if flights.testData == true {
+                Text("TEST DATA · NOT REAL FARES")
+                    .font(.system(size: 9, weight: .bold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Capsule().fill(Color.orange.opacity(0.18)))
+                    .foregroundColor(.orange)
+            }
+            ForEach(Array(flights.options.enumerated()), id: \.offset) { _, option in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .top) {
+                        if let label = option.label {
+                            Text(label.uppercased())
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(appState.themeAccent)
+                        }
+                        Text(option.carriers.joined(separator: " + "))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(appState.themeText)
+                            .lineLimit(1)
+                        if option.ticketing == "separate" {
+                            Label("2 tickets", systemImage: "ticket").font(.system(size: 10)).foregroundColor(.orange)
+                        }
+                        Spacer(minLength: 6)
+                        VStack(alignment: .trailing, spacing: 0) {
+                            Text(option.totalWithBagsText ?? option.priceText ?? "")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(appState.themeText)
+                            if option.totalWithBagsText != nil {
+                                Text("with bags").font(.system(size: 9)).foregroundColor(appState.themeTextSecondary)
+                            }
+                        }
+                    }
+                    ForEach(Array(option.slices.enumerated()), id: \.offset) { _, slice in
+                        let plus = FlightFormat.dayOffset(slice.departingAt, slice.arrivingAt)
+                        Text("\(FlightFormat.day(slice.departingAt)) · \(FlightFormat.clock(slice.departingAt)) \(slice.origin) → \(FlightFormat.clock(slice.arrivingAt)) \(slice.destination)\(plus > 0 ? " +\(plus)" : "") · \([FlightFormat.duration(slice.durationMinutes), FlightFormat.stops(slice.stops)].filter { !$0.isEmpty }.joined(separator: " · "))")
+                            .font(.system(size: 11))
+                            .foregroundColor(appState.themeTextSecondary)
+                    }
+                    if let warning = option.warning {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(.orange)
+                    }
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(appState.themeText.opacity(0.04)))
+            }
+            Label("Searched from our server: no location, device, cookies or history sent.",
+                  systemImage: "checkmark.shield.fill")
+                .font(.system(size: 10))
+                .foregroundColor(appState.themeTextSecondary)
+        }
+    }
+
     // MARK: - Question
 
     @ViewBuilder
@@ -221,6 +297,12 @@ struct AgentCardMessageView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(appState.themeText)
                     .fixedSize(horizontal: false, vertical: true)
+                if let action = view.action, !action.lines.isEmpty {
+                    actionLines(action.lines)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(appState.themeText.opacity(0.04)))
+                }
                 if let offer = view.offer {
                     HStack(spacing: 10) {
                         photo(offer.imageUrl, size: 56)
@@ -253,7 +335,12 @@ struct AgentCardMessageView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(appState.themeTextSecondary)
                 } else if forSomeoneElse {
-                    Text("Waiting for the buyer to answer.")
+                    Text(meta.isAssistantPrompt ? "Waiting for the person who asked." : "Waiting for the buyer to answer.")
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeTextSecondary)
+                } else if view.buttons.isEmpty {
+                    // An open question with no suggested answers: the reply is whatever they type.
+                    Label("Reply to answer.", systemImage: "questionmark.circle")
                         .font(.system(size: 11))
                         .foregroundColor(appState.themeTextSecondary)
                 } else {
@@ -286,7 +373,8 @@ struct AgentCardMessageView: View {
     private func closedText(_ status: String) -> String {
         switch status {
         case "answered": return meta.answerText ?? "Answered"
-        case "superseded": return "Replaced by a newer result"
+        case "superseded":
+            return meta.isAssistantPrompt ? "You moved on to something else" : "Replaced by a newer result"
         case "expired": return "This question expired"
         default: return "Closed"
         }
@@ -452,7 +540,7 @@ struct AgentCardMessageView: View {
 
     // MARK: - Shared
 
-    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+    func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
             .padding(12)
             .background(
@@ -494,7 +582,7 @@ struct AgentCardMessageView: View {
         }
     }
 
-    private func httpURL(_ string: String?) -> URL? {
+    func httpURL(_ string: String?) -> URL? {
         guard let string, let url = URL(string: string),
               ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
         return url

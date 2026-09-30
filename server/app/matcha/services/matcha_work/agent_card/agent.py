@@ -1,40 +1,42 @@
 """Bounded web agent that answers one agent card with a structured result.
 
 Hosted web_search (provider side) + our `fetch_page` + a `finish` tool whose
-payload goes through `schema.normalize_result`'s provenance gate. Read-only:
+payload goes through `schema.normalize_result`'s provenance gate. A travel
+request also gets `search_flights` (Duffel, `flights.py`) when a token is
+configured. Read-only:
 no tool here writes anywhere except the run's own audit rows and the card's
 progress line.
+
+The loop itself is the agent runtime's (`agent_runtime/runner.py`). This module
+is the card's caller of it: the card's limits, its abilities, its result
+contract and what happens to the result afterwards. The limits and the
+collaborators stay module attributes here, read at call time.
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-import time
-from typing import Any
-from urllib.parse import urlsplit
 from uuid import UUID
 
-from app.core.services.ai_usage import feature_scope
-from app.core.services.openai_responses import cited_urls, web_search_calls
 from app.core.services.safe_fetch import UnsafeURL, fetch_public
-from app.matcha.services.huume.luna_client import (
-    get_luna_client,
-    text_item,
-    tool_output_item,
-)
+from app.matcha.services.huume.luna_client import get_luna_client, text_item
 from app.matcha.services.huume.routing import LUNA
+from app.matcha.services.matcha_work.agent_runtime import runner
+from app.matcha.services.matcha_work.agent_runtime.abilities import flights as flights_ability
+from app.matcha.services.matcha_work.agent_runtime.abilities import shopping, web
+from app.matcha.services.matcha_work.agent_runtime.context import RunContext, RunLimits
 from app.matcha.services.matcha_work.project_agent import store
-from app.matcha.services.matcha_work.project_agent.agent import (
-    _fold_usage,
-    _safe_for_audit,
-)
+from app.matcha.services.matcha_work.project_agent.agent import _safe_for_audit
 
-from . import board, images
+# `board` is read through `progress.CardProgress`; the card tests patch
+# `agent.board.*`, so it stays importable from here.
+from . import board, flights, images  # noqa: F401
 from .page_extract import extract_page, page_urls
+from .progress import CardProgress
 from .prompt import build_system_prompt
 from .schema import normalize_result
-from .tools import RESPONSE_INCLUDE, declarations
+from .tools import FINISH_TOOL
 
 logger = logging.getLogger(__name__)
 
@@ -51,19 +53,16 @@ _FETCH_SECONDS = 25.0
 _PHOTO_SECONDS = 60.0
 _MAX_TOOL_OUTPUT_CHARS = 12_000
 _MAX_REPAIRS = 1
+_MAX_FLIGHT_SEARCHES = 3
+# One search's time budget. The search itself stops at it and keeps whatever
+# finished (flights.SEARCH_SECONDS); the runner's timeout is only a backstop.
+_FLIGHT_SEARCH_SECONDS = 100.0
+_MIN_FLIGHT_SEARCH_SECONDS = 30.0
 _AI_USAGE_FEATURE = "matcha.espresso.agent_card"
-_FINISH_CHOICE = {"type": "function", "name": "finish"}
 
 
 class CardAgentError(RuntimeError):
     """A run that ended without a usable result; the message is user-facing."""
-
-
-def _host(url: str) -> str:
-    try:
-        return (urlsplit(url).hostname or url)[:60]
-    except ValueError:
-        return url[:60]
 
 
 async def fetch_page_tool(url: str) -> tuple[dict, set[str]]:
@@ -128,9 +127,6 @@ async def run_card_agent(
     a run that raised.
     """
     stats = stats if stats is not None else {}
-    started = time.monotonic()
-    client = get_luna_client()
-    usage: dict[str, Any] = {"model": CARD_AGENT_MODEL}
     provenance: set[str] = set()
     if previous_result:
         # Links a previous round already verified stay usable in a revision.
@@ -148,118 +144,82 @@ async def run_card_agent(
                     provenance.add(pick[field].get("source_url"))
         provenance.discard(None)
 
-    model_calls = 0
-    search_calls = 0
-    fetches = 0
-    repairs = 0
-    seq = 0
-    result: dict | None = None
-    warnings: list[str] = []
+    ctx = RunContext(
+        run_id=run_id,
+        user_id=run_id,  # a card run acts for nobody: it has no commit tools
+        company_id=company_id,
+        role="card",
+        surface="card",
+        ask=ask,
+        storage_prefix=f"matcha-work/{company_id}/{project_id}/agent/{task_id}",
+        progress=CardProgress(project_id=project_id, task_id=task_id),
+        limits=RunLimits(
+            max_model_calls=_MAX_MODEL_CALLS,
+            wall_seconds=_WALL_SECONDS,
+            max_repairs=_MAX_REPAIRS,
+            max_hosted_per_response=_MAX_SEARCHES_PER_RESPONSE,
+            max_hosted_per_run=_MAX_SEARCHES_PER_RUN,
+            max_tool_output_chars=_MAX_TOOL_OUTPUT_CHARS,
+        ),
+        usage_feature=_AI_USAGE_FEATURE,
+        model=CARD_AGENT_MODEL,
+        project_id=project_id,
+        task_id=task_id,
+    )
+    travel = flights.is_travel_ask(ask)
+    flight_token = flights.token() if travel else None
+    abilities = []
+    if flight_token:
+        # Listed first: its tool is offered right after the hosted search.
+        abilities.append(flights_ability.build(
+            token=lambda: flight_token,
+            session=lambda token: flights.FlightSession(token),
+            max_searches=_MAX_FLIGHT_SEARCHES,
+            search_seconds=_FLIGHT_SEARCH_SECONDS,
+            min_seconds=_MIN_FLIGHT_SEARCH_SECONDS,
+        ))
+    abilities += [
+        # Resolved through this module on every call, so the page loader and the
+        # budgets are whatever this module holds when the page is asked for.
+        web.build(
+            fetch_page=lambda url: fetch_page_tool(url),
+            max_fetches=_MAX_FETCHES,
+            fetch_seconds=_FETCH_SECONDS,
+        ),
+        shopping.build(),
+    ]
+    contract = runner.ResultContract(
+        finish=FINISH_TOOL,
+        normalize=lambda args, state: normalize_result(
+            args.get("result"), state.provenance, flights=flights_ability.session_of(state),
+        ),
+    )
+    try:
+        outcome = await runner.run_agent(
+            ctx,
+            client=get_luna_client(),
+            abilities=abilities,
+            contract=contract,
+            instructions=build_system_prompt(round, travel=travel, flight_search=bool(flight_token)),
+            first_input=[text_item("user", _user_turn(ask, review_note, previous_result))],
+            first_note="Searching the web…" if round == 1 else "Working on your feedback…",
+            seed_provenance=provenance,
+            stats=stats,
+        )
+    except runner.AgentRunError as exc:
+        raise CardAgentError(str(exc)) from exc.__cause__
+    result = outcome.result
+    assert result is not None  # a card run has no ask or commit tool to end on
+    model_calls, search_calls, usage = outcome.model_calls, outcome.search_calls, outcome.token_usage
+
+    seq = outcome.last_seq
 
     async def step(tool: str, kind: str, label: str, args: dict, out: dict, status: str = "ok") -> None:
         nonlocal seq
         seq += 1
         await store.record_step(run_id, seq, tool, kind, label[:200], _safe_for_audit(args), _safe_for_audit(out), status)
 
-    async def progress(note: str) -> None:
-        row = await board.set_progress(task_id, note)
-        if row:
-            await board.publish_task_updated(project_id, row)
-
-    input_items = [text_item("user", _user_turn(ask, review_note, previous_result))]
-    pending: list[dict[str, Any]] = []
-    instructions = build_system_prompt(round)
-    tools = declarations()
-    await progress("Searching the web…" if round == 1 else "Working on your feedback…")
-
-    while result is None and model_calls < _MAX_MODEL_CALLS:
-        elapsed = time.monotonic() - started
-        if elapsed >= _WALL_SECONDS:
-            break
-        model_calls += 1
-        last_call = model_calls == _MAX_MODEL_CALLS or elapsed > _WALL_SECONDS * 0.8
-        searches_left = max(0, _MAX_SEARCHES_PER_RUN - search_calls)
-        call_timeout = max(5.0, _WALL_SECONDS - elapsed)
-        with feature_scope(_AI_USAGE_FEATURE):
-            response = await asyncio.wait_for(
-                client.create_response(
-                    model=CARD_AGENT_MODEL,
-                    input=input_items if model_calls == 1 else pending,
-                    instructions=instructions,
-                    # Out of search budget (or out of turns): only our function
-                    # tools remain, and the last turn must finish.
-                    tools=tools if searches_left and not last_call else tools[1:],
-                    tool_choice=_FINISH_CHOICE if last_call else "auto",
-                    reasoning_effort="medium",
-                    max_tool_calls=min(_MAX_SEARCHES_PER_RESPONSE, searches_left) if searches_left and not last_call else None,
-                    include=RESPONSE_INCLUDE,
-                    timeout_seconds=call_timeout,
-                ),
-                timeout=call_timeout,
-            )
-        _fold_usage(usage, response)
-        searches = web_search_calls(response.output_items)
-        search_calls += len(searches)
-        stats.update(model_calls=model_calls, search_calls=search_calls, token_usage=usage)
-        provenance.update(cited_urls(response.output_items))
-        for search in searches:
-            query = str((search.get("action") or {}).get("query") or "")
-            await step("web_search", "search", f"Searched: {query[:120]}" if query else "Searched the web",
-                       {"query": query}, {"status": search.get("status")})
-        if searches:
-            await progress(f"Searched the web ({search_calls})…")
-
-        if not response.function_calls:
-            # Prose instead of a tool call: nudge toward finish on the next turn.
-            if model_calls >= _MAX_MODEL_CALLS:
-                break
-            pending = [text_item("user", "Call the finish tool with the structured result now.")]
-            continue
-
-        outputs: list[dict[str, Any]] = []
-        for call in response.function_calls:
-            name, args = call["name"], dict(call["arguments"] or {})
-            if name == "fetch_page":
-                url = str(args.get("url") or "").strip()
-                if fetches >= _MAX_FETCHES:
-                    out = {"error": "Page budget used up; finish with what you have."}
-                    await step(name, "fetch", "Page budget exhausted", args, out, "skipped")
-                else:
-                    fetches += 1
-                    await progress(f"Reading {_host(url)}…")
-                    remaining = _WALL_SECONDS - (time.monotonic() - started)
-                    try:
-                        out, vouched = await asyncio.wait_for(
-                            fetch_page_tool(url), timeout=max(1.0, min(_FETCH_SECONDS + 5, remaining)),
-                        )
-                    except TimeoutError:
-                        out, vouched = {"error": "The page took too long to load."}, set()
-                    provenance.update(vouched)
-                    await step(name, "fetch", f"Read {_host(url)}", args,
-                               {k: out.get(k) for k in ("url", "title", "error")} | {"products": len(out.get("products") or [])},
-                               "error" if "error" in out else "ok")
-                outputs.append(tool_output_item(call["call_id"], out))
-            elif name == "finish":
-                try:
-                    normalized, warnings = normalize_result(args.get("result"), provenance)
-                except ValueError as exc:
-                    await step(name, "finish", "Result rejected", {"error": str(exc)}, {}, "error")
-                    if repairs >= _MAX_REPAIRS:
-                        raise CardAgentError("The agent could not produce a usable result.") from exc
-                    repairs += 1
-                    outputs.append(tool_output_item(call["call_id"], {"error": f"Invalid result: {exc}. Call finish again."}))
-                    continue
-                result = normalized
-                await step(name, "finish", "Prepared the result", {}, {"warnings": warnings[:20]})
-                outputs.append(tool_output_item(call["call_id"], {"accepted": True}))
-            else:
-                outputs.append(tool_output_item(call["call_id"], {"error": f"Unknown tool: {name}"}))
-        pending = outputs
-
-    if result is None:
-        raise CardAgentError("The agent ran out of time before finishing. Try again, or narrow the request.")
-
-    await progress("Collecting photos…")
+    await ctx.progress.note("Collecting photos…")
     image_warnings = await images.rehost_images(
         result, company_id=company_id, project_id=project_id, task_id=task_id,
         total_seconds=_PHOTO_SECONDS,
@@ -267,7 +227,7 @@ async def run_card_agent(
     for pick in [result.get("top_pick"), *(result.get("alternatives") or [])]:
         if pick:
             await step("rehost_images", "image", f"Photos for {pick['name'][:80]}", {}, {"kept": len(pick["images"])})
-    result["warnings"] = (warnings + image_warnings)[:30]
+    result["warnings"] = (outcome.warnings + image_warnings)[:30]
     result["round"] = round
 
     await store.mark_run(

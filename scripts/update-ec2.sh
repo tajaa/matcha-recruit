@@ -347,6 +347,7 @@ update_matcha() {
         # The compose_files list picks up the awslogs override only when the
         # host opted in; otherwise the worker stays on json-file.
         ssh_cmd "cd ~/matcha && compose_files='-f docker-compose.yml' && grep -qs '^MATCHA_LOG_DRIVER=awslogs' .env && compose_files=\"\$compose_files -f docker-compose.logging.yml\"; MATCHA_BACKEND_IMAGE='$BACKEND_IMAGE' docker-compose \$compose_files --profile worker pull matcha-worker && MATCHA_BACKEND_IMAGE='$BACKEND_IMAGE' docker-compose \$compose_files --profile worker up -d --no-deps matcha-worker"
+        update_agent_worker
         deploy_backend_zero_downtime
     fi
 
@@ -355,6 +356,23 @@ update_matcha() {
     fi
 
     log_success "Matcha-Recruit updated!"
+}
+
+# matcha-agent-worker (compose profile agent-worker) runs agent cards,
+# assistant runs and the booking browser once AGENT_CARD_QUEUE /
+# AGENT_BROWSER_QUEUE point at it. It is opt-in per host, so it is updated only
+# where it already exists; left alone it would keep running the old image and
+# hit columns or code the new API expects.
+update_agent_worker() {
+    if ! ssh_cmd "docker ps -a --format '{{.Names}}' | grep -qx matcha-agent-worker"; then
+        return 0
+    fi
+    local stop_timeout=60
+    [ "$HOTFIX" = true ] && stop_timeout=5
+    log_info "Updating matcha-agent-worker (${stop_timeout}s stop)..."
+    ssh_cmd "docker stop -t $stop_timeout matcha-agent-worker 2>/dev/null || true"
+    ssh_cmd "cd ~/matcha && compose_files='-f docker-compose.yml' && grep -qs '^MATCHA_LOG_DRIVER=awslogs' .env && compose_files=\"\$compose_files -f docker-compose.logging.yml\"; MATCHA_BACKEND_IMAGE='$BACKEND_IMAGE' docker-compose \$compose_files --profile agent-worker up -d --no-deps --force-recreate matcha-agent-worker" \
+        || log_warn "matcha-agent-worker did not come back up — check it by hand"
 }
 
 deploy_backend_zero_downtime() {
