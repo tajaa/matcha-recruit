@@ -38,7 +38,8 @@ async def _run(run_id: UUID) -> None:
                WHERE id = $1 AND status = 'queued' AND kind = 'assistant'
                RETURNING id, company_id, project_id, channel_id, requested_by,
                          trigger_message_id, prompt, surface, abilities, resume_prompt_id,
-                         (SELECT role FROM users WHERE id = requested_by) AS requester_role""",
+                         (SELECT role FROM users WHERE id = requested_by) AS requester_role,
+                         (SELECT email FROM users WHERE id = requested_by) AS requester_email""",
             run_id,
         )
     if not row:

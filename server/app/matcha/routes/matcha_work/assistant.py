@@ -142,7 +142,7 @@ async def list_abilities(
     )
     abilities = []
     for ability in catalog.build_catalog(fetch_page=_no_fetch):
-        if ability.allowance is not None and ability.allowance not in situation.allowed:
+        if not catalog.offered(ability, situation):
             continue  # not offered to this account: not listed either
         state = catalog.availability(ability, situation)
         row = rows.get(ability.key)
@@ -177,6 +177,9 @@ async def enable_ability(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     ability = _ability(key)
+    # Not offered to this account: as if it did not exist, the same as the listing.
+    if not catalog.offered(ability, catalog.Situation(private=True, allowed=catalog.allowances_for(current_user))):
+        raise HTTPException(status_code=404, detail="No such ability.")
     if ability.consent_version is None:
         raise HTTPException(status_code=400, detail="That ability is always on.")
     company_id = await _company(current_user)

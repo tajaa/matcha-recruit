@@ -111,6 +111,9 @@ class RunContext:
     grants: dict[str, dict] = field(default_factory=dict)  # ability key -> its settings
     commit_mode: CommitMode = "dry_run"
     resume: FrozenAction | None = None
+    # The confirmation whose yes this run carries out: what makes a commit
+    # idempotent per approval (a purchase row is UNIQUE on it).
+    resume_prompt_id: UUID | None = None
     on_receipt: Callable[[dict], Awaitable[None]] | None = None
     reasoning_effort: str = "medium"
     store_responses: bool = True

@@ -15,12 +15,17 @@ import json
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
 
 from app.core.models.auth import CurrentUser
 from app.core.services import card_vault
 from app.database import get_connection
 from app.matcha.dependencies import require_company_member
+from app.matcha.models.matcha_work.purchases import (
+    AddressIn,
+    BillingAddressUpdate,
+    PaymentCardCreate,
+    ShippingAddressIn,
+)
 from app.matcha.services.matcha_work import shipping_addresses as addresses
 from app.matcha.services.matcha_work.agent_card.chat_flow import purchases_allowed
 
@@ -28,34 +33,6 @@ router = APIRouter()
 
 MAX_CARDS_PER_USER = 5
 MAX_LABEL_DIGITS = 4
-
-
-class AddressIn(BaseModel):
-    name: str
-    line1: str
-    line2: str = ""
-    city: str
-    region: str = ""
-    postal_code: str
-    country: str = "US"
-    phone: str = ""
-
-
-class PaymentCardCreate(BaseModel):
-    number: str
-    exp_month: int
-    exp_year: int
-    label: str = ""
-    # None: bill to the shipping address.
-    billing_address: AddressIn | None = None
-
-
-class BillingAddressUpdate(BaseModel):
-    billing_address: AddressIn | None = None
-
-
-class ShippingAddressIn(AddressIn):
-    is_default: bool = False
 
 
 _CARD_COLUMNS = "id, label, brand, last4, exp_month, exp_year, billing_address, created_at"
@@ -178,6 +155,7 @@ async def set_card_billing_address(
 ):
     """Set the card's own billing address, or clear it (null) to bill to the
     shipping address."""
+    _require_purchases(current_user)
     billing = _clean_address(body.billing_address)
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -266,8 +244,11 @@ async def update_shipping_address(
                     RETURNING {addresses.ADDRESS_COLUMNS}""",
                 address_id, current_user.id, *(clean[k] for k in addresses.FIELDS), body.is_default,
             )
-    if row is None:
-        raise HTTPException(status_code=404, detail="Address not found")
+            if row is None:
+                # Inside the transaction, so the defaults cleared above roll
+                # back: a PUT on a missing or foreign id never strips the
+                # person's default.
+                raise HTTPException(status_code=404, detail="Address not found")
     return addresses.address_out(row)
 
 

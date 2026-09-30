@@ -84,11 +84,18 @@ def allowances_for(user) -> frozenset[str]:
     return frozenset({purchase.ALLOWANCE}) if purchases_allowed(user) else frozenset()
 
 
+def offered(ability: Ability, situation: Situation) -> bool:
+    """Whether this account may have the ability at all. The one place the
+    allowance rule lives: an ability that is not offered is not in a run, not
+    listed, not hinted at and cannot be switched on."""
+    return ability.allowance is None or ability.allowance in situation.allowed
+
+
 def availability(ability: Ability, situation: Situation) -> Availability:
     base = dict(key=ability.key, label=ability.label, private_only=ability.private_only)
     if not ability.env_ready():
         return Availability(**base, available=False, reason="Not set up on this server yet.")
-    if ability.allowance is not None and ability.allowance not in situation.allowed:
+    if not offered(ability, situation):
         return Availability(**base, available=False, reason="Not available on this account yet.")
     if ability.private_only and not situation.private:
         return Availability(**base, available=False,
@@ -122,9 +129,7 @@ def switch_on_hints(catalog: Sequence[Ability], situation: Situation) -> list[tu
     hints = []
     for ability in catalog:
         state = availability(ability, situation)
-        if state.available or not ability.env_ready():
-            continue
-        if ability.allowance is not None and ability.allowance not in situation.allowed:
+        if state.available or not ability.env_ready() or not offered(ability, situation):
             continue
         hints.append((ability.label, state.reason or "Not available here."))
     return hints

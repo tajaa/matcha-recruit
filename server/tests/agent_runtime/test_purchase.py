@@ -294,6 +294,9 @@ def _frozen(**over):
                         preview=purchase._preview(args, state))
 
 
+PROMPT_ID = uuid4()
+
+
 async def _approve(monkeypatch, conn, frozen=None, commit_mode="live"):
     wire_store(monkeypatch)
     monkeypatch.setattr(purchase, "connection_or_direct", connection(conn))
@@ -305,7 +308,8 @@ async def _approve(monkeypatch, conn, frozen=None, commit_mode="live"):
     client = FakeClient([response(call("finish", {"headline": "Bought it", "summary": "Test purchase."}))])
     abilities = [purchase.build()]
     out = await runner.run_agent(
-        _ctx(resume=frozen or _frozen(), commit_mode=commit_mode, on_receipt=on_receipt),
+        _ctx(resume=frozen or _frozen(), resume_prompt_id=PROMPT_ID, commit_mode=commit_mode,
+             on_receipt=on_receipt),
         client=client, abilities=abilities,
         contract=runner.ResultContract(finish=result.finish_tool(abilities),
                                        normalize=lambda a, s: result.normalize(a, s, abilities)),
@@ -314,10 +318,14 @@ async def _approve(monkeypatch, conn, frozen=None, commit_mode="live"):
     return out, receipts, client
 
 
-def _buy_conn(purchase_id):
+def _buy_conn(purchase_id, *, status=None, inserted=True, payment_intent_id=None, error=None):
+    def row(*args):
+        return {"id": purchase_id, "status": status or args[-1], "stripe_payment_intent_id": payment_intent_id,
+                "charge_error": error, "inserted": inserted}
+
     return (FakeConn()
             .on("FROM mw_payment_cards", dict(CARD))
-            .on("INSERT INTO mw_agent_purchase_requests", purchase_id))
+            .on("INSERT INTO mw_agent_purchase_requests", row))
 
 
 @pytest.mark.asyncio
@@ -330,10 +338,13 @@ async def test_a_yes_records_the_purchase_and_charges_stripe_test_mode(monkeypat
     charge = AsyncMock(return_value={"status": "test_charged", "payment_intent_id": "pi_1", "error": None})
     monkeypatch.setattr(test_charge, "charge", charge)
     out, receipts, _ = await _approve(monkeypatch, conn)
-    insert = conn.ran("INSERT INTO mw_agent_purchase_requests")[0][2]
-    assert insert[4] == "4242" and insert[5] == "Organic Cotton Baseball Hat"
-    assert insert[8] == 65.0 and insert[9] == "USD"
-    assert json.loads(insert[11])["line1"] == "1 Main St" and insert[12] is None
+    query, insert = conn.ran("INSERT INTO mw_agent_purchase_requests")[0][1:]
+    # Keyed on the approval: a second run of the same yes finds this row.
+    assert "ON CONFLICT (prompt_id)" in query and insert[2] == PROMPT_ID
+    assert insert[5] == "4242" and insert[6] == "Organic Cotton Baseball Hat"
+    assert insert[9] == 65.0 and insert[10] == "USD"
+    assert json.loads(insert[12])["line1"] == "1 Main St" and insert[13] is None
+    assert insert[14] == "charging"  # until Stripe's answer is written
     assert charge.await_args.kwargs["amount"] == 65.0 and charge.await_args.kwargs["brand"] == "visa"
     assert conn.ran("UPDATE mw_agent_purchase_requests")[0][2][1] == "test_charged"
     receipt = receipts[0]
@@ -355,6 +366,7 @@ async def test_without_a_test_key_it_is_a_handoff_to_the_store(monkeypatch):
     monkeypatch.setattr(test_charge, "charge", charge)
     _, receipts, _ = await _approve(monkeypatch, conn)
     assert charge.await_count == 0
+    assert conn.ran("INSERT INTO mw_agent_purchase_requests")[0][2][14] == "handoff"
     assert receipts[0]["status"] == "handoff"
     assert receipts[0]["link"] == {"label": "Finish checkout", "url": "https://vandre.example.com/hat"}
 
@@ -438,3 +450,107 @@ def test_the_model_is_told_what_would_switch_buying_on_but_only_for_allowed_acco
     text = prompt.build_system_prompt(context(), [], unavailable=[("Buying", "Switch it on.")])
     assert "- Buying: Switch it on." in text
     assert "Not available in this run" not in prompt.build_system_prompt(context(), [])
+
+
+# ── once per approval ─────────────────────────────────────────────────────────
+
+def _stripe(monkeypatch, **result):
+    from app.matcha.services.matcha_work.agent_card import test_charge
+
+    monkeypatch.setattr(test_charge, "test_key", lambda: "sk_test_x")
+    charge = AsyncMock(return_value={"status": "test_charged", "payment_intent_id": "pi_1", "error": None, **result})
+    monkeypatch.setattr(test_charge, "charge", charge)
+    return charge
+
+
+@pytest.mark.asyncio
+async def test_a_second_run_of_a_charged_yes_charges_nothing(monkeypatch):
+    charge = _stripe(monkeypatch)
+    conn = _buy_conn(uuid4(), status="test_charged", inserted=False, payment_intent_id="pi_first")
+    _, receipts, _ = await _approve(monkeypatch, conn)
+    assert charge.await_count == 0 and conn.ran("UPDATE mw_agent_purchase_requests") == []
+    assert receipts[0]["status"] == "done" and "nothing was charged again" in receipts[0]["note"]
+    assert any("pi_first" in line["value"] for line in receipts[0]["lines"])
+
+
+@pytest.mark.asyncio
+async def test_a_second_run_of_a_failed_or_handed_off_yes_reports_it_again(monkeypatch):
+    charge = _stripe(monkeypatch)
+    _, receipts, _ = await _approve(monkeypatch, _buy_conn(uuid4(), status="test_failed", inserted=False,
+                                                           error="Declined."))
+    assert receipts[0]["status"] == "failed" and "Declined." in receipts[0]["note"]
+    _, receipts, _ = await _approve(monkeypatch, _buy_conn(uuid4(), status="handoff", inserted=False))
+    assert receipts[0]["status"] == "handoff"
+    assert charge.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_a_charge_left_unsettled_is_retried_under_the_same_idempotency_key(monkeypatch):
+    charge = _stripe(monkeypatch)
+    purchase_id = uuid4()
+    conn = _buy_conn(purchase_id, status="charging", inserted=False)
+    _, receipts, _ = await _approve(monkeypatch, conn)
+    assert charge.await_args.kwargs["purchase_id"] == purchase_id  # Stripe key agent-purchase-<id>
+    assert conn.ran("UPDATE mw_agent_purchase_requests")[0][2][1] == "test_charged"
+    assert receipts[0]["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_an_unsettled_charge_without_a_key_is_unknown_not_failed(monkeypatch):
+    from app.matcha.services.matcha_work.agent_card import test_charge
+
+    monkeypatch.setattr(test_charge, "test_key", lambda: None)
+    _, receipts, _ = await _approve(monkeypatch, _buy_conn(uuid4(), status="charging", inserted=False))
+    assert receipts[0]["status"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_a_crash_after_the_charge_is_an_unknown_outcome_and_the_row_stays_charging(monkeypatch):
+    from app.matcha.services.matcha_work.agent_card import test_charge
+
+    monkeypatch.setattr(test_charge, "test_key", lambda: "sk_test_x")
+    monkeypatch.setattr(test_charge, "charge", AsyncMock(side_effect=RuntimeError("socket closed")))
+    conn = _buy_conn(uuid4())
+    _, receipts, _ = await _approve(monkeypatch, conn)
+    assert conn.ran("UPDATE mw_agent_purchase_requests") == []
+    assert receipts[0]["status"] == "unknown" and "Check before retrying" in receipts[0]["note"]
+
+
+# ── what counts as buyable, and what "it" is ──────────────────────────────────
+
+def test_an_http_buy_link_is_not_buyable():
+    plain = {**STORED, "blocks": [{**STORED["blocks"][0], "top_pick": _pick("Hat", url="http://shop.example.com/hat"),
+                                   "alternatives": []}]}
+    assert purchase.offers_from_result(plain) == []
+
+
+def _answer(headline, blocks):
+    return {"schema": "agent_result.v2", "headline": headline, "summary": "s", "blocks": blocks}
+
+
+@pytest.mark.asyncio
+async def test_it_is_the_latest_answer_not_an_older_product(monkeypatch):
+    newer = _answer("Your calendar is free", [])
+    question = {"schema": "agent_result.v2", "question": {"question": "Which size?"}}
+    _, out = await _prepared(monkeypatch, _conn(results=(question, newer, STORED)))
+    assert out.payload["ready"] is True
+    assert all(not item["from_latest_answer"] for item in out.payload["items"])
+    assert "ask which one" in out.payload["next"]
+
+
+@pytest.mark.asyncio
+async def test_a_question_run_does_not_hide_the_latest_answer(monkeypatch):
+    question = {"schema": "agent_result.v2", "question": {"question": "Which card?"}}
+    older = _answer("Best cap", [{"type": "picks", "criteria": [], "top_pick": _pick("Old Cap"), "alternatives": []}])
+    _, out = await _prepared(monkeypatch, _conn(results=(question, STORED, older)))
+    items = out.payload["items"]
+    assert items[0]["name"] == "Organic Cotton Baseball Hat" and items[0]["from_latest_answer"]
+    assert items[-1]["name"] == "Old Cap" and not items[-1]["from_latest_answer"]
+    assert "is the top pick of their latest answer, item-1" in out.payload["next"]
+
+
+def test_offered_is_the_one_allowance_rule():
+    buy = purchase.build()
+    assert not catalog.offered(buy, catalog.Situation(private=True))
+    assert catalog.offered(buy, catalog.Situation(private=True, allowed=frozenset({purchase.ALLOWANCE})))
+    assert catalog.offered(catalog.build_catalog(fetch_page=_no_fetch)[0], catalog.Situation(private=True))

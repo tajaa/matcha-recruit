@@ -25,6 +25,8 @@ What keeps this safe:
     purchase is a Stripe test-mode charge (`agent_card/test_charge.py`, the
     same path agent-card purchases use); otherwise it is a handoff: the order
     is recorded and the person finishes checkout at the store's link.
+  * One yes buys once: the purchase row is keyed on the approved
+    confirmation, and a row stays `charging` until Stripe's answer is written.
   * Private conversation only, switched on by the person (disclosure
     `purchase-1`), and only for accounts allowed to buy
     (`chat_flow.purchases_allowed`): admins and `AGENT_PURCHASE_ALLOWED_EMAILS`.
@@ -71,13 +73,15 @@ def _session(state: RunState) -> dict:
 
 def _new_session(_ctx: RunContext) -> dict:
     return {"loaded": False, "items": {}, "cards": {}, "addresses": {}, "default_address": None,
-            "setup": None}
+            "setup": None, "latest_buyable": False}
 
 
 # ── loading ──────────────────────────────────────────────────────────────────
 
 def offers_from_result(result: Any) -> list[dict]:
-    """Every buyable pick in one stored result (v1 or v2), top pick first."""
+    """Every buyable pick in one stored result (v1 or v2), top pick first.
+    Buyable means an https buy link: the checkout link a handoff hands over
+    must be one both apps will open."""
     from app.matcha.services.matcha_work.agent_card.chat_flow import pick_offer
 
     from ..result import picks_block, read_result
@@ -90,7 +94,7 @@ def offers_from_result(result: Any) -> list[dict]:
     offers = []
     for pick in picks:
         offer = pick_offer(pick) if isinstance(pick, dict) else None
-        if offer:
+        if offer and str(offer["checkout_url"]).startswith("https://"):
             offers.append(offer)
     return offers
 
@@ -121,13 +125,26 @@ async def load_session(conn, ctx: RunContext, session: dict) -> None:
     )
     items: dict[str, dict] = {}
     results = 0
+    # "It" means the latest answer. A run that only asked a question or held
+    # an action is not an answer; an answer with nothing to buy still is,
+    # and then "it" is not an older product.
+    latest_seen = False
+    session["latest_buyable"] = False
     for row in rows:
-        offers = offers_from_result(decode_jsonb(row["result"], None))
+        stored = decode_jsonb(row["result"], None)
+        if not (isinstance(stored, dict) and stored.get("headline")):
+            continue
+        offers = offers_from_result(stored)
+        if not latest_seen:
+            latest_seen = True
+            session["latest_buyable"] = bool(offers)
         if not offers:
             continue
         results += 1
         for offer in offers:
-            items[f"item-{len(items) + 1}"] = {**offer, "source_run_id": str(row["id"])}
+            items[f"item-{len(items) + 1}"] = {
+                **offer, "source_run_id": str(row["id"]), "latest": session["latest_buyable"] and results == 1,
+            }
         if results >= RECENT_RESULTS:
             break
     cards = await conn.fetch(
@@ -182,7 +199,7 @@ def _model_view(session: dict) -> dict:
     return {
         "items": [
             {"item_id": key, "name": o["item_name"], "brand": o.get("brand"), "store": o.get("retailer"),
-             "price": _money(o) or "not confirmed"}
+             "price": _money(o) or "not confirmed", "from_latest_answer": bool(o.get("latest"))}
             for key, o in session["items"].items()
         ],
         "cards": [{"card_id": key, "card": _card_text(c)} for key, c in session["cards"].items()],
@@ -215,11 +232,16 @@ async def _prepare(ctx: RunContext, state: RunState, args: dict, left: float) ->
                      "pick. Research it first (the result becomes buyable), or ask what they want."),
         }
     else:
+        which = (
+            "\"It\" or \"the best pick\" is the top pick of their latest answer, item-1."
+            if session.get("latest_buyable") else
+            "Their latest answer had nothing to buy, so \"it\" is not any of these: unless they named "
+            "the item, ask which one (ask_user)."
+        )
         payload = {
             **view, "ready": True,
-            "next": ("Call buy_item with the item_id they meant (\"it\" or \"the best pick\" is the top "
-                     "pick of the latest result, item-1). If they have several cards and did not say "
-                     "which, ask. The address defaults to their default address."),
+            "next": (f"Call buy_item with the item_id they meant. {which} If they have several cards and "
+                     "did not say which, ask. The address defaults to their default address."),
         }
     return ToolOutput(
         payload=payload,
@@ -297,11 +319,67 @@ def _preview(args: dict, state: RunState) -> dict:
     return {"title": title[:160], "lines": [*_lines(args), {"label": "Payment", "value": TEST_MODE_NOTE}]}
 
 
+def _receipt_lines(args: dict, order_ref: str) -> list[dict]:
+    return [*_lines(args), {"label": "Order ref", "value": order_ref, "mono": True}]
+
+
+def _handoff(item: dict, lines: list[dict], purchase_id, why: str) -> ToolOutput:
+    return ToolOutput(
+        payload={"status": "handoff", "order_ref": str(purchase_id)[:8].upper(),
+                 "note": f"{why} The person finishes checkout at the store's link."},
+        receipt={
+            "status": "handoff", "title": f"Ready to check out: {item['item_name']}"[:160],
+            "lines": lines, "note": f"{why} Finish checkout at the store.",
+            "link": {"label": "Finish checkout", "url": item["checkout_url"]},
+        },
+        audit={"status": "handoff", "purchase_id": str(purchase_id)},
+    )
+
+
+def _charged(item: dict, lines: list[dict], purchase_id, payment_intent_id: str, *, again: bool) -> ToolOutput:
+    lines = [*lines, {"label": "Payment", "value": f"{payment_intent_id} (succeeded)", "mono": True}]
+    note = "Stripe TEST mode: no real money moved and no real order was placed."
+    if again:
+        note = "Already bought with this approval; nothing was charged again. " + note
+    return ToolOutput(
+        payload={"status": "test_charged", "order_ref": str(purchase_id)[:8].upper(), "already": again,
+                 "note": "Charged in Stripe test mode. No real money moved and no real order was placed."},
+        receipt={
+            "title": f"Bought {item['item_name']}"[:160], "lines": lines, "note": note,
+            "link": {"label": "View at store", "url": item["checkout_url"]},
+        },
+        audit={"status": "test_charged", "purchase_id": str(purchase_id),
+               "payment_intent_id": payment_intent_id, "again": again},
+    )
+
+
+def _failed(lines: list[dict], purchase_id, error: str | None) -> ToolOutput:
+    return ToolOutput(
+        payload={"error": f"The test charge failed: {error}", "order_ref": str(purchase_id)[:8].upper()},
+        receipt={"lines": lines, "note": f"The Stripe test charge failed: {error}"},
+        audit={"status": "test_failed", "purchase_id": str(purchase_id)},
+    )
+
+
 async def _buy(ctx: RunContext, state: RunState, args: dict, left: float) -> ToolOutput:
+    """Carry out an approved purchase, once per approval.
+
+    The row is keyed on the confirmation the person said yes to
+    (`prompt_id`, UNIQUE), so a second run of the same yes (a stale-run
+    sweep, a re-dispatch) finds the first row instead of making another, and
+    the Stripe idempotency key (`agent-purchase-<row id>`) makes a repeated
+    charge the same charge. A row is `charging` from before the Stripe call
+    until its outcome is written: one left `charging` is an outcome nobody
+    knows yet, and the next attempt on that approval settles it.
+    """
     from app.matcha.services.matcha_work.agent_card import test_charge
+
+    from ..runner import TransportUncertain
 
     item, frozen_card = args["item"], args["card"]
     await ctx.progress.note(f"Buying {item['item_name']}…", force=True)
+    key = test_charge.test_key()
+    chargeable = key is not None and item.get("amount") is not None and bool(item.get("currency"))
     async with connection_or_direct() as conn:
         card = await conn.fetchrow(
             """SELECT id, brand, last4, exp_month, exp_year FROM mw_payment_cards
@@ -312,65 +390,57 @@ async def _buy(ctx: RunContext, state: RunState, args: dict, left: float) -> Too
             return ToolOutput(payload={
                 "error": f"The card ending {frozen_card['last4']} was removed or has expired. Nothing was bought.",
             })
-        purchase_id = await conn.fetchval(
+        row = await conn.fetchrow(
             """INSERT INTO mw_agent_purchase_requests
                    (company_id, project_id, task_id, run_id, prompt_id, user_id, card_id, card_last4,
                     item_name, retailer, checkout_url, amount, currency, channel_id,
-                    shipping_address, billing_address)
-               VALUES ($1, NULL, NULL, $2, NULL, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-                       $12::jsonb, $13::jsonb)
-               RETURNING id""",
-            ctx.company_id, ctx.run_id, ctx.user_id, card["id"], card["last4"], item["item_name"],
-            item.get("retailer"), item["checkout_url"], item.get("amount"), item.get("currency"),
-            ctx.channel_id, json.dumps(args["shipping"]),
+                    shipping_address, billing_address, status)
+               VALUES ($1, NULL, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                       $13::jsonb, $14::jsonb, $15)
+               ON CONFLICT (prompt_id) DO UPDATE SET prompt_id = EXCLUDED.prompt_id
+               RETURNING id, status, stripe_payment_intent_id, charge_error, (xmax = 0) AS inserted""",
+            ctx.company_id, ctx.run_id, ctx.resume_prompt_id, ctx.user_id, card["id"], card["last4"],
+            item["item_name"], item.get("retailer"), item["checkout_url"], item.get("amount"),
+            item.get("currency"), ctx.channel_id, json.dumps(args["shipping"]),
             json.dumps(args["billing"]) if args.get("billing") else None,
+            "charging" if chargeable else "handoff",
         )
-    order_ref = str(purchase_id)[:8].upper()
-    lines = [*_lines(args), {"label": "Order ref", "value": order_ref, "mono": True}]
-    link_url = item["checkout_url"] if str(item["checkout_url"]).startswith("https://") else None
-    key = test_charge.test_key()
-    if key is None or item.get("amount") is None or not item.get("currency"):
+    purchase_id = row["id"]
+    lines = _receipt_lines(args, str(purchase_id)[:8].upper())
+    status = row["status"]
+    if not row["inserted"]:
+        # This approval was already carried out: report what happened then.
+        if status == "test_charged":
+            return _charged(item, lines, purchase_id, row["stripe_payment_intent_id"], again=True)
+        if status == "test_failed":
+            return _failed(lines, purchase_id, row["charge_error"])
+        if status != "charging":
+            return _handoff(item, lines, purchase_id, "Nothing was charged.")
+        if key is None:
+            raise TransportUncertain("a charge was started for this approval and its outcome is unknown")
+    elif status == "handoff":
         why = "No verified price, so nothing was charged." if key else "Nothing was charged."
-        return ToolOutput(
-            payload={"status": "handoff", "order_ref": order_ref,
-                     "note": f"{why} The person finishes checkout at the store's link."},
-            receipt={
-                "status": "handoff", "title": f"Ready to check out: {item['item_name']}"[:160],
-                "lines": lines, "note": f"{why} Finish checkout at the store.",
-                "link": {"label": "Finish checkout", "url": link_url} if link_url else None,
-            },
-            audit={"status": "handoff", "purchase_id": str(purchase_id)},
+        return _handoff(item, lines, purchase_id, why)
+    try:
+        outcome = await test_charge.charge(
+            key, purchase_id=purchase_id, amount=item["amount"], currency=item["currency"],
+            brand=card["brand"], description=f"Espresso assistant test purchase: {item['item_name']}",
+            metadata={"purchase_id": purchase_id, "run_id": ctx.run_id, "card_last4": card["last4"]},
         )
-    outcome = await test_charge.charge(
-        key, purchase_id=purchase_id, amount=item["amount"], currency=item["currency"],
-        brand=card["brand"], description=f"Espresso assistant test purchase: {item['item_name']}",
-        metadata={"purchase_id": purchase_id, "run_id": ctx.run_id, "card_last4": card["last4"]},
-    )
-    async with connection_or_direct() as conn:
-        await conn.execute(
-            """UPDATE mw_agent_purchase_requests
-               SET status = $2, stripe_payment_intent_id = $3, charge_error = $4
-               WHERE id = $1""",
-            purchase_id, outcome["status"], outcome["payment_intent_id"], outcome["error"],
-        )
+        async with connection_or_direct() as conn:
+            await conn.execute(
+                """UPDATE mw_agent_purchase_requests
+                   SET status = $2, stripe_payment_intent_id = $3, charge_error = $4
+                   WHERE id = $1""",
+                purchase_id, outcome["status"], outcome["payment_intent_id"], outcome["error"],
+            )
+    except Exception as exc:
+        # The charge may have gone through; the row stays `charging` and the
+        # receipt says the outcome is unknown, never that it failed.
+        raise TransportUncertain(f"purchase {purchase_id}: {type(exc).__name__}") from exc
     if outcome["status"] != "test_charged":
-        return ToolOutput(
-            payload={"error": f"The test charge failed: {outcome['error']}", "order_ref": order_ref},
-            receipt={"lines": lines, "note": f"The Stripe test charge failed: {outcome['error']}"},
-            audit={"status": "test_failed", "purchase_id": str(purchase_id)},
-        )
-    lines.append({"label": "Payment", "value": f"{outcome['payment_intent_id']} (succeeded)", "mono": True})
-    return ToolOutput(
-        payload={"status": "test_charged", "order_ref": order_ref,
-                 "note": "Charged in Stripe test mode. No real money moved and no real order was placed."},
-        receipt={
-            "title": f"Bought {item['item_name']}"[:160], "lines": lines,
-            "note": "Stripe TEST mode: no real money moved and no real order was placed.",
-            "link": {"label": "View at store", "url": link_url} if link_url else None,
-        },
-        audit={"status": "test_charged", "purchase_id": str(purchase_id),
-               "payment_intent_id": outcome["payment_intent_id"]},
-    )
+        return _failed(lines, purchase_id, outcome["error"])
+    return _charged(item, lines, purchase_id, outcome["payment_intent_id"], again=False)
 
 
 PREPARE_TOOL = AgentTool(

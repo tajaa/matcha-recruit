@@ -135,12 +135,13 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         active = await grants.load_grants(conn, user_id) if private else {}
         if active:
             await gmail.load_token()
-        requester = await conn.fetchrow("SELECT role, email FROM users WHERE id = $1", user_id)
         situation = catalog.Situation(
             private=private, grants=active,
             google_connected=gmail.is_configured, granted_scopes=gmail.granted_scopes,
-            # A Record has no attributes; the allowance check reads role/email off one.
-            allowed=catalog.allowances_for(SimpleNamespace(**dict(requester))) if requester else frozenset(),
+            # The worker's claim query carries who asked (role, email).
+            allowed=catalog.allowances_for(SimpleNamespace(
+                role=run.get("requester_role"), email=run.get("requester_email"),
+            )),
         )
         everything = catalog.build_catalog(
             fetch_page=lambda url: card_agent.fetch_page_tool(url), gmail=gmail,
@@ -185,7 +186,8 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
             grounding=policy.Grounding(user_texts=own_texts, own_addresses=own),
         ),
         granted_scopes=situation.granted_scopes, grants=active,
-        commit_mode=commit_mode(), resume=frozen, on_receipt=on_receipt,
+        commit_mode=commit_mode(), resume=frozen, resume_prompt_id=run.get("resume_prompt_id"),
+        on_receipt=on_receipt,
         # Nothing from the private conversation is stored by the provider: even
         # a run without mail or calendar replays earlier answers built from them.
         store_responses=not private and not any(a.private_only for a in abilities),

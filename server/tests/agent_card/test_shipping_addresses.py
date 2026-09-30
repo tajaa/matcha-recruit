@@ -3,6 +3,7 @@ No database: a scripted fake connection stands in."""
 import base64
 import json
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
@@ -127,6 +128,33 @@ async def test_update_is_scoped_to_the_owner_and_never_drops_the_default(db):
     assert "user_id = $2" in query and "is_default = is_default OR $11" in query
 
 
+class _TxConn(FakeConn):
+    """Records whether an exception left each transaction (i.e. rolled it back)."""
+
+    def __init__(self):
+        super().__init__()
+        self.rolled_back = []
+
+    @asynccontextmanager
+    async def transaction(self):
+        try:
+            yield
+        except BaseException:
+            self.rolled_back.append(True)
+            raise
+        self.rolled_back.append(False)
+
+
+@pytest.mark.asyncio
+async def test_a_default_put_on_a_missing_id_rolls_back_the_cleared_default(db):
+    db["conn"] = _TxConn()
+    with pytest.raises(HTTPException) as exc:
+        await payment_cards.update_shipping_address(uuid4(), _body(is_default=True), _user())
+    assert exc.value.status_code == 404
+    assert db["conn"].ran("SET is_default = FALSE")  # cleared inside the transaction…
+    assert db["conn"].rolled_back == [True]           # …and rolled back with it
+
+
 @pytest.mark.asyncio
 async def test_deleting_the_default_promotes_the_oldest(db):
     db["conn"] = FakeConn().on("DELETE FROM mw_shipping_addresses", True)
@@ -180,3 +208,6 @@ async def test_set_and_clear_a_cards_billing_address(db):
     with pytest.raises(HTTPException) as exc:
         await payment_cards.set_card_billing_address(uuid4(), payment_cards.BillingAddressUpdate(), _user())
     assert exc.value.status_code == 404
+    with pytest.raises(HTTPException) as exc:
+        await payment_cards.set_card_billing_address(uuid4(), payment_cards.BillingAddressUpdate(), _user("client"))
+    assert exc.value.status_code == 403

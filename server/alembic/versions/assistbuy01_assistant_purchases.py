@@ -4,7 +4,7 @@ Revision ID: assistbuy01
 Revises: agentrt03
 Create Date: 2026-09-30
 
-Three changes, all additive:
+Four changes, all additive:
 
   * `mw_shipping_addresses`: where a purchase ships. Per person, at most five
     (enforced in the route), one marked default.
@@ -16,6 +16,7 @@ Three changes, all additive:
     requires one or the other. The address a purchase shipped to (and billed
     to) is snapshotted on the row, so editing or deleting an address later
     never rewrites history.
+  * status `charging`: a charge whose outcome is not written yet.
 """
 from alembic import op
 
@@ -72,6 +73,14 @@ def upgrade():
         ALTER TABLE mw_agent_purchase_requests ADD CONSTRAINT mw_agent_purchase_requests_origin
             CHECK (task_id IS NOT NULL OR shipping_address IS NOT NULL)
     """)
+    # `charging`: the Stripe call was made (or is about to be) and its outcome
+    # is not written yet. A row left there is an outcome nobody knows; the
+    # next attempt on the same approval settles it (same idempotency key).
+    op.execute("ALTER TABLE mw_agent_purchase_requests DROP CONSTRAINT IF EXISTS mw_agent_purchase_requests_status_check")
+    op.execute("""
+        ALTER TABLE mw_agent_purchase_requests ADD CONSTRAINT mw_agent_purchase_requests_status_check
+            CHECK (status IN ('handoff', 'cancelled', 'charging', 'test_charged', 'test_failed'))
+    """)
     op.execute("""
         CREATE INDEX IF NOT EXISTS idx_mw_agent_purchase_requests_user
             ON mw_agent_purchase_requests (user_id, created_at DESC)
@@ -81,6 +90,12 @@ def upgrade():
 def downgrade():
     # Assistant purchases have no task and cannot survive NOT NULL again.
     op.execute("DELETE FROM mw_agent_purchase_requests WHERE task_id IS NULL")
+    op.execute("UPDATE mw_agent_purchase_requests SET status = 'test_failed' WHERE status = 'charging'")
+    op.execute("ALTER TABLE mw_agent_purchase_requests DROP CONSTRAINT IF EXISTS mw_agent_purchase_requests_status_check")
+    op.execute("""
+        ALTER TABLE mw_agent_purchase_requests ADD CONSTRAINT mw_agent_purchase_requests_status_check
+            CHECK (status IN ('handoff', 'cancelled', 'test_charged', 'test_failed'))
+    """)
     op.execute("DROP INDEX IF EXISTS idx_mw_agent_purchase_requests_user")
     op.execute("""
         ALTER TABLE mw_agent_purchase_requests

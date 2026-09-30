@@ -159,6 +159,17 @@ async def test_buying_is_listed_only_for_accounts_allowed_to_buy(wired, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_an_ability_not_offered_to_the_account_cannot_be_switched_on(wired, monkeypatch):
+    enabled = AsyncMock()
+    monkeypatch.setattr(grants, "enable", enabled)
+    monkeypatch.delenv("AGENT_PURCHASE_ALLOWED_EMAILS", raising=False)
+    with pytest.raises(HTTPException) as exc:
+        await routes.enable_ability("purchase", AbilityEnableRequest(consent_version="purchase-1"),
+                                    current_user=_user())
+    assert exc.value.status_code == 404 and enabled.await_count == 0
+
+
+@pytest.mark.asyncio
 async def test_switching_an_ability_on_and_off(wired, monkeypatch):
     enabled = AsyncMock(return_value={"key": "email", "enabled": True, "settings": {}})
     disabled = AsyncMock(return_value={"key": "email", "enabled": False})
