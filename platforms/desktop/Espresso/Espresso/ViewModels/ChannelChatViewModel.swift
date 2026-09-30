@@ -360,6 +360,15 @@ final class ChannelChatViewModel {
                 self.messages[idx].metadata?.answerText = update.answerText
             }
         }
+        sub.onAgentRunProgress = { [weak self] channelId, progress in
+            guard let self, channelId == self.channelId else { return }
+            // The run's one progress message carries its run id; restamp it.
+            for idx in self.messages.indices
+            where self.messages[idx].metadata?.kind == "agent_progress"
+                && self.messages[idx].metadata?.runId == progress.runId {
+                self.messages[idx].metadata?.progress = progress
+            }
+        }
         sub.onReactionUpdate = { [weak self] messageId, reactions in
             guard let self else { return }
             if let idx = self.messages.firstIndex(where: { $0.id == messageId }) {

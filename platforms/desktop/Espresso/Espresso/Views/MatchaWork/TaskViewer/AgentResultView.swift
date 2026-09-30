@@ -231,6 +231,9 @@ struct AgentResultBody: View {
             Text(result.summary).font(.ticket(size: 12)).foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let flights = result.flights, !flights.options.isEmpty {
+                AgentFlightsSection(flights: flights)
+            }
             if let pick = result.topPick {
                 AgentPickCard(pick: pick, hero: true)
             }
@@ -267,6 +270,130 @@ struct AgentResultBody: View {
                         .lineLimit(1)
                 }
             }
+        }
+    }
+}
+
+/// A flight search's chosen offers. Every price, time, flight and warning is
+/// the server's own search data; the agent only picked and labelled them.
+private struct AgentFlightsSection: View {
+    let flights: MWAgentFlights
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "airplane").foregroundColor(.accentColor)
+                Text(flights.querySummary).font(.ticket(size: 11)).foregroundColor(.secondary)
+                if flights.testData {
+                    Text("TEST DATA · NOT REAL FARES")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Capsule().fill(Color.orange.opacity(0.18)))
+                        .foregroundColor(.orange)
+                }
+            }
+            ForEach(flights.options) { AgentFlightOptionCard(option: $0) }
+            Text("Fares change fast; run the card again to refresh them.")
+                .font(.ticket(size: 10)).foregroundColor(.secondary)
+            if let privacy = flights.privacy {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "checkmark.shield.fill").foregroundColor(.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Searched privately, via \(privacy.via)").font(.ticket(size: 10)).bold()
+                        Text("Sent: \(privacy.sent.joined(separator: ", ")).").font(.ticket(size: 10))
+                        Text("Not sent: \(privacy.notSent.joined(separator: ", ")).").font(.ticket(size: 10))
+                    }
+                    .foregroundColor(.secondary)
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.green.opacity(0.06))
+                .cornerRadius(6)
+            }
+        }
+    }
+}
+
+private struct AgentFlightOptionCard: View {
+    let option: MWFlightOption
+
+    private var withBags: Bool {
+        option.trueTotalAmount != nil && option.trueTotalAmount != option.totalAmount
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        if let label = option.label {
+                            Text(label.uppercased()).font(.system(size: 9, weight: .bold)).foregroundColor(.green)
+                        }
+                        Text(option.carriers.joined(separator: " + ")).font(.ticket(size: 12)).bold()
+                        if option.ticketing == "separate" {
+                            Label("2 tickets", systemImage: "ticket").font(.ticket(size: 10)).foregroundColor(.orange)
+                        }
+                    }
+                    HStack(spacing: 6) {
+                        if let changeable = option.conditions.changeable {
+                            chip(changeable ? "Changeable" : "No changes", changeable ? .green : .orange)
+                        }
+                        if let refundable = option.conditions.refundable {
+                            chip(refundable ? "Refundable" : "Non-refundable", refundable ? .green : .secondary)
+                        }
+                        chip(option.bagsIncluded.checked > 0
+                             ? "\(option.bagsIncluded.checked) checked bag incl." : "No checked bag incl.", .secondary)
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(FlightFormat.fare(withBags ? option.trueTotalAmount : option.totalAmount, option.currency))
+                        .font(.system(size: 16, weight: .bold))
+                    if withBags {
+                        Text("fare \(FlightFormat.fare(option.totalAmount, option.currency)) + bags")
+                            .font(.ticket(size: 9)).foregroundColor(.secondary)
+                    }
+                    if let note = option.bagNote {
+                        Text(note).font(.ticket(size: 9)).foregroundColor(.secondary).multilineTextAlignment(.trailing)
+                    }
+                }
+            }
+            Divider().opacity(0.5)
+            ForEach(Array(option.slices.enumerated()), id: \.offset) { _, slice in
+                sliceRow(slice)
+            }
+            ForEach(option.why, id: \.self) { Text("• \($0)").font(.ticket(size: 11)) }
+            ForEach(option.warnings, id: \.self) { warning in
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.ticket(size: 10))
+                    .foregroundColor(.orange)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.1)))
+    }
+
+    private func chip(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(.ticket(size: 9))
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .overlay(Capsule().stroke(color.opacity(0.5)))
+            .foregroundColor(color)
+    }
+
+    private func sliceRow(_ slice: MWFlightSlice) -> some View {
+        let plus = FlightFormat.dayOffset(slice.departingAt, slice.arrivingAt)
+        let via = slice.segments.dropLast().map(\.destination).joined(separator: ", ")
+        return HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(FlightFormat.day(slice.departingAt)).font(.ticket(size: 10)).foregroundColor(.secondary)
+                .frame(width: 80, alignment: .leading)
+            Text("\(FlightFormat.clock(slice.departingAt)) \(slice.origin) → \(FlightFormat.clock(slice.arrivingAt)) \(slice.destination)\(plus > 0 ? " +\(plus)" : "")")
+                .font(.ticket(size: 11)).bold()
+            Text([FlightFormat.duration(slice.durationMinutes), FlightFormat.stops(slice.stops) + (via.isEmpty ? "" : " via \(via)")]
+                .filter { !$0.isEmpty }.joined(separator: " · "))
+                .font(.ticket(size: 10)).foregroundColor(.secondary)
+            Text(slice.segments.map(\.flightNumber).joined(separator: ", "))
+                .font(.system(size: 10, design: .monospaced)).foregroundColor(.secondary)
         }
     }
 }

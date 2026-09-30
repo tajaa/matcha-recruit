@@ -62,6 +62,50 @@ async def record_step(
         )
 
 
+async def claim_step(
+    run_id: UUID,
+    seq: int,
+    tool: str,
+    kind: str,
+    label: str,
+    args: dict | None,
+    result: dict | None,
+) -> UUID:
+    """Write a step as `claimed` BEFORE the action it records is attempted.
+
+    An outward action that dies mid-call then still has a row saying it was
+    started, and `resolve_step` decides what became of it.
+    """
+    async with connection_or_direct() as conn:
+        return await conn.fetchval(
+            """INSERT INTO mw_project_agent_steps
+               (run_id, seq, tool, kind, label, args, result, status)
+               VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,'claimed')
+               RETURNING id""",
+            run_id,
+            seq,
+            tool,
+            kind,
+            label,
+            json.dumps(args or {}),
+            json.dumps(result or {}),
+        )
+
+
+async def resolve_step(step_id: UUID, *, status: str, result: dict | None) -> None:
+    async with connection_or_direct() as conn:
+        await conn.execute(
+            """UPDATE mw_project_agent_steps
+               SET status = $2,
+                   result = COALESCE(result, '{}'::jsonb) || $3::jsonb,
+                   resolved_at = NOW()
+               WHERE id = $1 AND status = 'claimed'""",
+            step_id,
+            status,
+            json.dumps(result or {}),
+        )
+
+
 async def search_snapshot(project_id: UUID, query: str) -> list[dict]:
     term = (query or "").strip()
     if not term:
