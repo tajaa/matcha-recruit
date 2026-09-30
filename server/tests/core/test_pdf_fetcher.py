@@ -91,3 +91,53 @@ class TestSafeUrlFetcher:
         # must not slip through.
         with pytest.raises(ValueError):
             pdf.safe_url_fetcher("http://evil.test/redirect?to=data:image/png;base64,AAAA")
+
+
+class TestBothWeasyPrintMajors:
+    """CI installs one WeasyPrint; this loads pdf.py against the other API too."""
+
+    def _load_with(self, monkeypatch, urls_module):
+        import importlib.util
+        import sys
+
+        monkeypatch.setitem(sys.modules, "weasyprint.urls", urls_module)
+        spec = importlib.util.spec_from_file_location("_pdf_under_test", pdf.__file__)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_69_uses_plain_function_fetchers(self, monkeypatch):
+        import types
+
+        seen = []
+        urls = types.ModuleType("weasyprint.urls")
+        urls.default_url_fetcher = lambda url: seen.append(url) or {"string": b""}
+        module = self._load_with(monkeypatch, urls)
+        assert module.URLFetcher is None
+        assert module.safe_url_fetcher is module._fetch_data_only
+        module.safe_url_fetcher("data:,x")
+        assert seen == ["data:,x"]
+        with pytest.raises(ValueError):
+            module.safe_url_fetcher("file:///etc/passwd")
+
+    def test_70_uses_a_url_fetcher_object(self, monkeypatch):
+        import types
+
+        class FakeURLFetcher:
+            def __init__(self, allowed_protocols=None, **_kw):
+                self.allowed_protocols = allowed_protocols
+
+            def __call__(self, url):
+                return self.fetch(url)
+
+            def fetch(self, url, headers=None):
+                return ("fetched", url)
+
+        urls = types.ModuleType("weasyprint.urls")
+        urls.URLFetcher = FakeURLFetcher
+        module = self._load_with(monkeypatch, urls)
+        assert isinstance(module.safe_url_fetcher, FakeURLFetcher)
+        assert module.default_url_fetcher.allowed_protocols == {"data"}
+        assert module.safe_url_fetcher("data:,x") == ("fetched", "data:,x")
+        with pytest.raises(ValueError):
+            module.safe_url_fetcher("http://169.254.169.254/")
