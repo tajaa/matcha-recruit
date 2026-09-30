@@ -178,3 +178,9 @@ def test_flag_registered():
 
     assert DEFAULT_COMPANY_FEATURES["hr_cases"] is False
     assert FEATURE_REQUIRES["hr_cases"] == ("matcha_work", "matcha_drive")
+
+
+def test_platform_admin_is_refused(mod, scope):
+    with _client(mod, SimpleNamespace(id=uuid4(), role="admin")) as client:
+        assert client.get("/hr-cases").status_code == 403
+        assert client.get("/hr-cases/access").status_code == 403
