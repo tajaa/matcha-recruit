@@ -143,6 +143,9 @@ desktop/Werk/build/
 !.claude/CLAUDE.md
 !.claude/hooks/
 !.claude/settings.json
+# Per-machine Claude Code files in subdirectories (the rules above only match the repo root)
+**/.claude/settings.local.json
+**/.claude/scheduled_tasks.lock
 /soc/
 
 # Scratch / working files
