@@ -393,8 +393,14 @@ tmux split-window -t "$SESSION_NAME:dev" -h -p 30 -c "$PROJECT_ROOT" \
 sleep 1
 
 # Pane 2: Worker - Split below tunnel
+# macOS: Celery's prefork pool fails every task with "ValueError: not enough
+# values to unpack (expected 3, got 0)" in fast_trace_task — pool children
+# never get the worker's trace state. Run a single in-process worker there;
+# prod runs --concurrency=1 on Linux anyway (docker-compose.yml).
+WORKER_POOL_ARGS=""
+[ "$(uname -s)" = "Darwin" ] && WORKER_POOL_ARGS=" --pool=solo"
 tmux split-window -t "$SESSION_NAME:dev.1" -v -c "$PROJECT_ROOT/server" \
-    "$GS_OFF cd $SERVER_ROOT_Q && ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && celery -A app.workers.celery_app worker --loglevel=info; echo -e '\n${RED}Worker exited.${NC}'; read"
+    "$GS_OFF cd $SERVER_ROOT_Q && ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && celery -A app.workers.celery_app worker --loglevel=info${WORKER_POOL_ARGS}; echo -e '\n${RED}Worker exited.${NC}'; read"
 
 # Pane 3: Frontend - Start immediately (proxies will retry until backend is up)
 tmux split-window -t "$SESSION_NAME:dev.2" -v -c "$PROJECT_ROOT/client" \
