@@ -242,6 +242,48 @@ class TestNormalizeHrisLocations:
         assert normalize_hris_locations(["nope", 3]) == []
 
 
+class TestPayRateMatchesClassification:
+    """`employees.pay_rate` is $/hour for hourly and annual $ for exempt.
+
+    Finch reports the amount per `income.unit`; storing it raw priced a
+    salaried non-exempt manager at their annual salary per hour.
+    """
+
+    def _rate(self, flsa, unit, cents):
+        return FinchHRISService.normalize_worker(
+            _worker({"flsa_status": flsa, "income": {"amount": cents, "unit": unit}})
+        )["pay_rate"]
+
+    def test_hourly_worker_keeps_the_hourly_rate(self):
+        assert self._rate("non_exempt", "hourly", 2800) == Decimal("28.00")
+
+    def test_salaried_non_exempt_becomes_an_hourly_equivalent(self):
+        # $52,000 a year over 2,080 hours — not $52,000 an hour.
+        assert self._rate("non_exempt", "yearly", 5200000) == Decimal("25.00")
+        assert self._rate("non_exempt", "bi_weekly", 200000) == Decimal("25.00")
+
+    def test_exempt_salary_is_annualized_from_its_pay_period(self):
+        assert self._rate("exempt", "yearly", 12000000) == Decimal("120000.00")
+        assert self._rate("exempt", "monthly", 400000) == Decimal("48000.00")
+        assert self._rate("exempt", "semi_monthly", 200000) == Decimal("48000.00")
+        assert self._rate(None, "weekly", 100000) == Decimal("52000.00")
+
+    def test_finch_underscored_units_classify(self):
+        norm = FinchHRISService.normalize_worker(
+            _worker({"income": {"amount": 200000, "unit": "bi_weekly"}})
+        )
+        assert norm["pay_classification"] == "exempt"
+
+    def test_an_unconvertible_amount_is_left_unpriced(self):
+        # "fixed" names no period; a wrong rate is worse than no rate.
+        assert self._rate("exempt", "fixed", 500000) is None
+        assert self._rate("non_exempt", "fixed", 500000) is None
+
+    def test_unclassified_amount_is_passed_through(self):
+        assert self._rate(None, "per_project", 12345) == Decimal("123.45")
+        assert self._rate(None, "yearly", None) is None
+
+
 class TestMockPipeline:
     def test_mock_workers_normalize_cleanly(self):
         for record in _FINCH_MOCK_EMPLOYEES:

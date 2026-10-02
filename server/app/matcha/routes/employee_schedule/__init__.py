@@ -22,6 +22,7 @@ from .auto_schedules import router as _auto_schedules_router
 from .audit_logs import router as _audit_logs_router
 from .break_reminder_events import router as _break_reminder_events_router
 from .location_profile import router as _location_profile_router
+from .locations import router as _locations_router
 from .planning import router as _planning_router
 
 router = APIRouter()
@@ -38,6 +39,7 @@ router.include_router(_auto_schedules_router)
 router.include_router(_audit_logs_router)
 router.include_router(_break_reminder_events_router)
 router.include_router(_location_profile_router)
+router.include_router(_locations_router)
 router.include_router(_planning_router)
 
 # Sibling router — own prefix (/schedule-intelligence) + its own single-flag

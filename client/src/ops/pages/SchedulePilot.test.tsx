@@ -33,6 +33,15 @@ const {
 }))
 
 vi.mock('../../hooks/useMe', () => ({ useMe: useMeMock }))
+vi.mock('../../api/employees/scheduleStores', () => ({
+  // Plain functions, not vi.fn(): the suite resets mock implementations
+  // between tests, and these two are read on every render.
+  fetchStoreReadiness: () => Promise.resolve({ ready_to_publish: true, missing_fields: [], message: null }),
+  fetchUnassignedEmployees: () => Promise.resolve([]),
+  createScheduleStore: vi.fn(),
+  updateScheduleStore: vi.fn(),
+  assignEmployeesToStore: vi.fn(),
+}))
 vi.mock('../../hooks/employees/useScheduleEditor', () => ({ useScheduleEditor: useEditorMock }))
 vi.mock('../../hooks/employees/useScheduleJobs', () => ({ useScheduleJobs: useScheduleJobsMock }))
 vi.mock('../../hooks/useLocationScope', async () => {
@@ -122,6 +131,10 @@ function reviewPane() {
   return screen.getByLabelText('Review')
 }
 
+/** A plan that includes the Huume thread (it needs both flags), plus extras. */
+const withHuume = (...extra: string[]) => (feature: string) =>
+  ['huume', 'matcha_work', ...extra].includes(feature)
+
 function renderPilot({ url = '/ops/schedule/editor?week=2026-08-09&location=loc1', strict = false } = {}) {
   const tree = (
     <MemoryRouter initialEntries={[url]}>
@@ -162,7 +175,7 @@ beforeEach(() => {
     open_buffer_minutes: 0, close_buffer_minutes: 0, template: null,
   })
   useScheduleJobsMock.mockReturnValue({ jobs: [{ id: 'job-1', name: 'Opener' }], reloadJobs: vi.fn() })
-  useMeMock.mockReturnValue({ me: { profile: { name: 'Jamie Rivera' } }, hasFeature: () => false })
+  useMeMock.mockReturnValue({ me: { profile: { name: 'Jamie Rivera' } }, hasFeature: withHuume() })
   useLocationScopeMock.mockReturnValue({
     locationId: 'loc1',
     setLocationId: vi.fn(),
@@ -202,6 +215,22 @@ describe('SchedulePilot — the workspace', () => {
     expect(screen.getByRole('region', { name: 'Huume schedule assistant' })).toBeInTheDocument()
     expect(screen.getByText('Week of 2026-08-09')).toBeInTheDocument()
     await waitFor(() => expect(planningInputsMock).toHaveBeenCalledWith('loc1', '2026-08-09'))
+  })
+
+  it('leaves the Huume thread out entirely for a plan that does not include it', async () => {
+    // Without the flag the thread can only answer "feature not enabled", so
+    // no session is opened and nothing points at a panel that cannot work.
+    useMeMock.mockReturnValue({ me: { profile: { name: 'Jamie Rivera' } }, hasFeature: () => false })
+
+    renderPilot()
+
+    expect(screen.getByLabelText('Planning inputs')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Huume schedule assistant' })).not.toBeInTheDocument()
+    expect(screen.queryByTitle('Show or hide the Huume thread')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Fill with Huume/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Huume' })).not.toBeInTheDocument()
+    await waitFor(() => expect(planningInputsMock).toHaveBeenCalled())
+    expect(getSessionMock).not.toHaveBeenCalled()
   })
 
   it('does not load a stale location from the URL', async () => {
@@ -252,7 +281,7 @@ describe('SchedulePilot — the workspace', () => {
 
 describe('SchedulePilot — setup and drawers', () => {
   it('opens Autopilot setup even when blocked and returns from week setup', async () => {
-    useMeMock.mockReturnValue({ me: { profile: { name: 'Jamie Rivera' } }, hasFeature: (feature: string) => feature === 'schedule_autopilot' })
+    useMeMock.mockReturnValue({ me: { profile: { name: 'Jamie Rivera' } }, hasFeature: withHuume('schedule_autopilot') })
     fetchAutopilotReadinessMock.mockResolvedValue({
       ready: false, blockers: ['Save operating hours before building.'], autopilot: null,
     })
@@ -268,7 +297,7 @@ describe('SchedulePilot — setup and drawers', () => {
   })
 
   it('builds only after the wizard confirmation and opens review', async () => {
-    useMeMock.mockReturnValue({ me: { profile: { name: 'Jamie Rivera' } }, hasFeature: (feature: string) => feature === 'schedule_autopilot' })
+    useMeMock.mockReturnValue({ me: { profile: { name: 'Jamie Rivera' } }, hasFeature: withHuume('schedule_autopilot') })
     const session = {
       session_id: 'session-1', thread_id: 'thread-1', location_id: 'loc1',
       week_start: '2026-08-09', week_end: '2026-08-16', messages: [], version: 1,
@@ -302,7 +331,7 @@ describe('SchedulePilot — setup and drawers', () => {
   })
 
   it('rechecks readiness before generation when setup changes during the wizard', async () => {
-    useMeMock.mockReturnValue({ me: { profile: { name: 'Jamie Rivera' } }, hasFeature: (feature: string) => feature === 'schedule_autopilot' })
+    useMeMock.mockReturnValue({ me: { profile: { name: 'Jamie Rivera' } }, hasFeature: withHuume('schedule_autopilot') })
     renderPilot()
 
     fireEvent.click(screen.getByRole('button', { name: 'Build with Autopilot' }))

@@ -32,6 +32,11 @@ interface SchedulePilotToolbarProps {
   threadOpen: boolean
   onToggleThread(): void
   huumeSelectionCount: number
+  /** False when the plan has no Huume: its toggle and hints are left out
+   *  rather than pointing at a panel that can only answer with an error. */
+  huumeEnabled?: boolean
+  /** Rendered beside the location picker — the page's store actions. */
+  storeActions?: React.ReactNode
   autopilot?: { visible: boolean; running: boolean; onOpen(): void }
 }
 
@@ -47,6 +52,7 @@ export default function SchedulePilotToolbar({
   locations, locationId, onChangeLocation,
   onPreviousWeek, onNextWeek, onThisWeek, onTogglePublishedEditing, onPublish, onExit, onHelp,
   centerView, onSetCenterView, reviewReady, railOpen, onToggleRail, threadOpen, onToggleThread, huumeSelectionCount, autopilot,
+  huumeEnabled = true, storeActions,
 }: SchedulePilotToolbarProps) {
   const paneButton = (active: boolean) => `hidden items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs lg:inline-flex ${active ? 'border-emerald-500/50 text-emerald-300' : 'border-zinc-800 text-zinc-400 hover:text-zinc-100'}`
   return (
@@ -63,6 +69,7 @@ export default function SchedulePilotToolbar({
         <button onClick={onNextWeek} className="rounded-lg border border-zinc-800 p-1.5 text-zinc-400 hover:text-zinc-100" aria-label="Next week"><ChevronRight className="h-4 w-4" /></button>
         <span className="ml-1 inline-flex items-center gap-1.5 text-xs text-zinc-500"><CalendarDays className="h-3.5 w-3.5" /> Week of {weekStart}</span>
         <LocationPicker locations={locations} value={locationId} onChange={onChangeLocation} />
+        {storeActions}
         {autopilot?.visible && (
           <button type="button" onClick={autopilot.onOpen} disabled={autopilot.running} title="Check setup and prepare a reviewable week" className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/35 bg-emerald-500/[0.07] px-2.5 py-1.5 text-xs text-emerald-200 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-40">
             {autopilot.running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} Build with Autopilot
@@ -77,7 +84,7 @@ export default function SchedulePilotToolbar({
           </button>
         </div>
         <button onClick={onToggleRail} aria-pressed={railOpen} className={paneButton(railOpen)} title="Show or hide the inputs rail"><PanelLeft className="h-3.5 w-3.5" /> Inputs</button>
-        <button onClick={onToggleThread} aria-pressed={threadOpen} className={paneButton(threadOpen)} title="Show or hide the Huume thread"><MessageSquareText className="h-3.5 w-3.5" /> Huume</button>
+        {huumeEnabled && <button onClick={onToggleThread} aria-pressed={threadOpen} className={paneButton(threadOpen)} title="Show or hide the Huume thread"><MessageSquareText className="h-3.5 w-3.5" /> Huume</button>}
         <div className="ml-auto flex items-center gap-2">
           <span className={`hidden items-center gap-1 text-[11px] sm:inline-flex ${saveState === 'error' ? 'text-red-400' : 'text-zinc-500'}`}>
             {saveState === 'saving' ? <Loader2 className="h-3 w-3 animate-spin" /> : saveState === 'saved' ? <Save className="h-3 w-3 text-emerald-400" /> : null}
@@ -97,7 +104,7 @@ export default function SchedulePilotToolbar({
         <span>{summary?.total_shifts ?? 0} shifts</span>
         <span>{summary?.open_shifts ?? 0} open slots</span>
         <span>Drag to arrange</span>
-        <span className={huumeSelectionCount ? 'text-emerald-400' : ''}>{huumeSelectionCount ? `${huumeSelectionCount} selected for Huume` : 'Use ✨ on a shift to give Huume context'}</span>
+        {huumeEnabled && <span className={huumeSelectionCount ? 'text-emerald-400' : ''}>{huumeSelectionCount ? `${huumeSelectionCount} selected for Huume` : 'Use ✨ on a shift to give Huume context'}</span>}
       </div>
     </div>
   )

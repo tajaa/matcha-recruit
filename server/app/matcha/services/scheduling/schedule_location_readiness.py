@@ -28,7 +28,9 @@ def _valid_timezone(value: str | None) -> bool:
         return False
     try:
         ZoneInfo(str(value))
-    except (ZoneInfoNotFoundError, ValueError):
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        # OSError: a bare region ("Pacific") is a tzdata directory, which
+        # ZoneInfo reports as IsADirectoryError, not as "not found".
         return False
     return True
 
@@ -112,6 +114,17 @@ def _missing_fields_message(missing_fields: tuple[str, ...]) -> str:
     return f"This location needs {joined} before its schedule can be published."
 
 
+def readiness_message(readiness: LocationReadiness) -> str | None:
+    """The sentence a manager reads for a store that cannot publish, or None.
+
+    The same wording the publish refusal carries, so a screen that checks
+    readiness up front says exactly what publishing would have said.
+    """
+    if readiness.ready_to_publish:
+        return None
+    return _missing_fields_message(readiness.missing_fields)
+
+
 async def assert_schedule_location_ready_to_publish(
     conn,
     company_id: UUID,
@@ -130,6 +143,6 @@ async def assert_schedule_location_ready_to_publish(
             "code": "schedule_location_not_ready",
             "location_id": str(location_id) if location_id else None,
             "missing_fields": list(readiness.missing_fields),
-            "message": _missing_fields_message(readiness.missing_fields),
+            "message": readiness_message(readiness),
         },
     )

@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_client
@@ -46,7 +46,11 @@ async def status(current_user=Depends(require_client)):
 
 
 @router.post("/complete", response_model=ScOnboardingResult)
-async def complete(body: ScOnboardingComplete, current_user=Depends(require_client)):
+async def complete(
+    body: ScOnboardingComplete,
+    background_tasks: BackgroundTasks,
+    current_user=Depends(require_client),
+):
     company_id = await _company_id(current_user)
     try:
         async with get_connection() as conn:
@@ -55,6 +59,7 @@ async def complete(body: ScOnboardingComplete, current_user=Depends(require_clie
                 company_id=company_id,
                 actor_user_id=current_user.id,
                 body=body,
+                background_tasks=background_tasks,
             )
     except ScOnboardingAccessError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc

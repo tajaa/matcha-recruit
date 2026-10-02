@@ -74,7 +74,10 @@ def infer_location_timezone(*, state: str | None, country_code: str = "US") -> s
 def _valid_iana_timezone(value: str) -> bool:
     try:
         ZoneInfo(value)
-    except (ZoneInfoNotFoundError, ValueError):
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        # OSError: a region name with no city ("Pacific", "America") is a
+        # directory in tzdata, and ZoneInfo raises IsADirectoryError for it
+        # rather than "not found" — a typed-in zone must not become a 500.
         return False
     return True
 

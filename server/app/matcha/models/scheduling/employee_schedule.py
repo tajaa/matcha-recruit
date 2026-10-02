@@ -718,3 +718,41 @@ class FillVacantPreviewRequest(BaseModel):
 
 class AutopilotRunRequest(BaseModel):
     week_start: date
+
+
+class ScheduleStoreCreate(BaseModel):
+    """A store added from the schedule screens — only what scheduling needs.
+
+    Publishing requires an address, a jurisdiction and a timezone, so all of
+    the address is required here. `timezone` may be left out for a state that
+    sits in one zone; a split-zone state is refused without it.
+    """
+    name: str = Field(min_length=1, max_length=255)
+    address: str = Field(min_length=1, max_length=500)
+    city: str = Field(min_length=1, max_length=100)
+    state: str = Field(pattern=r"^[A-Za-z]{2}$")
+    zipcode: str = Field(pattern=r"^\d{5}(?:-\d{4})?$")
+    timezone: Optional[str] = Field(default=None, max_length=64)
+
+    @field_validator("name", "address", "city", mode="before")
+    @classmethod
+    def _strip(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class ScheduleStoreUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    address: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    city: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    state: Optional[str] = Field(default=None, pattern=r"^[A-Za-z]{2}$")
+    zipcode: Optional[str] = Field(default=None, pattern=r"^\d{5}(?:-\d{4})?$")
+    timezone: Optional[str] = Field(default=None, min_length=1, max_length=64)
+
+    @field_validator("name", "address", "city", mode="before")
+    @classmethod
+    def _strip(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class ScheduleStoreAssignEmployees(BaseModel):
+    employee_ids: List[UUID] = Field(min_length=1, max_length=500)

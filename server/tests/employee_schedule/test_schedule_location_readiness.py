@@ -8,6 +8,7 @@ import pytest
 from app.matcha.services.scheduling.schedule_location_readiness import (
     assert_schedule_location_ready_to_publish,
     get_schedule_location_readiness,
+    readiness_message,
 )
 
 
@@ -98,3 +99,24 @@ def test_assertion_message_lists_multiple_missing_fields():
     assert "an address" in message
     assert "a timezone" in message
     assert message.endswith("before its schedule can be published.")
+
+
+def test_a_bare_region_timezone_is_missing_not_a_crash():
+    # "Pacific" is a directory in tzdata: ZoneInfo raises IsADirectoryError for
+    # it, which used to escape as a 500 from every readiness check.
+    row = _location(timezone="Pacific")
+    result = _run(get_schedule_location_readiness(FakeConn(row), uuid4(), row["id"]))
+    assert result.missing_fields == ("timezone",)
+
+
+def test_readiness_message_is_the_publish_refusal_wording():
+    ready = _location()
+    assert readiness_message(
+        _run(get_schedule_location_readiness(FakeConn(ready), uuid4(), ready["id"]))
+    ) is None
+    row = _location(timezone=None, jurisdiction_id=None)
+    readiness = _run(get_schedule_location_readiness(FakeConn(row), uuid4(), row["id"]))
+    assert readiness_message(readiness) == (
+        "This location needs a matched jurisdiction and a timezone before its "
+        "schedule can be published."
+    )

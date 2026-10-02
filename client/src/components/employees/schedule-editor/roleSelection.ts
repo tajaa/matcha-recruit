@@ -11,7 +11,7 @@ import type { ScheduleJob, Shift } from '../../../types/employeeSchedule'
  *  rewording this cannot silently break aria-invalid. */
 export const ROLE_REQUIRED_MESSAGE = 'Select a role for this shift'
 
-export const NO_ROLES_MESSAGE = "No roles are available for this location. Add one in the schedule editor's Jobs tab."
+export const NO_ROLES_MESSAGE = "No roles are available for this location. Open the full shift editor and add one under Jobs, in the left rail."
 
 export const ROLE_PLACEHOLDER = 'Select a role…'
 

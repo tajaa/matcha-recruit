@@ -955,6 +955,14 @@ export function fmtDayLabel(iso: string): string {
 }
 
 /** Human-readable text for any thrown API error (ApiError detail, or a fallback). */
+/** True for the publish refusal that means "this store is missing something"
+ *  (address, time zone, jurisdiction) — the one a store form can fix. */
+export function isStoreNotReady(err: unknown): boolean {
+  const detail = (err as { body?: { detail?: unknown } } | null)?.body?.detail
+  return !!detail && typeof detail === 'object'
+    && (detail as { code?: unknown }).code === 'schedule_location_not_ready'
+}
+
 export function errorMessage(err: unknown): string {
   const body = (err as { body?: { detail?: unknown } } | null)?.body
   const detail = body?.detail
@@ -966,3 +974,45 @@ export function errorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message
   return 'Something went wrong. Please try again.'
 }
+
+// ── Stores, from the schedule screens ────────────────────────────────────
+
+export type ScheduleStorePayload = {
+  name: string
+  address: string
+  city: string
+  state: string
+  zipcode: string
+  timezone: string
+}
+
+/** Why a store cannot publish yet, in the server's own words. `message` is
+ *  null once nothing is missing. */
+export type StoreReadiness = {
+  ready_to_publish: boolean
+  missing_fields: string[]
+  message: string | null
+}
+
+export type ScheduleStore = StoreReadiness & {
+  id: string
+  name: string | null
+  address: string | null
+  city: string | null
+  state: string | null
+  zipcode: string | null
+  is_active: boolean
+  timezone: string | null
+}
+
+/** An active employee with no store — invisible to every schedule roster. */
+export type UnassignedEmployee = {
+  id: string
+  first_name: string | null
+  last_name: string | null
+  email: string | null
+  job_title: string | null
+  work_state: string | null
+}
+
+export type StoreAssignmentResult = { assigned: string[]; skipped: string[] }

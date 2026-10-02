@@ -66,6 +66,54 @@ def _is_health_benefit(benefit_type: Optional[str]) -> bool:
     return "medical" in btype
 
 
+# How many of each Finch `income.unit` make a year.
+_PAY_PERIODS_PER_YEAR = {
+    "yearly": 1,
+    "quarterly": 4,
+    "monthly": 12,
+    "semimonthly": 24,
+    "biweekly": 26,
+    "weekly": 52,
+    "daily": 260,
+}
+_FULL_TIME_HOURS_PER_YEAR = Decimal(2080)
+
+
+def _compact_income_unit(raw) -> str:
+    return (raw or "").lower().replace("_", "").replace("-", "").replace(" ", "")
+
+
+def rate_for_classification(
+    amount: Optional[Decimal], classification: Optional[str], unit: str
+) -> Optional[Decimal]:
+    """Convert a Finch income amount into what `employees.pay_rate` means.
+
+    The column is read by classification, not by cadence: dollars per hour for
+    `hourly`, dollars per year for `exempt` (`scheduling/labor_cost.PayProfile`).
+    Finch reports the amount per `income.unit`, and the two disagree whenever a
+    salaried person is non-exempt or a salary is quoted per pay period — a
+    $50,000 salaried non-exempt manager was stored as $50,000 *an hour*, and a
+    $4,000 monthly salary as $4,000 a year.
+
+    Returns None when the amount cannot be converted honestly (unit `fixed` or
+    unrecognized): an unpriced employee is reported as unpriced, a wrong rate
+    is silently wrong in every labor-cost total.
+    """
+    if amount is None or classification is None:
+        # No classification: leave the raw amount for labor cost's own
+        # magnitude heuristic, as before.
+        return amount
+    if classification == "hourly" and unit == "hourly":
+        return amount
+    periods = _PAY_PERIODS_PER_YEAR.get(unit)
+    if periods is None:
+        return None
+    annual = amount * periods
+    if classification == "hourly":
+        return (annual / _FULL_TIME_HOURS_PER_YEAR).quantize(Decimal("0.01"))
+    return annual.quantize(Decimal("0.01"))
+
+
 class FinchHRISService:
     """Client for the Finch API. Fetches and normalizes employee data.
 
@@ -530,15 +578,18 @@ class FinchHRISService:
         # never matched Finch's "non_exempt" and misclassified it as exempt.
         flsa = (employment.get("flsa_status") or "").lower()
         flsa_compact = flsa.replace("_", "").replace("-", "").replace(" ", "")
-        unit = (income.get("unit") or "").lower()
+        # Same compaction for the unit: Finch documents "bi_weekly" and
+        # "semi_monthly", which the bare spellings below never matched.
+        unit = _compact_income_unit(income.get("unit"))
         if "nonexempt" in flsa_compact or unit == "hourly":
             pay_classification = "hourly"
         elif "exempt" in flsa_compact:
             pay_classification = "exempt"
-        elif unit in ("yearly", "quarterly", "monthly", "weekly", "biweekly", "semimonthly", "daily", "fixed"):
+        elif unit in _PAY_PERIODS_PER_YEAR or unit == "fixed":
             pay_classification = "exempt"
         else:
             pay_classification = None
+        pay_rate = rate_for_classification(pay_rate, pay_classification, unit)
 
         is_active = employment.get("is_active")
         employment_status = "active" if is_active in (True, None) else "terminated"

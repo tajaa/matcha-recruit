@@ -42,6 +42,15 @@ vi.mock('../../../hooks/useLocationScope', () => ({
   useLocationScope: useLocationScopeMock,
 }))
 vi.mock('../../../components/employees/ScheduleLawPanel', () => ({ default: () => null }))
+vi.mock('../../../api/employees/scheduleStores', () => ({
+  // Plain functions, not vi.fn(): the suite resets mock implementations
+  // between tests, and these two are read on every render.
+  fetchStoreReadiness: () => Promise.resolve({ ready_to_publish: true, missing_fields: [], message: null }),
+  fetchUnassignedEmployees: () => Promise.resolve([]),
+  createScheduleStore: vi.fn(),
+  updateScheduleStore: vi.fn(),
+  assignEmployeesToStore: vi.fn(),
+}))
 vi.mock('../../../components/employees/onboarding/ScheduleHelperWizard', () => ({ default: () => null }))
 vi.mock('../../../components/employees/AutoSchedulesTab', () => ({
   default: () => <div>Auto schedule settings</div>,
@@ -390,15 +399,23 @@ describe('EmployeeSchedule break planning', () => {
     })))
   })
 
-  it('shows a corrective message when location prerequisites block publication', async () => {
+  it('says what the store is missing when publishing is refused, and opens the fix', async () => {
     publishRangeMock.mockRejectedValue(new ApiError('Request failed', 422, {
-      detail: { code: 'schedule_location_not_ready' },
+      detail: {
+        code: 'schedule_location_not_ready',
+        missing_fields: ['timezone'],
+        message: 'This location needs a timezone before its schedule can be published.',
+      },
     }))
     renderSchedule()
 
     fireEvent.click(await screen.findByRole('button', { name: /Publish week/ }))
 
-    expect(await screen.findByText("Complete this location's scheduling prerequisites before publishing.")).toBeInTheDocument()
+    // The server's own sentence, not a generic "complete the prerequisites".
+    expect(await screen.findByText('This location needs a timezone before its schedule can be published.')).toBeInTheDocument()
+    // And the form that fixes it, already on the store that was refused.
+    expect(await screen.findByText('Store details')).toBeInTheDocument()
+    expect(screen.getByLabelText(/Store name/)).toHaveValue('Downtown')
   })
 
   it('links a prepared suggestion to its generated-week review', async () => {

@@ -10,6 +10,8 @@ export type CompanyLocation = {
   state: string
   zipcode?: string | null
   is_active: boolean
+  /** IANA zone, or null for a store that has none yet (it cannot publish). */
+  timezone?: string | null
   /** 0=Sunday .. 6=Saturday, from this location's scheduling profile. Every
    * location-scoped page computes its own week boundaries, so it has to come
    * along with the location rather than being fetched per page. */

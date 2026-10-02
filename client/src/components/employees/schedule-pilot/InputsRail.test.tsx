@@ -60,6 +60,26 @@ function renderRail(overrides: Partial<React.ComponentProps<typeof InputsRail>> 
 }
 
 describe('InputsRail — people', () => {
+  it('explains an empty roster instead of calling it a failed search', () => {
+    // Nobody is placed at this store yet — the state every import used to
+    // leave a new account in. "No one matches." said nothing about why.
+    const { unmount } = renderRail({ roster: [], inputs: null, emptyRoster: <p>Assign 3 waiting employees</p> })
+    expect(screen.getByText('Assign 3 waiting employees')).toBeInTheDocument()
+    expect(screen.queryByText('No one matches.')).not.toBeInTheDocument()
+    unmount()
+
+    renderRail({ roster: [], inputs: null })
+    expect(screen.getByText('No one is assigned to this store yet.')).toBeInTheDocument()
+  })
+
+  it('leaves the Huume shortcuts out for a plan that does not include it', () => {
+    renderRail({ onAskHuume: undefined, weekRules: { established: false, missing: ['operating_hours'] as never[] } })
+    expect(screen.queryByRole('button', { name: /Fill with Huume/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Set up with Huume' })).not.toBeInTheDocument()
+    // The by-hand path is still there.
+    expect(screen.getByRole('button', { name: 'Fill it in myself' })).toBeInTheDocument()
+  })
+
   it('puts the heaviest week first, because that is the question being asked', () => {
     renderRail()
     const names = screen.getAllByRole('button').map((button) => button.textContent ?? '')
