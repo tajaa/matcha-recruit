@@ -3,7 +3,8 @@ import Stage from '../Stage'
 import { WRAP, display, mono } from '../../../../components/marketing/kit/styles'
 import { BOARD, PAPER, hexA } from '../../../../components/marketing/kit/theme'
 import { DURATION, LAYOUTS, STILL_FRAME } from '../timeline'
-import { Accent, PrimaryButton } from './Chrome'
+import { SCHEDULING_SIGNUP_PATH } from '../signup'
+import { Accent, PrimaryLink } from './Chrome'
 
 const loadWeek = () => import('../WeekComposition')
 
@@ -41,9 +42,12 @@ export function Hero({ onContact }: { onContact: () => void }) {
               <span style={{ color: MUTED }}>You review. You publish.</span>
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-6">
-              <PrimaryButton onClick={onContact} tone="paper">
+              <PrimaryLink to={SCHEDULING_SIGNUP_PATH} tone="paper">
+                Start now
+              </PrimaryLink>
+              <button type="button" onClick={onContact} className="sched-link sched-focus rounded text-[15px] font-medium">
                 Book a walkthrough
-              </PrimaryButton>
+              </button>
               <Link to="/login" className="sched-link sched-focus rounded text-[15px] font-medium">
                 Log in
               </Link>

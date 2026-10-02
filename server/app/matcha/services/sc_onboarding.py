@@ -406,6 +406,28 @@ async def _link_jurisdiction(conn, city: str, state: str, zipcode: str) -> UUID:
     return await _get_or_create_jurisdiction(conn, city, state, None, zipcode)
 
 
+async def _link_jurisdiction_in_savepoint(conn, city: str, state: str, zipcode: str) -> UUID | None:
+    """Link a jurisdiction without letting the lookup sink the whole setup.
+
+    The resolver swallows some of its own statement failures (a missing
+    reference table). Outside a transaction that is harmless; inside this one
+    the failed statement would leave it aborted, and every write after it —
+    the roster, the jobs, the completion stamp — would fail for a reason that
+    has nothing to do with them. A savepoint confines the damage to the lookup.
+
+    None means "not linked yet": the store still saves, the post-commit
+    compliance run links it, and the schedule's own store form repairs it.
+    """
+    try:
+        async with conn.transaction():
+            return await _link_jurisdiction(conn, city, state, zipcode)
+    except Exception:
+        logger.exception(
+            "S&C onboarding could not link a jurisdiction for %s, %s", city, state
+        )
+        return None
+
+
 async def _insert_locations(conn, company_id: UUID, locations) -> list[UUID]:
     """Insert the stores publish-ready; returns their ids in submission order.
 
@@ -419,12 +441,12 @@ async def _insert_locations(conn, company_id: UUID, locations) -> list[UUID]:
     # contractual, and two stores may share every column but the name.
     location_ids = [uuid4() for _ in locations]
     timezones = [resolve_location_timezone(location) for location in locations]
-    jurisdictions: dict[tuple[str, str], UUID] = {}
-    jurisdiction_ids: list[UUID] = []
+    jurisdictions: dict[tuple[str, str], UUID | None] = {}
+    jurisdiction_ids: list[UUID | None] = []
     for location in locations:
         place = (_key(location.city), location.state.upper())
         if place not in jurisdictions:
-            jurisdictions[place] = await _link_jurisdiction(
+            jurisdictions[place] = await _link_jurisdiction_in_savepoint(
                 conn, location.city.strip(), location.state.upper(), location.zipcode
             )
         jurisdiction_ids.append(jurisdictions[place])

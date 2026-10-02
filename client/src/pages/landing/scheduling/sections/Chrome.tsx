@@ -3,10 +3,11 @@ import { Link } from 'react-router-dom'
 import { KitStyles } from '../../../../components/marketing/kit/Chrome'
 import { Reveal } from '../../../../components/marketing/kit/motion'
 import { WRAP, display, mono } from '../../../../components/marketing/kit/styles'
+import { SCHEDULING_SIGNUP_PATH } from '../signup'
 import { ALL_STEPS, INCIDENT_STEPS, STEPS, type LandingTab, type StepDef, type StepId } from '../styles'
 import { AMBER, BOARD, INK, INK_SOFT, PAPER, STAMP, hexA } from '../../../../components/marketing/kit/theme'
 
-export { Accent, CellLabel, Glows, Grain, PrimaryButton } from '../../../../components/marketing/kit/Chrome'
+export { Accent, CellLabel, Glows, Grain, PrimaryButton, PrimaryLink } from '../../../../components/marketing/kit/Chrome'
 
 /** Section opener: the step's Sunday timestamp, then the headline. `split`
  *  puts the copy (and `aside`) in a right-hand column level with the
@@ -138,13 +139,24 @@ export function TopBar({ onContact, tab = 'scheduling' }: { onContact: () => voi
           <Link to="/login" className="sched-link sched-focus rounded text-[14px] font-medium max-[359px]:hidden">
             Log in
           </Link>
-          <button
-            type="button"
-            onClick={onContact}
-            className={`sched-btn ${scrolled ? 'sched-btn-ink' : 'sched-btn-paper'} sched-focus hidden h-10 items-center rounded-full px-4 text-[14px] font-semibold sm:inline-flex`}
-          >
-            Book a walkthrough
-          </button>
+          {tab === 'scheduling' ? (
+            // Scheduling is self-serve: the bar's one button starts an account.
+            // The walkthrough stays a click away in the hero and the close.
+            <Link
+              to={SCHEDULING_SIGNUP_PATH}
+              className={`sched-btn ${scrolled ? 'sched-btn-ink' : 'sched-btn-paper'} sched-focus hidden h-10 items-center rounded-full px-4 text-[14px] font-semibold sm:inline-flex`}
+            >
+              Start now
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={onContact}
+              className={`sched-btn ${scrolled ? 'sched-btn-ink' : 'sched-btn-paper'} sched-focus hidden h-10 items-center rounded-full px-4 text-[14px] font-semibold sm:inline-flex`}
+            >
+              Book a walkthrough
+            </button>
+          )}
         </div>
       </div>
     </div>

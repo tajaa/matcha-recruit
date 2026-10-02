@@ -17,7 +17,7 @@ vi.mock('../../../api/employees/scheduleStores', () => ({
 import type { StoreSetup } from '../../../hooks/employees/useStoreSetup'
 import type { CompanyLocation } from '../../../hooks/useLocationScope'
 import { ToastProvider } from '../../ui'
-import { storeFormError, withStoreChange, EMPTY_STORE } from '../StoreFields'
+import { EMPTY_STORE, storeFormError, withStoreChange } from '../storeForm'
 import {
   EmptyRosterHelp, NoStoresYet, StoreActions, StoreSetupModals, StoreSetupNotice,
 } from './StoreSetup'

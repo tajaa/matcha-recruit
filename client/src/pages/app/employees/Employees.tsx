@@ -43,7 +43,19 @@ export default function Employees() {
   const locationOptions = [UNASSIGNED_LOCATION, ...locations]
   const [showBatch, setShowBatch] = useState(false)
   const [showUpload, setShowUpload] = useState(false)
-  const [showHRIS, setShowHRIS] = useState(false)
+  // The HRIS provider's connect redirect lands here with ?hris=connected.
+  // Nothing read it, so a manager who had just authorized the import arrived
+  // at an unchanged page and had to find the Sync button themselves.
+  const [hrisJustConnected] = useState(() => searchParams.get('hris') === 'connected')
+  const [showHRIS, setShowHRIS] = useState(hrisJustConnected)
+  useEffect(() => {
+    if (!hrisJustConnected) return
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      next.delete('hris')
+      return next
+    }, { replace: true })
+  }, [hrisJustConnected, setSearchParams])
   const [wageGap, setWageGap] = useState<WageGapSummary | null>(null)
   const [wageDrawerOpen, setWageDrawerOpen] = useState(false)
   const [flightRisk, setFlightRisk] = useState<FlightRiskWidgetSummary | null>(null)
@@ -177,6 +189,7 @@ export default function Employees() {
         open={showHRIS}
         onClose={() => setShowHRIS(false)}
         onSuccess={refetch}
+        autoSync={hrisJustConnected}
       />
 
       {/* Filters */}

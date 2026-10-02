@@ -238,13 +238,19 @@ class _Transaction:
         self.conn = conn
 
     async def __aenter__(self):
-        assert not self.conn.in_transaction
-        self.conn.in_transaction = True
+        # Nested = a savepoint, as in asyncpg. Only the outermost one is the
+        # setup transaction whose commit or rollback the tests assert on.
+        self.outermost = not self.conn.in_transaction
+        if self.outermost:
+            self.conn.in_transaction = True
+        else:
+            self.conn.savepoints += 1
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
-        self.conn.in_transaction = False
-        self.conn.rolled_back = exc_type is not None
+        if self.outermost:
+            self.conn.in_transaction = False
+            self.conn.rolled_back = exc_type is not None
 
 
 class _Connection:
@@ -255,6 +261,7 @@ class _Connection:
         self.existing_locations = list(existing_locations)
         self.in_transaction = False
         self.rolled_back = False
+        self.savepoints = 0
         self.calls: list[tuple[str, str, tuple]] = []
         self.employee_id = uuid4()
         self.job_id = uuid4()
@@ -924,3 +931,36 @@ async def test_status_tolerates_a_missing_headcount_table(monkeypatch):
 
     status = await service.get_sc_onboarding_status(_NoProfiles(), company_id=uuid4())
     assert status["suggested_company_size"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_jurisdiction_lookup_does_not_sink_setup(monkeypatch):
+    # The resolver swallows some of its own statement failures, which inside a
+    # transaction leaves it aborted. The lookup runs in a savepoint, so the
+    # store still saves (unlinked, repairable) and so does everything after it.
+    _allow_sc_product(monkeypatch)
+    _capture_location_sync(monkeypatch)
+
+    async def replace(conn_arg, **kwargs):
+        return []
+
+    async def broken(conn, city, state, zipcode):
+        raise RuntimeError("current transaction is aborted")
+
+    monkeypatch.setattr(service, "replace_job_credential_requirements", replace)
+    monkeypatch.setattr(service, "_link_jurisdiction", broken)
+    conn = _RosterConnection()
+
+    result = await service.complete_sc_onboarding(
+        conn, company_id=uuid4(), actor_user_id=uuid4(),
+        body=submission(locations=[_store("Downtown")], employees=[_crew("a@example.com")]),
+    )
+
+    assert result["already_completed"] is False
+    assert conn.rolled_back is False
+    assert conn.savepoints == 1
+    _, _, args = next(call for call in conn.calls if "INSERT INTO business_locations" in call[1])
+    assert args[9] == [None]
+    # The employee is still placed at the store.
+    _, _, employee_args = next(call for call in conn.calls if "INSERT INTO employees" in call[1])
+    assert employee_args[7] == [args[1][0]]

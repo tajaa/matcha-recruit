@@ -14,7 +14,8 @@ import type {
   ScOnboardingSubmission,
 } from '../../../types/scOnboarding'
 import { inferLocationTimezone, TIMEZONE_OPTIONS } from '../../../utils/locationTimezone'
-import { EMPTY_STORE, StoreFields, storeFormError, type StoreForm } from '../../employees/StoreFields'
+import { StoreFields } from '../../employees/StoreFields'
+import { EMPTY_STORE, storeFormError, type StoreForm } from '../../employees/storeForm'
 import { Button, FileUpload, Input, Select, Toggle } from '../../ui'
 
 const COMPANY_SIZES: { value: CompanySize; label: string }[] = [

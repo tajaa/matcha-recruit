@@ -196,7 +196,7 @@ export default function MatchaXSignup() {
 
           <p className="text-center text-xs text-zinc-500">
             Already have an account?{' '}
-            <a href="/auth/login" className="text-zinc-300 hover:text-white underline">
+            <a href="/login" className="text-zinc-300 hover:text-white underline">
               Sign in
             </a>
           </p>

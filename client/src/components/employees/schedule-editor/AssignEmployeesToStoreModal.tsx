@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { assignEmployeesToStore } from '../../../api/employees/scheduleStores'
 import { errorMessage, type UnassignedEmployee } from '../../../types/employeeSchedule'
@@ -21,19 +21,28 @@ function displayName(employee: UnassignedEmployee): string {
 /** Place the people an import left without a store. The schedule roster only
  *  lists employees who have one, so this is what makes them schedulable. */
 export default function AssignEmployeesToStoreModal({
-  open, storeId, storeName, employees, onClose, onAssigned,
+  open, storeName, onClose, ...body
 }: AssignEmployeesToStoreModalProps) {
-  const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  return (
+    <Modal open={open} onClose={onClose} title={`Assign employees to ${storeName}`} dismissible={!saving}>
+      {/* The Modal renders nothing while closed, so the body mounts fresh on
+          every open, with everyone ticked. */}
+      <AssignBody {...body} storeName={storeName} onClose={onClose} saving={saving} setSaving={setSaving} />
+    </Modal>
+  )
+}
 
-  useEffect(() => {
-    if (!open) return
-    // Everyone starts ticked: the common case is a one-store shop placing its
-    // whole imported roster.
-    setSelected(new Set(employees.map((employee) => employee.id)))
-    setError(null)
-  }, [open, employees])
+interface AssignBodyProps extends Omit<AssignEmployeesToStoreModalProps, 'open'> {
+  saving: boolean
+  setSaving(saving: boolean): void
+}
+
+function AssignBody({ storeId, storeName, employees, onClose, onAssigned, saving, setSaving }: AssignBodyProps) {
+  // Everyone starts ticked: the common case is a one-store shop placing its
+  // whole imported roster.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(employees.map((employee) => employee.id)))
+  const [error, setError] = useState<string | null>(null)
 
   function toggle(id: string) {
     setSelected((current) => {
@@ -60,45 +69,43 @@ export default function AssignEmployeesToStoreModal({
   const allSelected = employees.length > 0 && selected.size === employees.length
 
   return (
-    <Modal open={open} onClose={onClose} title={`Assign employees to ${storeName}`} dismissible={!saving}>
-      <div className="space-y-4">
-        <p className="text-sm text-zinc-400">
-          These employees have no store yet, so they don't appear on any schedule. Pick who works at {storeName}.
-        </p>
-        {employees.length === 0 ? (
-          <p className="text-sm text-zinc-500">Everyone already has a store.</p>
-        ) : (
-          <>
-            <label className="flex items-center gap-2 text-xs text-zinc-400">
-              <input
-                type="checkbox"
-                checked={allSelected}
-                onChange={() => setSelected(allSelected ? new Set() : new Set(employees.map((employee) => employee.id)))}
-              />
-              Select all ({employees.length})
-            </label>
-            <ul className="max-h-72 space-y-1 overflow-y-auto rounded-lg border border-white/[0.08] p-2">
-              {employees.map((employee) => (
-                <li key={employee.id}>
-                  <label className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-zinc-200 hover:bg-white/[0.04]">
-                    <input type="checkbox" checked={selected.has(employee.id)} onChange={() => toggle(employee.id)} />
-                    <span className="min-w-0 flex-1 truncate">{displayName(employee)}</span>
-                    {employee.job_title && <span className="shrink-0 text-xs text-zinc-500">{employee.job_title}</span>}
-                  </label>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-        {error && <p role="alert" className="rounded border border-red-900/40 bg-red-950/30 px-3 py-2 text-sm text-red-300">{error}</p>}
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" disabled={saving} onClick={onClose}>Cancel</Button>
-          <Button disabled={saving || selected.size === 0} onClick={() => void assign()}>
-            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-            Assign {selected.size || ''} to {storeName}
-          </Button>
-        </div>
+    <div className="space-y-4">
+      <p className="text-sm text-zinc-400">
+        These employees have no store yet, so they don't appear on any schedule. Pick who works at {storeName}.
+      </p>
+      {employees.length === 0 ? (
+        <p className="text-sm text-zinc-500">Everyone already has a store.</p>
+      ) : (
+        <>
+          <label className="flex items-center gap-2 text-xs text-zinc-400">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={() => setSelected(allSelected ? new Set() : new Set(employees.map((employee) => employee.id)))}
+            />
+            Select all ({employees.length})
+          </label>
+          <ul className="max-h-72 space-y-1 overflow-y-auto rounded-lg border border-white/[0.08] p-2">
+            {employees.map((employee) => (
+              <li key={employee.id}>
+                <label className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-zinc-200 hover:bg-white/[0.04]">
+                  <input type="checkbox" checked={selected.has(employee.id)} onChange={() => toggle(employee.id)} />
+                  <span className="min-w-0 flex-1 truncate">{displayName(employee)}</span>
+                  {employee.job_title && <span className="shrink-0 text-xs text-zinc-500">{employee.job_title}</span>}
+                </label>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {error && <p role="alert" className="rounded border border-red-900/40 bg-red-950/30 px-3 py-2 text-sm text-red-300">{error}</p>}
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" disabled={saving} onClick={onClose}>Cancel</Button>
+        <Button disabled={saving || selected.size === 0} onClick={() => void assign()}>
+          {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+          Assign {selected.size || ''} to {storeName}
+        </Button>
       </div>
-    </Modal>
+    </div>
   )
 }

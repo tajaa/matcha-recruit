@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Button, FileUpload, Modal, Toggle } from '../ui'
+import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
+import { useMe } from '../../hooks/useMe'
 import type { BulkUploadResponse } from '../../types/employee'
 
 type BulkUploadModalProps = {
@@ -14,10 +16,17 @@ export function BulkUploadModal({ open, onClose, onSuccess }: BulkUploadModalPro
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState<BulkUploadResponse | null>(null)
   const [error, setError] = useState('')
+  // A scheduling customer's roster is who works where, doing what, for how
+  // much — not licence and NPI numbers. They get the short template, with the
+  // `location` column that puts each person on a store's schedule.
+  const schedulingEnabled = useMe().hasFeature('employee_schedule')
 
   async function handleDownloadTemplate() {
     try {
-      await api.download('/employees/bulk-upload/template', 'employee_template.csv')
+      await api.download(
+        `/employees/bulk-upload/template${schedulingEnabled ? '?variant=scheduling' : ''}`,
+        'employee_template.csv',
+      )
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to download template')
     }
@@ -58,6 +67,13 @@ export function BulkUploadModal({ open, onClose, onSuccess }: BulkUploadModalPro
           Download CSV Template
         </Button>
 
+        {schedulingEnabled && (
+          <p className="text-xs text-zinc-500">
+            Put each person's store name in the <span className="font-mono text-zinc-400">location</span> column
+            to add them to that store's schedule. With one store, you can leave it out.
+          </p>
+        )}
+
         <FileUpload onFiles={handleFiles} accept=".csv" disabled={uploading}>
           <p>{uploading ? 'Uploading...' : <>Drop CSV here or <span className="text-emerald-400 underline">browse</span></>}</p>
         </FileUpload>
@@ -82,6 +98,12 @@ export function BulkUploadModal({ open, onClose, onSuccess }: BulkUploadModalPro
               <p className="text-xs text-amber-400">
                 {result.rows_missing_work_location} row{result.rows_missing_work_location === 1 ? '' : 's'} had no
                 work location (work_state) — compliance scoping won't cover {result.rows_missing_work_location === 1 ? 'that person' : 'them'} yet.
+              </p>
+            )}
+            {schedulingEnabled && result.created > 0 && (
+              <p className="text-xs text-zinc-400">
+                Next: <Link to="/ops/schedule" className="text-emerald-400 underline hover:text-emerald-300">open the schedule</Link>{' '}
+                to build a week, or to assign anyone who has no store yet.
               </p>
             )}
             {result.errors.length > 0 && (

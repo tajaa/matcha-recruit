@@ -27,6 +27,8 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
 
   useEffect(() => {
     if (editingLocation) {
+      // Re-seeding the form when the dialog opens on a different location.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setForm({
         name: editingLocation.name || '',
         address: editingLocation.address || '',
@@ -54,6 +56,8 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
   useEffect(() => {
     if (timezoneSource !== 'auto') return
     const mapped = inferLocationTimezone(form.state) || ''
+    // Keeps an auto time zone in step with the state field.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setForm((current) => current.timezone === mapped ? current : { ...current, timezone: mapped })
   }, [form.state, timezoneSource])
 
