@@ -19,7 +19,7 @@ import type {
   Shift, RosterEmployee, ScheduleJob, WeekTemplate, ScheduleRequest, ShiftPayload, RosterFlags,
 } from '../../../types/employeeSchedule'
 import {
-  STATUS_TONE, REQUEST_TONE, describeProposedAvailability, errorMessage,
+  STATUS_TONE, REQUEST_TONE, describeProposedAvailability, errorMessage, isStoreNotReady,
   fmtTime, fmtDayLabel, toISODate, addDays, startOfWeek,
 } from '../../../types/employeeSchedule'
 import { useEmployeeSchedule } from './useEmployeeSchedule'
@@ -44,6 +44,11 @@ import {
 import { TemplateForm } from '../../../components/employees/schedule-editor/TemplateForm'
 import { useScheduleJobs } from '../../../hooks/employees/useScheduleJobs'
 import { getScheduleSuggestionStatus, type ScheduleSuggestionStatus } from '../../../api/employees/scheduleAssistant'
+import { useStoreSetup } from '../../../hooks/employees/useStoreSetup'
+import {
+  NoStoresYet, StoreActions, StoreSetupModals, StoreSetupNotice,
+} from '../../../components/employees/schedule-editor/StoreSetup'
+import { shouldAutoOpenScheduleTour } from '../../../utils/scheduleTour'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
 const SCHEDULE_GUIDE_STORAGE_KEY = 'matcha.employee-schedule.guide.v1'
@@ -61,11 +66,14 @@ export default function EmployeeSchedule() {
   const requestedTab = parseScheduleTab(searchParams.get('tab'))
   const { me, hasFeature, loading: meLoading } = useMe()
   const { toast } = useToast()
-  const { locationId, setLocationId, locations, loading: locationsLoading } = useLocationScope()
+  const { locationId, setLocationId, locations, loading: locationsLoading, reloadLocations } = useLocationScope()
+  const currentStore = locations.find((l) => l.id === locationId) ?? null
+  // Stores are a company-admin concern; a store-scoped manager sees neither
+  // the actions nor checks they would be refused.
+  const canManageStores = me?.user?.role === 'admin' || me?.user?.role === 'client'
+  const stores = useStoreSetup(canManageStores ? locationId : '')
   const weekStartWeekday = locations.find((l) => l.id === locationId)?.week_start_weekday ?? 0
-  const [guideOpen, setGuideOpen] = useState(() => {
-    try { return window.localStorage.getItem(SCHEDULE_GUIDE_STORAGE_KEY) !== 'seen' } catch { return true }
-  })
+  const [guideOpen, setGuideOpen] = useState(() => shouldAutoOpenScheduleTour(SCHEDULE_GUIDE_STORAGE_KEY))
   const [automaticSuggestion, setAutomaticSuggestion] = useState<ScheduleSuggestionStatus | null>(null)
   const { jobs, reloadJobs } = useScheduleJobs(locationId)
   const intelligenceEnabled = me?.user.role === 'admin' || hasFeature('schedule_intelligence')
@@ -136,15 +144,12 @@ export default function EmployeeSchedule() {
     try {
       await publishWeek()
     } catch (err) {
-      const detail = err instanceof ApiError
-        ? err.body as { detail?: { code?: string } }
-        : null
-      toast(
-        detail?.detail?.code === 'schedule_location_not_ready'
-          ? "Complete this location's scheduling prerequisites before publishing."
-          : errorMessage(err),
-        'error',
-      )
+      // The refusal names what the store is missing ("…needs a timezone
+      // before its schedule can be published"). Say that, and open the form
+      // that fixes it — a generic "complete the prerequisites" left the
+      // manager with no idea what to complete or where.
+      toast(errorMessage(err), 'error')
+      if (canManageStores && isStoreNotReady(err)) stores.setModal('edit')
     }
   }
 
@@ -187,7 +192,12 @@ export default function EmployeeSchedule() {
           <TabButton active={tab === 'audit'} onClick={() => setTab('audit')} icon={<History className="h-4 w-4" />}>Audit log</TabButton>
           {intelligenceEnabled && <TabButton active={tab === 'intelligence'} onClick={() => setTab('intelligence')} icon={<BarChart2 className="h-4 w-4" />}>Intelligence</TabButton>}
         </div>
-        {tab !== 'audit' && <LocationPicker locations={locations} value={locationId} onChange={setLocationId} />}
+        {tab !== 'audit' && (
+          <div className="flex flex-wrap items-center justify-end gap-2 py-1.5">
+            <LocationPicker locations={locations} value={locationId} onChange={setLocationId} />
+            {canManageStores && <StoreActions setup={stores} canEdit={!!currentStore} />}
+          </div>
+        )}
       </div>
 
       <div className="min-w-0 space-y-6 p-5">
@@ -219,8 +229,12 @@ export default function EmployeeSchedule() {
             </div>
           )}
 
+          {canManageStores && <StoreSetupNotice setup={stores} store={currentStore} />}
+
           {!locationId && !locationsLoading ? (
-            <div className="flex items-center justify-center h-64 text-sm text-zinc-500">Select a location to view its schedule.</div>
+            locations.length === 0 && canManageStores
+              ? <NoStoresYet setup={stores} />
+              : <div className="flex items-center justify-center h-64 text-sm text-zinc-500">Select a location to view its schedule.</div>
           ) : summary && (
             <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-white/[0.06] border border-white/[0.06] rounded-lg overflow-hidden">
               <Stat label="Shifts" value={summary.total_shifts} tone="text-zinc-200" />
@@ -264,6 +278,17 @@ export default function EmployeeSchedule() {
       {tab === 'intelligence' && intelligenceEnabled && <ScheduleIntelligence />}
       </div>
       <ScheduleHelperWizard open={guideOpen} onClose={closeGuide} />
+      {canManageStores && (
+        <StoreSetupModals
+          setup={stores}
+          store={currentStore}
+          onStoreSaved={async (saved, created) => {
+            await reloadLocations()
+            if (created) setLocationId(saved.id)
+          }}
+          onRosterChanged={reload}
+        />
+      )}
     </div>
   )
 }

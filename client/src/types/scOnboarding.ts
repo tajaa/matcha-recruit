@@ -12,6 +12,9 @@ export type ScLocationImport = {
   city: string
   state: string
   zipcode: string
+  /** IANA zone. Blank lets the server infer it, which only works for a state
+   *  in a single zone — the wizard makes the manager choose for the rest. */
+  timezone?: string | null
 }
 
 export type ScEmployeeImport = {
@@ -21,6 +24,8 @@ export type ScEmployeeImport = {
   work_state: string
   job_title: string
   department: string
+  /** Store name from the locations step; what puts the person on a schedule. */
+  location?: string | null
 }
 
 export type ScCertificateSetup = {
@@ -49,4 +54,9 @@ export type ScOnboardingStatus = {
   /** Expected CSV headers, owned by the server's parser. Optional so a blue/green
    *  window where the old backend is still serving does not crash the wizard. */
   csv_columns?: { locations: string[]; employees: string[] }
+  /** Columns a file may add after the required ones, or leave out. */
+  csv_optional_columns?: { locations: string[]; employees: string[] }
+  /** Derived from what signup already asked, so the wizard does not re-ask. */
+  suggested_company_size?: CompanySize | null
+  suggested_naics_code?: string | null
 }

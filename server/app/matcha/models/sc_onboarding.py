@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 CompanySize = Literal["1-10", "11-50", "51-100", "101-250", "251-500", "501+"]
 
@@ -27,6 +27,11 @@ class ScLocationImport(ScOnboardingModel):
     city: str = Field(min_length=1, max_length=100)
     state: str = Field(pattern=r"^[A-Za-z]{2}$")
     zipcode: str = Field(pattern=r"^\d{5}(?:-\d{4})?$")
+    # IANA zone, chosen in the wizard. Blank means "infer it from the state",
+    # which only works for states that sit in one zone — the service refuses a
+    # split-zone state (TX, FL, ...) with no choice rather than guess. A store
+    # with no timezone cannot publish a schedule.
+    timezone: str | None = Field(default=None, max_length=64)
 
 
 class ScEmployeeImport(ScOnboardingModel):
@@ -36,6 +41,17 @@ class ScEmployeeImport(ScOnboardingModel):
     work_state: str = Field(pattern=r"^[A-Za-z]{2}$")
     job_title: str = Field(min_length=1, max_length=150)
     department: str = Field(min_length=1, max_length=100)
+    # The store this person works at, by the name given in the locations step.
+    # Optional: a one-store setup assigns everyone to that store, and a roster
+    # with no store is still importable (assigned later from the schedule).
+    location: str | None = Field(default=None, max_length=255)
+
+    @field_validator("location", mode="before")
+    @classmethod
+    def blank_location_is_none(cls, value):
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 class ScCertificateSetup(ScOnboardingModel):
@@ -55,8 +71,8 @@ class ScJobSetup(ScOnboardingModel):
     credential_grace_days: int = Field(default=7, ge=0, le=365)
     # A job may carry no certificate: every employee job title must name a job,
     # and a roster routinely holds roles (a shift supervisor, a dishwasher) with
-    # no credential requirement. validate_sc_submission still requires at least
-    # one mandatory certificate across the whole setup.
+    # no credential requirement. A whole setup may carry none either — a cafe
+    # with nothing to certify is not asked to invent one.
     certificates: list[ScCertificateSetup] = Field(default_factory=list, max_length=50)
 
 
@@ -74,6 +90,12 @@ class ScOnboardingStatus(ScOnboardingModel):
     # The expected CSV headers, so the wizard renders the server's own columns
     # instead of a second copy that can drift out of step with the parser.
     csv_columns: dict[str, list[str]] = Field(default_factory=dict)
+    # Columns a file may add after the required ones (or leave out).
+    csv_optional_columns: dict[str, list[str]] = Field(default_factory=dict)
+    # What signup already knows, so the wizard pre-fills instead of re-asking.
+    # Both stay editable; either may be None when signup could not tell.
+    suggested_company_size: CompanySize | None = None
+    suggested_naics_code: str | None = None
 
 
 class ScOnboardingCsvParse(ScOnboardingModel):

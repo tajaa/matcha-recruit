@@ -26,6 +26,7 @@ from ...services.scheduling.shift_writes import create_shift_core
 from ...services.scheduling.schedule_location_readiness import (
     assert_schedule_location_ready_to_publish,
     get_schedule_location_readiness,
+    readiness_message,
 )
 from ...services.scheduling.labor_cost_service import labor_cost_visible_from, load_week_cost
 from ...services.scheduling.schedule_guidance import refresh_assignment_break_guidance
@@ -446,6 +447,7 @@ async def schedule_location_readiness(
         "location_id": str(location_id),
         "ready_to_publish": readiness.ready_to_publish,
         "missing_fields": list(readiness.missing_fields),
+        "message": readiness_message(readiness),
         "jurisdiction_id": str(readiness.jurisdiction_id) if readiness.jurisdiction_id else None,
         "timezone": readiness.timezone,
         "industry_code": readiness.industry_code,

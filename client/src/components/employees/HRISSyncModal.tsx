@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { CheckCircle2, Loader2, RefreshCw, Unlink, Wallet, Plus } from 'lucide-react'
 import { api } from '../../api/client'
 import { Modal } from '../ui/Modal'
@@ -29,10 +30,15 @@ type Props = {
   open: boolean
   onClose: () => void
   onSuccess: () => void
+  /** Run the first sync as soon as the connection is confirmed. Set when the
+   *  page was opened by the provider's connect redirect: the manager just
+   *  authorized the import, so making them find and press Sync is busywork. */
+  autoSync?: boolean
 }
 
-export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
+export function HRISSyncModal({ open, onClose, onSuccess, autoSync = false }: Props) {
   const { hasFeature } = useMe()
+  const autoSynced = useRef(false)
   // Legacy hris_import umbrella enables both providers.
   const legacyBoth = hasFeature('hris_import')
   const showGusto = hasFeature('hris_gusto') || legacyBoth
@@ -56,6 +62,8 @@ export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
 
   useEffect(() => {
     if (!open) return
+    // Each open starts from a clean slate before re-reading the connection.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setConnectionStatus(null)
     setFetchError(null)
     setSyncResult(null)
@@ -115,6 +123,14 @@ export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
   }
 
   const isConnected = connectionStatus?.connected === true
+
+  useEffect(() => {
+    if (!open || !autoSync || !isConnected || autoSynced.current) return
+    autoSynced.current = true
+    void handleSync()
+    // handleSync is recreated every render; the ref makes this run once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, autoSync, isConnected])
 
   return (
     <Modal open={open} onClose={handleClose} title="Sync employees from HRIS" width="sm">
@@ -222,6 +238,7 @@ function ConnectedPanel({
   onSync: () => void
   onDisconnect: () => void
 }) {
+  const schedulingEnabled = useMe().hasFeature('employee_schedule')
   const lastSync = status.last_sync_at
     ? new Date(status.last_sync_at).toLocaleString()
     : null
@@ -269,6 +286,14 @@ function ConnectedPanel({
                 <li className="text-zinc-500">+{syncResult.errors.length - 3} more</li>
               )}
             </ul>
+          )}
+          {schedulingEnabled && (syncResult.created_count > 0 || syncResult.updated_count > 0) && (
+            // An HRIS knows a city, not which of your stores someone works at,
+            // and the schedule only lists people who have a store.
+            <p className="pt-1 text-[11px] text-zinc-400">
+              Next: <Link to="/ops/schedule" className="text-emerald-400 underline hover:text-emerald-300">open the schedule</Link>{' '}
+              to assign anyone without a store.
+            </p>
           )}
         </div>
       )}
@@ -332,6 +357,8 @@ function BenefitsManager({ mode }: { mode: string | null }) {
 
   useEffect(() => {
     if (!enabled) return
+    // Entering the loading state before the benefits fetch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     setLoadError(null)
     Promise.allSettled([

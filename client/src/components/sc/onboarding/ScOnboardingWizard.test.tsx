@@ -165,7 +165,8 @@ describe('ScOnboardingWizard', () => {
     expect(screen.getByText('Review setup')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Complete setup' }))
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/app', { replace: true }))
+    // Setup hands off to the schedule, not the generic dashboard.
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/ops/schedule', { replace: true }))
     const submission = completeMock.mock.calls[0][0]
     expect(submission.employees.map((employee: { job_title: string }) => employee.job_title))
       .toEqual(['Shift Supervisor', 'Barista', 'barista'])
@@ -213,5 +214,192 @@ describe('ScOnboardingWizard', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('Row 4 must contain all 5 values'),
     )
     expect(screen.getByText('No locations selected')).toBeInTheDocument()
+  })
+
+  it('shows the reason on its own when setup cannot load, not a form that cannot save', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    statusMock.mockRejectedValue(new ApiError('Activate this product before completing setup', 403, null))
+
+    renderWizard()
+
+    await vi.advanceTimersByTimeAsync(1500 * 9)
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Activate this product'))
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument()
+  })
+
+  it('sends a signed-out visitor to the login page', async () => {
+    statusMock.mockRejectedValue(new ApiError('Not authenticated', 401, null))
+
+    renderWizard()
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/login', { replace: true }))
+  })
+
+  it('starts from the headcount and industry signup already asked for', async () => {
+    const user = userEvent.setup()
+    statusMock.mockResolvedValue({
+      company_name: 'Cafe Adore', completed: false, completed_at: null,
+      csv_columns: { locations: ['name'], employees: ['email'] },
+      suggested_company_size: '11-50', suggested_naics_code: '72',
+    })
+
+    renderWizard()
+    await waitFor(() => expect(screen.getByText('Set up Cafe Adore')).toBeInTheDocument())
+
+    expect(screen.getByRole('textbox')).toHaveValue('72')
+    // Nothing to fill in: the step can be passed as it stands.
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Locations' })).toBeInTheDocument()
+  })
+
+  async function reachLocationsFromCafe(user: ReturnType<typeof userEvent.setup>) {
+    statusMock.mockResolvedValue({
+      company_name: 'Cafe Adore', completed: false, completed_at: null,
+      csv_columns: { locations: ['name'], employees: ['email'] },
+      csv_optional_columns: { locations: [], employees: ['location'] },
+      suggested_company_size: '11-50', suggested_naics_code: '72',
+    })
+    renderWizard()
+    await waitFor(() => expect(screen.getByText('Set up Cafe Adore')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Locations
+  }
+
+  it('fills in a one-zone state and makes the manager choose for a split-zone one', async () => {
+    const user = userEvent.setup()
+    parseLocationsMock.mockResolvedValue([
+      { name: 'Oakland', address: '1 Main', city: 'Oakland', state: 'CA', zipcode: '94607' },
+      { name: 'El Paso', address: '9 Mesa', city: 'El Paso', state: 'TX', zipcode: '79901' },
+    ])
+    await reachLocationsFromCafe(user)
+    await user.upload(fileInput(), new File(['x'], 'l.csv', { type: 'text/csv' }))
+    await waitFor(() => expect(screen.getByText('2 locations ready to import')).toBeInTheDocument())
+
+    // California is one zone, so it is already answered; Texas is two.
+    expect(screen.getByRole('button', { name: /Time zone for Oakland/ })).toHaveTextContent('US Pacific')
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Choose a time zone for El Paso.')
+
+    await user.click(screen.getByRole('button', { name: /Time zone for El Paso/ }))
+    await user.click(screen.getByRole('button', { name: 'US Mountain (Denver)' }))
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Employees' })).toBeInTheDocument()
+  })
+
+  it('takes a one-store shop from a typed-in store to setup with no file and no certificate', async () => {
+    const user = userEvent.setup()
+    completeMock.mockResolvedValue({ already_completed: false, completed_at: '2026-10-01T00:00:00Z' })
+    parseEmployeesMock.mockResolvedValue([
+      { email: 'bar1@example.com', first_name: 'Bo', last_name: 'Kim', work_state: 'CA', job_title: 'Barista', department: 'Front' },
+    ])
+    await reachLocationsFromCafe(user)
+
+    await user.click(screen.getByRole('button', { name: 'Add a store' }))
+    await user.click(screen.getByRole('button', { name: 'Add this store' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Give the store a name.')
+
+    await user.type(screen.getByLabelText(/Store name/), 'Downtown')
+    await user.type(screen.getByLabelText(/Street address/), '120 Main St')
+    await user.type(screen.getByLabelText(/City/), 'Oakland')
+    await user.click(screen.getByRole('button', { name: /^State/ }))
+    await user.click(screen.getByRole('button', { name: 'California' }))
+    await user.type(screen.getByLabelText(/Zip code/), '94607')
+    await user.click(screen.getByRole('button', { name: 'Add this store' }))
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText('120 Main St, Oakland, CA 94607')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Employees
+    expect(screen.getByText('optional: location')).toBeInTheDocument()
+    await user.upload(fileInput(), new File(['x'], 'e.csv', { type: 'text/csv' }))
+    await waitFor(() => expect(screen.getByText('Everyone will be scheduled at Downtown.')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Jobs
+    // No certificate anywhere, and setup still goes through.
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Review
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Complete setup' }))
+
+    await waitFor(() => expect(completeMock).toHaveBeenCalled())
+    const submission = completeMock.mock.calls[0][0]
+    expect(submission.locations).toEqual([{
+      name: 'Downtown', address: '120 Main St', city: 'Oakland', state: 'CA',
+      zipcode: '94607', timezone: 'America/Los_Angeles',
+    }])
+    expect(submission.jobs).toEqual([{ name: 'Barista', credential_grace_days: 7, certificates: [] }])
+  })
+
+  it('warns about employees with no store and refuses a store name it does not know', async () => {
+    const user = userEvent.setup()
+    parseLocationsMock.mockResolvedValue([
+      { name: 'Downtown', address: '1 Main', city: 'Oakland', state: 'CA', zipcode: '94607' },
+      { name: 'Mission', address: '9 Oak', city: 'San Francisco', state: 'CA', zipcode: '94103' },
+    ])
+    parseEmployeesMock.mockResolvedValue([
+      { email: 'a@example.com', first_name: 'A', last_name: 'One', work_state: 'CA', job_title: 'Barista', department: 'Front', location: 'mission' },
+      { email: 'b@example.com', first_name: 'B', last_name: 'Two', work_state: 'CA', job_title: 'Barista', department: 'Front', location: null },
+      { email: 'c@example.com', first_name: 'C', last_name: 'Three', work_state: 'CA', job_title: 'Barista', department: 'Front', location: 'Uptown' },
+    ])
+    await reachLocationsFromCafe(user)
+    await user.upload(fileInput(), new File(['x'], 'l.csv', { type: 'text/csv' }))
+    await waitFor(() => expect(screen.getByText('2 locations ready to import')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Employees
+    await user.upload(fileInput(), new File(['x'], 'e.csv', { type: 'text/csv' }))
+
+    await waitFor(() => expect(screen.getByText(/1 employee has no store/)).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Not found: Uptown')
+  })
+
+  it('matches a store name the way the server does, across case folding', async () => {
+    // Python's casefold makes "Straße" and "STRASSE" the same key. A plain
+    // toLowerCase precheck did not, and refused a roster the server accepts.
+    const user = userEvent.setup()
+    parseLocationsMock.mockResolvedValue([
+      { name: 'Straße', address: '1 Main', city: 'Oakland', state: 'CA', zipcode: '94607' },
+      { name: 'Mission', address: '9 Oak', city: 'San Francisco', state: 'CA', zipcode: '94103' },
+    ])
+    parseEmployeesMock.mockResolvedValue([
+      { email: 'a@example.com', first_name: 'A', last_name: 'One', work_state: 'CA', job_title: 'Barista', department: 'Front', location: 'STRASSE' },
+    ])
+    await reachLocationsFromCafe(user)
+    await user.upload(fileInput(), new File(['x'], 'l.csv', { type: 'text/csv' }))
+    await waitFor(() => expect(screen.getByText('2 locations ready to import')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Employees
+    await user.upload(fileInput(), new File(['x'], 'e.csv', { type: 'text/csv' }))
+    await waitFor(() => expect(screen.getByText('1 employees ready to import')).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Jobs and certificates' })).toBeInTheDocument()
+  })
+
+  it('does not put an out-of-state employee at the only store without being told to', async () => {
+    const user = userEvent.setup()
+    parseLocationsMock.mockResolvedValue([
+      { name: 'Downtown', address: '1 Main', city: 'Oakland', state: 'CA', zipcode: '94607' },
+    ])
+    parseEmployeesMock.mockResolvedValue([
+      { email: 'ca@example.com', first_name: 'Cal', last_name: 'One', work_state: 'CA', job_title: 'Barista', department: 'Front' },
+      { email: 'nv@example.com', first_name: 'Nev', last_name: 'Two', work_state: 'NV', job_title: 'Barista', department: 'Front' },
+      { email: 'named@example.com', first_name: 'Nam', last_name: 'Three', work_state: 'NV', job_title: 'Barista', department: 'Front', location: 'Downtown' },
+    ])
+    await reachLocationsFromCafe(user)
+    await user.upload(fileInput(), new File(['x'], 'l.csv', { type: 'text/csv' }))
+    await waitFor(() => expect(screen.getByText('1 locations ready to import')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Employees
+    await user.upload(fileInput(), new File(['x'], 'e.csv', { type: 'text/csv' }))
+
+    // Only the Nevada row with no store named is left out, and it says why.
+    await waitFor(() => expect(screen.getByText(/1 employee has no store/)).toBeInTheDocument())
+    expect(screen.getByText(/Their work state isn't CA, where Downtown is/)).toBeInTheDocument()
+    expect(screen.queryByText('Everyone will be scheduled at Downtown.')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Jobs
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Review
+    expect(screen.getByText(/Nev Two — nv@example.com; Barista, Front; no store yet/)).toBeInTheDocument()
+    expect(screen.getByText(/Nam Three — named@example.com; Barista, Front; Downtown/)).toBeInTheDocument()
   })
 })

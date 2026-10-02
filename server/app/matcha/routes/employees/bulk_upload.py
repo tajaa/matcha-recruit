@@ -6,10 +6,10 @@ Routes:
   GET  /bulk-upload/credentials-template    — CSV template for credentials-only upload
   POST /bulk-upload/credentials             — upsert credentials for existing employees by email
 
-`send_invitations` query param on /bulk-upload defaults to **True** (legacy
-behavior). Reserved-domain emails in the CSV are silently skipped by the
-email service guard, so test data using @example.com / *.test / *.invalid
-won't bounce-storm.
+`send_invitations` query param on /bulk-upload defaults to **False** — a
+roster upload never emails anyone unless the caller opts in. Reserved-domain
+emails in the CSV are also skipped by the email service guard, so test data
+using @example.com / *.test / *.invalid won't bounce-storm.
 """
 import asyncio
 import csv
@@ -43,7 +43,12 @@ from ._shared import (
     _sync_employee_location_for_compliance,
     send_single_invitation,
 )
-from app.matcha.services.employees.roster_csv import is_valid_email
+from app.matcha.services.employees.roster_csv import (
+    StoreDirectory,
+    decode_csv_bytes,
+    is_valid_email,
+    normalize_header,
+)
 from app.matcha.services.onboarding.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
@@ -74,68 +79,82 @@ class BulkCredentialsUploadResponse(BaseModel):
     errors: list[dict]
 
 
+_FULL_TEMPLATE_ROW = {
+    'email': 'jane.doe@hospital.test',
+    'personal_email': 'jane.doe@example.com',
+    'first_name': 'Jane',
+    'last_name': 'Doe',
+    'work_state': 'CA',
+    'employment_type': 'full_time',
+    'start_date': '2026-02-01',
+    'manager_email': 'manager@example.com',
+    'job_title': 'Registered Nurse',
+    'department': 'Emergency',
+    'phone': '555-1234',
+    'uid': 'EMP-001',
+    'pay_classification': 'hourly',
+    'pay_rate': '45.00',
+    'work_city': 'San Francisco',
+    'location': '',
+    'license_type': 'RN',
+    'license_number': 'RN123456',
+    'license_state': 'CA',
+    'license_expiration': '2027-06-30',
+    'npi_number': '1234567890',
+    'dea_number': '',
+    'dea_expiration': '',
+    'board_certification': '',
+    'board_certification_expiration': '',
+    'clinical_specialty': 'Emergency Medicine',
+    'malpractice_carrier': '',
+    'malpractice_policy_number': '',
+    'malpractice_expiration': '',
+    'health_clearances': '{"tb_test": "2026-01-10", "hep_b": "cleared"}',
+}
+
+# The roster a scheduling customer actually has: who works where, doing what,
+# for how much. `location` is the store name; it is what puts a person on a
+# schedule. No licence, NPI or malpractice columns to scroll past.
+_SCHEDULING_TEMPLATE_ROWS = [
+    {
+        'email': 'sam.rivera@example.com', 'first_name': 'Sam', 'last_name': 'Rivera',
+        'job_title': 'Barista', 'location': 'Downtown', 'work_state': 'CA',
+        'phone': '555-0101', 'employment_type': 'part_time',
+        'pay_classification': 'hourly', 'pay_rate': '19.50',
+    },
+    {
+        'email': 'priya.shah@example.com', 'first_name': 'Priya', 'last_name': 'Shah',
+        'job_title': 'Shift Lead', 'location': 'Downtown', 'work_state': 'CA',
+        'phone': '555-0102', 'employment_type': 'full_time',
+        'pay_classification': 'hourly', 'pay_rate': '24.00',
+    },
+]
+
+
+def bulk_upload_template_csv(variant: str = "full") -> str:
+    """The downloadable roster template, as CSV text."""
+    rows = _SCHEDULING_TEMPLATE_ROWS if variant == "scheduling" else [_FULL_TEMPLATE_ROW]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=list(rows[0]))
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue()
+
+
 @router.get("/bulk-upload/template")
 async def download_bulk_upload_template(
+    variant: str = Query("full", pattern="^(full|scheduling)$"),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """
     Download CSV template for bulk employee upload.
 
-    Returns CSV file with:
-    - Column headers
-    - Sample data row
-    - Comments explaining each field
+    `variant=scheduling` returns the short roster a shift-scheduling customer
+    needs (name, job, store, pay); the default keeps every column, including
+    the clinical credential ones.
     """
-    # Create CSV in memory
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=[
-        'email', 'personal_email', 'first_name', 'last_name', 'work_state',
-        'employment_type', 'start_date', 'manager_email', 'job_title', 'department',
-        'phone', 'uid', 'pay_classification', 'pay_rate', 'work_city',
-        'license_type', 'license_number', 'license_state', 'license_expiration',
-        'npi_number', 'dea_number', 'dea_expiration',
-        'board_certification', 'board_certification_expiration', 'clinical_specialty',
-        'malpractice_carrier', 'malpractice_policy_number', 'malpractice_expiration',
-        'health_clearances',
-    ])
-    writer.writeheader()
-
-    # Add example row (medical employee)
-    writer.writerow({
-        'email': 'jane.doe@hospital.test',
-        'personal_email': 'jane.doe@gmail.com',
-        'first_name': 'Jane',
-        'last_name': 'Doe',
-        'work_state': 'CA',
-        'employment_type': 'full_time',
-        'start_date': '2026-02-01',
-        'manager_email': 'manager@example.com',
-        'job_title': 'Registered Nurse',
-        'department': 'Emergency',
-        'phone': '555-1234',
-        'uid': 'EMP-001',
-        'pay_classification': 'hourly',
-        'pay_rate': '45.00',
-        'work_city': 'San Francisco',
-        'license_type': 'RN',
-        'license_number': 'RN123456',
-        'license_state': 'CA',
-        'license_expiration': '2027-06-30',
-        'npi_number': '1234567890',
-        'dea_number': '',
-        'dea_expiration': '',
-        'board_certification': '',
-        'board_certification_expiration': '',
-        'clinical_specialty': 'Emergency Medicine',
-        'malpractice_carrier': '',
-        'malpractice_policy_number': '',
-        'malpractice_expiration': '',
-        'health_clearances': '{"tb_test": "2026-01-10", "hep_b": "cleared"}',
-    })
-
-    output.seek(0)
     return StreamingResponse(
-        io.BytesIO(output.getvalue().encode()),
+        io.BytesIO(bulk_upload_template_csv(variant).encode()),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=employee_bulk_upload_template.csv"}
     )
@@ -166,11 +185,14 @@ async def bulk_upload_employees_csv(
     - manager_email (must be existing employee email)
     - job_title
     - phone
+    - location (the store's name — sets the employee's work location, which is
+      what makes them schedulable; an unknown name is a per-row error. Left
+      blank, a company with exactly one store gets everyone placed there.)
     """
     company_id = await get_client_company_id(current_user)
 
     # Validate file format
-    if not file.filename.endswith('.csv'):
+    if not (file.filename or '').lower().endswith('.csv'):
         raise HTTPException(status_code=400, detail="File must be a CSV")
 
     # Check file size (10MB max)
@@ -180,8 +202,10 @@ async def bulk_upload_employees_csv(
 
     # Parse CSV
     try:
-        csv_content = contents.decode('utf-8')
+        csv_content = decode_csv_bytes(contents)
         csv_reader = csv.DictReader(io.StringIO(csv_content))
+        # "Email" and " email " are the same column to the person who typed it.
+        csv_reader.fieldnames = normalize_header(csv_reader.fieldnames)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid CSV format: {str(e)}")
 
@@ -221,6 +245,15 @@ async def bulk_upload_employees_csv(
     async with get_connection() as conn:
         compensation_fields_available = await _employee_compensation_fields_available(conn)
         external_uid_available = await _column_exists(conn, "employees", "external_uid")
+        work_location_available = await _column_exists(conn, "employees", "work_location_id")
+        stores = StoreDirectory(
+            dict(store) for store in await conn.fetch(
+                """SELECT id, name, address, city, state
+                     FROM business_locations
+                    WHERE company_id = $1 AND is_active = true""",
+                company_id,
+            )
+        ) if work_location_available else StoreDirectory([])
 
         google_workspace_auto_provision = False
         slack_auto_provision = False
@@ -371,6 +404,16 @@ async def bulk_upload_employees_csv(
 
                 work_city = (row.get('work_city') or '').strip() or None
 
+                work_location_id, store_covers_work_location, store_error = stores.resolve(
+                    location_name=row.get('location'),
+                    work_state=work_state,
+                    work_city=work_city,
+                )
+                if store_error:
+                    errors.append({"row": row_num, "email": email, "error": store_error})
+                    failed += 1
+                    continue
+
                 # Parse start_date
                 start_date = None
                 if (row.get('start_date') or '').strip():
@@ -414,6 +457,9 @@ async def bulk_upload_employees_csv(
                 if external_uid is not None and external_uid_available:
                     bulk_cols.append("external_uid")
                     bulk_vals.append(external_uid)
+                if work_location_id is not None:
+                    bulk_cols.append("work_location_id")
+                    bulk_vals.append(work_location_id)
                 bulk_placeholders = ", ".join(f"${i}" for i in range(1, len(bulk_vals) + 1))
                 bulk_col_list = ", ".join(bulk_cols)
                 employee = await conn.fetchrow(
@@ -522,14 +568,19 @@ async def bulk_upload_employees_csv(
                         "error": f"Employee created but credentials failed: {_exception_message(e)}"
                     })
 
-                await _sync_employee_location_for_compliance(
-                    conn,
-                    company_id=company_id,
-                    employee_id=employee["id"],
-                    work_state=work_state,
-                    work_city=work_city,
-                    background_tasks=background_tasks,
-                )
+                # A row placed at a store in its own work state/city already
+                # has its compliance location: the store. Deriving another one
+                # would add an address-less "City, ST" twin to every store
+                # picker in the product.
+                if not store_covers_work_location:
+                    await _sync_employee_location_for_compliance(
+                        conn,
+                        company_id=company_id,
+                        employee_id=employee["id"],
+                        work_state=work_state,
+                        work_city=work_city,
+                        background_tasks=background_tasks,
+                    )
 
                 # Auto-assign new-hire training per training_assignment_rules
                 try:
@@ -672,7 +723,7 @@ async def bulk_upload_credentials_csv(
     """
     company_id = await get_client_company_id(current_user)
 
-    if not file.filename.endswith('.csv'):
+    if not (file.filename or '').lower().endswith('.csv'):
         raise HTTPException(status_code=400, detail="File must be a CSV")
 
     contents = await file.read()
@@ -680,8 +731,10 @@ async def bulk_upload_credentials_csv(
         raise HTTPException(status_code=413, detail="File too large (max 10MB)")
 
     try:
-        csv_content = contents.decode('utf-8')
+        csv_content = decode_csv_bytes(contents)
         csv_reader = csv.DictReader(io.StringIO(csv_content))
+        # "Email" and " email " are the same column to the person who typed it.
+        csv_reader.fieldnames = normalize_header(csv_reader.fieldnames)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid CSV format: {str(e)}")
 

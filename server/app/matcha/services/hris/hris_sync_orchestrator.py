@@ -191,6 +191,29 @@ async def _upsert_demographics(conn, *, company_id, employee_id, demographics, s
     )
 
 
+def merge_compensation(existing_rate, existing_classification, incoming_rate, incoming_classification):
+    """What `(pay_rate, pay_classification)` should be after a resync.
+
+    The two columns are one fact: `pay_rate` is dollars per hour when the
+    classification is hourly and dollars per year when it is exempt. Merging
+    them independently (a COALESCE each) let a feed that changed the
+    classification without a usable rate keep the OLD rate under the NEW unit —
+    a $52,000 exempt salary became $52,000 an hour.
+
+    - A rate arrived: take it, with its classification (or the stored one when
+      the feed gave none, as before).
+    - No rate, classification changed: the stored rate is in the wrong unit
+      now. Clear it — unpriced is reported as unpriced; a wrong rate is not.
+    - No rate, classification the same or absent: nothing new; keep the pair.
+      (A sync without the compensation scope must not wipe imported pay.)
+    """
+    if incoming_rate is not None:
+        return incoming_rate, incoming_classification or existing_classification
+    if incoming_classification and incoming_classification != existing_classification:
+        return None, incoming_classification
+    return existing_rate, existing_classification
+
+
 async def _resolve_work_location_id(conn, company_id, work_city, work_state):
     """Map an HRIS work city/state to a business_locations.id (the OSHA establishment FK).
 
@@ -712,13 +735,13 @@ async def _sync_single_employee(
     existing = None
     if hris_id:
         existing = await conn.fetchrow(
-            "SELECT id FROM employees WHERE org_id = $1 AND hris_id = $2",
+            "SELECT id, pay_rate, pay_classification FROM employees WHERE org_id = $1 AND hris_id = $2",
             company_id,
             hris_id,
         )
     if existing is None:
         existing = await conn.fetchrow(
-            "SELECT id FROM employees WHERE org_id = $1 AND email = $2",
+            "SELECT id, pay_rate, pay_classification FROM employees WHERE org_id = $1 AND email = $2",
             company_id,
             email,
         )
@@ -738,6 +761,12 @@ async def _sync_single_employee(
 
     if existing:
         employee_id = existing["id"]
+        pay_rate, pay_classification = merge_compensation(
+            existing.get("pay_rate"),
+            existing.get("pay_classification"),
+            normalized.get("pay_rate"),
+            normalized.get("pay_classification"),
+        )
         await conn.execute(
             """
             UPDATE employees
@@ -754,11 +783,13 @@ async def _sync_single_employee(
                     WHEN employees.employment_status = 'terminated' AND $9 = 'active' THEN 'active'
                     ELSE employees.employment_status
                 END,
-                -- COALESCE so a sync without compensations:read scope doesn't null out
-                -- pay data imported on an earlier scoped sync.
                 work_city = COALESCE($10, work_city),
-                pay_rate = COALESCE($11, pay_rate),
-                pay_classification = COALESCE($12, pay_classification),
+                -- Written as a pair, already merged by merge_compensation: a
+                -- sync with no pay data still keeps what an earlier one
+                -- imported, but a rate never outlives the classification that
+                -- gave it its unit.
+                pay_rate = $11,
+                pay_classification = $12,
                 address = COALESCE($13, address),
                 termination_date = COALESCE($14, termination_date),
                 -- COALESCE: a confident match sets/updates the establishment FK; an
@@ -781,8 +812,8 @@ async def _sync_single_employee(
             normalized.get("hris_id"),
             normalized.get("employment_status"),
             normalized.get("work_city"),
-            normalized.get("pay_rate"),
-            normalized.get("pay_classification"),
+            pay_rate,
+            pay_classification,
             normalized.get("address"),
             _parse_date(normalized.get("termination_date")),
             resolved_location_id,

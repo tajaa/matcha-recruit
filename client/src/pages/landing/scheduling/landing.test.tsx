@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import SchedulingLanding from '.'
+import { SCHEDULING_SIGNUP_PATH } from './signup'
 
 // The hero animation is a lazy Remotion stage; the tabs are what's under test.
 vi.mock('./Stage', () => ({ default: () => null }))
@@ -53,6 +54,22 @@ describe('home landing tabs', () => {
     expect(tabs.getByRole('link', { name: 'Incidents' }).getAttribute('href')).toBe('/incidents')
     expect(document.getElementById('draft')).not.toBeNull()
     expect(document.getElementById('triage')).toBeNull()
+  })
+
+  it('scheduling is self-serve: every primary call to action starts an account', () => {
+    renderAt('/')
+    // Top bar, hero and close. The walkthrough is still offered, as the
+    // second choice rather than the only door in.
+    const starts = screen.getAllByRole('link', { name: /Start now/ })
+    expect(starts).toHaveLength(3)
+    for (const link of starts) expect(link.getAttribute('href')).toBe(SCHEDULING_SIGNUP_PATH)
+    expect(screen.getAllByRole('button', { name: /book a walkthrough/i }).length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('the incidents tab keeps the walkthrough as its call to action', () => {
+    renderAt('/incidents')
+    expect(screen.queryByRole('link', { name: /Start now/ })).toBeNull()
+    expect(screen.getAllByRole('button', { name: /book a walkthrough/i }).length).toBeGreaterThanOrEqual(1)
   })
 
   it('/incidents is the incident workflow, in order, from report to signed copy', () => {

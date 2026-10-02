@@ -27,8 +27,12 @@ export interface InputsRailProps {
   onOpenAutopilot?(): void
   onOpenWeekSetup(): void
   onOpenJobs(): void
-  onAskHuume(text: string): void
+  /** Absent when the plan has no Huume — its shortcuts are then left out. */
+  onAskHuume?(text: string): void
   onShowShift(shiftId: string): void
+  /** Shown in place of the roster when this store has nobody on it: why, and
+   *  the way to fix it. Falls back to a plain line when not supplied. */
+  emptyRoster?: React.ReactNode
 }
 
 type Person = {
@@ -146,7 +150,7 @@ function Section({ label, count, children, action }: { label: string; count?: nu
 function InputsRail({
   inputs, loading, roster, rosterFlags, selectedEmployeeId, onSelectEmployee, requiredJobId, requiredJobDate,
   cost, weekRules, locationName, credentialsEnabled, autopilotReadiness, onOpenAutopilot,
-  onOpenWeekSetup, onOpenJobs, onAskHuume, onShowShift,
+  onOpenWeekSetup, onOpenJobs, onAskHuume, onShowShift, emptyRoster,
 }: InputsRailProps) {
   const [query, setQuery] = useState('')
   const { setNodeRef, isOver } = useDroppable({ id: 'schedule-unassign', data: { kind: 'unassign' } })
@@ -219,7 +223,13 @@ function InputsRail({
               onSelect={() => onSelectEmployee(person.employee.id === selectedEmployeeId ? null : person.employee.id)}
             />
           ))}
-          {people.length === 0 && <p className="px-2 py-3 text-xs text-zinc-600">{loading ? 'Loading people…' : 'No one matches.'}</p>}
+          {people.length === 0 && (
+            // An empty roster is not a failed search: nobody is placed at this
+            // store yet, and "No one matches." told a new manager nothing.
+            !loading && roster.length === 0 && emptyRoster
+              ? emptyRoster
+              : <p className="px-2 py-3 text-xs text-zinc-600">{loading ? 'Loading people…' : roster.length === 0 ? 'No one is assigned to this store yet.' : 'No one matches.'}</p>
+          )}
         </div>
         {inputs?.roster_truncated && <p className="mt-2 text-[10px] text-amber-400">Showing the first {inputs.roster.length} people by load.</p>}
         <div ref={setNodeRef} className={`mt-3 rounded-lg border border-dashed px-2.5 py-2 text-center text-[10px] text-zinc-600 ${isOver ? 'border-red-400/70 bg-red-500/10 text-red-300' : 'border-zinc-800'}`}>
@@ -231,7 +241,7 @@ function InputsRail({
       <Section
         label="Open seats"
         count={openSeats}
-        action={openSeats > 0
+        action={openSeats > 0 && onAskHuume
           ? <button type="button" onClick={() => onAskHuume('Fill the open shifts this week.')} className="inline-flex items-center gap-1 text-[10px] text-emerald-300 hover:text-emerald-100"><Sparkles className="h-3 w-3" /> Fill with Huume</button>
           : null}
       >
@@ -338,7 +348,7 @@ function InputsRail({
                 : 'Huume can’t build a template week until these are saved.'}</span>
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              <button type="button" onClick={() => onAskHuume(SETUP_KICKOFF_PROMPT)} className="rounded-md border border-amber-400/40 px-2 py-1 text-[10px] font-medium hover:bg-amber-400/10">Set up with Huume</button>
+              {onAskHuume && <button type="button" onClick={() => onAskHuume(SETUP_KICKOFF_PROMPT)} className="rounded-md border border-amber-400/40 px-2 py-1 text-[10px] font-medium hover:bg-amber-400/10">Set up with Huume</button>}
               <button type="button" onClick={onOpenWeekSetup} className="rounded-md border border-amber-400/40 px-2 py-1 text-[10px] font-medium hover:bg-amber-400/10">Fill it in myself</button>
             </div>
           </div>

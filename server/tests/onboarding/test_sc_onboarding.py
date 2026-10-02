@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from pydantic import ValidationError
 
 from app.core.routes.admin.products import ProductUpsert, _validated
@@ -123,7 +123,7 @@ def submission(*, locations=(), employees=()) -> ScOnboardingComplete:
 
 def test_strings_are_trimmed_before_length_validation():
     location = ScLocationImport(
-        name="  North  ", address="1 Main", city="Austin", state="TX", zipcode="78701",
+        name="  North  ", address="1 Main", city="Austin", state="TX", timezone="America/Chicago", zipcode="78701",
     )
     assert location.name == "North"
     with pytest.raises(ValidationError):
@@ -146,19 +146,31 @@ def test_company_fields_and_schedule_blocking_are_validated():
         ScCertificateSetup(name="Card", is_required=False, schedule_blocking=True)
 
 
-def test_a_job_may_carry_no_certificate_but_the_setup_needs_one_mandatory():
+def test_a_setup_may_carry_no_certificate_at_all():
     # A roster title with no credential requirement (e.g. a shift supervisor)
     # must still be configurable as a job, or its employees can't import.
     assert ScJobSetup(name="Shift Supervisor").certificates == []
 
-    no_mandatory = submission().model_copy(update={"jobs": [
+    # And a whole setup may have none: a cafe with nothing to certify used to
+    # be refused until it invented a mandatory certificate.
+    service.validate_sc_submission(submission().model_copy(update={"jobs": [
         ScJobSetup(name="Shift Supervisor"),
         ScJobSetup(name="Barista", certificates=[
             ScCertificateSetup(name="Food Handler Card", is_required=False, schedule_blocking=False),
         ]),
+    ]}))
+    service.validate_sc_submission(submission().model_copy(update={"jobs": [
+        ScJobSetup(name="Barista"),
+    ]}))
+
+    duplicated = submission().model_copy(update={"jobs": [
+        ScJobSetup(name="Barista", certificates=[
+            ScCertificateSetup(name="Food Handler Card"),
+            ScCertificateSetup(name="food handler card"),
+        ]),
     ]})
-    with pytest.raises(service.ScOnboardingError, match="at least one mandatory certificate"):
-        service.validate_sc_submission(no_mandatory)
+    with pytest.raises(service.ScOnboardingError, match="duplicate certificate"):
+        service.validate_sc_submission(duplicated)
 
 
 def test_optional_imports_can_be_skipped():
@@ -167,15 +179,15 @@ def test_optional_imports_can_be_skipped():
 
 def test_duplicate_location_rejects_exact_rows_but_allows_two_sites_in_one_city():
     locations = [
-        ScLocationImport(name="North", address="1 Main", city="Austin", state="TX", zipcode="78701"),
-        ScLocationImport(name=" north ", address="1 MAIN", city=" austin ", state="tx", zipcode="78701"),
+        ScLocationImport(name="North", address="1 Main", city="Austin", state="TX", timezone="America/Chicago", zipcode="78701"),
+        ScLocationImport(name=" north ", address="1 MAIN", city=" austin ", state="tx", timezone="America/Chicago", zipcode="78701"),
     ]
     with pytest.raises(service.ScOnboardingError, match="duplicate location row"):
         service.validate_sc_submission(submission(locations=locations))
 
     service.validate_sc_submission(submission(locations=[
         locations[0],
-        ScLocationImport(name="South", address="99 Other", city="Austin", state="TX", zipcode="78702"),
+        ScLocationImport(name="South", address="99 Other", city="Austin", state="TX", timezone="America/Chicago", zipcode="78702"),
     ]))
 
 
@@ -226,21 +238,30 @@ class _Transaction:
         self.conn = conn
 
     async def __aenter__(self):
-        assert not self.conn.in_transaction
-        self.conn.in_transaction = True
+        # Nested = a savepoint, as in asyncpg. Only the outermost one is the
+        # setup transaction whose commit or rollback the tests assert on.
+        self.outermost = not self.conn.in_transaction
+        if self.outermost:
+            self.conn.in_transaction = True
+        else:
+            self.conn.savepoints += 1
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
-        self.conn.in_transaction = False
-        self.conn.rolled_back = exc_type is not None
+        if self.outermost:
+            self.conn.in_transaction = False
+            self.conn.rolled_back = exc_type is not None
 
 
 class _Connection:
-    def __init__(self, *, completed_at=None, existing_locations=()):
+    def __init__(self, *, completed_at=None, existing_locations=(), headcount=None, industry=None):
         self.completed_at = completed_at
+        self.headcount = headcount
+        self.industry = industry
         self.existing_locations = list(existing_locations)
         self.in_transaction = False
         self.rolled_back = False
+        self.savepoints = 0
         self.calls: list[tuple[str, str, tuple]] = []
         self.employee_id = uuid4()
         self.job_id = uuid4()
@@ -256,6 +277,7 @@ class _Connection:
                 "id": args[0], "name": "Example Co", "status": "approved",
                 "signup_source": "product:safety-co", "enabled_features": {"employees": True},
                 "sc_onboarding_completed_at": self.completed_at,
+                "industry": self.industry,
             }
         raise AssertionError(query)
 
@@ -276,6 +298,8 @@ class _Connection:
         self.calls.append(("fetchval", query, args))
         if "SELECT id FROM scoped_credential_types" in query:
             return None
+        if "FROM company_handbook_profiles" in query:
+            return self.headcount
         if "INSERT INTO schedule_jobs" in query:
             return self.job_id
         if "UPDATE companies SET sc_onboarding_completed_at" in query:
@@ -297,6 +321,14 @@ def _allow_sc_product(monkeypatch):
 
     monkeypatch.setattr(service, "get_product_by_signup_source", product)
     monkeypatch.setattr(service, "is_tenant_activated", lambda *args, **kwargs: True)
+    monkeypatch.setattr(service, "_link_jurisdiction", _fake_jurisdiction)
+
+
+JURISDICTION_ID = uuid4()
+
+
+async def _fake_jurisdiction(conn, city, state, zipcode):
+    return JURISDICTION_ID
 
 
 def _capture_location_sync(monkeypatch) -> list[dict]:
@@ -348,7 +380,7 @@ async def test_completion_is_company_scoped_and_materializes_after_rules(monkeyp
         work_state="TX", job_title="Cook", department="Kitchen",
     )
     location = ScLocationImport(
-        name="Downtown", address="1 Main", city="Austin", state="TX", zipcode="78701",
+        name="Downtown", address="1 Main", city="Austin", state="TX", timezone="America/Chicago", zipcode="78701",
     )
     replacement_calls = []
 
@@ -371,9 +403,10 @@ async def test_completion_is_company_scoped_and_materializes_after_rules(monkeyp
     assert any("INSERT INTO schedule_job_employees" in query for _, query, _ in conn.calls)
     assert any("UPDATE companies SET sc_onboarding_completed_at" in query for _, query, _ in conn.calls)
     assert conn.rolled_back is False
-    # Imported employees must get the same derived jurisdiction coverage the
-    # employees CSV endpoint produces, and the sync runs after the commit.
-    assert synced == [{"TX": conn.employee_id}]
+    # The store the manager entered IS the TX compliance location, so no
+    # second, address-less "TX" location is derived next to it. The sync still
+    # runs after the commit, with nothing left to derive.
+    assert synced == [{}]
 
 
 @pytest.mark.asyncio
@@ -396,7 +429,7 @@ async def test_roster_and_locations_are_written_in_set_based_statements(monkeypa
     locations = [
         ScLocationImport(
             name=f"Store {index}", address=f"{index} Main", city="Austin",
-            state="TX", zipcode="78701",
+            state="TX", timezone="America/Chicago", zipcode="78701",
         )
         for index in range(25)
     ]
@@ -525,7 +558,7 @@ async def test_existing_company_location_is_rejected_before_mutation(monkeypatch
         "state": "TX", "zipcode": "78702",
     }])
     location = ScLocationImport(
-        name="downtown", address="99 other", city="austin", state="tx", zipcode="78702",
+        name="downtown", address="99 other", city="austin", state="tx", timezone="America/Chicago", zipcode="78702",
     )
 
     with pytest.raises(service.ScOnboardingError, match="already exists"):
@@ -644,6 +677,7 @@ async def test_complete_route_accepts_the_shift_supervisor_setup(monkeypatch):
 
     response = await sc_route.complete(
         _shift_supervisor_submission(jobs=_CAFE_JOBS),
+        BackgroundTasks(),
         current_user=SimpleNamespace(id=uuid4()),
     )
 
@@ -659,6 +693,7 @@ async def test_complete_route_names_every_missing_title_as_a_422(monkeypatch):
     with pytest.raises(HTTPException) as caught:
         await sc_route.complete(
             _shift_supervisor_submission(jobs=_CAFE_JOBS[:1]),
+            BackgroundTasks(),
             current_user=SimpleNamespace(id=uuid4()),
         )
 
@@ -666,3 +701,276 @@ async def test_complete_route_names_every_missing_title_as_a_422(monkeypatch):
     assert caught.value.detail == service.UNMATCHED_JOB_TITLES_MESSAGE + "Shift Supervisor"
     # Rejected before the transaction opens: nothing was written.
     assert conn.calls == []
+
+
+# ── Publishable stores, assigned employees ───────────────────────────────
+#
+# A schedule can only be published for a store that has a timezone and a
+# jurisdiction, and only for employees who have a store. Setup used to write
+# none of the three, so a customer who finished every step still could not
+# publish — and nothing in a scheduling-first product could repair it.
+
+
+def _store(name="Downtown", *, state="CA", city="Oakland", **overrides) -> ScLocationImport:
+    return ScLocationImport(
+        name=name, address="1 Main", city=city, state=state, zipcode="94607", **overrides,
+    )
+
+
+def _crew(email: str, *, location=None, work_state="CA") -> ScEmployeeImport:
+    return ScEmployeeImport(
+        email=email, first_name="Sam", last_name="Lee", work_state=work_state,
+        job_title="Cook", department="Kitchen", location=location,
+    )
+
+
+def test_timezone_is_inferred_for_a_one_zone_state_and_kept_when_chosen():
+    assert service.resolve_location_timezone(_store()) == ("America/Los_Angeles", "auto")
+    assert service.resolve_location_timezone(
+        _store(state="TX", city="El Paso", timezone="America/Denver")
+    ) == ("America/Denver", "manual")
+
+
+def test_a_split_zone_store_with_no_timezone_is_refused_by_name():
+    # Texas runs on two clocks; guessing one would publish shifts an hour off.
+    with pytest.raises(service.ScOnboardingError, match="Choose a time zone for El Paso"):
+        service.validate_sc_submission(
+            submission(locations=[_store("El Paso", state="TX", city="El Paso")])
+        )
+    with pytest.raises(service.ScOnboardingError, match="valid IANA time zone"):
+        service.validate_sc_submission(
+            submission(locations=[_store(timezone="Pacific")])
+        )
+
+
+def test_employees_land_at_the_named_store_or_the_only_one():
+    two_stores = [_store("Downtown"), _store("Mission", city="San Francisco")]
+    body = submission(locations=two_stores, employees=[
+        _crew("a@example.com", location="  mission "),
+        _crew("b@example.com"),
+    ])
+    # Named store matches regardless of case/spacing; with two stores and no
+    # name there is no honest default, so that person stays unassigned.
+    assert service.employee_store_keys(body) == ["mission", None]
+
+    one_store = submission(locations=[_store("Downtown")], employees=[_crew("a@example.com")])
+    assert service.employee_store_keys(one_store) == ["downtown"]
+
+    # The only store is in California. Someone the roster says works in Nevada
+    # is not quietly put on its schedule (and, through the store's state, under
+    # California's handbook) — they stay unassigned for an explicit choice.
+    # Naming the store is that choice.
+    cross_state = submission(locations=[_store("Downtown")], employees=[
+        _crew("nv@example.com", work_state="NV"),
+        _crew("named@example.com", work_state="NV", location="Downtown"),
+    ])
+    assert service.employee_store_keys(cross_state) == [None, "downtown"]
+
+    no_stores = submission(employees=[_crew("a@example.com")])
+    assert service.employee_store_keys(no_stores) == [None]
+
+
+def test_an_unknown_or_ambiguous_store_name_is_refused_with_the_fix():
+    with pytest.raises(service.ScOnboardingError, match="Not found: Uptown"):
+        service.validate_sc_submission(submission(
+            locations=[_store("Downtown")],
+            employees=[_crew("a@example.com", location="Uptown")],
+        ))
+    twins = [_store("Downtown"), _store("Downtown", city="San Francisco")]
+    with pytest.raises(service.ScOnboardingError, match="More than one location is named Downtown"):
+        service.validate_sc_submission(submission(
+            locations=twins, employees=[_crew("a@example.com", location="downtown")],
+        ))
+    # Twin names are only a problem once a roster row has to pick between them.
+    service.validate_sc_submission(submission(locations=twins))
+
+
+def test_employee_csv_takes_an_optional_location_column():
+    header = "email,first_name,last_name,work_state,job_title,department"
+    with_store = service.parse_employees_csv(
+        header + ",location\n"
+        "a@example.com,A,One,CA,Cook,Kitchen,Downtown\n"
+        "b@example.com,B,Two,CA,Cook,Kitchen,\n"
+        "c@example.com,C,Three,CA,Cook,Kitchen"
+    )
+    assert [employee.location for employee in with_store] == ["Downtown", None, None]
+    # The file a customer exported before the column existed still imports.
+    assert service.parse_employees_csv(
+        header + "\na@example.com,A,One,CA,Cook,Kitchen"
+    )[0].location is None
+    with pytest.raises(RosterCsvError, match=r"Expected header: .*\(optional: location\)"):
+        service.parse_employees_csv(header + ",store\na@example.com,A,One,CA,Cook,Kitchen,X")
+
+
+@pytest.mark.asyncio
+async def test_stores_are_written_publishable_and_employees_assigned(monkeypatch):
+    _allow_sc_product(monkeypatch)
+    synced = _capture_location_sync(monkeypatch)
+
+    async def replace(conn_arg, **kwargs):
+        return []
+
+    monkeypatch.setattr(service, "replace_job_credential_requirements", replace)
+    linked: list[tuple] = []
+
+    async def link(conn, city, state, zipcode):
+        linked.append((city, state, zipcode))
+        return JURISDICTION_ID
+
+    monkeypatch.setattr(service, "_link_jurisdiction", link)
+    conn = _RosterConnection()
+    stores = [
+        _store("Downtown"),
+        _store("Uptown"),  # same city: one jurisdiction lookup serves both
+        _store("El Paso", state="TX", city="El Paso", timezone="America/Denver"),
+    ]
+    tasks = BackgroundTasks()
+
+    await service.complete_sc_onboarding(
+        conn, company_id=uuid4(), actor_user_id=uuid4(),
+        body=submission(locations=stores, employees=[
+            _crew("a@example.com", location="Uptown"),
+            _crew("b@example.com"),
+            _crew("remote@example.com", work_state="NV"),
+        ]),
+        background_tasks=tasks,
+    )
+
+    _, _, args = next(call for call in conn.calls if "INSERT INTO business_locations" in call[1])
+    store_ids, timezones, sources, jurisdictions = args[1], args[7], args[8], args[9]
+    assert timezones == ["America/Los_Angeles", "America/Los_Angeles", "America/Denver"]
+    assert sources == ["auto", "auto", "manual"]
+    assert jurisdictions == [JURISDICTION_ID] * 3
+    assert linked == [("Oakland", "CA", "94607"), ("El Paso", "TX", "94607")]
+
+    _, _, employee_args = next(call for call in conn.calls if "INSERT INTO employees" in call[1])
+    # Named store → that store's id; no name with three stores → unassigned.
+    assert employee_args[7] == [store_ids[1], None, None]
+
+    # Only the state with no store still derives a compliance location.
+    assert synced == [{"NV": conn.employee_ids["remote@example.com"]}]
+    # Each real store gets the catalog's requirements projected onto it.
+    assert [task.args for task in tasks.tasks] == [
+        (store_id, conn.calls[0][2][0]) for store_id in store_ids
+    ]
+    assert all(task.func is service._project_store_compliance for task in tasks.tasks)
+
+
+@pytest.mark.asyncio
+async def test_store_compliance_projection_spends_no_model_calls(monkeypatch):
+    import app.core.services.compliance_service as compliance_service
+
+    seen: list[dict] = []
+
+    async def check(location_id, company_id, **kwargs):
+        seen.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(compliance_service, "run_compliance_check_background", check)
+    await service._project_store_compliance(uuid4(), uuid4())
+    assert seen == [{
+        "check_type": "proactive",
+        "allow_live_research": False,
+        "allow_repository_refresh": False,
+    }]
+
+    async def explode(*args, **kwargs):
+        raise RuntimeError("catalog offline")
+
+    # Best-effort: the store is already schedulable, so a failure is logged.
+    monkeypatch.setattr(compliance_service, "run_compliance_check_background", explode)
+    await service._project_store_compliance(uuid4(), uuid4())
+
+
+@pytest.mark.asyncio
+async def test_link_jurisdiction_delegates_to_the_compliance_resolver(monkeypatch):
+    import app.core.services.compliance_service as compliance_service
+
+    async def resolver(conn, city, state, county, zipcode):
+        return (city, state, county, zipcode)
+
+    monkeypatch.setattr(compliance_service, "_get_or_create_jurisdiction", resolver)
+    assert await service._link_jurisdiction(object(), "Oakland", "CA", "94607") == (
+        "Oakland", "CA", None, "94607",
+    )
+
+
+def test_company_size_bucket_follows_the_signup_headcount():
+    assert [service.company_size_for_headcount(n) for n in (None, 0, 1, 10, 11, 50, 100, 250, 500, 501)] == [
+        None, None, "1-10", "1-10", "11-50", "11-50", "51-100", "101-250", "251-500", "501+",
+    ]
+
+
+def test_every_industry_default_is_a_naics_code_setup_accepts():
+    from app.matcha.services.ir.naics_titles import naics_industry_description
+
+    for industry, code in service.INDUSTRY_NAICS_DEFAULTS.items():
+        assert naics_industry_description(code), industry
+        ScCompanySetup(company_size="1-10", naics_code=code)
+
+
+@pytest.mark.asyncio
+async def test_status_prefills_what_signup_already_asked(monkeypatch):
+    _allow_sc_product(monkeypatch)
+    status = await service.get_sc_onboarding_status(
+        _Connection(headcount=24, industry="Hospitality"), company_id=uuid4(),
+    )
+    assert status["suggested_company_size"] == "11-50"
+    assert status["suggested_naics_code"] == "72"
+    assert status["csv_optional_columns"] == {"locations": [], "employees": ["location"]}
+
+    # "other" (or a missing profile) has no honest default: the wizard asks.
+    blank = await service.get_sc_onboarding_status(
+        _Connection(industry="other"), company_id=uuid4(),
+    )
+    assert blank["suggested_company_size"] is None
+    assert blank["suggested_naics_code"] is None
+
+
+@pytest.mark.asyncio
+async def test_status_tolerates_a_missing_headcount_table(monkeypatch):
+    import asyncpg
+
+    _allow_sc_product(monkeypatch)
+
+    class _NoProfiles(_Connection):
+        async def fetchval(self, query, *args):
+            if "FROM company_handbook_profiles" in query:
+                raise asyncpg.UndefinedTableError("relation does not exist")
+            return await super().fetchval(query, *args)
+
+    status = await service.get_sc_onboarding_status(_NoProfiles(), company_id=uuid4())
+    assert status["suggested_company_size"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_jurisdiction_lookup_does_not_sink_setup(monkeypatch):
+    # The resolver swallows some of its own statement failures, which inside a
+    # transaction leaves it aborted. The lookup runs in a savepoint, so the
+    # store still saves (unlinked, repairable) and so does everything after it.
+    _allow_sc_product(monkeypatch)
+    _capture_location_sync(monkeypatch)
+
+    async def replace(conn_arg, **kwargs):
+        return []
+
+    async def broken(conn, city, state, zipcode):
+        raise RuntimeError("current transaction is aborted")
+
+    monkeypatch.setattr(service, "replace_job_credential_requirements", replace)
+    monkeypatch.setattr(service, "_link_jurisdiction", broken)
+    conn = _RosterConnection()
+
+    result = await service.complete_sc_onboarding(
+        conn, company_id=uuid4(), actor_user_id=uuid4(),
+        body=submission(locations=[_store("Downtown")], employees=[_crew("a@example.com")]),
+    )
+
+    assert result["already_completed"] is False
+    assert conn.rolled_back is False
+    assert conn.savepoints == 1
+    _, _, args = next(call for call in conn.calls if "INSERT INTO business_locations" in call[1])
+    assert args[9] == [None]
+    # The employee is still placed at the store.
+    _, _, employee_args = next(call for call in conn.calls if "INSERT INTO employees" in call[1])
+    assert employee_args[7] == [args[1][0]]

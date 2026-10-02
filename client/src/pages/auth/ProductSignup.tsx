@@ -37,10 +37,13 @@ export default function ProductSignup() {
   const [industryOther, setIndustryOther] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [alreadyRegistered, setAlreadyRegistered] = useState(false)
   const [done, setDone] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
+    // Back to the loading state when the slug changes under a mounted page.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingProduct(true)
     fetch(`${API_BASE}/products/${encodeURIComponent(slug)}`)
       .then((r) => (r.ok ? r.json() : null))
@@ -81,6 +84,7 @@ export default function ProductSignup() {
     if (!canSubmit || !product) return
     setSubmitting(true)
     setError(null)
+    setAlreadyRegistered(false)
     try {
       const regRes = await fetch(`${API_BASE}/auth/register/business`, {
         method: 'POST',
@@ -101,6 +105,10 @@ export default function ProductSignup() {
       })
       const regData = await regRes.json()
       if (!regRes.ok) {
+        // Usually someone who backed out of checkout and came back: the
+        // account exists, so "registration failed" is a dead end and the
+        // login page is the way forward (it resumes at payment or setup).
+        setAlreadyRegistered(regRes.status === 400 && /already registered/i.test(String(regData.detail ?? '')))
         setError(regData.detail ?? 'Registration failed')
         return
       }
@@ -265,7 +273,12 @@ export default function ProductSignup() {
             )}
           </div>
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          {alreadyRegistered ? (
+            <p role="alert" className="rounded border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-sm text-amber-200">
+              You already have an account with this email.{' '}
+              <a href="/login" className="underline hover:text-white">Sign in to pick up where you left off</a>.
+            </p>
+          ) : error && <p className="text-sm text-red-400">{error}</p>}
 
           <button
             type="submit"
@@ -286,7 +299,7 @@ export default function ProductSignup() {
 
           <p className="text-center text-xs text-zinc-500">
             Already have an account?{' '}
-            <a href="/auth/login" className="text-zinc-300 hover:text-white underline">Sign in</a>
+            <a href="/login" className="text-zinc-300 hover:text-white underline">Sign in</a>
           </p>
         </form>
       </div>

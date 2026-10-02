@@ -711,6 +711,71 @@ In the full editor, an assignment-time meal-break advisory opens the affected
 shift inspector so the manager can set planned break minutes. It must not fall
 through to the generic force-through confirmation used for other advisories.
 
+## Stores from the schedule screens (2026-10-01) — what a week needs before it can publish
+
+A week publishes only for a store with an address, a **timezone** and a
+**jurisdiction** (`schedule_location_readiness.py`), and the roster lists only
+employees with a `work_location_id` (`routes/employee_schedule/_shared.fetch_roster`).
+Until this change nothing in a scheduling-first signup wrote any of the three:
+S&C setup inserted bare stores and store-less employees, so a customer who
+finished every step still could not publish, and Company settings could not
+repair it (`update_location` never links a jurisdiction).
+
+- **`routes/employee_schedule/locations.py`** — `POST /locations` (add a store),
+  `PATCH /locations/{id}` (edit / repair), `GET /locations/unassigned-employees`,
+  `POST /locations/{id}/employees` (assign). `GET /locations/{id}/readiness`
+  stays in `shifts.py` and now carries `message`, the same sentence the publish
+  refusal uses (`readiness_message`).
+- **Not a second location model.** Create and edit delegate to
+  `compliance_service.create_location` / `update_location`, so a store is the
+  same row whichever screen made it. The scheduling body just asks for less
+  (no EIN / NAICS / headcount) and requires the whole address.
+- **PATCH is the repair path.** After the update it links a jurisdiction when
+  the store has none (`AND jurisdiction_id IS NULL`, once) and queues a
+  projection-only compliance run (`allow_live_research=False,
+  allow_repository_refresh=False` — zero model calls).
+- **A move re-links, fail-closed.** The jurisdiction decides which break and
+  scheduling rules a week is checked against (`schedule_break_rule_store`
+  walks it), so an edit that changes city, state or zip (`_geography_changed`)
+  must not keep the old one — "Austin, TX" corrected to "Oakland, CA" stayed
+  *ready* under Texas rules. The route NULLs `jurisdiction_id` (and the stale
+  `county`) BEFORE the geography is written, then links the new place. Any
+  failure in between leaves the store unlinked — refused at publish, fixed by
+  the next save — never ready under the old law. A refused edit (invalid time
+  zone) puts the old link back. `update_location` itself still does not
+  re-link; that gap remains for the compliance location form.
+- **Projection-only means BOTH flags.** `allow_live_research=False` alone still
+  lets `run_compliance_check_background` refresh the SHARED catalog
+  (`_refresh_repository_missing_categories`: Gemini discovery + research),
+  because `allow_repository_refresh` defaults to True. Store creation passes
+  both as the tenant's `compliance` flag; setup and repair pass both False.
+- **Assign is add-only.** It sets `work_location_id` only where it is NULL and
+  reports the rest as `skipped`. One request carries at most 500 ids; the
+  client batches (`api/employees/scheduleStores.assignEmployeesToStore`), since
+  an import can leave more than that waiting. Moving someone between stores can strand their
+  upcoming shifts at the old one, so that stays a one-person edit on the
+  employee page.
+- **S&C setup** (`services/sc_onboarding.py`) writes stores with timezone +
+  jurisdiction inside its transaction (the jurisdiction lookup in a savepoint:
+  the resolver swallows some statement failures, which would otherwise leave
+  the whole setup transaction aborted), places employees by an optional
+  `location` CSV column (or at the only store, when it is in the row's own
+  `work_state`: handbook scoping prefers the store's state over the employee's,
+  so a cross-state default would also change which handbook applies), and no longer derives an
+  address-less per-state location for a state that has a real store — that stub
+  used to appear in the store picker beside the store the manager entered.
+- **Timezone is never guessed for a split-zone state** (TX, FL, …):
+  `core/services/location_timezone.py` infers only single-zone states, and both
+  setup and the store form make the manager choose for the rest.
+- **Per-location billing is not reconciled.** A `per_location` product bills
+  the store count typed at signup; adding a store here does not change the
+  Stripe quantity. Known gap, not handled by these endpoints.
+- Frontend: `components/employees/schedule-editor/StoreSetup.tsx` (actions,
+  readiness/unassigned notice, empty states, modals) over
+  `hooks/employees/useStoreSetup.ts`, mounted by both `/ops/schedule` and the
+  editor. A refused publish toasts the server's sentence and opens the store
+  form.
+
 ## `employee_schedule` (default ❌)
 
 ### Employee scheduling inputs (migration `empsched16`)

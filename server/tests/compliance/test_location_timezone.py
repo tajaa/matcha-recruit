@@ -108,3 +108,11 @@ def test_explicit_auto_switch_and_manual_override():
     )
     assert manual.timezone == "America/Phoenix"
     assert manual.source == "manual"
+
+
+def test_a_bare_region_is_rejected_as_invalid_not_a_crash():
+    # "Pacific" names a tzdata directory; ZoneInfo raises IsADirectoryError.
+    with pytest.raises(TimezoneResolutionError, match="valid IANA time zone"):
+        timezone_for_create(
+            timezone="Pacific", timezone_source="manual", state="CA", country_code="US"
+        )

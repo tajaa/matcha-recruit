@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { ArrowRight } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { mono } from './styles'
 import { AMBER, BOARD, GRAIN, INK, INK_SOFT, PAPER, SERIF, STAMP, hexA } from './theme'
 
@@ -16,6 +17,20 @@ export function PrimaryButton({ onClick, children, tone = 'ink' }: { onClick: ()
       {children}
       <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5" />
     </button>
+  )
+}
+
+/** The same pill as `PrimaryButton`, for a call to action that is a place to
+ *  go (self-serve signup) rather than something to open. */
+export function PrimaryLink({ to, children, tone = 'ink' }: { to: string; children: ReactNode; tone?: 'ink' | 'paper' }) {
+  return (
+    <Link
+      to={to}
+      className={`group sched-btn sched-btn-${tone} sched-focus inline-flex h-12 items-center gap-2 rounded-full px-6 text-[15px] font-medium`}
+    >
+      {children}
+      <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5" />
+    </Link>
   )
 }
 

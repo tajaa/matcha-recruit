@@ -2,7 +2,8 @@ import { Reveal } from '../../../../components/marketing/kit/motion'
 import { WRAP, display, mono } from '../../../../components/marketing/kit/styles'
 import { CARD, INK, INK_SOFT, PAPER, STAMP, hexA } from '../../../../components/marketing/kit/theme'
 import { CREW, initials } from '../weekData'
-import { Accent, PrimaryButton } from './Chrome'
+import { SCHEDULING_SIGNUP_PATH } from '../signup'
+import { Accent, PrimaryLink } from './Chrome'
 
 /** The hero's sent card, at rest: the same 4:12 PM send the animation ends on. */
 function SentCard() {
@@ -55,9 +56,13 @@ export function Closing({ onContact }: { onContact: () => void }) {
           </div>
         </Reveal>
         <Reveal delay={200} className="mt-14 flex flex-wrap items-center gap-x-8 gap-y-5">
-          <PrimaryButton onClick={onContact}>Book a walkthrough</PrimaryButton>
+          <PrimaryLink to={SCHEDULING_SIGNUP_PATH}>Start now</PrimaryLink>
           <p className="max-w-sm text-[0.98rem] leading-[1.55]" style={{ color: INK_SOFT }}>
-            Twenty minutes with your own store’s week. We’ll draft it live.
+            Add your store and your crew, and build this week today. Or{' '}
+            <button type="button" onClick={onContact} className="sched-link sched-focus rounded font-medium underline underline-offset-4">
+              book a walkthrough
+            </button>{' '}
+            — twenty minutes with your own store’s week, drafted live.
           </p>
         </Reveal>
       </div>

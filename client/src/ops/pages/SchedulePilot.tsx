@@ -14,8 +14,13 @@ import { adoptScheduleProposal, getScheduleSuggestionStatus, type ScheduleSugges
 import { fetchLocationScheduleProfile } from '../../api/employees/locationProfile'
 import { fetchAutopilotReadiness, runAutopilot } from '../../api/employees/employeeSchedule'
 import LocationPicker from '../../components/shared/LocationPicker'
+import { useStoreSetup } from '../../hooks/employees/useStoreSetup'
 import {
-  addDays, errorMessage, startOfWeek, toISODate,
+  EmptyRosterHelp, NoStoresYet, StoreActions, StoreSetupModals, StoreSetupNotice,
+} from '../../components/employees/schedule-editor/StoreSetup'
+import { shouldAutoOpenScheduleTour } from '../../utils/scheduleTour'
+import {
+  addDays, errorMessage, isStoreNotReady, startOfWeek, toISODate,
   type AutopilotReadiness, type LocationScheduleProfile, type Shift,
 } from '../../types/employeeSchedule'
 import { resolveScheduleDrop, type ScheduleDragData, type ScheduleDropData } from '../../components/employees/schedule-editor/drag'
@@ -37,13 +42,6 @@ import { approvalVerdict, demandCoverage, proposalPreviewShifts } from '../../co
 // workspace walkthrough instead of staying pinned to the old editor's.
 const GUIDE_STORAGE_KEY = 'matcha.schedule-pilot.guide.v1'
 
-function hasSeenGuide(): boolean {
-  try {
-    return window.localStorage.getItem(GUIDE_STORAGE_KEY) === 'seen'
-  } catch {
-    return false
-  }
-}
 
 /** Snaps to the location's own week start: a `?week=` carried over from
  * another store (or from before the manager changed the start day) would
@@ -86,13 +84,19 @@ export default function SchedulePilot() {
   // whether to ASK for the column — it is not the gate.
   const laborCostEnabled = hasFeature('labor_cost')
   const autopilotEnabled = hasFeature('schedule_autopilot')
+  // The thread is an OpenAI-backed feature some scheduling plans do not
+  // include. Without it the panel can only answer "feature not enabled", so
+  // the whole surface — pane, toggle, shortcuts — is left out instead.
+  const huumeEnabled = hasFeature('huume') && hasFeature('matcha_work')
+  const canManageStores = me?.user?.role === 'admin' || me?.user?.role === 'client'
+  const stores = useStoreSetup(canManageStores ? locationId : '')
   const [editPublished, setEditPublished] = useState(false)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const [inspectorShiftId, setInspectorShiftId] = useState<string | null>(null)
   const [newDefaults, setNewDefaults] = useState<NewShiftDefaults | null>(null)
   const [activeDrag, setActiveDrag] = useState<ScheduleDragData | null>(null)
   const [publishing, setPublishing] = useState(false)
-  const [guideOpen, setGuideOpen] = useState(() => !hasSeenGuide())
+  const [guideOpen, setGuideOpen] = useState(() => shouldAutoOpenScheduleTour(GUIDE_STORAGE_KEY))
   const [centerView, setCenterView] = useState<CenterView>('board')
   const [drawer, setDrawer] = useState<Drawer>(null)
   const [railOpen, setRailOpen] = useState(true)
@@ -192,7 +196,8 @@ export default function SchedulePilot() {
   useEffect(() => { afterAppliedRef.current = afterApplied }, [afterApplied])
 
   const thread = useScheduleHuumeThread({
-    locationId: locationId || null,
+    // No location, no session: the hook stays idle for a plan without Huume.
+    locationId: huumeEnabled ? locationId || null : null,
     weekStart,
     selectedShifts: huumeSelectedShifts,
     // A confirmed setup save lands here too, so the banner clears the moment
@@ -499,15 +504,21 @@ export default function SchedulePilot() {
       await editor.publishWeek()
       toast('Week published', 'success')
     } catch (error) {
-      toast(error instanceof Error ? error.message : 'Could not publish week', 'error')
+      // The server says exactly what the store is missing; show that, and
+      // open the form that fixes it rather than leaving the manager to hunt.
+      toast(errorMessage(error), 'error')
+      if (canManageStores && isStoreNotReady(error)) stores.setModal('edit')
     } finally {
       setPublishing(false)
     }
   }
 
-  const mobileTabs: Array<[MobileTab, string]> = [['inputs', 'Inputs'], ['board', 'Board'], ['review', 'Review'], ['huume', 'Huume']]
+  const mobileTabs: Array<[MobileTab, string]> = [
+    ['inputs', 'Inputs'], ['board', 'Board'], ['review', 'Review'],
+    ...(huumeEnabled ? [['huume', 'Huume'] as [MobileTab, string]] : []),
+  ]
   const showRail = railOpen
-  const showThread = threadOpen
+  const showThread = threadOpen && huumeEnabled
 
   const showWeek = () => { setShowProposal(true); setCenterView('board'); setMobileTab('board') }
   const openReview = () => { setCenterView('review'); setMobileTab('review') }
@@ -520,7 +531,7 @@ export default function SchedulePilot() {
       policyMinutes={policyMinutes}
       compare={compareScenario ? { label: compareScenario.label, review: compareScenario.review } : null}
       onShowShift={showShift}
-      onAskHuume={askHuume}
+      onAskHuume={huumeEnabled ? askHuume : undefined}
       onShowWeek={showWeek}
       onSelectPerson={(employeeId) => { setSelectedEmployeeId(employeeId); setShowProposal(true); setCenterView('board'); setMobileTab('board') }}
       onApprove={canDecide ? () => decide('confirm') : undefined}
@@ -596,8 +607,11 @@ export default function SchedulePilot() {
       onOpenAutopilot={autopilotEnabled ? () => { setAutopilotWizardOpen(true); void refreshAutopilotReadiness() } : undefined}
       onOpenWeekSetup={openWeekSetup}
       onOpenJobs={openJobs}
-      onAskHuume={askHuume}
+      onAskHuume={huumeEnabled ? askHuume : undefined}
       onShowShift={showShift}
+      emptyRoster={canManageStores
+        ? <EmptyRosterHelp setup={stores} storeName={currentLocation?.name || 'this store'} />
+        : undefined}
     />
   )
 
@@ -644,6 +658,8 @@ export default function SchedulePilot() {
           threadOpen={threadOpen}
           onToggleThread={() => setThreadOpen((open) => !open)}
           huumeSelectionCount={huumeSelectedShifts.length}
+          huumeEnabled={huumeEnabled}
+          storeActions={canManageStores ? <StoreActions setup={stores} canEdit={!!currentLocation} /> : undefined}
           autopilot={{
             visible: autopilotEnabled && !!locationId,
             running: autopilotRunning,
@@ -673,15 +689,22 @@ export default function SchedulePilot() {
         )}
         {!locationId ? (
           <div className="flex min-h-[500px] flex-col items-center justify-center gap-3 text-center">
-            <p className="text-sm text-zinc-400">Pick a location to see its schedule.</p>
             {locations.length > 0 ? (
-              <LocationPicker locations={locations} value="" onChange={setLocationId} />
+              <>
+                <p className="text-sm text-zinc-400">Pick a location to see its schedule.</p>
+                <LocationPicker locations={locations} value="" onChange={setLocationId} />
+              </>
+            ) : locationsLoading ? (
+              <p className="text-xs text-zinc-600">Loading locations…</p>
+            ) : canManageStores ? (
+              <NoStoresYet setup={stores} />
             ) : (
-              <p className="text-xs text-zinc-600">No locations set up yet — add one under Company.</p>
+              <p className="text-xs text-zinc-600">No locations set up yet — ask a company admin to add one.</p>
             )}
           </div>
         ) : (
           <>
+            {canManageStores && <StoreSetupNotice setup={stores} store={currentLocation ?? null} className="border-b border-white/[0.06] px-4 py-2 md:px-6" />}
             <ScenariosStrip
               scenarios={scenarios.scenarios}
               selectedIds={scenarios.selectedIds}
@@ -728,15 +751,28 @@ export default function SchedulePilot() {
                   </div>
                 )}
               </div>
-              <div className={`min-h-0 w-full shrink-0 border-l border-white/[0.06] lg:w-[380px] ${mobileTab === 'huume' ? 'block' : 'hidden'} ${showThread ? 'lg:block' : 'lg:hidden'}`}>
-                {threadContent}
-              </div>
+              {huumeEnabled && (
+                <div className={`min-h-0 w-full shrink-0 border-l border-white/[0.06] lg:w-[380px] ${mobileTab === 'huume' ? 'block' : 'hidden'} ${showThread ? 'lg:block' : 'lg:hidden'}`}>
+                  {threadContent}
+                </div>
+              )}
             </div>
           </>
         )}
       </div>
       <DragOverlay>{activeDrag ? <div className="rounded-lg border border-emerald-500/50 bg-zinc-900 px-3 py-2 text-xs text-zinc-200 shadow-xl">{activeDrag.kind === 'shift' ? 'Moving shift' : activeDrag.kind === 'shift-assignment' ? 'Moving assignment' : 'Scheduling employee'}</div> : null}</DragOverlay>
       <ScheduleEditorGuide open={guideOpen} onClose={closeGuide} />
+      {canManageStores && (
+        <StoreSetupModals
+          setup={stores}
+          store={currentLocation ?? null}
+          onStoreSaved={async (saved, created) => {
+            await reloadLocations()
+            if (created) setLocationId(saved.id)
+          }}
+          onRosterChanged={() => { void editor.reload(); planning.reload() }}
+        />
+      )}
       {autopilotWizardOpen && locationId && (
         <AutopilotWizard
           key={`${locationId}:${weekStart}`}

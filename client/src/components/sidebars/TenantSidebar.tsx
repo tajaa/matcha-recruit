@@ -80,7 +80,10 @@ function ProductPendingSidebar({
     setError(null)
     try {
       const { checkout_url } = await api.post<{ checkout_url: string }>('/resources/checkout/product', {
-        success_url: `${window.location.origin}/app`,
+        // Same return as the signup page's own checkout: a product with a
+        // setup wizard lands in it (and it waits out the activation webhook),
+        // where /app would show this pending sidebar again until it arrived.
+        success_url: `${window.location.origin}${product.onboarding_kind === 'sc' ? '/sc/onboarding' : '/app'}`,
         cancel_url: window.location.href,
       })
       externalRedirect(checkout_url)
