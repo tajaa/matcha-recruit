@@ -68,6 +68,13 @@ Rules (the runner enforces 1–2, you enforce the rest):
   Fixed IDs make reruns harmless but do not move existing shift dates. To
   refresh the 63-day window, run the pack with `--undo` first, then rehearse
   and apply it again. The undo targets this demo company and its two users.
+- `po_coffee_handbook.sql` — an active 5-section employee handbook for the Po Coffee Co test tenant
+  (`c4c256c3…`). HR cases triage grounds on handbook/policy content; with none on file the check is
+  clean and no incident opens a case. Undo: `po_coffee_handbook.undo.sql`. Linted by
+  `server/tests/seed_packs/test_po_coffee_handbook_pack.py`.
+- `po_coffee_enable_incidents.sql` — sets `enabled_features.incidents = true` on Po Coffee Co (every
+  `/ir/incidents` route and the HR cases intake path are gated on it). A deliberate single-key flag
+  write, applied to prod 2026-10-01 after a dry-run. Undo restores `false`.
 - `benefits_sunset_dental.sql` — Sunset Smile Dental Group demo benefits
   (plan catalog, a closed + an open enrollment period, elections in every
   status, roster + eligibility exceptions, renewal-risk radar). Undo:
