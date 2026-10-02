@@ -756,6 +756,16 @@ def test_employees_land_at_the_named_store_or_the_only_one():
     one_store = submission(locations=[_store("Downtown")], employees=[_crew("a@example.com")])
     assert service.employee_store_keys(one_store) == ["downtown"]
 
+    # The only store is in California. Someone the roster says works in Nevada
+    # is not quietly put on its schedule (and, through the store's state, under
+    # California's handbook) — they stay unassigned for an explicit choice.
+    # Naming the store is that choice.
+    cross_state = submission(locations=[_store("Downtown")], employees=[
+        _crew("nv@example.com", work_state="NV"),
+        _crew("named@example.com", work_state="NV", location="Downtown"),
+    ])
+    assert service.employee_store_keys(cross_state) == [None, "downtown"]
+
     no_stores = submission(employees=[_crew("a@example.com")])
     assert service.employee_store_keys(no_stores) == [None]
 

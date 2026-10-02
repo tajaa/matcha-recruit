@@ -8,12 +8,15 @@ const { createMock, updateMock, assignMock } = vi.hoisted(() => ({
   createMock: vi.fn(), updateMock: vi.fn(), assignMock: vi.fn(),
 }))
 
-vi.mock('../../../api/employees/scheduleStores', () => ({
+vi.mock('../../../api/employees/scheduleStores', async (importOriginal) => ({
+  // The real PartialAssignmentError: the dialog tells it apart with instanceof.
+  ...(await importOriginal<typeof import('../../../api/employees/scheduleStores')>()),
   createScheduleStore: createMock,
   updateScheduleStore: updateMock,
   assignEmployeesToStore: assignMock,
 }))
 
+import { PartialAssignmentError } from '../../../api/employees/scheduleStores'
 import type { StoreSetup } from '../../../hooks/employees/useStoreSetup'
 import type { CompanyLocation } from '../../../hooks/useLocationScope'
 import { ToastProvider } from '../../ui'
@@ -232,5 +235,27 @@ describe('StoreSetupModals', () => {
     await user.click(screen.getByRole('button', { name: 'Assign 2 to Downtown' }))
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('not authorized'))
+  })
+
+  it('reports a partly finished assignment honestly and keeps the rest ready to retry', async () => {
+    const user = userEvent.setup()
+    const stores = setup({ modal: 'assign', unassigned: WAITING })
+    const onRosterChanged = vi.fn()
+    assignMock.mockRejectedValueOnce(
+      new PartialAssignmentError(['e1'], new ApiError('Request failed', 503, { detail: 'Service unavailable' })),
+    )
+    renderIn(<StoreSetupModals setup={stores} store={DOWNTOWN} onStoreSaved={vi.fn()} onRosterChanged={onRosterChanged} />)
+
+    await user.click(screen.getByRole('button', { name: 'Assign 2 to Downtown' }))
+
+    // Not "failed": one person is on the roster now, and the page re-reads it.
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('1 employee was assigned, then this stopped: Service unavailable'))
+    expect(onRosterChanged).toHaveBeenCalled()
+    expect(stores.refresh).toHaveBeenCalled()
+    // The dialog stays open with only the one still waiting selected.
+    expect(stores.setModal).not.toHaveBeenCalledWith(null)
+    assignMock.mockResolvedValueOnce({ assigned: ['e2'], skipped: [] })
+    await user.click(screen.getByRole('button', { name: 'Assign 1 to Downtown' }))
+    await waitFor(() => expect(assignMock).toHaveBeenLastCalledWith('loc-1', ['e2']))
   })
 })

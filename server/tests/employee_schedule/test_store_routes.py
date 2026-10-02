@@ -48,7 +48,7 @@ class _Conn:
     async def fetchrow(self, query, *args):
         self.calls.append((query, args))
         assert args[-1] == COMPANY_ID or COMPANY_ID in args, "every store read is tenant-scoped"
-        return self.store
+        return dict(self.store) if self.store else None
 
     async def fetch(self, query, *args):
         self.calls.append((query, args))
@@ -63,7 +63,14 @@ class _Conn:
 
     async def execute(self, query, *args):
         self.calls.append((query, args))
-        if "SET jurisdiction_id" in query:
+        assert COMPANY_ID in args, "every store write is tenant-scoped"
+        if "SET jurisdiction_id = NULL" in query:
+            self.store["jurisdiction_id"] = None
+            self.store["county"] = None
+        elif "SET jurisdiction_id = $1, county = $2" in query:
+            # The restore after a refused edit.
+            self.store["jurisdiction_id"], self.store["county"] = args[0], args[1]
+        elif "SET jurisdiction_id" in query:
             self.store["jurisdiction_id"] = args[0]
         return "UPDATE 1"
 
@@ -171,7 +178,13 @@ async def test_live_research_is_only_for_tenants_who_bought_compliance(monkeypat
     (task,) = tasks.tasks
     assert task.func is routes.run_compliance_check_background
     assert task.args == (LOCATION_ID, COMPANY_ID)
-    assert task.kwargs == {"allow_live_research": has_compliance}
+    # Both: the repository refresh is its own route to the model (discovery +
+    # research into the SHARED catalog) and defaults to on. Turning off only
+    # live research still spent model calls for a scheduling-only tenant.
+    assert task.kwargs == {
+        "allow_live_research": has_compliance,
+        "allow_repository_refresh": has_compliance,
+    }
 
 
 @pytest.mark.asyncio
@@ -202,7 +215,7 @@ async def test_editing_a_store_with_no_jurisdiction_links_one(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_store_that_has_a_jurisdiction_keeps_it(monkeypatch):
+async def test_an_edit_that_does_not_move_the_store_keeps_its_jurisdiction(monkeypatch):
     conn = _Conn(jurisdiction_id=JURISDICTION_ID)
     _patch(monkeypatch, conn)
     monkeypatch.setattr(routes, "update_location", AsyncMock(return_value=SimpleNamespace()))
@@ -210,12 +223,105 @@ async def test_a_store_that_has_a_jurisdiction_keeps_it(monkeypatch):
     monkeypatch.setattr(routes, "_get_or_create_jurisdiction", resolver)
     tasks = BackgroundTasks()
 
+    # A new name, a corrected street number, and the same city retyped.
     await routes.update_schedule_store(
-        LOCATION_ID, ScheduleStoreUpdate(city="Dallas"), tasks, _user(),
+        LOCATION_ID,
+        ScheduleStoreUpdate(name="Downtown Flagship", address="2 Main", city=" austin ", state="tx", zipcode="78701"),
+        tasks, _user(),
     )
 
     resolver.assert_not_awaited()
+    assert conn.store["jurisdiction_id"] == JURISDICTION_ID
+    assert "SET jurisdiction_id = NULL" not in conn.queries()
     assert tasks.tasks == []
+
+
+def _moving_update(conn):
+    """`update_location` stand-in that applies the new geography to the fake."""
+    async def update(location_id, company_id, data):
+        # The link is already gone by the time the geography changes: there is
+        # no moment where the store sits in the new place under the old law.
+        assert conn.store["jurisdiction_id"] is None
+        conn.store.update(data.model_dump(exclude_unset=True))
+        return SimpleNamespace(id=location_id)
+
+    return update
+
+
+@pytest.mark.asyncio
+async def test_moving_a_store_relinks_it_to_where_it_now_is(monkeypatch):
+    """Austin, TX corrected to Oakland, CA. Keeping the Texas jurisdiction left
+    the store 'ready' and publishing under Texas break rules."""
+    texas = JURISDICTION_ID
+    california = UUID("44444444-4444-4444-4444-444444444444")
+    conn = _Conn(jurisdiction_id=texas)
+    conn.store["county"] = "Travis"
+    _patch(monkeypatch, conn)
+    monkeypatch.setattr(routes, "update_location", _moving_update(conn))
+    resolver = AsyncMock(return_value=california)
+    monkeypatch.setattr(routes, "_get_or_create_jurisdiction", resolver)
+    tasks = BackgroundTasks()
+
+    await routes.update_schedule_store(
+        LOCATION_ID,
+        ScheduleStoreUpdate(city="Oakland", state="CA", zipcode="94607", timezone="America/Los_Angeles"),
+        tasks, _user(),
+    )
+
+    # Resolved from the NEW place, with the stale Texas county dropped.
+    resolver.assert_awaited_once_with(conn, "Oakland", "CA", None, "94607")
+    assert conn.store["jurisdiction_id"] == california
+    assert [task.func for task in tasks.tasks] == [routes._project_store_compliance]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_relink_leaves_the_store_unlinked_not_wrongly_ready(monkeypatch):
+    conn = _Conn(jurisdiction_id=JURISDICTION_ID)
+    _patch(monkeypatch, conn)
+    monkeypatch.setattr(routes, "update_location", _moving_update(conn))
+    monkeypatch.setattr(
+        routes, "_get_or_create_jurisdiction", AsyncMock(side_effect=RuntimeError("resolver down")),
+    )
+
+    with pytest.raises(RuntimeError):
+        await routes.update_schedule_store(
+            LOCATION_ID, ScheduleStoreUpdate(city="Oakland", state="CA", zipcode="94607"),
+            BackgroundTasks(), _user(),
+        )
+
+    # Fail closed: publishing is refused until the next save links it.
+    assert conn.store["jurisdiction_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_refused_move_puts_the_jurisdiction_back(monkeypatch):
+    conn = _Conn(jurisdiction_id=JURISDICTION_ID)
+    conn.store["county"] = "Travis"
+    _patch(monkeypatch, conn)
+    refused = HTTPException(status_code=422, detail="Select a valid IANA time zone")
+    monkeypatch.setattr(routes, "update_location", AsyncMock(side_effect=refused))
+    resolver = AsyncMock()
+    monkeypatch.setattr(routes, "_get_or_create_jurisdiction", resolver)
+
+    with pytest.raises(HTTPException) as caught:
+        await routes.update_schedule_store(
+            LOCATION_ID, ScheduleStoreUpdate(state="CA", timezone="Pacific"),
+            BackgroundTasks(), _user(),
+        )
+
+    assert caught.value.status_code == 422
+    # The store did not move, so a rejected request must not cost it its link.
+    assert (conn.store["jurisdiction_id"], conn.store["county"]) == (JURISDICTION_ID, "Travis")
+    resolver.assert_not_awaited()
+
+
+def test_only_city_state_and_zip_count_as_a_move():
+    before = {"city": "Austin", "state": "TX", "zipcode": "78701"}
+    assert not routes._geography_changed(before, {"name": "X", "address": "9 Elm", "timezone": "America/Chicago"})
+    assert not routes._geography_changed(before, {"city": "AUSTIN ", "state": "tx"})
+    assert routes._geography_changed(before, {"zipcode": "78702"})
+    assert routes._geography_changed(before, {"city": "Dallas"})
+    assert not routes._geography_changed(None, {"city": "Dallas"})
 
 
 @pytest.mark.asyncio

@@ -48,15 +48,19 @@ _INSERT_ONLY_KEYS = {"first_name", "last_name", "personal_email", "start_date"}
 class FakeConn:
     """Records execute/fetchrow calls. Mimics just enough asyncpg for the upsert."""
 
-    def __init__(self, existing_employee: bool):
+    def __init__(self, existing_employee: bool, existing_pay=(None, None)):
         self._existing = existing_employee
+        self._existing_pay = existing_pay
         self.calls: list[tuple[str, tuple]] = []
         self.employee_id = uuid4()
 
     async def fetchrow(self, sql: str, *args):
         self.calls.append((sql, args))
-        if "SELECT id FROM employees" in sql:
-            return {"id": self.employee_id} if self._existing else None
+        if "FROM employees WHERE org_id" in sql:
+            if not self._existing:
+                return None
+            rate, classification = self._existing_pay
+            return {"id": self.employee_id, "pay_rate": rate, "pay_classification": classification}
         if "INSERT INTO employees" in sql:
             return {"id": self.employee_id}
         return None
@@ -106,8 +110,8 @@ def _finch_worker() -> dict:
     }
 
 
-def _run_sync(normalized: dict, *, existing: bool) -> FakeConn:
-    conn = FakeConn(existing_employee=existing)
+def _run_sync(normalized: dict, *, existing: bool, existing_pay=(None, None)) -> FakeConn:
+    conn = FakeConn(existing_employee=existing, existing_pay=existing_pay)
 
     async def go():
         return await orch._sync_single_employee(
@@ -249,3 +253,59 @@ def test_ssn_is_never_taken_from_the_finch_payload():
     flat = str(normalized)
     assert "123-45-6789" not in flat and "enc:abc" not in flat
     assert "ssn" not in normalized and "ssn" not in (normalized["demographics"] or {})
+
+
+# ── compensation is one fact in two columns ───────────────────────────────────
+
+from decimal import Decimal  # noqa: E402
+
+
+def _written_pay(conn: FakeConn):
+    """`(pay_rate, pay_classification)` as bound on the UPDATE."""
+    sql, args = conn.sql_containing("UPDATE employees")[0]
+    assert "pay_rate = $11" in sql and "pay_classification = $12" in sql
+    return args[10], args[11]
+
+
+@pytest.mark.parametrize("existing,incoming,expected", [
+    # A usable rate replaces the pair.
+    ((Decimal("52000"), "exempt"), (Decimal("25.00"), "hourly"), (Decimal("25.00"), "hourly")),
+    # Nothing about pay in this feed (no compensation scope): keep what we have.
+    ((Decimal("52000"), "exempt"), (None, None), (Decimal("52000"), "exempt")),
+    # Same classification, no rate: nothing new.
+    ((Decimal("25.00"), "hourly"), (None, "hourly"), (Decimal("25.00"), "hourly")),
+    # THE bug: classification flips with no usable rate. The stored salary must
+    # not survive as an hourly rate.
+    ((Decimal("52000"), "exempt"), (None, "hourly"), (None, "hourly")),
+    ((Decimal("25.00"), "hourly"), (None, "exempt"), (None, "exempt")),
+    # A rate with no classification keeps the stored one, as before.
+    ((Decimal("25.00"), "hourly"), (Decimal("27.50"), None), (Decimal("27.50"), "hourly")),
+])
+def test_merge_compensation_never_leaves_a_rate_under_the_wrong_unit(existing, incoming, expected):
+    assert orch.merge_compensation(*existing, *incoming) == expected
+
+
+def test_resync_of_an_unconvertible_amount_does_not_price_a_salary_per_hour():
+    """A worker stored as a $52,000 exempt salary comes back non-exempt with an
+    amount Finch gives no cadence for. The normalizer cannot convert it, so it
+    reports no rate — and the old two-COALESCE update then kept 52000 under the
+    new `hourly` classification: $52,000 an hour in every labor-cost total."""
+    worker = _finch_worker()
+    worker["employment"]["flsa_status"] = "non_exempt"
+    worker["employment"]["income"] = {"amount": 2500, "unit": None}
+    normalized = FinchHRISService.normalize_worker(worker)
+    assert (normalized["pay_rate"], normalized["pay_classification"]) == (None, "hourly")
+
+    conn = _run_sync(normalized, existing=True, existing_pay=(Decimal("52000.00"), "exempt"))
+
+    assert _written_pay(conn) == (None, "hourly")
+
+
+def test_resync_without_pay_data_keeps_the_imported_pair():
+    normalized = FinchHRISService.normalize_worker(_finch_worker())
+    normalized["pay_rate"] = None
+    normalized["pay_classification"] = None
+
+    conn = _run_sync(normalized, existing=True, existing_pay=(Decimal("52000.00"), "exempt"))
+
+    assert _written_pay(conn) == (Decimal("52000.00"), "exempt")

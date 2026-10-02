@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import { assignEmployeesToStore } from '../../../api/employees/scheduleStores'
+import { assignEmployeesToStore, PartialAssignmentError } from '../../../api/employees/scheduleStores'
 import { errorMessage, type UnassignedEmployee } from '../../../types/employeeSchedule'
 import { Button, Modal } from '../../ui'
 
@@ -12,6 +12,9 @@ interface AssignEmployeesToStoreModalProps {
   employees: UnassignedEmployee[]
   onClose(): void
   onAssigned(count: number): void
+  /** Some were placed before a later batch failed: the lists need re-reading,
+   *  but the dialog stays open on the ones still waiting. */
+  onPartiallyAssigned(): void
 }
 
 function displayName(employee: UnassignedEmployee): string {
@@ -38,7 +41,7 @@ interface AssignBodyProps extends Omit<AssignEmployeesToStoreModalProps, 'open'>
   setSaving(saving: boolean): void
 }
 
-function AssignBody({ storeId, storeName, employees, onClose, onAssigned, saving, setSaving }: AssignBodyProps) {
+function AssignBody({ storeId, storeName, employees, onClose, onAssigned, onPartiallyAssigned, saving, setSaving }: AssignBodyProps) {
   // Everyone starts ticked: the common case is a one-store shop placing its
   // whole imported roster.
   const [selected, setSelected] = useState<Set<string>>(() => new Set(employees.map((employee) => employee.id)))
@@ -60,6 +63,15 @@ function AssignBody({ storeId, storeName, employees, onClose, onAssigned, saving
       const result = await assignEmployeesToStore(storeId, [...selected])
       onAssigned(result.assigned.length)
     } catch (caught) {
+      if (caught instanceof PartialAssignmentError) {
+        // Say what did land, drop those from the selection, and leave the
+        // rest ticked so one more click retries only what is still waiting.
+        const done = new Set(caught.assigned)
+        setSelected((current) => new Set([...current].filter((id) => !done.has(id))))
+        setError(`${done.size} ${done.size === 1 ? 'employee was' : 'employees were'} assigned, then this stopped: ${errorMessage(caught.cause)} Try again for the rest.`)
+        onPartiallyAssigned()
+        return
+      }
       setError(errorMessage(caught))
     } finally {
       setSaving(false)

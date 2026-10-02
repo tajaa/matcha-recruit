@@ -73,8 +73,13 @@ function withTimezone(location: ScLocationImport): ScLocationImport {
 const UNMATCHED_JOB_TITLES_MESSAGE =
   'Every employee job title needs a job. Add a job with the same name, or correct the title in the employee CSV and upload it again. Missing: '
 
+/** The comparison form for names, matching the server's `_key` (Python
+ *  `casefold`). Plain `toLowerCase` is not enough: it leaves "Straße" and
+ *  "STRASSE" different, and the wizard then refused a roster the server would
+ *  have accepted. Upper-then-lower folds those the way casefold does. The
+ *  server stays the authority — this only decides what to flag early. */
 function normalized(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, ' ')
+  return value.trim().toUpperCase().toLowerCase().replace(/\s+/g, ' ')
 }
 
 /** Distinct employee job titles with no job yet, in roster order. */
@@ -139,10 +144,21 @@ function unknownStores(locations: ScLocationImport[], employees: ScEmployeeImpor
   return [...missing.values()]
 }
 
+/** The store an employee will be placed at, or null for none. Mirrors
+ *  services/sc_onboarding.employee_store_keys: a named store wins; with no
+ *  name, the only store is used — but only when it is in the state the row
+ *  says the person works in. A Nevada worker is not quietly put on a
+ *  California store's schedule (and under its handbook). */
+function storeFor(employee: ScEmployeeImport, locations: ScLocationImport[]): string | null {
+  const named = employee.location?.trim()
+  if (named) return named
+  const only = locations.length === 1 ? locations[0] : null
+  return only && only.state.toUpperCase() === employee.work_state.toUpperCase() ? only.name : null
+}
+
 /** How many employees will finish setup with no store, and so on no schedule. */
 function unassignedCount(locations: ScLocationImport[], employees: ScEmployeeImport[]): number {
-  if (locations.length === 1) return 0
-  return employees.filter((employee) => !employee.location?.trim()).length
+  return employees.filter((employee) => storeFor(employee, locations) === null).length
 }
 
 export default function ScOnboardingWizard() {
@@ -465,7 +481,7 @@ export default function ScOnboardingWizard() {
                 <Upload className="mx-auto mb-2 h-5 w-5" /><p>Drop an employees CSV or browse</p>
               </FileUpload>
               {csvSummary('employees', employees.length, csvColumns.employees, parsing === 'employees', optionalColumns.employees)}
-              {employees.length > 0 && locations.length === 1 && (
+              {employees.length > 0 && locations.length === 1 && unassigned === 0 && (
                 <p className="text-sm text-zinc-300">Everyone will be scheduled at {locations[0].name}.</p>
               )}
               {employees.length > 0 && unassigned > 0 && (
@@ -473,7 +489,9 @@ export default function ScOnboardingWizard() {
                   {unassigned} {unassigned === 1 ? 'employee has' : 'employees have'} no store, so they won't appear on a schedule yet.
                   {locations.length > 1
                     ? ' Add a location column with the store name and upload again, or assign them from the schedule after setup.'
-                    : ' Add a store in the previous step, or assign them from the schedule after setup.'}
+                    : locations.length === 1
+                      ? ` Their work state isn't ${locations[0].state}, where ${locations[0].name} is. To place them there anyway, name it in a location column; otherwise assign them from the schedule after setup.`
+                      : ' Add a store in the previous step, or assign them from the schedule after setup.'}
                 </p>
               )}
               <div className="flex flex-wrap gap-2">
@@ -516,7 +534,7 @@ export default function ScOnboardingWizard() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <ReviewList title={`Locations (${locations.length})`} items={locations.map((location) => `${location.name} — ${location.address}, ${location.city}, ${location.state} ${location.zipcode}; ${location.timezone}`)} empty="Skipped" />
                 <ReviewList title={`Employees (${employees.length})`} items={employees.map((employee) => {
-                  const store = employee.location?.trim() || (locations.length === 1 ? locations[0].name : 'no store yet')
+                  const store = storeFor(employee, locations) ?? 'no store yet'
                   return `${employee.first_name} ${employee.last_name} — ${employee.email}; ${employee.job_title}, ${employee.department}; ${store}`
                 })} empty="Skipped" />
               </div>

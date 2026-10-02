@@ -61,6 +61,25 @@ async def _project_store_compliance(location_id: UUID, company_id: UUID) -> None
         logger.exception("Could not project compliance for store %s", location_id)
 
 
+def _place(value) -> str:
+    return " ".join(str(value or "").split()).casefold()
+
+
+def _geography_changed(before, patch: dict) -> bool:
+    """Whether an edit moves the store somewhere a different law may apply.
+
+    City, state and zip decide the jurisdiction; a renamed store or a corrected
+    street number does not. Compared loosely so retyping the same city in a
+    different case is not a move.
+    """
+    if before is None:
+        return False
+    return any(
+        field in patch and _place(patch[field]) != _place(before[field])
+        for field in ("city", "state", "zipcode")
+    )
+
+
 async def _store_payload(conn, company_id: UUID, location_id: UUID) -> dict:
     row = await conn.fetchrow(
         """SELECT id, name, address, city, state, zipcode, is_active, timezone
@@ -111,12 +130,19 @@ async def create_schedule_store(
         ),
     )
     if not has_complete_repository_coverage:
+        # Filling the shared catalog is a paid compliance activity. A tenant
+        # without that feature gets a projection of what the catalog already
+        # holds and nothing more: BOTH flags off, because the repository
+        # refresh is its own path to the model (discovery + research that
+        # writes shared jurisdiction requirements) and defaults to on.
         features = await get_company_features(company_id)
+        has_compliance = bool(features.get("compliance", False))
         background_tasks.add_task(
             run_compliance_check_background,
             location.id,
             company_id,
-            allow_live_research=features.get("compliance", False),
+            allow_live_research=has_compliance,
+            allow_repository_refresh=has_compliance,
         )
 
     async with get_connection() as conn:
@@ -139,18 +165,55 @@ async def update_schedule_store(
             conn, company_id=company_id, user_id=current_user.id,
             actor_role=current_user.role, location_id=location_id,
         )
+        before = await conn.fetchrow(
+            """SELECT city, state, zipcode, county, jurisdiction_id
+                 FROM business_locations WHERE id = $1 AND company_id = $2""",
+            location_id,
+            company_id,
+        )
+        # A store's jurisdiction decides which break and scheduling rules its
+        # weeks are checked against. Correcting "Austin, TX" to "Oakland, CA"
+        # while keeping the Texas jurisdiction would leave the store reporting
+        # ready and publishing under the wrong state's rules. So a move drops
+        # the link FIRST: whatever happens next, the store is either re-linked
+        # to where it now is, or unlinked and refused at publish — never ready
+        # under the old place's law.
+        moved = _geography_changed(before, patch)
+        if moved:
+            await conn.execute(
+                """UPDATE business_locations
+                      SET jurisdiction_id = NULL, county = NULL, updated_at = NOW()
+                    WHERE id = $1 AND company_id = $2""",
+                location_id,
+                company_id,
+            )
 
     if patch:
-        updated = await update_location(location_id, company_id, LocationUpdate(**patch))
+        try:
+            updated = await update_location(location_id, company_id, LocationUpdate(**patch))
+        except Exception:
+            # The edit was refused (an invalid time zone, say), so the store
+            # did not move: put back the link a rejected request must not cost.
+            if moved:
+                async with get_connection() as conn:
+                    await conn.execute(
+                        """UPDATE business_locations
+                              SET jurisdiction_id = $1, county = $2
+                            WHERE id = $3 AND company_id = $4 AND jurisdiction_id IS NULL""",
+                        before["jurisdiction_id"],
+                        before["county"],
+                        location_id,
+                        company_id,
+                    )
+            raise
         if updated is None:
             raise HTTPException(status_code=404, detail="Location not found")
 
     async with get_connection() as conn:
-        # `update_location` never links a jurisdiction, and a store created
-        # before setup wrote one has none — which blocks publishing with
-        # nothing in the product able to fix it. Link it here, once. A store
-        # that already has one keeps it (re-linking on a city change is a
-        # compliance decision, not a scheduling one).
+        # Link the jurisdiction for a store that has none: one that just moved
+        # (above), or one created before setup wrote it — `update_location`
+        # never does, which left such a store unpublishable with nothing in the
+        # product able to fix it.
         row = await conn.fetchrow(
             """SELECT city, state, county, zipcode, jurisdiction_id
                  FROM business_locations WHERE id = $1 AND company_id = $2""",

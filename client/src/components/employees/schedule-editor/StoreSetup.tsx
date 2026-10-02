@@ -103,6 +103,10 @@ export function StoreSetupModals({ setup, store, onStoreSaved, onRosterChanged }
             onRosterChanged()
             toast(`${count} ${count === 1 ? 'employee' : 'employees'} assigned`, 'success')
           }}
+          onPartiallyAssigned={() => {
+            setup.refresh()
+            onRosterChanged()
+          }}
         />
       )}
     </>

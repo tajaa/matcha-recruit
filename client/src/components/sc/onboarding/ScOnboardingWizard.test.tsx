@@ -351,4 +351,55 @@ describe('ScOnboardingWizard', () => {
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     expect(screen.getByRole('alert')).toHaveTextContent('Not found: Uptown')
   })
+
+  it('matches a store name the way the server does, across case folding', async () => {
+    // Python's casefold makes "Straße" and "STRASSE" the same key. A plain
+    // toLowerCase precheck did not, and refused a roster the server accepts.
+    const user = userEvent.setup()
+    parseLocationsMock.mockResolvedValue([
+      { name: 'Straße', address: '1 Main', city: 'Oakland', state: 'CA', zipcode: '94607' },
+      { name: 'Mission', address: '9 Oak', city: 'San Francisco', state: 'CA', zipcode: '94103' },
+    ])
+    parseEmployeesMock.mockResolvedValue([
+      { email: 'a@example.com', first_name: 'A', last_name: 'One', work_state: 'CA', job_title: 'Barista', department: 'Front', location: 'STRASSE' },
+    ])
+    await reachLocationsFromCafe(user)
+    await user.upload(fileInput(), new File(['x'], 'l.csv', { type: 'text/csv' }))
+    await waitFor(() => expect(screen.getByText('2 locations ready to import')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Employees
+    await user.upload(fileInput(), new File(['x'], 'e.csv', { type: 'text/csv' }))
+    await waitFor(() => expect(screen.getByText('1 employees ready to import')).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Jobs and certificates' })).toBeInTheDocument()
+  })
+
+  it('does not put an out-of-state employee at the only store without being told to', async () => {
+    const user = userEvent.setup()
+    parseLocationsMock.mockResolvedValue([
+      { name: 'Downtown', address: '1 Main', city: 'Oakland', state: 'CA', zipcode: '94607' },
+    ])
+    parseEmployeesMock.mockResolvedValue([
+      { email: 'ca@example.com', first_name: 'Cal', last_name: 'One', work_state: 'CA', job_title: 'Barista', department: 'Front' },
+      { email: 'nv@example.com', first_name: 'Nev', last_name: 'Two', work_state: 'NV', job_title: 'Barista', department: 'Front' },
+      { email: 'named@example.com', first_name: 'Nam', last_name: 'Three', work_state: 'NV', job_title: 'Barista', department: 'Front', location: 'Downtown' },
+    ])
+    await reachLocationsFromCafe(user)
+    await user.upload(fileInput(), new File(['x'], 'l.csv', { type: 'text/csv' }))
+    await waitFor(() => expect(screen.getByText('1 locations ready to import')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Employees
+    await user.upload(fileInput(), new File(['x'], 'e.csv', { type: 'text/csv' }))
+
+    // Only the Nevada row with no store named is left out, and it says why.
+    await waitFor(() => expect(screen.getByText(/1 employee has no store/)).toBeInTheDocument())
+    expect(screen.getByText(/Their work state isn't CA, where Downtown is/)).toBeInTheDocument()
+    expect(screen.queryByText('Everyone will be scheduled at Downtown.')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Jobs
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Review
+    expect(screen.getByText(/Nev Two — nv@example.com; Barista, Front; no store yet/)).toBeInTheDocument()
+    expect(screen.getByText(/Nam Three — named@example.com; Barista, Front; Downtown/)).toBeInTheDocument()
+  })
 })

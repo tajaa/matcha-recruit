@@ -733,18 +733,35 @@ repair it (`update_location` never links a jurisdiction).
 - **PATCH is the repair path.** After the update it links a jurisdiction when
   the store has none (`AND jurisdiction_id IS NULL`, once) and queues a
   projection-only compliance run (`allow_live_research=False,
-  allow_repository_refresh=False` — zero model calls). A store that already has
-  a jurisdiction keeps it when its city changes; re-linking is a compliance
-  decision and deliberately out of scope here.
+  allow_repository_refresh=False` — zero model calls).
+- **A move re-links, fail-closed.** The jurisdiction decides which break and
+  scheduling rules a week is checked against (`schedule_break_rule_store`
+  walks it), so an edit that changes city, state or zip (`_geography_changed`)
+  must not keep the old one — "Austin, TX" corrected to "Oakland, CA" stayed
+  *ready* under Texas rules. The route NULLs `jurisdiction_id` (and the stale
+  `county`) BEFORE the geography is written, then links the new place. Any
+  failure in between leaves the store unlinked — refused at publish, fixed by
+  the next save — never ready under the old law. A refused edit (invalid time
+  zone) puts the old link back. `update_location` itself still does not
+  re-link; that gap remains for the compliance location form.
+- **Projection-only means BOTH flags.** `allow_live_research=False` alone still
+  lets `run_compliance_check_background` refresh the SHARED catalog
+  (`_refresh_repository_missing_categories`: Gemini discovery + research),
+  because `allow_repository_refresh` defaults to True. Store creation passes
+  both as the tenant's `compliance` flag; setup and repair pass both False.
 - **Assign is add-only.** It sets `work_location_id` only where it is NULL and
-  reports the rest as `skipped`. Moving someone between stores can strand their
+  reports the rest as `skipped`. One request carries at most 500 ids; the
+  client batches (`api/employees/scheduleStores.assignEmployeesToStore`), since
+  an import can leave more than that waiting. Moving someone between stores can strand their
   upcoming shifts at the old one, so that stays a one-person edit on the
   employee page.
 - **S&C setup** (`services/sc_onboarding.py`) writes stores with timezone +
   jurisdiction inside its transaction (the jurisdiction lookup in a savepoint:
   the resolver swallows some statement failures, which would otherwise leave
   the whole setup transaction aborted), places employees by an optional
-  `location` CSV column (or at the only store), and no longer derives an
+  `location` CSV column (or at the only store, when it is in the row's own
+  `work_state`: handbook scoping prefers the store's state over the employee's,
+  so a cross-state default would also change which handbook applies), and no longer derives an
   address-less per-state location for a state that has a real store — that stub
   used to appear in the store picker beside the store the manager entered.
 - **Timezone is never guessed for a split-zone state** (TX, FL, …):

@@ -205,21 +205,29 @@ def employee_store_keys(body: ScOnboardingComplete) -> list[str | None]:
     """The normalized store name each employee lands at, in roster order.
 
     A named store must be one of this submission's locations. An employee with
-    no store named goes to the only location when there is exactly one, and is
-    otherwise left unassigned (`None`) for the manager to place later.
+    no store named goes to the only location when there is exactly one AND it
+    is in the state the row says they work in, and is otherwise left unassigned
+    (`None`) for the manager to place later.
+
+    The state check matters beyond the roster: handbook scoping prefers the
+    store's state over the employee's own `work_state`, so quietly placing a
+    Nevada worker at a company's one California store would also put them
+    under California's handbook. Same rule as bulk upload's `StoreDirectory`.
     """
     names = [_key(location.name) for location in body.locations]
     display = {_key(location.name): location.name.strip() for location in body.locations}
     known = set(names)
     repeated = {name for name in names if names.count(name) > 1}
     only_store = names[0] if len(names) == 1 else None
+    only_store_state = body.locations[0].state.upper() if only_store else None
 
     keys: list[str | None] = []
     unknown: dict[str, str] = {}
     ambiguous: dict[str, str] = {}
     for employee in body.employees:
         if not employee.location:
-            keys.append(only_store)
+            in_store_state = employee.work_state.upper() == only_store_state
+            keys.append(only_store if in_store_state else None)
             continue
         key = _key(employee.location)
         if key not in known:
