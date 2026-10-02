@@ -1,5 +1,5 @@
 import { api } from '../../api/client'
-import type { HrCase, HrCaseColumn, HrCaseEmployee, HrCaseIncident, ManagerCase, DraftSubmission } from '../types'
+import type { HrCase, HrCaseColumn, HrCaseEmployee, HrCaseIncident, HrCaseReadiness, ManagerCase, DraftSubmission } from '../types'
 
 // HR cases — the dedicated HR Cases page (business /work only).
 // Backend: server/app/matcha/routes/matcha_work/hr_cases.py. Every route is
@@ -8,6 +8,8 @@ import type { HrCase, HrCaseColumn, HrCaseEmployee, HrCaseIncident, ManagerCase,
 const BASE = '/matcha-work/hr-cases'
 
 export const getHrCaseAccess = () => api.get<{ hr_access: boolean }>(`${BASE}/access`)
+
+export const getHrCaseReadiness = () => api.get<HrCaseReadiness>(`${BASE}/readiness`)
 
 export const listHrCases = (includeClosed = false) =>
   api.get<{ columns: HrCaseColumn[]; cases: HrCase[] }>(`${BASE}${includeClosed ? '?include_closed=true' : ''}`)

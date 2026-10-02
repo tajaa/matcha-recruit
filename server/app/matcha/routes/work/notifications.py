@@ -3,10 +3,10 @@
 import json
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Annotated, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
@@ -56,6 +56,11 @@ class MarkReadByRequest(BaseModel):
     section_id: Optional[str] = None
     channel_id: Optional[str] = None
     project_id: Optional[str] = None
+    hr_case_id: Optional[str] = None
+
+
+# A feature's notification types share a prefix (`hr_case_flagged`, …).
+TypePrefix = Annotated[Optional[str], Query(pattern=r"^[a-z][a-z0-9_]{1,39}$")]
 
 
 @router.get("/notifications")
@@ -63,15 +68,17 @@ async def list_notifications(
     unread_only: bool = False,
     limit: int = 30,
     offset: int = 0,
+    type_prefix: TypePrefix = None,
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Get notifications for the current user, scoped to their current company."""
     company_id = await get_client_company_id(current_user)
     items = await notif_svc.get_notifications(
         current_user.id, company_id=company_id, unread_only=unread_only, limit=limit, offset=offset,
+        type_prefix=type_prefix,
     )
     total = await notif_svc.count_notifications(
-        current_user.id, company_id=company_id, unread_only=unread_only,
+        current_user.id, company_id=company_id, unread_only=unread_only, type_prefix=type_prefix,
     )
     return {
         "notifications": [
@@ -93,11 +100,12 @@ async def list_notifications(
 
 @router.get("/notifications/unread-count")
 async def unread_count(
+    type_prefix: TypePrefix = None,
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Get unread notification count, scoped to current company."""
     company_id = await get_client_company_id(current_user)
-    count = await notif_svc.get_unread_count(current_user.id, company_id=company_id)
+    count = await notif_svc.get_unread_count(current_user.id, company_id=company_id, type_prefix=type_prefix)
     return {"count": count}
 
 
@@ -124,6 +132,7 @@ async def mark_read_by(
         ("section_id", body.section_id),
         ("channel_id", body.channel_id),
         ("project_id", body.project_id),
+        ("hr_case_id", body.hr_case_id),
     ]
     total = 0
     for key, value in pairs:

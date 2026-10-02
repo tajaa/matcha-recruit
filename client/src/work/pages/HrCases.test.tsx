@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
   getHrCase: vi.fn(),
   dismissHrCase: vi.fn(),
   getHrCaseAccess: vi.fn(),
+  getHrCaseReadiness: vi.fn(),
   decideHrCase: vi.fn(),
   getWriteUpDraftUrl: vi.fn(),
   markWriteUpDelivered: vi.fn(),
@@ -18,6 +19,31 @@ const api = vi.hoisted(() => ({
   recheckHrCase: vi.fn(),
 }))
 vi.mock('../api/hrCases', () => api)
+
+const notif = vi.hoisted(() => ({
+  getNotifications: vi.fn(),
+  getNotificationUnreadCount: vi.fn(),
+  markNotificationsRead: vi.fn(),
+  markHrCaseNotificationsRead: vi.fn(),
+  listener: null as null | ((n: unknown) => void),
+}))
+vi.mock('../api/notifications', () => notif)
+vi.mock('../api/channelSocket', () => ({
+  getSharedChannelSocket: () => ({
+    addNotificationListener: (fn: (n: unknown) => void) => { notif.listener = fn },
+    removeNotificationListener: () => { notif.listener = null },
+  }),
+}))
+
+const READY = { threshold: 0.6, handbook_sources: 12, incidents_enabled: true, notified: ['Ana Ruiz'], ready: true }
+
+function notice(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'n1', type: 'hr_case_flagged', title: 'HRC-2026-0001: incident flagged',
+    body: 'IR-7 looks like it may involve Attendance policy.', link: '/work/hr-cases/c1',
+    metadata: { hr_case_id: 'c1' }, is_read: false, created_at: '2026-09-29T00:00:00Z', ...overrides,
+  }
+}
 
 const COLUMNS: HrCaseColumn[] = [
   { key: 'new', label: 'New', stages: ['flagged', 'drafting'] },
@@ -57,7 +83,32 @@ function renderAt(path: string) {
   )
 }
 
-beforeEach(() => Object.values(api).forEach((fn) => fn.mockReset()))
+// This jsdom/Node pairing can leave `localStorage` undefined; the page only
+// needs a place to remember that the guide was seen.
+function memoryStorage(): Storage {
+  const data = new Map<string, string>()
+  return {
+    get length() { return data.size },
+    clear: () => data.clear(),
+    getItem: (k) => data.get(k) ?? null,
+    key: (i) => [...data.keys()][i] ?? null,
+    removeItem: (k) => { data.delete(k) },
+    setItem: (k, v) => { data.set(k, String(v)) },
+  }
+}
+
+beforeEach(() => {
+  vi.stubGlobal('localStorage', memoryStorage())
+  Object.values(api).forEach((fn) => fn.mockReset())
+  for (const fn of [notif.getNotifications, notif.getNotificationUnreadCount, notif.markNotificationsRead, notif.markHrCaseNotificationsRead]) fn.mockReset()
+  api.getHrCaseReadiness.mockResolvedValue(READY)
+  notif.getNotifications.mockResolvedValue({ notifications: [], total: 0 })
+  notif.getNotificationUnreadCount.mockResolvedValue({ count: 0 })
+  notif.markHrCaseNotificationsRead.mockResolvedValue({ updated: 0 })
+  notif.markNotificationsRead.mockResolvedValue({ updated: 1 })
+  notif.listener = null
+  localStorage.setItem('hr-cases-guide-seen', '1')
+})
 
 describe('HrCases', () => {
   it('puts cases in their columns', async () => {
@@ -242,5 +293,127 @@ describe('HrCases signed copy', () => {
     fireEvent.click(screen.getByRole('button', { name: /Open the signed copy/ }))
     await waitFor(() => expect(open).toHaveBeenCalledWith('https://s3/signed', '_blank', 'noopener,noreferrer'))
     open.mockRestore()
+  })
+})
+
+
+describe('HrCases guidance', () => {
+  it('walks a first-time visitor through the wizard once', async () => {
+    localStorage.removeItem('hr-cases-guide-seen')
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [hrCase()] })
+    renderAt('/work/hr-cases')
+    const dialog = await screen.findByRole('dialog', { name: 'How HR cases work' })
+    expect(dialog.textContent).toContain('What opens a case')
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }))
+    expect(dialog.textContent).toContain('Where a case goes')
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }))
+    expect(await screen.findByLabelText('Setup check')).toBeTruthy()
+    expect(dialog.textContent).toContain('12 sections on file')
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(localStorage.getItem('hr-cases-guide-seen')).toBe('1')
+  })
+
+  it('stays out of the way once seen, and reopens from How it works', async () => {
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [hrCase()] })
+    renderAt('/work/hr-cases')
+    await screen.findByRole('region', { name: 'New' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /How it works/ }))
+    expect(screen.getByRole('dialog', { name: 'How HR cases work' })).toBeTruthy()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('explains an empty board: what opens a case, and what is missing', async () => {
+    api.getHrCaseReadiness.mockResolvedValue({ ...READY, handbook_sources: 0, notified: [], ready: false })
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [] })
+    renderAt('/work/hr-cases')
+    const empty = await screen.findByRole('region', { name: 'Nothing here yet' })
+    expect(empty.textContent).toContain('A new incident looks like a policy violation')
+    expect(await screen.findByText(/none will be flagged until one is added/)).toBeTruthy()
+    expect(empty.textContent).toContain('No one with HR access would be notified')
+    expect(screen.getByRole('region', { name: 'New' }).textContent).toContain('Nothing flagged.')
+  })
+
+  it('never reads a check that could not run as ready', async () => {
+    api.getHrCaseReadiness.mockResolvedValue({ threshold: 0.6, handbook_sources: null, incidents_enabled: null, notified: null, ready: false })
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [] })
+    renderAt('/work/hr-cases')
+    const check = await screen.findByLabelText('Setup check')
+    expect(check.querySelectorAll('[aria-label="Unknown"]').length).toBe(3)
+    expect(check.querySelector('[aria-label="Ready"]')).not.toBeNull() // only the fixed threshold row
+  })
+
+  it('does not ask for readiness when there are cases and no wizard', async () => {
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [hrCase()] })
+    renderAt('/work/hr-cases')
+    await screen.findByRole('region', { name: 'New' })
+    expect(api.getHrCaseReadiness).not.toHaveBeenCalled()
+  })
+
+  it('points at the cases waiting on HR', async () => {
+    const waiting = hrCase({ id: 'c9', case_number: 'HRC-2026-0009', stage: 'hr_review', stage_label: 'HR review', column: 'review' })
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [hrCase(), waiting] })
+    api.getHrCase.mockResolvedValue(waiting)
+    renderAt('/work/hr-cases')
+    fireEvent.click(await screen.findByRole('button', { name: '1 write-up to review' }))
+    await waitFor(() => expect(api.getHrCase).toHaveBeenCalledWith('c9'))
+  })
+})
+
+describe('HrCases updates', () => {
+  it('lists HR-case notices with an unread count and opens the case', async () => {
+    notif.getNotifications.mockResolvedValue({ notifications: [notice()], total: 1 })
+    notif.getNotificationUnreadCount.mockResolvedValue({ count: 1 })
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [hrCase()] })
+    api.getHrCase.mockResolvedValue(hrCase())
+    renderAt('/work/hr-cases')
+    const button = await screen.findByRole('button', { name: /Updates/ })
+    await waitFor(() => expect(button.textContent).toContain('1'))
+    expect(notif.getNotifications).toHaveBeenCalledWith(false, 25, 'hr_case_')
+    fireEvent.click(button)
+    fireEvent.click(await screen.findByRole('button', { name: /incident flagged/ }))
+    await waitFor(() => expect(api.getHrCase).toHaveBeenCalledWith('c1'))
+    expect(notif.markNotificationsRead).toHaveBeenCalledWith(['n1'])
+  })
+
+  it('marks only the listed HR notices read, not the whole account', async () => {
+    notif.getNotifications.mockResolvedValue({ notifications: [notice(), notice({ id: 'n2', is_read: true })], total: 2 })
+    notif.getNotificationUnreadCount.mockResolvedValue({ count: 1 })
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [hrCase()] })
+    renderAt('/work/hr-cases')
+    fireEvent.click(await screen.findByRole('button', { name: /Updates/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark all read' }))
+    expect(notif.markNotificationsRead).toHaveBeenCalledWith(['n1'])
+  })
+
+  it('refreshes the board and says so when a notice arrives live', async () => {
+    api.listHrCases.mockResolvedValueOnce({ columns: COLUMNS, cases: [] })
+    renderAt('/work/hr-cases')
+    await screen.findByRole('region', { name: 'Nothing here yet' })
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [hrCase()] })
+    await waitFor(() => expect(notif.listener).not.toBeNull())
+    notif.listener?.(notice())
+    expect((await screen.findByRole('status')).textContent).toContain('HRC-2026-0001: incident flagged')
+    await waitFor(() => expect(screen.getByRole('region', { name: 'New' }).textContent).toContain('Late for shift again'))
+  })
+
+  it('ignores notices that are not about HR cases', async () => {
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [hrCase()] })
+    renderAt('/work/hr-cases')
+    await screen.findByRole('region', { name: 'New' })
+    await waitFor(() => expect(notif.listener).not.toBeNull())
+    notif.listener?.(notice({ id: 'x', type: 'channel_message', title: 'New message' }))
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('clears a case’s notices when it is opened', async () => {
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [hrCase()] })
+    api.getHrCase.mockResolvedValue(hrCase())
+    renderAt('/work/hr-cases/c1')
+    await waitFor(() => expect(notif.markHrCaseNotificationsRead).toHaveBeenCalledWith('c1'))
   })
 })

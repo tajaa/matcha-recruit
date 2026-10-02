@@ -81,6 +81,21 @@ async def get_access(current_user: CurrentUser = Depends(require_admin_or_client
         return {"hr_access": await has_hr_access(conn, user=current_user, company_id=company_id)}
 
 
+@router.get("/readiness")
+async def get_readiness(current_user: CurrentUser = Depends(require_admin_or_client)):
+    """Whether a new incident can open a case, and who would hear about it —
+    the page's "why is nothing here?" answer. HR only."""
+    from app.matcha.services.hr_cases import readiness
+
+    company_id = await _business_company(current_user)
+    async with get_connection() as conn:
+        await _require_hr(conn, current_user, company_id)
+        settings = await case_service.get_settings(conn, company_id)
+        return await readiness.build(
+            conn, company_id=company_id, threshold=float(settings["triage_min_confidence"]),
+        )
+
+
 @router.get("/settings")
 async def get_settings(current_user: CurrentUser = Depends(require_admin_or_client)):
     company_id = await _business_company(current_user)

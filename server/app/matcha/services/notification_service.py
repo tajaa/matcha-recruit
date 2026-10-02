@@ -272,8 +272,10 @@ async def get_notifications(
     unread_only: bool = False,
     limit: int = 30,
     offset: int = 0,
+    type_prefix: str | None = None,
 ) -> list[dict]:
-    """Get notifications for a user, newest first. Scoped to company if provided."""
+    """Get notifications for a user, newest first. Scoped to company if provided.
+    `type_prefix` narrows to one feature's types (e.g. `hr_case_`)."""
     where = "WHERE user_id = $1"
     params: list = [user_id]
     if company_id is not None:
@@ -281,6 +283,9 @@ async def get_notifications(
         where += f" AND (company_id = ${len(params)} OR company_id IS NULL)"
     if unread_only:
         where += " AND is_read = FALSE"
+    if type_prefix:
+        params.append(type_prefix)
+        where += f" AND starts_with(type, ${len(params)})"
 
     params.extend([limit, offset])
     async with get_connection() as conn:
@@ -302,6 +307,7 @@ async def count_notifications(
     *,
     company_id: UUID | None = None,
     unread_only: bool = False,
+    type_prefix: str | None = None,
 ) -> int:
     """Count notifications using the same user/company/read scope as the list."""
     where = "WHERE user_id = $1"
@@ -311,23 +317,28 @@ async def count_notifications(
         where += f" AND (company_id = ${len(params)} OR company_id IS NULL)"
     if unread_only:
         where += " AND is_read = FALSE"
+    if type_prefix:
+        params.append(type_prefix)
+        where += f" AND starts_with(type, ${len(params)})"
 
     async with get_connection() as conn:
         total = await conn.fetchval(f"SELECT COUNT(*) FROM mw_notifications {where}", *params)
     return int(total or 0)
 
 
-async def get_unread_count(user_id: UUID, company_id: UUID | None = None) -> int:
+async def get_unread_count(
+    user_id: UUID, company_id: UUID | None = None, type_prefix: str | None = None,
+) -> int:
+    where = "WHERE user_id = $1 AND is_read = FALSE"
+    params: list = [user_id]
+    if company_id is not None:
+        params.append(company_id)
+        where += f" AND (company_id = ${len(params)} OR company_id IS NULL)"
+    if type_prefix:
+        params.append(type_prefix)
+        where += f" AND starts_with(type, ${len(params)})"
     async with get_connection() as conn:
-        if company_id is not None:
-            return await conn.fetchval(
-                "SELECT COUNT(*) FROM mw_notifications WHERE user_id = $1 AND is_read = FALSE AND (company_id = $2 OR company_id IS NULL)",
-                user_id, company_id,
-            )
-        return await conn.fetchval(
-            "SELECT COUNT(*) FROM mw_notifications WHERE user_id = $1 AND is_read = FALSE",
-            user_id,
-        )
+        return await conn.fetchval(f"SELECT COUNT(*) FROM mw_notifications {where}", *params)
 
 
 async def mark_read(user_id: UUID, notification_ids: list[UUID]) -> int:
@@ -375,7 +386,7 @@ async def mark_read_by_metadata(
     ticket's notifications drop from the bell and the tab badge only once
     the user actually opens that ticket. `key` is allow-listed to avoid
     interpolating arbitrary JSON paths into SQL."""
-    allowed = {"project_id", "task_id", "section_id", "channel_id"}
+    allowed = {"project_id", "task_id", "section_id", "channel_id", "hr_case_id"}
     if key not in allowed:
         raise ValueError(f"unsupported metadata key: {key}")
     async with get_connection() as conn:

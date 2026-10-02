@@ -71,6 +71,19 @@ skip a step.
   business supervisor with no per-viewer access check; adding case records
   there would bypass HR access.
 
+## Page guidance (wizard, setup check, updates)
+
+- `GET /hr-cases/readiness` (`readiness.py`, HR-only) answers "will a new
+  incident open a case?": handbook/policy sections on file (the same corpus
+  triage reads), incident reporting on, who `hr_recipients` would notify, and
+  the threshold. A source that can't be read is `null`, never ready.
+  Computed on demand (it builds the corpus), so the page only asks when the
+  wizard is open or the board is empty.
+- The page's Updates feed is `GET /notifications?type_prefix=hr_case_`;
+  opening a case clears its notices via `mark-read-by {hr_case_id}`. Copy for
+  the wizard lives in `client/src/work/components/panels/hr-cases/hrCaseGuide.ts`
+  and restates this file: change them together.
+
 ## Write-up workflow (5/6: `workflow.py`, `draft_review.py`)
 
 A manager sends a letter (upload, a Drive file they can read, or a Google Doc

@@ -61,12 +61,13 @@ async def test_list_notifications_returns_filtered_total(monkeypatch):
             "unread_only": True,
             "limit": 30,
             "offset": 30,
+            "type_prefix": "hr_case_",
         }
         return [row]
 
     async def fake_count(*args, **kwargs):
         assert args == (user_id,)
-        assert kwargs == {"company_id": company_id, "unread_only": True}
+        assert kwargs == {"company_id": company_id, "unread_only": True, "type_prefix": "hr_case_"}
         return 61
 
     monkeypatch.setattr(routes, "get_client_company_id", fake_company)
@@ -77,8 +78,49 @@ async def test_list_notifications_returns_filtered_total(monkeypatch):
         unread_only=True,
         limit=30,
         offset=30,
+        type_prefix="hr_case_",
         current_user=SimpleNamespace(id=user_id),
     )
 
     assert result["total"] == 61
     assert result["notifications"][0]["id"] == str(notification_id)
+
+
+@pytest.mark.asyncio
+async def test_type_prefix_narrows_list_count_and_unread(monkeypatch):
+    user_id, company_id = uuid4(), uuid4()
+    seen = []
+
+    class _Conn:
+        async def fetch(self, query, *args):
+            seen.append((query, args))
+            return []
+
+        async def fetchval(self, query, *args):
+            seen.append((query, args))
+            return 3
+
+    @asynccontextmanager
+    async def fake_connection():
+        yield _Conn()
+
+    monkeypatch.setattr(notif_svc, "get_connection", fake_connection)
+
+    await notif_svc.get_notifications(user_id, company_id=company_id, type_prefix="hr_case_")
+    assert await notif_svc.count_notifications(user_id, company_id=company_id, type_prefix="hr_case_") == 3
+    assert await notif_svc.get_unread_count(user_id, company_id, type_prefix="hr_case_") == 3
+
+    for query, args in seen:
+        assert "starts_with(type, $3)" in query
+        assert args[:3] == (user_id, company_id, "hr_case_")
+
+    seen.clear()
+    await notif_svc.get_notifications(user_id, company_id=company_id)
+    assert "starts_with" not in seen[0][0]
+
+
+def test_hr_case_id_clears_by_entity():
+    assert "hr_case_id" in routes.MarkReadByRequest.model_fields
+    import inspect
+
+    assert '"hr_case_id"' in inspect.getsource(notif_svc.mark_read_by_metadata)

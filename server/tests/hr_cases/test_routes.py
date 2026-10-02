@@ -58,6 +58,7 @@ def test_surface_order_and_gating(mod):
     order = [r.path for r in routes]
     param = order.index("/hr-cases/{case_id}")
     assert order.index("/hr-cases/access") < param and order.index("/hr-cases/settings") < param
+    assert order.index("/hr-cases/readiness") < param
     for route in routes:
         label = f"{sorted(route.methods)} {route.path}"
         assert "hr_cases" in _feature_of(route.dependant), label
@@ -118,6 +119,24 @@ def test_non_hr_gets_404_and_access_false(mod, scope):
         assert client.get("/hr-cases").status_code == 404
         assert client.get(f"/hr-cases/{uuid4()}").status_code == 404
         assert client.post(f"/hr-cases/{uuid4()}/dismiss", json={"reason": "not a policy issue"}).status_code == 404
+
+
+def test_readiness_is_hr_only_and_passes_the_threshold(mod, scope, monkeypatch):
+    from app.matcha.services.hr_cases import readiness
+
+    async def settings(conn, company_id):
+        return {"triage_min_confidence": 0.7}
+
+    async def build(conn, *, company_id, threshold):
+        assert company_id == scope["company"] and threshold == 0.7
+        return {"ready": True}
+
+    monkeypatch.setattr(mod.case_service, "get_settings", settings)
+    monkeypatch.setattr(readiness, "build", build)
+    with _client(mod, USER) as client:
+        assert client.get("/hr-cases/readiness").json() == {"ready": True}
+        scope["hr"] = False
+        assert client.get("/hr-cases/readiness").status_code == 404
 
 
 def test_list_returns_columns_and_cases(mod, scope, monkeypatch):
