@@ -52,6 +52,35 @@ class CappeCatalog(BaseModel):
     intro_available: bool = False
 
 
+class CappePublicPlan(BaseModel):
+    """A plan as the anonymous marketing page sees it — an allowlist, so an
+    internal entitlement added to `CappePlan.features` never goes public."""
+    code: str
+    name: str
+    description: Optional[str] = None
+    sort_order: int = 0
+    platform_fee_bps: int = 0
+    allowed_fulfillment: list[str] = Field(default_factory=list)
+    site_limit: Optional[int] = None
+    mailbox_quota_included: int = 0
+    prices: list[CappePlanPrice] = Field(default_factory=list)
+    intro_price_cents: Optional[int] = None
+    intro_days: Optional[int] = None
+
+
+class CappePublicAddon(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = None
+    unit_label: str = "unit"
+    prices: list[CappePlanPrice] = Field(default_factory=list)
+
+
+class CappePublicPricing(BaseModel):
+    plans: list[CappePublicPlan] = Field(default_factory=list)
+    addons: list[CappePublicAddon] = Field(default_factory=list)
+
+
 # --- Tenant subscription ----------------------------------------------------
 
 class CappeSubscriptionAddon(BaseModel):
@@ -203,6 +232,9 @@ __all__ = [
     "CappePlan",
     "CappeAddon",
     "CappeCatalog",
+    "CappePublicPlan",
+    "CappePublicAddon",
+    "CappePublicPricing",
     "CappeSubscriptionAddon",
     "CappeSubscription",
     "CappeCheckoutRequest",

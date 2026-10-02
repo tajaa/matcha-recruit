@@ -5,6 +5,7 @@
 
 import type {
   CappeDirectoryCategories,
+  CappePublicPricing,
   CappeDirectoryPage,
   CappeDirectoryQuery,
   PublicCreatorPage,
@@ -329,6 +330,13 @@ export function fetchCappeDirectory(query: CappeDirectoryQuery = {}) {
 
 export function fetchCappeDirectoryCategories() {
   return cappePublicGet<CappeDirectoryCategories>('/public/directory/categories')
+}
+
+// --- Plan pricing (public) ----------------------------------------------------
+// The landing page quotes live prices from the same catalog checkout charges.
+
+export function fetchCappePricing() {
+  return cappePublicGet<CappePublicPricing>('/public/pricing')
 }
 
 // --- Creator marketplace directory (public) -----------------------------------

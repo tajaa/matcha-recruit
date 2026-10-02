@@ -21,6 +21,7 @@ from . import (
     forms,
     messages,
     newsletter,
+    pricing,
     reviews,
     shop,
     shopper,
@@ -34,6 +35,7 @@ router.include_router(site.router)
 # its own rate-limit bucket and depth cap; see the module docstring.
 router.include_router(directory.router)
 router.include_router(creators.router)
+router.include_router(pricing.router)
 router.include_router(shop.router)
 router.include_router(shopper.router)
 router.include_router(newsletter.router)
