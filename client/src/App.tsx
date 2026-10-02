@@ -1,6 +1,5 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { lazy, Suspense } from "react";
-import Home from "./pages/home";
 import Login from "./pages/Login";
 import RequireBusinessAccount from "./components/auth/RequireBusinessAccount";
 import RouteTracker from "./components/shared/RouteTracker";
@@ -29,6 +28,7 @@ const CappeRoutes = lazy(() => import("./cappe/routes")); // Cappe — website b
 const MatchaWorkPage = lazy(() => import("./pages/landing/MatchaWorkPage"));
 const MatchaOpsPage = lazy(() => import("./pages/simpler-pages/Ops"));
 const SchedulingLanding = lazy(() => import("./pages/landing/scheduling"));
+const Home = lazy(() => import("./pages/home"));
 const ServicesPage = lazy(() => import("./pages/landing/ServicesPage"));
 // Marketing pages restyled closer to /services (originals retired 2026-07-05).
 const SimpleCompliancePage = lazy(
@@ -147,11 +147,15 @@ export default function App() {
       <Routes>
         {/* Exact "/" outranks the isCappeHost "/*" splat below, so the apex
             swap has to happen here: on the Cappe domain "/" renders the
-            Gummfit landing (CappeRoutes index), everywhere else Matcha Home. */}
-        <Route path="/" element={isCappeHost ? <CappeRoutes /> : <Home />} />
+            Gummfit landing (CappeRoutes index), everywhere else the Matcha home page: the scheduling landing, whose
+            second tab (/incidents) sells the incident workflow. The old
+            multi-product home lives on at /overview. */}
+        <Route path="/" element={isCappeHost ? <CappeRoutes /> : <SchedulingLanding />} />
+        <Route path="/incidents" element={<SchedulingLanding tab="incidents" />} />
+        <Route path="/overview" element={<Home />} />
         <Route path="/matcha-work" element={<MatchaWorkPage />} />
         <Route path="/matcha-ops" element={<MatchaOpsPage />} />
-        <Route path="/matcha-scheduling" element={<SchedulingLanding />} />
+        <Route path="/matcha-scheduling" element={<Navigate to="/" replace />} />
         <Route path="/matcha-lite" element={<SimpleLitePage />} />
         <Route path="/matcha-compliance" element={<SimpleCompliancePage />} />
         <Route path="/matcha-platform" element={<SimplePlatformPage />} />

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { KitStyles } from '../../../../components/marketing/kit/Chrome'
 import { Reveal } from '../../../../components/marketing/kit/motion'
 import { WRAP, display, mono } from '../../../../components/marketing/kit/styles'
-import { STEPS, type StepId } from '../styles'
+import { ALL_STEPS, INCIDENT_STEPS, STEPS, type LandingTab, type StepDef, type StepId } from '../styles'
 import { AMBER, BOARD, INK, INK_SOFT, PAPER, STAMP, hexA } from '../../../../components/marketing/kit/theme'
 
 export { Accent, CellLabel, Glows, Grain, PrimaryButton } from '../../../../components/marketing/kit/Chrome'
@@ -26,12 +26,12 @@ export function StepHead({
   dark?: boolean
   split?: boolean
 }) {
-  const s = STEPS.find((x) => x.id === step)!
+  const s = ALL_STEPS.find((x) => x.id === step)!
   const head = (
     <>
       <Reveal>
         <div className="flex items-center gap-3" style={mono('11px', { color: dark ? PAPER : INK, fontWeight: 500 })}>
-          <span>Sun {s.time} PM</span>
+          <span>{s.when}</span>
           <span aria-hidden className="h-px w-8" style={{ backgroundColor: dark ? hexA(PAPER, 0.3) : hexA(INK, 0.25) }} />
           <span style={{ color: dark ? hexA(PAPER, 0.6) : INK_SOFT }}>{s.label}</span>
         </div>
@@ -69,7 +69,40 @@ export function StepHead({
   )
 }
 
-export function TopBar({ onContact }: { onContact: () => void }) {
+/** The two products this page sells, as routes: crawlable, linkable, and the
+ *  back button works. The active tab is the one with the underline. */
+function TabSwitch({ tab, scrolled }: { tab: LandingTab; scrolled: boolean }) {
+  const tabs: { id: LandingTab; to: string; label: string }[] = [
+    { id: 'scheduling', to: '/', label: 'Scheduling' },
+    { id: 'incidents', to: '/incidents', label: 'Incidents' },
+  ]
+  return (
+    <nav aria-label="Product" className="flex items-center gap-1 sm:gap-2">
+      {tabs.map((t) => {
+        const on = t.id === tab
+        return (
+          <Link
+            key={t.id}
+            to={t.to}
+            aria-current={on ? 'page' : undefined}
+            className="sched-focus relative rounded-full px-3 py-1.5 transition-[background-color,color] duration-200"
+            style={mono('10.5px', {
+              color: on ? (scrolled ? PAPER : INK) : 'inherit',
+              fontWeight: on ? 600 : 400,
+              backgroundColor: on ? (scrolled ? INK : PAPER) : 'transparent',
+              opacity: on ? 1 : 0.72,
+            })}
+          >
+            {t.label}
+          </Link>
+        )
+      })}
+    </nav>
+  )
+}
+
+export function TopBar({ onContact, tab = 'scheduling' }: { onContact: () => void; tab?: LandingTab }) {
+  const steps: readonly StepDef[] = tab === 'incidents' ? INCIDENT_STEPS : STEPS
   const [scrolled, setScrolled] = useState(false)
   useEffect(() => {
     const on = () => setScrolled(window.scrollY > 8)
@@ -91,10 +124,10 @@ export function TopBar({ onContact }: { onContact: () => void }) {
       <div className={`${WRAP} flex h-16 items-center justify-between gap-6`}>
         <Link to="/" className="sched-focus flex items-baseline gap-2 rounded" aria-label="Matcha home">
           <span style={{ ...display, fontWeight: 600, fontSize: 21, letterSpacing: '-0.03em' }}>Matcha</span>
-          <span style={mono('10.5px', { color: scrolled ? INK_SOFT : hexA(PAPER, 0.6) })}>/ Scheduling</span>
         </Link>
+        <TabSwitch tab={tab} scrolled={scrolled} />
         <nav aria-label="Page sections" className="hidden items-center gap-7 lg:flex">
-          {STEPS.map((s) => (
+          {steps.map((s) => (
             <a key={s.id} href={`#${s.id}`} className="sched-link sched-focus rounded" style={mono('10.5px', { color: 'inherit' })}>
               {s.label}
             </a>
@@ -122,19 +155,29 @@ export function TopBar({ onContact }: { onContact: () => void }) {
  * reading. Only shown between the first and last step, and only where the
  * left gutter is wide enough to hold it without touching the content.
  */
-export function TimelineRail() {
-  const [active, setActive] = useState<StepId | null>(null)
+export function TimelineRail({
+  steps = STEPS,
+  day = ['Sun', 'Oct 4'],
+  label = 'Sunday timeline',
+  darkStep,
+}: {
+  steps?: readonly StepDef[]
+  day?: readonly [string, string]
+  label?: string
+  darkStep?: string
+} = {}) {
+  const [active, setActive] = useState<string | null>(null)
   useEffect(() => {
     let raf = 0
     const measure = () => {
       raf = 0
       const line = window.innerHeight * 0.45
-      let current: StepId | null = null
-      for (const s of STEPS) {
+      let current: string | null = null
+      for (const s of steps) {
         const el = document.getElementById(s.id)
         if (el && el.getBoundingClientRect().top <= line) current = s.id
       }
-      const last = document.getElementById(STEPS[STEPS.length - 1].id)
+      const last = document.getElementById(steps[steps.length - 1].id)
       if (last && last.getBoundingClientRect().bottom < window.innerHeight * 0.3) current = null
       setActive(current)
     }
@@ -149,27 +192,27 @@ export function TimelineRail() {
       window.removeEventListener('resize', on)
       if (raf) cancelAnimationFrame(raf)
     }
-  }, [])
-  const activeIndex = STEPS.findIndex((s) => s.id === active)
+  }, [steps])
+  const activeIndex = steps.findIndex((s) => s.id === active)
   // No card: a bare mono list in the gutter. It floats over the dark Cost
   // section too, so its ink follows whichever section is under it.
-  const dark = active === 'cost'
+  const dark = !!darkStep && active === darkStep
   const ink = dark ? PAPER : INK
   const soft = dark ? hexA(PAPER, 0.6) : INK_SOFT
   const green = dark ? BOARD.STAMP : STAMP
   return (
     <nav
-      aria-label="Sunday timeline"
+      aria-label={label}
       className="fixed left-6 top-1/2 z-40 hidden -translate-y-1/2 transition-opacity duration-500 min-[1560px]:block"
       style={{ opacity: active ? 1 : 0, pointerEvents: active ? 'auto' : 'none' }}
     >
       <div className="transition-colors duration-300" style={mono('9.5px', { color: soft, lineHeight: 1.5 })}>
-        Sun
+        {day[0]}
         <br />
-        Oct 4
+        {day[1]}
       </div>
       <ol className="relative mt-4 space-y-5 pl-4 transition-colors duration-300" style={{ borderLeft: `1px solid ${hexA(ink, 0.2)}` }}>
-        {STEPS.map((s, i) => {
+        {steps.map((s, i) => {
           const state = i === activeIndex ? 'now' : i < activeIndex ? 'past' : 'next'
           return (
             <li key={s.id} className="relative">
@@ -198,22 +241,35 @@ export function TimelineRail() {
   )
 }
 
-export function Footer() {
+export function Footer({ tab = 'scheduling' }: { tab?: LandingTab }) {
   return (
     <footer style={{ backgroundColor: BOARD.PAPER, color: PAPER }}>
       <div className={`${WRAP} grid gap-10 py-14 md:grid-cols-12 md:items-end`}>
         <div className="md:col-span-7">
           <div style={{ ...display, fontSize: 'clamp(3rem, 8vw, 6rem)', lineHeight: 0.9 }}>Matcha</div>
           <p className="mt-4 max-w-md text-[0.95rem] leading-[1.6]" style={{ color: hexA(PAPER, 0.62) }}>
-            Scheduling is part of{' '}
-            <Link to="/matcha-ops" className="sched-link sched-focus rounded" style={{ color: PAPER }}>
-              Matcha Ops
-            </Link>{' '}
-            — events, inventory, and team channels for every location.
+            {tab === 'incidents' ? (
+              <>
+                Incidents work alongside{' '}
+                <Link to="/" className="sched-link sched-focus rounded" style={{ color: PAPER }}>
+                  Matcha Scheduling
+                </Link>{' '}
+                — the same people, the same locations.
+              </>
+            ) : (
+              <>
+                Scheduling is part of{' '}
+                <Link to="/matcha-ops" className="sched-link sched-focus rounded" style={{ color: PAPER }}>
+                  Matcha Ops
+                </Link>{' '}
+                — events, inventory, and team channels for every location.
+              </>
+            )}
           </p>
         </div>
         <nav aria-label="Footer" className="flex flex-wrap gap-x-7 gap-y-3 md:col-span-5 md:justify-end" style={mono('10.5px')}>
-          <Link className="sched-link sched-focus rounded" to="/">hey-matcha.com</Link>
+          <Link className="sched-link sched-focus rounded" to="/">Scheduling</Link>
+          <Link className="sched-link sched-focus rounded" to="/incidents">Incidents</Link>
           <Link className="sched-link sched-focus rounded" to="/privacy">Privacy</Link>
           <Link className="sched-link sched-focus rounded" to="/terms">Terms</Link>
           <span style={{ opacity: 0.5 }}>© {new Date().getFullYear()} Matcha</span>

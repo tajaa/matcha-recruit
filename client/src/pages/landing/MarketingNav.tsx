@@ -14,7 +14,7 @@ interface Props {
 const PRODUCT_LINKS = [
   { to: "/matcha-platform", label: "Full Platform" },
   // { to: '/matcha-work', label: 'Matcha Work' }, // beta — hidden until launch
-  { to: "/matcha-scheduling", label: "Scheduling", isNew: true },
+  { to: "/", label: "Scheduling", isNew: true },
   // { to: "/matcha-ops", label: "Matcha Ops", isNew: true }, // hidden for now
   { to: "/matcha-lite", label: "Matcha Lite" },
   { to: "/matcha-compliance", label: "Compliance", isNew: true },
