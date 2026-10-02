@@ -1566,6 +1566,17 @@ export type HrCase = {
 
 export type HrCaseColumn = { key: string; label: string; stages: HrCaseStage[] }
 
+/** Whether a new incident can open a case, and who hears about it
+ *  (server: hr_cases/readiness.py). `null` = that source couldn't be read,
+ *  which is never shown as ready. */
+export type HrCaseReadiness = {
+  threshold: number
+  handbook_sources: number | null
+  incidents_enabled: boolean | null
+  notified: string[] | null
+  ready: boolean
+}
+
 export type HrCaseReviewItem = { source: 'compliance' | 'ladder' | 'structure' | 'ai'; code: string; detail: string }
 
 export type HrCaseReview = {

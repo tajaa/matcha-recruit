@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { relativeTime as timeAgo } from '../../../utils/format'
-import { Bell, ClipboardCheck, ExternalLink, FolderOpen, Hash, Mail, UserPlus, X } from 'lucide-react'
+import { Bell, Briefcase, ClipboardCheck, ExternalLink, FolderOpen, Hash, Mail, UserPlus, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { getSharedChannelSocket } from '../../api/channelSocket'
 import {
@@ -148,7 +148,7 @@ export default function NotificationBell() {
             )}
 
             {!loading && notifications.map((n) => {
-              const Icon = TYPE_ICONS[n.type] || Bell
+              const Icon = TYPE_ICONS[n.type] || (n.type.startsWith('hr_case_') ? Briefcase : Bell)
               return (
                 <button
                   key={n.id}

@@ -1,13 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Briefcase, Loader2 } from 'lucide-react'
+import { BookOpen, Briefcase, Loader2, X } from 'lucide-react'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
 import {
-  acknowledgeHrCase, decideHrCase, dismissHrCase, getHrCase, getSignedCopyUrl, getWriteUpDraftUrl, listHrCases,
+  acknowledgeHrCase, decideHrCase, dismissHrCase, getHrCase, getHrCaseReadiness, getSignedCopyUrl, getWriteUpDraftUrl, listHrCases,
   markWriteUpDelivered, recheckHrCase, uploadSignedCopy,
 } from '../api/hrCases'
-import type { HrCase, HrCaseColumn } from '../types'
+import { markHrCaseNotificationsRead } from '../api/notifications'
+import type { MWNotification } from '../api/notifications'
+import { useHrCaseUpdates } from '../hooks/useHrCaseUpdates'
+import type { HrCase, HrCaseColumn, HrCaseReadiness } from '../types'
 import HrCaseDetail from '../components/panels/hr-cases/HrCaseDetail'
+import HrCaseUpdates from '../components/panels/hr-cases/HrCaseUpdates'
+import HrCaseWizard, { HR_CASES_GUIDE_SEEN_KEY } from '../components/panels/hr-cases/HrCaseWizard'
+import SetupCheck from '../components/panels/hr-cases/SetupCheck'
+import { COLUMN_GUIDE, triggers } from '../components/panels/hr-cases/hrCaseGuide'
 
 const STAGE_TONE: Partial<Record<HrCase['stage'], string>> = {
   flagged: 'bg-amber-500/15 text-amber-300',
@@ -22,6 +29,16 @@ function errorText(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback
 }
 
+const LIST_POLL_MS = 60_000
+
+function guideSeen(): boolean {
+  try { return localStorage.getItem(HR_CASES_GUIDE_SEEN_KEY) === '1' } catch { return true }
+}
+
+function plural(n: number, one: string, many: string) {
+  return `${n} ${n === 1 ? one : many}`
+}
+
 export default function HrCases() {
   const navigate = useNavigate()
   const base = useWorkBase()
@@ -31,6 +48,11 @@ export default function HrCases() {
   const [error, setError] = useState<string | null>(null)
   const [detail, setDetail] = useState<HrCase | null>(null)
   const [detailError, setDetailError] = useState<{ id: string; message: string } | null>(null)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [guideDone, setGuideDone] = useState(guideSeen)
+  const [readiness, setReadiness] = useState<HrCaseReadiness | null>(null)
+  const [readinessState, setReadinessState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  const [fresh, setFresh] = useState<MWNotification | null>(null)
 
   const load = useCallback(() => listHrCases().then(
     (res) => { setColumns(res.columns); setCases(res.cases); setError(null) },
@@ -42,8 +64,57 @@ export default function HrCases() {
     (err) => setDetailError({ id, message: errorText(err, 'Could not open that case') }),
   ), [])
 
+  // A notice just landed: pull the board (and the open case) up to date and
+  // say what happened, instead of waiting for the next poll.
+  const latest = useRef({ load, loadDetail, caseId })
+  useEffect(() => { latest.current = { load, loadDetail, caseId } })
+  const updates = useHrCaseUpdates(useCallback((n: MWNotification) => {
+    setFresh(n)
+    void latest.current.load()
+    if (latest.current.caseId) void latest.current.loadDetail(latest.current.caseId)
+  }, []))
+
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const id = setInterval(() => { if (!document.hidden) void load() }, LIST_POLL_MS)
+    return () => clearInterval(id)
+  }, [load])
   useEffect(() => { if (caseId) void loadDetail(caseId) }, [caseId, loadDetail])
+
+  // Opening a case is the signal that its notices were seen.
+  const { reload: reloadUpdates } = updates
+  useEffect(() => {
+    if (caseId) void markHrCaseNotificationsRead(caseId).then(() => reloadUpdates(), () => {})
+  }, [caseId, reloadUpdates])
+
+  // First visit: walk them through it once the board has loaded.
+  const empty = cases !== null && cases.length === 0
+  const wizardOpen = helpOpen || (cases !== null && !guideDone)
+  const wantsReadiness = wizardOpen || empty
+  const readinessAsked = useRef(false)
+  useEffect(() => {
+    if (!wantsReadiness || readinessAsked.current) return
+    readinessAsked.current = true
+    setReadinessState('loading')
+    getHrCaseReadiness().then(
+      (r) => { setReadiness(r); setReadinessState('done') },
+      () => setReadinessState('error'),
+    )
+  }, [wantsReadiness])
+  const readinessLoading = readinessState === 'idle' || readinessState === 'loading'
+
+  function closeWizard() {
+    try { localStorage.setItem(HR_CASES_GUIDE_SEEN_KEY, '1') } catch { /* best effort */ }
+    setHelpOpen(false)
+    setGuideDone(true)
+  }
+
+  function openUpdate(n: MWNotification) {
+    if (!n.is_read) updates.markRead(n.id)
+    const target = typeof n.metadata?.hr_case_id === 'string' ? n.metadata.hr_case_id : null
+    if (target && (n.link ?? '').includes('/hr-cases/')) navigate(`${base}/hr-cases/${target}`)
+    else if (n.link) navigate(n.link)
+  }
 
   const byColumn = useMemo(() => {
     const out: Record<string, HrCase[]> = {}
@@ -52,6 +123,15 @@ export default function HrCases() {
   }, [cases])
 
   const shown = caseId && detail?.id === caseId ? detail : null
+
+  // Cases sitting in HR's hands right now.
+  const waiting = useMemo(() => {
+    const open = (stage: HrCase['stage']) => (cases ?? []).filter((c) => c.stage === stage)
+    return [
+      { key: 'hr_review', label: (n: number) => `${plural(n, 'write-up', 'write-ups')} to review`, items: open('hr_review') },
+      { key: 'needs_attention', label: (n: number) => `${plural(n, 'signed copy', 'signed copies')} to look at`, items: open('needs_attention') },
+    ].filter((w) => w.items.length > 0)
+  }, [cases])
 
   async function refreshCase(id: string) {
     await Promise.all([load(), loadDetail(id)])
@@ -106,13 +186,73 @@ export default function HrCases() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="flex min-h-0 min-w-0 flex-1">
       <div className="min-w-0 flex-1 overflow-auto">
         <div className="space-y-4 px-4 py-5">
-          <header>
-            <h1 className="flex items-center gap-2 text-lg font-semibold text-w-text"><Briefcase size={18} /> HR Cases</h1>
-            <p className="text-xs text-w-faint">Incidents that may need a write-up, from first flag to signed copy.</p>
+          <header className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="flex items-center gap-2 text-lg font-semibold text-w-text"><Briefcase size={18} /> HR Cases</h1>
+              <p className="text-xs text-w-faint">Incidents that may need a write-up, from first flag to signed copy.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setHelpOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-w-line px-2.5 py-1.5 text-xs text-w-dim transition-colors hover:bg-w-surface2 hover:text-w-text"
+              >
+                <BookOpen size={14} /> How it works
+              </button>
+              <HrCaseUpdates items={updates.items} unread={updates.unread} onOpen={openUpdate} onMarkAllRead={updates.markAllRead} />
+            </div>
           </header>
+
+          {fresh && (
+            <div role="status" className="flex items-start gap-3 rounded-lg border border-w-accent/30 bg-w-accent/10 px-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-w-text">{fresh.title}</p>
+                {fresh.body && <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-w-dim">{fresh.body}</p>}
+              </div>
+              <button type="button" onClick={() => { openUpdate(fresh); setFresh(null) }} className="shrink-0 text-xs font-medium text-w-accent hover:underline">Open</button>
+              <button type="button" onClick={() => setFresh(null)} className="shrink-0 text-w-dim hover:text-w-text" aria-label="Dismiss"><X size={14} /></button>
+            </div>
+          )}
+
+          {waiting.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2" aria-label="Waiting on you">
+              <span className="text-[11px] font-medium uppercase tracking-wide text-amber-300">Waiting on you</span>
+              {waiting.map((w) => (
+                <button
+                  key={w.key}
+                  type="button"
+                  onClick={() => navigate(`${base}/hr-cases/${w.items[0].id}`)}
+                  className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-200 transition-colors hover:bg-amber-500/20"
+                >
+                  {w.label(w.items.length)}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {empty && (
+            <section aria-label="Nothing here yet" className="space-y-4 rounded-xl border border-w-line bg-w-surface px-4 py-4 sm:px-5">
+              <div>
+                <h2 className="text-sm font-semibold text-w-text">No cases yet, and that’s normal until something is flagged</h2>
+                <p className="mt-1 text-xs leading-5 text-w-dim">Cases start on their own. You’ll get a bell and an email, and it will show up here.</p>
+              </div>
+              <ul className="grid gap-2 md:grid-cols-3">
+                {triggers(readiness?.threshold).map((t) => (
+                  <li key={t.title} className="rounded-lg border border-w-line bg-w-surface2/40 p-3">
+                    <p className="text-xs font-medium text-w-text">{t.title}</p>
+                    <p className="mt-1 text-[11px] leading-4 text-w-dim">{t.body}</p>
+                  </li>
+                ))}
+              </ul>
+              <SetupCheck readiness={readiness} loading={readinessLoading} error={readinessState === 'error'} />
+              <button type="button" onClick={() => setHelpOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium text-w-accent hover:underline">
+                <BookOpen size={14} /> Walk me through it
+              </button>
+            </section>
+          )}
 
           {error ? (
             <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
@@ -128,6 +268,9 @@ export default function HrCases() {
                     {col.label}
                     <span className="text-w-faint">{byColumn[col.key]?.length ?? 0}</span>
                   </h2>
+                  {(byColumn[col.key] ?? []).length === 0 && COLUMN_GUIDE[col.key] && (
+                    <p className="px-1 py-2 text-[11px] leading-4 text-w-faint">{COLUMN_GUIDE[col.key].empty}</p>
+                  )}
                   <ul className="space-y-2">
                     {(byColumn[col.key] ?? []).map((c) => (
                       <li key={c.id}>
@@ -156,6 +299,16 @@ export default function HrCases() {
           )}
         </div>
       </div>
+
+      {wizardOpen && (
+        <HrCaseWizard
+          columns={columns}
+          readiness={readiness}
+          readinessLoading={readinessLoading}
+          readinessError={readinessState === 'error'}
+          onClose={closeWizard}
+        />
+      )}
 
       {caseId && (
         shown ? (

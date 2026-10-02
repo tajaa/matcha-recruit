@@ -11,14 +11,22 @@ export interface MWNotification {
   created_at: string
 }
 
-export function getNotifications(unreadOnly = false, limit = 30) {
+// `typePrefix` narrows to one feature's types, e.g. `hr_case_`.
+export function getNotifications(unreadOnly = false, limit = 30, typePrefix?: string) {
+  const prefix = typePrefix ? `&type_prefix=${encodeURIComponent(typePrefix)}` : ''
   return api.get<{ notifications: MWNotification[]; total: number }>(
-    `/matcha-work/notifications?unread_only=${unreadOnly}&limit=${limit}`
+    `/matcha-work/notifications?unread_only=${unreadOnly}&limit=${limit}${prefix}`
   )
 }
 
-export function getNotificationUnreadCount() {
-  return api.get<{ count: number }>('/matcha-work/notifications/unread-count')
+export function getNotificationUnreadCount(typePrefix?: string) {
+  const prefix = typePrefix ? `?type_prefix=${encodeURIComponent(typePrefix)}` : ''
+  return api.get<{ count: number }>(`/matcha-work/notifications/unread-count${prefix}`)
+}
+
+/** Clear everything about one HR case once its owner has opened it. */
+export function markHrCaseNotificationsRead(hrCaseId: string) {
+  return api.post('/matcha-work/notifications/mark-read-by', { hr_case_id: hrCaseId })
 }
 
 export function markNotificationsRead(notificationIds: string[]) {
