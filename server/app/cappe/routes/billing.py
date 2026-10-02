@@ -13,23 +13,21 @@ from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import (
     CappeAccount,
-    CappeAddon,
     CappeAddonQuantityRequest,
     CappeCancelRequest,
     CappeChangePlanRequest,
     CappeCatalog,
     CappeCheckoutRequest,
     CappeCheckoutResponse,
-    CappePlan,
-    CappePlanPrice,
     CappePortalRequest,
     CappePortalResponse,
     CappeSubscription,
     CappeSubscriptionAddon,
 )
 from ..services import billing as billing_svc
+from ..services.catalog import build_catalog
 from ..services.email import dashboard_url
-from ..services.entitlements import decode_features, mailbox_quota
+from ..services.entitlements import mailbox_quota
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 from .payments import _own_dashboard_url
 
@@ -47,76 +45,12 @@ def _billing_return_url(url: str | None) -> str:
     return _own_dashboard_url(url) or dashboard_url(_BILLING_FALLBACK_URL)
 
 
-def _prices_for(rows, code: str) -> list[CappePlanPrice]:
-    return [
-        CappePlanPrice(
-            interval=r["interval"],
-            unit_amount_cents=r["unit_amount_cents"],
-            currency=r["currency"],
-            # Nothing is purchasable until the seed script mints the Stripe
-            # Price; surfacing that beats a checkout that 400s.
-            purchasable=bool(r["stripe_price_id"]),
-        )
-        for r in rows
-        if r["product_code"] == code and r["role"] == "standard"
-    ]
-
-
 @router.get("/billing/catalog", response_model=CappeCatalog)
 async def get_catalog(account: CappeAccount = Depends(require_cappe_account)):
     """The purchasable lineup, plus whether THIS account can still claim the $1."""
     async with get_connection() as conn:
-        products = await conn.fetch(
-            "SELECT * FROM cappe_billing_products WHERE status = 'active' ORDER BY sort_order, code"
-        )
-        prices = await conn.fetch(
-            "SELECT * FROM cappe_billing_prices WHERE is_current AND active"
-        )
+        plans, addons = await build_catalog(conn)
         intro_ok = await billing_svc.intro_eligible(conn, account.id)
-
-    intro_by_code = {r["product_code"]: r for r in prices if r["role"] == "intro"}
-    plans, addons = [], []
-    for p in products:
-        if p["kind"] == "plan":
-            # Only surface the intro if its Stripe Price actually exists —
-            # `_prices_for` already withholds `purchasable` for un-minted
-            # standard prices, but intro_price_cents/intro_days carried no such
-            # flag. Before the seed script has run, the catalog would advertise
-            # "$1 for 30 days" while start_checkout silently drops the intro
-            # (its own stripe_price_id check) and charges full price — the
-            # customer sees a different amount on Stripe's page than the one
-            # they clicked.
-            intro_row = intro_by_code.get(p["code"])
-            intro = intro_row if intro_row and intro_row["stripe_price_id"] else None
-            plans.append(
-                CappePlan(
-                    code=p["code"],
-                    name=p["name"],
-                    description=p["description"],
-                    status=p["status"],
-                    sort_order=p["sort_order"],
-                    can_sell=p["can_sell"],
-                    platform_fee_bps=p["platform_fee_bps"],
-                    allowed_fulfillment=list(p["allowed_fulfillment"] or []),
-                    site_limit=p["site_limit"],
-                    mailbox_quota_included=p["mailbox_quota_included"],
-                    features=decode_features(p["features"]),
-                    prices=_prices_for(prices, p["code"]),
-                    intro_price_cents=intro["unit_amount_cents"] if intro else None,
-                    intro_days=intro["intro_days"] if intro else None,
-                )
-            )
-        else:
-            addons.append(
-                CappeAddon(
-                    code=p["code"],
-                    name=p["name"],
-                    description=p["description"],
-                    unit_label=p["unit_label"],
-                    max_quantity=p["max_quantity"],
-                    prices=_prices_for(prices, p["code"]),
-                )
-            )
     return CappeCatalog(plans=plans, addons=addons, intro_available=intro_ok)
 
 
