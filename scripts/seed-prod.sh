@@ -41,6 +41,13 @@
 # Conventions for writing seeds: scripts/seed/README.md
 set -euo pipefail
 
+# Homebrew's libpq is keg-only, so psql is not on PATH by default.
+if ! command -v psql >/dev/null 2>&1; then
+  for _libpq in /opt/homebrew/opt/libpq/bin /usr/local/opt/libpq/bin; do
+    if [[ -x "$_libpq/psql" ]]; then PATH="$_libpq:$PATH"; break; fi
+  done
+fi
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PEM="$REPO_ROOT/secrets/roonMT-arm.pem"
 ENV_FILE="$REPO_ROOT/server/.env"
