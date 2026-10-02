@@ -77,7 +77,7 @@ function TabSwitch({ tab, scrolled }: { tab: LandingTab; scrolled: boolean }) {
     { id: 'incidents', to: '/incidents', label: 'Incidents' },
   ]
   return (
-    <nav aria-label="Product" className="flex items-center gap-1 sm:gap-2">
+    <nav aria-label="Product" className="flex shrink-0 items-center gap-0.5 sm:gap-2">
       {tabs.map((t) => {
         const on = t.id === tab
         return (
@@ -85,12 +85,12 @@ function TabSwitch({ tab, scrolled }: { tab: LandingTab; scrolled: boolean }) {
             key={t.id}
             to={t.to}
             aria-current={on ? 'page' : undefined}
-            className="sched-focus relative rounded-full px-3 py-1.5 transition-[background-color,color] duration-200"
+            className="sched-focus relative rounded-full px-2.5 py-1.5 transition-[background-color,color] duration-200 sm:px-3"
             style={mono('10.5px', {
               color: on ? (scrolled ? PAPER : INK) : 'inherit',
               fontWeight: on ? 600 : 400,
               backgroundColor: on ? (scrolled ? INK : PAPER) : 'transparent',
-              opacity: on ? 1 : 0.72,
+              opacity: on ? 1 : 0.86,
             })}
           >
             {t.label}
@@ -121,7 +121,7 @@ export function TopBar({ onContact, tab = 'scheduling' }: { onContact: () => voi
         boxShadow: scrolled ? `0 1px 0 ${hexA(INK, 0.1)}` : 'none',
       }}
     >
-      <div className={`${WRAP} flex h-16 items-center justify-between gap-6`}>
+      <div className={`${WRAP} flex h-16 items-center justify-between gap-3 sm:gap-6`}>
         <Link to="/" className="sched-focus flex items-baseline gap-2 rounded" aria-label="Matcha home">
           <span style={{ ...display, fontWeight: 600, fontSize: 21, letterSpacing: '-0.03em' }}>Matcha</span>
         </Link>
@@ -134,7 +134,8 @@ export function TopBar({ onContact, tab = 'scheduling' }: { onContact: () => voi
           ))}
         </nav>
         <div className="flex items-center gap-5">
-          <Link to="/login" className="sched-link sched-focus rounded text-[14px] font-medium">
+          {/* under 360px the bar can't hold it; the hero's own Log in link is right below */}
+          <Link to="/login" className="sched-link sched-focus rounded text-[14px] font-medium max-[359px]:hidden">
             Log in
           </Link>
           <button
@@ -300,6 +301,11 @@ export function LandingStyles() {
       /* check report: each result dot fills in its outcome colour as its row lands */
       .check-dot { background-color: ${hexA(INK, 0.15)}; transition: background-color .3s ease var(--d, 0ms); }
       .is-in .check-dot { background-color: var(--dot); }
+      /* signed scan: the check rings each region it confirmed, then tags it */
+      .ring-in { box-shadow: inset 0 0 0 1.5px transparent; transition: box-shadow .5s ease var(--d, 0ms); }
+      .is-in .ring-in { box-shadow: inset 0 0 0 1.5px ${STAMP}; }
+      .tag-in { opacity: 0; transform: translateY(4px) scale(.9); transition: opacity .35s ease var(--d, 0ms), transform .45s cubic-bezier(.2,.9,.3,1.2) var(--d, 0ms); }
+      .is-in .tag-in { opacity: 1; transform: none; }
       .toast-in { opacity: 0; transform: translateY(-12px) scale(.97); transition: opacity .6s ease .7s, transform .7s cubic-bezier(.2,.9,.3,1.2) .7s; }
       .is-in .toast-in { opacity: 1; transform: none; }
 
@@ -311,6 +317,8 @@ export function LandingStyles() {
         .pulse-ring { animation: none; box-shadow: 0 0 0 1.5px ${AMBER}; }
         .pulse-dot { animation: none; }
         .toast-in { opacity: 1; transform: none; transition: none; }
+        .ring-in { transition: none; box-shadow: inset 0 0 0 1.5px ${STAMP}; }
+        .tag-in { opacity: 1; transform: none; transition: none; }
       }
     `}</style>
     </>
