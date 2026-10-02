@@ -6,11 +6,15 @@ import { EYEBROW, WRAP } from './shared'
 const faqs: [string, string][] = [
   [
     'Do I need any other apps or plugins?',
-    'No. The site builder, store, checkout, bookings, newsletters, forms, reviews, blog, domains and email are all built by Gummfit. There’s no app store, because there’s nothing to add on.',
+    'The site builder, store, bookings, newsletters, forms, reviews and blog are part of Gummfit, so you don’t need to install plugins for them. Selling options and limits depend on your plan. Domains and optional business email are managed here too, with their costs shown separately.',
+  ],
+  [
+    'What costs extra?',
+    'Domain registration, optional mailboxes and any Gummfit per-sale fee depend on what you choose. Stripe charges its own payment processing fees. The pricing cards show plan prices, selling options and Gummfit sale fees.',
   ],
   [
     'How do payments work?',
-    'Connect a Stripe account in a few minutes and payouts go straight to you. Payments are built into checkout, so there’s no separate payment app to install. Card processing is billed by Stripe; Gummfit’s per-sale fee depends on your plan.',
+    'Connect your Stripe account and payouts go straight to you. Payments are built into checkout, so there’s no separate payment app to install. Card processing is billed by Stripe; Gummfit’s per-sale fee depends on your plan.',
   ],
   [
     'Can I use my own domain?',
@@ -31,7 +35,7 @@ export default function Faq() {
     <section id="faq" className={`scroll-mt-24 grid gap-10 border-t border-white/10 py-24 sm:py-32 lg:grid-cols-[0.8fr_1.2fr] lg:gap-20 ${WRAP}`}>
       <div>
         <p className={`${EYEBROW} text-[#d4ff72]`}>Questions</p>
-        <h2 className="mt-4 text-4xl font-semibold leading-[0.97] tracking-[-0.065em] text-[#f8f7f0] sm:text-5xl">The short answers.</h2>
+        <h2 className="mt-4 text-4xl font-medium leading-[1.04] tracking-[-0.055em] text-[#f8f7f0] sm:text-5xl">A few things you might be wondering.</h2>
       </div>
       <div className="border-t border-white/10">
         {faqs.map(([question, answer]) => (

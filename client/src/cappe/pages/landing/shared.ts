@@ -72,10 +72,8 @@ export function monthlyPriceCents(plan: CappePublicPlan): number | null {
   return plan.prices.find((p) => p.interval === 'month')?.unit_amount_cents ?? null
 }
 
-/** The plan the comparison quotes: the cheapest paid plan that sells every
- *  fulfillment type the catalog offers — i.e. "the one plan that replaces the
- *  whole stack". Derived, not hardcoded to a plan code, so a catalog edit can't
- *  leave the landing page quoting a plan that no longer exists. */
+/** Feature the cheapest paid plan covering every catalog fulfillment type.
+ *  Derive it from the live lineup so the highlighted card follows catalog edits. */
 export function allInPlan(plans: CappePublicPlan[]): CappePublicPlan | null {
   const kinds = new Set(plans.flatMap((p) => p.allowed_fulfillment))
   const candidates = plans

@@ -3,7 +3,6 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import type { CappePublicPlan, CappePublicPricing } from '../../types'
 import Pricing from './Pricing'
-import StackComparison from './StackComparison'
 import { allInPlan } from './shared'
 
 function plan(overrides: Partial<CappePublicPlan>): CappePublicPlan {
@@ -70,17 +69,8 @@ describe('landing Pricing', () => {
   })
 })
 
-describe('landing StackComparison', () => {
-  it('quotes the cheapest paid plan that sells everything', () => {
+describe('featured plan', () => {
+  it('selects the cheapest paid plan that covers every fulfillment type', () => {
     expect(allInPlan(catalog.plans)?.code).toBe('business')
-    render(<StackComparison pricing={{ status: 'ready', pricing: catalog }} />)
-    expect(screen.getByText('One bill · Business')).toBeTruthy()
-    expect(screen.getByText('$49')).toBeTruthy()
-  })
-
-  it('falls back to words, not a number, when pricing is unavailable', () => {
-    render(<StackComparison pricing={{ status: 'error' }} />)
-    expect(screen.getByText('One plan, everything in')).toBeTruthy()
-    expect(screen.queryByText('$49')).toBeNull()
   })
 })

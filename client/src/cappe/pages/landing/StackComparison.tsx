@@ -1,72 +1,36 @@
-import { Check, X } from 'lucide-react'
-import { EYEBROW, WRAP, allInPlan, formatCents, monthlyPriceCents, useReveal } from './shared'
-import type { PricingState } from './shared'
+import { ArrowRight, CalendarDays, Check, Globe, Mail, Puzzle, ShoppingBag } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { EYEBROW, SIGNUP_PATH, WRAP, useReveal } from './shared'
 
-// Typical monthly list prices for the standalone tools a small business stacks
-// up to get what Gummfit ships as one product. Deliberately generic categories
-// (no vendor names) and round, conservative figures — this is the one place to
-// tune them, and the footnote below says they're typical, not a quote.
-const TYPICAL_STACK: { tool: string; monthlyCents: number }[] = [
-  { tool: 'Website builder', monthlyCents: 2300 },
-  { tool: 'E-commerce plan', monthlyCents: 3900 },
-  { tool: 'Booking & scheduling app', monthlyCents: 3000 },
-  { tool: 'Email marketing tool', monthlyCents: 2000 },
-  { tool: 'Business email mailbox', monthlyCents: 700 },
-  { tool: 'Reviews & forms plugins', monthlyCents: 1500 },
+const tools = [
+  { name: 'Website', icon: Globe },
+  { name: 'Shop', icon: ShoppingBag },
+  { name: 'Bookings', icon: CalendarDays },
+  { name: 'Newsletter', icon: Mail },
 ]
 
-const STACK_TOTAL_CENTS = TYPICAL_STACK.reduce((sum, item) => sum + item.monthlyCents, 0)
-
-export default function StackComparison({ pricing }: { pricing: PricingState }) {
+export default function StackComparison() {
   const [attachReveal, revealClass] = useReveal<HTMLDivElement>()
-  const plan = pricing.status === 'ready' ? allInPlan(pricing.pricing.plans) : null
-  const planCents = plan ? monthlyPriceCents(plan) : null
-
   return (
-    <section className="bg-[#e8e1d2] py-24 text-[#20261e] sm:py-32">
-      <div className={`grid gap-14 lg:grid-cols-[0.85fr_1.15fr] lg:gap-20 ${WRAP}`}>
+    <section className="bg-[#ece6d8] py-20 text-[#293229] sm:py-28">
+      <div className={`grid items-center gap-12 lg:grid-cols-[0.85fr_1.15fr] lg:gap-20 ${WRAP}`}>
         <div>
-          <p className={`${EYEBROW} text-[#647c28]`}>Why we cost less</p>
-          <h2 className="mt-5 text-4xl font-semibold leading-[0.97] tracking-[-0.065em] sm:text-5xl">No middlemen. No markup on markup.</h2>
-          <p className="mt-6 max-w-md text-lg leading-8 text-[#5c6256]">
-            Other builders lean on an app store — and every app is another vendor with its own monthly fee. We build each feature ourselves, so there's nobody else to pay, and we pass that on.
-          </p>
+          <p className={`${EYEBROW} text-[#637343]`}>Less to piece together</p>
+          <h2 className="mt-5 text-4xl font-medium leading-[1.04] tracking-[-0.055em] sm:text-5xl">Run your business.<br /><span className="font-serif italic">Skip the juggling.</span></h2>
+          <p className="mt-6 max-w-md text-base leading-7 text-[#626858]">Your website shouldn’t become another job. Our site builder, shop, bookings and newsletters are built together, so there are fewer tools to connect and plugins to keep up with.</p>
+          <Link to={SIGNUP_PATH} className="mt-7 inline-flex items-center gap-2 text-sm font-semibold text-[#354829] underline decoration-[#354829]/30 underline-offset-4 hover:decoration-[#354829]">Bring it all together <ArrowRight className="h-4 w-4" /></Link>
         </div>
-
-        <div ref={attachReveal} className={`grid gap-3 sm:grid-cols-2 ${revealClass}`}>
-          <div className="rounded-[1.6rem] border border-[#bdb8aa] bg-[#f1ece1] p-6 sm:p-7">
-            <p className={`${EYEBROW} text-[#7a7d72]`}>The usual stack</p>
-            <ul className="mt-5 space-y-3 text-sm">
-              {TYPICAL_STACK.map((item) => (
-                <li key={item.tool} className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-2 text-[#4f554a]"><X className="h-3.5 w-3.5 shrink-0 text-[#b0603f]" /> {item.tool}</span>
-                  <span className="font-semibold tabular-nums">{formatCents(item.monthlyCents)}</span>
-                </li>
-              ))}
-            </ul>
-            <div className="mt-5 flex items-baseline justify-between border-t border-[#bdb8aa] pt-4">
-              <span className="text-sm font-semibold">Six bills a month</span>
-              <span className="text-2xl font-semibold tracking-[-0.04em] tabular-nums">{formatCents(STACK_TOTAL_CENTS)}<span className="text-sm font-medium text-[#7a7d72]">/mo</span></span>
-            </div>
+        <div ref={attachReveal} className={`overflow-hidden rounded-2xl border border-[#293229]/15 bg-[#f4efe5] ${revealClass}`}>
+          <div className="p-6 sm:p-8">
+            <div className="flex items-center gap-2 text-xs font-medium text-[#737866]"><Puzzle className="h-4 w-4" />When your tools live apart</div>
+            <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">{tools.map(({ name, icon: Icon }, i) => <div key={name} className={`flex flex-col items-center gap-3 rounded-lg border border-[#293229]/10 bg-[#fcf9f2] px-2 py-5 ${i % 2 ? 'rotate-[3deg]' : '-rotate-[3deg]'}`}><Icon className="h-5 w-5 text-[#7f826f]" strokeWidth={1.4} /><span className="text-[11px] text-[#626858]">{name}</span></div>)}</div>
+            <p className="mt-5 text-center text-xs text-[#737866]">Separate logins. More setup. More moving parts.</p>
           </div>
-
-          <div className="flex flex-col rounded-[1.6rem] bg-[#293229] p-6 text-[#f3f1e7] shadow-[0_25px_60px_rgba(41,50,41,0.35)] sm:p-7">
-            <p className={`${EYEBROW} text-[#d4ff72]`}>Gummfit</p>
-            <ul className="mt-5 space-y-3 text-sm">
-              {TYPICAL_STACK.map((item) => (
-                <li key={item.tool} className="flex items-center gap-2 text-[#d8d9d0]"><Check className="h-3.5 w-3.5 shrink-0 text-[#d4ff72]" /> {item.tool.replace(/ (app|tool|plan|plugins|mailbox)$/, '')}</li>
-              ))}
-            </ul>
-            <div className="mt-auto flex items-baseline justify-between border-t border-white/10 pt-4">
-              <span className="text-sm font-semibold">{plan ? `One bill · ${plan.name}` : 'One plan, everything in'}</span>
-              {planCents !== null && (
-                <span className="text-2xl font-semibold tracking-[-0.04em] text-[#d4ff72] tabular-nums">{formatCents(planCents)}<span className="text-sm font-medium text-[#b3bbac]">/mo</span></span>
-              )}
-            </div>
+          <div className="bg-[#293a2a] p-6 text-[#f3f1e7] sm:p-8">
+            <div className="flex items-center justify-between"><span className="text-base font-semibold tracking-tight">Gummfit</span><span className="flex items-center gap-1.5 text-[10px] text-[#d4ff72]"><Check className="h-3 w-3" />Built together</span></div>
+            <div className="mt-5 grid grid-cols-2 gap-2 rounded-xl border border-[#d4ff72]/20 bg-[#d4ff72]/5 p-3 sm:grid-cols-4">{tools.map(({ name, icon: Icon }) => <div key={name} className="flex flex-col items-center gap-2 px-1 py-3"><Icon className="h-5 w-5 text-[#d4ff72]" strokeWidth={1.4} /><span className="text-[11px] text-[#e4e9d8]">{name}</span></div>)}</div>
+            <p className="mt-5 text-center text-xs text-[#c0cab3]">One place to build, sell, and stay in touch.</p>
           </div>
-          <p className="text-xs leading-5 text-[#7a7d72] sm:col-span-2">
-            Typical published monthly prices for standalone tools in each category; your stack may vary. Mailboxes are an optional Gummfit add-on.
-          </p>
         </div>
       </div>
     </section>

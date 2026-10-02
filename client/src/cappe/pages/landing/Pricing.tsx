@@ -58,7 +58,7 @@ function PlanCard({ plan, interval, featured }: { plan: CappePublicPlan; interva
     <article data-testid={`plan-${plan.code}`} className={`relative flex flex-col rounded-[1.6rem] p-6 sm:p-7 ${tone}`}>
       <div className="flex min-h-7 items-center justify-between gap-3">
         <h3 className="text-xl font-semibold tracking-[-0.04em]">{plan.name}</h3>
-        {featured && <span className="rounded-full bg-[#182115] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#d4ff72]">Most popular</span>}
+        {featured && <span className="rounded-full bg-[#182115] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#d4ff72]">Full storefront</span>}
       </div>
       {plan.description && <p className="mt-2 text-sm leading-6 opacity-70">{plan.description}</p>}
       <div className="mt-6"><PriceLine plan={plan} interval={interval} /></div>
@@ -92,7 +92,7 @@ function AddonNote({ addons }: { addons: CappePublicAddon[] }) {
     })
     .filter(Boolean)
   if (!lines.length) return null
-  return <p className="mt-6 text-center text-sm text-[#969b8e]">Optional add-ons — {lines.join(' · ')}</p>
+  return <p className="mt-6 text-center text-sm text-[#b4bca9]">Optional extras — {lines.join(' · ')}</p>
 }
 
 export default function Pricing({ pricing }: { pricing: PricingState }) {
@@ -110,8 +110,8 @@ export default function Pricing({ pricing }: { pricing: PricingState }) {
     <section id="pricing" className={`scroll-mt-24 py-24 sm:py-32 ${WRAP}`}>
       <div className="mx-auto max-w-2xl text-center">
         <p className={`${EYEBROW} text-[#d4ff72]`}>Pricing</p>
-        <h2 className="mt-4 text-4xl font-semibold leading-[0.97] tracking-[-0.065em] text-[#f8f7f0] sm:text-5xl">Simple plans. Everything included.</h2>
-        <p className="mt-5 text-lg leading-8 text-[#afb3a7]">No app store, no surprise add-ons. Cancel anytime.</p>
+        <h2 className="mt-4 text-4xl font-medium leading-[1.04] tracking-[-0.055em] text-[#f8f7f0] sm:text-5xl">A plan for your next chapter.</h2>
+        <p className="mt-5 text-lg leading-8 text-[#afb3a7]">Choose the room you need to grow. The core tools are built in; selling options and allowances vary by plan.</p>
         {hasYearly && (
           <div role="group" aria-label="Billing interval" className="mx-auto mt-8 inline-flex rounded-full border border-white/10 bg-[#1a201a] p-1 text-sm font-semibold">
             {(['month', 'year'] as const).map((value) => (
@@ -139,6 +139,7 @@ export default function Pricing({ pricing }: { pricing: PricingState }) {
             {plans.map((plan) => <PlanCard key={plan.code} plan={plan} interval={interval} featured={plan.code === featuredCode} />)}
           </div>
           <AddonNote addons={pricing.pricing.addons} />
+          <p className="mx-auto mt-4 max-w-2xl text-center text-xs leading-6 text-[#a0ab93]">Domain registration and optional mailboxes cost extra unless included in your plan. Stripe processing fees apply to payments, alongside any Gummfit per-sale fee shown above.</p>
         </>
       )}
     </section>
