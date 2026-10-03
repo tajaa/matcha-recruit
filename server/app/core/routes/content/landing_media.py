@@ -12,6 +12,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.core.dependencies import require_admin
 from app.core.models.auth import CurrentUser
+from app.core.models.landing_media import CommercialUploadRequest, CommercialUploadComplete, SchedulingCommercial
+from app.core.services.landing_media import prepare_commercial_upload, verify_commercial_asset, verify_commercial_settings
 from app.database import get_connection
 
 logger = logging.getLogger(__name__)
@@ -26,6 +28,7 @@ DEFAULT_LANDING_MEDIA: dict[str, Any] = {
     "sizzle_videos": [],
     "customer_logos": [],
     "testimonials": [],
+    "scheduling_commercial": SchedulingCommercial().model_dump(),
 }
 
 _ALLOWED_VIDEO_EXT = {".mp4", ".mov", ".webm"}
@@ -86,13 +89,14 @@ async def update_landing_media(
 ):
     """Replace the entire landing_media blob."""
     merged = dict(DEFAULT_LANDING_MEDIA)
-    merged.update(body or {})
+    merged.pop("scheduling_commercial", None)
+    merged.update({key: value for key, value in (body or {}).items() if key != "scheduling_commercial"})
     async with get_connection() as conn:
         await conn.execute(
             """
             INSERT INTO platform_settings (key, value, updated_at)
             VALUES ('landing_media', $1::jsonb, NOW())
-            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+            ON CONFLICT (key) DO UPDATE SET value = platform_settings.value || EXCLUDED.value, updated_at = NOW()
             """,
             json.dumps(merged),
         )
@@ -129,3 +133,32 @@ async def upload_landing_media(
     storage = get_storage()
     url = await storage.upload_file(file_bytes, filename, prefix="landing", content_type=ct)
     return {"url": url, "filename": filename, "content_type": ct, "size": len(file_bytes)}
+
+
+@admin_router.post("/landing-media/scheduling-commercial/upload")
+async def prepare_scheduling_commercial_upload(body: CommercialUploadRequest, current_user: CurrentUser = Depends(require_admin)):
+    """Return a short-lived, exact-size POST policy for the public media bucket."""
+    import asyncio
+    return await asyncio.to_thread(prepare_commercial_upload, body)
+
+
+@admin_router.post("/landing-media/scheduling-commercial/complete")
+async def complete_scheduling_commercial_upload(body: CommercialUploadComplete, current_user: CurrentUser = Depends(require_admin)):
+    await verify_commercial_asset(body.slot, body.asset_url, expected_size=body.size, expected_type=body.content_type)
+    return {"url": body.asset_url}
+
+
+@admin_router.put("/landing-media/scheduling-commercial")
+async def save_scheduling_commercial(body: SchedulingCommercial, current_user: CurrentUser = Depends(require_admin)):
+    await verify_commercial_settings(body)
+    async with get_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO platform_settings (key, value, updated_at)
+            VALUES ('landing_media', jsonb_build_object('scheduling_commercial', $1::jsonb), NOW())
+            ON CONFLICT (key) DO UPDATE SET
+                value = platform_settings.value || EXCLUDED.value, updated_at = NOW()
+            """,
+            json.dumps(body.model_dump()),
+        )
+    return {"ok": True, "value": body.model_dump()}

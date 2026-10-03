@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Plus, Trash2, Upload, Check } from 'lucide-react'
 import { Card, Button } from '../../components/ui'
+import { SchedulingCommercialSettings } from '../../components/admin/SchedulingCommercialSettings'
 import { landingMedia, type LandingMedia, type LandingSizzleVideo, type LandingCustomerLogo, type LandingTestimonial } from '../../api/admin/landingMedia'
 
 const EMPTY: LandingMedia = {
@@ -150,6 +151,8 @@ export default function LandingMediaAdmin() {
       </div>
 
       {error && <div className="p-3 rounded border border-red-900/40 bg-red-950/20 text-sm text-red-300">{error}</div>}
+
+      <SchedulingCommercialSettings />
 
       {/* Hero */}
       <Card>
