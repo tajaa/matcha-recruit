@@ -152,6 +152,7 @@ export default function App() {
             multi-product home lives on at /overview. */}
         <Route path="/" element={isCappeHost ? <CappeRoutes /> : <SchedulingLanding />} />
         <Route path="/incidents" element={<SchedulingLanding tab="incidents" />} />
+        <Route path="/scheduling-v2" element={<SchedulingLanding variant="buyer" />} />
         <Route path="/overview" element={<Home />} />
         <Route path="/matcha-work" element={<MatchaWorkPage />} />
         <Route path="/matcha-ops" element={<MatchaOpsPage />} />

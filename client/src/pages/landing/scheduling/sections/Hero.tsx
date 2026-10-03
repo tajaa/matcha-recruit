@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import Stage from '../Stage'
+import { SchedulingCommercial } from '../../../../components/marketing/SchedulingCommercial'
 import { WRAP, display, mono } from '../../../../components/marketing/kit/styles'
 import { BOARD, PAPER, hexA } from '../../../../components/marketing/kit/theme'
 import { DURATION, LAYOUTS, STILL_FRAME } from '../timeline'
@@ -10,7 +11,7 @@ const loadWeek = () => import('../WeekComposition')
 
 const MUTED = hexA(PAPER, 0.58)
 
-export function Hero({ onContact }: { onContact: () => void }) {
+export function Hero({ onContact, showCommercial = false }: { onContact: () => void; showCommercial?: boolean }) {
   return (
     // The Draft section inverted: flat dark gray, pulled up under the sticky
     // top bar so it runs to the top edge.
@@ -57,7 +58,7 @@ export function Hero({ onContact }: { onContact: () => void }) {
 
         {/* the sheet sits flush on the page under one hairline, like the Draft grid */}
         <div className="relative mt-20 pt-4 sm:mt-24" style={{ borderTop: `1px solid ${hexA(PAPER, 0.1)}` }}>
-          <Stage
+          <SchedulingCommercial enabled={showCommercial} fallback={<Stage
             eager
             load={loadWeek}
             sizes={LAYOUTS}
@@ -91,7 +92,7 @@ export function Hero({ onContact }: { onContact: () => void }) {
                 </span>
               </div>
             }
-          />
+          />} />
         </div>
       </div>
     </header>

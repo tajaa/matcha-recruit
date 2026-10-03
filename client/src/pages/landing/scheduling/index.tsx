@@ -14,6 +14,9 @@ import { IncidentsHero } from './incidents/Hero'
 import { Approve, Report, Signed, Triage, WriteUp } from './incidents/Sections'
 import { INCIDENT_STEPS, type LandingTab } from './styles'
 import { BODY, INK, PAPER } from '../../../components/marketing/kit/theme'
+import { BuyerGuide, BuyerQuestions, BuyerTopBar, OperationFit, Recovery, Setup } from './buyers/BuyerSections'
+import { Pricing } from './buyers/Pricing'
+import { Value } from './buyers/Value'
 
 const PricingContactModal = lazy(() =>
   import('../../../components/marketing/PricingContactModal').then((m) => ({
@@ -58,7 +61,14 @@ const SEO: Record<LandingTab, { title: string; description: string; canonical: s
   },
 }
 
-export default function SchedulingLanding({ tab = 'scheduling' }: { tab?: LandingTab }) {
+const BUYER_SEO = {
+  ...SEO.scheduling,
+  title: 'Matcha Scheduling — Setup, plans, and value preview',
+  noindex: true,
+}
+
+export default function SchedulingLanding({ tab = 'scheduling', variant = 'original' }: { tab?: LandingTab; variant?: 'original' | 'buyer' }) {
+  const buyerPreview = tab === 'scheduling' && variant === 'buyer'
   const [contactOpen, setContactOpen] = useState(false)
   const [contactMounted, setContactMounted] = useState(false)
   const openContact = () => {
@@ -67,7 +77,7 @@ export default function SchedulingLanding({ tab = 'scheduling' }: { tab?: Landin
   }
 
   useMarketingBoard()
-  useSEO(SEO[tab])
+  useSEO(buyerPreview ? BUYER_SEO : SEO[tab])
 
   return (
     <div className="sched-root min-h-screen overflow-x-clip" style={{ backgroundColor: PAPER, color: INK, fontFamily: BODY }}>
@@ -78,7 +88,7 @@ export default function SchedulingLanding({ tab = 'scheduling' }: { tab?: Landin
           <PricingContactModal isOpen={contactOpen} onClose={() => setContactOpen(false)} mode="consultation" />
         </Suspense>
       )}
-      <TopBar onContact={openContact} tab={tab} />
+      {buyerPreview ? <BuyerTopBar /> : <TopBar onContact={openContact} tab={tab} />}
       {tab === 'incidents' ? (
         <>
           <TimelineRail steps={INCIDENT_STEPS} day={['Tue–Wed', 'Oct 6']} label="Incident timeline" />
@@ -95,13 +105,24 @@ export default function SchedulingLanding({ tab = 'scheduling' }: { tab?: Landin
       ) : (
         <>
           <TimelineRail darkStep="cost" />
-          <Hero onContact={openContact} />
+          <Hero onContact={openContact} showCommercial={buyerPreview} />
           <main>
+            {buyerPreview && <BuyerGuide />}
             <Draft />
             <Check />
             <Change />
+            {buyerPreview && <Recovery />}
             <Cost />
             <Publish />
+            {buyerPreview && (
+              <>
+                <Setup onContact={openContact} />
+                <OperationFit />
+                <Value onContact={openContact} />
+                <Pricing onContact={openContact} />
+                <BuyerQuestions onContact={openContact} />
+              </>
+            )}
             <Closing onContact={openContact} />
           </main>
         </>
