@@ -259,9 +259,9 @@ def _serves_default_queue(consumer) -> bool:
 def on_worker_ready(sender=None, **kwargs):
     """Auto-dispatch scheduled compliance checks on every worker startup.
 
-    The systemd timer restarts the worker every 15 minutes, so this
-    effectively runs the dispatcher on a 15-minute schedule without
-    needing celery-beat infrastructure.
+    The deployed systemd timer restarts the worker hourly. Startup also
+    resumes the auto-schedule dispatcher, which sweeps every minute and
+    keeps future rule occurrences durable in Postgres without celery-beat.
     """
     import importlib
 
@@ -298,6 +298,14 @@ def on_worker_ready(sender=None, **kwargs):
         prune_device_sessions.delay()
     except Exception:
         logger.exception("[Worker] Failed to enqueue mobile-session cleanup")
+
+    # Rule timing is durable in Postgres. Startup resumes the bounded
+    # minute dispatcher even if its previous countdown message was lost.
+    try:
+        from app.workers.tasks.schedule_auto_generation import dispatch_schedule_automation
+        dispatch_schedule_automation.delay()
+    except Exception:
+        logger.exception("[Worker] Failed to enqueue auto schedule recovery")
 
     task_keys = [key for key, _, _ in _SCHEDULED_TASKS]
     flags = _scheduler_flags(task_keys)

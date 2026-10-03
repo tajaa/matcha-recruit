@@ -70,7 +70,7 @@ def _fill(*, demand, roster, preflight=None, advisories=None, block_reasons=None
     async def fake_rules(conn, company_id, location_id):
         return dict(jurisdiction)
 
-    async def fake_preflight(conn, *, company_id, location_id, plan):
+    async def fake_preflight(conn, *, company_id, location_id, plan, **_context):
         calls["preflight"] += 1
         blocked = preflight(plan) if preflight else set()
         reasons = block_reasons(plan) if callable(block_reasons) else dict(block_reasons or {})

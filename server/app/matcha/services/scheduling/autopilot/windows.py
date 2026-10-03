@@ -72,6 +72,38 @@ def day_window(day: date, profile: dict) -> DayWindow:
     )
 
 
+OFF_WEEK_BUFFER_REFUSAL = (
+    "The opening prep buffer starts before this schedule week. Reduce the buffer "
+    "or move the first day's opening time later before building with Autopilot."
+)
+
+
+def off_week_buffer_refusal(week_start: date, profile: dict) -> str | None:
+    """The board owns shifts by start date, so this shape cannot be applied."""
+    window = day_window(week_start, profile)
+    if window.starts_at is not None and window.starts_at.date() < week_start:
+        return OFF_WEEK_BUFFER_REFUSAL
+    return None
+
+
+OFF_WEEK_DEMAND_REFUSAL = (
+    "Autopilot would create a shift starting outside this schedule week. "
+    "Adjust the overnight hours, buffers, or shift lengths before building again."
+)
+
+
+def off_week_demand_refusal(week_start: date, demand: list[dict]) -> str | None:
+    """Overnight ends may spill, but every start must belong to this board."""
+    lo = datetime.combine(week_start, time.min, tzinfo=timezone.utc)
+    hi = lo + timedelta(days=7)
+    for shift in demand:
+        start = shift["starts_at"]
+        start = datetime.fromisoformat(start) if isinstance(start, str) else start
+        if not lo <= start < hi:
+            return OFF_WEEK_DEMAND_REFUSAL
+    return None
+
+
 def slot_start(window: DayWindow, index: int) -> datetime:
     assert window.starts_at is not None
     return window.starts_at + timedelta(minutes=POLICY_SLOT_MINUTES * index)

@@ -39,6 +39,16 @@ export function useVoiceDictation(opts: { maxDurationSeconds?: number; onMaxDura
     ctxRef.current = null
   }, [])
 
+  const cancel = useCallback(() => {
+    cleanup()
+    framesRef.current = []
+    maxFiredRef.current = true
+    if (mountedRef.current) {
+      setStatus('idle')
+      setElapsedSeconds(0)
+    }
+  }, [cleanup])
+
   useEffect(() => {
     mountedRef.current = true
     return () => {
@@ -87,7 +97,9 @@ export function useVoiceDictation(opts: { maxDurationSeconds?: number; onMaxDura
       const source = ctx.createMediaStreamSource(stream)
       const node = new AudioWorkletNode(ctx, 'pcm-capture-processor')
       nodeRef.current = node
-      node.port.onmessage = (e: MessageEvent<ArrayBuffer>) => { framesRef.current.push(e.data) }
+      node.port.onmessage = (e: MessageEvent<ArrayBuffer>) => {
+        if (mountedRef.current && generation === startGenerationRef.current) framesRef.current.push(e.data)
+      }
       source.connect(node)
       // zero-gain sink keeps the worklet pulling without echoing the mic
       const silencer = ctx.createGain()
@@ -101,8 +113,9 @@ export function useVoiceDictation(opts: { maxDurationSeconds?: number; onMaxDura
       }, 1000)
       startPendingRef.current = false
     } catch (err) {
+      if (!mountedRef.current || generation !== startGenerationRef.current) return
       const denied = err instanceof DOMException && (err.name === 'NotAllowedError' || err.name === 'SecurityError')
-      if (mountedRef.current && generation === startGenerationRef.current) setStatus(denied ? 'denied' : 'error')
+      setStatus(denied ? 'denied' : 'error')
       cleanup()
     }
   }, [cleanup])
@@ -111,13 +124,19 @@ export function useVoiceDictation(opts: { maxDurationSeconds?: number; onMaxDura
   const stop = useCallback(async (): Promise<Blob | null> => {
     const node = nodeRef.current
     if (!node) {
+      cleanup()
       if (mountedRef.current) setStatus('idle')
       return null
     }
+    const generation = startGenerationRef.current
     return new Promise<Blob | null>((resolve) => {
       node.port.postMessage('flush')
       // give the flushed tail one tick to arrive before we tear down
       window.setTimeout(() => {
+        if (generation !== startGenerationRef.current) {
+          resolve(null)
+          return
+        }
         const frames = framesRef.current
         framesRef.current = []
         cleanup()
@@ -131,5 +150,5 @@ export function useVoiceDictation(opts: { maxDurationSeconds?: number; onMaxDura
     })
   }, [cleanup])
 
-  return { start, stop, status, elapsedSeconds }
+  return { start, stop, cancel, status, elapsedSeconds }
 }

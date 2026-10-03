@@ -25,6 +25,10 @@ from app.matcha.services.scheduling.schedule_assistant_session import (
     resolve_schedule_assistant_scope,
 )
 from app.matcha.models.matcha_work.matcha_work import SendMessageRequest, SendMessageResponse
+from app.matcha.services.scheduling.labor_cost_service import labor_cost_visible_from
+from app.matcha.services.scheduling.schedule_cost_projection import (
+    project_schedule_messages, project_schedule_payload,
+)
 from app.matcha.routes.matcha_work._shared import _row_to_message, _sse_data
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 from app.matcha.services.matcha_work.ai_apply import (
@@ -138,6 +142,13 @@ async def send_message_stream(
         doc_svc.get_company_profile_for_ai(company_id),
         doc_svc.get_context_summary(thread_id),
     )
+    if is_schedule_thread:
+        include_cost = labor_cost_visible_from(features, current_user.role)
+        thread["current_state"] = project_schedule_payload(thread.get("current_state") or {}, include_cost=include_cost)
+        messages = project_schedule_messages(messages, include_cost=include_cost)
+        if not include_cost:
+            # A compacted legacy conversation may contain previously visible wages.
+            context_summary = None
     tc.profile = profile
     tc.context_summary = context_summary
     tc.summary_at_count = summary_at_count
@@ -160,6 +171,8 @@ async def send_message_stream(
             except Exception:
                 meta = None
         if isinstance(meta, dict):
+            if is_schedule_thread:
+                entry["metadata"] = {"schedule_cost_visible": meta.get("schedule_cost_visible")}
             atts = meta.get("attachments") or []
             # Only image attachments go into the multimodal image path. File
             # attachments must NOT be sent as image parts.

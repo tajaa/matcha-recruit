@@ -18,6 +18,10 @@ from app.matcha.services.scheduling.schedule_eligibility_authorization import (
     resolve_eligibility_manager_scope,
 )
 from app.matcha.services.scheduling.schedule_rules import align_week_start
+from app.matcha.services.scheduling.schedule_automation import location_today
+from app.matcha.services.scheduling.schedule_cost_projection import (
+    price_automatic_action, project_schedule_messages, project_schedule_payload, schedule_cost_visible,
+)
 
 @dataclass(frozen=True)
 class ScheduleAssistantScope:
@@ -45,8 +49,10 @@ def _coerce_jsonb(value) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _automatic_action(row) -> dict:
-    proposal = _coerce_jsonb(row["proposal"])
+def _automatic_action(row, *, include_cost: bool = False) -> dict:
+    proposal = project_schedule_payload(
+        _coerce_jsonb(row["proposal"]), include_cost=include_cost,
+    )
     metrics = _coerce_jsonb(row["metrics"])
     review = _coerce_jsonb(proposal.get("review"))
     # The per-person load / advisories / jurisdiction review the workspace's
@@ -83,7 +89,7 @@ def _automatic_action(row) -> dict:
 
 async def _adopt_automatic_proposal(
     conn, *, company_id: UUID, location_id: UUID, week_start: date,
-    thread_id: UUID, current_state: dict, version: int,
+    thread_id: UUID, current_state: dict, version: int, actor_role: str | None = None,
 ) -> tuple[dict, int]:
     """Attach a prepared proposal to this manager's durable schedule session."""
     active = current_state.get("huume_action")
@@ -100,6 +106,18 @@ async def _adopt_automatic_proposal(
             generation_run_id, company_id,
         )
         if not live_status or live_status == "proposed":
+            if live_status == "proposed" and (active.get("auto_generated") or active.get("origin") == "automatic"):
+                priced = await price_automatic_action(
+                    conn, company_id=company_id, location_id=location_id, week_start=week_start,
+                    actor_role=actor_role, action=active,
+                )
+                if priced != active:
+                    current_state = {**current_state, "huume_action": priced}
+                    version = int(version or 0) + 1
+                    await conn.execute(
+                        "UPDATE mw_threads SET current_state=$1::jsonb, version=$2, updated_at=NOW() WHERE id=$3",
+                        json.dumps(current_state), version, thread_id,
+                    )
             return current_state, version
         display_status = "applied" if live_status == "applied" else (
             "cancelled" if live_status == "cancelled" else "failed"
@@ -131,7 +149,12 @@ async def _adopt_automatic_proposal(
     )
     if not row:
         return current_state, version
-    next_state = {**current_state, "huume_action": _automatic_action(row)}
+    action = await price_automatic_action(
+        conn, company_id=company_id, location_id=location_id, week_start=week_start,
+        actor_role=actor_role, action=_automatic_action(row),
+        proposal=_coerce_jsonb(row["proposal"]),
+    )
+    next_state = {**current_state, "huume_action": action}
     next_version = int(version or 0) + 1
     await conn.execute(
         """UPDATE mw_threads
@@ -314,6 +337,17 @@ async def get_or_create_schedule_assistant_session(
                 )
                 session_id = session_row["id"]
 
+            include_cost = await schedule_cost_visible(
+                conn, company_id=company_id, actor_role=actor_role,
+            )
+            projected_state = project_schedule_payload(current_state, include_cost=include_cost)
+            if projected_state != current_state:
+                current_state = projected_state
+                version = int(version or 0) + 1
+                await conn.execute(
+                    "UPDATE mw_threads SET current_state=$1::jsonb, version=$2, updated_at=NOW() WHERE id=$3",
+                    json.dumps(current_state), version, thread_id,
+                )
             current_state, version = await _adopt_automatic_proposal(
                 conn,
                 company_id=company_id,
@@ -322,6 +356,7 @@ async def get_or_create_schedule_assistant_session(
                 thread_id=thread_id,
                 current_state=current_state,
                 version=version,
+                actor_role=actor_role,
             )
             # The chat is named after its FIRST turn, so it has to be read
             # from the whole thread — the message window below is the newest
@@ -336,7 +371,9 @@ async def get_or_create_schedule_assistant_session(
                 thread_id,
             )
 
-    messages = await get_thread_messages(thread_id, limit=50)
+    messages = project_schedule_messages(
+        await get_thread_messages(thread_id, limit=50), include_cost=include_cost,
+    )
     return {
         "session_id": str(session_id),
         "thread_id": str(thread_id),
@@ -423,7 +460,12 @@ async def adopt_editor_proposal(
                     detail="That fill preview belongs to a different location or week than this chat",
                 )
 
-            review = build_review(proposal, proposal_id=str(proposal_id))
+            include_cost = await schedule_cost_visible(
+                conn, company_id=company_id, actor_role=actor_role,
+            )
+            review = project_schedule_payload(
+                build_review(proposal, proposal_id=str(proposal_id)), include_cost=include_cost,
+            )
             staged_ops = [item for item in review["assignments"] if item.get("verdict") != "blocked"]
             staged = {
                 "type": "schedule_change",
@@ -445,7 +487,9 @@ async def adopt_editor_proposal(
                 "adopted_from": "editor_scenario",
             }
 
-            current_state = _coerce_jsonb(row["current_state"])
+            current_state = project_schedule_payload(
+                _coerce_jsonb(row["current_state"]), include_cost=include_cost,
+            )
             displaced = current_state.get("huume_action")
             if isinstance(displaced, dict) and displaced.get("status") == "proposed":
                 if displaced.get("type") == "schedule_change" and displaced.get("proposal_id") \
@@ -635,17 +679,25 @@ async def get_automatic_suggestion_status(
             actor_role=actor_role,
             location_id=location_id,
         )
+        timezone_name = await conn.fetchval(
+            "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
+            location_id, company_id,
+        )
+        weekday = await resolve_week_start_weekday(
+            conn, company_id=company_id, location_id=location_id,
+        )
+        current_week = align_week_start(location_today(timezone_name), weekday)
         row = await conn.fetchrow(
             """
             SELECT id, week_start, created_at
             FROM schedule_generation_runs
             WHERE company_id=$1 AND location_id=$2
               AND origin='automatic' AND status='proposed'
-              AND week_start >= CURRENT_DATE
+              AND week_start >= $4
             ORDER BY (week_start=$3) DESC, week_start, created_at DESC
             LIMIT 1
             """,
-            company_id, location_id, week_start,
+            company_id, location_id, week_start, current_week,
         )
     return {
         "available": bool(row),

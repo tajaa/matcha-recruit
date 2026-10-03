@@ -343,6 +343,8 @@ export default function SchedulePilot() {
   function openAutopilotSetup(kind: 'weekSetup' | 'jobs') {
     setAutopilotWizardOpen(false)
     setReturnToAutopilot(true)
+    setCenterView('board')
+    setMobileTab('board')
     setDrawer(kind)
   }
 
@@ -783,6 +785,7 @@ export default function SchedulePilot() {
           readinessLoading={autopilotReadinessLoading}
           readinessError={autopilotReadinessError}
           running={autopilotRunning}
+          canEditPolicy={canManageStores}
           onClose={() => setAutopilotWizardOpen(false)}
           onRefresh={refreshAutopilotReadiness}
           onOpenWeekSetup={() => openAutopilotSetup('weekSetup')}

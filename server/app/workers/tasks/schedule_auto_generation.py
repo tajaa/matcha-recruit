@@ -1,4 +1,4 @@
-"""Execute one tenant-configured, review-only schedule automation rule."""
+"""Durable, bounded dispatch of tenant-configured schedule suggestions."""
 
 import asyncio
 import logging
@@ -19,18 +19,28 @@ from ..utils import get_db_connection
 
 
 logger = logging.getLogger(__name__)
+DISPATCH_TASK_KEY = "schedule_auto_generation_dispatch"
+DISPATCH_SECONDS = 60
+DISPATCH_HORIZON_SECONDS = 120
+# Longer than the worker's ten-minute hard time limit. A killed worker's
+# current occurrence stays durable and becomes eligible for recovery here.
+DISPATCH_LEASE_SECONDS = 660
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def enqueue_schedule_automation(rule_id: UUID, schedule_version: int, scheduled_for: datetime) -> None:
-    """Publish the exact rule/version occurrence; edited rules make it stale."""
+def enqueue_schedule_automation(rule_id: UUID, schedule_version: int, scheduled_for: datetime) -> bool:
+    """Only publish near-term occurrences; distant timers remain in Postgres."""
+    now = _utcnow()
+    if scheduled_for > now + timedelta(seconds=DISPATCH_HORIZON_SECONDS):
+        return False
     run_schedule_auto_generation.apply_async(
         args=[str(rule_id), schedule_version, scheduled_for.isoformat()],
-        eta=scheduled_for,
+        eta=max(now, scheduled_for),
     )
+    return True
 
 
 def supports_automatic_generation(
@@ -52,6 +62,14 @@ async def _run(rule_id: str, schedule_version: int, scheduled_for: str) -> dict:
 
     conn = await get_db_connection()
     try:
+        # Session-scoped: a crash releases it, without advancing the durable
+        # occurrence. Saves can still invalidate the version during planning.
+        locked = await conn.fetchval(
+            "SELECT pg_try_advisory_lock(hashtextextended($1, 0))",
+            f"schedule-auto:{rule_uuid}",
+        )
+        if not locked:
+            return {"skipped": True, "reason": "already_running"}
         rule = await conn.fetchrow(
             """
             SELECT r.*, l.timezone, c.enabled_features, c.signup_source, c.status AS company_status
@@ -70,91 +88,179 @@ async def _run(rule_id: str, schedule_version: int, scheduled_for: str) -> dict:
         if rule["company_status"] not in (None, "approved") or not supports_automatic_generation(
             rule["enabled_features"], rule["signup_source"], mode,
         ):
-            await conn.execute(
+            disabled = await conn.execute(
                 """UPDATE schedule_automation_rules
                    SET enabled=false, next_run_at=NULL, last_attempt_at=NOW(),
                        last_completed_at=NOW(), last_status='feature_disabled',
                        last_message='Required scheduling or Huume features are not enabled.', updated_at=NOW()
-                   WHERE id=$1""",
-                rule_uuid,
+                   WHERE id=$1 AND schedule_version=$2 AND enabled=true AND next_run_at=$3""",
+                rule_uuid, schedule_version, expected_at,
             )
-            return {"skipped": True, "reason": "feature_disabled"}
+            return {"skipped": True, "reason": "feature_disabled" if disabled != "UPDATE 0" else "stale_or_disabled_rule"}
 
-        following_at = None
-        following_enabled = False
-        if rule["cadence"] == "weekly":
-            following_at = next_run_at(
-                cadence="weekly",
-                timezone_name=rule["timezone"],
-                run_time=rule["run_time"],
-                run_weekday=rule["run_weekday"],
-                after=expected_at + timedelta(seconds=1),
-            )
-            following_enabled = True
         claim = await conn.execute(
             """UPDATE schedule_automation_rules
-               SET next_run_at=$1, enabled=$2, last_attempt_at=NOW(),
-                   last_status='running', last_message=NULL, updated_at=NOW()
-               WHERE id=$3 AND schedule_version=$4 AND enabled=true AND next_run_at=$5""",
-            following_at, following_enabled, rule_uuid, schedule_version, expected_at,
+               SET last_attempt_at=NOW(), last_status='running', last_message=NULL, updated_at=NOW()
+               WHERE id=$1 AND schedule_version=$2 AND enabled=true AND next_run_at=$3""",
+            rule_uuid, schedule_version, expected_at,
         )
         if claim == "UPDATE 0":
             return {"skipped": True, "reason": "already_claimed"}
-        # Queue the following occurrence immediately after the DB claim. A
-        # planner failure (or worker death during planning) must not silently
-        # erase the recurring rule's future cadence.
-        if following_at:
-            enqueue_schedule_automation(rule_uuid, schedule_version, following_at)
-
-        week_start_weekday = await resolve_week_start_weekday(
-            conn, company_id=rule["company_id"], location_id=rule["location_id"],
-        )
-        week_start = target_week_start(
-            cadence=rule["cadence"],
-            scheduled_for=expected_at,
-            timezone_name=rule["timezone"],
-            target_weeks_ahead=rule["target_weeks_ahead"],
-            one_time_week_start=rule["target_week_start"],
-            week_start_weekday=week_start_weekday,
-        )
-        # Save refuses a past week, but weeks keep passing after the save.
-        # Judged at delivery, not at the scheduled occurrence: a task that
-        # ran late (worker down or recycling past its ETA) must not build a
-        # week that ended while it waited.
-        stale_target = past_week_refusal(
-            week_start=week_start, timezone_name=rule["timezone"],
-            week_start_weekday=week_start_weekday, now=max(expected_at, _utcnow()),
-        )
         try:
+            week_start_weekday = await resolve_week_start_weekday(
+                conn, company_id=rule["company_id"], location_id=rule["location_id"],
+            )
+            week_start = target_week_start(
+                cadence=rule["cadence"], scheduled_for=expected_at,
+                timezone_name=rule["timezone"], target_weeks_ahead=rule["target_weeks_ahead"],
+                one_time_week_start=rule["target_week_start"], week_start_weekday=week_start_weekday,
+            )
+            stale_target = past_week_refusal(
+                week_start=week_start, timezone_name=rule["timezone"],
+                week_start_weekday=week_start_weekday, now=max(expected_at, _utcnow()),
+            )
             if stale_target:
                 result = stale_target
             elif mode == "template" and rule["week_template_id"] is None:
                 result = {"status": "not_ready", "message": "Choose a saved week template."}
             else:
                 kwargs = {
-                    "company_id": rule["company_id"],
-                    "location_id": rule["location_id"],
-                    "week_start": week_start,
-                    "week_template_id": rule["week_template_id"],
+                    "company_id": rule["company_id"], "location_id": rule["location_id"],
+                    "week_start": week_start, "week_template_id": rule["week_template_id"],
                 }
                 if mode == "autopilot":
                     kwargs["mode"] = mode
                 result = await generate_review_suggestion(**kwargs)
+            following_at = None
+            if rule["cadence"] == "weekly":
+                following_at = next_run_at(
+                    cadence="weekly", timezone_name=rule["timezone"],
+                    run_time=rule["run_time"], run_weekday=rule["run_weekday"],
+                    # A long outage must not replay every missed week before
+                    # reaching a future occurrence.
+                    after=max(expected_at + timedelta(seconds=1), _utcnow()),
+                )
+            generation_id = result.get("generation_run_id")
+            completed = await conn.execute(
+                """UPDATE schedule_automation_rules
+                   SET last_completed_at=NOW(), last_status=$1, last_message=$2,
+                       last_generation_run_id=$3, next_run_at=$6, enabled=$7, updated_at=NOW()
+                   WHERE id=$4 AND schedule_version=$5 AND enabled=true AND next_run_at=$8""",
+                result["status"], result.get("message"), UUID(generation_id) if generation_id else None,
+                rule_uuid, schedule_version, following_at, following_at is not None, expected_at,
+            )
+            if completed == "UPDATE 0":
+                return {"skipped": True, "reason": "stale_or_disabled_rule"}
+            return {**result, "week_start": week_start.isoformat(), "next_run_at": following_at}
         except Exception as exc:
-            logger.exception("Schedule planner failed rule=%s", rule_uuid)
-            result = {"status": "failed", "message": str(exc)[:1000]}
-        generation_id = result.get("generation_run_id")
+            # Keep the current occurrence pending for Celery retry and the
+            # dispatcher. A proposal already inserted is found idempotently
+            # on replay if the completion write was interrupted.
+            try:
+                await conn.execute(
+                    """UPDATE schedule_automation_rules
+                       SET last_status='retrying', last_message=$1, updated_at=NOW()
+                       WHERE id=$2 AND schedule_version=$3 AND enabled=true AND next_run_at=$4""",
+                    str(exc)[:1000], rule_uuid, schedule_version, expected_at,
+                )
+            except Exception:
+                logger.exception("Could not record schedule automation retry rule=%s", rule_uuid)
+            raise
+    finally:
+        # Closing the raw connection also releases its advisory lock.
+        await conn.close()
+
+
+async def _dispatch() -> dict:
+    """Recover durable occurrences and publish at most a bounded near-term batch."""
+    conn = await get_db_connection()
+    try:
+        # Existing scheduler infrastructure, no schema change. Never overwrite
+        # an operator's explicit disable or configured cycle limit.
         await conn.execute(
-            """UPDATE schedule_automation_rules
-               SET last_completed_at=NOW(), last_status=$1, last_message=$2,
-                   last_generation_run_id=$3, updated_at=NOW()
-               WHERE id=$4 AND schedule_version=$5""",
-            result["status"], result.get("message"), UUID(generation_id) if generation_id else None,
-            rule_uuid, schedule_version,
+            """INSERT INTO scheduler_settings(task_key, display_name, description, enabled, max_per_cycle)
+               VALUES($1, 'Auto schedule dispatch',
+                      'Recovers pending location rules and queues only near-term review suggestions.', true, 100)
+               ON CONFLICT (task_key) DO NOTHING""",
+            DISPATCH_TASK_KEY,
         )
-        return {**result, "week_start": week_start.isoformat(), "next_run_at": following_at}
+        settings = await conn.fetchrow(
+            "SELECT enabled, max_per_cycle FROM scheduler_settings WHERE task_key=$1", DISPATCH_TASK_KEY,
+        )
+        if not settings or not settings["enabled"]:
+            return {"skipped": True, "reason": "disabled", "reschedule": False}
+        claimed = await conn.fetchval(
+            """UPDATE scheduler_settings SET last_run_at=NOW()
+               WHERE task_key=$1 AND enabled=true
+                 AND (last_run_at IS NULL OR last_run_at < NOW() - make_interval(secs => $2))
+               RETURNING true""",
+            DISPATCH_TASK_KEY, int(DISPATCH_SECONDS * 0.75),
+        )
+        if not claimed:
+            return {"skipped": True, "reason": "another_chain", "reschedule": False}
+        limit = max(1, min(int(settings["max_per_cycle"] or 100), 1000))
+        horizon = _utcnow() + timedelta(seconds=DISPATCH_HORIZON_SECONDS)
+        rules = await conn.fetch(
+            """SELECT r.id, r.schedule_version, r.next_run_at
+               FROM schedule_automation_rules r
+               JOIN business_locations l ON l.id=r.location_id AND l.company_id=r.company_id
+               WHERE r.enabled=true AND r.next_run_at <= $1 AND l.is_active IS NOT FALSE
+                 AND (r.last_status IS NULL OR r.last_status NOT IN ('queued', 'running', 'retrying')
+                      OR r.updated_at < NOW() - make_interval(secs => $2))
+               ORDER BY r.next_run_at, r.id LIMIT $3""",
+            horizon, DISPATCH_LEASE_SECONDS, limit,
+        )
+        queued, failed = 0, 0
+        for rule in rules:
+            queued_claim = await conn.execute(
+                """UPDATE schedule_automation_rules SET last_status='queued', updated_at=NOW()
+                   WHERE id=$1 AND schedule_version=$2 AND enabled=true AND next_run_at=$3
+                     AND (last_status IS NULL OR last_status NOT IN ('queued', 'running', 'retrying')
+                          OR updated_at < NOW() - make_interval(secs => $4))""",
+                rule["id"], rule["schedule_version"], rule["next_run_at"], DISPATCH_LEASE_SECONDS,
+            )
+            if queued_claim == "UPDATE 0":
+                continue
+            try:
+                published = enqueue_schedule_automation(rule["id"], rule["schedule_version"], rule["next_run_at"])
+                if published is False:
+                    raise RuntimeError("Occurrence moved beyond the short dispatch horizon; waiting for recovery.")
+                queued += 1
+            except Exception as exc:
+                failed += 1
+                logger.exception("Could not dispatch schedule automation rule=%s", rule["id"])
+                # Publication can fail after the queue lease was persisted.
+                # Release it for the next sweep; a death before this write is
+                # repaired by lease expiry. A started task wins the predicate.
+                await conn.execute(
+                    """UPDATE schedule_automation_rules
+                       SET last_status='dispatch_failed', last_message=$1, updated_at=NOW()
+                       WHERE id=$2 AND schedule_version=$3 AND enabled=true AND next_run_at=$4
+                         AND last_status='queued'""",
+                    str(exc)[:1000], rule["id"], rule["schedule_version"], rule["next_run_at"],
+                )
+        return {"queued": queued, "failed": failed, "reschedule": True}
     finally:
         await conn.close()
+
+
+def _reschedule_dispatch() -> None:
+    try:
+        dispatch_schedule_automation.apply_async(countdown=DISPATCH_SECONDS)
+    except Exception:
+        logger.exception("Auto schedule dispatch could not re-enqueue; worker startup resumes recovery")
+
+
+@celery_app.task(name="schedule_auto_generation.dispatch")
+def dispatch_schedule_automation():
+    try:
+        result = asyncio.run(_dispatch())
+    except Exception:
+        _reschedule_dispatch()
+        raise
+    if result.pop("reschedule", False):
+        _reschedule_dispatch()
+    return result
 
 
 @celery_app.task(name="schedule_auto_generation.run", bind=True, max_retries=1)

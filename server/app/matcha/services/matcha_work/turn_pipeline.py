@@ -61,6 +61,10 @@ from app.matcha.services.scheduling.schedule_assistant_session import (
     resolve_schedule_assistant_scope,
 )
 from app.matcha.services.billing.model_pricing import calculate_call_cost
+from app.matcha.services.scheduling.labor_cost_service import labor_cost_visible_from
+from app.matcha.services.scheduling.schedule_cost_projection import (
+    project_schedule_messages, project_schedule_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -984,6 +988,11 @@ async def _run_huume_dispatch(tc: TurnContext):
             )
 
     current_state = thread.get("current_state") or {}
+    include_schedule_cost = labor_cost_visible_from(features, current_user.role)
+    if is_schedule_thread:
+        current_state = project_schedule_payload(current_state, include_cost=include_schedule_cost)
+        thread["current_state"] = current_state
+        tc.msg_dicts = project_schedule_messages(tc.msg_dicts, include_cost=include_schedule_cost)
     final_result: dict | None = None
     run_failed = False
     try:
@@ -1032,6 +1041,8 @@ async def _run_huume_dispatch(tc: TurnContext):
         }
 
     state_updates = final_result.get("state_updates") or {}
+    if is_schedule_thread:
+        state_updates = project_schedule_payload(state_updates, include_cost=include_schedule_cost)
     if state_updates:
         try:
             update_result = await doc_svc.apply_update(thread_id, state_updates, diff_summary="Huume turn")
@@ -1061,7 +1072,12 @@ async def _run_huume_dispatch(tc: TurnContext):
     except Exception:
         logger.warning("Huume post-turn state re-read failed for thread %s", thread_id, exc_info=True)
 
+    if is_schedule_thread:
+        tc.current_state = project_schedule_payload(tc.current_state, include_cost=include_schedule_cost)
     assistant_metadata = {"huume_steps": final_result.get("steps") or [], "huume_run_id": str(run_id)}
+    if is_schedule_thread:
+        assistant_metadata["schedule_cost_visible"] = include_schedule_cost
+        assistant_metadata = project_schedule_payload(assistant_metadata, include_cost=include_schedule_cost)
     # Pilot-tool citation records (Legal/Handbook Pilot skills) — stored under
     # the same metadata keys HR Pilot uses, so MessageBubble's CitationSources
     # renders them with no client changes.

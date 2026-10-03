@@ -27,7 +27,9 @@ class _Conn:
     async def fetchrow(self, *_args):
         return self.rule
 
-    async def fetchval(self, *_args):
+    async def fetchval(self, query, *_args):
+        if "pg_try_advisory_lock" in query:
+            return True
         # The location's week start day; no profile row in these fixtures.
         return None
 
@@ -92,7 +94,7 @@ def test_weekly_target_is_relative_to_the_scheduled_occurrence():
 
 
 @pytest.mark.asyncio
-async def test_rule_generates_review_proposal_and_queues_only_its_next_occurrence(monkeypatch):
+async def test_rule_generates_review_proposal_and_keeps_next_occurrence_in_database(monkeypatch):
     company_id, location_id, rule_id, template_id = uuid4(), uuid4(), uuid4(), uuid4()
     scheduled_for = datetime(2026, 8, 27, 16, tzinfo=timezone.utc)
     conn = _Conn({
@@ -132,8 +134,9 @@ async def test_rule_generates_review_proposal_and_queues_only_its_next_occurrenc
         week_start=date(2026, 8, 30),
         week_template_id=template_id,
     )
-    enqueue.assert_called_once()
-    assert enqueue.call_args.args[:2] == (rule_id, 3)
+    enqueue.assert_not_called()
+    completed = [args for query, args in conn.execute_calls if "last_completed_at" in query]
+    assert completed[-1][5] == datetime(2026, 9, 3, 16, tzinfo=timezone.utc)
     assert conn.closed is True
 
 

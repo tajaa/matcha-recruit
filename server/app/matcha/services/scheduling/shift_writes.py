@@ -156,6 +156,28 @@ async def lock_scheduling_employees(
         )
 
 
+async def lock_scheduling_weeks(
+    conn, company_id: UUID, scopes: list[tuple[UUID | None, date]],
+) -> None:
+    """Serialize materialization before live reads, including anchor changes.
+
+    A location mutex covers overlapping week scopes even if its week anchor
+    changed between requests. Different weeks at one location serialize too;
+    explicit full-week creation is infrequent. Take every location mutex,
+    then every week mutex, before run/shift/employee locks in stable order.
+    """
+    for location_id in sorted({item[0] for item in scopes}, key=str):
+        await conn.fetchval(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+            f"schedule-materialization:{company_id}:{location_id}",
+        )
+    for location_id, week_start in sorted(set(scopes), key=lambda item: (str(item[0]), item[1])):
+        await conn.fetchval(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+            f"schedule-week:{company_id}:{location_id}:{week_start.isoformat()}",
+        )
+
+
 async def fetch_availability(
     conn, company_id: UUID, employee_ids: list[UUID],
 ) -> dict:
@@ -688,7 +710,8 @@ async def generate_week_template_shifts(
     generated from a block inherits that block's job_id, so a job set on
     "Box Office" once carries into every generated week.
     """
-    from .schedule_rules import template_windows
+    from .location_profile import resolve_week_start_weekday
+    from .schedule_rules import align_week_start, template_windows
     from .shift_compliance import check_shift_compliance
     from .schedule_breaks import minimum_meal_break_minutes
     from .schedule_guidance import resolve_open_shift_break_plans
@@ -725,6 +748,17 @@ async def generate_week_template_shifts(
             (entry_index, window_index, starts_at, ends_at)
             for window_index, (starts_at, ends_at) in enumerate(zip(starts, ends))
         )
+
+    scopes = []
+    for location_id, indexed_windows in windows_by_location.items():
+        weekday = await resolve_week_start_weekday(
+            conn, company_id=company_id, location_id=location_id,
+        )
+        scopes.extend(
+            (location_id, align_week_start(starts_at.date(), weekday))
+            for _entry, _window, starts_at, _ends_at in indexed_windows
+        )
+    await lock_scheduling_weeks(conn, company_id, scopes)
 
     # Resolve location metadata once and rule sets once per local calendar
     # date, rather than issuing several queries for every materialized shift.

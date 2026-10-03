@@ -1698,7 +1698,7 @@ async def test_statutory_advisories_reach_the_assignment_the_findings_and_the_re
     _propose_env(monkeypatch, conn, demand=demand, employees=[_employee("amy", "Amy", state="windows")],
                  profile=_profile(operating_hours=ALL_WEEK_HOURS))
 
-    async def every_pair_has_the_flsa_line(conn_, *, company_id, location_id, plan):
+    async def every_pair_has_the_flsa_line(conn_, *, company_id, location_id, plan, **_context):
         return set(), {(shift["key"], a["employee_id"]): [FLSA]
                        for shift in plan["shifts"] for a in shift["proposed_assignments"]}, {}
 
@@ -1727,7 +1727,7 @@ async def test_the_advisory_list_is_capped_but_the_count_is_not(monkeypatch):
                  employees=[_employee("amy", "Amy", state="windows"), _employee("bea", "Bea", state="windows")],
                  profile=_profile(operating_hours=ALL_WEEK_HOURS))
 
-    async def flsa_everywhere(conn_, *, company_id, location_id, plan):
+    async def flsa_everywhere(conn_, *, company_id, location_id, plan, **_context):
         return set(), {(shift["key"], a["employee_id"]): [FLSA]
                        for shift in plan["shifts"] for a in shift["proposed_assignments"]}, {}
 
@@ -1747,7 +1747,7 @@ async def test_a_block_that_survives_the_replan_budget_is_stripped_not_shown_fil
                  employees=employees)
     calls = []
 
-    async def block_whoever_was_picked(conn_, *, company_id, location_id, plan):
+    async def block_whoever_was_picked(conn_, *, company_id, location_id, plan, **_context):
         pairs = {(s["key"], a["employee_id"]) for s in plan["shifts"] for a in s["proposed_assignments"]}
         calls.append(pairs)
         return pairs, {}, {

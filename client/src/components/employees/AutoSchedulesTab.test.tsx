@@ -27,6 +27,28 @@ const template = {
   id: 'template-1', name: 'Standard Week', location_id: 'loc-1', color: null, notes: null, blocks: [],
 }
 
+function automationRule(locationId: string, weeks = 1) {
+  return {
+    id: `rule-${locationId}`, location_id: locationId, location_name: locationId, timezone: 'UTC',
+    enabled: true, cadence: 'weekly', mode: 'autopilot', week_template_id: null,
+    week_template_name: null, run_weekday: 4, run_date: null, run_time: '09:00',
+    target_weeks_ahead: weeks, target_week_start: null, next_run_at: null,
+    last_attempt_at: null, last_completed_at: null, last_status: null,
+    last_message: null, last_generation_run_id: null,
+  }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: Error) => void
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+
+function automationTree(locationId: string) {
+  return <MemoryRouter><ToastProvider><AutoSchedulesTab locationId={locationId} /></ToastProvider></MemoryRouter>
+}
+
 describe('AutoSchedulesTab', () => {
   beforeEach(() => {
     mocks.hasFeature.mockReturnValue(false)
@@ -46,6 +68,91 @@ describe('AutoSchedulesTab', () => {
       last_generation_run_id: null,
       ...payload,
     }))
+  })
+
+  it.each(['success', 'failure'])('ignores a stale location load %s without ending the current load', async (outcome) => {
+    const first = deferred<{ rule: ReturnType<typeof automationRule> }>()
+    const current = deferred<{ rule: ReturnType<typeof automationRule> }>()
+    mocks.fetchRule.mockReturnValueOnce(first.promise).mockReturnValueOnce(current.promise)
+    const view = render(automationTree('loc-1'))
+    view.rerender(automationTree('loc-2'))
+    await act(async () => { if (outcome === 'success') first.resolve({ rule: automationRule('loc-1', 3) }); else first.reject(new Error('Old location failed')) })
+    expect(screen.queryByLabelText('Week to prepare')).not.toBeInTheDocument()
+    expect(screen.queryByText('Old location failed')).not.toBeInTheDocument()
+    await act(async () => current.resolve({ rule: automationRule('loc-2', 2) }))
+    expect(screen.getByLabelText('Week to prepare')).toHaveValue('2')
+  })
+
+  it('does not reuse an old load after returning to the same location', async () => {
+    const first = deferred<{ rule: ReturnType<typeof automationRule> }>()
+    mocks.fetchRule.mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce({ rule: automationRule('loc-2') })
+      .mockResolvedValueOnce({ rule: automationRule('loc-1', 2) })
+    const view = render(automationTree('loc-1'))
+    view.rerender(automationTree('loc-2'))
+    await screen.findByLabelText('Week to prepare')
+    view.rerender(automationTree('loc-1'))
+    expect(await screen.findByLabelText('Week to prepare')).toHaveValue('2')
+    await act(async () => first.resolve({ rule: automationRule('loc-1', 4) }))
+    expect(screen.getByLabelText('Week to prepare')).toHaveValue('2')
+  })
+
+  it.each(['success', 'failure'])('ignores an old save %s after A → B → A while another save is pending', async (outcome) => {
+    mocks.hasFeature.mockReturnValue(true)
+    mocks.fetchRule.mockImplementation(async (id: string) => ({ rule: automationRule(id) }))
+    const first = deferred<ReturnType<typeof automationRule>>()
+    const current = deferred<ReturnType<typeof automationRule>>()
+    mocks.saveRule.mockReturnValueOnce(first.promise).mockReturnValueOnce(current.promise)
+    const view = render(automationTree('loc-1'))
+    fireEvent.change(await screen.findByLabelText('Week to prepare'), { target: { value: '4' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save auto schedule' }))
+    view.rerender(automationTree('loc-2'))
+    await screen.findByLabelText('Week to prepare')
+    view.rerender(automationTree('loc-1'))
+    fireEvent.change(await screen.findByLabelText('Week to prepare'), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save auto schedule' }))
+    await act(async () => { if (outcome === 'success') first.resolve(automationRule('loc-1', 4)); else first.reject(new Error('Old save failed')) })
+    expect(screen.getByLabelText('Week to prepare')).toHaveValue('2')
+    expect(screen.getByRole('button', { name: 'Save auto schedule' })).toBeDisabled()
+    expect(screen.queryByText('Old save failed')).not.toBeInTheDocument()
+    await act(async () => current.resolve(automationRule('loc-1', 2)))
+    expect(screen.getByRole('button', { name: 'Save auto schedule' })).not.toBeDisabled()
+  })
+
+  it.each(['success', 'failure'])('ignores an old run %s after A → B → A while another run is pending', async (outcome) => {
+    mocks.fetchRule.mockImplementation(async (id: string) => ({ rule: automationRule(id) }))
+    mocks.hasFeature.mockReturnValue(true)
+    const first = deferred<{ status: string; message: string; week_start: string }>()
+    const current = deferred<{ status: string; message: string; week_start: string }>()
+    mocks.runNow.mockReturnValueOnce(first.promise).mockReturnValueOnce(current.promise)
+    const view = render(automationTree('loc-1'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
+    view.rerender(automationTree('loc-2'))
+    await screen.findByRole('button', { name: 'Run now' })
+    view.rerender(automationTree('loc-1'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
+    await act(async () => { if (outcome === 'success') first.resolve({ status: 'generated', message: 'Old run', week_start: '2026-10-04' }); else first.reject(new Error('Old run failed')) })
+    expect(screen.queryByRole('link', { name: /Review the generated week/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run now' })).toBeDisabled()
+    expect(screen.queryByText('Old run failed')).not.toBeInTheDocument()
+    await act(async () => current.resolve({ status: 'generated', message: 'Current run', week_start: '2026-10-11' }))
+    expect(await screen.findByRole('link', { name: /Review the generated week/ })).toHaveAttribute('href', '/ops/schedule/editor?week=2026-10-11&location=loc-1')
+  })
+
+  it('lets a revoked Autopilot rule be paused or switched to a template', async () => {
+    mocks.fetchRule.mockResolvedValue({ rule: automationRule('loc-1') })
+    render(automationTree('loc-1'))
+    expect(await screen.findByRole('button', { name: 'Autopilot' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Run now' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Save auto schedule' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Enabled' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save auto schedule' }))
+    await waitFor(() => expect(mocks.saveRule).toHaveBeenCalledWith('loc-1', expect.objectContaining({ enabled: false, mode: 'autopilot' })))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save auto schedule' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'From template' }))
+    fireEvent.change(screen.getByLabelText('Week template'), { target: { value: 'template-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save auto schedule' }))
+    await waitFor(() => expect(mocks.saveRule).toHaveBeenLastCalledWith('loc-1', expect.objectContaining({ mode: 'template', week_template_id: 'template-1' })))
   })
 
   it('saves Autopilot without a week template when the premium flag is enabled', async () => {

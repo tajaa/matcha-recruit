@@ -1,6 +1,6 @@
 # Auto-scheduling audit — 2026-10-02
 
-This audit found **14 actionable defects (2 P1, 11 P2, 1 P3)** and **4 efficiency opportunities** in the existing main implementation. Highest priority: recipient-side wage authorization and durable recurring-job recovery. This PR adds the audit report only; fixes are proposed below.
+This audit found **14 actionable defects (2 P1, 11 P2, 1 P3)** and **4 efficiency opportunities** in the existing main implementation. Highest priority: recipient-side wage authorization and durable recurring-job recovery. This report records the original main-snapshot audit. PR #665 now also implements the fixes and efficiency changes; see [the implementation and validation record](auto-schedule-fixes-2026-10-03.md). The pinned evidence below preserves the original reproductions.
 
 ## Reviewed range and scope
 
@@ -8,7 +8,7 @@ This audit found **14 actionable defects (2 P1, 11 P2, 1 P3)** and **4 efficienc
 - Code baseline: `main` / `origin/main` at `dfe2b7124f3bde34bfffef512886ca6c089748c5`.
 - Audit branch: `codex/auto-schedule-audit`, initially at the same SHA; initial merge base was the baseline and the code diff was empty.
 - This is a system audit of that main snapshot, not a claim that these defects were introduced by the report PR. Source links below are pinned to the audited SHA.
-- PR scope: only `docs/reviews/auto-schedule-audit-2026-10-02.md`. Final PR base/head SHAs and merge base are recorded in the PR description.
+- Initial audit commit: `a63a3acf81ffb153634898d29e882e8aa700bbc7`, containing only this report. The subsequent implementation scope, coverage and validation are recorded in `auto-schedule-fixes-2026-10-03.md`; the current PR base/head SHAs and merge base are recorded in the PR description.
 - The primary main checkout had unrelated uncommitted scheduling-commercial/landing-media changes. They were excluded and preserved. All review source came from an isolated main-based worktree.
 - Reviewed surfaces: recurring automation timing/dispatch, deterministic Autopilot demand, week planning/preflight/apply, automatic proposal adoption and authorization, API/model contracts, wizard/configuration/chat UI and related tests.
 - Independent reviews covered planner/data, worker/operations, and client/contracts; the coordinating reviewer checked reported defects against source, guards and reproductions and deduplicated them.

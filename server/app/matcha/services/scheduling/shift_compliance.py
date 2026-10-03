@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID
@@ -421,6 +422,14 @@ async def jurisdiction_rule_status(conn, company_id: UUID, location_id: Optional
     return {"state": st, "status": "catalog" if db_rules else "unmapped"}
 
 
+@dataclass(frozen=True)
+class PlannedShiftComplianceContext:
+    """Caller-simulated week/rest totals for an assignment not persisted yet."""
+
+    week_hours: float
+    min_rest_gap_hours: float | None
+
+
 async def check_shift_compliance(
     conn,
     company_id: UUID,
@@ -437,6 +446,7 @@ async def check_shift_compliance(
     shift_kind: str = "work",
     training_requirement_id: Optional[UUID] = None,
     lapse_items: Optional[list[dict]] = None,
+    planning_context: PlannedShiftComplianceContext | None = None,
 ) -> list[dict]:
     """Assemble context + evaluate. Returns violations (never raises). When
     `employee_id` is None (shift not yet assigned), only shift-intrinsic checks
@@ -455,6 +465,8 @@ async def check_shift_compliance(
     call's own feature-lookup + lapse-item query — callers looping over many
     employees (create_shift, update_shift) would otherwise re-resolve company
     features and re-query training/credential lapses once per employee."""
+    # Draft planners supply their simulated assignment ledger; live write
+    # callers keep querying the persisted state under their employee locks.
     violations: list[dict] = []
     state, city = await _location_state(conn, company_id, location_id)
     location_timezone = await _location_timezone(conn, company_id, location_id)
@@ -479,10 +491,14 @@ async def check_shift_compliance(
             job_id=job_id,
             employee_age=age,
         ))
-        week_hours = await _week_hours(
-            conn, company_id, employee_id, starts_at, worked, exclude_shift_id, location_id,
-        )
-        min_rest = await _min_rest_gap(conn, company_id, employee_id, starts_at, ends_at, exclude_shift_id)
+        if planning_context is None:
+            week_hours = await _week_hours(
+                conn, company_id, employee_id, starts_at, worked, exclude_shift_id, location_id,
+            )
+            min_rest = await _min_rest_gap(conn, company_id, employee_id, starts_at, ends_at, exclude_shift_id)
+        else:
+            week_hours = planning_context.week_hours
+            min_rest = planning_context.min_rest_gap_hours
 
     # Only bother fetching catalog-extraction thresholds for a state the
     # in-code table doesn't already curate — `rules_for_state` would ignore

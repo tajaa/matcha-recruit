@@ -29,7 +29,7 @@ function renderWizard(overrides: Partial<Parameters<typeof AutopilotWizard>[0]> 
   }
   render(<AutopilotWizard
     locationId="loc-1" locationName="Downtown" weekStart="2026-09-21"
-    readiness={ready} readinessLoading={false} readinessError={null} running={false}
+    readiness={ready} readinessLoading={false} readinessError={null} running={false} canEditPolicy
     {...callbacks} {...overrides}
   />)
   return callbacks
@@ -41,6 +41,22 @@ beforeEach(() => {
 })
 
 describe('AutopilotWizard', () => {
+  it('lets a store manager build using saved choices without changing company policy', async () => {
+    const callbacks = renderWizard({ canEditPolicy: false })
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(await screen.findByLabelText('Minimum floor staff')).toBeDisabled()
+    expect(screen.getByLabelText('Weather sensitivity')).toBeDisabled()
+    expect(screen.getByLabelText(/Target labor/)).toBeDisabled()
+    expect(screen.getByLabelText(/Minimum shift hours/)).toBeDisabled()
+    expect(screen.getByLabelText(/Maximum shift hours/)).toBeDisabled()
+    expect(screen.getByText(/A company admin can change them/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Build review' }))
+    await waitFor(() => expect(callbacks.onGenerate).toHaveBeenCalledOnce())
+    expect(saveProfile).not.toHaveBeenCalled()
+    expect(callbacks.onProfileSaved).not.toHaveBeenCalled()
+  })
+
   it('shows server warnings on a ready week without blocking the build', async () => {
     const warning = "5 of 5 staff can't be scheduled this week, so their seats will stay open."
     const callbacks = renderWizard({ readiness: { ...ready, warnings: [warning] } })
