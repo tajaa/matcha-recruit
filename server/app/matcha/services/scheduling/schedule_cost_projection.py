@@ -144,12 +144,19 @@ async def price_automatic_action(
                         "labor_pct": round(float(total) * 100 / forecast, 2) if forecast > 0 else None,
                         "open_positions": open_positions,
                     }
+                    incomplete = []
                     if open_positions:
-                        labor["labor_pct"] = None
-                        labor["note"] = (
-                            f"{open_positions} seat{'s are' if open_positions != 1 else ' is'} still open, "
-                            "so labor % isn't shown."
+                        incomplete.append(
+                            f"{open_positions} seat{'s are' if open_positions != 1 else ' is'} still open"
                         )
+                    unpriced = int(cost.get("unpriced_employee_count") or 0)
+                    if unpriced:
+                        incomplete.append(
+                            f"{unpriced} employee{'s have' if unpriced != 1 else ' has'} no pay rate"
+                        )
+                    if incomplete:
+                        labor["labor_pct"] = None
+                        labor["note"] = "; ".join(incomplete) + ", so labor % isn't shown."
                     demand["labor"] = labor
                     review["demand_model"] = project_schedule_payload(demand, include_cost=True)
             return result

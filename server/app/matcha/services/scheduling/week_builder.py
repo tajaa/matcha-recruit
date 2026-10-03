@@ -1807,11 +1807,16 @@ async def plan_vacant_fill(
             allow_split_shift=allow_split_shift,
         )
 
+    # Fill requests can start on any date. Statutory weekly limits still use
+    # the location's configured workweek, matching the live confirmation gate.
+    week_start_weekday = await resolve_week_start_weekday(
+        conn, company_id=company_id, location_id=location_id,
+    )
     plan, advisories = await _plan_with_preflight(
         conn, company_id=company_id, location_id=location_id, build=_build,
         existing_assignments=roster["existing_assignments"],
         adjacent_assignments=roster.get("adjacent_assignments", []),
-        week_start_weekday=sunday_indexed_weekday(week_start),
+        week_start_weekday=week_start_weekday,
     )
     _attach_advisories(plan, advisories)
 

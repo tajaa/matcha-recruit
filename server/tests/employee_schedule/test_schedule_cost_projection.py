@@ -2,6 +2,7 @@
 
 import json
 from datetime import date
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -10,6 +11,7 @@ import pytest
 from app.matcha.services.scheduling import labor_cost_service as costs
 from app.matcha.services.scheduling import schedule_cost_projection as projection
 from app.matcha.services.scheduling import schedule_assistant_session as sessions
+from app.matcha.services.scheduling.labor_cost import HOURLY, PayProfile
 
 
 @pytest.mark.parametrize("role,flag,visible", [
@@ -127,6 +129,45 @@ async def test_labor_percentage_needs_sales_and_a_filled_plan(pricing, forecast,
     assert (labor or {}).get("labor_pct") == percentage
     if open_positions:
         assert "still open" in labor["note"]
+
+
+@pytest.mark.parametrize("priced_rate", [None, Decimal("20")])
+@pytest.mark.parametrize("open_positions", [0, 1])
+@pytest.mark.asyncio
+async def test_missing_pay_rates_hide_percentage_for_zero_and_partial_costs(
+    monkeypatch, priced_rate, open_positions,
+):
+    """Use the real cost engine: missing rates return a subtotal, not None."""
+    missing, other = str(uuid4()), str(uuid4())
+    proposal = _proposal()
+    proposal["shifts"][0]["proposed_assignments"] = [
+        {"employee_id": missing}, {"employee_id": other},
+    ]
+    action = _action()
+    action["metrics"]["open_positions"] = open_positions
+    monkeypatch.setattr(projection, "schedule_cost_visible", AsyncMock(return_value=True))
+    monkeypatch.setattr(projection, "load_week_assignment_rows", AsyncMock(return_value=([], False)))
+    monkeypatch.setattr(costs, "is_labor_cost_visible", AsyncMock(return_value=True))
+    monkeypatch.setattr(costs, "load_pay_profiles", AsyncMock(return_value={
+        missing: PayProfile(missing, None, HOURLY, False),
+        other: PayProfile(other, priced_rate, HOURLY, False),
+    }))
+    monkeypatch.setattr(costs, "_load_rules", AsyncMock(return_value={}))
+
+    result = await _price(action, proposal)
+
+    cost = result["review"]["cost"]
+    assert cost["after"] == (80.0 if priced_rate is not None else 0.0)
+    unpriced = 1 if priced_rate is not None else 2
+    assert cost["unpriced_employee_count"] == unpriced
+    assert cost["by_employee"][missing]["after"] is None
+    labor = result["demand_model"]["labor"]
+    assert labor["labor_pct"] is None
+    assert f"{unpriced} employee{'s have' if unpriced != 1 else ' has'} no pay rate" in labor["note"]
+    if open_positions:
+        assert "still open" in labor["note"]
+    assert result["review"]["demand_model"] == result["demand_model"]
+    assert result["confirm_id"] == action["confirm_id"]
 
 
 @pytest.mark.asyncio
