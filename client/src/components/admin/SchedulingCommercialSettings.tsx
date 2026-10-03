@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, Loader2, Upload } from 'lucide-react'
 import { Card, Button } from '../ui'
 import { landingMedia } from '../../api/admin/landingMedia'
@@ -13,6 +13,7 @@ const SLOTS: { slot: CommercialSlot; label: string; note: string; accept: string
 ]
 
 export function SchedulingCommercialSettings() {
+  const fileInputs = useRef<Partial<Record<CommercialSlot, HTMLInputElement | null>>>({})
   const [draft, setDraft] = useState<SchedulingCommercial>(EMPTY_COMMERCIAL)
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -79,10 +80,10 @@ export function SchedulingCommercialSettings() {
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div><h3 className="text-sm font-medium text-zinc-200">{item.label}</h3><p className="mt-1 text-xs text-zinc-500">{item.note}</p></div>
                   <div className="flex items-center gap-3">
-                    <label className={`inline-flex items-center gap-2 rounded bg-zinc-800 px-3 py-2 text-sm text-zinc-100 ${!loaded || busy ? 'opacity-50' : 'cursor-pointer hover:bg-zinc-700'}`}>
+                    <Button type="button" variant="secondary" aria-label={`${url ? 'Replace' : 'Upload'} ${item.label.toLowerCase()}`} disabled={!loaded || busy} onClick={() => fileInputs.current[item.slot]?.click()} className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900">
                       {uploading === item.slot ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {url ? 'Replace' : 'Upload'}
-                      <input aria-label={`Upload ${item.label.toLowerCase()}`} type="file" accept={item.accept} disabled={!loaded || busy} className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file, item); event.target.value = '' }} />
-                    </label>
+                    </Button>
+                    <input ref={(element) => { fileInputs.current[item.slot] = element }} aria-label={`Choose ${item.label.toLowerCase()} file`} type="file" accept={item.accept} disabled={!loaded || busy} hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file, item); event.target.value = '' }} />
                     {url && <button type="button" disabled={busy} className="text-xs text-zinc-400 hover:text-red-300" onClick={() => setDraft((current) => ({ ...current, [key]: null, ...(item.slot === 'desktop_video' ? { enabled: false } : {}) }))}>Clear</button>}
                   </div>
                 </div>

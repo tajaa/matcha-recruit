@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SchedulingCommercialSettings } from './SchedulingCommercialSettings'
 import { landingMedia } from '../../api/admin/landingMedia'
@@ -10,6 +11,26 @@ beforeEach(() => {
 })
 
 describe('commercial admin', () => {
+  it('opens every upload picker with Enter and Space after keyboard navigation', async () => {
+    const user = userEvent.setup()
+    render(<SchedulingCommercialSettings />)
+    const save = screen.getByRole('button', { name: 'Save commercial' })
+    await waitFor(() => expect(save).not.toBeDisabled())
+    await user.tab()
+    expect(save).toHaveFocus()
+
+    for (const name of ['desktop commercial', 'mobile commercial', 'desktop poster', 'mobile poster', 'english captions']) {
+      const button = screen.getByRole('button', { name: `Upload ${name}` })
+      const input = screen.getByLabelText(`Choose ${name} file`)
+      const openPicker = vi.spyOn(input, 'click').mockImplementation(() => {})
+      await user.tab()
+      expect(button).toHaveFocus()
+      await user.keyboard('{Enter}')
+      expect(openPicker).toHaveBeenCalledTimes(1)
+      await user.keyboard(' ')
+      expect(openPicker).toHaveBeenCalledTimes(2)
+    }
+  })
   it('uploads before enabling, then saves separately from the legacy form', async () => {
     const url = 'https://media.example.com/film.mp4'
     vi.mocked(landingMedia.uploadCommercial).mockResolvedValue(url)
@@ -17,7 +38,7 @@ describe('commercial admin', () => {
     render(<SchedulingCommercialSettings />)
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save commercial' }).hasAttribute('disabled')).toBe(false))
     expect(screen.getByRole('checkbox').hasAttribute('disabled')).toBe(true)
-    fireEvent.change(screen.getByLabelText('Upload desktop commercial'), { target: { files: [new File(['video'], 'film.mp4', { type: 'video/mp4' })] } })
+    fireEvent.change(screen.getByLabelText('Choose desktop commercial file'), { target: { files: [new File(['video'], 'film.mp4', { type: 'video/mp4' })] } })
     await waitFor(() => expect(screen.getByRole('checkbox').hasAttribute('disabled')).toBe(false))
     expect(landingMedia.uploadCommercial).toHaveBeenCalledWith(expect.any(File), 'desktop_video', expect.any(Function))
     expect(landingMedia.saveCommercial).not.toHaveBeenCalled()
@@ -39,7 +60,17 @@ describe('commercial admin', () => {
     vi.mocked(landingMedia.saveCommercial).mockImplementation(async (data) => ({ ok: true, value: data }))
     render(<SchedulingCommercialSettings />)
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save commercial' }).hasAttribute('disabled')).toBe(false))
-    fireEvent.change(screen.getByLabelText('Upload desktop commercial'), { target: { files: [new File(['video'], 'replacement.mp4', { type: 'video/mp4' })] } })
+    const user = userEvent.setup()
+    const replace = screen.getByRole('button', { name: 'Replace desktop commercial' })
+    const input = screen.getByLabelText('Choose desktop commercial file')
+    const openPicker = vi.spyOn(input, 'click').mockImplementation(() => {})
+    await user.tab()
+    await user.tab()
+    await user.tab()
+    expect(replace).toHaveFocus()
+    await user.keyboard('{Enter}')
+    expect(openPicker).toHaveBeenCalledOnce()
+    fireEvent.change(input, { target: { files: [new File(['video'], 'replacement.mp4', { type: 'video/mp4' })] } })
     expect(await screen.findByRole('alert')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Save commercial' }))
     await waitFor(() => expect(landingMedia.saveCommercial).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, desktop_video_url: url })))
