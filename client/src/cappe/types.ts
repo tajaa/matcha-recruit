@@ -115,6 +115,44 @@ export type CappeDirectoryEntry = {
   published_at: string | null
 }
 
+// --- Public pricing (gummfit.com landing) ------------------------------------
+// Mirrors server `CappePublicPricing`: only purchasable prices, legacy tiers
+// excluded, and the intro only when its Stripe Price exists.
+
+export type CappePublicPrice = {
+  interval: 'month' | 'year' | string
+  unit_amount_cents: number
+  currency: string
+  purchasable: boolean
+}
+
+export type CappePublicPlan = {
+  code: string
+  name: string
+  description: string | null
+  sort_order: number
+  platform_fee_bps: number
+  allowed_fulfillment: string[]
+  site_limit: number | null
+  mailbox_quota_included: number
+  prices: CappePublicPrice[]
+  intro_price_cents: number | null
+  intro_days: number | null
+}
+
+export type CappePublicAddon = {
+  code: string
+  name: string
+  description: string | null
+  unit_label: string
+  prices: CappePublicPrice[]
+}
+
+export type CappePublicPricing = {
+  plans: CappePublicPlan[]
+  addons: CappePublicAddon[]
+}
+
 export type CappeDirectoryPage = {
   entries: CappeDirectoryEntry[]
   /** Clamped server-side to the anti-enumeration depth cap — "results you can
