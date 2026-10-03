@@ -121,20 +121,20 @@ export function ScoreHistoryPanel({ qs }: Props) {
       </div>
 
       {loading && (
-        <div className="border border-zinc-800 rounded-2xl p-8 text-center">
+        <div className="border border-zinc-800 rounded-2xl p-6 text-center">
           <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Loading trend data...</div>
         </div>
       )}
 
       {!loading && chartData.length === 0 && (
-        <div className="border border-zinc-800 rounded-2xl p-8 text-center">
+        <div className="border border-zinc-800 rounded-2xl p-6 text-center">
           <div className="text-xs text-zinc-500 uppercase tracking-wider">No history yet</div>
           <div className="text-[10px] text-zinc-600 mt-2 font-mono">Risk assessments will be recorded automatically</div>
         </div>
       )}
 
       {!loading && chartData.length > 0 && (
-        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6">
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5">
           {/* Dimension toggles */}
           <div className="flex flex-wrap gap-2 mb-5">
             {DIMENSION_ORDER.map(dim => {

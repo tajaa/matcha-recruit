@@ -33,7 +33,7 @@ export function MonteCarloPanel({ qs, isAdmin, companyId }: Props) {
   const categories = mc ? Object.values(mc.categories).filter(c => c.expected_loss > 0) : []
 
   return (
-    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-5">
+    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Monte Carlo Simulation</div>

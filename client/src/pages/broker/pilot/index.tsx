@@ -212,7 +212,7 @@ export default function BrokerPilot() {
             <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
           </div>
         ) : !active ? (
-          <div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center">
+          <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
             <Sparkles className="h-8 w-8 text-zinc-700" />
             <p className="max-w-md text-sm leading-relaxed text-zinc-500">
               Select or start a session. Upload a client's carrier documents — loss runs, dec

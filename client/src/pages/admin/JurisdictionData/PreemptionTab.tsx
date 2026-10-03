@@ -24,7 +24,7 @@ export default function PreemptionTab({ requiredCats, preemptionRules }: Preempt
   return (
     <div>
       {preemptionMatrix.states.length === 0 ? (
-        <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
+        <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
           <p className="text-sm text-zinc-600">No preemption rules in the database yet.</p>
         </div>
       ) : (

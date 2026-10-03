@@ -36,8 +36,8 @@ export default function AskExpert() {
 
   if (result) {
     return (
-      <div className="max-w-2xl mx-auto py-12">
-        <div className="rounded-2xl border border-vsc-border bg-vsc-panel p-10 text-center">
+      <div className="max-w-2xl mx-auto py-8">
+        <div className="rounded-2xl border border-vsc-border bg-vsc-panel p-6 text-center">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-emerald-500/10 mb-5">
             <CheckCircle2 className="w-7 h-7 text-emerald-500" />
           </div>
@@ -57,7 +57,7 @@ export default function AskExpert() {
   const valid = topic.trim().length >= 3 && description.trim().length >= 10 && (mode === 'email' || phone.trim().length >= 7)
 
   return (
-    <div className="max-w-2xl mx-auto py-8">
+    <div className="max-w-2xl mx-auto py-6">
       <div className="flex items-center gap-3 mb-6">
         <div className="w-10 h-10 rounded-lg bg-vsc-panel border border-vsc-border flex items-center justify-center">
           <MessageCircleQuestion className="w-5 h-5 text-vsc-text/80" />
@@ -68,7 +68,7 @@ export default function AskExpert() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-vsc-border bg-vsc-panel p-6 mb-6">
+      <div className="rounded-xl border border-vsc-border bg-vsc-panel p-5 mb-6">
         <p className="text-sm text-vsc-text/80 leading-relaxed">
           Submit any HR question — discipline situations, leave requests, terminations,
           policy gaps. Aaron responds personally within 1 business day, by email or

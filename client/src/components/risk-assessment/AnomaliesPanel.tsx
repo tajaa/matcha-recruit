@@ -13,7 +13,7 @@ export function AnomaliesPanel({ qs }: Props) {
   }, [qs], null)
 
   return (
-    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
+    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-4">
       <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Anomaly Detection</div>
 
       {loading && <div className="text-[10px] text-zinc-600 animate-pulse font-mono">Loading...</div>}

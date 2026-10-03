@@ -58,13 +58,13 @@ export function IRRiskMatrixHeatmap({
       </div>
       <div className="bg-zinc-900 border border-white/10 rounded-2xl overflow-hidden">
         {loading ? (
-          <div className="p-6 text-xs text-zinc-500 text-center animate-pulse">
+          <div className="p-5 text-xs text-zinc-500 text-center animate-pulse">
             Loading matrix…
           </div>
         ) : error ? (
           <p className="p-4 text-sm text-red-400">{error}</p>
         ) : !matrix || matrix.rows.length === 0 ? (
-          <p className="p-6 text-sm text-zinc-500 text-center">
+          <p className="p-5 text-sm text-zinc-500 text-center">
             No incidents reported in this window.
           </p>
         ) : (

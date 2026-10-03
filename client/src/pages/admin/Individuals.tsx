@@ -243,7 +243,7 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-zinc-500">
+                <td colSpan={9} className="px-4 py-6 text-center text-zinc-500">
                   {search ? 'No users match your search.' : 'No individual users yet.'}
                 </td>
               </tr>
@@ -383,7 +383,7 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
       {/* Generate signup URL modal */}
       {showInvite && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-md">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 w-full max-w-md">
             <h3 className="text-sm font-semibold text-zinc-100 mb-1">Generate Individual Signup URL</h3>
             <p className="text-xs text-zinc-500 mb-4">
               Creates a one-time matcha-work invite link for an individual account. No email is sent — share the URL manually.
@@ -453,7 +453,7 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
       {/* Grant tokens modal */}
       {grantTarget && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-sm">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 w-full max-w-sm">
             <h3 className="text-sm font-semibold text-zinc-100 mb-1">Grant Tokens</h3>
             <p className="text-xs text-zinc-500 mb-4">{grantTarget.email}</p>
             <p className="text-[11px] text-zinc-500 mb-3">

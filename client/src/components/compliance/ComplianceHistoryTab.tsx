@@ -7,7 +7,7 @@ export function ComplianceHistoryTab({ checkLog, loading }: Props) {
 
   if (checkLog.length === 0) {
     return (
-      <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
+      <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
         <p className="text-sm text-zinc-600">No compliance checks run yet for this location.</p>
       </div>
     )

@@ -43,7 +43,7 @@ export default function TrafficReport() {
         </button>
       </div>
       {error ? (
-        <div className="p-6 text-sm text-zinc-600">
+        <div className="p-5 text-sm text-zinc-600">
           {error.includes('404')
             ? 'Report not generated in this environment (prod host writes it every 15 min).'
             : error}
@@ -56,7 +56,7 @@ export default function TrafficReport() {
           className="w-full flex-1 border-0"
         />
       ) : (
-        <div className="p-6 text-sm text-zinc-500">Loading…</div>
+        <div className="p-5 text-sm text-zinc-500">Loading…</div>
       )}
     </div>
   )

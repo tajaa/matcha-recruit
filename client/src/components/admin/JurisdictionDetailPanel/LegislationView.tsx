@@ -8,7 +8,7 @@ type Props = {
 export default function LegislationView({ legislation }: Props) {
   if (legislation.length === 0) {
     return (
-      <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
+      <div className="border border-zinc-800 rounded-lg px-4 py-5 text-center">
         <p className="text-sm text-zinc-600">No legislation tracked.</p>
       </div>
     )

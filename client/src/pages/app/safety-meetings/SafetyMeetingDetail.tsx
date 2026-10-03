@@ -66,11 +66,11 @@ export default function SafetyMeetingDetail() {
     }
   }
 
-  if (!meeting) return <main className="mx-auto max-w-5xl px-6 py-12"><p className="text-slate-500">{error || 'Loading meeting...'}</p></main>
+  if (!meeting) return <main className="mx-auto max-w-5xl px-5 py-8"><p className="text-slate-500">{error || 'Loading meeting...'}</p></main>
   const locked = meeting.status === 'signed'
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-8">
+    <main className="mx-auto max-w-5xl px-5 py-6">
       <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">{locked ? 'Signed safety record' : 'Manager review'}</p><h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{meeting.title}</h1><p className="mt-2 text-sm text-slate-500">Recorded {dateFormat.format(new Date(meeting.started_at))}{meeting.location_name ? ` · ${meeting.location_name}` : ''}</p></div>{!locked && <button className="text-sm font-semibold text-slate-600 hover:text-slate-950" onClick={() => navigate('/app/safety-meetings')}>Back to meetings</button>}</div>
       {error && <p className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
 

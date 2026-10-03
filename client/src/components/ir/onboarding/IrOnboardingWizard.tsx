@@ -116,7 +116,7 @@ export default function IrOnboardingWizard() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0c0c0e] flex items-center justify-center px-4 py-10">
+    <div className="min-h-screen bg-[#0c0c0e] flex items-center justify-center px-4 py-6">
       <div className="max-w-xl w-full">
         <Stepper current={step} />
         <div className="mt-8">

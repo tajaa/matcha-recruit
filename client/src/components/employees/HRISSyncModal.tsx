@@ -135,7 +135,7 @@ export function HRISSyncModal({ open, onClose, onSuccess, autoSync = false }: Pr
   return (
     <Modal open={open} onClose={handleClose} title="Sync employees from HRIS" width="sm">
       {loading ? (
-        <div className="flex items-center justify-center py-8">
+        <div className="flex items-center justify-center py-6">
           <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
         </div>
       ) : fetchError ? (

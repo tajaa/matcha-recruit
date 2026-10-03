@@ -85,7 +85,7 @@ export function EROutcomePanel({ caseId, onApplyOutcome }: Props) {
 
   if (loading) {
     return (
-      <div className="text-center py-8">
+      <div className="text-center py-6">
         <p className="text-sm text-zinc-500">{phase || 'Generating outcome analysis...'}</p>
       </div>
     )
@@ -93,7 +93,7 @@ export function EROutcomePanel({ caseId, onApplyOutcome }: Props) {
 
   if (!data) {
     return (
-      <div className="text-center py-8">
+      <div className="text-center py-6">
         <p className="text-sm text-zinc-500 mb-2">
           Generate AI-powered outcome recommendations based on evidence, policy, and precedent.
         </p>

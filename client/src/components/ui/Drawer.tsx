@@ -38,8 +38,8 @@ export function Drawer({
   return (
     <div className="fixed inset-0 z-50 flex">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className={`relative ml-auto flex h-full w-full ${w} flex-col overflow-hidden border-l border-zinc-700 bg-zinc-900 shadow-2xl`}>
-        <div className="flex items-start justify-between border-b border-zinc-700/50 px-5 py-4">
+      <div className={`relative ml-auto flex h-full w-full ${w} flex-col overflow-hidden bg-zinc-900 shadow-2xl`}>
+        <div className="flex items-start justify-between px-5 py-4">
           <div className="min-w-0">
             {title && <h2 className="truncate text-lg font-semibold text-zinc-100">{title}</h2>}
             {subtitle && <div className="mt-0.5 text-xs text-zinc-500">{subtitle}</div>}

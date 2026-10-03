@@ -59,7 +59,7 @@ export default function SpecialtyReviewModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-white/[0.08] bg-zinc-900 p-6">
+      <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-white/[0.08] bg-zinc-900 p-5">
         <h3 className="text-lg font-semibold text-zinc-100">
           Confirm scope for {proposal.label}
         </h3>

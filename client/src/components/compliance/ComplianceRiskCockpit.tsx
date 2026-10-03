@@ -38,7 +38,7 @@ export function ComplianceRiskCockpit({
     )
   }
   if (!riskSummary) {
-    return <p className="text-sm text-zinc-600 px-4 py-8">Risk summary unavailable. Try again shortly.</p>
+    return <p className="text-sm text-zinc-600 px-4 py-6">Risk summary unavailable. Try again shortly.</p>
   }
 
   const { posture: p, issues, get_ahead, recently_resolved, dismissed_count } = riskSummary
@@ -100,7 +100,7 @@ export function ComplianceRiskCockpit({
             <span className="text-[11px] text-zinc-600">Ranked by severity, then deadline</span>
           </div>
           {issues.length === 0 ? (
-            <div className={`${PANEL} flex items-center gap-2 px-4 py-8 text-sm text-emerald-300/80`}>
+            <div className={`${PANEL} flex items-center gap-2 px-4 py-6 text-sm text-emerald-300/80`}>
               <ShieldCheck className="h-4 w-4" /> No open compliance issues. You're clear.
             </div>
           ) : (
@@ -123,7 +123,7 @@ export function ComplianceRiskCockpit({
         <div className="space-y-2">
           <h2 className={`${LABEL} flex items-center gap-1`}>Get ahead<HelpHint text={HELP.getAhead} /></h2>
           {get_ahead.length === 0 ? (
-            <div className={`${PANEL} px-4 py-6 text-sm text-zinc-600`}>Nothing on the horizon.</div>
+            <div className={`${PANEL} px-4 py-5 text-sm text-zinc-600`}>Nothing on the horizon.</div>
           ) : (
             <div className={`${PANEL} divide-y divide-white/[0.06]`}>
               {get_ahead.map((g, i) => (

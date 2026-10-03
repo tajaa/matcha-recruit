@@ -129,7 +129,7 @@ export function IndustryCoveragePanel({
           {gridLoading ? (
             <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
           ) : !grid || grid.jurisdictions.length === 0 ? (
-            <div className="rounded-lg border border-white/[0.06] px-4 py-6 text-center text-sm text-zinc-600">
+            <div className="rounded-lg border border-white/[0.06] px-4 py-5 text-center text-sm text-zinc-600">
               No ledger cells for this industry yet. Run onboarding or scoping for a coordinate to populate it.
             </div>
           ) : (
@@ -205,9 +205,9 @@ export function IndustryCoveragePanel({
             </div>
           )}
           {matrixLoading ? (
-            <div className="py-8 text-center text-sm text-zinc-500">Loading…</div>
+            <div className="py-6 text-center text-sm text-zinc-500">Loading…</div>
           ) : !matrix ? (
-            <div className="py-8 text-center text-sm text-zinc-500">No matrix data.</div>
+            <div className="py-6 text-center text-sm text-zinc-500">No matrix data.</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
@@ -269,11 +269,11 @@ export function IndustryCoveragePanel({
       ) : (
         <>
           {!state.trim() ? (
-            <div className="py-6 text-center text-xs text-zinc-500">Set a state to resolve the grounded registry scope.</div>
+            <div className="py-5 text-center text-xs text-zinc-500">Set a state to resolve the grounded registry scope.</div>
           ) : resolveError ? (
             <div className="text-xs text-red-400">{resolveError}</div>
           ) : !resolveResult ? (
-            <div className="py-6 text-center text-xs text-zinc-500">Resolving…</div>
+            <div className="py-5 text-center text-xs text-zinc-500">Resolving…</div>
           ) : (
             <>
               <div className="flex flex-wrap gap-3 text-xs">

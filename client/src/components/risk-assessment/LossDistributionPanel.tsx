@@ -26,7 +26,7 @@ export function LossDistributionPanel({ mc, isAdmin, onRerun, running }: Props) 
 
   if (!bins || bins.length === 0) {
     return (
-      <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6">
+      <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5">
         <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-3">Loss Distribution</div>
         <p className="text-sm text-zinc-500">Re-run the Monte Carlo simulation to generate distribution data.</p>
         {isAdmin && onRerun && (
@@ -39,7 +39,7 @@ export function LossDistributionPanel({ mc, isAdmin, onRerun, running }: Props) 
   }
 
   return (
-    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-5">
+    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-5">
       <div className="flex items-center justify-between">
         <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Loss Distribution<InfoTip text="Histogram of 10,000 simulated annual loss outcomes. Each bar shows how often a particular loss range occurred. The shape reveals whether your risk is concentrated or has a long tail." /></div>
         <div className="text-[10px] text-zinc-600 font-mono">{mc.iterations.toLocaleString()} iterations</div>

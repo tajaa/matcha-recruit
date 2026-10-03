@@ -169,7 +169,7 @@ export function FlagsTable({ flags, heatMap, locations, totalFlags: _totalFlags,
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-vsc-text/40">
+                <td colSpan={5} className="px-4 py-6 text-center text-vsc-text/40">
                   {search || priorityFilter !== 'all' ? 'No flags match your filters.' : 'No open flags. All clear.'}
                 </td>
               </tr>

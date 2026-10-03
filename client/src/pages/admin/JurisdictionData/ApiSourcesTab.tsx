@@ -187,7 +187,7 @@ export default function ApiSourcesTab({ data, loading }: ApiSourcesTabProps) {
           )}
 
           {data.source_counts.length === 0 && data.recent_api.length === 0 && (
-            <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
+            <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
               <p className="text-sm text-zinc-600">No research source data yet. Use the "Fed Sources" button on a jurisdiction to fetch from government APIs.</p>
             </div>
           )}

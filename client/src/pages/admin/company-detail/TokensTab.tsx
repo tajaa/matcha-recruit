@@ -37,7 +37,7 @@ export function TokensTab({ companyId }: { companyId: string }) {
     setGranting(false)
   }
 
-  if (loading) return <div className="flex justify-center py-8"><Loader2 className="w-4 h-4 text-zinc-500 animate-spin" /></div>
+  if (loading) return <div className="flex justify-center py-6"><Loader2 className="w-4 h-4 text-zinc-500 animate-spin" /></div>
   if (!detail) return <p className="text-sm text-zinc-500">Failed to load token data</p>
 
   const b = detail.budget

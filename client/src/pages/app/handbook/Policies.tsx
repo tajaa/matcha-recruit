@@ -280,7 +280,7 @@ export default function Policies() {
       {/* List */}
       <div className="mt-3">
         {filtered.length === 0 ? (
-          <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
+          <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
             <p className="text-sm text-zinc-600">
               {tab === 'all' && !catFilter ? 'No policies yet. Upload or create one to get started.' : 'No matching policies.'}
             </p>
@@ -403,7 +403,7 @@ export default function Policies() {
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="w-full rounded-lg border border-dashed border-zinc-700 px-4 py-6 text-center text-sm text-zinc-500 hover:border-zinc-500 hover:text-zinc-400 transition-colors"
+              className="w-full rounded-lg border border-dashed border-zinc-700 px-4 py-5 text-center text-sm text-zinc-500 hover:border-zinc-500 hover:text-zinc-400 transition-colors"
             >
               <Upload className="h-5 w-5 mx-auto mb-1" />
               Click to upload a PDF or DOCX (optional)

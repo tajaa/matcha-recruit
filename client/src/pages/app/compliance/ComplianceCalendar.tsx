@@ -172,7 +172,7 @@ export default function ComplianceCalendar() {
         </div>
       ) : filtered.length === 0 ? (
         <Card>
-          <div className="text-center py-10 max-w-md mx-auto">
+          <div className="text-center py-6 max-w-md mx-auto">
             <CalendarDays className="mx-auto text-zinc-600 mb-2" size={32} />
             <p className="text-sm text-zinc-400">No upcoming compliance deadlines.</p>
             <p className="text-xs text-zinc-600 mt-2 leading-relaxed">

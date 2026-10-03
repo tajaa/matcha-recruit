@@ -152,9 +152,9 @@ export default function EscalatedQueries() {
         <div className={`${selectedId ? 'lg:col-span-2' : 'lg:col-span-5'}`}>
           <Card className="p-0">
             {loading ? (
-              <div className="px-5 py-8 text-center text-sm text-zinc-500">Loading...</div>
+              <div className="px-5 py-6 text-center text-sm text-zinc-500">Loading...</div>
             ) : items.length === 0 ? (
-              <div className="px-5 py-8 text-center text-sm text-zinc-500">
+              <div className="px-5 py-6 text-center text-sm text-zinc-500">
                 No escalated queries{tab !== 'all' ? ` with status "${tab.replace('_', ' ')}"` : ''}.
               </div>
             ) : (

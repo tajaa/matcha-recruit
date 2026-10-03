@@ -100,7 +100,7 @@ export function BlockView({ block, onFocus }: { block: MetricBlock; onFocus?: (c
 
 export function MetricsTab({ datasets, onFocus }: { datasets: AnalysisDataset[]; onFocus?: (chip: FocusChip) => void }) {
   if (datasets.length === 0) {
-    return <p className="text-sm text-zinc-600 p-6">Upload a dataset to see its computed metrics here.</p>
+    return <p className="text-sm text-zinc-600 p-5">Upload a dataset to see its computed metrics here.</p>
   }
   return (
     <div className="p-4">

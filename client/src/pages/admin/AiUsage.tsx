@@ -171,7 +171,7 @@ function RollupTable<T extends { calls: number; cost_usd: number | null; input_t
   onSelect: (label: string) => void
 }) {
   if (rows.length === 0) {
-    return <p className="p-6 text-center text-sm text-zinc-500">No calls in the selected window.</p>
+    return <p className="p-5 text-center text-sm text-zinc-500">No calls in the selected window.</p>
   }
   return (
     <div className="overflow-x-auto">
@@ -579,7 +579,7 @@ export default function AiUsage() {
 
         <div className="rounded-xl border border-zinc-800 overflow-hidden">
           {callLog.items.length === 0 ? (
-            <p className="p-6 text-center text-sm text-zinc-500">No calls match the current filters.</p>
+            <p className="p-5 text-center text-sm text-zinc-500">No calls match the current filters.</p>
           ) : (
             <div className="divide-y divide-zinc-800">
               {callLog.items.map((c) => (

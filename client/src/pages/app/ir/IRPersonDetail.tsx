@@ -42,7 +42,7 @@ export default function IRPersonDetail() {
         <button onClick={() => navigate(-1)} className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 mb-4">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
-        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 text-sm text-red-400">
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 text-sm text-red-400">
           {error || 'Person not found'}
         </div>
       </div>
@@ -85,7 +85,7 @@ export default function IRPersonDetail() {
       <div>
         <h2 className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-3">Incidents</h2>
         {incidents.length === 0 ? (
-          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 text-sm text-zinc-500 text-center">
+          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 text-sm text-zinc-500 text-center">
             No incidents linked to this person.
           </div>
         ) : (

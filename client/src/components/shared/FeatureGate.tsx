@@ -65,11 +65,11 @@ export function FeatureGate({ feature, anyOf, label, children, pitch, bullets, a
   }, [loading, allowed, refresh])
 
   if (loading || revalidating || (!allowed && !refreshAttempted.current)) {
-    return <div role="status" className="p-6 text-sm text-w-dim">Checking access…</div>
+    return <div role="status" className="p-5 text-sm text-w-dim">Checking access…</div>
   }
   if (allowed) return <>{children}</>
   return (
-    <div className="p-6">
+    <div className="p-5">
       <UpgradeUpsellCard
         source={`feature_gate:${sourceFlag}`}
         title={`Upgrade to unlock ${label}`}

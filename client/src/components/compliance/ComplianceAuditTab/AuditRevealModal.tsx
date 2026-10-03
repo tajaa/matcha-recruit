@@ -48,7 +48,7 @@ export function AuditRevealModal({ open, onClose, checklist, employeeCount, runI
   return (
     <Modal open={open} onClose={onClose} bare dismissible>
       <div
-        className="w-full max-w-6xl max-h-[85vh] overflow-y-auto rounded-2xl border border-white/10 bg-zinc-950 p-6 shadow-2xl"
+        className="w-full max-w-6xl max-h-[85vh] overflow-y-auto rounded-2xl border border-white/10 bg-zinc-950 p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header card — real numbers, not a scripted scenario */}

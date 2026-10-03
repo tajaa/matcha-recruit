@@ -115,7 +115,7 @@ export default function GapOverview() {
 
       {/* Table */}
       {view.length === 0 ? (
-        <div className="rounded-xl border border-vsc-border bg-vsc-panel p-10 text-center text-sm text-zinc-400">
+        <div className="rounded-xl border border-vsc-border bg-vsc-panel p-6 text-center text-sm text-zinc-400">
           {rows.length === 0
             ? <>No companies analyzed yet. Use <span className="text-zinc-100">Open any company</span> or the <span className="text-zinc-100">Onboarding</span> tab to run the first analysis.</>
             : 'No companies match your search.'}

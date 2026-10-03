@@ -171,7 +171,7 @@ export default function Notifications() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto py-8 px-6">
+    <div className="max-w-2xl mx-auto py-6 px-5">
       <div className="flex items-center gap-3 mb-6">
         <Bell className="w-5 h-5 text-zinc-400" />
         <h1 className="text-xl font-semibold text-zinc-100">Notifications</h1>

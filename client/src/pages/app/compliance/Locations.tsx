@@ -46,7 +46,7 @@ export default function Locations() {
 
   if (!rows) {
     return (
-      <div className="flex items-center justify-center py-10">
+      <div className="flex items-center justify-center py-6">
         <Loader2 className="w-5 h-5 text-zinc-500 animate-spin" />
       </div>
     )
@@ -78,7 +78,7 @@ export default function Locations() {
       {showAdd && <AddLocationForm onAdded={() => { setShowAdd(false); refresh() }} />}
 
       {rows.length === 0 && !showAdd && (
-        <div className="text-sm text-zinc-500 bg-zinc-900 border border-zinc-800 rounded p-6 text-center">
+        <div className="text-sm text-zinc-500 bg-zinc-900 border border-zinc-800 rounded p-5 text-center">
           No locations yet. Add one to start submitting incidents.
         </div>
       )}

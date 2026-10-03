@@ -52,7 +52,7 @@ export function FileUpload({
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={() => setDragOver(false)}
-        className={`rounded-lg border-2 border-dashed px-4 py-6 text-center text-sm cursor-pointer transition-colors ${
+        className={`rounded-lg border-2 border-dashed px-4 py-5 text-center text-sm cursor-pointer transition-colors ${
           disabled
             ? 'border-zinc-800 text-zinc-600 cursor-not-allowed'
             : dragOver

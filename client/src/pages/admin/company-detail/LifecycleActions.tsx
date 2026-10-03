@@ -264,7 +264,7 @@ function RefundModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-      <form onSubmit={submit} className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-lg">
+      <form onSubmit={submit} className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 w-full max-w-lg">
         <h3 className="text-sm font-semibold text-zinc-100 mb-1">Issue refund</h3>
         <p className="text-xs text-zinc-500 mb-4">Pick a charge. Leave amount blank for a full refund.</p>
         <div className="space-y-3">

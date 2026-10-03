@@ -55,8 +55,8 @@ export default function IntegrityTab() {
     }
   }
 
-  if (loading) return <div className="text-zinc-500 py-12 text-center">Loading integrity check...</div>
-  if (!data) return <div className="text-zinc-500 py-12 text-center">Failed to load</div>
+  if (loading) return <div className="text-zinc-500 py-8 text-center">Loading integrity check...</div>
+  if (!data) return <div className="text-zinc-500 py-8 text-center">Failed to load</div>
 
   return (
     <div className="space-y-4">

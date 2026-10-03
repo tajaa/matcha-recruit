@@ -63,7 +63,7 @@ export default function SafetyMeetings() {
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
+    <main className="mx-auto max-w-6xl px-5 py-6">
       <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <p className="mb-2 text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">Safety records</p>
@@ -79,8 +79,8 @@ export default function SafetyMeetings() {
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 px-5 py-4"><h2 className="font-semibold text-slate-900">Meeting history</h2></div>
-        {loading ? <p className="p-6 text-sm text-slate-500">Loading meetings...</p> : meetings.length === 0 ? (
-          <div className="flex flex-col items-center px-6 py-16 text-center">
+        {loading ? <p className="p-5 text-sm text-slate-500">Loading meetings...</p> : meetings.length === 0 ? (
+          <div className="flex flex-col items-center px-5 py-16 text-center">
             <div className="mb-4 rounded-2xl bg-emerald-50 p-4 text-emerald-700"><HardHat size={30} /></div>
             <h3 className="font-semibold text-slate-900">No safety meetings yet</h3>
             <p className="mt-2 max-w-md text-sm text-slate-500">Start a toolbox talk and Matcha will transcribe the conversation as it happens.</p>
@@ -105,7 +105,7 @@ export default function SafetyMeetings() {
 
       {showSetup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl">
             <div className="mb-5"><h2 className="text-xl font-semibold text-slate-950">Set up the safety meeting</h2><p className="mt-1 text-sm text-slate-500">Add context so the transcript and summary are easier to review.</p></div>
             <div className="space-y-4">
               <label className="block text-sm font-medium text-slate-700">Meeting title<input className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" value={title} onChange={(event) => setTitle(event.target.value)} /></label>

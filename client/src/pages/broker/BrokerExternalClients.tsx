@@ -128,7 +128,7 @@ export default function BrokerExternalClients() {
           <AlertCircle className="h-8 w-8 mb-2" /><p className="text-sm">Unable to load external clients.</p>
         </div>
       ) : clients.length === 0 ? (
-        <Card className="p-8 text-center">
+        <Card className="p-6 text-center">
           <p className="text-sm text-zinc-400">No external clients yet.</p>
           <p className="text-xs text-zinc-600 mt-1">Add a prospect or off-platform book client to score their WC + EPL risk.</p>
         </Card>

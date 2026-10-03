@@ -128,14 +128,14 @@ export default function LandingMediaAdmin() {
 
   if (loading) {
     return (
-      <div className="p-6 flex items-center gap-2 text-zinc-400">
+      <div className="p-5 flex items-center gap-2 text-zinc-400">
         <Loader2 className="w-4 h-4 animate-spin" /> Loading…
       </div>
     )
   }
 
   return (
-    <div className="p-6 max-w-4xl space-y-6">
+    <div className="p-5 max-w-4xl space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-zinc-100">Landing Page Media</h1>

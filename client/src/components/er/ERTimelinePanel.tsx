@@ -81,12 +81,12 @@ export function ERTimelinePanel({ caseId, timeline, onTimelineChange }: ERTimeli
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
-    return <p className="text-sm text-zinc-500 py-8 text-center">Analyzing timeline...</p>
+    return <p className="text-sm text-zinc-500 py-6 text-center">Analyzing timeline...</p>
   }
 
   if (!timeline || !timeline.generated_at) {
     return (
-      <div className="text-center py-8">
+      <div className="text-center py-6">
         <p className="text-sm text-zinc-500 mb-4">
           Generate a chronological timeline from uploaded documents.
         </p>
