@@ -118,6 +118,11 @@ if [ -n "${LOCAL_PORT:-}" ]; then
 elif [ -n "${LOCAL_DB_PORT:-}" ]; then
     LOCAL_PORT="$LOCAL_DB_PORT"
     LOCAL_PORT_SOURCE="env"
+elif grep -q '^LOCAL_DB_PORT=' "$PROJECT_ROOT/server/.env" 2>/dev/null; then
+    # Per-machine override, e.g. when :5432 is taken by a native Postgres.
+    # Keep it off :5434 — that's the prod tunnel port every prod script uses.
+    LOCAL_PORT="$(sed -n 's/^LOCAL_DB_PORT=//p' "$PROJECT_ROOT/server/.env" | head -1 | tr -d "\"' ")"
+    LOCAL_PORT_SOURCE="server/.env"
 else
     LOCAL_PORT="$DEFAULT_LOCAL_PORT"
 fi
@@ -364,7 +369,9 @@ if [ "$IS_AGENT_SANDBOX" = true ]; then
     STATUS_PANE="echo 'Host local service status (PostgreSQL + Redis)'; while true; do date; pg_isready -h host.docker.internal -p $LOCAL_PORT -U matcha -d matcha; redis-cli -h host.docker.internal -p $REDIS_PORT ping; sleep 5; done"
     WAITING_MESSAGE="Waiting for host local Postgres and Redis..."
 else
-    SERVICE_WAIT_LOOP="{ WAITED=0; MAX_WAIT=60; until lsof -n -P -iTCP:$LOCAL_PORT -sTCP:LISTEN >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'DB tunnel did not become ready within 60s.'; exit 1; fi; done; }"
+    # pg_isready, not lsof: on Linux the Docker port listener is owned by
+    # root, so an unprivileged lsof never sees it and this loop hung for 60s.
+    SERVICE_WAIT_LOOP="{ WAITED=0; MAX_WAIT=60; until pg_isready -h 127.0.0.1 -p $LOCAL_PORT -U matcha -d matcha >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'DB tunnel did not become ready within 60s.'; exit 1; fi; done; }"
     STATUS_PANE="echo 'Local Postgres (matcha-postgres) — dev DB on localhost:$LOCAL_PORT'; docker start matcha-postgres >/dev/null 2>&1; docker logs -f matcha-postgres"
     WAITING_MESSAGE="Waiting for DB tunnel on localhost:$LOCAL_PORT..."
 
