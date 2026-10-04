@@ -62,11 +62,11 @@ class _RunConn:
             update = {"last_status": status, "last_message": message,
                       "last_generation_run_id": generation_id, "next_run_at": following, "enabled": enabled}
         else:
-            key, version, occurrence = args
+            key, version, occurrence, first_attempt_at = args
             # An in-flight claim must leave its only durable occurrence intact.
             setters = query.split("WHERE")[0]
             assert "SET next_run_at" not in setters and "enabled=" not in setters
-            update = {"last_status": "running"}
+            update = {"last_status": "running", "last_attempt_at": first_attempt_at}
         if (key, version, occurrence) != (self.rule["id"], self.rule["schedule_version"], self.rule["next_run_at"]):
             return "UPDATE 0"
         self.rule.update(update)
@@ -97,6 +97,8 @@ async def test_planner_failure_keeps_occurrence_for_retry(monkeypatch):
     with pytest.raises(ConnectionError):
         await worker._run(str(rule["id"]), 1, NOW.isoformat())
     assert conn.closed and rule["last_status"] == "retrying"
+    # The cause is logged; the manager sees a plain status, not exception text.
+    assert "temporary planner" not in rule["last_message"]
     assert rule["enabled"] and rule["next_run_at"] == NOW
     generate.side_effect = None
     generate.return_value = {"status": "generated", "generation_run_id": str(uuid4())}
@@ -104,6 +106,58 @@ async def test_planner_failure_keeps_occurrence_for_retry(monkeypatch):
     assert result["status"] == "generated"
     assert rule["next_run_at"] == datetime(2026, 10, 8, 16, tzinfo=timezone.utc)
     assert generate.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_retries_share_one_window_and_then_fail_and_advance(monkeypatch):
+    rule = _rule()
+    conn = _RunConn(rule)
+    generate = AsyncMock(side_effect=ValueError("deterministic planner bug"))
+    _wire_run(monkeypatch, conn, generate)
+    with pytest.raises(ValueError):
+        await worker._run(str(rule["id"]), 1, NOW.isoformat())
+    assert rule["last_attempt_at"] == NOW
+    # A lease recovery inside the window retries and keeps the first attempt time.
+    later = NOW + timedelta(seconds=worker.RETRY_WINDOW_SECONDS - 1)
+    monkeypatch.setattr(worker, "_utcnow", lambda: later)
+    with pytest.raises(ValueError):
+        await worker._run(str(rule["id"]), 1, NOW.isoformat())
+    assert rule["last_attempt_at"] == NOW and rule["last_status"] == "retrying"
+    # Past the window the failure is terminal: no raise, so no Celery retry,
+    # and the weekly rule moves to its next occurrence.
+    monkeypatch.setattr(worker, "_utcnow", lambda: NOW + timedelta(seconds=worker.RETRY_WINDOW_SECONDS))
+    result = await worker._run(str(rule["id"]), 1, NOW.isoformat())
+    assert result["status"] == "failed" and "deterministic" not in result["message"]
+    assert rule["last_status"] == "failed" and rule["enabled"]
+    assert rule["next_run_at"] == datetime(2026, 10, 8, 16, tzinfo=timezone.utc)
+    assert generate.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_repeated_worker_deaths_abandon_the_occurrence_without_planning(monkeypatch):
+    # 'running' with an old first attempt: every earlier attempt was killed.
+    age = worker.RETRY_WINDOW_SECONDS + worker.DISPATCH_LEASE_SECONDS
+    rule = _rule(cadence="once", target_weeks_ahead=None, target_week_start=date(2026, 10, 4),
+                 last_status="running", last_attempt_at=NOW)
+    conn = _RunConn(rule)
+    generate = AsyncMock()
+    _wire_run(monkeypatch, conn, generate)
+    monkeypatch.setattr(worker, "_utcnow", lambda: NOW + timedelta(seconds=age))
+    result = await worker._run(str(rule["id"]), 1, NOW.isoformat())
+    assert result["status"] == "failed"
+    assert rule["last_status"] == "failed" and rule["next_run_at"] is None and rule["enabled"] is False
+    generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_previous_occurrences_attempt_does_not_shorten_the_window(monkeypatch):
+    rule = _rule(last_attempt_at=NOW - timedelta(days=7))
+    conn = _RunConn(rule)
+    generate = AsyncMock(side_effect=ConnectionError("outage"))
+    _wire_run(monkeypatch, conn, generate)
+    with pytest.raises(ConnectionError):
+        await worker._run(str(rule["id"]), 1, NOW.isoformat())
+    assert rule["last_attempt_at"] == NOW and rule["last_status"] == "retrying"
 
 
 @pytest.mark.asyncio
@@ -339,6 +393,17 @@ def test_only_winning_dispatch_chain_reschedules(monkeypatch, reschedule):
     monkeypatch.setattr(worker, "_reschedule_dispatch", publish)
     assert worker.dispatch_schedule_automation.run() == {"queued": 0}
     assert publish.call_count == int(reschedule)
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_startup_dispatch_that_loses_the_claim_follows_up_once(monkeypatch, resume):
+    skipped = {"skipped": True, "reason": "another_chain", "reschedule": False}
+    monkeypatch.setattr(worker, "_dispatch", AsyncMock(return_value=skipped))
+    publish = Mock()
+    monkeypatch.setattr(worker, "_reschedule_dispatch", publish)
+    worker.dispatch_schedule_automation.run(resume=resume)
+    # The follow-up is a plain dispatch, so a live chain ends it after one hop.
+    assert publish.call_count == int(resume)
 
 
 def test_dispatch_chain_publication_failure_is_logged_for_startup_recovery(monkeypatch, caplog):

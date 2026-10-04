@@ -27,6 +27,16 @@ type FormState = {
   targetWeekStart: string
 }
 
+// Worker lifecycle states a manager can see between occurrences; terminal
+// planner results fall through to their own wording.
+const STATUS_LABELS: Record<string, string> = {
+  queued: 'Queued',
+  running: 'Running',
+  retrying: 'Retrying after a problem',
+  dispatch_failed: 'Waiting to be queued again',
+  failed: 'Failed',
+}
+
 function defaults(weekStartWeekday = 0): FormState {
   const tomorrow = addDays(toISODate(new Date()), 1)
   // The server rejects a target week that is not aligned to this location's
@@ -310,7 +320,7 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
             <Status
               label="Last result"
               value={rule.last_status
-                ? `${rule.last_status.replaceAll('_', ' ')}${rule.last_attempt_at ? ` · ${formatTimestamp(rule.last_attempt_at, rule.timezone)}` : ''}`
+                ? `${STATUS_LABELS[rule.last_status] ?? rule.last_status.replaceAll('_', ' ')}${rule.last_attempt_at ? ` · ${formatTimestamp(rule.last_attempt_at, rule.timezone)}` : ''}`
                 : 'Has not run'}
             />
             {rule.last_message && <p className="rounded-lg bg-zinc-950/60 p-3 text-xs leading-5 text-zinc-400">{rule.last_message}</p>}

@@ -339,6 +339,7 @@ Scheduling model: no celery-beat. Worker container runs continuously (`restart: 
 - `ir_deadline_alerts` — IR deadline/SLA nudges; dedup via `reminder_sent_at` + `ir_deadline_alert_log`. Detail: `server/app/workers/CLAUDE.md`
 - `symlink_passcode_rotation`, `symlink_sweep` — weekly sym-link passcode rotation (+ Ops-channel announcement) and open-link expiry / one-shot reminder. Detail: `server/app/matcha/services/symlink/CLAUDE.md`
 - `schedule_break_reminders` — break-start push for published planned breaks; self-re-enqueues every 2 min (the hourly dispatch only restarts the chain). Every email/push break reminder lands in append-only `schedule_break_reminder_events`. Seeded disabled. Detail: `server/app/matcha/services/scheduling/CLAUDE.md`
+- `schedule_auto_generation` — per-location auto-schedule rules; a minute dispatcher (self-re-enqueues every 60s, row inserted enabled) publishes due occurrences from Postgres, bounded retry per occurrence. Detail: `server/app/workers/CLAUDE.md`
 - `hr_proactive_push` — opens pre-briefed HR Pilot threads (leave returns, discipline review dates, stuck signatures); deterministic briefings, one-shot-ever dedupe (`hrpush01`). Detail: `server/app/workers/CLAUDE.md`
 - `handbook_freshness` — re-evaluate handbooks against current law
 - `pattern_recognition` — cross-incident analysis

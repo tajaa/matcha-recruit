@@ -303,7 +303,7 @@ def on_worker_ready(sender=None, **kwargs):
     # minute dispatcher even if its previous countdown message was lost.
     try:
         from app.workers.tasks.schedule_auto_generation import dispatch_schedule_automation
-        dispatch_schedule_automation.delay()
+        dispatch_schedule_automation.delay(resume=True)
     except Exception:
         logger.exception("[Worker] Failed to enqueue auto schedule recovery")
 

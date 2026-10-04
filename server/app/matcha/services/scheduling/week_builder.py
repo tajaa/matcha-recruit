@@ -753,9 +753,10 @@ async def _preflight_compliance(
                 ),
             )
         except Exception:
+            # Deliberately names only the location: the pair's identifiers
+            # derive from roster data and stay out of the log.
             logger.exception(
-                "week builder compliance preflight failed for shift %s employee %s — pair blocked",
-                shift.get("key"), assignment.get("employee_id"),
+                "week builder compliance preflight failed at location %s — pair blocked", location_id,
             )
             blocked.add(pair)
             block_reasons[pair] = _refusal(
