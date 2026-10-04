@@ -195,10 +195,10 @@ async def test_pricing_failure_never_falls_back_to_saved_wages(pricing, failure)
         delta.return_value = None
     elif failure == "bad-json":
         proposal = None
-        conn.fetchrow.return_value = {"proposal": "bad-json"}
+        conn.fetchval.return_value = "bad-json"
     else:
         proposal = None
-        conn.fetchrow.return_value = None
+        conn.fetchval.return_value = None
     result = await _price(_action(), proposal, conn)
     assert "cost" not in result["review"]
     assert "labor" not in result["demand_model"]
@@ -207,14 +207,17 @@ async def test_pricing_failure_never_falls_back_to_saved_wages(pricing, failure)
 @pytest.mark.asyncio
 async def test_resumed_automatic_action_reads_company_location_week_and_keeps_consent(pricing):
     conn = _conn()
-    conn.fetchrow.return_value = {"proposal": json.dumps(_proposal())}
+    conn.fetchval.return_value = json.dumps(_proposal())
     action = _action()
     result = await _price(action, conn=conn)
-    query, run_id, company_id, location_id, week_start = conn.fetchrow.call_args.args
+    query, run_id, company_id, location_id, week_start, thread_id = conn.fetchval.call_args.args
     assert "company_id=$2" in query and "location_id=$3" in query and "week_start=$4" in query
     assert "status='proposed'" in query and "origin='automatic'" in query
     assert str(run_id) == action["generation_run_id"] and company_id != location_id
     assert week_start == date(2026, 10, 4)
+    # No owning thread is offered, so only an automatic run can match.
+    assert thread_id is None and "thread_id=$5 OR origin='automatic'" in query
+    assert result["review"]["cost"]["after"] == 100
     assert result["confirm_id"] == action["confirm_id"]
 
 

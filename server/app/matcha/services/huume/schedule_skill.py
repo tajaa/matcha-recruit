@@ -723,6 +723,8 @@ async def propose(
                     editor_location_id=location_id,
                     editor_week_start=week_start, editor_week_end=week_end,
                     actor_role=actor_role,
+                    # Persisted on the row so a resumed chat can show them again.
+                    unfilled=unfilled,
                 )
             operation_count = len(edit_requests) + len(shift_requests)
             operation_summary = summarize_operations(edit_requests, shift_requests)

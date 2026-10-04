@@ -63,7 +63,7 @@ from app.matcha.services.scheduling.schedule_assistant_session import (
 from app.matcha.services.billing.model_pricing import calculate_call_cost
 from app.matcha.services.scheduling.labor_cost_service import labor_cost_visible_from
 from app.matcha.services.scheduling.schedule_cost_projection import (
-    project_schedule_messages, project_schedule_payload,
+    project_schedule_messages, project_schedule_payload, project_schedule_ui_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -1073,7 +1073,11 @@ async def _run_huume_dispatch(tc: TurnContext):
         logger.warning("Huume post-turn state re-read failed for thread %s", thread_id, exc_info=True)
 
     if is_schedule_thread:
-        tc.current_state = project_schedule_payload(tc.current_state, include_cost=include_schedule_cost)
+        tc.current_state = await project_schedule_ui_state(
+            tc.current_state, company_id=company_id, thread_id=thread_id,
+            location_id=schedule_scope.location_id, week_start=schedule_scope.week_start,
+            include_cost=include_schedule_cost, actor_role=current_user.role,
+        )
     assistant_metadata = {"huume_steps": final_result.get("steps") or [], "huume_run_id": str(run_id)}
     if is_schedule_thread:
         assistant_metadata["schedule_cost_visible"] = include_schedule_cost

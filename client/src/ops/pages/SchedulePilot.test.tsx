@@ -518,7 +518,7 @@ describe('SchedulePilot — Huume', () => {
     expect(sendMessageStreamMock.mock.calls[0][1]).toBe('confirm')
   })
 
-  it('previews a generated week on the board before it exists', async () => {
+  it.each([1, 28])('previews all %i generated shifts on the board before they exist', async (count) => {
     getSessionMock.mockResolvedValue({
       session_id: 'session-1', thread_id: 'thread-1', location_id: 'loc1',
       week_start: '2026-08-09', week_end: '2026-08-16', messages: [], version: 2,
@@ -528,10 +528,10 @@ describe('SchedulePilot — Huume', () => {
           generation_run_id: 'generation-1',
           review: review({
             kind: 'week_draft',
-            assignments: [{
-              shift_id: 'autopilot:2026-08-09:opener:1', role: 'Opener', starts_at: '2026-08-09T09:00:00Z', ends_at: '2026-08-09T17:00:00Z',
+            assignments: Array.from({ length: count }, (_, index) => ({
+              shift_id: `autopilot:2026-08-09:opener:${index}`, role: 'Opener', starts_at: '2026-08-09T09:00:00Z', ends_at: '2026-08-09T17:00:00Z',
               employee_id: 'e1', employee_name: 'Aisha Rivera', op: 'assign', verdict: 'ok', reasons: [],
-            }],
+            })),
           }),
         },
       },
@@ -539,15 +539,17 @@ describe('SchedulePilot — Huume', () => {
     renderPilot()
 
     await screen.findByLabelText('Approval verdict')
+    expect(screen.getByText(`${count} staged`)).toBeInTheDocument()
     fireEvent.click(within(reviewPane()).getByRole('button', { name: /See the week on the board/ }))
     expect(centerTab(/Board/)).toHaveAttribute('aria-selected', 'true')
-    expect(await screen.findByRole('img', { name: /^Proposed Opener .+: Aisha Rivera$/ })).toBeInTheDocument()
+    expect(await screen.findAllByRole('img', { name: /^Proposed Opener .+: Aisha Rivera$/ })).toHaveLength(count)
+    expect(sendMessageStreamMock).not.toHaveBeenCalled()
     expect(screen.getByText(/dashed shifts are not written until you approve/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Hide preview' }))
     expect(screen.queryByRole('img', { name: /^Proposed Opener/ })).not.toBeInTheDocument()
     fireEvent.click(centerTab(/Review/))
     fireEvent.click(await screen.findByRole('button', { name: /See the week on the board/ }))
-    expect(await screen.findByRole('img', { name: /^Proposed Opener/ })).toBeInTheDocument()
+    expect(await screen.findAllByRole('img', { name: /^Proposed Opener/ })).toHaveLength(count)
   })
 
   it('surfaces an automatically prepared schedule for review', async () => {

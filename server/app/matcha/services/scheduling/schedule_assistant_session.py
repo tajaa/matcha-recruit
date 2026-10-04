@@ -20,7 +20,8 @@ from app.matcha.services.scheduling.schedule_eligibility_authorization import (
 from app.matcha.services.scheduling.schedule_rules import align_week_start
 from app.matcha.services.scheduling.schedule_automation import location_today
 from app.matcha.services.scheduling.schedule_cost_projection import (
-    price_automatic_action, project_schedule_messages, project_schedule_payload, schedule_cost_visible,
+    price_automatic_action, project_schedule_messages, project_schedule_payload,
+    project_schedule_ui_state, schedule_cost_visible,
 )
 
 @dataclass(frozen=True)
@@ -371,6 +372,13 @@ async def get_or_create_schedule_assistant_session(
                 thread_id,
             )
 
+    # After commit: an optional preview read must not extend the session's
+    # advisory and row locks. The state was projected for this reader above.
+    ui_state = await project_schedule_ui_state(
+        current_state, company_id=company_id, thread_id=thread_id,
+        location_id=location_id, week_start=week_start,
+        include_cost=include_cost, actor_role=actor_role, already_projected=True,
+    )
     messages = project_schedule_messages(
         await get_thread_messages(thread_id, limit=50), include_cost=include_cost,
     )
@@ -382,7 +390,7 @@ async def get_or_create_schedule_assistant_session(
         "week_end": _week_end(week_start).isoformat(),
         "title": _session_title(first_user_turn),
         "messages": messages,
-        "current_state": current_state,
+        "current_state": ui_state,
         "version": version,
     }
 

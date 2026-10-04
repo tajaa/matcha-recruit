@@ -12,6 +12,9 @@ from app.matcha.services.scheduling import labor_cost_service as costs
 from app.matcha.services.scheduling import schedule_assistant_session as sessions
 from app.matcha.services.scheduling import schedule_automation
 from app.matcha.services.scheduling import schedule_cost_projection as projection
+from tests.employee_schedule.projection_fixtures import (
+    compact_week_state, connection, full_week_review, patch_preview_connection,
+)
 
 
 def _connection():
@@ -101,11 +104,11 @@ async def test_resumed_automatic_proposal_gains_cost_without_new_confirmation(mo
     proposal = {"shifts": [{"starts_at": "2026-10-04T08:00:00+00:00", "worked_minutes": 240,
                             "proposed_assignments": [{"employee_id": str(employee_id)}]}]}
 
-    async def fetchrow(query, *params):
-        return existing if "FROM schedule_assistant_sessions" in query else {"proposal": json.dumps(proposal)}
-
-    conn.fetchrow.side_effect = fetchrow
-    conn.fetchval.side_effect = lambda query, *params: "proposed" if "SELECT status" in query else None
+    conn.fetchrow.return_value = existing
+    conn.fetchval.side_effect = lambda query, *params: (
+        "proposed" if "SELECT status" in query
+        else json.dumps(proposal) if "SELECT proposal FROM schedule_generation_runs" in query else None
+    )
     _patch_connection(monkeypatch, conn)
     monkeypatch.setattr(costs, "get_company_features", AsyncMock(return_value={"labor_cost": True}))
     monkeypatch.setattr(sessions, "get_thread_messages", AsyncMock(return_value=[]))
@@ -119,6 +122,36 @@ async def test_resumed_automatic_proposal_gains_cost_without_new_confirmation(mo
     assert priced["review"]["cost"]["after"] == 80
     assert priced["demand_model"]["labor"]["labor_pct"] == 20
     assert priced["confirm_id"] == "same-consent" and result["version"] == 4
+
+
+@pytest.mark.asyncio
+async def test_resuming_chat_generated_week_restores_preview_without_persisting_full_rows(monkeypatch):
+    conn = _connection()
+    company_id, location_id, user_id, thread_id, session_id = [uuid4() for _ in range(5)]
+    review = full_week_review()
+    state = compact_week_state(review)
+    existing = {"id": session_id, "thread_id": thread_id, "version": 3, "current_state": json.dumps(state)}
+    conn.fetchrow.return_value = existing
+    conn.fetchval.side_effect = lambda query, *params: "proposed" if "SELECT status" in query else None
+    _patch_connection(monkeypatch, conn)
+    # The preview is read on its own connection, after the session's locked
+    # transaction has committed.
+    preview = patch_preview_connection(monkeypatch, connection(review))
+    monkeypatch.setattr(sessions, "schedule_cost_visible", AsyncMock(return_value=False))
+    monkeypatch.setattr(sessions, "get_thread_messages", AsyncMock(return_value=[]))
+    result = await sessions.get_or_create_schedule_assistant_session(
+        company_id=company_id, user_id=user_id, actor_role="client", location_id=location_id,
+        week_start=date(2026, 10, 11), session_id=session_id,
+    )
+    action = result["current_state"]["huume_action"]
+    assert len(action["review"]["assignments"]) == 28
+    assert action["confirm_id"] == state["huume_action"]["confirm_id"]
+    assert "cost" not in action["review"]
+    preview.fetchval.assert_awaited_once()
+    assert all("schedule_review" not in call.args[0] for call in conn.fetchval.call_args_list)
+    for call in conn.execute.call_args_list:
+        if "UPDATE mw_threads" in call.args[0]:
+            assert "assignments" not in json.loads(call.args[1])["huume_action"]["review"]
 
 
 @pytest.mark.asyncio

@@ -159,6 +159,8 @@ export default function ReviewPane({ review, title, subtitle, caps, policyMinute
   const personCost = (employeeId: string, side: 'before' | 'after') => {
     if (!review.cost) return undefined
     if (unpricedIds.has(employeeId)) return null
+    // A summary-only cost carries no per-person rows: unknown, not $0.
+    if (!review.cost.by_employee) return undefined
     return review.cost.by_employee[employeeId]?.[side] ?? 0
   }
 

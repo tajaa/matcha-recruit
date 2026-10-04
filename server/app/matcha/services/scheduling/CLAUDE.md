@@ -44,6 +44,16 @@ regions to tabs.
   page owns `currentState` and the panel is presentational. `setCurrentState` is what the adopt call
   writes back through. `usePlanningInputs` and `useScheduleScenarios` are the rail's and the strip's
   state; both are last-request-wins and reload after any applied write.
+- Staged Huume actions keep a compact review in durable/model state. Session open/resume and the
+  completed Huume turn expand it for the UI through `project_schedule_ui_state`: a
+  `schedule_week_draft` from `schedule_generation_runs.proposal->'schedule_review'` (bound to
+  company, location, week and the owning thread, or an automatic run), a `schedule_change` from
+  `schedule_chat_proposals.proposal->'review'` (company + still `proposed`). Only the review is
+  selected, never the frozen plan, and the read runs on its own connection after the session
+  transaction commits. The confirmation ID and current wage gate are kept; expanded rows are never
+  saved and no shift is created. A manual review keeps its frozen cost (`by_employee` included —
+  `ReviewPane` reads it per person); an automatic run's cached cost is never served, it is priced
+  for the reader.
 - Retired: `ScheduleEditor.tsx` (+ its test), `RosterPanel` (the rail's people list replaces it — same
   drag, same qualification preview, now with load), `ScheduleEditorToolbar` (→ `SchedulePilotToolbar`).
   The board, `ShiftInspector`, drag wiring, publish and edit-published semantics are unchanged;
