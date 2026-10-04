@@ -1,5 +1,6 @@
 """Authorization + scope invariants for the Week Start pane's endpoints."""
 
+from inspect import signature
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
@@ -10,6 +11,7 @@ from pydantic import ValidationError
 
 from app.matcha.models.scheduling.employee_schedule import LocationScheduleProfileUpdate
 from app.matcha.routes.employee_schedule import location_profile as routes
+from app.matcha.services.scheduling.schedule_assistant_session import assert_manager_location
 
 
 COMPANY_ID = UUID("11111111-1111-1111-1111-111111111111")
@@ -49,6 +51,43 @@ def _patch(monkeypatch, conn, *, bundle=None):
 
 def _user():
     return SimpleNamespace(id=ACTOR_ID, role="client")
+
+
+@pytest.mark.asyncio
+async def test_employee_managers_can_read_policy_but_cannot_write_it():
+    employee = SimpleNamespace(id=ACTOR_ID, role="employee")
+    read_role = signature(routes.get_location_schedule_profile).parameters["current_user"].default.dependency
+    write_role = signature(routes.update_location_schedule_profile).parameters["current_user"].default.dependency
+
+    assert await read_role(employee) is employee
+    with pytest.raises(HTTPException) as excinfo:
+        await write_role(employee)
+    assert excinfo.value.status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("managed_location", [LOCATION_ID, TEMPLATE_ID, None])
+async def test_employee_profile_read_keeps_the_manager_location_guard(monkeypatch, managed_location):
+    conn = _conn()
+    conn.fetchrow = AsyncMock(return_value={"is_active": True})
+    conn.fetch = AsyncMock(return_value=[{"work_location_id": managed_location}] if managed_location else [])
+    _patch(monkeypatch, conn)
+    monkeypatch.setattr(routes, "assert_manager_location", assert_manager_location)
+    employee = SimpleNamespace(id=ACTOR_ID, role="employee")
+
+    if managed_location == LOCATION_ID:
+        result = await routes.get_location_schedule_profile(LOCATION_ID, employee)
+        assert result["location_id"] == str(LOCATION_ID)
+    else:
+        with pytest.raises(HTTPException) as excinfo:
+            await routes.get_location_schedule_profile(LOCATION_ID, employee)
+        assert excinfo.value.status_code == 403
+        routes.load_profile_bundle.assert_not_awaited()
+
+    assert conn.fetch.await_args.args[1:] == (COMPANY_ID, ACTOR_ID)
+    assert "is_manager" in conn.fetch.await_args.args[0]
+    assert "is_supervisor" in conn.fetch.await_args.args[0]
+    assert "employment_status" in conn.fetch.await_args.args[0]
 
 
 @pytest.mark.asyncio

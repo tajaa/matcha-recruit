@@ -74,6 +74,8 @@ class _FakeConn:
         return self.rows
 
     async def fetchval(self, *_args):
+        if "SELECT week_start_weekday" in _args[0]:
+            return 0
         return self.scalar
 
     async def execute(self, *args):

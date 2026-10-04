@@ -71,6 +71,9 @@ def test_materialized_template_shift_uses_generated_minimum(monkeypatch):
     monkeypatch.setattr(shift_compliance, "check_shift_compliance", compliance)
 
     class Connection:
+        async def fetchval(self, *_args):
+            return None
+
         async def fetch(self, query, *args):
             assert "w.break_minutes" in query
             captured["breaks"] = args[8]
@@ -106,6 +109,9 @@ def test_materialized_template_batches_rule_resolution(monkeypatch):
     monkeypatch.setattr(shift_compliance, "check_shift_compliance", compliance)
 
     class Connection:
+        async def fetchval(self, *_args):
+            return None
+
         async def fetch(self, query, *args):
             return [{"id": uuid4()} for _ in args[6]]
 

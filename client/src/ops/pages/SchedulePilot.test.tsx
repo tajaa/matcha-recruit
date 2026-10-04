@@ -280,6 +280,24 @@ describe('SchedulePilot — the workspace', () => {
 })
 
 describe('SchedulePilot — setup and drawers', () => {
+  it.each([
+    ['Edit week setup', 'Week setup pane'],
+    ['Edit jobs', 'Jobs configuration for loc1'],
+  ])('opens a visible repair pane from mobile Inputs: %s', async (repair, pane) => {
+    useMeMock.mockReturnValue({ me: { profile: { name: 'Jamie Rivera' } }, hasFeature: withHuume('schedule_autopilot') })
+    renderPilot()
+    const mobileTabs = screen.getByRole('tablist', { name: 'Workspace panes' })
+    fireEvent.click(within(mobileTabs).getByRole('tab', { name: 'Inputs' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Build with Autopilot' }))
+    fireEvent.click(await screen.findByRole('button', { name: repair }))
+    expect(screen.getByText(pane)).toBeInTheDocument()
+    expect(within(mobileTabs).getByRole('tab', { name: 'Board' })).toHaveAttribute('aria-selected', 'true')
+    const drawer = screen.getByRole('dialog', { name: repair === 'Edit jobs' ? 'Jobs' : 'Week setup' })
+    expect(drawer?.parentElement?.className).not.toMatch(/\bhidden\b/)
+    fireEvent.click(screen.getByRole('button', { name: 'Return to Autopilot wizard' }))
+    expect(await screen.findByRole('dialog', { name: 'Check setup' })).toBeInTheDocument()
+  })
+
   it('opens Autopilot setup even when blocked and returns from week setup', async () => {
     useMeMock.mockReturnValue({ me: { profile: { name: 'Jamie Rivera' } }, hasFeature: withHuume('schedule_autopilot') })
     fetchAutopilotReadinessMock.mockResolvedValue({

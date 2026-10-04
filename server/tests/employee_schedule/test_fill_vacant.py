@@ -8,7 +8,7 @@ the shifts that already exist.
 """
 
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 from uuid import UUID, uuid4
 
@@ -70,7 +70,7 @@ def _fill(*, demand, roster, preflight=None, advisories=None, block_reasons=None
     async def fake_rules(conn, company_id, location_id):
         return dict(jurisdiction)
 
-    async def fake_preflight(conn, *, company_id, location_id, plan):
+    async def fake_preflight(conn, *, company_id, location_id, plan, **_context):
         calls["preflight"] += 1
         blocked = preflight(plan) if preflight else set()
         reasons = block_reasons(plan) if callable(block_reasons) else dict(block_reasons or {})
@@ -91,6 +91,7 @@ def _fill(*, demand, roster, preflight=None, advisories=None, block_reasons=None
         mock.patch.object(week_builder, "resolve_job_by_name", fake_job),
         mock.patch.object(week_builder, "_week_rules_gate", gate_must_not_run),
         mock.patch.object(week_builder, "load_profile_bundle", gate_must_not_run),
+        mock.patch.object(week_builder, "resolve_week_start_weekday", mock.AsyncMock(return_value=0)),
     ):
         result = _run(week_builder.plan_vacant_fill(
             None, company_id=COMPANY, location_id=LOCATION, week_start=WEEK, **kwargs,
@@ -330,6 +331,72 @@ class TestPlanVacantFill:
                           jurisdiction={"state": "TX", "status": "unmapped"})
         assert result["status"] == "ready"
         assert "NOT verified for TX" in result["jurisdiction"]["message"]
+
+
+@pytest.mark.parametrize("weekday", [0, 1])
+def test_misaligned_fill_replans_against_the_configured_workweek(weekday):
+    """A shifted request must not drop the first day of a minor's workweek."""
+    from app.matcha.services.scheduling import schedule_eligibility, shift_compliance
+
+    configured_start = date(2026, 10, 4) + timedelta(days=weekday)
+    requested_start = configured_start + timedelta(days=1)
+
+    def assignment(employee_id, day, hours):
+        starts = datetime(day.year, day.month, day.day, 8, tzinfo=UTC)
+        return {
+            "employee_id": employee_id, "shift_id": str(uuid4()),
+            "starts_at": starts, "ends_at": starts + timedelta(hours=hours),
+            "break_minutes": 0, "worked_minutes": hours * 60,
+            "location_id": str(LOCATION), "status": "published",
+        }
+
+    minor_rows = [assignment(ANA, configured_start + timedelta(days=i), 8) for i in range(6)]
+    adult_rows = [assignment(BEN, requested_start + timedelta(days=i), 7) for i in range(5)]
+    adult_rows.append(assignment(BEN, requested_start + timedelta(days=6), 7))
+    employees = [_employee(ANA, "Minor", lead=False), _employee(BEN, "Adult", lead=False)]
+    for employee in employees:
+        employee.update(availability_state="always_available", allow_overtime=True,
+                        max_weekly_minutes=None, max_consecutive_days=7)
+    roster = _roster(employees, existing=minor_rows[1:] + adult_rows)
+    roster["adjacent_assignments"] = minor_rows[:1]
+    starts = datetime.combine(requested_start + timedelta(days=5), datetime.min.time(), tzinfo=UTC)
+    starts += timedelta(hours=8)
+    demand = [{
+        "key": "vacancy", "source_shift_id": str(uuid4()), "role": "Crew",
+        "starts_at": starts, "ends_at": starts + timedelta(hours=3),
+        "break_minutes": 0, "worked_minutes": 180, "required_staff": 1,
+        "kind": "work", "job_id": None, "fixed_employee_ids": [],
+        "training_requirement_id": None,
+    }]
+
+    async def age(_conn, _company_id, employee_id, _day):
+        return (16 if employee_id == UUID(ANA) else 30), False
+
+    configured_weekday = mock.AsyncMock(return_value=weekday)
+    with (
+        mock.patch.object(week_builder, "_load_vacant_demand", mock.AsyncMock(return_value=demand)),
+        mock.patch.object(week_builder, "_load_roster_context", mock.AsyncMock(return_value=roster)),
+        mock.patch.object(week_builder, "jurisdiction_rule_status", mock.AsyncMock(
+            return_value={"state": "NY", "status": "curated"},
+        )),
+        mock.patch.object(week_builder, "resolve_week_start_weekday", configured_weekday),
+        mock.patch.object(week_builder, "get_company_features", mock.AsyncMock(return_value={})),
+        mock.patch.object(week_builder, "fetch_lapse_items", mock.AsyncMock(return_value={})),
+        mock.patch.object(shift_compliance, "_location_state", mock.AsyncMock(return_value=("NY", None))),
+        mock.patch.object(shift_compliance, "_location_timezone", mock.AsyncMock(return_value="UTC")),
+        mock.patch.object(shift_compliance, "_employee_age", age),
+        mock.patch.object(shift_compliance, "_meal_break_waiver_on_file", mock.AsyncMock(return_value=False)),
+        mock.patch.object(schedule_eligibility, "schedule_eligibility_violations", mock.AsyncMock(return_value=[])),
+    ):
+        result = _run(week_builder.plan_vacant_fill(
+            None, company_id=COMPANY, location_id=LOCATION,
+            week_start=requested_start, week_end=requested_start + timedelta(days=6),
+        ))
+
+    assert result["status"] == "ready"
+    assert _who(result) == {"vacancy": "Adult"}
+    assert result["unfilled"] == []
+    configured_weekday.assert_awaited_once_with(None, company_id=COMPANY, location_id=LOCATION)
 
 
 class _DemandConn:

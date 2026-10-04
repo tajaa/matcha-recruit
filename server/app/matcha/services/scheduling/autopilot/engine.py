@@ -27,7 +27,7 @@ from .policy import (
     POLICY_SHIFT_MINUTES_BOUNDS,
     POLICY_SLOT_MINUTES,
 )
-from .windows import day_window, slot_start
+from .windows import day_window, off_week_buffer_refusal, off_week_demand_refusal, slot_start
 
 
 def _json_number(value: Decimal | None) -> float | None:
@@ -185,6 +185,8 @@ def generate_autopilot_demand(
     anchor: date | None = None,
 ) -> AutopilotResult:
     profile = dict(profile or {})
+    if refusal := off_week_buffer_refusal(week_start, profile):
+        raise ValueError(refusal)
     jobs = sorted((dict(job) for job in jobs), key=lambda j: (str(j.get("name") or ""), str(j.get("id"))))
     roster = dict(roster or {})
     sales = {day: Decimal(str(value)) for day, value in sales_by_day.items()}
@@ -450,5 +452,7 @@ def generate_autopilot_demand(
         },
         "notes": week_notes, "sentence": sentence,
     }
+    if refusal := off_week_demand_refusal(week_start, rows):
+        raise ValueError(refusal)
     json.dumps(demand_model)
     return AutopilotResult(rows, demand_model)

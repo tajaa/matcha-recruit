@@ -27,6 +27,16 @@ type FormState = {
   targetWeekStart: string
 }
 
+// Worker lifecycle states a manager can see between occurrences; terminal
+// planner results fall through to their own wording.
+const STATUS_LABELS: Record<string, string> = {
+  queued: 'Queued',
+  running: 'Running',
+  retrying: 'Retrying after a problem',
+  dispatch_failed: 'Waiting to be queued again',
+  failed: 'Failed',
+}
+
 function defaults(weekStartWeekday = 0): FormState {
   const tomorrow = addDays(toISODate(new Date()), 1)
   // The server rejects a target week that is not aligned to this location's
@@ -87,10 +97,11 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
   const { toast } = useToast()
   const { hasFeature } = useMe()
   const autopilotEnabled = hasFeature('schedule_autopilot')
-  // Read by in-flight run-now callbacks to drop a result for a location the
-  // manager has since left; synced after render, never written during it.
-  const locationIdRef = useRef(locationId)
-  useEffect(() => { locationIdRef.current = locationId }, [locationId])
+  // A new selection is a new request scope, even after returning to the same
+  // location. Location identity alone cannot distinguish A → B → A.
+  const scopeRequest = useRef(0)
+  const saveRequest = useRef(0)
+  const runRequest = useRef(0)
   const [form, setForm] = useState<FormState>(defaults)
   const [rule, setRule] = useState<ScheduleAutomationRule | null>(null)
   const [templates, setTemplates] = useState<WeekTemplate[]>([])
@@ -103,29 +114,37 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
   // setState the rule objects to is clearing the previous location's rule
   // before the request leaves, so it can never render under the new one.
   useEffect(() => {
+    const scope = ++scopeRequest.current
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setRule(null)
     setForm(defaults(weekStartWeekday))
     setTemplates([])
     setGeneratedWeekStart(null)
+    setSaving(false)
     setRunning(false)
+    setLoading(!!locationId)
+    const current = () => scope === scopeRequest.current
     if (!locationId) return
-    setLoading(true)
     Promise.all([fetchAutoSchedule(locationId), fetchWeekTemplates(locationId)])
       .then(([automation, templateResponse]) => {
+        if (!current()) return
         setRule(automation.rule)
         setTemplates(templateResponse.week_templates)
         if (automation.rule) setForm(fromRule(automation.rule, weekStartWeekday))
       })
-      .catch((err) => toast(errorMessage(err), 'error'))
-      .finally(() => setLoading(false))
-  }, [locationId, toast])
+      .catch((err) => { if (current()) toast(errorMessage(err), 'error') })
+      .finally(() => { if (current()) setLoading(false) })
+    return () => { if (current()) scopeRequest.current += 1 }
+  }, [locationId, weekStartWeekday, toast])
 
   async function save() {
     if (form.mode === 'template' && !form.weekTemplateId) {
       toast('Choose a saved week template first.', 'error')
       return
     }
+    const scope = scopeRequest.current
+    const request = ++saveRequest.current
+    const current = () => scope === scopeRequest.current && request === saveRequest.current
     setSaving(true)
     try {
       const saved = await saveAutoSchedule(locationId, {
@@ -139,31 +158,35 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
         target_weeks_ahead: form.cadence === 'weekly' ? form.targetWeeksAhead : null,
         target_week_start: form.cadence === 'once' ? form.targetWeekStart : null,
       })
+      if (!current()) return
       setRule(saved)
       setForm(fromRule(saved, weekStartWeekday))
-      toast(saved.enabled ? 'Auto schedule saved and queued.' : 'Auto schedule saved but paused.', 'success')
+      toast(saved.enabled ? 'Auto schedule saved.' : 'Auto schedule saved but paused.', 'success')
     } catch (err) {
-      toast(errorMessage(err), 'error')
+      if (current()) toast(errorMessage(err), 'error')
     } finally {
-      setSaving(false)
+      if (current()) setSaving(false)
     }
   }
 
   async function runNow() {
     const runLocationId = locationId
+    const scope = scopeRequest.current
+    const request = ++runRequest.current
+    const current = () => scope === scopeRequest.current && request === runRequest.current
     setRunning(true)
     try {
       const result = await runAutoScheduleNow(runLocationId)
-      if (locationIdRef.current !== runLocationId) return
+      if (!current()) return
       toast(result.message, result.status === 'generated' ? 'success' : 'info')
       setGeneratedWeekStart(result.status === 'generated' ? result.week_start : null)
       const refreshed = await fetchAutoSchedule(runLocationId)
-      if (locationIdRef.current !== runLocationId) return
+      if (!current()) return
       setRule(refreshed.rule)
     } catch (err) {
-      if (locationIdRef.current === runLocationId) toast(errorMessage(err), 'error')
+      if (current()) toast(errorMessage(err), 'error')
     } finally {
-      if (locationIdRef.current === runLocationId) setRunning(false)
+      if (current()) setRunning(false)
     }
   }
 
@@ -208,13 +231,14 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
             </label>
           </div>
 
-          {autopilotEnabled && (
+          {(autopilotEnabled || form.mode === 'autopilot') && (
             <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-emerald-500/25 text-sm">
               <button type="button" onClick={() => setForm({ ...form, mode: 'template' })} className={`px-3 py-2 ${form.mode === 'template' ? 'bg-emerald-500/15 text-emerald-100' : 'text-zinc-500 hover:text-zinc-300'}`}>From template</button>
-              <button type="button" onClick={() => setForm({ ...form, mode: 'autopilot', weekTemplateId: '' })} className={`px-3 py-2 ${form.mode === 'autopilot' ? 'bg-emerald-500/15 text-emerald-100' : 'text-zinc-500 hover:text-zinc-300'}`}>Autopilot</button>
+              <button type="button" disabled={!autopilotEnabled} onClick={() => setForm({ ...form, mode: 'autopilot', weekTemplateId: '' })} className={`px-3 py-2 disabled:opacity-40 ${form.mode === 'autopilot' ? 'bg-emerald-500/15 text-emerald-100' : 'text-zinc-500 hover:text-zinc-300'}`}>Autopilot</button>
             </div>
           )}
 
+          {form.mode === 'autopilot' && !autopilotEnabled && <p className="text-xs leading-5 text-amber-300">Autopilot is no longer enabled. Pause this rule or switch to a saved template.</p>}
           {form.mode === 'template' ? (
             <label className="block space-y-1.5">
               <span className="text-xs font-medium text-zinc-400">Week template</span>
@@ -259,10 +283,10 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
           )}
 
           <div className="flex flex-wrap gap-2 border-t border-white/[0.06] pt-4">
-            <button onClick={save} disabled={saving || (form.mode === 'template' && !form.weekTemplateId)} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-40">
+            <button onClick={save} disabled={saving || running || (form.mode === 'template' && !form.weekTemplateId) || (form.mode === 'autopilot' && !autopilotEnabled && form.enabled)} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-40">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save auto schedule
             </button>
-            {rule && <button onClick={runNow} disabled={running} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:text-zinc-100 disabled:opacity-40">
+            {rule && <button onClick={runNow} disabled={running || saving || (rule.mode === 'autopilot' && !autopilotEnabled)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:text-zinc-100 disabled:opacity-40">
               {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} Run now
             </button>}
           </div>
@@ -296,7 +320,7 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
             <Status
               label="Last result"
               value={rule.last_status
-                ? `${rule.last_status.replaceAll('_', ' ')}${rule.last_attempt_at ? ` · ${formatTimestamp(rule.last_attempt_at, rule.timezone)}` : ''}`
+                ? `${STATUS_LABELS[rule.last_status] ?? rule.last_status.replaceAll('_', ' ')}${rule.last_attempt_at ? ` · ${formatTimestamp(rule.last_attempt_at, rule.timezone)}` : ''}`
                 : 'Has not run'}
             />
             {rule.last_message && <p className="rounded-lg bg-zinc-950/60 p-3 text-xs leading-5 text-zinc-400">{rule.last_message}</p>}

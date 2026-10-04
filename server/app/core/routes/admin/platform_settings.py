@@ -299,6 +299,10 @@ async def trigger_scheduler(task_key: str):
         # restart from re-billing Gemini, not to override a human).
         run_vertical_coverage_sweep.delay(force=True)
         return {"status": "triggered", "task_key": task_key, "message": "Vertical coverage sweep enqueued"}
+    elif task_key == "schedule_auto_generation_dispatch":
+        from app.workers.tasks.schedule_auto_generation import dispatch_schedule_automation
+        dispatch_schedule_automation.delay()
+        return {"status": "triggered", "task_key": task_key, "message": "Auto schedule dispatch enqueued"}
     elif task_key == "location_fips_backfill":
         from app.workers.tasks.location_fips_backfill import run_location_fips_backfill
         # force=True: a human pressing Trigger bypasses the disabled-row guard.

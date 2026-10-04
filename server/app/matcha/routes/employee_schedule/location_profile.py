@@ -14,7 +14,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import get_connection
-from ...dependencies import require_admin_or_client
+from ...dependencies import require_admin_or_client, require_company_member
 from ...models.scheduling.employee_schedule import LocationScheduleProfileUpdate
 from ...services.scheduling.location_profile import (
     UNSET, bundle_leader_jobs, load_profile_bundle, missing_fields, upsert_location_profile,
@@ -70,7 +70,7 @@ def _serialize(bundle: dict, *, location_id: UUID) -> dict:
 
 @router.get("/locations/{location_id}/profile")
 async def get_location_schedule_profile(
-    location_id: UUID, current_user=Depends(require_admin_or_client),
+    location_id: UUID, current_user=Depends(require_company_member),
 ):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:

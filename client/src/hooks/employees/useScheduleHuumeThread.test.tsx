@@ -93,7 +93,7 @@ beforeEach(() => {
   sendMessageStreamMock.mockReset().mockReturnValue(new AbortController())
   toastMock.mockReset()
   dictationMock.mockReset().mockReturnValue({
-    status: 'idle', elapsedSeconds: 0, start: vi.fn(), stop: vi.fn(),
+    status: 'idle', elapsedSeconds: 0, start: vi.fn(), stop: vi.fn(), cancel: vi.fn(),
   })
 })
 
@@ -161,9 +161,91 @@ describe('useScheduleHuumeThread — opening a chat', () => {
     expect(result.current.messages).toEqual([])
     expect(getSessionMock).toHaveBeenLastCalledWith('loc1', '2026-08-16', null)
   })
+
+  it.each([
+    { locationId: 'loc1', weekStart: '2026-08-16' },
+    { locationId: 'loc2', weekStart: '2026-08-09' },
+  ])('does not carry a resumed chat into a new scope or back again: %j', async (nextScope) => {
+    const { result, rerender } = render()
+    await waitFor(() => expect(result.current.sessionId).toBe('session-1'))
+    act(() => result.current.openChat('session-1'))
+    await waitFor(() => expect(getSessionMock).toHaveBeenCalledTimes(2))
+    expect(getSessionMock).toHaveBeenLastCalledWith('loc1', '2026-08-09', 'session-1')
+
+    getSessionMock.mockResolvedValue(session({}, 'session-2'))
+    rerender(nextScope)
+    await waitFor(() => expect(result.current.sessionId).toBe('session-2'))
+    expect(getSessionMock).toHaveBeenLastCalledWith(nextScope.locationId, nextScope.weekStart, null)
+
+    getSessionMock.mockResolvedValue(session({}, 'session-3'))
+    rerender({ locationId: 'loc1', weekStart: '2026-08-09' })
+    await waitFor(() => expect(result.current.sessionId).toBe('session-3'))
+    expect(getSessionMock).toHaveBeenLastCalledWith('loc1', '2026-08-09', null)
+  })
+
+  it('drops history returned for a previous scope', async () => {
+    let resolveHistory!: (value: { sessions: ReturnType<typeof summary>[] }) => void
+    listSessionsMock.mockReturnValueOnce(new Promise((resolve) => { resolveHistory = resolve }))
+    const { result, rerender } = render()
+    await waitFor(() => expect(result.current.sessionId).toBe('session-1'))
+    act(() => result.current.setHistoryOpen(true))
+    getSessionMock.mockResolvedValue(session({}, 'session-2'))
+    listSessionsMock.mockResolvedValue({ sessions: [summary('session-2', 'Current week')] })
+    rerender({ weekStart: '2026-08-16' })
+    await waitFor(() => expect(result.current.sessions[0]?.session_id).toBe('session-2'))
+    await act(async () => { resolveHistory({ sessions: [summary('session-old', 'Old week')] }) })
+    expect(result.current.sessions[0]?.session_id).toBe('session-2')
+    expect(result.current.historyOpen).toBe(false)
+  })
+
+  it('ignores callbacks from an aborted turn after switching scope', async () => {
+    const { result, rerender, onApplied } = render()
+    await waitFor(() => expect(result.current.threadId).toBeTruthy())
+    await act(async () => { await result.current.send('Build this week') })
+    const callbacks = streamCallbacks()
+    getSessionMock.mockResolvedValue(session({}, 'session-2'))
+    rerender({ weekStart: '2026-08-16' })
+    await waitFor(() => expect(result.current.sessionId).toBe('session-2'))
+    act(() => {
+      callbacks.onEvent({ type: 'text_delta', delta: 'Old response' })
+      callbacks.onError('Old error')
+      callbacks.onComplete({
+        assistant_message: message('old-response', 'assistant', 'Old response'),
+        current_state: { huume_action: { type: 'schedule_change', status: 'applied', confirm_id: 'old-confirm' } },
+      })
+    })
+    expect(result.current.messages).toEqual([])
+    expect(result.current.currentState).toEqual({})
+    expect(result.current.status).toBe('')
+    expect(onApplied).not.toHaveBeenCalled()
+    expect(toastMock).not.toHaveBeenCalled()
+  })
 })
 
 describe('useScheduleHuumeThread — archiving', () => {
+  it.each(['success', 'failure'])('ignores an archive %s after switching scope', async (outcome) => {
+    let resolveArchive!: (value: unknown) => void
+    let rejectArchive!: (error: Error) => void
+    archiveSessionMock.mockReturnValueOnce(new Promise((resolve, reject) => { resolveArchive = resolve; rejectArchive = reject }))
+    const { result, rerender } = render()
+    await waitFor(() => expect(result.current.sessionId).toBe('session-1'))
+    let pending!: Promise<void>
+    act(() => { pending = result.current.archiveChat(summary('session-1', 'Old week')) })
+    getSessionMock.mockResolvedValue(session({}, 'session-2'))
+    listSessionsMock.mockResolvedValue({ sessions: [summary('session-2', 'Current week')] })
+    rerender({ weekStart: '2026-08-16' })
+    await waitFor(() => expect(result.current.sessions[0]?.session_id).toBe('session-2'))
+    const calls = getSessionMock.mock.calls.length
+    await act(async () => {
+      if (outcome === 'success') resolveArchive({ archived: true }); else rejectArchive(new Error('Old archive error'))
+      await pending
+    })
+    expect(result.current.sessionId).toBe('session-2')
+    expect(result.current.sessions[0]?.session_id).toBe('session-2')
+    expect(getSessionMock).toHaveBeenCalledTimes(calls)
+    expect(toastMock).not.toHaveBeenCalled()
+  })
+
   it('drops the chat from history and opens a fresh one when it was the open chat', async () => {
     // The server stops listing an archived chat, so the re-open that follows
     // lists the remaining ones — here, none.
@@ -204,6 +286,51 @@ describe('useScheduleHuumeThread — archiving', () => {
 
     expect(toastMock).toHaveBeenCalledWith('Could not remove that chat.', 'error')
     expect(result.current.sessions).toHaveLength(1)
+  })
+})
+
+describe('useScheduleHuumeThread — voice scope', () => {
+  it.each(['capture', 'transcription'])('drops pending %s when the location changes', async (stage) => {
+    let complete!: (value: unknown) => void
+    const pending = new Promise((resolve) => { complete = resolve })
+    const stop = vi.fn().mockReturnValue(stage === 'capture' ? pending : Promise.resolve(new Blob(['audio'])))
+    dictationMock.mockReturnValue({ status: 'idle', elapsedSeconds: 0, start: vi.fn(), stop, cancel: vi.fn() })
+    transcribeMock.mockReturnValue(stage === 'transcription' ? pending : Promise.resolve({ available: true, transcript: 'Old week' }))
+    const { result, rerender } = render()
+    await waitFor(() => expect(result.current.sessionId).toBe('session-1'))
+    let voice!: Promise<void>
+    act(() => { voice = result.current.voice.finish() })
+    if (stage === 'transcription') await waitFor(() => expect(transcribeMock).toHaveBeenCalledOnce())
+    getSessionMock.mockResolvedValue(session({}, 'session-2'))
+    rerender({ locationId: 'loc2' })
+    await waitFor(() => expect(result.current.sessionId).toBe('session-2'))
+    expect(result.current.voice.transcribing).toBe(false)
+    expect(result.current.composerDisabled).toBe(false)
+    await act(async () => {
+      complete(stage === 'capture' ? new Blob(['audio']) : { available: true, transcript: 'Old week' })
+      await voice
+    })
+    expect(sendMessageStreamMock).not.toHaveBeenCalled()
+    expect(result.current.voice.error).toBeNull()
+  })
+
+  it('ignores a failed microphone start after scope changes', async () => {
+    let rejectStart!: (error: Error) => void
+    const start = vi.fn().mockReturnValue(new Promise((_resolve, reject) => { rejectStart = reject }))
+    const cancel = vi.fn()
+    dictationMock.mockReturnValue({ status: 'idle', elapsedSeconds: 0, start, stop: vi.fn(), cancel })
+    const { result, rerender } = render()
+    await waitFor(() => expect(result.current.sessionId).toBe('session-1'))
+    let voice!: Promise<void>
+    act(() => { voice = result.current.voice.begin() })
+    getSessionMock.mockResolvedValue(session({}, 'session-2'))
+    rerender({ weekStart: '2026-08-16' })
+    await waitFor(() => expect(result.current.sessionId).toBe('session-2'))
+    expect(result.current.voice.starting).toBe(false)
+    expect(cancel).toHaveBeenCalledTimes(2)
+    await act(async () => { rejectStart(new Error('Old microphone denied')); await voice })
+    expect(result.current.voice.error).toBeNull()
+    expect(result.current.composerDisabled).toBe(false)
   })
 })
 

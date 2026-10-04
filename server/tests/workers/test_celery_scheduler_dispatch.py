@@ -47,3 +47,55 @@ def test_entry_resolves_to_a_celery_task(task_key, module_path, callable_name):
     task = getattr(module, callable_name, None)
     assert task is not None, f"{module_path}.{callable_name} does not exist ({task_key})"
     assert hasattr(task, "delay"), f"{module_path}.{callable_name} is not a Celery task ({task_key})"
+
+
+@pytest.mark.parametrize("default_queue", [True, False])
+def test_worker_startup_recovers_auto_schedule_dispatch_only_on_default_queue(monkeypatch, default_queue):
+    from unittest.mock import Mock
+    from app.workers.tasks import schedule_auto_generation as automatic
+
+    module = importlib.import_module("app.workers.celery_app")
+    monkeypatch.setattr(module, "_serves_default_queue", lambda _sender: default_queue)
+    monkeypatch.setattr(module, "_scheduler_flags", lambda _keys: {})
+    # No startup test should publish to a real broker. Patch the defining
+    # task objects for every unconditional recovery hook.
+    recoveries = [
+        ("er_document_processing", "reset_stale_er_documents"),
+        ("huume_code", "reconcile_stale_runs"),
+        ("project_agent", "reconcile_stale_runs"),
+        ("schedule_break_refresh", "recover_stale_employee_schedule_breaks"),
+        ("auth_device_sessions", "prune_device_sessions"),
+    ]
+    for task_module, name in recoveries:
+        task = getattr(importlib.import_module(f"app.workers.tasks.{task_module}"), name)
+        monkeypatch.setattr(task, "delay", Mock())
+    dispatch = Mock()
+    monkeypatch.setattr(automatic.dispatch_schedule_automation, "delay", dispatch)
+    module.on_worker_ready(sender=object())
+    assert dispatch.call_count == int(default_queue)
+
+
+def test_admin_can_trigger_auto_schedule_dispatch(monkeypatch):
+    import asyncio
+    from unittest.mock import Mock
+    from app.core.routes.admin import platform_settings
+    from app.workers.tasks import schedule_auto_generation as automatic
+
+    class Conn:
+        async def fetchrow(self, _query, key):
+            assert key == automatic.DISPATCH_TASK_KEY
+            return {"task_key": key}
+
+    class Context:
+        async def __aenter__(self):
+            return Conn()
+
+        async def __aexit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(platform_settings, "get_connection", Context)
+    publish = Mock()
+    monkeypatch.setattr(automatic.dispatch_schedule_automation, "delay", publish)
+    result = asyncio.run(platform_settings.trigger_scheduler(automatic.DISPATCH_TASK_KEY))
+    assert result["status"] == "triggered" and result["task_key"] == automatic.DISPATCH_TASK_KEY
+    publish.assert_called_once()

@@ -23,6 +23,7 @@ function ReadinessWarnings({ warnings }: { warnings?: string[] }) {
 
 export default function AutopilotWizard({
   locationId, locationName, weekStart, readiness, readinessLoading, readinessError,
+  canEditPolicy = false,
   running, onClose, onRefresh, onOpenWeekSetup, onOpenJobs, onProfileSaved, onGenerate,
 }: {
   locationId: string
@@ -32,6 +33,7 @@ export default function AutopilotWizard({
   readinessLoading: boolean
   readinessError: string | null
   running: boolean
+  canEditPolicy?: boolean
   onClose(): void
   onRefresh(): Promise<void>
   onOpenWeekSetup(): void
@@ -63,7 +65,7 @@ export default function AutopilotWizard({
 
   const quality = readiness?.autopilot
   const ready = readiness?.ready === true && !readinessLoading && !readinessError
-  const policyChanged = !!profile && !!policy
+  const policyChanged = canEditPolicy && !!profile && !!policy
     && JSON.stringify(policy) !== JSON.stringify(policyDraftFromProfile(profile))
 
   function leave(action: 'close' | 'weekSetup' | 'jobs') {
@@ -86,6 +88,7 @@ export default function AutopilotWizard({
 
   async function continueFromPolicy() {
     if (!profile || !policy) return
+    if (!canEditPolicy) { setStep(2); return }
     setError(null)
     try {
       const payload = policyPayload(policy)
@@ -182,9 +185,9 @@ export default function AutopilotWizard({
               </div>
               <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
                 <h3 className="text-xs font-medium text-zinc-200">Planning choices</h3>
-                <p className="mb-3 mt-1 text-xs leading-5 text-zinc-500">These are your operating targets, not legal limits. Leave optional values blank to use Autopilot defaults.</p>
+                <p className="mb-3 mt-1 text-xs leading-5 text-zinc-500">{canEditPolicy ? 'These are your operating targets, not legal limits. Leave optional values blank to use Autopilot defaults.' : 'These are the saved operating targets. A company admin can change them; you can build a review using these choices.'}</p>
                 {profileLoading ? <p className="flex items-center gap-2 text-xs text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading saved choices…</p>
-                  : policy ? <AutopilotPolicyFields value={policy} onChange={setPolicy} />
+                  : policy ? <AutopilotPolicyFields value={policy} onChange={setPolicy} disabled={!canEditPolicy || saving} />
                     : <div className="space-y-2"><p className="text-xs text-red-200">Saved choices could not be loaded.</p><button type="button" onClick={() => { setError(null); setProfileLoading(true); setProfileAttempt((value) => value + 1) }} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-200">Retry loading choices</button></div>}
               </div>
               {error && <p role="alert" className="text-xs text-red-200">{error}</p>}

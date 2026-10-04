@@ -1,5 +1,6 @@
 """Manager-configured Huume schedule suggestion timing, scoped per location."""
 
+import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -23,6 +24,7 @@ from ...dependencies import require_admin_or_client
 from ._shared import assert_location_in_company, log_audit, require_company_id
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -112,7 +114,9 @@ async def save_auto_schedule(
             )
             if not template_exists:
                 raise HTTPException(status_code=422, detail="Choose a week template available to this location.")
-        else:
+        elif body.enabled:
+            # Removing a premium grant must not prevent a manager pausing
+            # their existing automation. Tenant/location/Huume gates remain.
             features = await get_company_features(company_id, conn=conn)
             if not features.get("schedule_autopilot"):
                 raise HTTPException(status_code=403, detail="Schedule Autopilot is not enabled for this company.")
@@ -180,6 +184,7 @@ async def save_auto_schedule(
                     target_week_start=EXCLUDED.target_week_start,
                     next_run_at=EXCLUDED.next_run_at,
                     schedule_version=schedule_automation_rules.schedule_version + 1,
+                    last_status=NULL, last_message=NULL,
                     updated_by=EXCLUDED.updated_by,
                     updated_at=NOW()
                 RETURNING id, schedule_version
@@ -198,7 +203,12 @@ async def save_auto_schedule(
 
     if scheduled_at:
         from app.workers.tasks.schedule_auto_generation import enqueue_schedule_automation
-        enqueue_schedule_automation(row["id"], row["schedule_version"], scheduled_at)
+        try:
+            enqueue_schedule_automation(row["id"], row["schedule_version"], scheduled_at)
+        except Exception:
+            # The rule is already committed. The durable dispatcher retries
+            # publication; returning an error here misreports a successful save.
+            logger.exception("Auto schedule saved; dispatch awaits recovery rule=%s", row["id"])
     return _serialize(saved)
 
 

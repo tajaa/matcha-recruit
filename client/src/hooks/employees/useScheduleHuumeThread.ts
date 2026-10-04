@@ -139,7 +139,9 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
   const [sessionId, setSessionId] = useState<string | null>(null)
   // Which chat the next mount opens: null starts a fresh one, an id reopens
   // the chat the manager picked out of history.
-  const [resumeSessionId, setResumeSessionId] = useState<string | null>(null)
+  const scope = `${locationId ?? ''}:${weekStart}`
+  const [resumeChat, setResumeChat] = useState<{ scope: string; sessionId: string | null } | null>(null)
+  const resumeSessionId = resumeChat?.scope === scope ? resumeChat.sessionId : null
   const [sessions, setSessions] = useState<ScheduleHuumeSessionSummary[]>([])
   const [historyOpen, setHistoryOpen] = useState(false)
   const [messages, setMessages] = useState<MWMessage[]>([])
@@ -155,22 +157,27 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
   const [transcribing, setTranscribing] = useState(false)
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const mountedRef = useRef(true)
+  const sessionRequest = useRef(0)
   const stepsRef = useRef<HuumeStep[]>([])
   const appliedKeysRef = useRef(new Set<string>())
   const settledAutomaticKeysRef = useRef(new Set<string>())
   const abortRef = useRef<AbortController | null>(null)
   const voiceTurnRef = useRef(0)
   const selectedShiftsRef = useRef(selectedShifts)
-  selectedShiftsRef.current = selectedShifts
   const onAppliedRef = useRef(onApplied)
-  onAppliedRef.current = onApplied
   const onSettledRef = useRef(onAutomaticActionSettled)
-  onSettledRef.current = onAutomaticActionSettled
+
+  useEffect(() => {
+    selectedShiftsRef.current = selectedShifts
+    onAppliedRef.current = onApplied
+    onSettledRef.current = onAutomaticActionSettled
+  }, [selectedShifts, onApplied, onAutomaticActionSettled])
 
   const dictation = useVoiceDictation({
     maxDurationSeconds: 45,
     onMaxDuration: () => { void finishVoiceTurn() },
   })
+  const cancelDictation = dictation.cancel
 
   useEffect(() => () => {
     mountedRef.current = false
@@ -178,23 +185,42 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
     abortRef.current?.abort()
   }, [])
 
+  // A history selection belongs to one week at one location. Deriving the
+  // request above also prevents a stale id from leaving before this reset.
+  useEffect(() => {
+    // Discard the previous scope's history selection before it can be reused.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setResumeChat(null)
+  }, [scope])
+
   const refreshSessions = useCallback(() => {
     if (!locationId) return
+    const request = sessionRequest.current
     void listScheduleHuumeSessions(locationId, weekStart)
-      .then((result) => { if (mountedRef.current) setSessions(result.sessions) })
+      .then((result) => { if (mountedRef.current && request === sessionRequest.current) setSessions(result.sessions) })
       .catch(() => { /* history is a convenience; a failed list never blocks the chat */ })
   }, [locationId, weekStart])
 
   useEffect(() => {
     let cancelled = false
+    const request = ++sessionRequest.current
     // React StrictMode re-runs effects after their simulated cleanup. The
     // cleanup below marks the hook unmounted, so restore the live state
     // before accepting this scope's session response.
     mountedRef.current = true
     abortRef.current?.abort()
+    voiceTurnRef.current += 1
+    cancelDictation()
+    // Reset the old session immediately while the next scope opens.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setStartingVoice(false)
+    setTranscribing(false)
+    setVoiceError(null)
     setThreadId(null)
     setSessionId(null)
     setMessages([])
+    setSessions([])
+    setHistoryOpen(false)
     setCurrentState({})
     setSessionError(null)
     setSteps([])
@@ -208,7 +234,7 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
 
     void getScheduleHuumeSession(locationId, weekStart, resumeSessionId)
       .then((session) => {
-        if (cancelled || !mountedRef.current) return
+        if (cancelled || !mountedRef.current || request !== sessionRequest.current) return
         setThreadId(session.thread_id)
         setSessionId(session.session_id)
         setMessages(session.messages)
@@ -217,12 +243,12 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
         refreshSessions()
       })
       .catch((error: unknown) => {
-        if (cancelled || !mountedRef.current) return
+        if (cancelled || !mountedRef.current || request !== sessionRequest.current) return
         setStatus('')
         setSessionError(error instanceof Error ? error.message : 'Could not open the schedule assistant.')
       })
-    return () => { cancelled = true }
-  }, [locationId, weekStart, sessionAttempt, resumeSessionId, refreshSessions])
+    return () => { cancelled = true; if (request === sessionRequest.current) sessionRequest.current += 1 }
+  }, [locationId, weekStart, sessionAttempt, resumeSessionId, refreshSessions, cancelDictation])
 
   const settledAutomaticKey = settledAutomaticActionKey(currentState)
   useEffect(() => {
@@ -234,18 +260,20 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
   const openChat = useCallback((nextSessionId: string | null) => {
     if (busy) return
     setHistoryOpen(false)
-    setResumeSessionId(nextSessionId)
+    setResumeChat({ scope, sessionId: nextSessionId })
     setSessionAttempt((attempt) => attempt + 1)
-  }, [busy])
+  }, [busy, scope])
 
   const archiveChat = useCallback(async (summary: ScheduleHuumeSessionSummary) => {
+    const request = sessionRequest.current
+    const current = () => mountedRef.current && request === sessionRequest.current
     try {
       await archiveScheduleHuumeSession(summary.session_id)
     } catch (error: unknown) {
-      toast(error instanceof Error ? error.message : 'Could not remove that chat.', 'error')
+      if (current()) toast(error instanceof Error ? error.message : 'Could not remove that chat.', 'error')
       return
     }
-    if (!mountedRef.current) return
+    if (!current()) return
     setSessions((current) => current.filter((item) => item.session_id !== summary.session_id))
     // Archiving the chat that is open leaves nothing to talk in — start a new
     // one rather than keeping a thread the server will now refuse turns on.
@@ -256,6 +284,7 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
     const displayContent = (contentOverride ?? input).trim()
     if (!displayContent || !threadId || busy || sessionError) return
     const content = displayContent + selectedShiftContext(selectedShiftsRef.current)
+    const request = sessionRequest.current
     setInput('')
     setBusy(true)
     setStatus('Huume is working…')
@@ -265,7 +294,7 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
     setMessages((current) => [...current, optimistic])
     abortRef.current = sendMessageStream(threadId, content, {
       onEvent: (event: MWStreamEvent) => {
-        if (!mountedRef.current) return
+        if (!mountedRef.current || request !== sessionRequest.current) return
         if (event.type === 'status') setStatus(event.message)
         if (event.type === 'step') {
           stepsRef.current = [...stepsRef.current, event.data]
@@ -273,7 +302,7 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
         }
       },
       onComplete: (response: MWSendResponse) => {
-        if (!mountedRef.current) return
+        if (!mountedRef.current || request !== sessionRequest.current) return
         const persistedSteps = response.assistant_message.metadata?.huume_steps
         const completedSteps = persistedSteps || stepsRef.current
         const assistantMessage = persistedSteps
@@ -303,7 +332,7 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
         }
       },
       onError: (message: string) => {
-        if (!mountedRef.current) return
+        if (!mountedRef.current || request !== sessionRequest.current) return
         setMessages((current) => current.filter((item) => item.id !== optimistic.id))
         stepsRef.current = []
         setSteps([])
@@ -316,45 +345,50 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
 
   async function beginVoiceTurn() {
     if (busy || transcribing || startingVoice) return
+    const request = sessionRequest.current
+    const voiceTurn = ++voiceTurnRef.current
+    const current = () => mountedRef.current && request === sessionRequest.current && voiceTurn === voiceTurnRef.current
     setVoiceEnabled(true)
     setStartingVoice(true)
     setVoiceError(null)
     try {
       await dictation.start()
     } catch {
-      setVoiceError('Microphone access failed. Please type your request instead.')
+      if (current()) setVoiceError('Microphone access failed. Please type your request instead.')
     } finally {
-      if (mountedRef.current) setStartingVoice(false)
+      if (current()) setStartingVoice(false)
     }
   }
 
   async function finishVoiceTurn() {
     if (transcribing) return
     const voiceTurn = ++voiceTurnRef.current
+    const request = sessionRequest.current
+    const current = () => mountedRef.current && request === sessionRequest.current && voiceTurn === voiceTurnRef.current
     setTranscribing(true)
     setVoiceError(null)
     try {
       const wav = await dictation.stop()
-      if (!mountedRef.current || voiceTurn !== voiceTurnRef.current) return
+      if (!current()) return
       if (!wav) {
         setVoiceError('No audio captured. Try again, or type your request.')
         return
       }
       const voice = await transcribeScheduleVoice(wav)
-      if (!mountedRef.current || voiceTurn !== voiceTurnRef.current) return
+      if (!current()) return
       if (!voice.available || !voice.transcript?.trim()) {
         setVoiceError("I couldn't understand the audio. Try again, or type your request.")
         return
       }
       await send(voice.transcript.trim())
     } catch (error: unknown) {
-      if (mountedRef.current && voiceTurn === voiceTurnRef.current) {
+      if (current()) {
         setVoiceError(error instanceof ApiError && error.status === 429
           ? 'Too many voice attempts. Wait a moment, or type your request.'
           : 'Voice transcription failed. Please type your request.')
       }
     } finally {
-      if (mountedRef.current && voiceTurn === voiceTurnRef.current) setTranscribing(false)
+      if (current()) setTranscribing(false)
     }
   }
 

@@ -41,13 +41,16 @@ from .schedule_review import build_week_draft_review, compliance_status_for, jur
 from .schedule_rules import (
     align_week_start, availability_violations, sunday_indexed_weekday, template_windows,
 )
-from .shift_compliance import check_shift_compliance, jurisdiction_rule_status
+from .shift_compliance import (
+    PlannedShiftComplianceContext, _hours, _week_window, check_shift_compliance, jurisdiction_rule_status,
+)
 from .shift_writes import (
     apply_assignment_core,
     create_shift_core,
     fetch_availability,
     find_conflicts,
     lock_scheduling_employees,
+    lock_scheduling_weeks,
     log_audit,
     resolve_job_by_name,
 )
@@ -256,6 +259,30 @@ def _is_unavailable(employee_id: str, shift_date: date, ranges: dict[str, list[t
     return any(start <= shift_date <= end for start, end in ranges.get(employee_id, []))
 
 
+def _has_time_away(
+    employee_id: str, starts_at: datetime, ends_at: datetime,
+    ranges: dict[str, list[tuple[date, date]]],
+) -> bool:
+    """Approved day ranges intersect any worked part of [start, end)."""
+    if ends_at <= starts_at:
+        return False
+    first, last = starts_at.date(), (ends_at - timedelta(microseconds=1)).date()
+    return any(start <= last and end >= first for start, end in ranges.get(employee_id, []))
+
+
+def _time_away_bounds(demand: list[dict[str, Any]], week_start: date) -> tuple[date, date]:
+    """Include buffers and final-night spillover, including long live shifts."""
+    starts, ends = [], []
+    for shift in demand:
+        if shift.get("starts_at") is not None and shift.get("ends_at") is not None:
+            start, end = shift["starts_at"], shift["ends_at"]
+            start = datetime.fromisoformat(start) if isinstance(start, str) else start
+            end = datetime.fromisoformat(end) if isinstance(end, str) else end
+            starts.append(start.date())
+            ends.append((end - timedelta(microseconds=1)).date())
+    return min([week_start - timedelta(days=1), *starts]), max([week_start + timedelta(days=8), *ends])
+
+
 # The planner's refusal vocabulary. Codes are shared with
 # `assignment_guard._reason` wherever the two describe the same rule, so law,
 # operational policy and eligibility stay machine-distinguishable without a
@@ -393,7 +420,7 @@ def build_plan(
             return _refusal("availability_unconfirmed", "availability unconfirmed")
         if not _job_qualified(employee, shift.get("job_id"), shift_date, gated_job_ids):
             return _refusal("not_qualified", "not qualified for the shift job")
-        if _is_unavailable(employee_id, shift_date, unavailable_ranges):
+        if _has_time_away(employee_id, shift["starts_at"], shift["ends_at"], unavailable_ranges):
             return _refusal("approved_time_away", "approved time away")
         if availability_violations(
             availability.get(employee_id, {}), shift["starts_at"], shift["ends_at"],
@@ -457,14 +484,20 @@ def build_plan(
         for index in range(max(0, int(shift["required_staff"]) - len(fixed))):
             slots.append((shift, index))
 
-    def static_candidate_count(item: tuple[dict[str, Any], int]) -> tuple[Any, ...]:
-        shift, index = item
-        count = sum(
+    # Every seat of a shift has the same initial feasible pool. Cache before
+    # assignments mutate the ledger rather than recounting once per seat.
+    initial_candidates = {
+        shift["key"]: sum(
             1 for employee in employees
             if employee["id"] not in fixed_by_shift[shift["key"]]
             and refusal(employee, shift) is None
         )
-        return count, shift["starts_at"], shift["key"], index
+        for shift in demand if int(shift["required_staff"]) > len(fixed_by_shift[shift["key"]])
+    }
+
+    def static_candidate_count(item: tuple[dict[str, Any], int]) -> tuple[Any, ...]:
+        shift, index = item
+        return initial_candidates[shift["key"]], shift["starts_at"], shift["key"], index
 
     slots.sort(key=static_candidate_count)
     proposed_by_shift: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -581,8 +614,66 @@ def describe_block(violations: list[dict[str, Any]]) -> dict[str, Any]:
     return _refusal(str(ranked[0].get("code") or "eligibility_block"), message)
 
 
+class _PlannedComplianceLedger:
+    """Simulate accepted writes without letting rejected siblings inflate totals.
+
+    Each pair is added only after its hard checks pass. Later pairs see all
+    accepted siblings for weekly hours and rest, just as sequential live
+    writes do. Datetime durations preserve the live checker's sub-minute
+    precision; integer planner/display minutes are a separate contract.
+    """
+
+    def __init__(
+        self, *, existing_assignments: list[dict[str, Any]],
+        adjacent_assignments: list[dict[str, Any]], week_start_weekday: int,
+    ):
+        self.week_start_weekday = week_start_weekday
+        self.windows: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
+        self.hours: dict[tuple[str, datetime], float] = defaultdict(float)
+        seen: set[tuple[str, str]] = set()
+        for assignment in [*existing_assignments, *adjacent_assignments]:
+            employee_id = assignment["employee_id"]
+            identity = (employee_id, assignment["shift_id"])
+            if identity in seen:
+                continue
+            seen.add(identity)
+            start, end = self.moments(assignment)
+            self.windows[employee_id].append((start, end))
+            lo, _hi = _week_window(start, self.week_start_weekday)
+            # Older fixture/persisted contexts have only integer minutes.
+            hours = _hours(start, end, int(assignment.get("break_minutes") or 0)) if (
+                "break_minutes" in assignment
+            ) else int(assignment["worked_minutes"]) / 60
+            self.hours[(employee_id, lo)] += hours
+
+    @staticmethod
+    def moments(shift: dict[str, Any]) -> tuple[datetime, datetime]:
+        start, end = shift["starts_at"], shift["ends_at"]
+        return (
+            datetime.fromisoformat(start) if isinstance(start, str) else start,
+            datetime.fromisoformat(end) if isinstance(end, str) else end,
+        )
+
+    def context(self, shift: dict[str, Any], employee_id: str) -> PlannedShiftComplianceContext:
+        start, end = self.moments(shift)
+        lo, _hi = _week_window(start, self.week_start_weekday)
+        return PlannedShiftComplianceContext(
+            week_hours=self.hours[(employee_id, lo)] + _hours(start, end, int(shift.get("break_minutes") or 0)),
+            min_rest_gap_hours=_min_rest_gap_hours(self.windows[employee_id], start, end),
+        )
+
+    def accept(self, shift: dict[str, Any], employee_id: str) -> None:
+        start, end = self.moments(shift)
+        lo, _hi = _week_window(start, self.week_start_weekday)
+        self.hours[(employee_id, lo)] += _hours(start, end, int(shift.get("break_minutes") or 0))
+        self.windows[employee_id].append((start, end))
+
+
 async def _preflight_compliance(
     conn, *, company_id: UUID, location_id: UUID, plan: dict[str, Any],
+    existing_assignments: list[dict[str, Any]] | None = None,
+    adjacent_assignments: list[dict[str, Any]] | None = None,
+    week_start_weekday: int = 0,
 ) -> tuple[
     set[tuple[str, str]],
     dict[tuple[str, str], list[dict[str, Any]]],
@@ -614,6 +705,13 @@ async def _preflight_compliance(
     block_reasons: dict[tuple[str, str], dict[str, Any]] = {}
     if not pairs:
         return blocked, advisories, block_reasons
+    ledger = _PlannedComplianceLedger(
+        existing_assignments=existing_assignments,
+        adjacent_assignments=adjacent_assignments or [], week_start_weekday=week_start_weekday,
+    ) if existing_assignments is not None else None
+    pairs.sort(key=lambda item: (
+        _PlannedComplianceLedger.moments(item[0])[0], item[0]["key"], item[1]["employee_id"],
+    ))
     lapse_map: dict[str, list[dict[str, Any]]] | None = None
     try:
         features = await get_company_features(company_id, conn=conn)
@@ -643,6 +741,7 @@ async def _preflight_compliance(
                     UUID(shift["source_shift_id"])
                     if shift.get("source_shift_id") else None
                 ),
+                planning_context=ledger.context(shift, assignment["employee_id"]) if ledger is not None else None,
                 fw_event="assign", fw_shift_published=False,
                 shift_kind=shift.get("kind") or "work",
                 training_requirement_id=(
@@ -654,9 +753,10 @@ async def _preflight_compliance(
                 ),
             )
         except Exception:
+            # Deliberately names only the location: the pair's identifiers
+            # derive from roster data and stay out of the log.
             logger.exception(
-                "week builder compliance preflight failed for shift %s employee %s — pair blocked",
-                shift.get("key"), assignment.get("employee_id"),
+                "week builder compliance preflight failed at location %s — pair blocked", location_id,
             )
             blocked.add(pair)
             block_reasons[pair] = _refusal(
@@ -669,6 +769,8 @@ async def _preflight_compliance(
             blocked.add(pair)
             block_reasons[pair] = describe_block(blocking)
             continue
+        if ledger is not None:
+            ledger.accept(shift, assignment["employee_id"])
         kept = [dict(item) for item in violations if item.get("severity") != "block"]
         if kept:
             advisories[pair] = kept
@@ -717,6 +819,9 @@ def _strip_blocked_pairs(
 
 async def _plan_with_preflight(
     conn, *, company_id: UUID, location_id: UUID, build,
+    existing_assignments: list[dict[str, Any]] | None = None,
+    adjacent_assignments: list[dict[str, Any]] | None = None,
+    week_start_weekday: int = 0,
 ) -> tuple[dict[str, Any], dict[tuple[str, str], list[dict[str, Any]]]]:
     """Build → preflight → replan around hard blocks, up to
     `_MAX_COMPLIANCE_REPLANS` more times. The plan handed back was ALWAYS
@@ -737,6 +842,8 @@ async def _plan_with_preflight(
         plan = build(blocked_pairs, block_reasons)
         blocked, advisories, reasons = await _preflight_compliance(
             conn, company_id=company_id, location_id=location_id, plan=plan,
+            existing_assignments=existing_assignments, adjacent_assignments=adjacent_assignments,
+            week_start_weekday=week_start_weekday,
         )
         block_reasons.update(reasons)
         if not blocked - blocked_pairs:
@@ -1062,9 +1169,38 @@ async def _break_relief_findings(
         return []
 
 
+async def _load_unavailable_ranges(
+    conn, *, company_id: UUID, start_date: date, end_date: date,
+) -> dict[str, list[tuple[date, date]]]:
+    unavailable: dict[str, list[tuple[date, date]]] = defaultdict(list)
+    request_rows = await conn.fetch(
+        """
+        SELECT employee_id, unavailable_start AS start_date, unavailable_end AS end_date
+        FROM schedule_requests
+        WHERE company_id=$1 AND request_type='unavailable' AND status='approved'
+          AND unavailable_start <= $3 AND unavailable_end >= $2
+        UNION ALL
+        SELECT p.employee_id, p.start_date, p.end_date
+        FROM pto_requests p JOIN employees e ON e.id=p.employee_id
+        WHERE e.org_id=$1 AND p.status='approved' AND p.start_date <= $3 AND p.end_date >= $2
+        UNION ALL
+        SELECT l.employee_id, l.start_date, COALESCE(l.end_date, l.expected_return_date, $3)
+        FROM leave_requests l
+        WHERE l.org_id=$1 AND l.status IN ('approved','active')
+          AND l.start_date <= $3 AND COALESCE(l.end_date, l.expected_return_date, $3) >= $2
+        """,
+        company_id, start_date, end_date,
+    )
+    for row in request_rows:
+        unavailable[str(row["employee_id"])].append((row["start_date"], row["end_date"]))
+    for ranges in unavailable.values():
+        ranges.sort()
+    return dict(unavailable)
+
+
 async def _load_roster_context(conn, *, company_id: UUID, location_id: UUID,
-                               week_start: date) -> dict[str, Any]:
-    week_end = week_start + timedelta(days=6)
+                               week_start: date, time_away_start: date | None = None,
+                               time_away_end: date | None = None) -> dict[str, Any]:
     employees_rows = await conn.fetch(
         """
         SELECT e.id, e.first_name, e.last_name, e.job_title,
@@ -1137,6 +1273,7 @@ async def _load_roster_context(conn, *, company_id: UUID, location_id: UUID,
         "employee_id": str(row["employee_id"]),
         "shift_id": str(row["shift_id"]),
         "starts_at": row["starts_at"], "ends_at": row["ends_at"],
+        "break_minutes": int(row["break_minutes"] or 0),
         "worked_minutes": max(
             0, int((row["ends_at"] - row["starts_at"]).total_seconds() // 60)
             - int(row["break_minutes"] or 0),
@@ -1153,29 +1290,11 @@ async def _load_roster_context(conn, *, company_id: UUID, location_id: UUID,
         and not (item["starts_at"] < hi and item["ends_at"] > lo)
     ]
 
-    unavailable: dict[str, list[tuple[date, date]]] = defaultdict(list)
-    request_rows = await conn.fetch(
-        """
-        SELECT employee_id, unavailable_start AS start_date, unavailable_end AS end_date
-        FROM schedule_requests
-        WHERE company_id=$1 AND request_type='unavailable' AND status='approved'
-          AND unavailable_start <= $3 AND unavailable_end >= $2
-        UNION ALL
-        SELECT p.employee_id, p.start_date, p.end_date
-        FROM pto_requests p JOIN employees e ON e.id=p.employee_id
-        WHERE e.org_id=$1 AND p.status='approved' AND p.start_date <= $3 AND p.end_date >= $2
-        UNION ALL
-        SELECT l.employee_id, l.start_date, COALESCE(l.end_date, l.expected_return_date, $3)
-        FROM leave_requests l
-        WHERE l.org_id=$1 AND l.status IN ('approved','active')
-          AND l.start_date <= $3 AND COALESCE(l.end_date, l.expected_return_date, $3) >= $2
-        """,
-        company_id, week_start, week_end,
+    unavailable = await _load_unavailable_ranges(
+        conn, company_id=company_id,
+        start_date=time_away_start or week_start - timedelta(days=1),
+        end_date=time_away_end or week_start + timedelta(days=8),
     )
-    for row in request_rows:
-        unavailable[str(row["employee_id"])].append((row["start_date"], row["end_date"]))
-    for ranges in unavailable.values():
-        ranges.sort()
     # Jobs somebody has been named qualified for, company-wide — the same
     # EXISTS check `_shared.check_job_qualification` does, and deliberately not
     # filtered to this location: a job whose roster lives at another store is
@@ -1194,7 +1313,9 @@ async def _load_roster_context(conn, *, company_id: UUID, location_id: UUID,
     }
 
 
-async def _coverage_profile(conn, *, company_id: UUID, location_id: UUID) -> dict[str, Any]:
+async def _coverage_profile(
+    conn, *, company_id: UUID, location_id: UUID, profile_bundle: dict | None = None,
+) -> dict[str, Any]:
     """The profile fields the coverage evaluator needs, plus the leaders' names.
 
     The leader jobs' NAMES cost one extra fetch and are what make a finding
@@ -1203,12 +1324,14 @@ async def _coverage_profile(conn, *, company_id: UUID, location_id: UUID) -> dic
     FK on the mirror column nulls itself on job delete, but nothing can do
     that inside the array, and a rule naming only a deleted job is no rule.
     """
-    profile = await get_location_profile(
-        conn, company_id=company_id, location_id=location_id,
-    ) or {}
+    profile = (profile_bundle.get("profile") or {}) if profile_bundle is not None else (
+        await get_location_profile(conn, company_id=company_id, location_id=location_id) or {}
+    )
     leader_ids = profile_leader_job_ids(profile)
-    names_by_id: dict[str, str] = {}
-    if leader_ids:
+    names_by_id: dict[str, str] = {
+        str(job["id"]): job["name"] for job in (profile_bundle or {}).get("leader_jobs") or []
+    }
+    if leader_ids and profile_bundle is None:
         rows = await conn.fetch(
             "SELECT id, name FROM schedule_jobs WHERE company_id=$1 AND id = ANY($2::uuid[])",
             company_id, leader_ids,
@@ -1226,7 +1349,7 @@ async def _coverage_profile(conn, *, company_id: UUID, location_id: UUID) -> dic
 
 async def _week_rules_gate(
     conn, *, company_id: UUID, location_id: UUID, location_name: str | None = None,
-    mode: str = "template",
+    mode: str = "template", profile_bundle: dict | None = None,
 ) -> dict[str, Any] | None:
     """`None` when this location's week-set rules are established, else the
     clarify to return INSTEAD of planning a week.
@@ -1241,7 +1364,7 @@ async def _week_rules_gate(
             "SELECT name FROM business_locations WHERE id=$1 AND company_id=$2",
             location_id, company_id,
         ) or "This location"
-    bundle = await load_profile_bundle(
+    bundle = profile_bundle if profile_bundle is not None else await load_profile_bundle(
         conn, company_id=company_id, location_id=location_id,
     )
     message = week_rules_refusal(bundle, location_name=location_name, mode=mode)
@@ -1421,7 +1544,7 @@ def _double_booking_findings(
 
 async def _attach_findings(
     conn, *, company_id: UUID, location_id: UUID, week_start: date,
-    plan: dict[str, Any], snapshot: dict[str, Any],
+    plan: dict[str, Any], snapshot: dict[str, Any], profile_bundle: dict | None = None,
 ) -> list[dict[str, Any]]:
     """Add findings/metrics in place; return uncapped concentration findings.
 
@@ -1443,7 +1566,7 @@ async def _attach_findings(
     try:
         return await _attach_findings_core(
             conn, company_id=company_id, location_id=location_id,
-            week_start=week_start, plan=plan, snapshot=snapshot,
+            week_start=week_start, plan=plan, snapshot=snapshot, profile_bundle=profile_bundle,
         )
     except Exception:
         logger.exception(
@@ -1454,10 +1577,10 @@ async def _attach_findings(
 
 async def _attach_findings_core(
     conn, *, company_id: UUID, location_id: UUID, week_start: date,
-    plan: dict[str, Any], snapshot: dict[str, Any],
+    plan: dict[str, Any], snapshot: dict[str, Any], profile_bundle: dict | None = None,
 ) -> list[dict[str, Any]]:
     profile = await _coverage_profile(
-        conn, company_id=company_id, location_id=location_id,
+        conn, company_id=company_id, location_id=location_id, profile_bundle=profile_bundle,
     )
     hours = profile["operating_hours"]
     coverage = evaluate_week_coverage(
@@ -1651,8 +1774,10 @@ async def plan_vacant_fill(
             "message": f"There are no open shifts{scope} in this week to fill.",
             "assignments": [], "unfilled": [], "jurisdiction": jurisdiction,
         }
+    time_away_start, time_away_end = _time_away_bounds(demand, week_start)
     roster = await _load_roster_context(
         conn, company_id=company_id, location_id=location_id, week_start=week_start,
+        time_away_start=time_away_start, time_away_end=time_away_end,
     )
     employees = roster["employees"]
     if only_employee_ids:
@@ -1683,8 +1808,16 @@ async def plan_vacant_fill(
             allow_split_shift=allow_split_shift,
         )
 
+    # Fill requests can start on any date. Statutory weekly limits still use
+    # the location's configured workweek, matching the live confirmation gate.
+    week_start_weekday = await resolve_week_start_weekday(
+        conn, company_id=company_id, location_id=location_id,
+    )
     plan, advisories = await _plan_with_preflight(
         conn, company_id=company_id, location_id=location_id, build=_build,
+        existing_assignments=roster["existing_assignments"],
+        adjacent_assignments=roster.get("adjacent_assignments", []),
+        week_start_weekday=week_start_weekday,
     )
     _attach_advisories(plan, advisories)
 
@@ -2013,10 +2146,8 @@ async def _planning_snapshot(
     conn, *, company_id: UUID, location_id: UUID, week_start: date,
     source_mode: str, week_template_id: UUID | None,
     demand_override: list[dict[str, Any]] | None = None,
+    roster_override: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], str | None]:
-    roster = await _load_roster_context(
-        conn, company_id=company_id, location_id=location_id, week_start=week_start,
-    )
     week_shift_state = await _load_week_shift_state(
         conn, company_id=company_id, location_id=location_id, week_start=week_start,
     )
@@ -2036,6 +2167,11 @@ async def _planning_snapshot(
         demand = demand_override
     else:
         raise ValueError("Choose existing draft shifts, a week template, or Autopilot as the schedule source.")
+    time_away_start, time_away_end = _time_away_bounds(demand, week_start)
+    roster = roster_override if roster_override is not None else await _load_roster_context(
+        conn, company_id=company_id, location_id=location_id, week_start=week_start,
+        time_away_start=time_away_start, time_away_end=time_away_end,
+    )
     snapshot = {
         "location_id": str(location_id), "week_start": week_start.isoformat(),
         "source_mode": source_mode,
@@ -2075,14 +2211,14 @@ async def get_week_build_readiness(
         default_id = await _default_template_id(
             conn, company_id=company_id, location_id=location_id,
         )
-        profile = await _coverage_profile(
-            conn, company_id=company_id, location_id=location_id,
-        )
         # Readiness has to agree with the builder about whether a week can be
         # built at all — the model is told to call this first, and "ready" here
         # followed by a refusal there is the loop this surface exists to end.
         rules_bundle = await load_profile_bundle(
             conn, company_id=company_id, location_id=location_id,
+        )
+        profile = await _coverage_profile(
+            conn, company_id=company_id, location_id=location_id, profile_bundle=rules_bundle,
         )
         # Judge the PATTERN, before anyone is assigned to it: `required` asks
         # "would this shape cover the day even with everybody showing up?".
@@ -2237,6 +2373,10 @@ async def get_week_build_readiness(
     )
     if rules_refusal:
         blockers.append(rules_refusal)
+    if autopilot_mode:
+        from .autopilot.windows import off_week_buffer_refusal
+        if refusal := off_week_buffer_refusal(week_start, rules_bundle.get("profile") or {}):
+            blockers.append(refusal)
     if not roster["employees"]:
         blockers.append("No active employees are assigned to this location.")
     if autopilot_mode and not autopilot_has_jobs:
@@ -2371,9 +2511,13 @@ async def propose_week_draft(
         if misaligned:
             return misaligned
         requested_mode = (source_mode or "auto").strip().lower()
+        profile_bundle = await load_profile_bundle(
+            conn, company_id=company_id, location_id=location_id,
+        )
         gate = await _week_rules_gate(
             conn, company_id=company_id, location_id=location_id,
             mode="autopilot" if requested_mode == "autopilot" else "template",
+            profile_bundle=profile_bundle,
         )
         if gate:
             return gate
@@ -2446,15 +2590,13 @@ async def propose_week_draft(
                 return {"status": "clarify", "message": "Choose a week_template_id from the readiness list."}
         demand_model: dict[str, Any] | None = None
         demand_override: list[dict[str, Any]] | None = None
+        autopilot_roster: dict[str, Any] | None = None
         if selected_source == "autopilot":
             features = await get_company_features(company_id, conn=conn)
             if not features.get("schedule_autopilot"):
                 return {"status": "refused", "message": "Schedule Autopilot is not enabled for this company."}
             from .autopilot import generate_autopilot_demand
             from .autopilot.inputs import load_autopilot_inputs
-            profile_bundle = await load_profile_bundle(
-                conn, company_id=company_id, location_id=location_id,
-            )
             autopilot_roster = await _load_roster_context(
                 conn, company_id=company_id, location_id=location_id, week_start=week_start,
             )
@@ -2463,7 +2605,10 @@ async def propose_week_draft(
                 week_start=week_start, roster=autopilot_roster,
                 profile_bundle=profile_bundle,
             )
-            result = generate_autopilot_demand(**kwargs)
+            try:
+                result = generate_autopilot_demand(**kwargs)
+            except ValueError as exc:
+                return {"status": "refused", "message": str(exc)}
             demand_override = result.demand
             demand_model = result.demand_model
             if not demand_override:
@@ -2477,7 +2622,7 @@ async def propose_week_draft(
             snapshot, demand, template_name = await _planning_snapshot(
                 conn, company_id=company_id, location_id=location_id, week_start=week_start,
                 source_mode=selected_source, week_template_id=template_uuid,
-                demand_override=demand_override,
+                demand_override=demand_override, roster_override=autopilot_roster,
             )
         except ValueError as exc:
             return {"status": "clarify", "message": str(exc)}
@@ -2515,6 +2660,9 @@ async def propose_week_draft(
 
         plan, advisories = await _plan_with_preflight(
             conn, company_id=company_id, location_id=location_id, build=_build,
+            existing_assignments=snapshot["existing_assignments"],
+            adjacent_assignments=snapshot.get("adjacent_assignments", []),
+            week_start_weekday=sunday_indexed_weekday(week_start),
         )
         _attach_advisories(plan, advisories)
         # Coverage + break relief run on the FINAL plan, and their output lives
@@ -2528,7 +2676,7 @@ async def propose_week_draft(
         # minute would otherwise stale an otherwise-good proposal at confirm.
         concentration_findings = await _attach_findings(
             conn, company_id=company_id, location_id=location_id,
-            week_start=week_start, plan=plan, snapshot=snapshot,
+            week_start=week_start, plan=plan, snapshot=snapshot, profile_bundle=profile_bundle,
         )
         review = _review_payload(
             plan=plan, snapshot=snapshot, source_mode=selected_source,
@@ -2694,6 +2842,7 @@ async def apply_week_draft(
     dropped: list[dict[str, Any]] = []
     async with connection_or_direct() as conn:
         async with conn.transaction():
+            await lock_scheduling_weeks(conn, company_id, [(location_id, week_start)])
             run = await conn.fetchrow(
                 """SELECT * FROM schedule_generation_runs
                    WHERE id=$1 AND company_id=$2 FOR UPDATE""",
@@ -2706,6 +2855,15 @@ async def apply_week_draft(
                         "message": "That generated draft was already applied."}
             if run["status"] != "proposed":
                 return {"status": "error", "message": "That week proposal is no longer available."}
+            misaligned = await _misaligned_week(
+                conn, company_id=company_id, location_id=location_id, week_start=week_start,
+            )
+            if misaligned:
+                await conn.execute(
+                    "UPDATE schedule_generation_runs SET status='stale', updated_at=NOW() WHERE id=$1",
+                    generation_run_id,
+                )
+                return {"status": "error", "message": misaligned["message"]}
             # Re-checked at confirm for the same reason availability and
             # qualifications are: the rules can be edited away in the Week
             # setup pane between staging and approval.
@@ -2734,6 +2892,14 @@ async def apply_week_draft(
             proposal = run["proposal"]
             if isinstance(proposal, str):
                 proposal = json.loads(proposal)
+            if run["source_mode"] == "autopilot":
+                from .autopilot.windows import off_week_demand_refusal
+                if refusal := off_week_demand_refusal(week_start, proposal.get("shifts") or []):
+                    await conn.execute(
+                        "UPDATE schedule_generation_runs SET status='stale', updated_at=NOW() WHERE id=$1",
+                        generation_run_id,
+                    )
+                    return {"status": "error", "message": refusal}
             snapshot, _demand, _template_name = await _planning_snapshot(
                 conn, company_id=company_id, location_id=location_id, week_start=week_start,
                 source_mode=run["source_mode"], week_template_id=run["week_template_id"],
@@ -2749,6 +2915,7 @@ async def apply_week_draft(
                     "message": "The schedule, roster, or availability changed after this proposal was built. Ask me to rebuild it.",
                 }
             shift_id_by_key: dict[str, UUID] = {}
+            assignment_windows: list[dict[str, Any]] = []
             series_id = uuid4()
             for shift in proposal.get("shifts") or []:
                 source_shift_id = shift.get("source_shift_id")
@@ -2771,7 +2938,9 @@ async def apply_week_draft(
                         }
                     shift_id_by_key[shift["key"]] = live["id"]
                     touched_shift_ids.append(live["id"])
+                    assignment_windows.append(dict(live))
                     continue
+                assignment_windows.append(shift)
                 job_id = UUID(shift["job_id"]) if shift.get("job_id") else None
                 if job_id is None:
                     # A legacy block with a free-text role and no job still
@@ -2816,6 +2985,10 @@ async def apply_week_draft(
             # concurrent week applies cannot deadlock on inverse rosters.
             await lock_scheduling_employees(conn, company_id, employee_ids)
             availability = await fetch_availability(conn, company_id, employee_ids)
+            time_away_start, time_away_end = _time_away_bounds(assignment_windows, week_start)
+            unavailable = await _load_unavailable_ranges(
+                conn, company_id=company_id, start_date=time_away_start, end_date=time_away_end,
+            )
             for shift in proposal.get("shifts") or []:
                 shift_id = shift_id_by_key[shift["key"]]
                 for assignment in shift.get("proposed_assignments") or []:
@@ -2834,6 +3007,10 @@ async def apply_week_draft(
                     reason = None
                     if assigned_count >= live["required_staff"]:
                         reason = "shift already reached required staffing"
+                    elif _has_time_away(
+                        str(employee_id), live["starts_at"], live["ends_at"], unavailable,
+                    ):
+                        reason = "employee has approved time away during this shift"
                     elif await find_conflicts(
                         conn, company_id, employee_id, live["starts_at"], live["ends_at"],
                         exclude_shift_id=shift_id,
