@@ -1,98 +1,54 @@
 import type { ReactNode } from 'react'
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Value } from './Value'
 import { Pricing } from './Pricing'
 
 vi.mock('../../../../components/marketing/kit/motion', () => ({ Reveal: ({ children, className }: { children: ReactNode; className?: string }) => <div className={className}>{children}</div> }))
 beforeEach(() => vi.clearAllMocks())
-const loadExample = () => fireEvent.click(screen.getByRole('button', { name: 'Load café example' }))
-const remaining = (name: string) => within(screen.getByRole('group', { name: `Minutes still needed with ${name}` }))
+const set = (label: RegExp, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
 
-describe('plan value calculator', () => {
-  it('starts with no savings and visible instructions', () => {
+describe('value calculator', () => {
+  it('asks for three numbers and shows a result straight away', () => {
     render(<Value onContact={vi.fn()} />)
-    for (const title of ['Measure your current week', 'Estimate each plan separately', 'Compare the full picture']) expect(screen.getByText(title)).toBeInTheDocument()
-    expect(screen.getByTestId('basic-net-value')).toHaveTextContent('−$49')
-    expect(screen.getByTestId('pro-net-value')).toHaveTextContent('−$99')
-    expect(screen.getByTestId('autopilot-net-value')).toHaveTextContent('−$149')
+    expect(screen.getAllByRole('spinbutton')).toHaveLength(3)
+    expect(screen.getByLabelText('Number of locations')).toHaveValue(1)
+    expect(screen.getByTestId('current-monthly')).toHaveTextContent('$433')
+    expect(screen.getByTestId('subscription')).toHaveTextContent('$149')
+    expect(screen.getByTestId('break-even')).toHaveTextContent('83 minutes a week')
+    expect(screen.getByText(/Assumes Autopilot, our highest plan/)).toBeInTheDocument()
   })
-  it('loads a labeled example with separate plan savings and no invented labor savings', () => {
+  it('updates as the numbers change and scales with locations', () => {
     render(<Value onContact={vi.fn()} />)
-    loadExample()
-    expect(screen.getByRole('status', { name: 'Scenario' })).toHaveTextContent('illustrative assumptions, not measured customer results')
-    expect(screen.getByTestId('basic-net-value')).toHaveTextContent('$179')
-    expect(screen.getByTestId('pro-net-value')).toHaveTextContent('$280')
-    expect(screen.getByTestId('autopilot-net-value')).toHaveTextContent('$559')
-    expect(screen.getByTestId('pro-net-cash')).toHaveTextContent('−$99')
+    set(/Number of locations/, '3')
+    set(/Average hourly wage/, '30')
+    set(/Time spent building the schedule/, '5')
+    expect(screen.getByTestId('current-monthly')).toHaveTextContent('$1,950')
+    expect(screen.getByTestId('hours-monthly')).toHaveTextContent('65')
+    expect(screen.getByTestId('subscription')).toHaveTextContent('$447')
+    expect(screen.getByText(/across 3 locations/)).toBeInTheDocument()
+    expect(screen.getByTestId('break-even')).toHaveTextContent('69 minutes a week per location, out of the 300 you spend now')
   })
-  it('keeps each plan edit when switching and retains unsupported Basic cost-review work', async () => {
-    const user = userEvent.setup()
+  it('does not present a win when the time entered cannot cover the plan', () => {
     render(<Value onContact={vi.fn()} />)
-    loadExample()
-    fireEvent.change(remaining('Pro').getByLabelText('Building and reviewing the schedule'), { target: { value: '120' } })
-    const proValue = screen.getByTestId('pro-net-value').textContent
-    await user.click(screen.getByRole('button', { name: 'Edit Basic assumptions' }))
-    expect(remaining('Basic').getByLabelText('Building and reviewing the schedule')).toHaveValue(180)
-    expect(remaining('Basic').getByLabelText('Reviewing labor cost and overtime')).toBeDisabled()
-    await user.click(screen.getByRole('button', { name: 'Edit Pro assumptions' }))
-    expect(remaining('Pro').getByLabelText('Building and reviewing the schedule')).toHaveValue(120)
-    expect(screen.getByTestId('pro-net-value')).toHaveTextContent(proValue!)
+    set(/Time spent building the schedule/, '1')
+    expect(screen.getByTestId('break-even')).toHaveTextContent('it would not pay for itself')
   })
-  it('assumes unchanged time for blank plan fields and calculates cancellation per plan', () => {
+  it('shows input errors without plausible totals', () => {
     render(<Value onContact={vi.fn()} />)
-    fireEvent.change(screen.getByLabelText('Value of manager time ($ / hour)'), { target: { value: '35' } })
-    fireEvent.change(within(screen.getByRole('group', { name: 'Manager minutes / week / location' })).getByLabelText('Building and reviewing the schedule'), { target: { value: '240' } })
-    expect(screen.getByTestId('pro-net-value')).toHaveTextContent('−$99')
-    fireEvent.change(screen.getByLabelText('Current scheduler ($ / month / location)'), { target: { value: '40' } })
-    fireEvent.click(screen.getByRole('checkbox', { name: /Cancel my current scheduler with Pro/ }))
-    expect(screen.getByTestId('pro-net-cash')).toHaveTextContent('−$59')
-    expect(screen.getByTestId('basic-net-cash')).toHaveTextContent('−$49')
-  })
-  it('shows cleared and fractional-location input errors without plausible totals', () => {
-    render(<Value onContact={vi.fn()} />)
-    loadExample()
-    fireEvent.change(screen.getByLabelText('Locations to include'), { target: { value: '1.5' } })
+    set(/Number of locations/, '1.5')
     expect(screen.getByRole('alert')).toHaveTextContent('whole number')
-    expect(screen.getByTestId('pro-net-value')).toHaveTextContent('—')
-    fireEvent.change(screen.getByLabelText('Locations to include'), { target: { value: '1' } })
-    fireEvent.change(screen.getByLabelText('Value of manager time ($ / hour)'), { target: { value: '' } })
-    expect(screen.getByTestId('pro-net-value')).toHaveTextContent('—')
+    expect(screen.getByTestId('current-monthly')).toHaveTextContent('—')
+    set(/Number of locations/, '1')
+    set(/Average hourly wage/, '')
+    expect(screen.getByTestId('current-monthly')).toHaveTextContent('—')
+    set(/Average hourly wage/, '0')
+    expect(screen.getByTestId('break-even')).toHaveTextContent('Enter an hourly wage above $0')
   })
-  it('requires an hourly cost before displaying claimed labor savings', () => {
-    render(<Value onContact={vi.fn()} />)
-    fireEvent.click(screen.getByText(/Add measured paid-labor savings/))
-    fireEvent.change(screen.getByLabelText('Regular paid hours removed / week / location'), { target: { value: '2' } })
-    expect(screen.getByRole('alert')).toHaveTextContent('regular staff cost above $0')
-    expect(screen.getByTestId('pro-net-cash')).toHaveTextContent('—')
-    fireEvent.change(screen.getByLabelText('Regular staff cost ($ / hour)'), { target: { value: '20' } })
-    expect(screen.getByTestId('pro-net-cash')).toHaveTextContent('$74')
-  })
-  it('describes extra work without presenting it as savings and announces the selected result', () => {
-    render(<Value onContact={vi.fn()} />)
-    fireEvent.change(screen.getByLabelText('Value of manager time ($ / hour)'), { target: { value: '35' } })
-    fireEvent.change(remaining('Pro').getByLabelText('Building and reviewing the schedule'), { target: { value: '60' } })
-    expect(within(screen.getByRole('article', { name: 'Pro estimate' })).getByText('1 extra')).toBeInTheDocument()
-    expect(screen.getByRole('status', { name: 'Selected plan result' })).toHaveTextContent('−$250.67 net monthly value; −$99.00 net monthly cash')
-  })
-  it('scales recurring totals while deducting business onboarding time from value only', () => {
-    render(<Value onContact={vi.fn()} />)
-    loadExample()
-    fireEvent.change(screen.getByLabelText('Locations to include'), { target: { value: '2' } })
-    fireEvent.change(screen.getByLabelText('One-time switching spend ($ / business)'), { target: { value: '300' } })
-    fireEvent.change(screen.getByLabelText('Manager onboarding hours / business'), { target: { value: '6' } })
-    expect(screen.getByText('$6,214')).toBeInTheDocument()
-    expect(screen.getByText('−$2,676')).toBeInTheDocument()
-  })
-  it('clears all plan assumptions and opens consultation', () => {
+  it('opens consultation', () => {
     const contact = vi.fn()
     render(<Value onContact={contact} />)
-    loadExample()
-    fireEvent.click(screen.getByRole('button', { name: 'Clear assumptions' }))
-    expect(screen.getByTestId('autopilot-net-value')).toHaveTextContent('−$149')
-    expect(remaining('Pro').getByLabelText('Building and reviewing the schedule')).toHaveValue(null)
-    fireEvent.click(screen.getByRole('button', { name: 'Discuss my assumptions' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Talk through my numbers' }))
     expect(contact).toHaveBeenCalledOnce()
   })
   it('preserves the proposed pricing shown alongside the calculator', () => {

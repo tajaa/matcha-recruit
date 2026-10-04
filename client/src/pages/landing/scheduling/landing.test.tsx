@@ -64,9 +64,16 @@ function renderAt(path: string, prior?: string) {
   )
 }
 
+// The tabs are lazy chunks: wait for the hero before asserting on the page.
+async function renderLanding(path: string) {
+  const view = renderAt(path)
+  await screen.findByRole('heading', { level: 1 })
+  return view
+}
+
 describe('home landing tabs', () => {
-  it('home is the scheduling tab, with the product switch pointing at both tabs', () => {
-    renderAt('/')
+  it('home is the scheduling tab, with the product switch pointing at both tabs', async () => {
+    await renderLanding('/')
     expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/Next week’s schedule/)
     const tabs = within(screen.getByRole('navigation', { name: 'Product' }))
     expect(tabs.getByRole('link', { name: 'Scheduling' }).getAttribute('aria-current')).toBe('page')
@@ -77,8 +84,8 @@ describe('home landing tabs', () => {
     expect(document.getElementById('triage')).toBeNull()
   })
 
-  it('shows the complete buying guide at the indexable canonical home URL', () => {
-    renderAt('/')
+  it('shows the complete buying guide at the indexable canonical home URL', async () => {
+    await renderLanding('/')
     for (const id of ['recovery', 'setup', 'fit', 'value', 'pricing', 'questions']) {
       expect(document.getElementById(id)).not.toBeNull()
     }
@@ -99,9 +106,9 @@ describe('home landing tabs', () => {
     expect(screen.getByRole('button', { name: 'Skip to the schedule' })).toBeInTheDocument()
   })
 
-  it('keeps home usable when media cannot load', () => {
+  it('keeps home usable when media cannot load', async () => {
     vi.mocked(landingMedia.getPublic).mockRejectedValue(new Error('offline'))
-    renderAt('/')
+    await renderLanding('/')
     expect(landingMedia.getPublic).toHaveBeenCalledOnce()
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Next week’s schedule')
     expect(document.getElementById('pricing')).not.toBeNull()
@@ -110,7 +117,7 @@ describe('home landing tabs', () => {
   it('redirects preview links with campaign parameters and section anchors without adding history', async () => {
     renderAt('/scheduling-v2?utm_source=review#pricing', '/incidents')
     await waitFor(() => expect(screen.getByLabelText('Current URL')).toHaveTextContent('/?utm_source=review#pricing'))
-    expect(document.getElementById('pricing')).not.toBeNull()
+    await waitFor(() => expect(document.getElementById('pricing')).not.toBeNull())
     expect(Element.prototype.scrollIntoView).toHaveBeenCalledOnce()
     expect(vi.mocked(Element.prototype.scrollIntoView).mock.contexts[0]).toBe(document.getElementById('pricing'))
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
@@ -118,8 +125,8 @@ describe('home landing tabs', () => {
     expect(screen.getByLabelText('Current URL')).toHaveTextContent('/incidents')
   })
 
-  it('scheduling is self-serve: every primary call to action starts an account', () => {
-    renderAt('/')
+  it('scheduling is self-serve: every primary call to action starts an account', async () => {
+    await renderLanding('/')
     // Top bar, hero and close. The walkthrough is still offered, as the
     // second choice rather than the only door in.
     const starts = screen.getAllByRole('link', { name: /Start now/ })
@@ -128,16 +135,16 @@ describe('home landing tabs', () => {
     expect(screen.getAllByRole('button', { name: /book a walkthrough/i }).length).toBeGreaterThanOrEqual(2)
   })
 
-  it('the incidents tab keeps the walkthrough as its call to action', () => {
-    renderAt('/incidents')
+  it('the incidents tab keeps the walkthrough as its call to action', async () => {
+    await renderLanding('/incidents')
     expect(screen.queryByRole('link', { name: /Start now/ })).toBeNull()
     expect(screen.getAllByRole('button', { name: /book a walkthrough/i }).length).toBeGreaterThanOrEqual(1)
     expect(landingMedia.getPublic).not.toHaveBeenCalled()
     expect(document.getElementById('pricing')).toBeNull()
   })
 
-  it('/incidents is the incident workflow, in order, from report to signed copy', () => {
-    renderAt('/incidents')
+  it('/incidents is the incident workflow, in order, from report to signed copy', async () => {
+    await renderLanding('/incidents')
     expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/closed case/i)
     const tabs = within(screen.getByRole('navigation', { name: 'Product' }))
     expect(tabs.getByRole('link', { name: 'Incidents' }).getAttribute('aria-current')).toBe('page')
@@ -152,8 +159,8 @@ describe('home landing tabs', () => {
     expect(document.getElementById('draft')).toBeNull()
   })
 
-  it('every step in the top bar and margin clock has a section to scroll to', () => {
-    renderAt('/incidents')
+  it('every step in the top bar and margin clock has a section to scroll to', async () => {
+    await renderLanding('/incidents')
     const links = Array.from(document.querySelectorAll('nav[aria-label="Page sections"] a[href^="#"]'))
     expect(links.length).toBe(5)
     for (const a of links) expect(document.getElementById(a.getAttribute('href')!.slice(1))).not.toBeNull()

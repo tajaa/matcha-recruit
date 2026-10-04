@@ -133,10 +133,14 @@ const NotFound = lazy(() => import("./pages/shared/NotFound"));
 // the bare apex shows the Gummfit landing instead of the Matcha landing.
 import { isCappeHost } from "./cappe/host";
 
+// The landing opens on a dark hero; a white spinner page before it reads as a flash.
+const LANDING_PATHS = ["/", "/incidents"];
+
 function RouteFallback() {
+  const dark = !isCappeHost && LANDING_PATHS.includes(window.location.pathname);
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600" />
+    <div className="min-h-screen flex items-center justify-center" style={dark ? { backgroundColor: "#161817" } : undefined}>
+      <div className={`h-6 w-6 animate-spin rounded-full border-2 ${dark ? "border-zinc-700 border-t-zinc-400" : "border-zinc-300 border-t-zinc-600"}`} />
     </div>
   );
 }
