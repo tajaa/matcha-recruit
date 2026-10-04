@@ -11,13 +11,17 @@ from app.matcha.models.matcha_work.matcha_work import SendMessageRequest
 from app.matcha.services.huume import agent, store
 from app.matcha.services.matcha_work import turn_pipeline as pipeline
 from app.matcha.services.scheduling.schedule_assistant_session import ScheduleAssistantScope
+from app.matcha.services.scheduling import schedule_cost_projection as projection
+from tests.employee_schedule.test_schedule_ui_projection import connection, full_week_review
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("role,enabled,visible", [("employee", True, False), ("client", False, False), ("client", True, True)])
 async def test_turn_projects_model_input_updates_and_reread_output(monkeypatch, role, enabled, visible):
     thread_id, company_id, user_id, location_id = [uuid4() for _ in range(4)]
-    state = {"huume_action": {"type": "schedule_week_draft", "status": "proposed", "review": {"cost": {"after": 80}},
+    state = {"huume_action": {"type": "schedule_week_draft", "status": "proposed",
+                              "generation_run_id": str(uuid4()), "confirm_id": "same-confirmation",
+                              "review": {"assignment_count": 28, "cost": {"after": 80}},
                               "demand_model": {"labor": {"labor_pct": 20}}}}
     tc = pipeline.TurnContext(
         thread_id=thread_id, company_id=company_id, body=SendMessageRequest(content="Review"),
@@ -58,6 +62,13 @@ async def test_turn_projects_model_input_updates_and_reread_output(monkeypatch, 
     saved = AsyncMock(side_effect=add_message)
     monkeypatch.setattr(pipeline.doc_svc, "add_message", saved)
     monkeypatch.setattr(pipeline, "_record_turn_usage", AsyncMock(return_value=None))
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def preview_connection():
+        yield connection({"schedule_review": full_week_review()})
+
+    monkeypatch.setattr(projection, "get_connection", preview_connection)
     from app.matcha.routes.work.thread_ws import thread_manager
     monkeypatch.setattr(thread_manager, "broadcast_new_message", AsyncMock())
     frames = [frame async for frame in pipeline._run_huume_dispatch(tc)]
@@ -66,6 +77,10 @@ async def test_turn_projects_model_input_updates_and_reread_output(monkeypatch, 
     assert ("Payroll $80" in [message["content"] for message in captured["history"]]) is visible
     assert ("cost" in applied.call_args.args[1]["huume_action"]["review"]) is visible
     assert ("cost" in tc.current_state["huume_action"]["review"]) is visible
+    assert len(tc.current_state["huume_action"]["review"]["assignments"]) == 28
+    assert "assignments" not in captured["current_state"]["huume_action"]["review"]
+    assert "assignments" not in applied.call_args.args[1]["huume_action"]["review"]
+    assert tc.current_state["huume_action"]["confirm_id"] == "same-confirmation"
     assert saved.call_args.kwargs["metadata"]["schedule_cost_visible"] is visible
     assert ("cost" in saved.call_args.kwargs["metadata"]["huume_steps"][0]["result"]) is visible
 

@@ -44,6 +44,11 @@ regions to tabs.
   page owns `currentState` and the panel is presentational. `setCurrentState` is what the adopt call
   writes back through. `usePlanningInputs` and `useScheduleScenarios` are the rail's and the strip's
   state; both are last-request-wins and reload after any applied write.
+- Chat-generated weeks keep a compact review in durable/model state. Session open/resume and the
+  completed Huume turn expand that review from the frozen `schedule_generation_runs.proposal` for
+  the UI through `project_schedule_ui_state`. Reads bind company, location, week and the owning
+  thread (or an automatic run), retain the confirmation ID and current wage gate, and never save
+  expanded rows or create shifts. This lets the board preview an already-staged week before approval.
 - Retired: `ScheduleEditor.tsx` (+ its test), `RosterPanel` (the rail's people list replaces it — same
   drag, same qualification preview, now with load), `ScheduleEditorToolbar` (→ `SchedulePilotToolbar`).
   The board, `ShiftInspector`, drag wiring, publish and edit-published semantics are unchanged;

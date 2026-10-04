@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import AsyncExitStack
 from datetime import date
 from math import isfinite
 from uuid import UUID
+
+from app.database import get_connection
 
 from .labor_cost_service import (
     COST_ROLES, cost_delta_for_rows, is_labor_cost_visible, load_week_assignment_rows,
@@ -64,6 +67,65 @@ def project_schedule_messages(messages: list[dict], *, include_cost: bool) -> li
             continue
         result.append(project_schedule_payload({**message, "metadata": metadata}, include_cost=include_cost))
     return result
+
+
+async def project_schedule_ui_state(
+    state: dict | None, *, company_id: UUID, thread_id: UUID,
+    location_id: UUID, week_start: date, include_cost: bool, conn=None,
+) -> dict | None:
+    """Expand a staged week's compact review for the board, without saving it.
+
+    The model and durable thread keep their bounded summary. The UI needs the
+    frozen assignment rows and demand curve, including when resuming an older
+    chat. Callers must first authorize the schedule session's scope.
+    """
+    result = project_schedule_payload(state, include_cost=include_cost)
+    action = result.get("huume_action") if isinstance(result, dict) else None
+    if (
+        not isinstance(action, dict) or action.get("type") != "schedule_week_draft"
+        or action.get("status") != "proposed"
+    ):
+        return result
+    review = action.get("review")
+    if isinstance(review, dict) and isinstance(review.get("assignments"), list):
+        return result
+    try:
+        run_id = UUID(str(action.get("generation_run_id")))
+    except (TypeError, ValueError):
+        return result
+    try:
+        async with AsyncExitStack() as stack:
+            if conn is None:
+                conn = await stack.enter_async_context(get_connection())
+            # A failed optional read must not abort the session transaction.
+            await stack.enter_async_context(conn.transaction())
+            row = await conn.fetchrow(
+                """SELECT proposal FROM schedule_generation_runs
+                   WHERE id=$1 AND company_id=$2 AND location_id=$3 AND week_start=$4
+                     AND status='proposed' AND (thread_id=$5 OR origin='automatic')""",
+                run_id, company_id, location_id, week_start, thread_id,
+            )
+            if not row:
+                return result
+            proposal = row["proposal"]
+            if isinstance(proposal, str):
+                proposal = json.loads(proposal)
+            full_review = proposal.get("schedule_review") if isinstance(proposal, dict) else None
+            if not isinstance(full_review, dict) or not isinstance(full_review.get("assignments"), list):
+                return result
+            automatic = action.get("auto_generated") or action.get("origin") == "automatic"
+            full_review = project_schedule_payload(full_review, include_cost=include_cost and not automatic)
+            # An automatic action's cost is freshly priced for this recipient;
+            # never replace it with a price cached on the generation run.
+            if isinstance(review, dict) and "cost" in review:
+                full_review["cost"] = review["cost"]
+            demand = action.get("demand_model")
+            if isinstance(demand, dict):
+                full_review["demand_model"] = demand
+            return {**result, "huume_action": {**action, "review": full_review}}
+    except Exception:
+        logger.warning("schedule review: preview read unavailable for %s", thread_id, exc_info=True)
+        return result
 
 
 async def schedule_cost_visible(conn, *, company_id: UUID, actor_role: str | None) -> bool:
