@@ -93,6 +93,8 @@ export function CommercialPlayer({ settings, fallback }: { settings: CommercialS
     setSkipped(false); setWatching(false); setEnded(false); setPlaying(false); setMuted(true)
   }
 
+  // controlsList + the blocked context menu below only remove the browser's own Download /
+  // "Save video as" entries. The film is a public CDN file, so this deters, it cannot prevent.
   if (failed || !source) return fallback
   if (skipped) return <><div className="mb-5 flex justify-end"><button type="button" onClick={resume} className="sched-link sched-focus inline-flex items-center gap-2 rounded text-sm"><RotateCcw size={14} aria-hidden />Watch the film</button></div>{fallback}</>
   const soundHeard = soundOn && watching && !muted
@@ -102,7 +104,7 @@ export function CommercialPlayer({ settings, fallback }: { settings: CommercialS
         <span>Matcha · the film</span><button type="button" onClick={skip} className="sched-link sched-focus inline-flex min-h-11 items-center gap-2 rounded" style={{ color: PAPER }}>Skip film<ArrowRight size={13} aria-hidden /></button>
       </div>
       <div className="relative mx-auto overflow-hidden bg-black" style={{ aspectRatio: vertical ? '9 / 16' : '16 / 9', maxWidth: vertical ? 'min(100%, 380px)' : undefined }}>
-        <video key={source} ref={video} src={source} poster={poster} muted={!soundOn || muted} playsInline controls={soundOn && (watching || ended)} preload={reduced ? 'none' : 'metadata'} crossOrigin={settings.captions_url ? 'anonymous' : undefined} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => { setEnded(true); setPlaying(false) }} onVolumeChange={(event) => { if (soundOn && watching) setMuted(event.currentTarget.muted) }} onError={() => setFailed(true)} className="h-full w-full object-contain" aria-label="Matcha scheduling commercial">
+        <video key={source} ref={video} src={source} poster={poster} muted={!soundOn || muted} playsInline controls={soundOn && (watching || ended)} preload={reduced ? 'none' : 'metadata'} crossOrigin={settings.captions_url ? 'anonymous' : undefined} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => { setEnded(true); setPlaying(false) }} onVolumeChange={(event) => { if (soundOn && watching) setMuted(event.currentTarget.muted) }} onError={() => setFailed(true)} controlsList="nodownload" onContextMenu={(event) => event.preventDefault()} className="h-full w-full object-contain" aria-label="Matcha scheduling commercial">
           {settings.captions_url && <track kind="captions" src={settings.captions_url} srcLang="en" label="English" default />}
         </video>
         {soundOn && !watching && <div className="pointer-events-none absolute inset-0 flex items-center justify-center" style={{ background: 'linear-gradient(transparent 50%, rgba(0,0,0,.35))' }}><button type="button" onClick={watch} className="pointer-events-auto sched-btn sched-btn-paper sched-focus inline-flex min-h-14 items-center gap-3 rounded-full px-7 text-sm font-medium"><Play size={17} fill="currentColor" aria-hidden />Watch with sound</button></div>}
