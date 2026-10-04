@@ -74,10 +74,14 @@ export function SchedulingCommercialSettings() {
         {error && <p role="alert" className="rounded border border-red-900/40 bg-red-950/20 p-3 text-sm text-red-300">{error}</p>}
         {message && <p role="status" className="text-sm text-emerald-400">{message}</p>}
         <label className="flex items-center gap-3 text-sm text-zinc-200"><input type="checkbox" checked={draft.enabled} disabled={!loaded || busy || !draft.desktop_video_url} onChange={(event) => setDraft((current) => ({ ...current, enabled: event.target.checked }))} />Show the commercial on the home page</label>
+        <div className="space-y-1">
+          <label className="flex items-center gap-3 text-sm text-zinc-200"><input type="checkbox" checked={draft.sound_enabled} disabled={!loaded || busy} onChange={(event) => setDraft((current) => ({ ...current, sound_enabled: event.target.checked }))} />Play the commercial with sound</label>
+          <p className="pl-7 text-xs leading-relaxed text-zinc-500">{draft.sound_enabled ? 'Visitors can start the film with sound and switch it off with the Sound off button. They can also skip straight to the schedule.' : 'The film plays silently only — no sound controls are shown. Visitors can still skip straight to the schedule.'}</p>
+        </div>
         <p className="text-xs leading-relaxed text-zinc-500">1080p is supported: export MP4 with H.264 video and AAC audio, up to 150 MB. Transfer progress appears below the selected file; verification finishes before a preview is added. A separate vertical edit keeps the app readable on phones; mobile falls back to the desktop film if absent. Upload posters and captions when needed.</p>
         <div className="space-y-5">
           {SLOTS.map((item) => {
-            const key = `${item.slot}_url` as keyof Omit<SchedulingCommercial, 'enabled'>
+            const key = `${item.slot}_url` as keyof Omit<SchedulingCommercial, 'enabled' | 'sound_enabled'>
             const url = draft[key]
             const isVideo = item.slot.endsWith('_video')
             const isPoster = item.slot.endsWith('_poster')

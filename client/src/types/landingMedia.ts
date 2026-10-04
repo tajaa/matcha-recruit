@@ -3,6 +3,8 @@ export type LandingCustomerLogo = { name: string; url: string }
 export type LandingTestimonial = { quote: string; author: string; title: string }
 export type SchedulingCommercial = {
   enabled: boolean
+  /** true: viewers can start it with sound and get a Sound off/on button; false: always silent. */
+  sound_enabled: boolean
   desktop_video_url: string | null
   mobile_video_url: string | null
   desktop_poster_url: string | null
@@ -23,6 +25,6 @@ export type LandingMedia = {
   scheduling_commercial?: SchedulingCommercial
 }
 export const EMPTY_COMMERCIAL: SchedulingCommercial = {
-  enabled: false, desktop_video_url: null, mobile_video_url: null,
+  enabled: false, sound_enabled: true, desktop_video_url: null, mobile_video_url: null,
   desktop_poster_url: null, mobile_poster_url: null, captions_url: null,
 }

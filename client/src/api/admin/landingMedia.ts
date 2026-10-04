@@ -1,4 +1,5 @@
 import { api, API_BASE } from '../client'
+import { reportJsError } from '../errorReporter'
 
 import type { CommercialSlot, CommercialUploadProgress, LandingMedia, SchedulingCommercial } from '../../types/landingMedia'
 export type { LandingMedia, LandingSizzleVideo, LandingCustomerLogo, LandingTestimonial } from '../../types/landingMedia'
@@ -25,14 +26,29 @@ export const landingMedia = {
     // This signed POST goes directly to S3; never attach the app's auth headers.
     await new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest()
+      // The browser talks to S3 directly, so the backend never sees these failures. Report them
+      // (they land in Admin → Client Errors) with what's needed to tell CORS from a bad policy.
+      const fail = (message: string, outcome: 'rejected' | 'unreachable' | 'timeout') => {
+        reportJsError(new Error(message), {
+          source: 'landing-media-s3-upload',
+          outcome,
+          slot,
+          size: file.size,
+          content_type: contentType,
+          http_status: xhr.status,
+          upload_host: new URL(prepared.upload_url).host,
+          page_origin: window.location.origin,
+        })
+        reject(new Error(message))
+      }
       xhr.open('POST', prepared.upload_url)
       xhr.timeout = 15 * 60 * 1000
       xhr.upload.onprogress = (event) => {
         onProgress({ phase: 'uploading', percent: event.lengthComputable && event.total > 0 ? Math.min(100, Math.round(event.loaded / event.total * 100)) : null })
       }
-      xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error('S3 rejected the upload. Check the bucket upload configuration and try again.'))
-      xhr.onerror = () => reject(new Error('Upload could not reach S3. Check your connection and the bucket CORS configuration.'))
-      xhr.ontimeout = () => reject(new Error('Upload timed out. Try again with a smaller file.'))
+      xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : fail('S3 rejected the upload. Check the bucket upload configuration and try again.', 'rejected')
+      xhr.onerror = () => fail('Upload could not reach S3. Check your connection and the bucket CORS configuration.', 'unreachable')
+      xhr.ontimeout = () => fail('Upload timed out. Try again with a smaller file.', 'timeout')
       xhr.onabort = () => reject(new Error('Upload interrupted. Your previous saved video has not been changed.'))
       xhr.send(form)
     })

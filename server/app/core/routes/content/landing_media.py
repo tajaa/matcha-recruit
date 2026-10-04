@@ -56,6 +56,13 @@ async def _load_landing_media() -> dict[str, Any]:
         return dict(DEFAULT_LANDING_MEDIA)
     merged = dict(DEFAULT_LANDING_MEDIA)
     merged.update(parsed)
+    # Rows saved before a commercial field existed lack it; fill from defaults
+    # so the player never has to guess (e.g. `sound_enabled` absent => sound on).
+    stored_commercial = parsed.get("scheduling_commercial")
+    merged["scheduling_commercial"] = {
+        **SchedulingCommercial().model_dump(),
+        **(stored_commercial if isinstance(stored_commercial, dict) else {}),
+    }
     return merged
 
 

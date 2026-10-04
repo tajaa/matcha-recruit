@@ -49,6 +49,67 @@ describe('scheduling commercial', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Watch the film' }))
     expect(screen.getByLabelText('Matcha scheduling commercial')).toBeTruthy()
   })
+  it('gives viewers a Sound off / Sound on button once they watch with sound', () => {
+    render(<CommercialPlayer settings={settings} fallback={<p>Schedule demo</p>} />)
+    const video = screen.getByLabelText('Matcha scheduling commercial') as HTMLVideoElement
+    expect(screen.queryByRole('button', { name: /^Sound o/ })).toBeNull()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Watch with sound' })[0])
+    expect(video.muted).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Sound off' }))
+    expect(video.muted).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Sound off' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Sound on' }))
+    expect(video.muted).toBe(false)
+    // Muting through the native player controls keeps the page button truthful.
+    video.muted = true
+    fireEvent.volumeChange(video)
+    expect(screen.getByRole('button', { name: 'Sound on' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Skip to the schedule' }))
+    expect(screen.getByText('Schedule demo')).toBeTruthy()
+  })
+  it('treats settings saved before the sound option existed as sound on', () => {
+    const legacy: Partial<typeof settings> = { ...settings }
+    delete legacy.sound_enabled
+    render(<CommercialPlayer settings={legacy as typeof settings} fallback={<p>Schedule demo</p>} />)
+    expect(screen.getAllByRole('button', { name: 'Watch with sound' }).length).toBeGreaterThan(0)
+  })
+  describe('silent mode (sound turned off in the admin)', () => {
+    const silent = { ...settings, sound_enabled: false }
+    it('never offers sound: always muted, no native controls, no sound buttons', () => {
+      render(<CommercialPlayer settings={silent} fallback={<p>Schedule demo</p>} />)
+      const video = screen.getByLabelText('Matcha scheduling commercial') as HTMLVideoElement
+      expect(video.muted).toBe(true)
+      expect(video.controls).toBe(false)
+      expect(screen.queryByRole('button', { name: /sound/i })).toBeNull()
+      fireEvent.play(video)
+      fireEvent.ended(video)
+      expect(video.muted).toBe(true)
+      expect(video.controls).toBe(false)
+      expect(screen.queryByRole('button', { name: /sound/i })).toBeNull()
+    })
+    it('plays, pauses, replays, and can still be skipped', () => {
+      render(<CommercialPlayer settings={silent} fallback={<p>Schedule demo</p>} />)
+      const video = screen.getByLabelText('Matcha scheduling commercial') as HTMLVideoElement
+      fireEvent.click(screen.getAllByRole('button', { name: 'Play film' })[0])
+      expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(1)
+      fireEvent.play(video)
+      expect(screen.queryByRole('button', { name: 'Play film' })).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: 'Pause film' }))
+      expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled()
+      fireEvent.pause(video)
+      expect(screen.getAllByRole('button', { name: 'Play film' }).length).toBeGreaterThan(0)
+      fireEvent.click(screen.getAllByRole('button', { name: 'Play film' })[0])
+      fireEvent.play(video)
+      fireEvent.ended(video)
+      expect(screen.getAllByRole('button', { name: 'Watch again' }).length).toBeGreaterThan(0)
+      fireEvent.click(screen.getAllByRole('button', { name: 'Watch again' })[0])
+      expect(video.currentTime).toBe(0)
+      fireEvent.click(screen.getByRole('button', { name: 'Skip to the schedule' }))
+      expect(screen.getByText('Schedule demo')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: 'Watch the film' }))
+      expect((screen.getByLabelText('Matcha scheduling commercial') as HTMLVideoElement).muted).toBe(true)
+    })
+  })
   it('falls back to the schedule when the video fails', () => {
     render(<CommercialPlayer settings={settings} fallback={<p>Schedule demo</p>} />)
     fireEvent.error(screen.getByLabelText('Matcha scheduling commercial'))
