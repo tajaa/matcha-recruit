@@ -208,10 +208,22 @@ do_archive() {
 </plist>
 PLIST
 
+    # Embed Codex rejects anything but arm64 (see CodexRuntime/README.md).
     local xcode_settings=(
         DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
         CODE_SIGN_STYLE=Automatic
+        ARCHS=arm64
+        ONLY_ACTIVE_ARCH=NO
     )
+    # Let Xcode create/refresh certs and profiles with the API key when this
+    # machine's keychain doesn't have them (automatic signing).
+    local auth_args=()
+    if [[ -n "${APPLE_API_KEY_ID:-}" && -f "${APPLE_API_KEY_PATH:-}" ]]; then
+        auth_args=(-allowProvisioningUpdates
+            -authenticationKeyPath "$APPLE_API_KEY_PATH"
+            -authenticationKeyID "$APPLE_API_KEY_ID"
+            -authenticationKeyIssuerID "${APPLE_API_ISSUER_ID:-}")
+    fi
     [[ -n "$BUNDLE_ID_OVERRIDE" ]] && xcode_settings+=(PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID_OVERRIDE")
 
     local log
@@ -225,6 +237,7 @@ PLIST
             -destination 'generic/platform=macOS' \
             -archivePath "$ARCHIVE_PATH" \
             "${xcode_settings[@]}" \
+            ${auth_args[@]+"${auth_args[@]}"} \
             archive >"$log" 2>&1; then
         echo "${RED}archive failed${NC}"
         grep -E ": (error|fatal error):" "$log" | sed 's/^/  /' || tail -40 "$log" | sed 's/^/  /'
@@ -250,6 +263,7 @@ do_upload() {
             -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
             -exportOptionsPlist "$EXPORT_PLIST" \
+            -allowProvisioningUpdates \
             -authenticationKeyPath "$APPLE_API_KEY_PATH" \
             -authenticationKeyID "$APPLE_API_KEY_ID" \
             -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" >"$upload_log" 2>&1; then
