@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SchedulingCommercialSettings } from './SchedulingCommercialSettings'
 import { landingMedia } from '../../api/admin/landingMedia'
-import { EMPTY_COMMERCIAL } from '../../types/landingMedia'
+import { EMPTY_COMMERCIAL, type CommercialUploadProgress } from '../../types/landingMedia'
 vi.mock('../../api/admin/landingMedia', () => ({ landingMedia: { getAdmin: vi.fn(), uploadCommercial: vi.fn(), saveCommercial: vi.fn() } }))
 beforeEach(() => {
   vi.clearAllMocks()
@@ -16,6 +16,8 @@ describe('commercial admin', () => {
     render(<SchedulingCommercialSettings />)
     const save = screen.getByRole('button', { name: 'Save commercial' })
     await waitFor(() => expect(save).not.toBeDisabled())
+    await user.tab()
+    expect(screen.getByRole('link', { name: 'home page' })).toHaveFocus()
     await user.tab()
     expect(save).toHaveFocus()
 
@@ -67,6 +69,7 @@ describe('commercial admin', () => {
     await user.tab()
     await user.tab()
     await user.tab()
+    await user.tab()
     expect(replace).toHaveFocus()
     await user.keyboard('{Enter}')
     expect(openPicker).toHaveBeenCalledOnce()
@@ -74,5 +77,52 @@ describe('commercial admin', () => {
     expect(await screen.findByRole('alert')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Save commercial' }))
     await waitFor(() => expect(landingMedia.saveCommercial).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, desktop_video_url: url })))
+  })
+  it('shows the selected file and every upload phase, keeping save disabled until verification', async () => {
+    let update!: (value: CommercialUploadProgress) => void
+    let finish!: (url: string) => void
+    vi.mocked(landingMedia.uploadCommercial).mockImplementation((_file, _slot, progress) => {
+      update = progress
+      return new Promise<string>((resolve) => { finish = resolve })
+    })
+    render(<SchedulingCommercialSettings />)
+    const save = screen.getByRole('button', { name: 'Save commercial' })
+    await waitFor(() => expect(save).toBeEnabled())
+    const file = new File(['video'], 'cafe-1080p.mp4', { type: 'video/mp4' })
+    Object.defineProperty(file, 'size', { value: 59_222_054 })
+    fireEvent.change(screen.getByLabelText('Choose desktop commercial file'), { target: { files: [file] } })
+    expect(screen.getByText('cafe-1080p.mp4')).toBeInTheDocument()
+    expect(screen.getByText('56.5 MB')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Preparing secure upload')
+    expect(save).toBeDisabled()
+    act(() => update({ phase: 'uploading', percent: 42 }))
+    expect(screen.getByRole('progressbar')).toHaveAttribute('value', '42')
+    expect(screen.getByRole('status')).toHaveTextContent('Uploading 42%')
+    act(() => update({ phase: 'uploading', percent: 100 }))
+    expect(screen.getByRole('status')).toHaveTextContent('Waiting for storage confirmation')
+    act(() => update({ phase: 'verifying', percent: 100 }))
+    expect(screen.getByRole('progressbar')).not.toHaveAttribute('value')
+    expect(screen.getByRole('status')).toHaveTextContent('Verifying the file')
+    expect(save).toBeDisabled()
+    await act(async () => finish('https://media.example.com/film.mp4'))
+    expect(save).toBeEnabled()
+    expect(screen.getByRole('status')).toHaveTextContent('uploaded and verified')
+    expect(landingMedia.saveCommercial).not.toHaveBeenCalled()
+  })
+  it.each(['size', 'format', 'empty'] as const)('rejects an invalid %s before any network upload', async (invalid) => {
+    render(<SchedulingCommercialSettings />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save commercial' })).toBeEnabled())
+    const file = new File(invalid === 'empty' ? [] : ['video'], invalid === 'format' ? 'film.mov' : 'film.mp4', { type: 'video/mp4' })
+    if (invalid === 'size') Object.defineProperty(file, 'size', { value: 151 * 1024 * 1024 })
+    fireEvent.change(screen.getByLabelText('Choose desktop commercial file'), { target: { files: [file] } })
+    expect(screen.getByRole('alert')).toHaveTextContent(invalid === 'format' ? 'MP4 or WEBM' : '150 MB')
+    expect(landingMedia.uploadCommercial).not.toHaveBeenCalled()
+  })
+  it('explains a frontend/backend version mismatch instead of allowing a doomed upload', async () => {
+    vi.mocked(landingMedia.getAdmin).mockResolvedValue({ hero_video_url: null, hero_poster_url: null, sizzle_videos: [], customer_logos: [], testimonials: [] })
+    render(<SchedulingCommercialSettings />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Update the server and reload')
+    expect(screen.getByRole('button', { name: 'Upload desktop commercial' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Save commercial' })).toBeDisabled()
   })
 })

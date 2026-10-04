@@ -3,6 +3,7 @@ import { lazy, Suspense } from "react";
 import Login from "./pages/Login";
 import RequireBusinessAccount from "./components/auth/RequireBusinessAccount";
 import RouteTracker from "./components/shared/RouteTracker";
+import SchedulingHomeRedirect from "./pages/landing/scheduling/SchedulingHomeRedirect";
 
 // Lazy area modules — each /<area>/* prefix is its own chunk, loaded on entry.
 const AdminRoutes = lazy(() => import("./routes/AdminRoutes"));
@@ -152,7 +153,7 @@ export default function App() {
             multi-product home lives on at /overview. */}
         <Route path="/" element={isCappeHost ? <CappeRoutes /> : <SchedulingLanding />} />
         <Route path="/incidents" element={<SchedulingLanding tab="incidents" />} />
-        <Route path="/scheduling-v2" element={<SchedulingLanding variant="buyer" />} />
+        <Route path="/scheduling-v2" element={<SchedulingHomeRedirect />} />
         <Route path="/overview" element={<Home />} />
         <Route path="/matcha-work" element={<MatchaWorkPage />} />
         <Route path="/matcha-ops" element={<MatchaOpsPage />} />

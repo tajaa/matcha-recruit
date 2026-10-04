@@ -1,4 +1,5 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useMarketingBoard } from '../../../components/marketing/kit/hooks'
 import { useSEO } from '../../../hooks/useSEO'
 import { Change } from './sections/Change'
@@ -61,14 +62,8 @@ const SEO: Record<LandingTab, { title: string; description: string; canonical: s
   },
 }
 
-const BUYER_SEO = {
-  ...SEO.scheduling,
-  title: 'Matcha Scheduling — Setup, plans, and value preview',
-  noindex: true,
-}
-
-export default function SchedulingLanding({ tab = 'scheduling', variant = 'original' }: { tab?: LandingTab; variant?: 'original' | 'buyer' }) {
-  const buyerPreview = tab === 'scheduling' && variant === 'buyer'
+export default function SchedulingLanding({ tab = 'scheduling' }: { tab?: LandingTab }) {
+  const { hash } = useLocation()
   const [contactOpen, setContactOpen] = useState(false)
   const [contactMounted, setContactMounted] = useState(false)
   const openContact = () => {
@@ -77,7 +72,11 @@ export default function SchedulingLanding({ tab = 'scheduling', variant = 'origi
   }
 
   useMarketingBoard()
-  useSEO(buyerPreview ? BUYER_SEO : SEO[tab])
+  useSEO(SEO[tab])
+  // The route is lazy: the anchor target does not exist at redirect time.
+  useEffect(() => {
+    if (hash) document.getElementById(hash.slice(1))?.scrollIntoView()
+  }, [hash, tab])
 
   return (
     <div className="sched-root min-h-screen overflow-x-clip" style={{ backgroundColor: PAPER, color: INK, fontFamily: BODY }}>
@@ -88,7 +87,7 @@ export default function SchedulingLanding({ tab = 'scheduling', variant = 'origi
           <PricingContactModal isOpen={contactOpen} onClose={() => setContactOpen(false)} mode="consultation" />
         </Suspense>
       )}
-      {buyerPreview ? <BuyerTopBar /> : <TopBar onContact={openContact} tab={tab} />}
+      {tab === 'scheduling' ? <BuyerTopBar /> : <TopBar onContact={openContact} tab={tab} />}
       {tab === 'incidents' ? (
         <>
           <TimelineRail steps={INCIDENT_STEPS} day={['Tue–Wed', 'Oct 6']} label="Incident timeline" />
@@ -105,24 +104,20 @@ export default function SchedulingLanding({ tab = 'scheduling', variant = 'origi
       ) : (
         <>
           <TimelineRail darkStep="cost" />
-          <Hero onContact={openContact} showCommercial={buyerPreview} />
+          <Hero onContact={openContact} showCommercial />
           <main>
-            {buyerPreview && <BuyerGuide />}
+            <BuyerGuide />
             <Draft />
             <Check />
             <Change />
-            {buyerPreview && <Recovery />}
+            <Recovery />
             <Cost />
             <Publish />
-            {buyerPreview && (
-              <>
-                <Setup onContact={openContact} />
-                <OperationFit />
-                <Value onContact={openContact} />
-                <Pricing onContact={openContact} />
-                <BuyerQuestions onContact={openContact} />
-              </>
-            )}
+            <Setup onContact={openContact} />
+            <OperationFit />
+            <Value onContact={openContact} />
+            <Pricing onContact={openContact} />
+            <BuyerQuestions onContact={openContact} />
             <Closing onContact={openContact} />
           </main>
         </>
