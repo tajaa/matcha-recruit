@@ -57,6 +57,20 @@ describe('ReviewPane — nothing staged', () => {
 })
 
 describe('ReviewPane — what a change will do', () => {
+  it('renders a person whose cost summary has no per-person rows', () => {
+    const cost = { before: 0, after: 900, delta: 900, ot_premium_after: 0, unpriced_employee_count: 0 }
+    renderPane({
+      review: review({
+        cost: cost as ScheduleReview['cost'],
+        employees: [{
+          employee_id: 'e-dana', name: 'Dana Reyes', warnings: [],
+          before: { minutes: 0, shifts: 0, days: 0 }, after: { minutes: 480, shifts: 1, days: 1 },
+        }],
+      }),
+    })
+    expect(screen.getAllByText('Dana Reyes').length).toBeGreaterThan(0)
+  })
+
   it('shows Autopilot demand and keeps the server explanation verbatim', () => {
     renderPane({ review: review({
       demand_model: {

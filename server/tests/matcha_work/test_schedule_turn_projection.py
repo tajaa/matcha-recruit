@@ -11,8 +11,9 @@ from app.matcha.models.matcha_work.matcha_work import SendMessageRequest
 from app.matcha.services.huume import agent, store
 from app.matcha.services.matcha_work import turn_pipeline as pipeline
 from app.matcha.services.scheduling.schedule_assistant_session import ScheduleAssistantScope
-from app.matcha.services.scheduling import schedule_cost_projection as projection
-from tests.employee_schedule.test_schedule_ui_projection import connection, full_week_review
+from tests.employee_schedule.projection_fixtures import (
+    connection, full_week_review, patch_preview_connection,
+)
 
 
 @pytest.mark.asyncio
@@ -62,13 +63,7 @@ async def test_turn_projects_model_input_updates_and_reread_output(monkeypatch, 
     saved = AsyncMock(side_effect=add_message)
     monkeypatch.setattr(pipeline.doc_svc, "add_message", saved)
     monkeypatch.setattr(pipeline, "_record_turn_usage", AsyncMock(return_value=None))
-    from contextlib import asynccontextmanager
-
-    @asynccontextmanager
-    async def preview_connection():
-        yield connection({"schedule_review": full_week_review()})
-
-    monkeypatch.setattr(projection, "get_connection", preview_connection)
+    patch_preview_connection(monkeypatch, connection(full_week_review()))
     from app.matcha.routes.work.thread_ws import thread_manager
     monkeypatch.setattr(thread_manager, "broadcast_new_message", AsyncMock())
     frames = [frame async for frame in pipeline._run_huume_dispatch(tc)]

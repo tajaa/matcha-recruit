@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-from contextlib import AsyncExitStack
 from datetime import date
 from math import isfinite
 from uuid import UUID
@@ -69,60 +68,108 @@ def project_schedule_messages(messages: list[dict], *, include_cost: bool) -> li
     return result
 
 
+def _decode(value):
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except ValueError:
+            return None
+    return value
+
+
+async def _load_proposed_run(
+    conn, select: str, *, run_id: UUID, company_id: UUID, location_id: UUID,
+    week_start: date, thread_id: UUID | None = None,
+):
+    """One scoped read of a still-proposed generation run.
+
+    `select` is a fixed SQL expression, never caller input. `thread_id` admits
+    that chat's own run; without it only an automatic run matches.
+    """
+    return _decode(await conn.fetchval(
+        f"""SELECT {select} FROM schedule_generation_runs
+            WHERE id=$1 AND company_id=$2 AND location_id=$3 AND week_start=$4
+              AND status='proposed' AND (thread_id=$5 OR origin='automatic')""",
+        run_id, company_id, location_id, week_start, thread_id,
+    ))
+
+
+_REVIEW_SOURCE_ID = {"schedule_week_draft": "generation_run_id", "schedule_change": "proposal_id"}
+
+
+async def _load_frozen_review(
+    conn, action_type: str, source_id: UUID, *, company_id: UUID, thread_id: UUID,
+    location_id: UUID, week_start: date,
+):
+    """The full review a staged action was compacted from — the review only,
+    not the frozen plan beside it, which can run to hundreds of shifts."""
+    if action_type == "schedule_week_draft":
+        return await _load_proposed_run(
+            conn, "proposal->'schedule_review'", run_id=source_id, company_id=company_id,
+            location_id=location_id, week_start=week_start, thread_id=thread_id,
+        )
+    review = _decode(await conn.fetchval(
+        """SELECT proposal->'review' FROM schedule_chat_proposals
+           WHERE id=$1 AND company_id=$2 AND status='proposed'""",
+        source_id, company_id,
+    ))
+    # The row is written before its own id exists.
+    return {**review, "proposal_id": str(source_id)} if isinstance(review, dict) else review
+
+
 async def project_schedule_ui_state(
     state: dict | None, *, company_id: UUID, thread_id: UUID,
-    location_id: UUID, week_start: date, include_cost: bool, conn=None,
+    location_id: UUID, week_start: date, include_cost: bool,
+    actor_role: str | None = None, already_projected: bool = False,
 ) -> dict | None:
-    """Expand a staged week's compact review for the board, without saving it.
+    """Expand a staged action's compact review for the board, without saving it.
 
     The model and durable thread keep their bounded summary. The UI needs the
-    frozen assignment rows and demand curve, including when resuming an older
-    chat. Callers must first authorize the schedule session's scope.
+    frozen assignment rows (and a week's demand curve), including when resuming
+    an older chat. Callers must first authorize the schedule session's scope,
+    and call this outside their own transaction: it is an optional read.
     """
-    result = project_schedule_payload(state, include_cost=include_cost)
+    result = state if already_projected else project_schedule_payload(state, include_cost=include_cost)
     action = result.get("huume_action") if isinstance(result, dict) else None
     if (
-        not isinstance(action, dict) or action.get("type") != "schedule_week_draft"
-        or action.get("status") != "proposed"
+        not isinstance(action, dict) or action.get("status") != "proposed"
+        or action.get("type") not in _REVIEW_SOURCE_ID
     ):
         return result
     review = action.get("review")
     if isinstance(review, dict) and isinstance(review.get("assignments"), list):
         return result
     try:
-        run_id = UUID(str(action.get("generation_run_id")))
+        source_id = UUID(str(action.get(_REVIEW_SOURCE_ID[action["type"]])))
     except (TypeError, ValueError):
         return result
     try:
-        async with AsyncExitStack() as stack:
-            if conn is None:
-                conn = await stack.enter_async_context(get_connection())
-            # A failed optional read must not abort the session transaction.
-            await stack.enter_async_context(conn.transaction())
-            row = await conn.fetchrow(
-                """SELECT proposal FROM schedule_generation_runs
-                   WHERE id=$1 AND company_id=$2 AND location_id=$3 AND week_start=$4
-                     AND status='proposed' AND (thread_id=$5 OR origin='automatic')""",
-                run_id, company_id, location_id, week_start, thread_id,
+        async with get_connection() as conn:
+            full_review = await _load_frozen_review(
+                conn, action["type"], source_id, company_id=company_id, thread_id=thread_id,
+                location_id=location_id, week_start=week_start,
             )
-            if not row:
-                return result
-            proposal = row["proposal"]
-            if isinstance(proposal, str):
-                proposal = json.loads(proposal)
-            full_review = proposal.get("schedule_review") if isinstance(proposal, dict) else None
             if not isinstance(full_review, dict) or not isinstance(full_review.get("assignments"), list):
                 return result
             automatic = action.get("auto_generated") or action.get("origin") == "automatic"
+            # A manual review keeps the cost it was frozen with (per-person
+            # rows included). An automatic run's cached price is never served:
+            # it is priced for this recipient.
             full_review = project_schedule_payload(full_review, include_cost=include_cost and not automatic)
-            # An automatic action's cost is freshly priced for this recipient;
-            # never replace it with a price cached on the generation run.
-            if isinstance(review, dict) and "cost" in review:
-                full_review["cost"] = review["cost"]
+            action = {**action, "review": full_review}
+            if automatic and include_cost:
+                if isinstance(review, dict) and "cost" in review:
+                    full_review["cost"] = review["cost"]
+                else:
+                    action = await price_automatic_action(
+                        conn, company_id=company_id, location_id=location_id, week_start=week_start,
+                        actor_role=actor_role, action=action,
+                    )
+                    full_review = action["review"]
             demand = action.get("demand_model")
-            if isinstance(demand, dict):
+            if isinstance(demand, dict) and "demand_model" not in full_review:
                 full_review["demand_model"] = demand
-            return {**result, "huume_action": {**action, "review": full_review}}
+            return {**result, "huume_action": action}
     except Exception:
         logger.warning("schedule review: preview read unavailable for %s", thread_id, exc_info=True)
         return result
@@ -156,17 +203,10 @@ async def price_automatic_action(
     try:
         async with conn.transaction():
             if proposal is None:
-                row = await conn.fetchrow(
-                    """SELECT proposal FROM schedule_generation_runs
-                       WHERE id=$1 AND company_id=$2 AND location_id=$3 AND week_start=$4
-                         AND origin='automatic' AND status='proposed'""",
-                    UUID(str(action["generation_run_id"])), company_id, location_id, week_start,
+                proposal = await _load_proposed_run(
+                    conn, "proposal", run_id=UUID(str(action["generation_run_id"])),
+                    company_id=company_id, location_id=location_id, week_start=week_start,
                 )
-                if not row:
-                    return result
-                proposal = row["proposal"]
-                if isinstance(proposal, str):
-                    proposal = json.loads(proposal)
             if not isinstance(proposal, dict) or not isinstance(proposal.get("shifts"), list):
                 return result
             before, truncated = await load_week_assignment_rows(

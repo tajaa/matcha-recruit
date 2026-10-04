@@ -1076,7 +1076,7 @@ async def _run_huume_dispatch(tc: TurnContext):
         tc.current_state = await project_schedule_ui_state(
             tc.current_state, company_id=company_id, thread_id=thread_id,
             location_id=schedule_scope.location_id, week_start=schedule_scope.week_start,
-            include_cost=include_schedule_cost,
+            include_cost=include_schedule_cost, actor_role=current_user.role,
         )
     assistant_metadata = {"huume_steps": final_result.get("steps") or [], "huume_run_id": str(run_id)}
     if is_schedule_thread:
