@@ -189,6 +189,36 @@ ensure_local_postgres() {
         docker exec matcha-postgres pg_isready -U matcha -d matcha >/dev/null 2>&1 && break
         sleep 1
     done
+    restore_dev_dump_if_empty
+}
+
+# A fresh container (new machine, wiped volume) has an empty `matcha` DB. If a
+# dev dump is on hand, restore it so the stack comes up with data instead of
+# a blank schema. NEVER touches a DB that already has tables — refreshing a
+# populated dev DB is refresh-dev-from-prod.sh's job. Dump is untracked
+# (secrets/ is gitignored): it can hold real prod PII, see docs/ops/DB_WORKFLOW.md.
+DEV_DB_DUMP="${DEV_DB_DUMP:-$PROJECT_ROOT/secrets/dev/matcha-dev.dump}"
+restore_dev_dump_if_empty() {
+    local has_users
+    has_users="$(docker exec matcha-postgres psql -U matcha -d matcha -Atc "SELECT to_regclass('public.users') IS NOT NULL" 2>/dev/null || echo f)"
+    [ "$has_users" = "t" ] && return
+    if [ ! -f "$DEV_DB_DUMP" ]; then
+        echo -e "${YELLOW}Dev DB is empty and no dump at $DEV_DB_DUMP — starting with a blank schema.${NC}"
+        return
+    fi
+    echo -e "${YELLOW}Dev DB is empty — restoring $DEV_DB_DUMP ...${NC}"
+    docker cp "$DEV_DB_DUMP" matcha-postgres:/tmp/matcha-dev.dump
+    # --no-owner: the dump was taken under a different role setup. pg_restore
+    # exits non-zero on harmless warnings (e.g. an extension that already
+    # exists), so judge success by the data landing, not the exit code.
+    docker exec matcha-postgres pg_restore -U matcha -d matcha --clean --if-exists --no-owner /tmp/matcha-dev.dump >/dev/null 2>&1 || true
+    docker exec matcha-postgres rm -f /tmp/matcha-dev.dump
+    has_users="$(docker exec matcha-postgres psql -U matcha -d matcha -Atc "SELECT to_regclass('public.users') IS NOT NULL" 2>/dev/null || echo f)"
+    if [ "$has_users" = "t" ]; then
+        echo -e "${GREEN}Dev DB restored from dump.${NC}"
+    else
+        echo -e "${RED}Restore from $DEV_DB_DUMP did not produce a schema — run pg_restore by hand to see the errors.${NC}"
+    fi
 }
 if [ "$IS_AGENT_SANDBOX" = true ]; then
     echo -e "${GREEN}Using host local PostgreSQL and Redis through Docker Desktop${NC}"
@@ -371,7 +401,9 @@ if [ "$IS_AGENT_SANDBOX" = true ]; then
 else
     # pg_isready, not lsof: on Linux the Docker port listener is owned by
     # root, so an unprivileged lsof never sees it and this loop hung for 60s.
-    SERVICE_WAIT_LOOP="{ WAITED=0; MAX_WAIT=60; until pg_isready -h 127.0.0.1 -p $LOCAL_PORT -U matcha -d matcha >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'DB tunnel did not become ready within 60s.'; exit 1; fi; done; }"
+    # Host pg_isready (libpq) is often not on PATH (keg-only on Homebrew), so fall
+    # back to the one inside the container rather than waiting forever.
+    SERVICE_WAIT_LOOP="{ WAITED=0; MAX_WAIT=60; until { if command -v pg_isready >/dev/null 2>&1; then pg_isready -h 127.0.0.1 -p $LOCAL_PORT -U matcha -d matcha; else docker exec matcha-postgres pg_isready -U matcha -d matcha; fi; } >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'DB tunnel did not become ready within 60s.'; exit 1; fi; done; }"
     STATUS_PANE="echo 'Local Postgres (matcha-postgres) — dev DB on localhost:$LOCAL_PORT'; docker start matcha-postgres >/dev/null 2>&1; docker logs -f matcha-postgres"
     WAITING_MESSAGE="Waiting for DB tunnel on localhost:$LOCAL_PORT..."
 
