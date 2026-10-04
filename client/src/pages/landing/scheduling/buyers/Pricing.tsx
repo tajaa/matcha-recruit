@@ -14,6 +14,7 @@ const FEATURES = [
   { label: 'Automatic break staggering and relief review', plans: [false, true, true] },
   { label: 'Planned break reminders', plans: [false, true, true] },
   { label: 'Scheduled labor cost and overtime projections', plans: [false, true, true] },
+  { label: 'Credential and license tracking, with expiry checks on assignment', plans: [false, true, true] },
   { label: 'Sales- and weather-informed weekly drafts', plans: [false, false, true] },
   { label: 'Conversational changes and planning scenarios', plans: [false, false, true] },
   { label: 'Schedule intelligence, with relevant data', plans: [false, false, true] },
