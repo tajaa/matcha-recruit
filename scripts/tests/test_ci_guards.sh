@@ -412,6 +412,59 @@ grep -qF 'update_agent_worker' "$UPDATE_EC2" || workers_ok=1
 grep -qF -- '--profile agent-worker up -d --no-deps --force-recreate matcha-agent-worker' "$UPDATE_EC2" || workers_ok=1
 check "both Celery workers disable the API healthcheck and deploys update the agent worker" "$workers_ok"
 
+################################################################################
+# Case 10 — `build-and-push.sh --remote` died silently after its "Detecting
+# Changed Targets" banner. ecr_latest_sha() ran `aws ... | grep` under
+# `set -e -o pipefail`, so missing/expired AWS credentials (or a :latest with no
+# SHA tag) made the command substitution fail and the script exit with no
+# message. It must always return 0 with an empty answer (fail-open: "changed"),
+# warning on stderr only. A stub `aws` on PATH stands in for ECR; nothing real
+# is called and nothing is built or dispatched.
+################################################################################
+stub_dir="$(mktemp -d)"
+run_ecr_case() {
+    local desc="$1" stub_body="$2" expect_out="$3" expect_warn="$4"
+    printf '#!/usr/bin/env bash\n%s\n' "$stub_body" > "$stub_dir/aws"
+    chmod +x "$stub_dir/aws"
+    local out err rc
+    err="$(mktemp)"
+    out=$(PATH="$stub_dir:$PATH" bash -c '
+        source "$1"
+        set -euo pipefail
+        sha=$(ecr_latest_sha matcha-backend)
+        echo "SHA=[$sha]"
+    ' _ "$BUILD_PUSH" 2>"$err"); rc=$?
+    if [ "$rc" = "0" ] && [ "$out" = "SHA=[$expect_out]" ]; then
+        check "ecr_latest_sha: $desc" 0
+    else
+        check "ecr_latest_sha: $desc (rc=$rc out='$out')" 1
+    fi
+    if [ "$expect_warn" = "warn" ] && ! grep -q 'Could not read ECR' "$err"; then
+        check "ecr_latest_sha: $desc warns on stderr" 1
+    elif [ "$expect_warn" = "quiet" ] && grep -q 'Could not read ECR' "$err"; then
+        check "ecr_latest_sha: $desc stays quiet" 1
+    fi
+    rm -f "$err"
+}
+run_ecr_case "no AWS credentials -> empty, not a silent exit" 'echo "Unable to locate credentials" >&2; exit 253' "" warn
+run_ecr_case ":latest without a SHA tag -> empty, not a silent exit" 'printf "latest\n"' "" quiet
+run_ecr_case "no :latest image yet -> empty, quiet" 'echo "An error occurred (ImageNotFoundException)" >&2; exit 254' "" quiet
+run_ecr_case "returns the SHA tag when present" 'printf "latest\tc810e58\n"' "c810e58" quiet
+
+# End to end: with ECR unreadable, change detection must carry on and build both.
+detect_out=$(PATH="$stub_dir:$PATH" bash -c '
+    printf "#!/usr/bin/env bash\necho nope >&2; exit 255\n" > "'"$stub_dir"'/aws"
+    source "$1"
+    detect_changed_targets >/dev/null 2>&1
+    echo "BACKEND=$BUILD_BACKEND FRONTEND=$BUILD_FRONTEND"
+' _ "$BUILD_PUSH" 2>/dev/null)
+if [ "$detect_out" = "BACKEND=true FRONTEND=true" ]; then
+    check "detect_changed_targets fails open (builds both) when ECR is unreadable" 0
+else
+    check "detect_changed_targets fails open (builds both) when ECR is unreadable (got '$detect_out')" 1
+fi
+rm -rf "$stub_dir"
+
 echo
 echo "----------------------------------------"
 echo "PASS: $PASS  FAIL: $FAIL"
