@@ -1,12 +1,61 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 const backendTarget = process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8001'
 const backendWsTarget = backendTarget.replace(/^http/, 'ws')
 
+// The landing (`/`, `/incidents`) is a lazy route, so the browser only learns
+// about its chunks after the entry bundle has downloaded and run. This writes
+// a small inline script into index.html that, on those two paths only, adds
+// modulepreload links for the route's chunks and preloads its two headline
+// fonts, so they download alongside the entry instead of after it. It also
+// sets the dark page background before any JS runs. Build only; chunk names
+// are read from the bundle, so there is nothing to keep in sync by hand.
+const LANDING = 'src/pages/landing/scheduling/'
+const LANDING_TABS: Record<string, string> = { '/': 'SchedulingTab.tsx', '/incidents': 'IncidentsTab.tsx' }
+const LANDING_FONTS = /^assets\/(hanken-grotesk-latin|instrument-serif-italic-latin)-[\w-]+\.woff2$/
+const cappeHost = process.env.VITE_CAPPE_HOST || 'gummfit.com'
+
+function landingPreload(): Plugin {
+  return {
+    name: 'matcha-landing-preload',
+    transformIndexHtml: {
+      order: 'post',
+      handler(_html, ctx) {
+        if (!ctx.bundle) return
+        const chunks = Object.values(ctx.bundle).flatMap((item) => (item.type === 'chunk' ? [item] : []))
+        const byName = new Map(chunks.map((chunk) => [chunk.fileName, chunk]))
+        const closure = (roots: string[]) => {
+          const seen = new Set<string>()
+          const visit = (name: string) => {
+            if (seen.has(name)) return
+            seen.add(name)
+            byName.get(name)?.imports.forEach(visit)
+          }
+          roots.forEach(visit)
+          return seen
+        }
+        // Not facadeModuleId: Rollup leaves it unset when a lazy module's chunk also carries code shared with others.
+        const facade = (file: string) => chunks.find((chunk) => chunk.moduleIds.some((id) => id.endsWith(LANDING + file)))?.fileName
+        const shell = facade('index.tsx')
+        if (!shell) return
+        // Already fetched by the entry's own <script> and modulepreload tags.
+        const entry = closure(chunks.filter((chunk) => chunk.isEntry).map((chunk) => chunk.fileName))
+        const scripts = Object.fromEntries(Object.entries(LANDING_TABS).map(([path, file]) => {
+          const tab = facade(file)
+          return [path, [...closure(tab ? [shell, tab] : [shell])].filter((name) => !entry.has(name)).map((name) => `/${name}`)]
+        }))
+        const fonts = Object.keys(ctx.bundle).filter((name) => LANDING_FONTS.test(name)).map((name) => `/${name}`)
+        const code = `(function(){var h=location.hostname,s=${JSON.stringify(scripts)}[location.pathname];if(!s||h===${JSON.stringify(cappeHost)}||h===${JSON.stringify(`www.${cappeHost}`)})return;document.documentElement.setAttribute('data-marketing-board','');function add(rel,href,font){var l=document.createElement('link');l.rel=rel;l.href=href;if(font){l.as='font';l.type='font/woff2';l.crossOrigin=''}document.head.appendChild(l)}${JSON.stringify(fonts)}.forEach(function(f){add('preload',f,true)});s.forEach(function(f){add('modulepreload',f)})})()`
+        return [{ tag: 'script', children: code, injectTo: 'head' }]
+      },
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), landingPreload()],
   build: {
     // Emit source maps alongside JS bundles and include a
     // //# sourceMappingURL= comment so browsers resolve stack traces to

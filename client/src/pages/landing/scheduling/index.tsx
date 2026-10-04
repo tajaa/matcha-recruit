@@ -1,23 +1,16 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { useLocation } from 'react-router-dom'
-import { useMarketingBoard } from '../../../components/marketing/kit/hooks'
+import { useIdle, useMarketingBoard } from '../../../components/marketing/kit/hooks'
 import { useSEO } from '../../../hooks/useSEO'
-import { Change } from './sections/Change'
-import { Check } from './sections/Check'
-import { Closing } from './sections/Closing'
-import { Cost } from './sections/Cost'
-import { Draft } from './sections/Draft'
-import { Footer, Grain, LandingStyles, TimelineRail, TopBar } from './sections/Chrome'
-import { Hero } from './sections/Hero'
-import { Publish } from './sections/Publish'
-import { IncidentsClosing } from './incidents/Closing'
-import { IncidentsHero } from './incidents/Hero'
-import { Approve, Report, Signed, Triage, WriteUp } from './incidents/Sections'
-import { INCIDENT_STEPS, type LandingTab } from './styles'
-import { BODY, INK, PAPER } from '../../../components/marketing/kit/theme'
-import { BuyerGuide, BuyerQuestions, BuyerTopBar, OperationFit, Recovery, Setup } from './buyers/BuyerSections'
-import { Pricing } from './buyers/Pricing'
-import { Value } from './buyers/Value'
+import { Footer, Grain, LandingStyles } from './sections/Chrome'
+import type { LandingTab } from './styles'
+import { BODY, BOARD, INK, PAPER } from '../../../components/marketing/kit/theme'
+
+// Each tab is its own chunk, so `/` never downloads the incident sections (and
+// the reverse). index.html preloads the one the URL needs; see vite.config.ts.
+const loadScheduling = () => import('./SchedulingTab')
+const loadIncidents = () => import('./IncidentsTab')
+const SchedulingTab = lazy(loadScheduling)
+const IncidentsTab = lazy(loadIncidents)
 
 const PricingContactModal = lazy(() =>
   import('../../../components/marketing/PricingContactModal').then((m) => ({
@@ -63,7 +56,6 @@ const SEO: Record<LandingTab, { title: string; description: string; canonical: s
 }
 
 export default function SchedulingLanding({ tab = 'scheduling' }: { tab?: LandingTab }) {
-  const { hash } = useLocation()
   const [contactOpen, setContactOpen] = useState(false)
   const [contactMounted, setContactMounted] = useState(false)
   const openContact = () => {
@@ -73,10 +65,11 @@ export default function SchedulingLanding({ tab = 'scheduling' }: { tab?: Landin
 
   useMarketingBoard()
   useSEO(SEO[tab])
-  // The route is lazy: the anchor target does not exist at redirect time.
+  // Fetch the other tab once the page is idle, so switching does not wait on it.
+  const idle = useIdle(true)
   useEffect(() => {
-    if (hash) document.getElementById(hash.slice(1))?.scrollIntoView()
-  }, [hash, tab])
+    if (idle) void (tab === 'incidents' ? loadScheduling : loadIncidents)().catch(() => {})
+  }, [idle, tab])
 
   return (
     <div className="sched-root min-h-screen overflow-x-clip" style={{ backgroundColor: PAPER, color: INK, fontFamily: BODY }}>
@@ -87,41 +80,10 @@ export default function SchedulingLanding({ tab = 'scheduling' }: { tab?: Landin
           <PricingContactModal isOpen={contactOpen} onClose={() => setContactOpen(false)} mode="consultation" />
         </Suspense>
       )}
-      {tab === 'scheduling' ? <BuyerTopBar /> : <TopBar onContact={openContact} tab={tab} />}
-      {tab === 'incidents' ? (
-        <>
-          <TimelineRail steps={INCIDENT_STEPS} day={['Tue–Wed', 'Oct 6']} label="Incident timeline" />
-          <IncidentsHero onContact={openContact} />
-          <main>
-            <Report />
-            <Triage />
-            <WriteUp />
-            <Approve />
-            <Signed />
-            <IncidentsClosing onContact={openContact} />
-          </main>
-        </>
-      ) : (
-        <>
-          <TimelineRail darkStep="cost" />
-          <Hero onContact={openContact} showCommercial />
-          <main>
-            <BuyerGuide />
-            <Draft />
-            <Check />
-            <Change />
-            <Recovery />
-            <Cost />
-            <Publish />
-            <Setup onContact={openContact} />
-            <OperationFit />
-            <Value onContact={openContact} />
-            <Pricing onContact={openContact} />
-            <BuyerQuestions onContact={openContact} />
-            <Closing onContact={openContact} />
-          </main>
-        </>
-      )}
+      {/* Both tabs open on the dark hero; hold its colour while the chunk arrives. */}
+      <Suspense fallback={<div aria-hidden className="min-h-screen" style={{ backgroundColor: BOARD.PAPER }} />}>
+        {tab === 'incidents' ? <IncidentsTab onContact={openContact} /> : <SchedulingTab onContact={openContact} />}
+      </Suspense>
       <Footer tab={tab} />
     </div>
   )

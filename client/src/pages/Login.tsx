@@ -1,10 +1,15 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
-import { PricingContactModal } from '../components/marketing/PricingContactModal'
 import { api, API_BASE } from '../api/client'
 import { setAuthTokens } from '../api/authStorage'
 import { safeSameOriginPath } from '../utils/urlSecurity'
 import { invalidateMeCache } from '../hooks/useMe'
+
+// framer-motion rides in with the modal; keep it out of the entry chunk until
+// someone asks for a consultation.
+const PricingContactModal = lazy(() =>
+  import('../components/marketing/PricingContactModal').then((m) => ({ default: m.PricingContactModal })),
+)
 
 type LoginResponse = {
   access_token: string
@@ -60,6 +65,7 @@ export default function Login() {
   const [ssoMode, setSsoMode] = useState(false)
   const [ssoLoading, setSsoLoading] = useState(false)
   const [contactOpen, setContactOpen] = useState(false)
+  const [contactMounted, setContactMounted] = useState(false)
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const nextParam = searchParams.get('next')
@@ -229,7 +235,7 @@ export default function Login() {
           Don&apos;t have an account?{' '}
           <button
             type="button"
-            onClick={() => setContactOpen(true)}
+            onClick={() => { setContactMounted(true); setContactOpen(true) }}
             className="underline transition-opacity hover:opacity-60"
             style={{ color: INK, textDecorationColor: LINE, textUnderlineOffset: '4px' }}
           >
@@ -238,7 +244,11 @@ export default function Login() {
         </p>
       </div>
 
-      <PricingContactModal isOpen={contactOpen} onClose={() => setContactOpen(false)} />
+      {contactMounted && (
+        <Suspense fallback={null}>
+          <PricingContactModal isOpen={contactOpen} onClose={() => setContactOpen(false)} />
+        </Suspense>
+      )}
     </div>
   )
 }

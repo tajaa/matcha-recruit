@@ -14,17 +14,29 @@
          Space Grotesk reinstated 2026-07-28 for the Lite page copy.
          Space Mono is trimmed to the upright weights: it backs --font-mk-mono
          (marketing eyebrows), which never renders italic. -->
-    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=Inter:wght@300;400;500;600;700&family=Roboto+Flex:opsz,wght@8..144,100..1000&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Hanken+Grotesk:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Inserted by script so it never blocks first paint (an onload= swap
+         would be refused by the CSP's script-src-attr 'none'). The landing's
+         own three families are self-hosted in src/index.css, which comes
+         later in the document and so wins for Latin text. -->
+    <script>
+      (function () {
+        var link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = 'https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=Inter:wght@300;400;500;600;700&family=Roboto+Flex:opsz,wght@8..144,100..1000&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Hanken+Grotesk:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;700&display=swap'
+        document.currentScript.after(link)
+      })()
+    </script>
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=Inter:wght@300;400;500;600;700&family=Roboto+Flex:opsz,wght@8..144,100..1000&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Hanken+Grotesk:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet"></noscript>
     <!-- Static SEO/unfurl tags for crawlers that don't execute JS (Slack,
          iMessage, WhatsApp…). useSEO() finds-and-updates these same elements
          at runtime, so they never duplicate. -->
-    <meta name="description" content="Full-service HR for modern companies — an agentic risk & compliance platform, Matcha Lite for small teams, multi-state compliance tracking, and senior advisory." />
+    <meta name="description" content="Shift scheduling for cafés, restaurants, and shops. Matcha drafts the week from your sales, the weather, and who can work, then checks overtime, rest, and availability before you publish." />
     <meta name="theme-color" content="#0E0E0C" />
     <meta property="og:site_name" content="Matcha" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Matcha — Full-Service HR: Platform, Lite, Compliance & Consulting" />
-    <meta property="og:description" content="Full-service HR for modern companies — an agentic risk & compliance platform, Matcha Lite for small teams, multi-state compliance tracking, and senior advisory." />
-    <title>MATCHA</title>
+    <meta property="og:title" content="Matcha Scheduling — Next week’s schedule, already written" />
+    <meta property="og:description" content="Shift scheduling for cafés, restaurants, and shops. Matcha drafts the week from your sales, the weather, and who can work, then checks overtime, rest, and availability before you publish." />
+    <title>Matcha — Shift scheduling for cafés, restaurants, and shops</title>
   </head>
   <body>
     <div id="root"></div>
