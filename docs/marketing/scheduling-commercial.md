@@ -41,6 +41,15 @@ existed read as on).
 - Off: the film only ever plays silently. No sound button or native controls are
   rendered, so a visitor cannot unmute it; they get Play/Pause/Watch again and Skip.
 
+The player hides the browser's Download control (`controlsList="nodownload"`) and
+blocks the right-click "Save video as" menu. This is a deterrent only: the film is
+a public CDN file, so anyone who inspects the page can still fetch it. Real
+protection would need signed, expiring URLs or DRM streaming.
+
+Playback never touches the app server: the film is served by CloudFront from S3
+with `Cache-Control: public, max-age=31536000, immutable`. Only the small
+`/api/landing-media` settings read reaches the backend, once per page load.
+
 ## Storage prerequisites
 
 The existing public `S3_BUCKET`, its write credentials, and `CLOUDFRONT_DOMAIN`

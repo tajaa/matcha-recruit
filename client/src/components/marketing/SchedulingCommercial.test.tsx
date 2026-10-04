@@ -110,6 +110,12 @@ describe('scheduling commercial', () => {
       expect((screen.getByLabelText('Matcha scheduling commercial') as HTMLVideoElement).muted).toBe(true)
     })
   })
+  it('removes the browser download entry and the right-click save menu', () => {
+    render(<CommercialPlayer settings={settings} fallback={<p>Schedule demo</p>} />)
+    const video = screen.getByLabelText('Matcha scheduling commercial')
+    expect(video.getAttribute('controlslist')).toBe('nodownload')
+    expect(fireEvent.contextMenu(video)).toBe(false)
+  })
   it('falls back to the schedule when the video fails', () => {
     render(<CommercialPlayer settings={settings} fallback={<p>Schedule demo</p>} />)
     fireEvent.error(screen.getByLabelText('Matcha scheduling commercial'))
