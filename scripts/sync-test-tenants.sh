@@ -36,6 +36,7 @@
 # company-scoped, so the FK-walk never reaches it, and its `position` column
 # is dev-authored on purpose.
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/libpq-path.sh"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
