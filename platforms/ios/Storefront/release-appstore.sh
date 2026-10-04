@@ -4,6 +4,8 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=../../apple-env.sh
+source "$PROJECT_DIR/../../apple-env.sh"
 SCHEME="${SCHEME:-Ahnimal}"
 BUNDLE_ID="${BUNDLE_ID:-com.ahnimal.app}"
 APPLE_TEAM_ID="${APPLE_TEAM_ID:-5D6TJVCPBK}"

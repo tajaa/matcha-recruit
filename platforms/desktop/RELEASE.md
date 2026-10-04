@@ -39,15 +39,16 @@ The release script signs with a **Developer ID Application** certificate from th
    chmod 600 ~/.appstoreconnect/AuthKey_*.p8
    ```
 
-### 3. Shell environment
+### 3. Credentials (repo-local, untracked)
 
-Add to `~/.zshrc` (or `~/.bashrc`):
+The release scripts load credentials via `platforms/apple-env.sh` — no `~/.zshrc` setup needed:
 
 ```bash
-export APPLE_API_KEY_ID=XXXXXXXXXX                                          # 10-char key ID from the portal
-export APPLE_API_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx              # UUID at top of the API keys page
-export APPLE_API_KEY_PATH=$HOME/.appstoreconnect/AuthKey_XXXXXXXXXX.p8       # path to the .p8 you downloaded
+mv ~/Downloads/AuthKey_XXXXXXXXXX.p8 secrets/ && chmod 600 secrets/AuthKey_*.p8
+cp secrets/apple.env.example secrets/apple.env   # then set APPLE_API_ISSUER_ID (UUID at top of the API keys page)
 ```
+
+`secrets/` is gitignored. `APPLE_API_KEY_PATH` and `APPLE_API_KEY_ID` default to the single `secrets/AuthKey_<ID>.p8` and its `<ID>`; set them in `secrets/apple.env` to override. Variables already exported in your shell always win (so the old `~/.zshrc` exports still work).
 
 `APPLE_TEAM_ID` is **not** required — it defaults to `5D6TJVCPBK` inside `release.sh` (which also matches what's hard-coded in `Matcha.xcodeproj`). Override only if you're building for a different team.
 
