@@ -4,14 +4,7 @@ import { WRAP, display, mono } from '../../../../components/marketing/kit/styles
 import { BOARD, PAPER, hexA } from '../../../../components/marketing/kit/theme'
 import { Accent, CellLabel, PrimaryButton } from '../sections/Chrome'
 import { BuyerHeading } from './BuyerSections'
-
-export const AUTOPILOT_PREVIEW_PRICE = 149
-
-const PLANS = [
-  { name: 'Basic', price: 49, audience: 'Build the week.', detail: 'The essentials for a hands-on manager.', label: 'You build. Matcha checks.', features: ['Manual schedules and reusable templates', 'Employee schedules, availability, time off, and swaps', 'Core assignment checks and manual break planning'], featured: false },
-  { name: 'Pro', price: 99, audience: 'Balance the floor.', detail: 'Bring breaks, coverage, and cost together.', label: 'A little more off your plate.', features: ['Everything in Basic', 'Automatic break staggering and relief review', 'Planned break reminders with configured delivery', 'Scheduled labor cost and overtime projections'], featured: false },
-  { name: 'Autopilot', price: AUTOPILOT_PREVIEW_PRICE, audience: 'Start with a draft.', detail: 'Let demand shape the week. You make the call.', label: 'Our fullest scheduling plan.', features: ['Everything in Pro', 'Sales- and weather-informed weekly drafts', 'Conversational changes with manager confirmation', 'Planning scenarios and schedule intelligence'], featured: true },
-] as const
+import { SCHEDULING_PLANS as PLANS } from './plans'
 
 const FEATURES = [
   { label: 'Schedule editor, templates, and publishing', plans: [true, true, true] },
