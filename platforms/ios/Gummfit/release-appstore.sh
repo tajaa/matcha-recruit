@@ -26,6 +26,8 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=../../apple-env.sh
+source "$PROJECT_DIR/../../apple-env.sh"
 PROJECT="$PROJECT_DIR/Gummfit.xcodeproj"
 PROJECT_YML="$PROJECT_DIR/project.yml"
 SCHEME="Gummfit"
