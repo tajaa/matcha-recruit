@@ -443,13 +443,27 @@ validate_env() {
 }
 
 # The short git SHA this script tagged alongside :latest on its last push, or
-# empty when :latest doesn't exist / wasn't produced by this script.
+# empty when :latest doesn't exist / wasn't produced by this script / ECR can't
+# be read (no AWS credentials, expired SSO, no `aws` binary).
+#
+# Must never return non-zero: callers run it as `x=$(ecr_latest_sha ...)` under
+# `set -e -o pipefail`, so a failing `aws` or a grep with no match used to kill
+# the whole script with no output (--remote printed its "Detecting Changed
+# Targets" banner and stopped). Empty is the documented fail-open answer —
+# paths_changed_since treats an unknown base as "changed". Warnings go to stderr
+# because stdout is the captured return value.
 ecr_latest_sha() {
-    local repo=$1
-    aws ecr describe-images --region "${AWS_REGION:-us-west-1}" \
+    local repo=$1 tags
+    if ! tags=$(aws ecr describe-images --region "${AWS_REGION:-us-west-1}" \
         --repository-name "$repo" --image-ids imageTag=latest \
-        --query 'imageDetails[0].imageTags[]' --output text 2>/dev/null \
-        | tr '\t' '\n' | grep -E '^[0-9a-f]{7,40}$' | head -1
+        --query 'imageDetails[0].imageTags[]' --output text 2>&1); then
+        # An absent :latest is a normal first-push state; anything else is worth saying.
+        if ! printf '%s' "$tags" | grep -q 'ImageNotFoundException'; then
+            log_warning "Could not read ECR :latest for ${repo} ($(printf '%s' "$tags" | head -1 | cut -c1-160)) — assuming it changed." >&2
+        fi
+        return 0
+    fi
+    printf '%s\n' "$tags" | tr '\t' '\n' | { grep -E '^[0-9a-f]{7,40}$' || true; } | head -1
 }
 
 # 0 = the given pathspecs changed (committed since $1, or uncommitted now);
