@@ -7,6 +7,9 @@ CommercialSlot = Literal['desktop_video', 'mobile_video', 'desktop_poster', 'mob
 
 class SchedulingCommercial(BaseModel):
     enabled: bool = False
+    # True: visitors can start the film with sound and get a Sound off/on button.
+    # False: the film only ever plays silently (no sound controls are shown).
+    sound_enabled: bool = True
     desktop_video_url: str | None = Field(default=None, max_length=2048)
     mobile_video_url: str | None = Field(default=None, max_length=2048)
     desktop_poster_url: str | None = Field(default=None, max_length=2048)

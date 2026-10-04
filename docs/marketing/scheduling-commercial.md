@@ -27,10 +27,19 @@ The incidents page retains its existing behavior.
   those fields. Stored legacy settings and backend endpoints are preserved.
 
 The hero previews silently only while visible; reduced-motion and data-saver
-visitors get a still player. “Watch with sound” starts the full film with native
-play/pause, volume, seeking, and fullscreen controls. Skip restores the schedule
-demo and offers replay. API or playback errors fall back to the schedule demo.
-The page remains scrollable throughout.
+visitors get a still player. Skip restores the schedule demo and offers replay.
+API or playback errors fall back to the schedule demo. The page remains
+scrollable throughout.
+
+**Sound** is a backend setting: the **Play the commercial with sound** checkbox
+(`sound_enabled`, saved with the commercial; defaults on, and rows saved before it
+existed read as on).
+
+- On: “Watch with sound” starts the full film with native play/pause, volume,
+  seeking, and fullscreen controls, plus a **Sound off / Sound on** button on the
+  page (kept in sync with the native mute control). Skip is always available.
+- Off: the film only ever plays silently. No sound button or native controls are
+  rendered, so a visitor cannot unmute it; they get Play/Pause/Watch again and Skip.
 
 ## Storage prerequisites
 
@@ -66,6 +75,13 @@ playback/seeking, vertical phone playback, captions, skip, and the disabled stat
 No AWS policy, database setting, or asset is changed by the implementation tests.
 
 ## Upload troubleshooting
+
+The transfer goes from the browser straight to S3, so the backend (and Admin →
+Server Errors) never sees a failed transfer. The uploader reports S3
+unreachable/rejected/timeout failures to Admin → **Client Errors**
+(`context.source = landing-media-s3-upload`, with the bucket host, page origin,
+slot, size, and HTTP status). “Upload could not reach S3” with status 0 is almost
+always a missing bucket CORS rule.
 
 An HTTP 413 from `/api/admin/landing-media/upload` is the retired uploader hitting
 the application proxy's request-size limit. Its old 25 MB video allowance also

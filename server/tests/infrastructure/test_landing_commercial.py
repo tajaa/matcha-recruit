@@ -133,3 +133,39 @@ async def test_disabled_settings_can_be_saved_during_s3_outage(monkeypatch):
     monkeypatch.setattr(service, 'get_storage', storage)
     await service.verify_commercial_settings(SchedulingCommercial(enabled=False, desktop_video_url=URL))
     storage.assert_not_called()
+
+
+def test_sound_defaults_on_and_can_be_turned_off():
+    assert SchedulingCommercial().sound_enabled is True
+    assert SchedulingCommercial(sound_enabled=False).sound_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_sound_setting_is_persisted_with_the_commercial(storage, monkeypatch):
+    statements = []
+    class Conn:
+        async def execute(self, *args): statements.append(args)
+    @asynccontextmanager
+    async def connection(): yield Conn()
+    monkeypatch.setattr(routes, 'get_connection', connection)
+    result = await routes.save_scheduling_commercial(SchedulingCommercial(enabled=True, desktop_video_url=URL, sound_enabled=False), current_user=None)
+    assert result['value']['sound_enabled'] is False
+    assert json.loads(statements[0][1])['sound_enabled'] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('stored,expected', [
+    (None, True),
+    ({'scheduling_commercial': {'enabled': True, 'desktop_video_url': URL}}, True),  # saved before sound_enabled existed
+    ({'scheduling_commercial': {'enabled': True, 'desktop_video_url': URL, 'sound_enabled': False}}, False),
+    ({'scheduling_commercial': 'corrupt'}, True),
+])
+async def test_loaded_settings_always_carry_sound_enabled(monkeypatch, stored, expected):
+    class Conn:
+        async def fetchval(self, *args): return stored
+    @asynccontextmanager
+    async def connection(): yield Conn()
+    monkeypatch.setattr(routes, 'get_connection', connection)
+    loaded = await routes._load_landing_media()
+    assert loaded['scheduling_commercial']['sound_enabled'] is expected
+    assert set(loaded['scheduling_commercial']) >= set(SchedulingCommercial().model_dump())

@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { waitFor } from '@testing-library/react'
 import { api } from '../client'
 import { landingMedia } from './landingMedia'
+import { reportJsError } from '../errorReporter'
 import type { CommercialUploadProgress } from '../../types/landingMedia'
 
 vi.mock('../client', () => ({ API_BASE: '/api', api: { post: vi.fn() } }))
+vi.mock('../errorReporter', () => ({ reportJsError: vi.fn() }))
 const prepared = { upload_url: 'https://uploads.example.com', fields: { key: 'signed-key', 'Content-Type': 'video/mp4' }, asset_url: 'https://media.example.com/film.mp4' }
 const file = () => new File(['video'], 'film.mp4', { type: 'video/mp4' })
 const transport = () => ({
@@ -79,6 +81,33 @@ describe('commercial upload transport', () => {
     xhr[event]?.()
     await rejected
     expect(api.post).toHaveBeenCalledTimes(1)
+  })
+  it('reports S3 transfer failures with CORS-diagnosing context, but not user aborts', async () => {
+    xhr.status = 0
+    vi.mocked(api.post).mockResolvedValue(prepared)
+    const run = async (event: 'onerror' | 'onload' | 'ontimeout' | 'onabort') => {
+      vi.mocked(reportJsError).mockClear()
+      const upload = landingMedia.uploadCommercial(file(), 'desktop_video', vi.fn())
+      const settled = upload.catch(() => undefined)
+      await waitFor(() => expect(xhr.send).toHaveBeenCalled())
+      xhr[event]?.()
+      await settled
+    }
+    await run('onerror')
+    expect(reportJsError).toHaveBeenCalledOnce()
+    const [error, context] = vi.mocked(reportJsError).mock.calls[0]
+    expect((error as Error).message).toContain('could not reach S3')
+    expect(context).toEqual({
+      source: 'landing-media-s3-upload', outcome: 'unreachable', slot: 'desktop_video', size: 5,
+      content_type: 'video/mp4', http_status: 0, upload_host: 'uploads.example.com', page_origin: window.location.origin,
+    })
+    xhr.status = 403
+    await run('onload')
+    expect(vi.mocked(reportJsError).mock.calls[0][1]).toMatchObject({ outcome: 'rejected', http_status: 403 })
+    await run('ontimeout')
+    expect(vi.mocked(reportJsError).mock.calls[0][1]).toMatchObject({ outcome: 'timeout' })
+    await run('onabort')
+    expect(reportJsError).not.toHaveBeenCalled()
   })
   it('does not send a file when preparing the upload fails', async () => {
     vi.mocked(api.post).mockRejectedValueOnce(new Error('Not configured'))
