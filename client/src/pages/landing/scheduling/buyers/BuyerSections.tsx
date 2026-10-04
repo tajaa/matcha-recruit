@@ -28,11 +28,11 @@ export function BuyerTopBar() {
   return (
     <div className="sticky top-0 z-50" style={{ backgroundColor: hexA(PAPER, 0.94), backdropFilter: 'blur(14px)', borderBottom: `1px solid ${hexA(INK, 0.1)}` }}>
       <div className={`${WRAP} flex h-16 items-center justify-between gap-3`}>
-        <Link to="/scheduling-v2" className="sched-focus rounded" aria-label="Matcha scheduling preview">
+        <Link to="/" className="sched-focus rounded" aria-label="Matcha scheduling">
           <span style={{ ...display, fontSize: 21, fontWeight: 600 }}>Matcha</span>
         </Link>
         <nav aria-label="Product" className="flex items-center gap-3 sm:gap-5" style={mono('10.5px')}>
-          <Link to="/scheduling-v2" aria-current="page" className="sched-focus rounded" style={{ color: STAMP }}>Scheduling</Link>
+          <Link to="/" aria-current="page" className="sched-focus rounded" style={{ color: STAMP }}>Scheduling</Link>
           <Link to="/incidents" className="sched-link sched-focus rounded">Incidents</Link>
         </nav>
         <nav aria-label="Buying guide" className="hidden items-center gap-6 lg:flex" style={mono('10.5px')}>

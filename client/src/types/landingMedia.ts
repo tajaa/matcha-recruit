@@ -10,6 +10,10 @@ export type SchedulingCommercial = {
   captions_url: string | null
 }
 export type CommercialSlot = 'desktop_video' | 'mobile_video' | 'desktop_poster' | 'mobile_poster' | 'captions'
+export type CommercialUploadProgress = {
+  phase: 'preparing' | 'uploading' | 'verifying'
+  percent: number | null
+}
 export type LandingMedia = {
   hero_video_url: string | null
   hero_poster_url: string | null

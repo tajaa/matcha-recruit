@@ -1,11 +1,22 @@
-import { render, screen, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import SchedulingLanding from '.'
+import SchedulingHomeRedirect from './SchedulingHomeRedirect'
 import { SCHEDULING_SIGNUP_PATH } from './signup'
+import { landingMedia } from '../../../api/admin/landingMedia'
+import { EMPTY_COMMERCIAL } from '../../../types/landingMedia'
 
 // The hero animation is a lazy Remotion stage; the tabs are what's under test.
 vi.mock('./Stage', () => ({ default: () => null }))
+vi.mock('../../../api/admin/landingMedia', () => ({ landingMedia: { getPublic: vi.fn() } }))
+
+const media = { hero_video_url: null, hero_poster_url: null, sizzle_videos: [], customer_logos: [], testimonials: [] }
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.mocked(landingMedia.getPublic).mockResolvedValue(media)
+  Element.prototype.scrollIntoView = vi.fn()
+})
 
 beforeAll(() => {
   // useInView (Reveal) observes sections as they scroll in; jsdom has no IntersectionObserver.
@@ -34,12 +45,20 @@ beforeAll(() => {
   })) as typeof window.matchMedia
 })
 
-function renderAt(path: string) {
+function LocationProbe() {
+  const { pathname, search, hash } = useLocation()
+  const navigate = useNavigate()
+  return <><output aria-label="Current URL">{pathname}{search}{hash}</output><button onClick={() => navigate(-1)}>Back</button></>
+}
+
+function renderAt(path: string, prior?: string) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter initialEntries={prior ? [prior, path] : [path]} initialIndex={prior ? 1 : 0}>
+      <LocationProbe />
       <Routes>
         <Route path="/" element={<SchedulingLanding />} />
         <Route path="/incidents" element={<SchedulingLanding tab="incidents" />} />
+        <Route path="/scheduling-v2" element={<SchedulingHomeRedirect />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -51,9 +70,52 @@ describe('home landing tabs', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/Next week’s schedule/)
     const tabs = within(screen.getByRole('navigation', { name: 'Product' }))
     expect(tabs.getByRole('link', { name: 'Scheduling' }).getAttribute('aria-current')).toBe('page')
+    expect(tabs.getByRole('link', { name: 'Scheduling' })).toHaveAttribute('href', '/')
+    expect(screen.getByRole('link', { name: 'Matcha scheduling' })).toHaveAttribute('href', '/')
     expect(tabs.getByRole('link', { name: 'Incidents' }).getAttribute('href')).toBe('/incidents')
     expect(document.getElementById('draft')).not.toBeNull()
     expect(document.getElementById('triage')).toBeNull()
+  })
+
+  it('shows the complete buying guide at the indexable canonical home URL', () => {
+    renderAt('/')
+    for (const id of ['recovery', 'setup', 'fit', 'value', 'pricing', 'questions']) {
+      expect(document.getElementById(id)).not.toBeNull()
+    }
+    const guide = screen.getByRole('navigation', { name: 'Buying guide' })
+    for (const link of within(guide).getAllByRole('link')) {
+      expect(document.getElementById(link.getAttribute('href')!.slice(1))).not.toBeNull()
+    }
+    expect(document.querySelector('link[rel="canonical"]')).toHaveAttribute('href', 'https://hey-matcha.com/')
+    expect(document.querySelector('meta[name="robots"]')).toBeNull()
+    expect(document.title).not.toMatch(/preview/i)
+  })
+
+  it('plays an enabled saved commercial on home', async () => {
+    const url = 'https://media.example.com/film.mp4'
+    vi.mocked(landingMedia.getPublic).mockResolvedValue({ ...media, scheduling_commercial: { ...EMPTY_COMMERCIAL, enabled: true, desktop_video_url: url } })
+    renderAt('/')
+    expect(await screen.findByLabelText('Matcha scheduling commercial')).toHaveAttribute('src', url)
+    expect(screen.getByRole('button', { name: 'Skip to the schedule' })).toBeInTheDocument()
+  })
+
+  it('keeps home usable when media cannot load', () => {
+    vi.mocked(landingMedia.getPublic).mockRejectedValue(new Error('offline'))
+    renderAt('/')
+    expect(landingMedia.getPublic).toHaveBeenCalledOnce()
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Next week’s schedule')
+    expect(document.getElementById('pricing')).not.toBeNull()
+  })
+
+  it('redirects preview links with campaign parameters and section anchors without adding history', async () => {
+    renderAt('/scheduling-v2?utm_source=review#pricing', '/incidents')
+    await waitFor(() => expect(screen.getByLabelText('Current URL')).toHaveTextContent('/?utm_source=review#pricing'))
+    expect(document.getElementById('pricing')).not.toBeNull()
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledOnce()
+    expect(vi.mocked(Element.prototype.scrollIntoView).mock.contexts[0]).toBe(document.getElementById('pricing'))
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/closed case/i))
+    expect(screen.getByLabelText('Current URL')).toHaveTextContent('/incidents')
   })
 
   it('scheduling is self-serve: every primary call to action starts an account', () => {
@@ -70,6 +132,8 @@ describe('home landing tabs', () => {
     renderAt('/incidents')
     expect(screen.queryByRole('link', { name: /Start now/ })).toBeNull()
     expect(screen.getAllByRole('button', { name: /book a walkthrough/i }).length).toBeGreaterThanOrEqual(1)
+    expect(landingMedia.getPublic).not.toHaveBeenCalled()
+    expect(document.getElementById('pricing')).toBeNull()
   })
 
   it('/incidents is the incident workflow, in order, from report to signed copy', () => {
