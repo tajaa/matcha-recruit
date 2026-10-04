@@ -7,7 +7,7 @@ export const SCHEDULING_PLANS = [
   {
     id: 'pro', name: 'Pro', price: 99, audience: 'Balance the floor.',
     detail: 'Bring breaks, coverage, and cost together.', featured: false,
-    features: ['Everything in Basic', 'Automatic break staggering and relief review', 'Planned break reminders with configured delivery', 'Scheduled labor cost and overtime projections'],
+    features: ['Everything in Basic', 'Automatic break staggering and relief review', 'Planned break reminders with configured delivery', 'Scheduled labor cost and overtime projections', 'Credential and license tracking with expiry checks'],
   },
   {
     id: 'autopilot', name: 'Autopilot', price: 149, audience: 'Start with a draft.',
