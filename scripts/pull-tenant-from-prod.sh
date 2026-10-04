@@ -20,6 +20,7 @@
 #   * usage_events and infrastructure bookkeeping remain excluded.
 #   * selected-tenant production data is not anonymized.
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/libpq-path.sh"
 umask 077
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

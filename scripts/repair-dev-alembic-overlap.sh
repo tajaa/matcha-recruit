@@ -8,6 +8,7 @@
 # descendant cannot both be current. This removes only the stale ancestor row,
 # then delegates schema work to the normal migration command.
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/libpq-path.sh"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$REPO_ROOT/server/.env"

@@ -125,6 +125,8 @@ XCODE_SETTINGS=(
     CODE_SIGN_STYLE=Automatic
     CODE_SIGN_IDENTITY="Developer ID Application"
     ENABLE_HARDENED_RUNTIME=YES
+    ARCHS=arm64   # Embed Codex rejects anything else (CodexRuntime/README.md)
+    ONLY_ACTIVE_ARCH=NO
 )
 if [[ -n "$BUNDLE_ID_OVERRIDE" ]]; then
     XCODE_SETTINGS+=(PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID_OVERRIDE")

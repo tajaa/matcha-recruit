@@ -110,6 +110,7 @@ xcuserdata/
 **/DerivedData/
 # release-appstore.sh scratch dir (export plists, archive staging)
 platforms/ios/*/build/
+platforms/desktop/Espresso/build/
 *.xcarchive/
 *.xcuserstate
 *.xccheckout
