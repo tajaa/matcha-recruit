@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { Loader2, ArrowLeft } from 'lucide-react'
 import SetupGuide from '../components/SetupGuide'
@@ -14,6 +15,9 @@ import { SetupMerlinPanel } from './CappeSiteEditor/SetupMerlinPanel'
 export default function CappeSiteEditor() {
   const s = useCappeSiteEditor()
   const location = useLocation()
+  // null until the launch checklist has answered; only a known "not ready"
+  // disables the header's Publish button.
+  const [ready, setReady] = useState<boolean | null>(null)
 
   if (s.loading) {
     return (
@@ -38,12 +42,12 @@ export default function CappeSiteEditor() {
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-8">
-      <EditorHeader site={s.site} publicUrl={publicUrl} publishing={s.publishing} onPublish={s.publish} />
+      <EditorHeader site={s.site} publicUrl={publicUrl} publishing={s.publishing} onPublish={s.publish} blocked={ready === false} />
 
       {s.error && <p className="mb-4 text-sm text-red-400">{s.error}</p>}
       {s.notice && <p className="mb-4 text-sm text-emerald-400">{s.notice}</p>}
 
-      <SetupGuide site={s.site} pages={s.pages} publishing={s.publishing} onPublish={s.publish} refreshKey={s.setupRefresh} />
+      <SetupGuide site={s.site} pages={s.pages} publishing={s.publishing} onPublish={s.publish} refreshKey={s.setupRefresh} onReadiness={setReady} />
 
       {/* Settings */}
       <SettingsSection

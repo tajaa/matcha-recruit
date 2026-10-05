@@ -5,7 +5,9 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
+import asyncpg
 import pytest
+from fastapi import HTTPException
 
 os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
@@ -22,20 +24,32 @@ class _Transaction:
     def __init__(self, conn):
         self.conn = conn
 
+    # Depth 1 is the account-lock transaction; depth 2 is the per-attempt
+    # savepoint around the site INSERT, which must never outlive the lock.
     async def __aenter__(self):
-        assert not self.conn.in_transaction
+        assert self.conn.depth < 2
+        self.conn.depth += 1
         self.conn.in_transaction = True
-        self.conn.events.append("begin")
+        self.conn.events.append("begin" if self.conn.depth == 1 else "savepoint")
 
     async def __aexit__(self, exc_type, exc, tb):
-        self.conn.events.append("rollback" if exc_type else "commit")
-        self.conn.in_transaction = False
+        self.conn.depth -= 1
+        if self.conn.depth == 0:
+            self.conn.events.append("rollback" if exc_type else "commit")
+            self.conn.in_transaction = False
+        elif exc_type:
+            self.conn.events.append("savepoint-rollback")
 
 
 class _Conn:
-    def __init__(self, account_id, *, template=False):
+    def __init__(self, account_id, *, template=False, collisions=0):
         self.account_id = account_id
         self.template = template
+        # How many site INSERTs lose the race for their subdomain.
+        self.collisions = collisions
+        self.taken: set[str] = set()
+        self.inserted_args = None
+        self.depth = 0
         self.in_transaction = False
         self.events: list[str] = []
         self.site_id = uuid4()
@@ -55,7 +69,7 @@ class _Conn:
         if "SELECT 1 FROM cappe_sites" in sql:
             assert self.in_transaction
             self.events.append("slug")
-            return None
+            return 1 if args[0] in self.taken else None
         raise AssertionError(sql)
 
     async def fetchrow(self, sql, *args):
@@ -67,7 +81,12 @@ class _Conn:
                 "structure": json.dumps({"theme": {}, "pages": []}),
             }
         if "INSERT INTO cappe_sites" in sql:
-            assert self.in_transaction
+            assert self.depth == 2, "site INSERT must run inside its savepoint"
+            if self.collisions:
+                self.collisions -= 1
+                self.taken.add(args[2])
+                raise asyncpg.UniqueViolationError("cappe_sites_slug_key")
+            self.inserted_args = args
             self.events.append("site")
             return self._site_row(
                 name=args[1], slug=args[2],
@@ -134,7 +153,7 @@ async def test_blank_site_limit_check_and_insert_share_account_lock(monkeypatch)
     )
 
     assert conn.events == [
-        "begin", "lock", "entitlements", "count", "slug", "site", "page", "commit",
+        "begin", "lock", "entitlements", "count", "slug", "savepoint", "site", "page", "commit",
     ]
 
 
@@ -145,10 +164,49 @@ async def test_template_site_limit_check_and_insert_share_account_lock(monkeypat
     _patch_dependencies(monkeypatch, conn)
 
     await sites.create_site_from_template(
-        SimpleNamespace(template_id=uuid4(), name="Demo"), account,
+        SimpleNamespace(template_id=uuid4(), name="Demo", is_multi_location=True), account,
     )
 
     assert conn.events == [
         "template", "begin", "lock", "entitlements", "count", "slug",
-        "site", "page", "commit",
+        "savepoint", "site", "page", "commit",
     ]
+    # The wizard's "several locations" answer survives the template path.
+    assert conn.inserted_args[-1] is True
+
+
+@pytest.mark.asyncio
+async def test_losing_the_subdomain_race_retries_on_the_next_free_name(monkeypatch):
+    """Another account took "bakery" between the check and the INSERT. That was
+    a 500; now the attempt is rolled back to its savepoint (the account lock
+    is kept) and the site lands on the next candidate."""
+    account = SimpleNamespace(id=uuid4(), plan="free")
+    conn = _Conn(account.id, collisions=1)
+    _patch_dependencies(monkeypatch, conn)
+
+    site = await sites.create_site(
+        SimpleNamespace(name="Bakery", source_type="blank", is_multi_location=False), account,
+    )
+
+    assert site["slug"] == "bakery-2"
+    assert conn.events == [
+        "begin", "lock", "entitlements", "count",
+        "slug", "savepoint", "savepoint-rollback",
+        "slug", "slug", "savepoint", "site", "page", "commit",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_repeated_subdomain_collisions_end_in_a_409_not_a_500(monkeypatch):
+    account = SimpleNamespace(id=uuid4(), plan="free")
+    conn = _Conn(account.id, collisions=99)
+    _patch_dependencies(monkeypatch, conn)
+
+    with pytest.raises(HTTPException) as exc:
+        await sites.create_site(
+            SimpleNamespace(name="Demo", source_type="blank", is_multi_location=False), account,
+        )
+
+    assert exc.value.status_code == 409
+    assert conn.events[-1] == "rollback"
+    assert "site" not in conn.events

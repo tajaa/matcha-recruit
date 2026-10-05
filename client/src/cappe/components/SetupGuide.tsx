@@ -12,12 +12,15 @@ interface SetupGuideProps {
   onPublish: () => void
   // bumped by the parent after edits/saves so the checklist re-checks
   refreshKey?: number
+  // Reports whether the required steps are done, so the page's other Publish
+  // button can agree with this one instead of inviting a click that 422s.
+  onReadiness?: (ready: boolean) => void
 }
 
 /** Launch checklist. Reads server readiness (the same gate the publish endpoint
  *  enforces), shows required vs. recommended steps with a deep link to build
  *  each, and only enables publish once the required items are done. */
-export default function SetupGuide({ site, pages, publishing, onPublish, refreshKey }: SetupGuideProps) {
+export default function SetupGuide({ site, pages, publishing, onPublish, refreshKey, onReadiness }: SetupGuideProps) {
   const navigate = useNavigate()
   const [readiness, setReadiness] = useState<CappeReadiness | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -31,9 +34,9 @@ export default function SetupGuide({ site, pages, publishing, onPublish, refresh
   // that calls setState synchronously re-renders before the fetch even starts.
   const fetchReadiness = useCallback(() => {
     return cappeApi.get<CappeReadiness>(`/sites/${site.id}/readiness`)
-      .then((r) => { setReadiness(r); setError(null) })
+      .then((r) => { setReadiness(r); setError(null); onReadiness?.(r.ready) })
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not load the launch checklist'))
-  }, [site.id])
+  }, [site.id, onReadiness])
 
   useEffect(() => { void fetchReadiness() }, [fetchReadiness, refreshKey, site.status])
 
@@ -132,7 +135,9 @@ export default function SetupGuide({ site, pages, publishing, onPublish, refresh
         <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
           <Sparkles className="h-4 w-4 text-emerald-400" /> Get your site ready to launch
         </h2>
-        <span className="text-xs text-zinc-500">{requiredDone} of {required.length} required done</span>
+        <span className="text-xs text-zinc-500">
+          {readiness.ready ? 'Ready to publish' : `${requiredDone} of ${required.length} required done`}
+        </span>
       </div>
 
       <ul className="space-y-4">

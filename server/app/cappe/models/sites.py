@@ -91,6 +91,9 @@ class CappeSiteCreate(BaseModel):
 class CappeSiteFromTemplate(BaseModel):
     template_id: UUID
     name: Optional[str] = Field(default=None, max_length=255)
+    # Same meaning as on CappeSiteCreate; the onboarding wizard can now start
+    # from a template and must not lose its "several locations" answer.
+    is_multi_location: bool = False
 
 
 class CappeSiteUpdate(_SnapshotSizeLimit):
@@ -104,7 +107,7 @@ class CappeSiteUpdate(_SnapshotSizeLimit):
     name: Optional[str] = Field(default=None, max_length=255)
     # The tenant subdomain (<sub>.gummfit.com). Editable after creation; the
     # route slugifies + checks reserved/uniqueness before applying.
-    subdomain: Optional[str] = Field(default=None, max_length=140)
+    subdomain: Optional[str] = Field(default=None, max_length=63)
     # custom_domain is NOT editable here — it's owned by the verified
     # connect/verify flow in routes/domains.py (a domain can't be claimed
     # without proving control of it via TXT record). See models/domains.py.
