@@ -71,7 +71,7 @@ final class PushService {
 
     func register() async {
         guard let token = deviceToken, APIClient.shared.accessToken != nil else { return }
-        let bundle = Bundle.main.bundleIdentifier ?? "com.heymatcha.schedule"
+        let bundle = Bundle.main.bundleIdentifier ?? "com.matchasched.app"
         do {
             _ = try await APIClient.shared.requestData(
                 method: "POST", path: "/push/register",
