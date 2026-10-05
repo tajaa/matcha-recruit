@@ -7,10 +7,17 @@ struct MatchaScheduleApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(AppearancePreference.storageKey) private var appearance = AppearancePreference.system
 
+    init() {
+        Appearance.configure()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(appState)
+                .font(.app(.body))
+                // Explicit: the asset-catalog global accent is not always applied.
+                .tint(Color.brand)
                 .task { await appState.restore() }
                 .onAppear { AppearancePreference.apply(appearance) }
                 .onChange(of: appearance) { _, preference in

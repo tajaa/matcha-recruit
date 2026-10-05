@@ -48,7 +48,7 @@ struct NewConversationView: View {
                         Avatar(name: person.name, size: 36)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(person.name).foregroundStyle(Color.primary)
-                            Text(person.email).font(.caption).foregroundStyle(Color.secondary)
+                            Text(person.email).font(.app(.caption)).foregroundStyle(Color.secondary)
                         }
                     }
                 }

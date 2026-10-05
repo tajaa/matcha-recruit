@@ -25,7 +25,7 @@ struct DMThreadView: View {
                         let next = index + 1 < messages.count ? messages[index + 1] : nil
                         if DMOrder.startsNewMoment(message, after: previous) {
                             Text(Instant.label(message.createdAt))
-                                .font(.caption)
+                                .font(.app(.caption))
                                 .foregroundStyle(Color.secondary)
                                 .padding(.top, index == 0 ? 8 : 18)
                                 .padding(.bottom, 6)
@@ -74,7 +74,7 @@ struct DMThreadView: View {
     private var composer: some View {
         VStack(spacing: 6) {
             if let error {
-                Text(error).font(.caption).foregroundStyle(.red)
+                Text(error).font(.app(.caption)).foregroundStyle(.red)
             }
             HStack(alignment: .bottom, spacing: 8) {
                 TextField("Message", text: $draft, axis: .vertical)
@@ -149,21 +149,21 @@ private struct MessageBubble: View {
             if isMine { Spacer(minLength: 48) }
             VStack(alignment: isMine ? .trailing : .leading, spacing: 4) {
                 if showsSender {
-                    Text(message.senderName).font(.caption).foregroundStyle(Color.secondary)
+                    Text(message.senderName).font(.app(.caption)).foregroundStyle(Color.secondary)
                         .padding(.horizontal, 6)
                 }
                 if !message.content.isEmpty {
                     Text(message.content)
                         .foregroundStyle(isMine ? Color.white : Color.primary)
                         .padding(.horizontal, 14).padding(.vertical, 9)
-                        .background(isMine ? Color.accentColor : Color(.secondarySystemFill),
+                        .background(isMine ? Color.brand : Color(.secondarySystemFill),
                                     in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
                 ForEach(message.attachments ?? []) { attachment in
                     if let url = URL(string: attachment.url), url.scheme == "https" {
                         Link(destination: url) {
                             Label(attachment.filename, systemImage: attachment.isImage ? "photo" : "paperclip")
-                                .font(.caption)
+                                .font(.app(.caption))
                                 .lineLimit(1)
                         }
                         .buttonStyle(.bordered)

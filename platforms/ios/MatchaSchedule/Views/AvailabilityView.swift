@@ -34,13 +34,13 @@ struct AvailabilityView: View {
                 Section {
                     Label {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("A change is with your manager").font(.headline)
+                            Text("A change is with your manager").font(.app(.headline))
                             if let effective = pending.availability_effective_on {
                                 Text("Asked to start \(DateInput.display(effective, pattern: "EEEE, MMM d"))")
-                                    .font(.subheadline).foregroundStyle(Color.secondary)
+                                    .font(.app(.subheadline)).foregroundStyle(Color.secondary)
                             }
                             Text("Withdraw it in Requests to send a different one.")
-                                .font(.footnote).foregroundStyle(Color.secondary)
+                                .font(.app(.footnote)).foregroundStyle(Color.secondary)
                         }
                     } icon: {
                         Image(systemName: "clock.badge.checkmark").foregroundStyle(.orange)

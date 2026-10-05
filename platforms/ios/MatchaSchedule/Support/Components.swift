@@ -9,7 +9,7 @@ struct StatusPill: View {
 
     var body: some View {
         Text(text)
-            .font(.caption.weight(.medium))
+            .font(.app(.caption, .medium))
             .foregroundStyle(color)
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(color.opacity(0.15), in: Capsule())
@@ -34,7 +34,7 @@ struct Avatar: View {
 
     var body: some View {
         Text(initials)
-            .font(.system(size: size * 0.38, weight: .semibold))
+            .font(.inter(size * 0.38, .semibold))
             .foregroundStyle(.white)
             .frame(width: size, height: size)
             .background(tone.color, in: Circle())
@@ -70,11 +70,11 @@ struct ErrorRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(message, systemImage: "exclamationmark.circle")
-                .font(.subheadline)
+                .font(.app(.subheadline))
                 .foregroundStyle(.red)
             if let retry {
                 Button("Try again", action: retry)
-                    .font(.subheadline)
+                    .font(.app(.subheadline))
                     .buttonStyle(.borderless)
             }
         }

@@ -135,7 +135,7 @@ struct ScheduleView: View {
             Section("Next shift") {
                 Label("Couldn't load your next shift. Your week below is unaffected.",
                       systemImage: "exclamationmark.arrow.circlepath")
-                    .font(.subheadline)
+                    .font(.app(.subheadline))
                     .foregroundStyle(Color.secondary)
                 Button("Try again") { Task { await loadUpcoming() } }
                     .accessibilityIdentifier("schedule.next.retry")
@@ -151,8 +151,8 @@ struct ScheduleView: View {
             Section {
                 ForEach(0..<3, id: \.self) { _ in
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("9:00 AM – 5:00 PM").font(.headline)
-                        Text("Role · Store name").font(.subheadline)
+                        Text("9:00 AM – 5:00 PM").font(.app(.headline))
+                        Text("Role · Store name").font(.app(.subheadline))
                     }
                 }
             }
@@ -294,7 +294,7 @@ private struct WeekHeader: View {
                 chevron("chevron.left", label: "Previous week", id: "week.previous", action: onPrevious)
                 Spacer()
                 Text(label)
-                    .font(.headline)
+                    .font(.app(.headline))
                     .monospacedDigit()
                     .contentTransition(.numericText())
                 Spacer()
@@ -330,14 +330,14 @@ private struct WeekHeader: View {
         return Button { onSelect(key) } label: {
             VStack(spacing: 4) {
                 Text(WallClock.format(day, "EEEEE"))
-                    .font(.caption2.weight(.semibold))
+                    .font(.app(.caption2, .semibold))
                     .foregroundStyle(Color.secondary)
                 Text(WallClock.format(day, "d"))
-                    .font(.body.weight(isToday ? .semibold : .regular))
+                    .font(.app(.body, isToday ? .semibold : .regular))
                     .monospacedDigit()
                     .foregroundStyle(isToday ? Color.white : parts.isEmpty ? Color.secondary : Color.primary)
                     .frame(width: 36, height: 36)
-                    .background { if isToday { Circle().fill(Color.accentColor) } }
+                    .background { if isToday { Circle().fill(Color.brand) } }
                 HStack(spacing: 3) {
                     ForEach(Array(parts.prefix(3).enumerated()), id: \.offset) { _, part in
                         Circle().fill(part.color).frame(width: 5, height: 5)
@@ -367,7 +367,7 @@ private struct NextShiftRow: View {
         let onNow = start <= now && now < end
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: part.symbol)
-                .font(.title3)
+                .font(.app(.title3))
                 .foregroundStyle(part.color)
                 .frame(width: 28)
                 .accessibilityHidden(true)
@@ -380,16 +380,16 @@ private struct NextShiftRow: View {
                         .monospacedDigit()
                         .contentTransition(.numericText())
                 }
-                .font(.subheadline)
+                .font(.app(.subheadline))
                 .foregroundStyle(Color.secondary)
                 Text("\(WallClock.label(shift.starts_at, format: "h:mm a")) – \(WallClock.label(shift.ends_at, format: "h:mm a"))")
-                    .font(.title2.bold())
+                    .font(.app(.title2, .bold))
                     .monospacedDigit()
                     .foregroundStyle(Color.primary)
                     .minimumScaleFactor(0.7)
                     .lineLimit(1)
                 Text([shift.title, location].compactMap { $0 }.joined(separator: " · "))
-                    .font(.subheadline)
+                    .font(.app(.subheadline))
                     .foregroundStyle(Color.secondary)
                     .lineLimit(1)
                 if onNow {
@@ -433,20 +433,20 @@ struct ShiftRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 if showsDay {
                     Text(WallClock.label(shift.starts_at, format: "EEEE, MMM d"))
-                        .font(.subheadline)
+                        .font(.app(.subheadline))
                         .foregroundStyle(Color.secondary)
                 }
                 Text("\(WallClock.label(shift.starts_at, format: "h:mm a")) – \(WallClock.label(shift.ends_at, format: "h:mm a"))")
-                    .font(.headline)
+                    .font(.app(.headline))
                     .monospacedDigit()
                     .foregroundStyle(Color.primary)
                 Text(detail)
-                    .font(.subheadline)
+                    .font(.app(.subheadline))
                     .foregroundStyle(Color.secondary)
                     .lineLimit(1)
                 if isOpen || shift.has_conflict == true {
                     HStack(spacing: 6) {
-                        if isOpen { StatusPill(text: "Open", color: .accentColor) }
+                        if isOpen { StatusPill(text: "Open", color: .brand) }
                         if shift.has_conflict == true { StatusPill(text: "Overlaps your shift", color: .orange) }
                     }
                     .padding(.top, 2)
@@ -459,7 +459,7 @@ struct ShiftRow: View {
             Spacer(minLength: 4)
             if showsChevron {
                 Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
+                    .font(.app(.footnote, .semibold))
                     .foregroundStyle(Color(.tertiaryLabel))
                     .accessibilityHidden(true)
             }
@@ -478,7 +478,7 @@ struct CrewRow: View {
                     Avatar(name: person.name, size: 22)
                 }
             }
-            Text(names).font(.caption).foregroundStyle(Color.secondary).lineLimit(1)
+            Text(names).font(.app(.caption)).foregroundStyle(Color.secondary).lineLimit(1)
         }
     }
 

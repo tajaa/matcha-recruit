@@ -45,6 +45,14 @@ targets:
               NSIncludesSubdomains: true
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # Inter 4.1 (SIL OFL, Resources/Fonts/Inter-LICENSE.txt).
+        UIAppFonts:
+          - Inter-Regular.ttf
+          - Inter-Medium.ttf
+          - Inter-SemiBold.ttf
+          - Inter-Bold.ttf
+          - InterDisplay-SemiBold.ttf
+          - InterDisplay-Bold.ttf
     # The ATS exceptions above exist for a Debug build talking to a local
     # backend over http. Release only ever uses the https production API, so
     # they are removed from the built Info.plist before signing.

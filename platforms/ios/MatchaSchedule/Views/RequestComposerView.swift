@@ -82,11 +82,11 @@ struct RequestComposerView: View {
                     .disabled(targetEmployeeID.isEmpty)
                     if !targetEmployeeID.isEmpty && counterShifts.isEmpty && !loading {
                         Text("They have no published shifts in the next four weeks.")
-                            .font(.footnote).foregroundStyle(Color.secondary)
+                            .font(.app(.footnote)).foregroundStyle(Color.secondary)
                     }
                     if !loading && coworkers.isEmpty && error == nil {
                         Text("No one at your store has a published shift to trade in the next four weeks.")
-                            .font(.footnote).foregroundStyle(Color.secondary)
+                            .font(.app(.footnote)).foregroundStyle(Color.secondary)
                     }
                 } header: {
                     Text("Trade with")
@@ -95,7 +95,7 @@ struct RequestComposerView: View {
             if action == .claim && shift.has_conflict == true {
                 Section {
                     Label("This overlaps one of your shifts. Your manager will see that.", systemImage: "exclamationmark.triangle.fill")
-                        .font(.subheadline)
+                        .font(.app(.subheadline))
                         .foregroundStyle(.orange)
                 }
             }

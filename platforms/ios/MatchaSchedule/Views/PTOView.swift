@@ -15,7 +15,7 @@ struct PTOView: View {
                 Section {
                     LabeledContent("Available") {
                         Text("\(Self.trimmed(summary.balance.balance_hours)) hours")
-                            .font(.title2.bold())
+                            .font(.app(.title2, .bold))
                             .monospacedDigit()
                             .foregroundStyle(Color.primary)
                             .contentTransition(.numericText())
@@ -90,10 +90,10 @@ private struct PTORow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Label(request.request_type.capitalized,
                       systemImage: request.request_type == "sick" ? "cross.case" : "sun.max")
-                    .font(.headline)
+                    .font(.app(.headline))
                     .labelStyle(TightLabel())
                 Text(range + " · \(PTOView.trimmed(request.hours)) h")
-                    .font(.subheadline).foregroundStyle(Color.secondary).monospacedDigit()
+                    .font(.app(.subheadline)).foregroundStyle(Color.secondary).monospacedDigit()
             }
             Spacer()
             if pending {

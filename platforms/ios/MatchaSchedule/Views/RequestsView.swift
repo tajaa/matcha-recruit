@@ -85,8 +85,8 @@ struct RequestsView: View {
 
     private var placeholderRow: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("Shift swap request").font(.headline)
-            Text("Monday, Jan 1 · 9:00 AM").font(.subheadline)
+            Text("Shift swap request").font(.app(.headline))
+            Text("Monday, Jan 1 · 9:00 AM").font(.app(.subheadline))
         }
         .redacted(reason: .placeholder)
         .accessibilityLabel("Loading requests")
@@ -172,7 +172,7 @@ extension ScheduleRequest {
 
     var statusColor: Color {
         switch status {
-        case "approved": .accentColor
+        case "approved": .brand
         case "denied": .red
         case "awaiting_counterparty": .indigo
         case "pending", "awaiting_manager": .orange
@@ -227,17 +227,17 @@ private struct OfferRow: View {
             Text(offer.request_type == "swap"
                  ? "\(offer.employee_name) wants to swap"
                  : "\(offer.employee_name) is offering a shift")
-                .font(.headline)
+                .font(.app(.headline))
             if let offered = offer.offeredShiftLine {
                 Text(offer.request_type == "swap" ? "Offers: \(offered)" : offered)
-                    .font(.subheadline).foregroundStyle(Color.secondary).monospacedDigit()
+                    .font(.app(.subheadline)).foregroundStyle(Color.secondary).monospacedDigit()
             }
             if let wanted = offer.counterShiftLine {
                 Text("For: \(wanted)")
-                    .font(.subheadline).foregroundStyle(Color.secondary).monospacedDigit()
+                    .font(.app(.subheadline)).foregroundStyle(Color.secondary).monospacedDigit()
             }
             if let reason = offer.reason, !reason.isEmpty {
-                Text("\u{201C}\(reason)\u{201D}").font(.subheadline).foregroundStyle(Color.secondary)
+                Text("\u{201C}\(reason)\u{201D}").font(.app(.subheadline)).foregroundStyle(Color.secondary)
             }
             Button(action: onAccept) {
                 LoadingLabel(title: offer.request_type == "swap" ? "Accept swap" : "Take this shift", busy: busy)
@@ -261,29 +261,29 @@ private struct RequestRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Label(request.kindLabel, systemImage: request.kindSymbol)
-                    .font(.headline)
+                    .font(.app(.headline))
                     .labelStyle(TightLabel())
                 Spacer(minLength: 8)
                 StatusPill(text: request.statusLabel, color: request.statusColor)
             }
             if let role = request.shift_role {
-                Text(role).font(.subheadline).foregroundStyle(Color.secondary)
+                Text(role).font(.app(.subheadline)).foregroundStyle(Color.secondary)
             }
             if let when = request.whenLine {
-                Text(when).font(.subheadline).foregroundStyle(Color.secondary).monospacedDigit()
+                Text(when).font(.app(.subheadline)).foregroundStyle(Color.secondary).monospacedDigit()
             }
             if let wanted = request.counterShiftLine {
-                Text("For: \(wanted)").font(.subheadline).foregroundStyle(Color.secondary).monospacedDigit()
+                Text("For: \(wanted)").font(.app(.subheadline)).foregroundStyle(Color.secondary).monospacedDigit()
             }
             if let note = request.review_notes, !note.isEmpty {
-                Text("\u{201C}\(note)\u{201D}").font(.subheadline).foregroundStyle(Color.secondary)
+                Text("\u{201C}\(note)\u{201D}").font(.app(.subheadline)).foregroundStyle(Color.secondary)
             }
             if canEnd {
                 Button(role: .destructive, action: onEnd) {
                     if busy { ProgressView() } else { Text(request.status == "pending" ? "Cancel request" : "Withdraw") }
                 }
                 .buttonStyle(.borderless)
-                .font(.subheadline)
+                .font(.app(.subheadline))
                 .disabled(disabled)
                 .padding(.top, 2)
             }

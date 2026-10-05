@@ -1,9 +1,82 @@
 import SwiftUI
 import UIKit
 
-// The app uses the system's own type, colors and surfaces; the emerald accent
-// comes from the AccentColor asset. The only app-specific color is the day
-// part below.
+// The app uses the system's own colors and surfaces; the emerald accent comes
+// from the AccentColor asset. Type is Inter (SIL OFL, Resources/Fonts), with
+// Inter Display for large titles, sized to the system text styles so Dynamic
+// Type still applies.
+
+enum InterWeight {
+    case regular, medium, semibold, bold
+
+    fileprivate var textName: String {
+        switch self {
+        case .regular: "Inter-Regular"
+        case .medium: "Inter-Medium"
+        case .semibold: "Inter-SemiBold"
+        case .bold: "Inter-Bold"
+        }
+    }
+
+    /// Inter Display ships in two weights; lighter requests use SemiBold.
+    fileprivate var displayName: String { self == .bold ? "InterDisplay-Bold" : "InterDisplay-SemiBold" }
+}
+
+extension Font {
+    /// Inter at a text style's default size, scaling with Dynamic Type. Sizes
+    /// of 20 pt and up use the Display cut, which is drawn for large text.
+    static func app(_ style: Font.TextStyle, _ weight: InterWeight? = nil) -> Font {
+        let (size, standard) = style.interMetrics
+        return inter(size, weight ?? standard, relativeTo: style)
+    }
+
+    static func inter(_ size: CGFloat, _ weight: InterWeight = .regular, relativeTo style: Font.TextStyle = .body) -> Font {
+        .custom(size >= 20 ? weight.displayName : weight.textName, size: size, relativeTo: style)
+    }
+}
+
+private extension Font.TextStyle {
+    var interMetrics: (CGFloat, InterWeight) {
+        switch self {
+        case .largeTitle: (34, .bold)
+        case .title: (28, .bold)
+        case .title2: (22, .bold)
+        case .title3: (20, .semibold)
+        case .headline: (17, .semibold)
+        case .callout: (16, .regular)
+        case .subheadline: (15, .regular)
+        case .footnote: (13, .regular)
+        case .caption: (12, .regular)
+        case .caption2: (11, .regular)
+        default: (17, .regular)
+        }
+    }
+}
+
+extension Color {
+    /// The emerald accent, read from the asset by name: `Color.brand`
+    /// can resolve to system blue when the catalog accent is not applied.
+    static let brand = Color("AccentColor")
+}
+
+// MARK: - UIKit chrome
+//
+// Navigation titles, tab labels and segmented controls are UIKit-drawn.
+
+enum Appearance {
+    static func configure() {
+        func font(_ name: String, _ size: CGFloat, _ style: UIFont.TextStyle) -> UIFont {
+            UIFontMetrics(forTextStyle: style).scaledFont(for: UIFont(name: name, size: size) ?? .systemFont(ofSize: size))
+        }
+        let nav = UINavigationBar.appearance()
+        nav.largeTitleTextAttributes = [.font: font("InterDisplay-Bold", 34, .largeTitle)]
+        nav.titleTextAttributes = [.font: font("Inter-SemiBold", 17, .headline)]
+        let tab = font("Inter-Medium", 10, .caption2)
+        UITabBarItem.appearance().setTitleTextAttributes([.font: tab], for: .normal)
+        UITabBarItem.appearance().setTitleTextAttributes([.font: tab], for: .selected)
+        UISegmentedControl.appearance().setTitleTextAttributes([.font: font("Inter-Medium", 13, .footnote)], for: .normal)
+    }
+}
 
 // MARK: - Day parts
 //
@@ -43,7 +116,7 @@ enum DayPart: String {
     var color: Color {
         switch self {
         case .opener: .orange
-        case .mid: .accentColor
+        case .mid: .brand
         case .closer: .indigo
         }
     }

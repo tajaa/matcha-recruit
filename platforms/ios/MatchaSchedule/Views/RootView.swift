@@ -76,7 +76,7 @@ private struct BrandMark: View {
             .font(.system(size: size * 0.42, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: size, height: size)
-            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+            .background(Color.brand, in: RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
             .accessibilityHidden(true)
     }
 }
@@ -87,7 +87,7 @@ private struct LaunchView: View {
             BrandMark(size: 72)
             ProgressView()
             Text("Opening your schedule")
-                .font(.subheadline)
+                .font(.app(.subheadline))
                 .foregroundStyle(Color.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -232,15 +232,15 @@ private struct LoginHero: View {
                 Spacer()
                 Text("in 14h")
             }
-            .font(.caption.weight(.semibold))
+            .font(.app(.caption, .semibold))
             .foregroundStyle(Color.secondary)
             Text("6:30 – 2:30 PM")
-                .font(.system(size: 28, weight: .bold))
+                .font(.inter(28, .bold))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             Text("Barista · Downtown")
-                .font(.subheadline)
+                .font(.app(.subheadline))
                 .foregroundStyle(Color.secondary)
         }
         .padding(18)
@@ -251,11 +251,11 @@ private struct LoginHero: View {
     private var swapNotice: some View {
         HStack(spacing: 10) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.title3)
-                .foregroundStyle(Color.accentColor)
+                .font(.app(.title3))
+                .foregroundStyle(Color.brand)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Swap approved").font(.subheadline.weight(.semibold))
-                Text("Saturday is covered").font(.caption).foregroundStyle(Color.secondary)
+                Text("Swap approved").font(.app(.subheadline, .semibold))
+                Text("Saturday is covered").font(.app(.caption)).foregroundStyle(Color.secondary)
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
@@ -264,8 +264,8 @@ private struct LoginHero: View {
 
     private var openShift: some View {
         HStack(spacing: 8) {
-            Image(systemName: "plus.circle.fill").foregroundStyle(Color.accentColor)
-            Text("Open shift · Fri 4 PM").font(.subheadline.weight(.medium))
+            Image(systemName: "plus.circle.fill").foregroundStyle(Color.brand)
+            Text("Open shift · Fri 4 PM").font(.app(.subheadline, .medium))
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .glassPanel(in: Capsule())
@@ -304,7 +304,7 @@ private struct LoginView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 10) {
                         BrandMark(size: 34)
-                        Text("Matcha Schedule").font(.headline)
+                        Text("Matcha Schedule").font(.app(.headline))
                     }
                     .padding(.top, 12)
 
@@ -315,11 +315,11 @@ private struct LoginView: View {
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Your shifts,\nin your pocket.")
-                            .font(.system(size: 38, weight: .bold))
+                            .font(.inter(38, .bold))
                             .tracking(-0.6)
                             .fixedSize(horizontal: false, vertical: true)
                         Text("Sign in with the work email your manager invited.")
-                            .font(.body)
+                            .font(.app(.body))
                             .foregroundStyle(Color.secondary)
                     }
                     .padding(.bottom, 24)
@@ -370,7 +370,7 @@ private struct LoginView: View {
                     // the employee to that field.
                     Button(action: submit) {
                         LoadingLabel(title: "Sign in", busy: busy)
-                            .font(.headline)
+                            .font(.app(.headline))
                             .padding(.vertical, 6)
                     }
                     .prominentGlassButton()
@@ -383,7 +383,7 @@ private struct LoginView: View {
                     .sensoryFeedback(trigger: error) { _, new in new == nil ? nil : .error }
 
                     Text("Can't sign in? Ask your manager to resend your invite.")
-                        .font(.footnote)
+                        .font(.app(.footnote))
                         .foregroundStyle(Color.secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 16)
@@ -467,8 +467,8 @@ private struct MeView: View {
                 HStack(spacing: 14) {
                     Avatar(name: profile.displayName, size: 56)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(profile.displayName).font(.title3.weight(.semibold))
-                        Text(profile.company_name).font(.subheadline).foregroundStyle(Color.secondary)
+                        Text(profile.displayName).font(.app(.title3, .semibold))
+                        Text(profile.company_name).font(.app(.subheadline)).foregroundStyle(Color.secondary)
                     }
                 }
                 .padding(.vertical, 4)

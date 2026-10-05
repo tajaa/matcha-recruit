@@ -27,18 +27,18 @@ struct ShiftDetailView: View {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
                     Label(part.label, systemImage: part.symbol)
-                        .font(.subheadline.weight(.medium))
+                        .font(.app(.subheadline, .medium))
                         .foregroundStyle(part.color)
                         .labelStyle(TightLabel())
                     Text("\(WallClock.label(shift.starts_at, format: "h:mm a")) – \(WallClock.label(shift.ends_at, format: "h:mm a"))")
-                        .font(.title.bold())
+                        .font(.app(.title, .bold))
                         .monospacedDigit()
                         .minimumScaleFactor(0.6)
                         .lineLimit(1)
-                    Text(shift.title).font(.title3).foregroundStyle(Color.secondary)
+                    Text(shift.title).font(.app(.title3)).foregroundStyle(Color.secondary)
                     if mode == .open || shift.has_conflict == true {
                         HStack(spacing: 6) {
-                            if mode == .open { StatusPill(text: "Open", color: .accentColor) }
+                            if mode == .open { StatusPill(text: "Open", color: .brand) }
                             if shift.has_conflict == true { StatusPill(text: "Overlaps your shift", color: .orange) }
                         }
                         .padding(.top, 2)
@@ -108,14 +108,14 @@ struct ShiftDetailView: View {
             Section("Breaks") {
                 if let entitlement = guidance?.entitlement {
                     Label(entitlement, systemImage: guidance?.needsAttention == true ? "exclamationmark.triangle" : "info.circle")
-                        .font(.subheadline)
+                        .font(.app(.subheadline))
                         .foregroundStyle(guidance?.needsAttention == true ? Color.orange : Color.secondary)
                 } else if planned.isEmpty && minutes > 0 {
                     LabeledContent("Break", value: "\(minutes) minutes")
                 }
                 if guidance?.mealBreakWaived == true {
                     Label("Meal-break waiver applies to this shift.", systemImage: "checkmark.circle")
-                        .font(.subheadline)
+                        .font(.app(.subheadline))
                         .foregroundStyle(Color.secondary)
                 }
                 ForEach(planned) { item in
@@ -137,11 +137,11 @@ struct ShiftDetailView: View {
             Section {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Sent to your manager").font(.headline)
-                        Text("Track it in Requests.").font(.subheadline).foregroundStyle(Color.secondary)
+                        Text("Sent to your manager").font(.app(.headline))
+                        Text("Track it in Requests.").font(.app(.subheadline)).foregroundStyle(Color.secondary)
                     }
                 } icon: {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.brand)
                 }
             }
             .sensoryFeedback(.success, trigger: submitted)

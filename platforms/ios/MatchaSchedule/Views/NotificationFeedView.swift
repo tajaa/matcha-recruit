@@ -96,7 +96,7 @@ private struct NoticeRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbol)
-                .foregroundStyle(notice.is_read ? Color.secondary : Color.accentColor)
+                .foregroundStyle(notice.is_read ? Color.secondary : Color.brand)
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
@@ -105,15 +105,15 @@ private struct NoticeRow: View {
                         .foregroundStyle(Color.primary)
                     Spacer(minLength: 8)
                     Text(Instant.short(notice.created_at))
-                        .font(.caption).foregroundStyle(Color.secondary)
+                        .font(.app(.caption)).foregroundStyle(Color.secondary)
                 }
                 if let body = notice.body {
-                    Text(body).font(.subheadline).foregroundStyle(Color.secondary)
+                    Text(body).font(.app(.subheadline)).foregroundStyle(Color.secondary)
                         .multilineTextAlignment(.leading)
                 }
             }
             if !notice.is_read {
-                Circle().fill(Color.accentColor).frame(width: 8, height: 8).padding(.top, 6)
+                Circle().fill(Color.brand).frame(width: 8, height: 8).padding(.top, 6)
                     .accessibilityLabel("Unread")
             }
         }

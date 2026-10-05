@@ -17,8 +17,8 @@ struct InboxListView: View {
                 if !loaded {
                     ForEach(0..<4, id: \.self) { _ in
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Coworker name").font(.headline)
-                            Text("The last message in the conversation").font(.subheadline)
+                            Text("Coworker name").font(.app(.headline))
+                            Text("The last message in the conversation").font(.app(.subheadline))
                         }
                         .redacted(reason: .placeholder)
                         .accessibilityLabel("Loading messages")
@@ -112,26 +112,26 @@ private struct ConversationRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(name)
-                        .font(.headline)
+                        .font(.app(.headline))
                         .lineLimit(1)
                     Spacer(minLength: 8)
                     if let at = conversation.lastMessageAt {
                         Text(Instant.short(at))
-                            .font(.caption)
+                            .font(.app(.caption))
                             .foregroundStyle(Color.secondary)
                     }
                 }
                 HStack(alignment: .top) {
                     Text(conversation.lastMessagePreview ?? "No messages yet")
-                        .font(.subheadline)
+                        .font(.app(.subheadline))
                         .foregroundStyle(unread > 0 ? Color.primary : Color.secondary)
                         .lineLimit(2)
                     Spacer(minLength: 8)
                     if unread > 0 {
                         Text("\(min(unread, 99))")
-                            .font(.caption.weight(.semibold)).foregroundStyle(.white)
+                            .font(.app(.caption, .semibold)).foregroundStyle(.white)
                             .padding(.horizontal, 7).padding(.vertical, 2)
-                            .background(Color.accentColor, in: Capsule())
+                            .background(Color.brand, in: Capsule())
                             .accessibilityLabel("\(unread) unread")
                     }
                 }
