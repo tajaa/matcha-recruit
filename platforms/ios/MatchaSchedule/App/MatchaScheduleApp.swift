@@ -15,7 +15,9 @@ struct MatchaScheduleApp: App {
         WindowGroup {
             RootView()
                 .environment(appState)
-                .tint(Palette.leaf)
+                .font(.app(.body))
+                // Explicit: the asset-catalog global accent is not always applied.
+                .tint(Color.brand)
                 .task { await appState.restore() }
                 .onAppear { AppearancePreference.apply(appearance) }
                 .onChange(of: appearance) { _, preference in

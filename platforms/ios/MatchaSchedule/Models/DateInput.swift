@@ -1,10 +1,12 @@
 import Foundation
 
 enum DateInput {
-    static func date(_ value: Date) -> String {
+    /// The calendar day of `value` on the store's clock, which is the day the
+    /// server validates against.
+    static func date(_ value: Date, timeZone: TimeZone = .current) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
+        formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: value)
     }

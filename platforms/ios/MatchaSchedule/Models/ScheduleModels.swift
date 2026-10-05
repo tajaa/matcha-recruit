@@ -63,8 +63,58 @@ struct ShiftAssignment: Decodable, Identifiable {
     /// sends the visibility flag to managers, so presence is the signal.
     let manager_note: String?
     let planned_breaks: [PlannedBreak]?
+    /// Break entitlement for this shift; only on the employee's own assignment.
+    let compliance_guidance: ComplianceGuidance?
 
     var id: String { employee_id }
+}
+
+extension ShiftAssignment {
+    private enum CodingKeys: String, CodingKey {
+        case employee_id, name, status, manager_note, planned_breaks, compliance_guidance
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        employee_id = try container.decode(String.self, forKey: .employee_id)
+        name = try container.decode(String.self, forKey: .name)
+        status = try container.decode(String.self, forKey: .status)
+        manager_note = try container.decodeIfPresent(String.self, forKey: .manager_note)
+        planned_breaks = try container.decodeIfPresent([PlannedBreak].self, forKey: .planned_breaks)
+        // Guidance is an explanation beside the shift: a shape this build
+        // does not know must not take the schedule down with it.
+        compliance_guidance = try? container.decodeIfPresent(ComplianceGuidance.self, forKey: .compliance_guidance)
+    }
+}
+
+struct ComplianceGuidance: Decodable {
+    let status: String?
+    let summary: String?
+    let requirements: [BreakRequirement]?
+
+    /// What the employee is entitled to, in the web portal's words.
+    var entitlement: String? {
+        if let summary, !summary.isEmpty { return summary }
+        let active = (requirements ?? []).filter { !$0.waived }
+        guard !active.isEmpty else { return nil }
+        return active
+            .map { "\($0.duration_minutes)-minute \($0.paid ? "paid" : "unpaid") \($0.kind) break" }
+            .joined(separator: " · ")
+    }
+
+    /// The store's break rules could not be worked out for this shift.
+    var needsAttention: Bool { status == "unmapped" || status == "error" }
+
+    var mealBreakWaived: Bool {
+        (requirements ?? []).contains { $0.waived && $0.kind == "meal" }
+    }
+}
+
+struct BreakRequirement: Decodable {
+    let kind: String
+    let duration_minutes: Int
+    let paid: Bool
+    let waived: Bool
 }
 
 struct PlannedBreak: Decodable, Identifiable {

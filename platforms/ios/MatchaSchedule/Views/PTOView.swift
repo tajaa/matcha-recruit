@@ -7,87 +7,51 @@ struct PTOView: View {
     @State private var showForm = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                if let error { ErrorBanner(message: error) }
-                if let summary {
-                    balanceCard(summary.balance.balance_hours).rise()
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        SectionTitle(title: "Waiting for approval")
-                        if summary.pending_requests.isEmpty {
-                            QuietNote(symbol: "hourglass", text: "Nothing pending.")
-                        }
-                        ForEach(summary.pending_requests) { request in
-                            PTORow(request: request, pending: true, busy: busyID == request.id,
-                                   disabled: busyID != nil) { Task { await cancel(request) } }
-                        }
+        List {
+            if let error {
+                Section { ErrorRow(message: error) { Task { await load() } } }
+            }
+            if let summary {
+                Section {
+                    LabeledContent("Available") {
+                        Text("\(Self.trimmed(summary.balance.balance_hours)) hours")
+                            .font(.app(.title2, .bold))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.primary)
+                            .contentTransition(.numericText())
                     }
-                    .rise(delay: 0.05)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        SectionTitle(title: "Approved this year")
-                        if summary.approved_requests.isEmpty {
-                            QuietNote(symbol: "sun.max", text: "No approved time off yet this year.")
-                        }
-                        ForEach(summary.approved_requests) { request in
-                            PTORow(request: request, pending: false, busy: false, disabled: true) {}
-                        }
-                    }
-                    .rise(delay: 0.1)
-                } else if error == nil {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+                    Button { showForm = true } label: { Label("Request time off", systemImage: "plus") }
                 }
+                Section("Waiting for approval") {
+                    if summary.pending_requests.isEmpty {
+                        Text("Nothing pending.").foregroundStyle(Color.secondary)
+                    }
+                    ForEach(summary.pending_requests) { request in
+                        PTORow(request: request, pending: true, busy: busyID == request.id,
+                               disabled: busyID != nil) { Task { await cancel(request) } }
+                    }
+                }
+                Section("Approved this year") {
+                    if summary.approved_requests.isEmpty {
+                        Text("No approved time off yet this year.").foregroundStyle(Color.secondary)
+                    }
+                    ForEach(summary.approved_requests) { request in
+                        PTORow(request: request, pending: false, busy: false, disabled: true) {}
+                    }
+                }
+            } else if error == nil {
+                Section { HStack { ProgressView(); Text("Loading your time off").foregroundStyle(Color.secondary) } }
             }
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.bottom, 32)
         }
-        .scrollIndicators(.hidden)
-        .ambientBackground(.opener)
         .navigationTitle("Time off")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { showForm = true } label: { Text("Request").font(TypeScale.callout) }
-            }
-        }
+        .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
         .sheet(isPresented: $showForm) {
             NavigationStack {
                 PTORequestForm { Task { await load() } }
             }
-            .presentationCornerRadius(32)
         }
-    }
-
-    private func balanceCard(_ hours: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("Available".uppercased(), systemImage: "sun.horizon.fill")
-                .font(TypeScale.eyebrow).tracking(1.4)
-                .foregroundStyle(Palette.dawn)
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(Self.trimmed(hours))
-                    .font(.interDisplay(56, .bold, relativeTo: .largeTitle))
-                    .monospacedDigit()
-                    .foregroundStyle(Palette.ink)
-                    .contentTransition(.numericText())
-                Text("hours").font(TypeScale.title).foregroundStyle(Palette.inkSoft)
-            }
-            Button { showForm = true } label: { Label("Request time off", systemImage: "plus") }
-                .buttonStyle(GlassButtonStyle(tint: Palette.leaf))
-                .padding(.top, 6)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(22)
-        .background(alignment: .topTrailing) {
-            Image(systemName: "sun.horizon.fill")
-                .font(.system(size: 130))
-                .foregroundStyle(Palette.dawn.opacity(0.14))
-                .offset(x: 30, y: -10)
-                .accessibilityHidden(true)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.heroRadius, style: .continuous))
-        .glassSurface(cornerRadius: Metrics.heroRadius, tint: Palette.dawn)
     }
 
     /// "40.00" → "40", "7.50" → "7.5".
@@ -122,28 +86,24 @@ private struct PTORow: View {
     let onCancel: () -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: request.request_type == "sick" ? "cross.case.fill" : "sun.max.fill")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(pending ? Palette.amber : Palette.leaf)
-                .frame(width: 36, height: 36)
-                .background((pending ? Palette.amber : Palette.leaf).opacity(0.14), in: Circle())
+        HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(request.request_type.capitalized).font(TypeScale.headline).foregroundStyle(Palette.ink)
+                Label(request.request_type.capitalized,
+                      systemImage: request.request_type == "sick" ? "cross.case" : "sun.max")
+                    .font(.app(.headline))
+                    .labelStyle(TightLabel())
                 Text(range + " · \(PTOView.trimmed(request.hours)) h")
-                    .font(TypeScale.subhead).foregroundStyle(Palette.inkSoft).monospacedDigit()
+                    .font(.app(.subheadline)).foregroundStyle(Color.secondary).monospacedDigit()
             }
             Spacer()
             if pending {
-                Button(action: onCancel) {
+                Button(role: .destructive, action: onCancel) {
                     if busy { ProgressView() } else { Text("Cancel") }
                 }
-                .buttonStyle(GlassButtonStyle(tint: Palette.alert))
+                .buttonStyle(.borderless)
                 .disabled(disabled)
             }
         }
-        .padding(14)
-        .glassSurface(elevated: false)
     }
 
     private var range: String {
@@ -155,6 +115,7 @@ private struct PTORow: View {
 
 private struct PTORequestForm: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
     let onSaved: () -> Void
     @State private var start = Date()
     @State private var end = Date()
@@ -163,6 +124,8 @@ private struct PTORequestForm: View {
     @State private var type = "vacation"
     @State private var saving = false
     @State private var error: String?
+
+    private var zone: TimeZone { appState.storeTimeZone ?? .current }
 
     var body: some View {
         Form {
@@ -173,9 +136,6 @@ private struct PTORequestForm: View {
                     Text("Personal").tag("personal")
                     Text("Other").tag("other")
                 }
-                .pickerStyle(.segmented)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
             }
             Section {
                 DatePicker("From", selection: $start, in: Date()..., displayedComponents: .date)
@@ -189,35 +149,31 @@ private struct PTORequestForm: View {
                         .frame(width: 80)
                 }
             } header: {
-                Eyebrow("Dates")
+                Text("Dates")
             }
-            .listRowBackground(GlassRowBackground())
             Section {
                 TextField("Add a note (optional)", text: $reason, axis: .vertical).lineLimit(2...4)
             } header: {
-                Eyebrow("Note for your manager")
+                Text("Note for your manager")
             }
-            .listRowBackground(GlassRowBackground())
             if let error {
-                Section { ErrorBanner(message: error) }
-                    .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+                Section { ErrorRow(message: error) }
             }
             Section {
                 Button { Task { await submit() } } label: {
                     LoadingLabel(title: "Send request", busy: saving)
                 }
-                .buttonStyle(PrimaryButtonStyle())
+                .primaryActionRow()
                 .disabled(saving)
             }
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
         }
-        .glassForm(.opener)
+        // The pickers choose days on the store's calendar.
+        .environment(\.timeZone, zone)
         .navigationTitle("Request time off")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { dismiss() } label: { Text("Cancel").font(TypeScale.callout) }
+                Button("Cancel") { dismiss() }
             }
         }
     }
@@ -234,7 +190,7 @@ private struct PTORequestForm: View {
         defer { saving = false }
         do {
             try await RequestService.requestPTO(PTORequestBody(
-                start_date: DateInput.date(start), end_date: DateInput.date(end),
+                start_date: DateInput.date(start, timeZone: zone), end_date: DateInput.date(end, timeZone: zone),
                 hours: normalizedHours, reason: reason.isEmpty ? nil : reason,
                 request_type: type
             ))

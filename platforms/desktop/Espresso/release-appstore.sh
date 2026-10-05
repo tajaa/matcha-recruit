@@ -188,6 +188,10 @@ do_archive() {
     rm -rf "$ARCHIVE_PATH" "$EXPORT_PATH"
     mkdir -p "$BUILD_DIR" "$(dirname "$ARCHIVE_PATH")"
 
+    # Manual signing: automatic export asks Apple for cloud-managed distribution
+    # signing, which API keys may not use ("Cloud signing permission error").
+    # Needs the Apple Distribution + Mac Installer certs in the keychain and the
+    # "Espresso Mac App Store" profile (override APPSTORE_PROFILE_NAME).
     # destination=upload tells `xcodebuild -exportArchive` to ship the build
     # straight to App Store Connect (instead of writing a .pkg locally) AND
     # write a Distributions entry into the .xcarchive's Info.plist — which is
@@ -202,7 +206,11 @@ do_archive() {
     <key>method</key>           <string>app-store</string>
     <key>destination</key>      <string>upload</string>
     <key>teamID</key>           <string>$APPLE_TEAM_ID</string>
-    <key>signingStyle</key>     <string>automatic</string>
+    <key>signingStyle</key>     <string>manual</string>
+    <key>signingCertificate</key> <string>Apple Distribution</string>
+    <key>installerSigningCertificate</key> <string>3rd Party Mac Developer Installer</string>
+    <key>provisioningProfiles</key>
+    <dict><key>${BUNDLE_ID_OVERRIDE:-com.matchawork.app}</key><string>${APPSTORE_PROFILE_NAME:-Espresso Mac App Store}</string></dict>
     <key>uploadSymbols</key>    <true/>
 </dict>
 </plist>

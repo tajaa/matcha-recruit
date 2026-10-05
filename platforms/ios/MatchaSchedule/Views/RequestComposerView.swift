@@ -57,17 +57,15 @@ struct RequestComposerView: View {
     var body: some View {
         Form {
             Section {
-                ShiftCard(shift: shift, location: nil, isOpen: action == .claim)
+                ShiftRow(shift: shift, location: nil, showsDay: true, isOpen: action == .claim, showsChevron: false)
             } footer: {
-                Text(action.explainer).font(TypeScale.caption).padding(.top, 6)
+                Text(action.explainer)
             }
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
 
             if action == .swap {
                 Section {
                     if loading {
-                        HStack { ProgressView(); Text("Loading coworkers").foregroundStyle(Palette.inkSoft) }
+                        HStack { ProgressView(); Text("Loading coworkers").foregroundStyle(Color.secondary) }
                     }
                     Picker("Coworker", selection: $targetEmployeeID) {
                         Text("Choose").tag("")
@@ -84,31 +82,31 @@ struct RequestComposerView: View {
                     .disabled(targetEmployeeID.isEmpty)
                     if !targetEmployeeID.isEmpty && counterShifts.isEmpty && !loading {
                         Text("They have no published shifts in the next four weeks.")
-                            .font(TypeScale.caption).foregroundStyle(Palette.inkSoft)
+                            .font(.app(.footnote)).foregroundStyle(Color.secondary)
+                    }
+                    if !loading && coworkers.isEmpty && error == nil {
+                        Text("No one at your store has a published shift to trade in the next four weeks.")
+                            .font(.app(.footnote)).foregroundStyle(Color.secondary)
                     }
                 } header: {
-                    Eyebrow("Trade with")
+                    Text("Trade with")
                 }
-                .listRowBackground(GlassRowBackground())
             }
             if action == .claim && shift.has_conflict == true {
                 Section {
                     Label("This overlaps one of your shifts. Your manager will see that.", systemImage: "exclamationmark.triangle.fill")
-                        .font(TypeScale.subhead)
-                        .foregroundStyle(Palette.amber)
+                        .font(.app(.subheadline))
+                        .foregroundStyle(.orange)
                 }
-                .listRowBackground(GlassRowBackground())
             }
             Section {
                 TextField("Add context (optional)", text: $reason, axis: .vertical)
                     .lineLimit(2...5)
             } header: {
-                Eyebrow("Note for your manager")
+                Text("Note for your manager")
             }
-            .listRowBackground(GlassRowBackground())
             if let error {
-                Section { ErrorBanner(message: error) }
-                    .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+                Section { ErrorRow(message: error) }
             }
             Section {
                 Button {
@@ -131,18 +129,15 @@ struct RequestComposerView: View {
                 } label: {
                     LoadingLabel(title: action.submitTitle, busy: saving)
                 }
-                .buttonStyle(PrimaryButtonStyle())
+                .primaryActionRow()
                 .disabled(saving || loading || (action == .swap && (targetEmployeeID.isEmpty || counterShiftID.isEmpty)))
             }
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
         }
-        .glassForm(DayPart(wallClockISO: shift.starts_at))
         .navigationTitle(action.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { dismiss() } label: { Text("Cancel").font(TypeScale.callout) }
+                Button("Cancel") { dismiss() }
             }
         }
         .task {
@@ -154,7 +149,16 @@ struct RequestComposerView: View {
                 let start = WallClock.weekStart(containing: WallClock.today())
                 let end = WallClock.move(start, by: 4)
                 async let shifts = ScheduleService.teamShifts(from: start, through: end)
-                (coworkers, teamShifts) = try await (people, shifts)
+                async let places = ScheduleService.storeLocations()
+                // A swap with someone at another store is refused when they
+                // accept it, so only offer shifts and people at this one.
+                let scoped = ScheduleService.storeScoped(try await shifts, locationIDs: Set(await places.map(\.id)))
+                teamShifts = scoped
+                coworkers = try await people.filter { person in
+                    scoped.contains { candidate in
+                        candidate.id != shift.id && candidate.assignments.contains { $0.employee_id == person.id }
+                    }
+                }
             } catch { self.error = error.localizedDescription }
         }
     }

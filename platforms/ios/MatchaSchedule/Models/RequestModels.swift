@@ -8,10 +8,14 @@ struct ScheduleRequest: Decodable, Identifiable {
     let status: String
     let shift_id: String?
     let shift_starts_at: String?
+    let shift_ends_at: String?
     let shift_role: String?
     let target_employee_id: String?
     let target_employee_name: String?
     let counter_shift_id: String?
+    let counter_shift_starts_at: String?
+    let counter_shift_ends_at: String?
+    let counter_shift_role: String?
     let unavailable_start: String?
     let unavailable_end: String?
     let availability_effective_on: String?

@@ -50,6 +50,50 @@ final class ScheduleModelsTests: XCTestCase {
         XCTAssertEqual(shifts[1].has_conflict, true)
     }
 
+    func testBreakGuidanceReadsLikeTheWebPortal() throws {
+        func assignment(_ guidance: String) throws -> ShiftAssignment {
+            let json = #"{"employee_id":"me","name":"Ada","status":"assigned","compliance_guidance":\#(guidance)}"#
+            return try JSONDecoder().decode(ShiftAssignment.self, from: Data(json.utf8))
+        }
+        let listed = try assignment(#"""
+        {"status":"complete","summary":null,"advisories":[],"requirements":[
+          {"kind":"meal","duration_minutes":30,"paid":false,"waived":true},
+          {"kind":"rest","duration_minutes":10,"paid":true,"waived":false}]}
+        """#).compliance_guidance
+        XCTAssertEqual(listed?.entitlement, "10-minute paid rest break")
+        XCTAssertEqual(listed?.mealBreakWaived, true)
+        XCTAssertEqual(listed?.needsAttention, false)
+
+        let summarized = try assignment(#"{"status":"unmapped","summary":"Check with your manager.","requirements":[]}"#)
+        XCTAssertEqual(summarized.compliance_guidance?.entitlement, "Check with your manager.")
+        XCTAssertEqual(summarized.compliance_guidance?.needsAttention, true)
+
+        // A shape this build does not know costs the guidance, not the shift.
+        let unknown = try assignment(#"{"status":"complete","requirements":[{"kind":"meal"}]}"#)
+        XCTAssertNil(unknown.compliance_guidance)
+        XCTAssertEqual(unknown.name, "Ada")
+    }
+
+    func testSwapOfferNamesBothShifts() throws {
+        let json = """
+        {"id":"r","employee_id":"peer","employee_name":"Lin","request_type":"swap","status":"awaiting_counterparty",
+         "shift_id":"a","shift_starts_at":"2026-09-23T09:00:00+00:00","shift_ends_at":"2026-09-23T17:00:00+00:00",
+         "shift_role":"Barista","counter_shift_id":"b",
+         "counter_shift_starts_at":"2026-09-24T14:00:00+00:00","counter_shift_ends_at":"2026-09-24T22:00:00+00:00",
+         "counter_shift_role":"Lead","created_at":"2026-09-20T10:00:00Z"}
+        """
+        let request = try JSONDecoder().decode(ScheduleRequest.self, from: Data(json.utf8))
+        XCTAssertEqual(request.offeredShiftLine, "Wednesday, Sep 23 · 9:00 AM – 5:00 PM · Barista")
+        XCTAssertEqual(request.counterShiftLine, "Thu, Sep 24 · 2:00 PM – 10:00 PM · Lead")
+    }
+
+    func testRequestDaysAreTheStoresCalendarDays() {
+        // 11:30 PM on the 23rd in Los Angeles is already the 24th in New York.
+        let instant = ISO8601DateFormatter().date(from: "2026-09-24T06:30:00Z")!
+        XCTAssertEqual(DateInput.date(instant, timeZone: TimeZone(identifier: "America/Los_Angeles")!), "2026-09-23")
+        XCTAssertEqual(DateInput.date(instant, timeZone: TimeZone(identifier: "America/New_York")!), "2026-09-24")
+    }
+
     func testWallClockDoesNotShiftWithDeviceTimeZone() {
         XCTAssertEqual(WallClock.label("2026-09-23T09:30:00+00:00", format: "h:mm a"), "9:30 AM")
     }

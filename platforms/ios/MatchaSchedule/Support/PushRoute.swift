@@ -14,7 +14,7 @@ enum PushRoute {
             let id = metadata["conversation_id"] as? String ?? payload["conversation_id"] as? String
             if let id, UUID(uuidString: id) != nil { return .inbox(id) }
         }
-        if type == "schedule_published" { return .schedule }
+        if type == "schedule_published" || type == "schedule_break_reminder" { return .schedule }
         if type.hasPrefix("schedule_") { return .requests }
         let link = payload["link"] as? String ?? metadata["link"] as? String
         return link.flatMap(URL.init(string:)).flatMap(destination(for:))

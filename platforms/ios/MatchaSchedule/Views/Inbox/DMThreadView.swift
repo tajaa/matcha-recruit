@@ -25,8 +25,8 @@ struct DMThreadView: View {
                         let next = index + 1 < messages.count ? messages[index + 1] : nil
                         if DMOrder.startsNewMoment(message, after: previous) {
                             Text(Instant.label(message.createdAt))
-                                .font(TypeScale.caption)
-                                .foregroundStyle(Palette.inkFaint)
+                                .font(.app(.caption))
+                                .foregroundStyle(Color.secondary)
                                 .padding(.top, index == 0 ? 8 : 18)
                                 .padding(.bottom, 6)
                         }
@@ -41,19 +41,13 @@ struct DMThreadView: View {
                                 || DMOrder.startsNewMoment(next ?? message, after: message)
                         )
                         .id(message.id)
-                        .transition(.asymmetric(
-                            insertion: .scale(scale: 0.92, anchor: message.senderId == appState.currentUserID ? .bottomTrailing : .bottomLeading)
-                                .combined(with: .opacity),
-                            removal: .opacity
-                        ))
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
-                .animation(.spring(response: 0.4, dampingFraction: 0.82), value: messages.count)
+                .animation(.default, value: messages.count)
             }
-            .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.interactively)
             .defaultScrollAnchor(.bottom)
             .onChange(of: messages.count) { _, _ in
@@ -64,7 +58,6 @@ struct DMThreadView: View {
             }
         }
         .safeAreaInset(edge: .bottom) { composer }
-        .ambientBackground()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
@@ -81,27 +74,20 @@ struct DMThreadView: View {
     private var composer: some View {
         VStack(spacing: 6) {
             if let error {
-                Text(error).font(TypeScale.caption).foregroundStyle(Palette.alert)
+                Text(error).font(.app(.caption)).foregroundStyle(.red)
             }
-            HStack(alignment: .bottom, spacing: 10) {
+            HStack(alignment: .bottom, spacing: 8) {
                 TextField("Message", text: $draft, axis: .vertical)
-                    .font(TypeScale.body)
                     .lineLimit(1...5)
                     .focused($composing)
-                    .padding(.horizontal, 16).padding(.vertical, 11)
-                    .glassControl(in: RoundedRectangle(cornerRadius: 22, style: .continuous), interactive: false)
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 Button { Task { await send() } } label: {
-                    Group {
-                        if sending { ProgressView().tint(.white) }
-                        else { Image(systemName: "arrow.up").font(.system(size: 17, weight: .bold)) }
+                    if sending {
+                        ProgressView().frame(width: 34, height: 34)
+                    } else {
+                        Image(systemName: "arrow.up.circle.fill").font(.system(size: 34))
                     }
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(Circle().fill(Palette.leafGradient))
-                    .shadow(color: Palette.leaf.opacity(canSend ? 0.4 : 0), radius: 10, y: 5)
-                    .opacity(canSend || sending ? 1 : 0.4)
-                    .scaleEffect(canSend ? 1 : 0.9)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: canSend)
                 }
                 .disabled(!canSend)
                 .accessibilityLabel("Send message")
@@ -109,8 +95,8 @@ struct DMThreadView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 8)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
 
     private var canSend: Bool {
@@ -155,53 +141,32 @@ private struct MessageBubble: View {
     let message: MWInboxMessage
     let isMine: Bool
     let showsSender: Bool
-    /// The last bubble of a run from one sender gets the tail corner.
+    /// The last bubble of a run from one sender gets a little room below it.
     let closesRun: Bool
-
-    private var shape: UnevenRoundedRectangle {
-        let tail: CGFloat = closesRun ? 6 : 20
-        return UnevenRoundedRectangle(
-            topLeadingRadius: 20,
-            bottomLeadingRadius: isMine ? 20 : tail,
-            bottomTrailingRadius: isMine ? tail : 20,
-            topTrailingRadius: 20,
-            style: .continuous
-        )
-    }
 
     var body: some View {
         HStack {
             if isMine { Spacer(minLength: 48) }
             VStack(alignment: isMine ? .trailing : .leading, spacing: 4) {
                 if showsSender {
-                    Text(message.senderName).font(TypeScale.caption).foregroundStyle(Palette.inkSoft)
+                    Text(message.senderName).font(.app(.caption)).foregroundStyle(Color.secondary)
                         .padding(.horizontal, 6)
                 }
                 if !message.content.isEmpty {
                     Text(message.content)
-                        .font(TypeScale.body)
-                        .foregroundStyle(isMine ? .white : Palette.ink)
-                        .padding(.horizontal, 14).padding(.vertical, 10)
-                        .background {
-                            if isMine {
-                                shape.fill(Palette.leafGradient)
-                            } else {
-                                shape.fill(.ultraThinMaterial)
-                                    .overlay(shape.fill(Color.white.opacity(0.35)))
-                                    .overlay(shape.strokeBorder(Color.white.opacity(0.6), lineWidth: 0.8))
-                            }
-                        }
-                        .shadow(color: (isMine ? Palette.leaf : Palette.shadow).opacity(isMine ? 0.25 : 0.06), radius: 8, y: 4)
+                        .foregroundStyle(isMine ? Color.white : Color.primary)
+                        .padding(.horizontal, 14).padding(.vertical, 9)
+                        .background(isMine ? Color.brand : Color(.secondarySystemFill),
+                                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
                 ForEach(message.attachments ?? []) { attachment in
                     if let url = URL(string: attachment.url), url.scheme == "https" {
                         Link(destination: url) {
                             Label(attachment.filename, systemImage: attachment.isImage ? "photo" : "paperclip")
-                                .font(TypeScale.caption)
+                                .font(.app(.caption))
                                 .lineLimit(1)
-                                .padding(.horizontal, 12).padding(.vertical, 8)
-                                .glassSurface(cornerRadius: 14, elevated: false)
                         }
+                        .buttonStyle(.bordered)
                     }
                 }
             }
