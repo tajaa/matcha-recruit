@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Loader2, Plus, Globe, FileText, ExternalLink, Check } from 'lucide-react'
-import { cappeApi } from '../api'
+import { CappeApiError, cappeApi } from '../api'
+import UpgradeNotice from '../components/UpgradeNotice'
 import { cappeSiteHost, CAPPE_HOST } from '../host'
 import { subdomainPreview } from '../utils/slug'
 import type { CappeSite } from '../types'
@@ -16,6 +17,7 @@ export default function CappeSites() {
   const navigate = useNavigate()
   const [sites, setSites] = useState<CappeSite[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [limitHit, setLimitHit] = useState(false)
   const [naming, setNaming] = useState(false)
   const [siteName, setSiteName] = useState('')
   const [creatingBlank, setCreatingBlank] = useState(false)
@@ -38,10 +40,12 @@ export default function CappeSites() {
     if (!siteName.trim()) return
     setCreatingBlank(true)
     setError(null)
+    setLimitHit(false)
     try {
       const site = await cappeApi.post<CappeSite>('/sites', { name: siteName.trim(), source_type: 'blank' })
       navigate(`/cappe/sites/${site.id}`)
     } catch (e) {
+      setLimitHit(e instanceof CappeApiError && e.code === 'site_limit_reached')
       setError(e instanceof Error ? e.message : 'Failed to create site')
       setCreatingBlank(false)
       setNaming(false)
@@ -75,7 +79,9 @@ export default function CappeSites() {
         </div>
       </div>
 
-      {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
+      {error && (limitHit
+        ? <UpgradeNotice message={error} />
+        : <p role="alert" className="mb-4 text-sm text-red-400">{error}</p>)}
 
       {sites === null ? (
         <div className="flex justify-center py-20">

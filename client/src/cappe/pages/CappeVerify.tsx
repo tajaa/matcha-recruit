@@ -5,7 +5,8 @@ import { CappeApiError, cappePublicPost, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import { creatorPaths } from '../creators/creatorPaths'
 import ResendVerification from '../components/ResendVerification'
-import type { CappeTokenResponse } from '../types'
+import { billingStartPath } from './CappeBilling/paths'
+import type { CappeVerifyResponse } from '../types'
 
 const postAuthHome = (t?: string) => (t === 'creator' ? creatorPaths.home : '/cappe/sites')
 
@@ -23,12 +24,16 @@ export default function CappeVerify() {
     if (ran.current) return // StrictMode double-invoke guard — token is single-use.
     ran.current = true
     if (!token) return
-    cappePublicPost<CappeTokenResponse>('/auth/verify', { token })
+    cappePublicPost<CappeVerifyResponse>('/auth/verify', { token })
       .then((res) => {
         setCappeTokens(res.access_token, res.refresh_token)
         invalidateCappeMeCache()
         setState('ok')
-        setTimeout(() => navigate(postAuthHome(res.account?.account_type), { replace: true }), 900)
+        // A plan picked on the pricing page continues into checkout.
+        const next = res.intended_plan && res.account?.account_type !== 'creator'
+          ? billingStartPath(res.intended_plan, res.intended_interval)
+          : postAuthHome(res.account?.account_type)
+        setTimeout(() => navigate(next, { replace: true }), 900)
       })
       .catch((err) => {
         // An expired link belongs to a real, still-unconfirmed account, so the

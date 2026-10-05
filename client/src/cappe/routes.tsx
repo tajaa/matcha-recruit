@@ -7,6 +7,7 @@ import CappeDiscover from './pages/CappeDiscover'
 import CappeSignup from './pages/CappeSignup'
 import CappeLogin from './pages/CappeLogin'
 import CappeVerify from './pages/CappeVerify'
+import CappeBilling from './pages/CappeBilling'
 import CappeForgotPassword from './pages/CappeForgotPassword'
 import CappeResetPassword from './pages/CappeResetPassword'
 import ClientThread from './pages/ClientThread'
@@ -87,6 +88,7 @@ export default function CappeRoutes() {
           <Route path="onboarding" element={<CappeOnboardingWizard />} />
           <Route path="sites" element={<CappeSites />} />
           <Route path="templates" element={<CappeTemplates />} />
+          <Route path="billing" element={<CappeBilling />} />
           <Route path="sites/:siteId" element={<CappeSiteEditor />} />
           <Route path="sites/:siteId/pages/:pageId" element={<PageEditor />} />
           <Route path="sites/:siteId/shop" element={<Shop />} />

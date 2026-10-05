@@ -15,6 +15,11 @@ class CappeSignup(BaseModel):
     # creator on the creator marketplace (media kit + collab offers). Same
     # engine, different framing.
     account_type: Literal["business", "personal", "creator"] = "business"
+    # The paid plan picked on the pricing page, if any. Remembered across the
+    # email-confirmation hop so the person lands in checkout for it. Grants
+    # nothing by itself.
+    intended_plan: Optional[str] = Field(default=None, max_length=40, pattern=r"^[a-z0-9_]+$")
+    intended_interval: Optional[Literal["month", "year"]] = None
 
 
 class CappeLogin(BaseModel):
@@ -61,6 +66,15 @@ class CappeSignupResponse(BaseModel):
     refresh_token: Optional[str] = None
     expires_in: Optional[int] = None
     account: Optional[CappeAccount] = None
+    intended_plan: Optional[str] = None
+    intended_interval: Optional[str] = None
+
+
+class CappeVerifyResponse(CappeTokenResponse):
+    """A fresh session plus the plan picked at signup, when there was one, so
+    the client can continue to checkout. Returned once: confirming clears it."""
+    intended_plan: Optional[str] = None
+    intended_interval: Optional[str] = None
 
 
 class CappeVerifyRequest(BaseModel):
@@ -88,6 +102,7 @@ __all__ = [
     "CappeAccount",
     "CappeTokenResponse",
     "CappeSignupResponse",
+    "CappeVerifyResponse",
     "CappeVerifyRequest",
     "CappeResendRequest",
     "CappeForgotPasswordRequest",

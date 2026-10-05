@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import CappeLogin from './CappeLogin'
 import CappeSignup from './CappeSignup'
@@ -13,6 +13,11 @@ function respond(status: number, body: unknown) {
   return fetchMock
 }
 
+function Where() {
+  const { pathname, search } = useLocation()
+  return <p data-testid="where">{pathname}{search}</p>
+}
+
 function at(path: string, element: React.ReactNode) {
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -21,6 +26,7 @@ function at(path: string, element: React.ReactNode) {
         <Route path="/cappe/login" element={element} />
         <Route path="/cappe/website-setup" element={element} />
         <Route path="/cappe/sites" element={<p>dashboard</p>} />
+        <Route path="/cappe/billing" element={<Where />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -59,6 +65,49 @@ describe('CappeVerify', () => {
     at('/cappe/verify?token=abc', <CappeVerify />)
     expect(await screen.findByRole('heading', { name: "You're in" })).toBeInTheDocument()
     expect(sessionStorage.getItem('cappe_access_token')).toBe('a')
+  })
+})
+
+describe('plan picked on the pricing page', () => {
+  it('is sent with signup and explained on the form', async () => {
+    const fetchMock = respond(201, { verification_required: true, email: 'owner@example.com' })
+    at('/cappe/website-setup?plan=business&interval=year', <CappeSignup />)
+    expect(screen.getByText(/You picked the/)).toHaveTextContent('business plan, billed yearly. Nothing is charged now')
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'owner@example.com' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct horse' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create account' }))
+
+    await screen.findByRole('heading', { name: 'Confirm your email' })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      intended_plan: 'business', intended_interval: 'year',
+    })
+  })
+
+  it('ignores a malformed plan in the URL', async () => {
+    const fetchMock = respond(201, { verification_required: true, email: 'owner@example.com' })
+    at('/cappe/website-setup?plan=Not%20A%20Plan', <CappeSignup />)
+    expect(screen.queryByText(/You picked the/)).toBeNull()
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'owner@example.com' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct horse' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create account' }))
+
+    await screen.findByRole('heading', { name: 'Confirm your email' })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty('intended_plan')
+  })
+
+  it('continues into checkout after the email is confirmed', async () => {
+    respond(200, {
+      access_token: 'a', refresh_token: 'r', expires_in: 900, account: { account_type: 'business' },
+      intended_plan: 'business', intended_interval: 'year',
+    })
+    at('/cappe/verify?token=abc', <CappeVerify />)
+
+    await waitFor(
+      () => expect(screen.getByTestId('where')).toHaveTextContent('/cappe/billing?start=business&interval=year'),
+      { timeout: 3000 },
+    )
   })
 })
 

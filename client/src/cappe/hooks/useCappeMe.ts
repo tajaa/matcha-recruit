@@ -23,6 +23,11 @@ function _fetch(): Promise<CappeAccount> {
   return _promise
 }
 
+// Every mounted hook instance. Each holds its own copy of the account, so a
+// refresh in one place (the billing page after a plan change) has to be pushed
+// to the rest, or the sidebar and the editor keep showing the old plan.
+const _listeners = new Set<(account: CappeAccount | null) => void>()
+
 export function invalidateCappeMeCache() {
   _cache = null
   _promise = null
@@ -31,7 +36,9 @@ export function invalidateCappeMeCache() {
 /** Auth state for the Cappe product. Returns null account when unauthenticated. */
 export function useCappeMe() {
   const hasToken = !!getCappeToken()
-  const [account, setAccount] = useState<CappeAccount | null>(_cache)
+  // Signed out reads as "no account" from the first render, so the mount effect
+  // has nothing to reset.
+  const [account, setAccount] = useState<CappeAccount | null>(hasToken ? _cache : null)
   const [loading, setLoading] = useState(hasToken && !_cache)
 
   const refresh = useCallback(() => {
@@ -42,18 +49,19 @@ export function useCappeMe() {
       return
     }
     setLoading(true)
-    _fetch()
-      .then(setAccount)
+    return _fetch()
+      .then((fresh) => { _listeners.forEach((notify) => notify(fresh)) })
       .catch(() => setAccount(null))
       .finally(() => setLoading(false))
   }, [])
 
   useEffect(() => {
-    if (!getCappeToken()) {
-      setAccount(null)
-      setLoading(false)
-      return
-    }
+    _listeners.add(setAccount)
+    return () => { _listeners.delete(setAccount) }
+  }, [])
+
+  useEffect(() => {
+    if (!getCappeToken()) return
     _fetch()
       .then(setAccount)
       .catch(() => setAccount(null))

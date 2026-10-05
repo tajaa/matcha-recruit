@@ -98,9 +98,10 @@ def wired(monkeypatch):
     return state
 
 
-def _body(email):
+def _body(email, **intent):
     return CappeSignup.model_construct(
-        email=email, password="correct horse", name="Typed Name", account_type="business"
+        email=email, password="correct horse", name="Typed Name", account_type="business",
+        intended_plan=intent.get("plan"), intended_interval=intent.get("interval"),
     )
 
 
@@ -108,9 +109,9 @@ def _sent(background):
     return [(t.func.__name__, t.args) for t in background.tasks]
 
 
-async def _signup(email):
+async def _signup(email, **intent):
     background = BackgroundTasks()
-    res = await auth.signup(_body(email), request=None, background=background)
+    res = await auth.signup(_body(email, **intent), request=None, background=background)
     return res, background
 
 
@@ -146,6 +147,7 @@ async def test_duplicate_of_a_confirmed_account_writes_nothing(wired, deliverabl
     assert res.model_dump() == {
         "verification_required": True, "email": "owner@example.com",
         "access_token": None, "refresh_token": None, "expires_in": None, "account": None,
+        "intended_plan": None, "intended_interval": None,
     }
     assert conn.executed == []
     # Greeted with the name on file, never the one typed into the form.
@@ -221,6 +223,7 @@ def _account_row(**over):
         "id": uuid.uuid4(), "email": "owner@example.com", "name": None, "plan": "free",
         "status": "active", "account_type": "business",
         "verification_sent_at": datetime.now(timezone.utc),
+        "intended_plan_code": None, "intended_interval": None,
     }
     row.update(over)
     return row
@@ -272,3 +275,78 @@ async def test_login_of_an_unconfirmed_account_carries_a_stable_code(wired, monk
     assert exc.value.detail["code"] == "email_unverified"
     # The iOS client still matches on this phrase.
     assert "confirm your email" in exc.value.detail["message"]
+
+
+# ── the plan picked on the pricing page ──────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_signup_parks_the_chosen_plan_on_the_account(wired, deliverable):
+    conn = _Conn()
+    wired["use"](conn)
+    await _signup("owner@example.com", plan="business", interval="year")
+    assert conn.inserted[6:8] == ("business", "year")
+
+
+@pytest.mark.asyncio
+async def test_a_plan_without_an_interval_defaults_to_monthly(wired, deliverable):
+    conn = _Conn()
+    wired["use"](conn)
+    await _signup("owner@example.com", plan="business")
+    assert conn.inserted[6:8] == ("business", "month")
+
+
+@pytest.mark.asyncio
+async def test_an_interval_without_a_plan_is_dropped(wired, deliverable):
+    conn = _Conn()
+    wired["use"](conn)
+    await _signup("owner@example.com", interval="year")
+    assert conn.inserted[6:8] == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_signing_up_again_updates_the_chosen_plan_of_an_unconfirmed_account(wired, deliverable):
+    existing = {"id": uuid.uuid4(), "email": "owner@example.com", "name": None, "email_verified_at": None}
+    conn = _Conn(existing=existing, duplicate=True)
+    wired["use"](conn)
+    await _signup("owner@example.com", plan="creator", interval="month")
+
+    [(sql, args)] = conn.executed
+    assert "intended_plan_code = COALESCE($3, intended_plan_code)" in sql
+    assert args[2:4] == ("creator", "month")
+
+
+@pytest.mark.asyncio
+async def test_auto_verified_signup_gets_the_plan_back_instead_of_storing_it(wired):
+    conn = _Conn()
+    wired["use"](conn, is_production=False)
+    res, _background = await _signup("seed@example.com", plan="business", interval="year")
+
+    assert (res.intended_plan, res.intended_interval) == ("business", "year")
+    assert conn.inserted[6:8] == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_verify_hands_the_chosen_plan_back_once(wired):
+    conn = _VerifyConn(_account_row(intended_plan_code="business", intended_interval="year"))
+    wired["use"](conn)
+    res = await _verify(str(uuid.uuid4()))
+
+    assert (res.intended_plan, res.intended_interval) == ("business", "year")
+    assert res.access_token and res.account.email == "owner@example.com"
+    assert "intended_plan_code = NULL" in conn.executed[0][0]
+
+
+@pytest.mark.parametrize("plan", ["Business", "busi ness", "x" * 41, "plan;drop"])
+def test_signup_rejects_a_malformed_plan_code(plan):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        CappeSignup(email="owner@example.com", password="correct horse", intended_plan=plan)
+
+
+def test_signup_rejects_an_unknown_interval():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        CappeSignup(email="owner@example.com", password="correct horse",
+                    intended_plan="business", intended_interval="week")

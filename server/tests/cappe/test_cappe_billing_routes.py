@@ -138,3 +138,22 @@ class TestPlatformWebhook:
     def test_webhook_rejects_missing_signature(self, client):
         resp = client.post("/api/cappe/domains/webhook", content=b"{}")
         assert resp.status_code == 400
+
+
+class TestBillingReturnUrl:
+    """Stripe renders these on its own pages, so anything off our origin is
+    replaced; the replacement is the billing page, which re-checks the plan."""
+
+    def test_a_foreign_return_url_falls_back_to_the_billing_page(self):
+        from app.cappe.routes import billing
+
+        url = billing._billing_return_url("https://evil.test/phish")
+        assert "evil.test" not in url
+        assert url.endswith("/cappe/billing?checkout=return")
+
+    def test_a_url_on_our_origin_is_kept(self):
+        from app.cappe.routes import billing
+        from app.cappe.services.email import app_origin
+
+        own = f"{app_origin()}/cappe/billing?checkout=success"
+        assert billing._billing_return_url(own) == own

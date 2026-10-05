@@ -63,6 +63,19 @@ describe('landing Pricing', () => {
     expect(within(screen.getByTestId('plan-creator')).getByText('$19')).toBeTruthy()
   })
 
+  it('carries the picked plan and the interval on show into signup', () => {
+    renderPricing({ status: 'ready', pricing: catalog })
+    const cta = (code: string) => within(screen.getByTestId(`plan-${code}`)).getByRole('link').getAttribute('href')
+
+    expect(cta('free')).toBe('/gummfit/website-setup')
+    expect(cta('business')).toBe('/gummfit/website-setup?plan=business&interval=month')
+
+    fireEvent.click(screen.getByRole('button', { name: /yearly/i }))
+    expect(cta('business')).toBe('/gummfit/website-setup?plan=business&interval=year')
+    // Creator has no yearly price, so it is quoted (and bought) monthly.
+    expect(cta('creator')).toBe('/gummfit/website-setup?plan=creator&interval=month')
+  })
+
   it('hides the whole section when the catalog cannot load', () => {
     const { container } = renderPricing({ status: 'error' })
     expect(container.querySelector('#pricing')).toBeNull()

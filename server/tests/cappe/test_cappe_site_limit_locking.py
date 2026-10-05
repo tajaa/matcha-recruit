@@ -210,3 +210,25 @@ async def test_repeated_subdomain_collisions_end_in_a_409_not_a_500(monkeypatch)
     assert exc.value.status_code == 409
     assert conn.events[-1] == "rollback"
     assert "site" not in conn.events
+
+
+@pytest.mark.asyncio
+async def test_hitting_the_site_cap_carries_a_code_the_dashboard_can_act_on(monkeypatch):
+    account = SimpleNamespace(id=uuid4(), plan="free")
+    conn = _Conn(account.id)
+    _patch_dependencies(monkeypatch, conn)
+
+    async def _full(sql, *args):
+        if "COUNT(*) FROM cappe_sites" in sql:
+            return 1
+        return account.id
+
+    conn.fetchval = _full
+    with pytest.raises(HTTPException) as exc:
+        await sites.create_site(
+            SimpleNamespace(name="Second", source_type="blank", is_multi_location=False), account,
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail["code"] == "site_limit_reached"
+    assert "Upgrade to create more" in exc.value.detail["message"]

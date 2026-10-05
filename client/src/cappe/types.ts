@@ -40,6 +40,15 @@ export type CappeSignupResponse = {
   refresh_token?: string
   expires_in?: number
   account?: CappeAccount
+  intended_plan?: string | null
+  intended_interval?: string | null
+}
+
+// Email confirmation: a session, plus the plan picked on the pricing page at
+// signup (returned once) so the flow can continue into checkout.
+export type CappeVerifyResponse = CappeTokenResponse & {
+  intended_plan?: string | null
+  intended_interval?: string | null
 }
 
 export type CappeReadinessItem = {
@@ -138,6 +147,31 @@ export type CappePublicPlan = {
   prices: CappePublicPrice[]
   intro_price_cents: number | null
   intro_days: number | null
+}
+
+// --- Billing (authenticated) --------------------------------------------------
+
+export type CappeBillingInterval = 'month' | 'year'
+
+export type CappeBillingPlan = CappePublicPlan & { status: string; can_sell: boolean }
+
+export type CappeCatalog = {
+  plans: CappeBillingPlan[]
+  /** Whether THIS account can still claim the intro price. */
+  intro_available: boolean
+}
+
+export type CappeSubscription = {
+  plan_code: string
+  plan_name: string | null
+  interval: string
+  status: string
+  /** 'stripe' for a paid subscription; anything else is granted by staff. */
+  source: string
+  current_period_end: string | null
+  trial_end: string | null
+  cancel_at_period_end: boolean
+  comped_until: string | null
 }
 
 export type CappePublicAddon = {

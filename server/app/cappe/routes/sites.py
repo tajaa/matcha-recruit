@@ -102,10 +102,14 @@ async def _enforce_site_limit(conn, account: CappeAccount) -> None:
     if count >= limit:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                f"Your plan includes {limit} site{'s' if limit != 1 else ''}. "
-                "Upgrade to create more."
-            ),
+            # `code` lets the dashboard put an upgrade link beside the message.
+            detail={
+                "code": "site_limit_reached",
+                "message": (
+                    f"Your plan includes {limit} site{'s' if limit != 1 else ''}. "
+                    "Upgrade to create more."
+                ),
+            },
         )
 
 
