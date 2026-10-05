@@ -10,9 +10,14 @@ from datetime import datetime
 from html import escape
 from zoneinfo import ZoneInfo
 
+from ...core.services.email import _is_reserved_test_domain
 from ...core.services.email.client import get_email_service
 
 logger = logging.getLogger(__name__)
+
+# Cappe shares Matcha's sender address but not its brand: without this every
+# Gummfit email arrives signed with Matcha's display name.
+_FROM_NAME = "Gummfit"
 
 
 async def send_cappe_shopper_code_email(to_email: str, site_name: str, code: str):
@@ -163,7 +168,7 @@ def _email_shell(
 
 async def _send(
     to_email: str, to_name: str | None, subject: str, html: str, text: str, *,
-    label: str, log_recipient: bool = True,
+    label: str, log_recipient: bool = True, critical: bool = False,
 ) -> bool:
     """Best-effort send — logs and swallows so it's safe in a background task.
 
@@ -172,17 +177,23 @@ async def _send(
     providers down, or a blocked recipient), not by raising, so a caller that
     needs to retry or count failures must read this value. `log_recipient=False`
     keeps the address out of the log for callers that log by row id instead.
+
+    `critical=True` is for mail the recipient is stranded without (the
+    confirmation link): an undelivered one is logged at ERROR so it lands in
+    `server_error_reports` instead of vanishing. Reserved test domains are
+    skipped by design and are not a failure.
     """
+    who = to_email if log_recipient else "<recipient>"
     try:
         ok = await get_email_service().send_email_with_fallback(
             to_email=to_email, to_name=to_name, subject=subject,
-            html_content=html, text_content=text,
+            html_content=html, text_content=text, from_name=_FROM_NAME,
         )
     except Exception:
-        logger.exception(
-            "Cappe %s email failed for %s", label, to_email if log_recipient else "<recipient>"
-        )
+        logger.exception("Cappe %s email failed for %s", label, who)
         return False
+    if not ok and critical and not _is_reserved_test_domain(to_email):
+        logger.error("Cappe %s email was not delivered to %s (no provider accepted it)", label, who)
     return bool(ok)
 
 
@@ -231,16 +242,8 @@ async def send_cappe_verification_email(to_email: str, to_name: str | None, toke
         f"{greeting}\n\nConfirm your email to activate your Gummfit account:\n{verify_url}\n\n"
         "This link expires in 24 hours. If you didn't sign up, ignore this email."
     )
-    try:
-        await get_email_service().send_email_with_fallback(
-            to_email=to_email,
-            to_name=to_name,
-            subject="Confirm your email for Gummfit",
-            html_content=html,
-            text_content=text,
-        )
-    except Exception:  # never let email failure surface to signup
-        logger.exception("Cappe verification email failed for %s", to_email)
+    await _send(to_email, to_name, "Confirm your email for Gummfit", html, text,
+                label="verification", critical=True)
 
 
 async def send_cappe_message_email(
@@ -278,16 +281,7 @@ async def send_cappe_message_email(
 </body>
 </html>"""
     text = f"New message from {from_label} ({site_name}):\n\n{raw}\n\nRead & reply: {link}"
-    try:
-        await get_email_service().send_email_with_fallback(
-            to_email=to_email,
-            to_name=to_name,
-            subject=f"New message — {site_name}",
-            html_content=html,
-            text_content=text,
-        )
-    except Exception:
-        logger.exception("Cappe message email failed for %s", to_email)
+    await _send(to_email, to_name, f"New message — {site_name}", html, text, label="message")
 
 
 async def send_cappe_welcome_email(to_email: str, to_name: str | None) -> None:
@@ -329,16 +323,8 @@ async def send_cappe_welcome_email(to_email: str, to_name: str | None) -> None:
         f"publish your website.\n\nOpen your dashboard: {_DASHBOARD_URL}\n\n"
         "If you didn't create this account, you can safely ignore this email."
     )
-    try:
-        await get_email_service().send_email_with_fallback(
-            to_email=to_email,
-            to_name=to_name,
-            subject="Welcome to Cappe — your account is ready",
-            html_content=html,
-            text_content=text,
-        )
-    except Exception:  # never let email failure surface to signup
-        logger.exception("Cappe welcome email failed for %s", to_email)
+    await _send(to_email, to_name, "Welcome to Cappe — your account is ready", html, text,
+                label="welcome")
 
 
 # ── transactional: orders ────────────────────────────────────────────────────

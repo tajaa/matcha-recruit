@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest'
-import { CAPPE_NETWORK_ERROR, cappeApi, setCappeTokens, clearCappeTokens, getCappeToken } from './api'
+import { CAPPE_NETWORK_ERROR, CappeApiError, cappeApi, cappePublicGet, cappePublicPost, setCappeTokens, clearCappeTokens, getCappeToken } from './api'
 
 /** Regression guard for the storage migration: several call sites in this file
  * (including `request`, the helper behind every Cappe screen) kept reading the
@@ -157,5 +157,58 @@ describe('cappe api refresh outcomes', () => {
 
     await expect(cappeApi.get('/auth/me')).rejects.toThrow('Session expired')
     expect(window.location.href).toBe('')
+  })
+})
+
+/** Signup and login show `err.message` straight on the form, so what a failed
+ *  response turns into is user-facing copy. */
+describe('cappe api error shape', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  function failWith(status: number, body: unknown) {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false, status, statusText: 'Nope', json: async () => body,
+    }))
+  }
+
+  it('turns a FastAPI validation list into readable field messages', async () => {
+    failWith(422, { detail: [
+      { type: 'value_error', loc: ['body', 'email'], msg: 'value is not a valid email address' },
+      { type: 'string_too_short', loc: ['body', 'intended_plan'], msg: 'Value error, too short' },
+    ] })
+    const err = await cappePublicPost('/auth/signup', {}).catch((e: CappeApiError) => e) as CappeApiError
+    expect(err).toBeInstanceOf(CappeApiError)
+    expect(err.message).toBe('Email: value is not a valid email address Intended plan: too short')
+    expect(err.code).toBe('validation')
+    expect(err.status).toBe(422)
+  })
+
+  it('keeps the code and status of a structured detail', async () => {
+    failWith(403, { detail: { code: 'email_unverified', message: 'Please confirm your email.' } })
+    const err = await cappePublicPost('/auth/login', {}).catch((e: CappeApiError) => e) as CappeApiError
+    expect(err.message).toBe('Please confirm your email.')
+    expect(err.code).toBe('email_unverified')
+    expect(err.status).toBe(403)
+  })
+
+  it('carries the status of a plain-string detail', async () => {
+    failWith(429, { detail: 'Too many requests' })
+    const err = await cappePublicGet('/public/pricing').catch((e: CappeApiError) => e) as CappeApiError
+    expect(err.message).toBe('Too many requests')
+    expect(err.status).toBe(429)
+  })
+
+  it('falls back to generic copy when the body is not JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false, status: 502, statusText: 'Bad Gateway', json: async () => { throw new Error('html') },
+    }))
+    const err = await cappeApi.get('/sites').catch((e: CappeApiError) => e) as CappeApiError
+    expect(err.message).toBe('Server error — try again in a moment.')
+  })
+
+  it('never shows an empty validation message', async () => {
+    failWith(422, { detail: [{}] })
+    const err = await cappePublicPost('/auth/signup', {}).catch((e: CappeApiError) => e) as CappeApiError
+    expect(err.message).toMatch(/isn’t valid/)
   })
 })

@@ -233,8 +233,11 @@ export default function App() {
             </RequireBusinessAccount>
           }
         />
-        <Route path="/signup" element={<SignupPicker />} />
-        <Route path="/login" element={<Login />} />
+        {/* On the Gummfit host these three belong to Gummfit: left registered,
+            they outrank the isCappeHost "/*" splat below and gummfit.com/login
+            would open Matcha's sign-in. */}
+        {!isCappeHost && <Route path="/signup" element={<SignupPicker />} />}
+        {!isCappeHost && <Route path="/login" element={<Login />} />}
         <Route path="/sso/callback" element={<SSOCallback />} />
         <Route path="/register/beta" element={<BetaRegister />} />
         <Route
@@ -244,7 +247,7 @@ export default function App() {
         <Route path="/join-channel/:code" element={<ChannelInviteLanding />} />
         {/* OAuth consent for the Matcha AI connector (Claude / ChatGPT). */}
         <Route path="/oauth/consent" element={<ConnectorConsent />} />
-        <Route path="/reset-password" element={<ResetPassword />} />
+        {!isCappeHost && <Route path="/reset-password" element={<ResetPassword />} />}
         <Route path="/s/:token" element={<ERExportDownload />} />
         <Route path="/hb/:token" element={<PublicHandbook />} />
         <Route

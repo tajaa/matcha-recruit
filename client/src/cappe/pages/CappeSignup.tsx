@@ -4,6 +4,7 @@ import { Loader2, Store, User, Sparkles, MailCheck } from 'lucide-react'
 import { cappePublicPost, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import { creatorPaths } from '../creators/creatorPaths'
+import ResendVerification from '../components/ResendVerification'
 import type { CappeAccountType, CappeSignupResponse } from '../types'
 
 const postAuthHome = (t?: string) => (t === 'creator' ? creatorPaths.home : '/cappe/sites')
@@ -47,7 +48,6 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [sentTo, setSentTo] = useState<string | null>(null)
-  const [resent, setResent] = useState(false)
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -82,16 +82,6 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
     }
   }
 
-  async function resend() {
-    if (!sentTo) return
-    setResent(true)
-    try {
-      await cappePublicPost('/auth/resend-verification', { email: sentTo })
-    } catch {
-      // 202 regardless; ignore.
-    }
-  }
-
   if (sentTo) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-950 bg-[radial-gradient(60rem_40rem_at_50%_-10%,rgba(198,241,107,0.08),transparent)] px-4">
@@ -102,14 +92,21 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">Confirm your email</h1>
           <p className="mt-2 text-sm leading-relaxed text-zinc-400">
             We sent a confirmation link to <span className="text-zinc-200">{sentTo}</span>. Click it to
-            activate your account, then you can sign in and start building.
+            activate your account and start building. The link works for 24 hours.
           </p>
-          <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-4 text-left text-xs leading-relaxed text-zinc-500">
-            Didn't get it? Check spam, or{' '}
-            <button onClick={resend} disabled={resent} className="font-medium text-lime-400 hover:text-lime-300 disabled:opacity-60">
-              {resent ? 'sent again ✓' : 'resend the email'}
+          <div className="mt-6 space-y-3 rounded-xl border border-zinc-800 bg-zinc-900 p-4 text-left text-xs leading-relaxed text-zinc-500">
+            <p>
+              Didn't get it? Check spam first. If you already have an account with this address, the
+              email will tell you to sign in instead.
+            </p>
+            <ResendVerification email={sentTo} label="Resend the email" />
+            <button
+              type="button"
+              onClick={() => setSentTo(null)}
+              className="text-sm font-medium text-zinc-400 hover:text-zinc-200"
+            >
+              Wrong address? Go back and fix it
             </button>
-            .
           </div>
           <Link to={creatorOnly ? creatorPaths.login : brandOnly ? creatorPaths.brandLogin : '/cappe/login'} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
             Back to sign in
@@ -145,6 +142,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
                     key={value}
                     type="button"
                     onClick={() => setAccountType(value)}
+                    aria-pressed={active}
                     className={`rounded-xl border p-3 text-left transition-colors ${
                       active
                         ? 'border-emerald-500 bg-emerald-500/10'
@@ -160,9 +158,11 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
             </div>
           </div>}
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-300">Name</label>
+            <label htmlFor="cappe-signup-name" className="mb-1 block text-sm font-medium text-zinc-300">Your name</label>
             <input
+              id="cappe-signup-name"
               type="text"
+              autoComplete="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
@@ -170,9 +170,11 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-300">Email</label>
+            <label htmlFor="cappe-signup-email" className="mb-1 block text-sm font-medium text-zinc-300">Email</label>
             <input
+              id="cappe-signup-email"
               type="email"
+              autoComplete="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -181,18 +183,22 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-300">Password</label>
+            <label htmlFor="cappe-signup-password" className="mb-1 block text-sm font-medium text-zinc-300">Password</label>
             <input
+              id="cappe-signup-password"
               type="password"
+              autoComplete="new-password"
+              minLength={8}
+              aria-describedby="cappe-signup-password-hint"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-              placeholder="At least 8 characters"
             />
+            <p id="cappe-signup-password-hint" className="mt-1 text-xs text-zinc-500">At least 8 characters.</p>
           </div>
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
 
           <button
             type="submit"
