@@ -688,6 +688,38 @@ def subscribe_confirm_url(token: str) -> str:
     return f"{_base_url()}/api/cappe/public/subscribe/confirm/{token}"
 
 
+def password_reset_url(token: str) -> str:
+    """Reset link with the secret in the fragment, so it is never sent in a
+    request line (and so never lands in an access log or a Referer header)."""
+    return f"{_base_url()}/cappe/reset-password#token={token}"
+
+
+async def send_cappe_password_reset_email(to_email: str, to_name: str | None, token: str) -> None:
+    """Send the password-reset link. Critical: without it a locked-out owner
+    has no way back in, so an undelivered one is logged as an error."""
+    url = password_reset_url(token)
+    greeting = f"Hi {to_name}," if to_name else "Hi there,"
+    html = _email_shell(
+        "Reset your Gummfit password",
+        f'<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#a1a1aa;">'
+        f"{escape(greeting)} We got a request to reset the password for this account. "
+        "Choose a new one with the button below.</p>"
+        '<p style="margin:0 0 16px;font-size:12px;line-height:1.6;color:#71717a;">'
+        "The link works once and expires in 60 minutes. If you didn't ask for it, ignore this "
+        "email and your password stays the same.</p>",
+        cta_label="Choose a new password",
+        cta_url=url,
+    )
+    text = (
+        f"{greeting}\n\nWe got a request to reset the password for this Gummfit account. "
+        f"Choose a new one here:\n{url}\n\n"
+        "The link works once and expires in 60 minutes. If you didn't ask for it, ignore this "
+        "email and your password stays the same."
+    )
+    await _send(to_email, to_name, "Reset your Gummfit password", html, text,
+                label="password reset", critical=True)
+
+
 async def send_cappe_account_exists_email(to_email: str, to_name: str | None) -> None:
     """Told to whoever owns the address when a signup collides with it.
 
@@ -697,6 +729,7 @@ async def send_cappe_account_exists_email(to_email: str, to_name: str | None) ->
     is what this is.
     """
     greeting = f"Hi {to_name}," if to_name else "Hi there,"
+    forgot_url = f"{_base_url()}/cappe/forgot-password"
     html = _email_shell(
         "You already have a Gummfit account",
         f'<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#a1a1aa;">'
@@ -704,14 +737,18 @@ async def send_cappe_account_exists_email(to_email: str, to_name: str | None) ->
         "and an account already exists — so we didn't create a second one.</p>"
         '<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#a1a1aa;">'
         "If that was you, sign in instead. If it wasn't, you can ignore this "
-        "email — nothing changed on your account.</p>",
+        "email — nothing changed on your account.</p>"
+        '<p style="margin:0 0 16px;font-size:13px;line-height:1.6;color:#a1a1aa;">'
+        f'Forgot your password? <a href="{escape(forgot_url, quote=True)}" '
+        'style="color:#c6f16b;">Reset it here</a>.</p>',
         cta_label="Sign in",
         cta_url=f"{_base_url()}/cappe/login",
     )
     text = (
         f"{greeting}\n\nSomeone just tried to sign up with this email address, and an "
         f"account already exists — so we didn't create a second one.\n\n"
-        f"If that was you, sign in instead: {_base_url()}/cappe/login\n\n"
+        f"If that was you, sign in instead: {_base_url()}/cappe/login\n"
+        f"Forgot your password? Reset it: {forgot_url}\n\n"
         "If it wasn't you, ignore this email — nothing changed on your account."
     )
     await _send(to_email, to_name, "You already have a Gummfit account", html, text,

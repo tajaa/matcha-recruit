@@ -231,6 +231,19 @@ UPDATE cappe_accounts SET
     stripe_account_id  = CASE WHEN stripe_account_id IS NOT NULL THEN 'acct_dev_' || replace(id::text,'-','') END,
     stripe_customer_id = CASE WHEN stripe_customer_id IS NOT NULL THEN 'cus_dev_' || replace(id::text,'-','') END
 WHERE email <> ALL(ARRAY[__PRESERVE_EMAILS__]::text[]);
+-- Pending password-reset tokens. Only a hash is stored, so it is not a working
+-- link on its own, but it is live credential state for a real owner and has no
+-- business in dev. The columns arrive with zzzzcappe35; this
+-- file aborts on an unknown column, and a dump taken before prod ran that
+-- migration does not have them — hence the guard.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'cappe_accounts' AND column_name = 'password_reset_token_hash') THEN
+        UPDATE cappe_accounts SET password_reset_token_hash = NULL, password_reset_sent_at = NULL
+         WHERE password_reset_token_hash IS NOT NULL;
+    END IF;
+END $$;
 UPDATE cappe_subscribers SET
     email             = 'sub_' || replace(id::text,'-','') || '@example.com',
     name              = CASE WHEN name IS NOT NULL THEN 'Subscriber ' || left(replace(id::text,'-',''), 6) END,

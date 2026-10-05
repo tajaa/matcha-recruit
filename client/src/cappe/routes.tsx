@@ -7,6 +7,8 @@ import CappeDiscover from './pages/CappeDiscover'
 import CappeSignup from './pages/CappeSignup'
 import CappeLogin from './pages/CappeLogin'
 import CappeVerify from './pages/CappeVerify'
+import CappeForgotPassword from './pages/CappeForgotPassword'
+import CappeResetPassword from './pages/CappeResetPassword'
 import ClientThread from './pages/ClientThread'
 import CappeBookingManage from './pages/CappeBookingManage'
 import CappeSites from './pages/CappeSites'
@@ -74,6 +76,8 @@ export default function CappeRoutes() {
         <Route path="signup" element={<CappeSignup />} />
         <Route path="login" element={<CappeLogin />} />
         <Route path="verify" element={<CappeVerify />} />
+        <Route path="forgot-password" element={<CappeForgotPassword />} />
+        <Route path="reset-password" element={<CappeResetPassword />} />
         {/* Public, token-gated client conversation (emailed link). */}
         <Route path="thread/:token" element={<ClientThread />} />
         {/* Public, token-gated booking self-serve (view / cancel / reschedule). */}

@@ -19,13 +19,16 @@ from ..dependencies import require_cappe_account
 from ..services.commerce import check_recipient_send_ok
 from ..services.email import (
     send_cappe_account_exists_email,
+    send_cappe_password_reset_email,
     send_cappe_verification_email,
 )
 from ..models.cappe import (
     CappeAccount,
+    CappeForgotPasswordRequest,
     CappeLogin,
     CappeRefreshRequest,
     CappeResendRequest,
+    CappeResetPasswordRequest,
     CappeSignup,
     CappeSignupResponse,
     CappeTokenResponse,
@@ -36,7 +39,9 @@ from ..services.auth import (
     create_cappe_refresh_token,
     decode_cappe_token,
     hash_password,
+    hash_reset_token,
     is_cappe_token_revoked,
+    make_reset_token,
     verify_password_async,
 )
 
@@ -44,6 +49,8 @@ router = APIRouter()
 
 # Verification links are single-use and time-boxed.
 _VERIFY_TTL_HOURS = 24
+# Reset links are shorter-lived: one grants control of an existing account.
+_RESET_TTL_MINUTES = 60
 
 # Precomputed once at import: a throwaway hash to verify against when the login
 # email is unknown, so an unknown-email 401 costs the same bcrypt time as a
@@ -246,6 +253,95 @@ async def resend_verification(body: CappeResendRequest, request: Request, backgr
             )
             background.add_task(send_cappe_verification_email, row["email"], row["name"], str(token))
     return {"status": "ok"}
+
+
+@router.post("/auth/forgot-password", status_code=status.HTTP_202_ACCEPTED)
+async def forgot_password(body: CappeForgotPasswordRequest, request: Request, background: BackgroundTasks):
+    """Email a password-reset link. Always 202 (never leaks whether the address
+    has an account); only actually sends for a real, active account."""
+    ip = client_ip(request)
+    await check_rate_limit(ip, "cappe_forgot_min", 2, 60)
+    await check_rate_limit(ip, "cappe_forgot_hr", 6, 3600)
+    email = body.email.strip().lower()
+
+    # Per-recipient cap checked BEFORE the write: a throttled request must not
+    # replace the token behind a link already sitting in the inbox.
+    if not _is_reserved_test_domain(email) and await check_recipient_send_ok(email):
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, email, name, status FROM cappe_accounts WHERE lower(email) = $1",
+                email,
+            )
+            if row is not None and row["status"] == "active":
+                token = make_reset_token()
+                await conn.execute(
+                    "UPDATE cappe_accounts SET password_reset_token_hash = $1, "
+                    "password_reset_sent_at = NOW(), updated_at = NOW() WHERE id = $2",
+                    hash_reset_token(token),
+                    row["id"],
+                )
+                background.add_task(send_cappe_password_reset_email, row["email"], row["name"], token)
+    return {"status": "ok"}
+
+
+@router.post("/auth/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_password(body: CappeResetPasswordRequest, request: Request):
+    """Set a new password from an emailed reset link.
+
+    Single-use and time-boxed. Every existing session is revoked, and the
+    account is marked confirmed: reaching this endpoint with a valid token
+    proves control of the inbox, which is all email confirmation asks for (and
+    it rescues an account whose confirmation email never arrived). No tokens
+    are returned; the person signs in with the new password."""
+    await check_rate_limit(client_ip(request), "cappe_reset", 10, 3600)
+    token_hash = hash_reset_token(body.token)
+    invalid = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "code": "reset_invalid",
+            "message": "This reset link is invalid or has already been used. Request a new one.",
+        },
+    )
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, password_reset_sent_at FROM cappe_accounts "
+            "WHERE password_reset_token_hash = $1 AND status = 'active'",
+            token_hash,
+        )
+    if row is None:
+        raise invalid
+    sent_at = row["password_reset_sent_at"]
+    if sent_at is None or (datetime.now(timezone.utc) - sent_at).total_seconds() > _RESET_TTL_MINUTES * 60:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={"code": "reset_expired", "message": "This reset link has expired. Request a new one."},
+        )
+
+    password_hash = await asyncio.to_thread(hash_password, body.password)
+    async with get_connection() as conn:
+        # Guarded on the token hash so two requests racing on one link cannot
+        # both win, and a link replaced by a newer request stops working.
+        # `tokens_valid_after` is the revocation watermark the auth dependency
+        # and /auth/refresh already check; unlike logout it is not floored to
+        # the second, so a session opened a moment ago dies too.
+        updated = await conn.fetchval(
+            """UPDATE cappe_accounts
+                  SET password_hash = $1,
+                      password_reset_token_hash = NULL,
+                      password_reset_sent_at = NULL,
+                      tokens_valid_after = NOW(),
+                      email_verified_at = COALESCE(email_verified_at, NOW()),
+                      verification_token = NULL,
+                      updated_at = NOW()
+                WHERE id = $2 AND password_reset_token_hash = $3
+            RETURNING id""",
+            password_hash,
+            row["id"],
+            token_hash,
+        )
+    if updated is None:
+        raise invalid
 
 
 @router.post("/auth/login", response_model=CappeTokenResponse)

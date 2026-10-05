@@ -296,6 +296,12 @@ else
             + (SELECT count(*) FROM cappe_threads     WHERE client_email NOT LIKE '%@example.com');")
         echo "      non-reserved cappe consumer emails, excl. preserved (must be 0): $CAPPE_LEAK"
         [[ "$CAPPE_LEAK" == "0" ]] || { echo "${RED}PII LEAK DETECTED — anonymizer missed cappe rows.${NC}"; exit 1; }
+        # Reset-token hashes (zzzzcappe35): absent column in an older dump is a skip.
+        HAS_RESET=$(ddev -tA -d "$DB_NAME" -c "SELECT 1 FROM information_schema.columns WHERE table_name='cappe_accounts' AND column_name='password_reset_token_hash';")
+        if [[ "$HAS_RESET" == "1" ]]; then
+            RESET_LEAK=$(ddev -tA -d "$DB_NAME" -c "SELECT count(*) FROM cappe_accounts WHERE password_reset_token_hash IS NOT NULL;")
+            [[ "$RESET_LEAK" == "0" ]] || { echo "${RED}SECRET LEAK DETECTED — cappe password-reset tokens remain.${NC}"; exit 1; }
+        fi
         HAS_SHOPPERS=$(ddev -tA -d "$DB_NAME" -c "SELECT to_regclass('public.cappe_shoppers') IS NOT NULL;")
         if [[ "$HAS_SHOPPERS" == "t" ]]; then
             SHOPPER_LEAK=$(ddev -tA -d "$DB_NAME" -c "SELECT
