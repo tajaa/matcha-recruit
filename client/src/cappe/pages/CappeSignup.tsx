@@ -5,6 +5,7 @@ import { cappePublicPost, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import { creatorPaths } from '../creators/creatorPaths'
 import ResendVerification from '../components/ResendVerification'
+import { billingStartPath } from './CappeBilling/paths'
 import type { CappeAccountType, CappeSignupResponse } from '../types'
 
 const postAuthHome = (t?: string) => (t === 'creator' ? creatorPaths.home : '/cappe/sites')
@@ -48,6 +49,10 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [sentTo, setSentTo] = useState<string | null>(null)
+  // A paid plan picked on the pricing cards. The server keeps it across the
+  // email-confirmation hop; creators and brands have their own signup pages.
+  const plan = !creatorOnly && !brandOnly && /^[a-z0-9_]{1,40}$/.test(params.get('plan') ?? '') ? params.get('plan') : null
+  const interval = params.get('interval') === 'year' ? 'year' : 'month'
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -63,6 +68,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
         email,
         password,
         account_type: accountType,
+        ...(plan ? { intended_plan: plan, intended_interval: interval } : {}),
       })
       if (res.verification_required) {
         // No tokens yet — account is live only after the email link is clicked.
@@ -73,7 +79,14 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
       if (res.access_token && res.refresh_token) {
         setCappeTokens(res.access_token, res.refresh_token)
         invalidateCappeMeCache()
-        navigate(creatorOnly ? creatorPaths.home : brandOnly ? creatorPaths.brandHome : postAuthHome(res.account?.account_type), { replace: true })
+        navigate(
+          creatorOnly ? creatorPaths.home
+            : brandOnly ? creatorPaths.brandHome
+              : res.intended_plan && res.account?.account_type !== 'creator'
+                ? billingStartPath(res.intended_plan, res.intended_interval)
+                : postAuthHome(res.account?.account_type),
+          { replace: true },
+        )
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
@@ -197,6 +210,14 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
             />
             <p id="cappe-signup-password-hint" className="mt-1 text-xs text-zinc-500">At least 8 characters.</p>
           </div>
+
+          {plan && (
+            <p className="rounded-lg border border-lime-400/20 bg-lime-300/[0.06] px-3 py-2 text-xs leading-relaxed text-zinc-300">
+              You picked the <span className="font-semibold capitalize text-lime-300">{plan.replace(/_/g, ' ')}</span> plan,
+              billed {interval === 'year' ? 'yearly' : 'monthly'}. Nothing is charged now: you'll review and pay right
+              after confirming your email.
+            </p>
+          )}
 
           {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
 

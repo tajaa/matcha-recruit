@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Check } from 'lucide-react'
 import type { CappePublicAddon, CappePublicPlan } from '../../types'
-import { EYEBROW, SIGNUP_PATH, WRAP, allInPlan, formatCents, useReveal } from './shared'
+import { EYEBROW, SIGNUP_PATH, WRAP, allInPlan, formatCents, useReveal, signupPath } from './shared'
 import type { PricingState } from './shared'
 
 type Interval = 'month' | 'year'
@@ -73,7 +73,11 @@ function PlanCard({ plan, interval, featured }: { plan: CappePublicPlan; interva
         ))}
       </ul>
       <Link
-        to={SIGNUP_PATH}
+        // A paid card carries its plan and the interval actually on show (a
+        // plan with no yearly price is quoted monthly even in yearly view).
+        to={plan.prices.length
+          ? signupPath(plan.code, plan.prices.some((p) => p.interval === interval) ? interval : 'month')
+          : SIGNUP_PATH}
         className={`mt-8 inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-bold transition hover:-translate-y-0.5 ${
           featured ? 'bg-[#182115] text-[#e6f4b3] hover:bg-[#263219]' : 'bg-white/10 text-[#f3f1e7] hover:bg-white/15'
         }`}

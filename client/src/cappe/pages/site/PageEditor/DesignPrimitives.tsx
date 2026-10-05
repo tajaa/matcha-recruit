@@ -1,9 +1,15 @@
 import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { Trash2 } from 'lucide-react'
 import { useCappeMe } from '../../../hooks/useCappeMe'
+import { confirmLeave } from '../../../utils/unsavedGuard'
+import { BILLING_PATH } from '../../CappeBilling/paths'
 import { dLabel, inputCls } from './styles'
 import { arr, str } from './valueHelpers'
 
+// Lives beside the primitives it gates; five modules and four test mocks import
+// it from here.
+// eslint-disable-next-line react-refresh/only-export-components
 export function usePremium(): boolean {
   const { account } = useCappeMe()
   return account?.plan === 'pro' || account?.plan === 'business' || account?.plan === 'creator'
@@ -12,7 +18,17 @@ export function usePremium(): boolean {
 export function PremiumLock({ children }: { children: ReactNode }) {
   return (
     <div className="rounded-lg border border-dashed border-amber-700/40 bg-amber-500/[0.06] px-3 py-2.5 text-xs text-amber-300/90">
-      <span className="font-medium">Premium feature.</span> {children}
+      <span className="font-medium">Premium feature.</span> {children}{' '}
+      {/* Same tab on purpose: the session lives in this tab's storage, so a
+          new tab would open signed out. The editor's unsaved-work guard gets
+          to veto the move. */}
+      <Link
+        to={BILLING_PATH}
+        onClick={(e) => { if (!confirmLeave()) e.preventDefault() }}
+        className="font-semibold text-amber-200 underline underline-offset-2 hover:text-amber-100"
+      >
+        See plans
+      </Link>
     </div>
   )
 }

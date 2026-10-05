@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, Check } from 'lucide-react'
-import { cappeApi } from '../api'
+import { CappeApiError, cappeApi } from '../api'
+import UpgradeNotice from '../components/UpgradeNotice'
 import TemplateGallery from '../components/TemplateGallery'
 import { useCappeMe } from '../hooks/useCappeMe'
 import { CAPPE_HOST } from '../host'
@@ -12,6 +13,7 @@ export default function CappeTemplates() {
   const navigate = useNavigate()
   const { account } = useCappeMe()
   const [error, setError] = useState<string | null>(null)
+  const [limitHit, setLimitHit] = useState(false)
   const [usingId, setUsingId] = useState<string | null>(null)
   // Template picked but site not yet named — drives the naming modal. The
   // site name seeds the subdomain (slug), so we always ask instead of
@@ -22,6 +24,7 @@ export default function CappeTemplates() {
   async function createFromTemplate(t: CappeTemplateSummary, name: string) {
     setUsingId(t.id)
     setError(null)
+    setLimitHit(false)
     try {
       const site = await cappeApi.post<CappeSite>('/sites/from-template', {
         template_id: t.id,
@@ -29,6 +32,7 @@ export default function CappeTemplates() {
       })
       navigate(`/cappe/sites/${site.id}`)
     } catch (e) {
+      setLimitHit(e instanceof CappeApiError && e.code === 'site_limit_reached')
       setError(e instanceof Error ? e.message : 'Failed to create site')
       setUsingId(null)
       setNaming(null)
@@ -42,7 +46,9 @@ export default function CappeTemplates() {
         <p className="mt-1 text-sm text-zinc-400">Pick a design — we'll clone it into a new site you can edit.</p>
       </div>
 
-      {error && <p role="alert" className="mb-4 text-sm text-red-400">{error}</p>}
+      {error && (limitHit
+        ? <UpgradeNotice message={error} />
+        : <p role="alert" className="mb-4 text-sm text-red-400">{error}</p>)}
 
       <TemplateGallery
         accountType={account?.account_type}

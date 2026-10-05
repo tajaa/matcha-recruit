@@ -33,6 +33,7 @@ from ..models.cappe import (
     CappeSignupResponse,
     CappeTokenResponse,
     CappeVerifyRequest,
+    CappeVerifyResponse,
 )
 from ..services.auth import (
     create_cappe_access_token,
@@ -100,6 +101,9 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
     # those, outside production only: there it would hand a signed-in, confirmed
     # account to anyone typing an @example.com address.
     auto_verify = _is_reserved_test_domain(email) and not get_settings().is_production
+    # An interval without a plan means nothing; default the other way round.
+    intended_plan = body.intended_plan
+    intended_interval = (body.intended_interval or "month") if intended_plan else None
     token = None if auto_verify else uuid4()
 
     async with get_connection() as conn:
@@ -107,10 +111,12 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
             row = await conn.fetchrow(
                 """INSERT INTO cappe_accounts
                        (email, password_hash, name, account_type,
-                        email_verified_at, verification_token, verification_sent_at)
+                        email_verified_at, verification_token, verification_sent_at,
+                        intended_plan_code, intended_interval)
                    VALUES ($1, $2, $3, $4,
                         CASE WHEN $5 THEN NOW() ELSE NULL END, $6,
-                        CASE WHEN $5 THEN NULL ELSE NOW() END)
+                        CASE WHEN $5 THEN NULL ELSE NOW() END,
+                        $7, $8)
                    RETURNING id, email, name, plan, status, account_type""",
                 email,
                 password_hash,
@@ -118,6 +124,10 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
                 body.account_type,
                 auto_verify,
                 token,
+                # Auto-verified accounts get the intent back in this response,
+                # so there is nothing to park.
+                None if auto_verify else intended_plan,
+                None if auto_verify else intended_interval,
             )
         except asyncpg.UniqueViolationError:
             row = None
@@ -144,12 +154,20 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
                     # request has not proven they own the inbox, and letting
                     # them replace the password would hand them the account
                     # the moment the real owner clicks the link.
+                    # The plan intent IS refreshed: it only chooses which
+                    # checkout page the owner is offered after confirming, and
+                    # signing up again from a different pricing card is how
+                    # someone changes their mind.
                     await conn.execute(
                         "UPDATE cappe_accounts SET verification_token = $1, "
-                        "verification_sent_at = NOW(), updated_at = NOW() "
+                        "verification_sent_at = NOW(), updated_at = NOW(), "
+                        "intended_plan_code = COALESCE($3, intended_plan_code), "
+                        "intended_interval = COALESCE($4, intended_interval) "
                         "WHERE id = $2 AND email_verified_at IS NULL",
                         token,
                         existing["id"],
+                        intended_plan,
+                        intended_interval,
                     )
                     background.add_task(
                         send_cappe_verification_email, existing["email"], existing["name"], str(token)
@@ -169,6 +187,8 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
             refresh_token=tokens.refresh_token,
             expires_in=tokens.expires_in,
             account=account,
+            intended_plan=intended_plan,
+            intended_interval=intended_interval,
         )
 
     # Confirmation email after the response is sent.
@@ -176,7 +196,7 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
     return CappeSignupResponse(verification_required=True, email=account.email)
 
 
-@router.post("/auth/verify", response_model=CappeTokenResponse)
+@router.post("/auth/verify", response_model=CappeVerifyResponse)
 async def verify_email(body: CappeVerifyRequest, request: Request):
     """Confirm an account via its emailed token, then auto-sign-in."""
     await check_rate_limit(client_ip(request), "cappe_verify", 20, 3600)
@@ -190,7 +210,8 @@ async def verify_email(body: CappeVerifyRequest, request: Request):
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """SELECT id, email, name, plan, status, account_type, verification_sent_at
+            """SELECT id, email, name, plan, status, account_type, verification_sent_at,
+                      intended_plan_code, intended_interval
                FROM cappe_accounts WHERE verification_token = $1""",
             token,
         )
@@ -215,9 +236,11 @@ async def verify_email(body: CappeVerifyRequest, request: Request):
                         "message": "This confirmation link has expired. Request a new one.",
                     },
                 )
-        # Single-use: clear the token as we verify.
+        # Single-use: clear the token as we verify. The plan intent is handed
+        # back below exactly once, so it is cleared here too.
         await conn.execute(
             "UPDATE cappe_accounts SET email_verified_at = NOW(), verification_token = NULL, "
+            "intended_plan_code = NULL, intended_interval = NULL, "
             "updated_at = NOW() WHERE id = $1",
             row["id"],
         )
@@ -226,7 +249,11 @@ async def verify_email(body: CappeVerifyRequest, request: Request):
         id=row["id"], email=row["email"], name=row["name"], plan=row["plan"],
         status=row["status"], account_type=row["account_type"],
     )
-    return _token_response(account)
+    return CappeVerifyResponse(
+        **_token_response(account).model_dump(),
+        intended_plan=row["intended_plan_code"],
+        intended_interval=row["intended_interval"],
+    )
 
 
 @router.post("/auth/resend-verification", status_code=status.HTTP_202_ACCEPTED)

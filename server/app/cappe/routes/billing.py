@@ -38,7 +38,9 @@ router = APIRouter()
 # Where a caller-supplied Stripe redirect lands when it isn't one of ours.
 # Stripe renders these URLs on its own hosted, Stripe-branded pages, so an
 # arbitrary address there is a phishing redirect wearing our checkout flow.
-_BILLING_FALLBACK_URL = "/sites"
+# The billing page, flagged so it re-checks the subscription: a checkout that
+# came back here has usually just been paid.
+_BILLING_FALLBACK_URL = "/billing?checkout=return"
 
 
 def _billing_return_url(url: str | None) -> str:

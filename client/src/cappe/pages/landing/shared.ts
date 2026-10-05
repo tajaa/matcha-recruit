@@ -8,6 +8,13 @@ export const LIME_BUTTON =
 export const EYEBROW = 'text-xs font-bold uppercase tracking-[0.18em]'
 export const SIGNUP_PATH = '/gummfit/website-setup'
 
+/** Signup link that remembers a paid plan picked on the pricing cards, so the
+ *  person lands in checkout for it after confirming their email. */
+export function signupPath(plan?: string, interval: string = 'month'): string {
+  if (!plan) return SIGNUP_PATH
+  return `${SIGNUP_PATH}?${new URLSearchParams({ plan, interval }).toString()}`
+}
+
 /** Fade-and-rise as a section scrolls into view. Visible immediately when
  *  IntersectionObserver is missing (tests, old browsers); the motion itself is
  *  `motion-safe:`-only, so reduced-motion users get no transform. Returns

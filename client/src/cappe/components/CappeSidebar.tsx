@@ -3,12 +3,13 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutGrid, LayoutTemplate, LogOut, Globe, ArrowLeft, FileText, ShoppingBag,
   Receipt, Calendar, MessageSquare, Users, Mail, Inbox, Newspaper, UserCircle, Star, MapPin,
-  Handshake, Wallet, Compass,
+  Handshake, Wallet, Compass, CreditCard,
 } from 'lucide-react'
 import { cappeApi, clearCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import { creatorPaths } from '../creators/creatorPaths'
 import { confirmLeave } from '../utils/unsavedGuard'
+import { BILLING_PATH } from '../pages/CappeBilling/paths'
 import type { CappeAccount, CappeThread } from '../types'
 
 const linkBase = 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors'
@@ -149,6 +150,9 @@ export default function CappeSidebar({ account }: { account: CappeAccount | null
             </span>
           )}
         </div>
+        {account?.account_type !== 'creator' && (
+          <Item to={BILLING_PATH} icon={CreditCard} label="Plan & billing" />
+        )}
         <button onClick={signOut} className={`${linkBase} ${linkIdle} w-full`}>
           <LogOut className="h-4 w-4" /> Sign out
         </button>
