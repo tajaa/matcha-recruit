@@ -57,7 +57,12 @@ const SITE_NAV: { to: string; label: string; icon: typeof Globe; end?: boolean }
   { to: 'blog', label: 'Blog', icon: Newspaper },
 ]
 
-export default function CappeSidebar({ account }: { account: CappeAccount | null }) {
+export default function CappeSidebar({ account, open = false, onClose }: {
+  account: CappeAccount | null
+  /** Phone-width drawer state; ignored from md up, where the rail is always shown. */
+  open?: boolean
+  onClose?: () => void
+}) {
   const navigate = useNavigate()
   const location = useLocation()
   // Keyed to the site it was fetched for, so leaving a site reads as 0 without a
@@ -91,7 +96,17 @@ export default function CappeSidebar({ account }: { account: CappeAccount | null
   }
 
   return (
-    <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-zinc-800 bg-zinc-900">
+    <>
+    {open && <div className="fixed inset-0 z-30 bg-black/60 md:hidden" onClick={onClose} aria-hidden="true" />}
+    {/* From md up: the fixed rail it always was. Below md: an off-canvas
+        drawer. `invisible` while closed keeps its links out of the tab order
+        and the accessibility tree instead of merely off screen. */}
+    <aside
+      id="cappe-sidebar"
+      className={`fixed inset-y-0 left-0 z-40 flex w-64 max-w-[85vw] flex-col border-r border-zinc-800 bg-zinc-900 transition-[translate,visibility] duration-200 md:visible md:static md:z-auto md:h-screen md:w-60 md:max-w-none md:shrink-0 md:translate-x-0 ${
+        open ? 'translate-x-0' : 'invisible -translate-x-full'
+      }`}
+    >
       <div className="flex items-center gap-2.5 px-5 py-5">
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-lime-300 to-lime-500 text-sm font-bold text-zinc-950 shadow-lg shadow-lime-500/20">
           G
@@ -101,7 +116,8 @@ export default function CappeSidebar({ account }: { account: CappeAccount | null
         </span>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3">
+      {/* Any nav click closes the drawer, including a link to the page already open. */}
+      <nav onClick={onClose} className="flex flex-1 flex-col gap-1 overflow-y-auto px-3">
         {siteId ? (
           <>
             <NavLink to="/cappe/sites" onClick={guardNav} className={`${linkBase} ${linkIdle} mb-1`}>
@@ -158,5 +174,6 @@ export default function CappeSidebar({ account }: { account: CappeAccount | null
         </button>
       </div>
     </aside>
+    </>
   )
 }

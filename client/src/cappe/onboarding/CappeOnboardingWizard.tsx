@@ -39,7 +39,7 @@ export default function CappeOnboardingWizard() {
 
   if (account?.account_type === 'creator') {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950">
+      <div className="flex min-h-full items-center justify-center bg-zinc-950">
         <Loader2 className="h-6 w-6 animate-spin text-zinc-600" />
       </div>
     )
@@ -101,8 +101,8 @@ export default function CappeOnboardingWizard() {
   ]
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-950 bg-[radial-gradient(60rem_40rem_at_50%_-10%,rgba(198,241,107,0.08),transparent)] px-4">
-      <div className={`w-full ${step === 3 ? 'max-w-4xl py-10' : 'max-w-md'}`}>
+    <div className="flex min-h-full items-center justify-center bg-zinc-950 py-8 bg-[radial-gradient(60rem_40rem_at_50%_-10%,rgba(198,241,107,0.08),transparent)] px-4">
+      <div className={`w-full ${step === 3 ? 'max-w-4xl' : 'max-w-md'}`}>
         <div className="mb-8 text-center">
           <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-lime-300 to-lime-500 text-lg font-bold text-zinc-950 shadow-lg shadow-lime-500/20">
             G

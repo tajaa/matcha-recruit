@@ -147,7 +147,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
         <form onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-xl shadow-black/40">
           {!creatorOnly && !brandOnly && <div>
             <label className="mb-2 block text-sm font-medium text-zinc-300">I'm building a site for…</label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {ACCOUNT_TYPES.map(({ value, icon: Icon, title, blurb }) => {
                 const active = accountType === value
                 return (
