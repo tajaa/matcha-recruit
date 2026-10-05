@@ -70,6 +70,8 @@ export default function CappeRoutes() {
         <Route path="creators/directory" element={<CreatorDirectory />} />
         <Route path="creators/:handle" element={<CreatorPublicProfile />} />
         <Route path="website-setup" element={<CappeSignup />} />
+        {/* The address people type. */}
+        <Route path="signup" element={<CappeSignup />} />
         <Route path="login" element={<CappeLogin />} />
         <Route path="verify" element={<CappeVerify />} />
         {/* Public, token-gated client conversation (emailed link). */}

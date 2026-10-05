@@ -118,12 +118,15 @@ class EmailService(
         text_content: Optional[str] = None,
         attachments: Optional[list[dict]] = None,
         extra_headers: Optional[dict[str, str]] = None,
+        from_name: Optional[str] = None,
     ) -> bool:
         """Send an email via Gmail API.
 
         Attachments format: {"filename": "...", "content": "<base64>", "disposition": "attachment"}
         extra_headers lets callers attach RFC headers like List-Unsubscribe so
         Gmail/Outlook render the one-click unsubscribe button.
+        from_name overrides the sender display name (the address is unchanged)
+        for products that share this sender but not Matcha's brand.
         """
         if not self.is_configured():
             logger.warning("Gmail not configured — token.json missing or incomplete")
@@ -140,7 +143,7 @@ class EmailService(
         try:
             msg = MIMEMultipart("alternative") if not attachments else MIMEMultipart("mixed")
             msg["Subject"] = subject
-            msg["From"] = f"{self.from_name} <{self.from_email}>"
+            msg["From"] = f"{from_name or self.from_name} <{self.from_email}>"
             msg["To"] = f"{to_name} <{to_email}>" if to_name else to_email
             if extra_headers:
                 for name, value in extra_headers.items():
@@ -196,6 +199,7 @@ class EmailService(
         html_content: str,
         text_content: Optional[str] = None,
         attachments: Optional[list[dict]] = None,
+        from_name: Optional[str] = None,
     ) -> bool:
         """Public send wrapper: Gmail first, MailerSend on Gmail failure.
 
@@ -215,6 +219,7 @@ class EmailService(
             html_content=html_content,
             text_content=text_content,
             attachments=attachments,
+            from_name=from_name,
         )
 
     async def _send_with_fallback(
@@ -225,6 +230,7 @@ class EmailService(
         html_content: str,
         text_content: Optional[str] = None,
         attachments: Optional[list[dict]] = None,
+        from_name: Optional[str] = None,
     ) -> bool:
         """Send via Gmail first, fall back to MailerSend if Gmail fails."""
         # Reserved-domain guard must be transport-independent: the Gmail path
@@ -239,7 +245,7 @@ class EmailService(
             sent = await self.send_email(
                 to_email=to_email, to_name=to_name, subject=subject,
                 html_content=html_content, text_content=text_content,
-                attachments=attachments,
+                attachments=attachments, from_name=from_name,
             )
             if sent:
                 return True
@@ -251,7 +257,7 @@ class EmailService(
             return False
 
         payload = {
-            "from": {"email": self.mailersend_from_email, "name": self.from_name},
+            "from": {"email": self.mailersend_from_email, "name": from_name or self.from_name},
             "to": [{"email": to_email, "name": to_name or to_email}],
             "subject": subject,
             "html": html_content,

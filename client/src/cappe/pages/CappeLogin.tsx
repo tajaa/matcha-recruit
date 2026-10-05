@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
-import { cappePublicPost, clearCappeTokens, setCappeTokens } from '../api'
+import { CappeApiError, cappePublicPost, clearCappeTokens, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import { creatorPaths } from '../creators/creatorPaths'
+import ResendVerification from '../components/ResendVerification'
 import type { CappeTokenResponse } from '../types'
 
 const postAuthHome = (t?: string) => (t === 'creator' ? creatorPaths.home : '/cappe/sites')
@@ -15,7 +16,6 @@ export default function CappeLogin({ creatorOnly = false, brandOnly = false }: {
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [needsVerify, setNeedsVerify] = useState(false)
-  const [resent, setResent] = useState(false)
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -38,21 +38,10 @@ export default function CappeLogin({ creatorOnly = false, brandOnly = false }: {
       }
       navigate(creatorOnly ? creatorPaths.home : brandOnly ? creatorPaths.brandHome : postAuthHome(res.account?.account_type), { replace: true })
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Something went wrong.'
-      // Backend's unverified-account 403 carries "confirm your email".
-      if (/confirm your email/i.test(msg)) setNeedsVerify(true)
-      setError(msg)
+      if (err instanceof CappeApiError && err.code === 'email_unverified') setNeedsVerify(true)
+      setError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
       setSubmitting(false)
-    }
-  }
-
-  async function resend() {
-    setResent(true)
-    try {
-      await cappePublicPost('/auth/resend-verification', { email })
-    } catch {
-      // 202 regardless; ignore.
     }
   }
 
@@ -70,9 +59,11 @@ export default function CappeLogin({ creatorOnly = false, brandOnly = false }: {
 
         <form onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-xl shadow-black/40">
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-300">Email</label>
+            <label htmlFor="cappe-login-email" className="mb-1 block text-sm font-medium text-zinc-300">Email</label>
             <input
+              id="cappe-login-email"
               type="email"
+              autoComplete="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -81,9 +72,11 @@ export default function CappeLogin({ creatorOnly = false, brandOnly = false }: {
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-300">Password</label>
+            <label htmlFor="cappe-login-password" className="mb-1 block text-sm font-medium text-zinc-300">Password</label>
             <input
+              id="cappe-login-password"
               type="password"
+              autoComplete="current-password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -91,17 +84,8 @@ export default function CappeLogin({ creatorOnly = false, brandOnly = false }: {
             />
           </div>
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          {needsVerify && (
-            <button
-              type="button"
-              onClick={resend}
-              disabled={resent}
-              className="text-sm font-medium text-lime-400 hover:text-lime-300 disabled:opacity-60"
-            >
-              {resent ? 'Confirmation email sent ✓' : 'Resend confirmation email'}
-            </button>
-          )}
+          {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
+          {needsVerify && <ResendVerification email={email} />}
 
           <button
             type="submit"

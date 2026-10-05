@@ -42,11 +42,15 @@ def test_the_real_owner_is_told_out_of_band():
     assert hasattr(email_mod, "send_cappe_account_exists_email")
 
 
-def test_collision_creates_nothing():
+def test_collision_never_inserts_or_touches_the_password():
+    """A duplicate may refresh the confirmation link of a still-unconfirmed
+    account (behaviour covered in test_cappe_auth_signup_flow.py), but it never
+    creates a row and never replaces the password on file."""
     src = inspect.getsource(mod.signup)
-    collision = src.split("UniqueViolationError", 1)[1].split("account = CappeAccount", 1)[0]
-    for write in ("INSERT", "UPDATE", "DELETE"):
-        assert write not in collision.upper()
+    collision = src.split("if row is None:", 1)[1].split("account = CappeAccount", 1)[0]
+    assert "INSERT" not in collision.upper()
+    assert "DELETE" not in collision.upper()
+    assert "password_hash" not in collision
 
 
 def test_login_still_uses_a_constant_time_dummy_hash():

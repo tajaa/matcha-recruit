@@ -272,9 +272,11 @@ def test_daily_recipient_cap_charges_in_flight_campaigns():
 def test_account_exists_email_is_recipient_throttled_and_uses_the_stored_name():
     collision = inspect.getsource(auth_mod.signup).split("UniqueViolationError", 1)[1]
     assert "check_recipient_send_ok(email)" in collision
-    assert "SELECT name FROM cappe_accounts WHERE email = $1" in collision
-    # The request's name is attacker-typed text; it must never reach the email.
-    assert "send_cappe_account_exists_email, email, body.name" not in collision
+    # The request's name is attacker-typed text; it must never reach an email.
+    # Behaviour (name on file, case-insensitive lookup) is exercised in
+    # test_cappe_auth_signup_flow.py.
+    assert "lower(email) = $1" in collision
+    assert "body.name" not in collision.split("if row is None:", 1)[1].split("account = CappeAccount", 1)[0]
 
 
 # ── Stripe return URLs: our ORIGIN is the boundary, not /cappe ───────────────

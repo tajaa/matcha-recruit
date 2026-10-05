@@ -80,7 +80,9 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
     `{verification_required: true}` as a fresh one. A 409 here made signup a
     membership oracle for any address an attacker cared to try — the same
     enumeration login and resend already refuse to be. The real owner is told
-    by email instead."""
+    by email instead: a confirmed account gets "you already have an account",
+    an unconfirmed one gets a fresh confirmation link (signing up again is what
+    people do when the first email never arrived)."""
     await check_rate_limit(client_ip(request), "cappe_signup", 5, 3600)
     email = body.email.strip().lower()
     # bcrypt is CPU-blocking (~100ms); run it off the event loop so a burst of
@@ -88,8 +90,9 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
     password_hash = await asyncio.to_thread(hash_password, body.password)
 
     # No deliverable email → no link → would be unverifiable forever. Auto-verify
-    # those (dev/seed only; real users are on deliverable domains).
-    auto_verify = _is_reserved_test_domain(email)
+    # those, outside production only: there it would hand a signed-in, confirmed
+    # account to anyone typing an @example.com address.
+    auto_verify = _is_reserved_test_domain(email) and not get_settings().is_production
     token = None if auto_verify else uuid4()
 
     async with get_connection() as conn:
@@ -114,17 +117,38 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
 
     if row is None:
         # Duplicate address: answer exactly as a fresh signup would, and tell
-        # the real owner out-of-band. Nothing was created or changed.
+        # the real owner out-of-band.
         # Throttled per RECIPIENT (the per-IP signup limit does nothing against
         # rotating addresses) and greeted with the name ON FILE: the name in the
         # request is attacker-typed text, and mailing it to a victim from our
-        # domain is a phishing primitive.
+        # domain is a phishing primitive. The cap is checked BEFORE the write so
+        # a throttled request can't kill the link already sitting in the inbox.
         if await check_recipient_send_ok(email):
             async with get_connection() as conn:
-                stored_name = await conn.fetchval(
-                    "SELECT name FROM cappe_accounts WHERE email = $1", email
+                existing = await conn.fetchrow(
+                    "SELECT id, email, name, email_verified_at FROM cappe_accounts "
+                    "WHERE lower(email) = $1",
+                    email,
                 )
-            background.add_task(send_cappe_account_exists_email, email, stored_name)
+                if existing is not None and existing["email_verified_at"] is None and token is not None:
+                    # Still unconfirmed: the first email never arrived or
+                    # expired. Issue a fresh link. The password and profile on
+                    # file are deliberately left alone: whoever sends this
+                    # request has not proven they own the inbox, and letting
+                    # them replace the password would hand them the account
+                    # the moment the real owner clicks the link.
+                    await conn.execute(
+                        "UPDATE cappe_accounts SET verification_token = $1, "
+                        "verification_sent_at = NOW(), updated_at = NOW() "
+                        "WHERE id = $2 AND email_verified_at IS NULL",
+                        token,
+                        existing["id"],
+                    )
+                    background.add_task(
+                        send_cappe_verification_email, existing["email"], existing["name"], str(token)
+                    )
+                elif existing is not None:
+                    background.add_task(send_cappe_account_exists_email, existing["email"], existing["name"])
         return CappeSignupResponse(verification_required=True, email=email)
 
     account = CappeAccount(**dict(row))
@@ -152,7 +176,10 @@ async def verify_email(body: CappeVerifyRequest, request: Request):
     try:
         token = UUID(body.token)
     except (ValueError, TypeError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid confirmation link")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "verification_invalid", "message": "Invalid confirmation link"},
+        )
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -163,7 +190,10 @@ async def verify_email(body: CappeVerifyRequest, request: Request):
         if row is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="This confirmation link is invalid or has already been used.",
+                detail={
+                    "code": "verification_invalid",
+                    "message": "This confirmation link is invalid or has already been used.",
+                },
             )
         sent_at = row["verification_sent_at"]
         if sent_at is not None:
@@ -173,7 +203,10 @@ async def verify_email(body: CappeVerifyRequest, request: Request):
             if age_hours > _VERIFY_TTL_HOURS:
                 raise HTTPException(
                     status_code=status.HTTP_410_GONE,
-                    detail="This confirmation link has expired. Request a new one.",
+                    detail={
+                        "code": "verification_expired",
+                        "message": "This confirmation link has expired. Request a new one.",
+                    },
                 )
         # Single-use: clear the token as we verify.
         await conn.execute(
@@ -249,11 +282,15 @@ async def login(body: CappeLogin, request: Request):
     if row["status"] != "active":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is not active")
     # Email-confirmation gate: only verified accounts can sign in. 403 with a
-    # distinct marker so the UI can offer "resend confirmation".
+    # stable code so the UI can offer "resend confirmation". The message text is
+    # load-bearing too: the iOS app still matches on "confirm your email".
     if row["email_verified_at"] is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Please confirm your email before signing in. Check your inbox for the link.",
+            detail={
+                "code": "email_unverified",
+                "message": "Please confirm your email before signing in. Check your inbox for the link.",
+            },
         )
 
     account = CappeAccount(

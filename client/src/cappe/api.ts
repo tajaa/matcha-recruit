@@ -21,9 +21,12 @@ const BASE = `${import.meta.env.VITE_API_URL ?? '/api'}/cappe`
 // breaking that branch, so preserve `code` through the error.
 export class CappeApiError extends Error {
   code?: string
-  constructor(message: string, code?: string) {
+  /** HTTP status, when the error came from a response (absent for network errors). */
+  status?: number
+  constructor(message: string, code?: string, status?: number) {
     super(message)
     this.code = code
+    this.status = status
   }
 }
 
@@ -31,6 +34,41 @@ function _errorDetailCode(detail: unknown): string | undefined {
   return detail && typeof detail === 'object' && 'code' in detail && typeof (detail as { code: unknown }).code === 'string'
     ? (detail as { code: string }).code
     : undefined
+}
+
+// FastAPI reports request-validation failures as a 422 whose `detail` is a list
+// of `{loc, msg}` items. Shown raw that is a wall of JSON on the signup form, so
+// turn each into "Email: value is not a valid email address".
+function _validationMessage(items: unknown[]): string {
+  const lines = items.map((item) => {
+    const { loc, msg } = (item ?? {}) as { loc?: unknown; msg?: unknown }
+    const text = typeof msg === 'string' ? msg.replace(/^Value error, /, '') : ''
+    const field = Array.isArray(loc) ? loc[loc.length - 1] : undefined
+    if (typeof field !== 'string' || field === 'body') return text
+    const label = field.charAt(0).toUpperCase() + field.slice(1).replace(/_/g, ' ')
+    return text ? `${label}: ${text}` : label
+  }).filter(Boolean)
+  return lines.join(' ') || 'Some of what you entered isn’t valid. Check it and try again.'
+}
+
+/** One error shape for every failed response: readable message, the backend's
+ *  `code` when it sent one, and the HTTP status. */
+async function _errorFromResponse(res: Response): Promise<CappeApiError> {
+  const body = await res.json().catch(() => null)
+  const d: unknown = body?.detail
+  if (typeof d === 'string' && d) return new CappeApiError(d, undefined, res.status)
+  if (Array.isArray(d)) return new CappeApiError(_validationMessage(d), 'validation', res.status)
+  if (d && typeof d === 'object') {
+    // {message, missing} (publish gate) or {code, message} (a condition callers branch on).
+    const message = (d as { message?: unknown }).message
+    return new CappeApiError(
+      typeof message === 'string' && message ? message : JSON.stringify(d),
+      _errorDetailCode(d),
+      res.status,
+    )
+  }
+  if (res.status >= 500) return new CappeApiError('Server error — try again in a moment.', undefined, res.status)
+  return new CappeApiError(`${res.status} ${res.statusText || 'Request failed'}`, undefined, res.status)
 }
 
 const ACCESS_KEY = 'cappe_access_token'
@@ -196,10 +234,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       const retry = await fetch(`${BASE}${path}`, { ...init, headers: _buildHeaders(init, newToken) })
       if (!retry.ok) {
         if (retry.status === 401) { _logout(); throw new Error('Session expired') }
-        const body = await retry.json().catch(() => null)
-        const d = body?.detail
-        const msg = typeof d === 'string' ? d : (d?.message || JSON.stringify(d) || `${retry.status} ${retry.statusText}`)
-        throw new CappeApiError(msg, _errorDetailCode(d))
+        throw await _errorFromResponse(retry)
       }
       if (retry.status === 204) return null as T
       return retry.json()
@@ -209,22 +244,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw _networkError()
   }
 
-  if (!res.ok) {
-    const errBody = await res.json().catch(() => null)
-    let msg: string
-    let d: unknown
-    if (errBody?.detail) {
-      d = errBody.detail
-      // detail may be a string, or an object like {message, missing} (publish gate)
-      // or {code, message} (a condition callers branch on, e.g. payouts_not_ready).
-      msg = typeof d === 'string' ? d : ((d as { message?: string })?.message || JSON.stringify(d))
-    } else if (res.status >= 500) {
-      msg = 'Server error — try again in a moment.'
-    } else {
-      msg = `${res.status} ${res.statusText || 'Request failed'}`
-    }
-    throw new CappeApiError(msg, _errorDetailCode(d))
-  }
+  if (!res.ok) throw await _errorFromResponse(res)
   if (res.status === 204) return null as T
   return res.json()
 }
@@ -232,10 +252,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 // Unauthenticated GET (token-resolved public resources, e.g. a client thread).
 export async function cappePublicGet<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`)
-  if (!res.ok) {
-    const errBody = await res.json().catch(() => null)
-    throw new Error(errBody?.detail || `${res.status} ${res.statusText || 'Request failed'}`)
-  }
+  if (!res.ok) throw await _errorFromResponse(res)
   return res.json()
 }
 
@@ -246,14 +263,7 @@ export async function cappePublicPost<T>(path: string, body: unknown): Promise<T
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!res.ok) {
-    const errBody = await res.json().catch(() => null)
-    throw new Error(
-      errBody?.detail
-        ? typeof errBody.detail === 'string' ? errBody.detail : JSON.stringify(errBody.detail)
-        : `${res.status} ${res.statusText || 'Request failed'}`,
-    )
-  }
+  if (!res.ok) throw await _errorFromResponse(res)
   return res.json()
 }
 
