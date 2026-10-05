@@ -21,7 +21,7 @@ export default function CappeSiteEditor() {
 
   if (s.loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-full items-center justify-center py-20">
         <Loader2 className="h-6 w-6 animate-spin text-zinc-400" />
       </div>
     )
@@ -29,7 +29,7 @@ export default function CappeSiteEditor() {
 
   if (!s.site) {
     return (
-      <div className="mx-auto max-w-3xl px-8 py-10">
+      <div className="mx-auto max-w-3xl px-4 py-10 sm:px-8">
         <p className="text-sm text-red-400">{s.error || 'Site not found.'}</p>
         <Link to="/cappe/sites" className="mt-4 inline-flex items-center gap-1 text-sm text-emerald-400 hover:text-emerald-300">
           <ArrowLeft className="h-4 w-4" /> Back to sites
@@ -41,7 +41,7 @@ export default function CappeSiteEditor() {
   const publicUrl = cappeSiteHost(s.site)
 
   return (
-    <div className="mx-auto max-w-5xl px-8 py-8">
+    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-8">
       <EditorHeader site={s.site} publicUrl={publicUrl} publishing={s.publishing} onPublish={s.publish} blocked={ready === false} />
 
       {s.error && <p className="mb-4 text-sm text-red-400">{s.error}</p>}

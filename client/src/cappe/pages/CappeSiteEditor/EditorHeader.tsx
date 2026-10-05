@@ -13,7 +13,7 @@ export function EditorHeader({
   blocked?: boolean
 }) {
   return (
-    <div className="mb-6 flex items-start justify-between">
+    <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div>
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">{site.name}</h1>
@@ -21,7 +21,7 @@ export function EditorHeader({
             {site.status}
           </span>
         </div>
-        <div className="mt-1 flex items-center gap-1 text-sm text-zinc-500">
+        <div className="mt-1 flex items-center gap-1 break-all text-sm text-zinc-500">
           <Globe className="h-3.5 w-3.5" />
           {site.status === 'published' ? (
             <a href={`https://${publicUrl}`} target="_blank" rel="noreferrer" className="hover:text-emerald-400">
@@ -36,7 +36,7 @@ export function EditorHeader({
         onClick={onPublish}
         disabled={publishing || blocked}
         title={blocked ? 'Finish the required steps first' : undefined}
-        className="flex items-center gap-2 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+        className="flex shrink-0 items-center justify-center gap-2 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
         {site.status === 'published' ? 'Re-publish' : 'Publish'}
