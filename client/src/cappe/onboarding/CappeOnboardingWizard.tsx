@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, MapPin, MapPinned, ArrowRight, ArrowLeft, Check } from 'lucide-react'
+import { Loader2, MapPin, MapPinned, ArrowRight, ArrowLeft } from 'lucide-react'
 import { cappeApi } from '../api'
+import TemplateGallery from '../components/TemplateGallery'
 import { useCappeMe } from '../hooks/useCappeMe'
 import { CAPPE_HOST } from '../host'
 import { creatorPaths } from '../creators/creatorPaths'
-import type { CappeSite, CappeLocation } from '../types'
+import { subdomainPreview } from '../utils/slug'
+import type { CappeSite, CappeLocation, CappeTemplateSummary } from '../types'
 
 // Post-signup business-setup wizard. account_type is already chosen at signup;
 // this asks the one question that shapes the rest of the product — single vs
-// multi-location — then creates the first site (and a first branch if multi).
+// multi-location — then the name, then how to start: blank or from a template.
+// The template choice has to live here: the Free plan includes one site, so a
+// wizard that only made blank sites spent it before the gallery was reachable.
 // Mounted at /cappe/onboarding inside CappeLayout; CappeSites redirects here on
 // first run (zero sites).
 type Mode = 'single' | 'multi'
@@ -24,11 +28,13 @@ export default function CappeOnboardingWizard() {
     }
   }, [account, navigate])
 
-  const [step, setStep] = useState<1 | 2>(1)
+  const [step, setStep] = useState<1 | 2 | 3>(1)
   const [mode, setMode] = useState<Mode | null>(null)
   const [name, setName] = useState('')
   const [branch, setBranch] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // Which template is being cloned, when the site is not starting blank.
+  const [templateId, setTemplateId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   if (account?.account_type === 'creator') {
@@ -39,19 +45,25 @@ export default function CappeOnboardingWizard() {
     )
   }
 
-  const slugPreview =
-    name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'your-name'
+  const slugPreview = subdomainPreview(name)
 
-  async function finish() {
+  async function finish(template: CappeTemplateSummary | null) {
     if (!name.trim() || submitting) return
     setSubmitting(true)
+    setTemplateId(template?.id ?? null)
     setError(null)
     try {
-      const site = await cappeApi.post<CappeSite>('/sites', {
-        name: name.trim(),
-        source_type: 'blank',
-        is_multi_location: mode === 'multi',
-      })
+      const site = template
+        ? await cappeApi.post<CappeSite>('/sites/from-template', {
+            template_id: template.id,
+            name: name.trim(),
+            is_multi_location: mode === 'multi',
+          })
+        : await cappeApi.post<CappeSite>('/sites', {
+            name: name.trim(),
+            source_type: 'blank',
+            is_multi_location: mode === 'multi',
+          })
       if (mode === 'multi') {
         // Seed the first branch; the rest are added in the Locations manager.
         await cappeApi
@@ -69,6 +81,7 @@ export default function CappeOnboardingWizard() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not create your site. Try again.')
       setSubmitting(false)
+      setTemplateId(null)
     }
   }
 
@@ -89,18 +102,22 @@ export default function CappeOnboardingWizard() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-950 bg-[radial-gradient(60rem_40rem_at_50%_-10%,rgba(198,241,107,0.08),transparent)] px-4">
-      <div className="w-full max-w-md">
+      <div className={`w-full ${step === 3 ? 'max-w-4xl py-10' : 'max-w-md'}`}>
         <div className="mb-8 text-center">
           <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-lime-300 to-lime-500 text-lg font-bold text-zinc-950 shadow-lg shadow-lime-500/20">
             G
           </span>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">
-            {step === 1 ? `Hi${account?.name ? ` ${account.name.split(' ')[0]}` : ''} — let's set up` : 'Name your business'}
+            {step === 1
+              ? `Hi${account?.name ? ` ${account.name.split(' ')[0]}` : ''} — let's set up`
+              : step === 2 ? 'Name your business' : 'How do you want to start?'}
           </h1>
           <p className="mt-1 text-sm text-zinc-400">
             {step === 1
               ? 'A couple of quick questions so we can shape everything around how you work.'
-              : 'This becomes your web address. You can change it later.'}
+              : step === 2
+                ? 'This becomes your web address. You can change it later.'
+                : 'Pick a design to start from, or begin with an empty site. Either way, everything is editable.'}
           </p>
         </div>
 
@@ -118,6 +135,7 @@ export default function CappeOnboardingWizard() {
                       key={value}
                       type="button"
                       onClick={() => setMode(value)}
+                      aria-pressed={active}
                       className={`flex items-start gap-3 rounded-xl border p-3.5 text-left transition-colors ${
                         active ? 'border-lime-400 bg-lime-300/10' : 'border-zinc-700 bg-zinc-950 hover:border-zinc-500'
                       }`}
@@ -140,15 +158,47 @@ export default function CappeOnboardingWizard() {
                 Continue <ArrowRight className="h-4 w-4" />
               </button>
             </>
+          ) : step === 3 ? (
+            <>
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => setStep(2)}
+                  disabled={submitting}
+                  className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+                >
+                  <ArrowLeft className="h-4 w-4" /> Back
+                </button>
+                <button
+                  type="button"
+                  onClick={() => finish(null)}
+                  disabled={submitting}
+                  className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-60"
+                >
+                  {submitting && templateId === null && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Start with a blank site
+                </button>
+              </div>
+              {error && <p role="alert" className="mb-4 text-sm text-red-400">{error}</p>}
+              <TemplateGallery
+                accountType={account?.account_type}
+                busyId={templateId}
+                disabled={submitting}
+                onPick={(t) => finish(t)}
+              />
+            </>
           ) : (
             <form
               onSubmit={(e) => {
                 e.preventDefault()
-                finish()
+                if (name.trim()) setStep(3)
               }}
             >
-              <label className="mb-1 block text-sm font-medium text-zinc-300">Business name</label>
+              <label htmlFor="cappe-onboarding-name" className="mb-1 block text-sm font-medium text-zinc-300">
+                {account?.account_type === 'personal' ? 'Your name or business name' : 'Business name'}
+              </label>
               <input
+                id="cappe-onboarding-name"
                 autoFocus
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -159,7 +209,8 @@ export default function CappeOnboardingWizard() {
               <p className="mt-2 min-h-[1rem] text-xs text-zinc-500">
                 {name.trim() && (
                   <>
-                    Your site: <span className="text-lime-400">{slugPreview}.{CAPPE_HOST}</span>
+                    Your site: <span className="text-lime-400">{slugPreview}.{CAPPE_HOST}</span>{' '}
+                    (we'll adjust it slightly if that address is taken)
                   </>
                 )}
               </p>
@@ -178,24 +229,20 @@ export default function CappeOnboardingWizard() {
                 </div>
               )}
 
-              {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
-
               <div className="mt-5 flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setStep(1)}
-                  disabled={submitting}
-                  className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+                  className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800"
                 >
                   <ArrowLeft className="h-4 w-4" /> Back
                 </button>
                 <button
                   type="submit"
-                  disabled={!name.trim() || submitting}
+                  disabled={!name.trim()}
                   className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-lime-400 px-4 py-2 text-sm font-semibold text-zinc-950 transition-colors hover:bg-lime-300 disabled:opacity-50"
                 >
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                  Create my site
+                  Continue <ArrowRight className="h-4 w-4" />
                 </button>
               </div>
             </form>
@@ -205,6 +252,7 @@ export default function CappeOnboardingWizard() {
         <div className="mt-4 flex items-center justify-center gap-1.5">
           <span className={`h-1.5 w-1.5 rounded-full ${step === 1 ? 'bg-lime-400' : 'bg-zinc-700'}`} />
           <span className={`h-1.5 w-1.5 rounded-full ${step === 2 ? 'bg-lime-400' : 'bg-zinc-700'}`} />
+          <span className={`h-1.5 w-1.5 rounded-full ${step === 3 ? 'bg-lime-400' : 'bg-zinc-700'}`} />
         </div>
       </div>
     </div>

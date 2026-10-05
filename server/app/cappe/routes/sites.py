@@ -4,6 +4,7 @@ import json
 import logging
 from uuid import UUID
 
+import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse
 
@@ -35,6 +36,7 @@ from ..services.readiness import compute_readiness
 from ..services.render import render_site_html
 from .render import invalidate_render_cache, tenant_security_headers
 from ._shared import (
+    SUBDOMAIN_MAX_LEN,
     get_owned_site,
     loads,
     safe_subdomain_base,
@@ -107,6 +109,34 @@ async def _enforce_site_limit(conn, account: CappeAccount) -> None:
         )
 
 
+# Tries at allocating a subdomain before giving up with a 409.
+_SLUG_ATTEMPTS = 3
+
+
+async def _insert_site_with_free_slug(conn, name: str, insert):
+    """Pick a free subdomain for `name` and run `insert(slug)` with it.
+
+    `unique_slug` checks and the INSERT writes, and only THIS account is
+    locked between the two: another account can take the same name in the
+    gap, and the UNIQUE constraint then rejected the insert as a 500. Each
+    attempt runs in a savepoint so a collision does not poison the outer
+    transaction (and its account lock); the next attempt re-reads and lands on
+    the following free candidate.
+    """
+    base = safe_subdomain_base(name)
+    for _ in range(_SLUG_ATTEMPTS):
+        slug = await unique_slug(conn, base, "cappe_sites", max_len=SUBDOMAIN_MAX_LEN)
+        try:
+            async with conn.transaction():
+                return await insert(slug)
+        except asyncpg.UniqueViolationError:
+            continue
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="That site address was just taken. Try again, or pick a slightly different name.",
+    )
+
+
 async def _lock_account_for_site_creation(conn, account_id: UUID) -> None:
     """Serialize cap checks and inserts for one account.
 
@@ -149,18 +179,20 @@ async def create_site(body: CappeSiteCreate, account: CappeAccount = Depends(req
             # Slug doubles as the tenant subdomain — keep it off reserved
             # labels. Allocate it after the account lock so two creates for the
             # same account cannot both carry the same pre-lock candidate.
-            slug = await unique_slug(conn, safe_subdomain_base(body.name), "cappe_sites")
-            row = await conn.fetchrow(
-                f"""INSERT INTO cappe_sites
-                        (account_id, name, slug, subdomain, source_type, is_multi_location)
-                    VALUES ($1, $2, $3, $3, $4, $5)
-                    RETURNING {_SITE_COLS}""",
-                account.id,
-                body.name,
-                slug,
-                body.source_type,
-                body.is_multi_location,
-            )
+            async def _insert(slug: str):
+                return await conn.fetchrow(
+                    f"""INSERT INTO cappe_sites
+                            (account_id, name, slug, subdomain, source_type, is_multi_location)
+                        VALUES ($1, $2, $3, $3, $4, $5)
+                        RETURNING {_SITE_COLS}""",
+                    account.id,
+                    body.name,
+                    slug,
+                    body.source_type,
+                    body.is_multi_location,
+                )
+
+            row = await _insert_site_with_free_slug(conn, body.name, _insert)
             # Every site needs a homepage to edit — without one the launch
             # checklist's "Add an intro / about section" deep link had nowhere
             # to go. Seed an empty Home page (no content blocks, so the readiness
@@ -198,18 +230,22 @@ async def create_site_from_template(
         async with conn.transaction():
             await _lock_account_for_site_creation(conn, account.id)
             await _enforce_site_limit(conn, account)
-            slug = await unique_slug(conn, safe_subdomain_base(name), "cappe_sites")
-            site = await conn.fetchrow(
-                f"""INSERT INTO cappe_sites
-                        (account_id, name, slug, subdomain, source_type, template_id, theme_config)
-                    VALUES ($1, $2, $3, $3, 'template', $4, $5)
-                    RETURNING {_SITE_COLS}""",
-                account.id,
-                name,
-                slug,
-                template["id"],
-                json.dumps(theme),
-            )
+            async def _insert(slug: str):
+                return await conn.fetchrow(
+                    f"""INSERT INTO cappe_sites
+                            (account_id, name, slug, subdomain, source_type, template_id,
+                             theme_config, is_multi_location)
+                        VALUES ($1, $2, $3, $3, 'template', $4, $5, $6)
+                        RETURNING {_SITE_COLS}""",
+                    account.id,
+                    name,
+                    slug,
+                    template["id"],
+                    json.dumps(theme),
+                    body.is_multi_location,
+                )
+
+            site = await _insert_site_with_free_slug(conn, name, _insert)
             inserted = 0
             for i, page in enumerate(pages):
                 if not isinstance(page, dict):

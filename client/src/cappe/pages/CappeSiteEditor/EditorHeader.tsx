@@ -3,12 +3,14 @@ import type { CappeSite } from '../../types'
 import { statusStyle } from './styles'
 
 export function EditorHeader({
-  site, publicUrl, publishing, onPublish,
+  site, publicUrl, publishing, onPublish, blocked = false,
 }: {
   site: CappeSite
   publicUrl: string
   publishing: boolean
   onPublish: () => void
+  /** The launch checklist still has a required step open. */
+  blocked?: boolean
 }) {
   return (
     <div className="mb-6 flex items-start justify-between">
@@ -32,8 +34,9 @@ export function EditorHeader({
       </div>
       <button
         onClick={onPublish}
-        disabled={publishing}
-        className="flex items-center gap-2 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-60"
+        disabled={publishing || blocked}
+        title={blocked ? 'Finish the required steps first' : undefined}
+        className="flex items-center gap-2 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
         {site.status === 'published' ? 'Re-publish' : 'Publish'}
