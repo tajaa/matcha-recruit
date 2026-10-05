@@ -495,7 +495,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.heymatcha.schedule;
+				PRODUCT_BUNDLE_IDENTIFIER = com.matchasched.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -512,7 +512,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.heymatcha.schedule.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.matchasched.app.tests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MatchaSchedule.app/MatchaSchedule";
@@ -530,7 +530,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.heymatcha.schedule.uitests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.matchasched.app.uitests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = MatchaSchedule;
@@ -619,7 +619,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.heymatcha.schedule;
+				PRODUCT_BUNDLE_IDENTIFIER = com.matchasched.app;
 				PROVISIONING_PROFILE_SPECIFIER = "Matcha Schedule App Store";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -637,7 +637,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.heymatcha.schedule.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.matchasched.app.tests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MatchaSchedule.app/MatchaSchedule";
@@ -715,7 +715,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.heymatcha.schedule.uitests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.matchasched.app.uitests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = MatchaSchedule;
