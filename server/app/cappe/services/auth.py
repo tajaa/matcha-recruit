@@ -13,6 +13,9 @@ other product exposed.
 Password hashing/verification is reused verbatim from core — there is exactly
 one bcrypt implementation in the codebase.
 """
+import hashlib
+import secrets
+
 from app.core.services.scoped_auth import is_token_revoked, make_token_helpers
 
 # Re-export the single bcrypt implementation so Cappe code imports from one place.
@@ -26,3 +29,14 @@ create_cappe_access_token = _helpers.create_access_token
 create_cappe_refresh_token = _helpers.create_refresh_token
 decode_cappe_token = _helpers.decode_token
 is_cappe_token_revoked = is_token_revoked
+
+
+def make_reset_token() -> str:
+    """The secret that goes in a password-reset link."""
+    return secrets.token_urlsafe(32)
+
+
+def hash_reset_token(token: str) -> str:
+    """What is stored for a reset token: reading the database must not yield a
+    working reset link."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()

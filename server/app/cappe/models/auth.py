@@ -71,6 +71,16 @@ class CappeResendRequest(BaseModel):
     email: EmailStr
 
 
+class CappeForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class CappeResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=200)
+    # Same bounds as signup.
+    password: str = Field(min_length=8, max_length=200)
+
+
 __all__ = [
     "CappeSignup",
     "CappeLogin",
@@ -80,4 +90,6 @@ __all__ = [
     "CappeSignupResponse",
     "CappeVerifyRequest",
     "CappeResendRequest",
+    "CappeForgotPasswordRequest",
+    "CappeResetPasswordRequest",
 ]
