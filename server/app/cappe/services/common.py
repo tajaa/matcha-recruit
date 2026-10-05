@@ -84,14 +84,21 @@ def slugify(text: str) -> str:
     return s[:140] or "site"
 
 
+# A DNS label is at most 63 octets (RFC 1035). A longer subdomain is stored
+# happily and then never resolves.
+SUBDOMAIN_MAX_LEN = 63
+
+
 def safe_subdomain_base(text: str) -> str:
     """Slugify, then steer away from a reserved label so the slug can be used
     as a tenant subdomain. A reserved base gets a '-site' suffix (e.g. 'shop'
-    → 'shop-site'); uniqueness is still resolved by unique_slug afterward."""
+    → 'shop-site'); uniqueness is still resolved by unique_slug afterward.
+    Capped at one DNS label, here rather than in `slugify`, which also names
+    pages, forms and posts that have no such limit."""
     base = slugify(text)
     if base in RESERVED_SUBDOMAINS:
         base = f"{base}-site"
-    return base
+    return base[:SUBDOMAIN_MAX_LEN].strip("-") or "site"
 
 
 def loads(value: Any) -> dict:

@@ -24,6 +24,8 @@ from app.cappe.models.cappe import (  # noqa: E402
 from app.cappe.routes._shared import (  # noqa: E402
     RESERVED_SUBDOMAINS,
     safe_subdomain_base,
+    slugify,
+    unique_slug,
 )
 from app.cappe.routes.render import (  # noqa: E402
     _custom_domain_candidates,
@@ -48,6 +50,53 @@ def test_safe_subdomain_base(name, expected):
 def test_safe_subdomain_base_never_returns_reserved():
     for label in RESERVED_SUBDOMAINS:
         assert safe_subdomain_base(label) not in RESERVED_SUBDOMAINS
+
+
+def test_safe_subdomain_base_fits_one_dns_label():
+    """A 140-character subdomain was stored and then never resolved."""
+    long_name = "The Very Long And Winding Name Of A Neighbourhood Bakery And Coffee Roasting Company"
+    base = safe_subdomain_base(long_name)
+    assert len(base) <= 63
+    assert not base.endswith("-")
+    assert base.startswith("the-very-long-and-winding")
+    # The page/form/post slugifier is not a DNS label and keeps its own limit.
+    assert len(slugify(long_name)) > 63
+
+
+def test_safe_subdomain_base_falls_back_when_nothing_survives():
+    assert safe_subdomain_base("日本語") == "site"
+
+
+class _SlugConn:
+    def __init__(self, taken):
+        self.taken = set(taken)
+
+    async def fetchval(self, _sql, candidate):
+        return 1 if candidate in self.taken else None
+
+
+@pytest.mark.asyncio
+async def test_unique_slug_keeps_numbered_candidates_within_the_limit():
+    base = "a" * 62 + "-b"  # 64 would be too long once numbered
+    base = base[:63]
+    conn = _SlugConn({base, f"{base[:61]}-2"})
+    slug = await unique_slug(conn, base, "cappe_sites", max_len=63)
+    assert slug == f"{base[:61]}-3"
+    assert len(slug) == 63
+
+
+@pytest.mark.asyncio
+async def test_unique_slug_is_unbounded_without_a_limit():
+    conn = _SlugConn({"x" * 100})
+    assert await unique_slug(conn, "x" * 100, "cappe_pages") == "x" * 100 + "-2"
+
+
+def test_subdomain_edit_rejects_more_than_one_dns_label():
+    from app.cappe.models.sites import CappeSiteUpdate
+
+    assert CappeSiteUpdate(subdomain="a" * 63).subdomain == "a" * 63
+    with pytest.raises(ValidationError):
+        CappeSiteUpdate(subdomain="a" * 64)
 
 
 # --- subdomain_from_host ------------------------------------------------------

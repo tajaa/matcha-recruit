@@ -1,7 +1,8 @@
 """Launch readiness — the checklist that decides whether a site can publish.
 
-A site can't go live until the REQUIRED items are done (it has real content and
-something to book or buy). Recommended items are nudges, not blockers. The same
+A site can't go live until the REQUIRED items are done (it has real content).
+Recommended items are nudges, not blockers: having something to book or buy is
+one of them, because a brochure, menu or portfolio site is a real site. The same
 computation backs the GET /readiness endpoint and the publish gate, so the UI
 and the server can never disagree about what's missing.
 """
@@ -64,7 +65,7 @@ async def compute_readiness(conn, site_id, site_row) -> dict:
             "hint": "Tell visitors who you are — add a hero or text section to your homepage.",
         },
         {
-            "key": "offering", "required": True, "done": has_offering, "action": "shop",
+            "key": "offering", "required": False, "done": has_offering, "action": "shop",
             "label": "Add something to book or buy",
             "hint": "A product, service, or a bookable session — what people pay you for.",
         },

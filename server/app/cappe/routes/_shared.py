@@ -7,6 +7,7 @@ from fastapi import HTTPException, UploadFile, status
 from ..services.commerce import fetch_site_owner as _site_owner  # noqa: F401
 from ..services.common import (  # noqa: F401
     RESERVED_SUBDOMAINS,
+    SUBDOMAIN_MAX_LEN,
     loads,
     loads_list,
     safe_subdomain_base,
@@ -38,11 +39,15 @@ async def read_capped(file: UploadFile, max_bytes: int, detail: str) -> bytes:
     return b"".join(chunks)
 
 
-async def unique_slug(conn, base: str, table: str, column: str = "slug") -> str:
+async def unique_slug(
+    conn, base: str, table: str, column: str = "slug", *, max_len: int | None = None,
+) -> str:
     """Return `base`, or `base-2`, `base-3`, … until it's free in table.column.
 
     Table/column are caller-controlled literals (never user input), so the
-    f-string is safe; the value is always parameterized.
+    f-string is safe; the value is always parameterized. With `max_len` the
+    base is trimmed so the numbered candidate still fits (a subdomain is one
+    DNS label).
     """
     candidate = base
     n = 1
@@ -53,7 +58,9 @@ async def unique_slug(conn, base: str, table: str, column: str = "slug") -> str:
         if not exists:
             return candidate
         n += 1
-        candidate = f"{base}-{n}"
+        suffix = f"-{n}"
+        stem = base if max_len is None else base[: max_len - len(suffix)].rstrip("-")
+        candidate = f"{stem}{suffix}"
 
 
 async def unique_site_slug(conn, table: str, site_id, base: str, column: str = "slug") -> str:

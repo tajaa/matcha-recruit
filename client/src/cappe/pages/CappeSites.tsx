@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Loader2, Plus, Globe, FileText, ExternalLink, Check } from 'lucide-react'
 import { cappeApi } from '../api'
 import { cappeSiteHost, CAPPE_HOST } from '../host'
+import { subdomainPreview } from '../utils/slug'
 import type { CappeSite } from '../types'
 
 const statusStyle: Record<string, string> = {
@@ -47,7 +48,7 @@ export default function CappeSites() {
     }
   }
 
-  const slugPreview = siteName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'your-name'
+  const slugPreview = subdomainPreview(siteName)
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-10">
