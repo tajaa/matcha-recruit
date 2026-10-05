@@ -11,75 +11,68 @@ struct RequestsView: View {
     @State private var showUnavailable = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                HStack(spacing: 10) {
-                    ActionTile(symbol: "calendar.badge.minus", title: "Can't work") { showUnavailable = true }
-                    NavigationLink {
-                        AvailabilityView { Task { await load() } }
-                    } label: {
-                        TileContent(symbol: "clock.arrow.2.circlepath", title: "Availability")
-                    }
-                    .buttonStyle(PressableStyle())
-                    if profile.enabled_features.time_off {
-                        NavigationLink { PTOView() } label: {
-                            TileContent(symbol: "sun.horizon.fill", title: "Time off")
-                        }
-                        .buttonStyle(PressableStyle())
+        List {
+            Section {
+                Button { showUnavailable = true } label: {
+                    Label {
+                        Text("Can't work").foregroundStyle(Color.primary)
+                    } icon: {
+                        Image(systemName: "calendar.badge.minus")
                     }
                 }
-                .rise()
-
-                if let error { ErrorBanner(message: error) }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    SectionTitle(title: "Waiting on you", trailing: offers.isEmpty ? nil : "\(offers.count)")
-                    if !loaded && loading {
-                        GlassPlaceholder(label: "Loading requests")
-                    } else if offers.isEmpty {
-                        QuietNote(symbol: "tray", text: "No offers from coworkers right now.")
-                    } else {
-                        ForEach(offers) { offer in
-                            OfferCard(offer: offer, busy: busyID == offer.id, disabled: busyID != nil) {
-                                Task { await accept(offer) }
-                            }
-                            .transition(.scale(scale: 0.96).combined(with: .opacity))
-                        }
+                NavigationLink {
+                    AvailabilityView { Task { await load() } }
+                } label: {
+                    Label("Availability", systemImage: "clock.arrow.2.circlepath")
+                }
+                if profile.enabled_features.time_off {
+                    NavigationLink { PTOView() } label: {
+                        Label("Time off", systemImage: "sun.horizon")
                     }
                 }
-                .rise(delay: 0.05)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    SectionTitle(title: "Your requests")
-                    if !loaded && loading {
-                        GlassPlaceholder(label: "Loading requests")
-                        GlassPlaceholder(label: "Loading requests")
-                    } else if requests.isEmpty {
-                        QuietNote(symbol: "arrow.left.arrow.right",
-                                  text: "Swaps, drops and time off you ask for will show up here.")
-                    } else {
-                        ForEach(requests) { request in
-                            RequestCard(
-                                request: request,
-                                canEnd: request.isPending && (
-                                    request.employee_id == profile.id ||
-                                    (request.status == "awaiting_manager" && request.target_employee_id == profile.id)
-                                ),
-                                busy: busyID == request.id,
-                                disabled: busyID != nil
-                            ) { Task { await end(request) } }
-                        }
-                    }
-                }
-                .rise(delay: 0.1)
             }
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.bottom, 32)
-            .animation(.spring(response: 0.45, dampingFraction: 0.86), value: offers.map(\.id))
-            .animation(.spring(response: 0.45, dampingFraction: 0.86), value: requests.map(\.id))
+
+            if let error {
+                Section { ErrorRow(message: error) { Task { await load() } } }
+            }
+
+            Section("Waiting on you") {
+                if !loaded && loading {
+                    placeholderRow
+                } else if offers.isEmpty {
+                    Text("No offers from coworkers right now.").foregroundStyle(Color.secondary)
+                } else {
+                    ForEach(offers) { offer in
+                        OfferRow(offer: offer, busy: busyID == offer.id, disabled: busyID != nil) {
+                            Task { await accept(offer) }
+                        }
+                    }
+                }
+            }
+
+            Section("Your requests") {
+                if !loaded && loading {
+                    placeholderRow
+                    placeholderRow
+                } else if requests.isEmpty {
+                    Text("Swaps, drops and time off you ask for will show up here.").foregroundStyle(Color.secondary)
+                } else {
+                    ForEach(requests) { request in
+                        RequestRow(
+                            request: request,
+                            canEnd: request.isPending && (
+                                request.employee_id == profile.id ||
+                                (request.status == "awaiting_manager" && request.target_employee_id == profile.id)
+                            ),
+                            busy: busyID == request.id,
+                            disabled: busyID != nil
+                        ) { Task { await end(request) } }
+                    }
+                }
+            }
         }
-        .scrollIndicators(.hidden)
-        .ambientBackground()
+        .animation(.default, value: offers.map(\.id))
+        .animation(.default, value: requests.map(\.id))
         .navigationTitle("Requests")
         .refreshable { await load() }
         .task { await load() }
@@ -87,8 +80,16 @@ struct RequestsView: View {
             NavigationStack {
                 UnavailableView { Task { await load() } }
             }
-            .presentationCornerRadius(32)
         }
+    }
+
+    private var placeholderRow: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Shift swap request").font(.headline)
+            Text("Monday, Jan 1 · 9:00 AM").font(.subheadline)
+        }
+        .redacted(reason: .placeholder)
+        .accessibilityLabel("Loading requests")
     }
 
     private func load() async {
@@ -171,11 +172,11 @@ extension ScheduleRequest {
 
     var statusColor: Color {
         switch status {
-        case "approved": Palette.leaf
-        case "denied": Palette.alert
-        case "awaiting_counterparty": Palette.dusk
-        case "pending", "awaiting_manager": Palette.amber
-        default: Palette.inkSoft
+        case "approved": .accentColor
+        case "denied": .red
+        case "awaiting_counterparty": .indigo
+        case "pending", "awaiting_manager": .orange
+        default: .secondary
         }
     }
 
@@ -193,50 +194,63 @@ extension ScheduleRequest {
         }
         return nil
     }
+
+    /// The shift a swap asks for in return, once one is chosen.
+    var counterShiftLine: String? {
+        guard let starts = counter_shift_starts_at else { return nil }
+        var line = WallClock.label(starts, format: "EEE, MMM d · h:mm a")
+        if let ends = counter_shift_ends_at { line += " – " + WallClock.label(ends, format: "h:mm a") }
+        if let role = counter_shift_role, !role.isEmpty { line += " · " + role }
+        return line
+    }
+
+    /// The shift on offer: when, until when, and as what.
+    var offeredShiftLine: String? {
+        guard let starts = shift_starts_at else { return nil }
+        var line = WallClock.label(starts, format: "EEEE, MMM d · h:mm a")
+        if let ends = shift_ends_at { line += " – " + WallClock.label(ends, format: "h:mm a") }
+        if let role = shift_role, !role.isEmpty { line += " · " + role }
+        return line
+    }
 }
 
-// MARK: - Cards
+// MARK: - Rows
 
-private struct OfferCard: View {
+private struct OfferRow: View {
     let offer: ScheduleRequest
     let busy: Bool
     let disabled: Bool
     let onAccept: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Avatar(name: offer.employee_name, size: 40)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(offer.request_type == "swap"
-                         ? "\(offer.employee_name) wants to swap"
-                         : "\(offer.employee_name) is offering a shift")
-                        .font(TypeScale.headline).foregroundStyle(Palette.ink)
-                    if let role = offer.shift_role {
-                        Text(role).font(TypeScale.subhead).foregroundStyle(Palette.inkSoft)
-                    }
-                }
-                Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(offer.request_type == "swap"
+                 ? "\(offer.employee_name) wants to swap"
+                 : "\(offer.employee_name) is offering a shift")
+                .font(.headline)
+            if let offered = offer.offeredShiftLine {
+                Text(offer.request_type == "swap" ? "Offers: \(offered)" : offered)
+                    .font(.subheadline).foregroundStyle(Color.secondary).monospacedDigit()
             }
-            if let when = offer.shift_starts_at {
-                let part = DayPart(wallClockISO: when)
-                Label(WallClock.label(when, format: "EEEE, MMM d · h:mm a"), systemImage: part.symbol)
-                    .font(TypeScale.callout)
-                    .foregroundStyle(part.color)
-                    .labelStyle(TightLabel())
+            if let wanted = offer.counterShiftLine {
+                Text("For: \(wanted)")
+                    .font(.subheadline).foregroundStyle(Color.secondary).monospacedDigit()
+            }
+            if let reason = offer.reason, !reason.isEmpty {
+                Text("\u{201C}\(reason)\u{201D}").font(.subheadline).foregroundStyle(Color.secondary)
             }
             Button(action: onAccept) {
                 LoadingLabel(title: offer.request_type == "swap" ? "Accept swap" : "Take this shift", busy: busy)
             }
-            .buttonStyle(PrimaryButtonStyle())
+            .buttonStyle(.borderedProminent)
             .disabled(disabled)
+            .padding(.top, 2)
         }
-        .padding(16)
-        .glassSurface(tint: Palette.leaf)
+        .padding(.vertical, 4)
     }
 }
 
-private struct RequestCard: View {
+private struct RequestRow: View {
     let request: ScheduleRequest
     let canEnd: Bool
     let busy: Bool
@@ -244,59 +258,37 @@ private struct RequestCard: View {
     let onEnd: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: request.kindSymbol)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(request.statusColor)
-                    .frame(width: 36, height: 36)
-                    .background(request.statusColor.opacity(0.13), in: Circle())
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(request.kindLabel).font(TypeScale.headline).foregroundStyle(Palette.ink)
-                    if let role = request.shift_role {
-                        Text(role).font(TypeScale.subhead).foregroundStyle(Palette.inkSoft)
-                    }
-                    if let when = request.whenLine {
-                        Text(when).font(TypeScale.subhead).foregroundStyle(Palette.inkSoft).monospacedDigit()
-                    }
-                }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Label(request.kindLabel, systemImage: request.kindSymbol)
+                    .font(.headline)
+                    .labelStyle(TightLabel())
                 Spacer(minLength: 8)
                 StatusPill(text: request.statusLabel, color: request.statusColor)
             }
+            if let role = request.shift_role {
+                Text(role).font(.subheadline).foregroundStyle(Color.secondary)
+            }
+            if let when = request.whenLine {
+                Text(when).font(.subheadline).foregroundStyle(Color.secondary).monospacedDigit()
+            }
+            if let wanted = request.counterShiftLine {
+                Text("For: \(wanted)").font(.subheadline).foregroundStyle(Color.secondary).monospacedDigit()
+            }
             if let note = request.review_notes, !note.isEmpty {
-                Label(note, systemImage: "quote.opening")
-                    .font(TypeScale.subhead)
-                    .foregroundStyle(Palette.inkSoft)
-                    .padding(.leading, 48)
+                Text("\u{201C}\(note)\u{201D}").font(.subheadline).foregroundStyle(Color.secondary)
             }
             if canEnd {
-                HStack {
-                    Spacer()
-                    Button(action: onEnd) {
-                        if busy { ProgressView() } else { Text(request.status == "pending" ? "Cancel request" : "Withdraw") }
-                    }
-                    .buttonStyle(GlassButtonStyle(tint: Palette.alert))
-                    .disabled(disabled)
+                Button(role: .destructive, action: onEnd) {
+                    if busy { ProgressView() } else { Text(request.status == "pending" ? "Cancel request" : "Withdraw") }
                 }
+                .buttonStyle(.borderless)
+                .font(.subheadline)
+                .disabled(disabled)
+                .padding(.top, 2)
             }
         }
-        .padding(16)
-        .glassSurface(elevated: false)
-    }
-}
-
-struct QuietNote: View {
-    let symbol: String
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol).foregroundStyle(Palette.inkFaint)
-            Text(text).font(TypeScale.subhead).foregroundStyle(Palette.inkSoft)
-            Spacer(minLength: 0)
-        }
-        .padding(16)
-        .glassSurface(elevated: false)
+        .padding(.vertical, 2)
     }
 }
 
@@ -304,6 +296,7 @@ struct QuietNote: View {
 
 private struct UnavailableView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
     let onSaved: () -> Void
     @State private var start = Date()
     @State private var end = Date()
@@ -311,26 +304,25 @@ private struct UnavailableView: View {
     @State private var saving = false
     @State private var error: String?
 
+    private var zone: TimeZone { appState.storeTimeZone ?? .current }
+
     var body: some View {
         Form {
             Section {
                 DatePicker("From", selection: $start, in: Date()..., displayedComponents: .date)
                 DatePicker("Through", selection: $end, in: start..., displayedComponents: .date)
             } header: {
-                Eyebrow("Dates you can't work")
+                Text("Dates you can't work")
             } footer: {
-                Text("Your manager sees this before building the schedule.").font(TypeScale.caption)
+                Text("Your manager sees this before building the schedule.")
             }
-            .listRowBackground(GlassRowBackground())
             Section {
                 TextField("Why? (optional)", text: $reason, axis: .vertical).lineLimit(2...5)
             } header: {
-                Eyebrow("Note for your manager")
+                Text("Note for your manager")
             }
-            .listRowBackground(GlassRowBackground())
             if let error {
-                Section { ErrorBanner(message: error) }
-                    .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+                Section { ErrorRow(message: error) }
             }
             Section {
                 Button {
@@ -342,8 +334,8 @@ private struct UnavailableView: View {
                             try await RequestService.create(ScheduleRequestBody(
                                 request_type: "unavailable", shift_id: nil,
                                 target_employee_id: nil, counter_shift_id: nil,
-                                unavailable_start: DateInput.date(start),
-                                unavailable_end: DateInput.date(end),
+                                unavailable_start: DateInput.date(start, timeZone: zone),
+                                unavailable_end: DateInput.date(end, timeZone: zone),
                                 reason: reason.isEmpty ? nil : reason
                             ))
                             onSaved()
@@ -353,18 +345,17 @@ private struct UnavailableView: View {
                 } label: {
                     LoadingLabel(title: "Send to my manager", busy: saving)
                 }
-                .buttonStyle(PrimaryButtonStyle())
-                .disabled(saving || DateInput.date(end) < DateInput.date(start))
+                .primaryActionRow()
+                .disabled(saving || DateInput.date(end, timeZone: zone) < DateInput.date(start, timeZone: zone))
             }
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
         }
-        .glassForm()
+        // The pickers choose days on the store's calendar.
+        .environment(\.timeZone, zone)
         .navigationTitle("Can't work")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { dismiss() } label: { Text("Cancel").font(TypeScale.callout) }
+                Button("Cancel") { dismiss() }
             }
         }
     }

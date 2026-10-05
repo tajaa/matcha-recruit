@@ -18,6 +18,9 @@ final class AppState {
     var unreadMessages = 0
     var unreadNotifications = 0
     var pendingConversationID: String?
+    /// The store's clock, learned with the schedule. Date pickers pick store
+    /// days, which is what the server compares against.
+    var storeTimeZone: TimeZone?
     private var pendingURL: URL?
 
     /// Keychain items outlive an uninstall. Without this a reinstall would
@@ -136,6 +139,7 @@ final class AppState {
         unreadMessages = 0
         unreadNotifications = 0
         pendingConversationID = nil
+        storeTimeZone = nil
         pendingURL = nil
         AppDelegate.pendingNotification = nil
     }

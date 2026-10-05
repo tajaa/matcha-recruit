@@ -23,230 +23,142 @@ struct ShiftDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                header.rise()
-                details.rise(delay: 0.04)
-                if let note = myAssignment?.manager_note,
-                   !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    managerNote(note).rise(delay: 0.08)
-                }
-                if let breaks = myAssignment?.planned_breaks, !breaks.isEmpty {
-                    plannedBreaks(breaks).rise(delay: 0.1)
-                }
-                if !crew.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        SectionTitle(title: mode == .mine ? "Working with you" : "On this shift")
-                        VStack(spacing: 0) {
-                            ForEach(Array(crew.enumerated()), id: \.element.id) { index, person in
-                                HStack(spacing: 12) {
-                                    Avatar(name: person.name, size: 34)
-                                    Text(person.name).font(TypeScale.callout).foregroundStyle(Palette.ink)
-                                    Spacer()
-                                }
-                                .padding(.vertical, 10)
-                                if index < crew.count - 1 { Divider().overlay(Palette.inkFaint.opacity(0.3)) }
-                            }
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(part.label, systemImage: part.symbol)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(part.color)
+                        .labelStyle(TightLabel())
+                    Text("\(WallClock.label(shift.starts_at, format: "h:mm a")) – \(WallClock.label(shift.ends_at, format: "h:mm a"))")
+                        .font(.title.bold())
+                        .monospacedDigit()
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(1)
+                    Text(shift.title).font(.title3).foregroundStyle(Color.secondary)
+                    if mode == .open || shift.has_conflict == true {
+                        HStack(spacing: 6) {
+                            if mode == .open { StatusPill(text: "Open", color: .accentColor) }
+                            if shift.has_conflict == true { StatusPill(text: "Overlaps your shift", color: .orange) }
                         }
-                        .padding(.horizontal, 16).padding(.vertical, 4)
-                        .glassSurface(elevated: false)
-                    }
-                    .rise(delay: 0.12)
-                }
-                if let notes = shift.notes, !notes.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        SectionTitle(title: "Shift notes")
-                        Text(notes).font(TypeScale.body).foregroundStyle(Palette.ink)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(16).glassSurface(elevated: false)
+                        .padding(.top, 2)
                     }
                 }
-                actions.rise(delay: 0.14)
+                .padding(.vertical, 4)
             }
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.top, 8)
-            .padding(.bottom, 30)
+
+            Section {
+                LabeledContent("Date", value: WallClock.label(shift.starts_at, format: "EEEE, MMMM d"))
+                if let duration = WallClock.duration(from: shift.starts_at, to: shift.ends_at) {
+                    LabeledContent("Length", value: duration)
+                }
+                if let location { LabeledContent("Location", value: location) }
+                if let department = shift.department, !department.isEmpty {
+                    LabeledContent("Department", value: department)
+                }
+            }
+
+            breaks
+
+            if let note = myAssignment?.manager_note,
+               !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Section("From your manager") { Text(note) }
+            }
+            if let notes = shift.notes, !notes.isEmpty {
+                Section("Shift notes") { Text(notes) }
+            }
+            if !crew.isEmpty {
+                Section(mode == .mine ? "Working with you" : "On this shift") {
+                    ForEach(crew) { person in
+                        HStack(spacing: 12) {
+                            Avatar(name: person.name, size: 32)
+                            Text(person.name)
+                        }
+                    }
+                }
+            }
+
+            actions
         }
-        .scrollIndicators(.hidden)
-        .ambientBackground(part)
         .navigationTitle("Shift")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { dismiss() } label: { Text("Done").font(TypeScale.callout) }
+                Button("Done") { dismiss() }
             }
         }
         .sheet(item: $action) { selection in
             NavigationStack {
                 RequestComposerView(action: selection, shift: shift) {
-                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { submitted = true }
+                    withAnimation { submitted = true }
                     Task { await onChanged() }
                 }
             }
-            .presentationCornerRadius(32)
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(part.label.uppercased() + " · " + WallClock.label(shift.starts_at, format: "EEEE, MMM d").uppercased(),
-                  systemImage: part.symbol)
-                .font(TypeScale.eyebrow).tracking(1.4)
-                .foregroundStyle(part.color)
-            Text("\(WallClock.label(shift.starts_at, format: "h:mm")) – \(WallClock.label(shift.ends_at, format: "h:mm a"))")
-                .font(TypeScale.hero)
-                .monospacedDigit()
-                .foregroundStyle(Palette.ink)
-                .minimumScaleFactor(0.6)
-                .lineLimit(1)
-            Text(shift.title).font(TypeScale.title).foregroundStyle(Palette.ink)
-            HStack(spacing: 8) {
-                if let duration = WallClock.duration(from: shift.starts_at, to: shift.ends_at) {
-                    StatusPill(text: duration, color: part.color)
+    /// The employee's own breaks: what the shift entitles them to, then the
+    /// times their manager planned.
+    @ViewBuilder
+    private var breaks: some View {
+        let guidance = myAssignment?.compliance_guidance
+        let planned = myAssignment?.planned_breaks ?? []
+        let minutes = shift.break_minutes ?? 0
+        if guidance?.entitlement != nil || guidance?.mealBreakWaived == true || !planned.isEmpty || minutes > 0 {
+            Section("Breaks") {
+                if let entitlement = guidance?.entitlement {
+                    Label(entitlement, systemImage: guidance?.needsAttention == true ? "exclamationmark.triangle" : "info.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(guidance?.needsAttention == true ? Color.orange : Color.secondary)
+                } else if planned.isEmpty && minutes > 0 {
+                    LabeledContent("Break", value: "\(minutes) minutes")
                 }
-                if mode == .open { StatusPill(text: "Open seat", color: Palette.leaf) }
-                if shift.has_conflict == true { StatusPill(text: "Overlaps your shift", color: Palette.amber) }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
-        .background(alignment: .bottomTrailing) {
-            Image(systemName: part.symbol)
-                .font(.system(size: 140))
-                .foregroundStyle(part.color.opacity(0.14))
-                .offset(x: 30, y: 36)
-                .accessibilityHidden(true)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.heroRadius, style: .continuous))
-        .glassSurface(cornerRadius: Metrics.heroRadius, tint: part.color)
-    }
-
-    private var details: some View {
-        VStack(spacing: 0) {
-            DetailRow(symbol: "calendar", label: "Date",
-                      value: WallClock.label(shift.starts_at, format: "EEEE, MMMM d"))
-            if let location { rowDivider; DetailRow(symbol: "mappin.and.ellipse", label: "Location", value: location) }
-            if let department = shift.department, !department.isEmpty {
-                rowDivider; DetailRow(symbol: "square.grid.2x2", label: "Department", value: department)
-            }
-            if let minutes = shift.break_minutes, minutes > 0 {
-                rowDivider; DetailRow(symbol: "cup.and.saucer", label: "Break", value: "\(minutes) minutes")
-            }
-        }
-        .padding(.horizontal, 16).padding(.vertical, 4)
-        .glassSurface(elevated: false)
-    }
-
-    private var rowDivider: some View {
-        Divider().overlay(Palette.inkFaint.opacity(0.3)).padding(.leading, 34)
-    }
-
-    private func managerNote(_ note: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("From your manager", systemImage: "quote.opening")
-                .font(TypeScale.eyebrow).tracking(1.2)
-                .foregroundStyle(Palette.leaf)
-                .textCase(.uppercase)
-            Text(note).font(TypeScale.body).foregroundStyle(Palette.ink)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .glassSurface(tint: Palette.leaf, elevated: false)
-    }
-
-    private func plannedBreaks(_ breaks: [PlannedBreak]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionTitle(title: "Your breaks")
-            ScrollView(.horizontal) {
-                HStack(spacing: 10) {
-                    ForEach(breaks) { item in
-                        HStack(spacing: 10) {
-                            Image(systemName: item.kind == "meal" ? "fork.knife" : "cup.and.saucer.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(part.color)
-                                .frame(width: 32, height: 32)
-                                .background(part.color.opacity(0.14), in: Circle())
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(WallClock.clockTime(item.start_local))
-                                    .font(TypeScale.headline).monospacedDigit().foregroundStyle(Palette.ink)
-                                Text("\(item.kind.capitalized) · \(item.duration_minutes) min")
-                                    .font(TypeScale.caption).foregroundStyle(Palette.inkSoft)
-                            }
-                        }
-                        .padding(.vertical, 10).padding(.leading, 10).padding(.trailing, 16)
-                        .glassSurface(cornerRadius: 18, elevated: false)
+                if guidance?.mealBreakWaived == true {
+                    Label("Meal-break waiver applies to this shift.", systemImage: "checkmark.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.secondary)
+                }
+                ForEach(planned) { item in
+                    LabeledContent {
+                        Text("\(item.duration_minutes) min")
+                    } label: {
+                        Label("\(WallClock.clockTime(item.start_local)) · \(item.kind.capitalized)",
+                              systemImage: item.kind == "meal" ? "fork.knife" : "cup.and.saucer")
+                            .monospacedDigit()
                     }
                 }
-                .padding(.vertical, 2)
             }
-            .scrollIndicators(.hidden)
         }
     }
 
     @ViewBuilder
     private var actions: some View {
         if submitted {
-            HStack(spacing: 12) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 24))
-                    .foregroundStyle(Palette.leaf)
-                    .symbolEffect(.bounce, value: submitted)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Sent to your manager").font(TypeScale.headline).foregroundStyle(Palette.ink)
-                    Text("Track it in Requests.").font(TypeScale.subhead).foregroundStyle(Palette.inkSoft)
+            Section {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sent to your manager").font(.headline)
+                        Text("Track it in Requests.").font(.subheadline).foregroundStyle(Color.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
                 }
-                Spacer()
             }
-            .padding(16)
-            .glassSurface(tint: Palette.leaf)
-            .transition(.scale(scale: 0.95).combined(with: .opacity))
             .sensoryFeedback(.success, trigger: submitted)
         } else if mode == .mine {
-            VStack(alignment: .leading, spacing: 10) {
-                SectionTitle(title: "Need a change?")
-                HStack(spacing: 10) {
-                    ActionTile(symbol: "arrow.left.arrow.right", title: "Swap") { action = .swap }
-                    ActionTile(symbol: "hand.raised.fill", title: "Offer up") { action = .pickup }
-                    ActionTile(symbol: "minus.circle.fill", title: "Drop") { action = .drop }
-                }
+            Section("Need a change?") {
+                Button { action = .swap } label: { Label("Swap with a coworker", systemImage: "arrow.left.arrow.right") }
+                Button { action = .pickup } label: { Label("Offer it up", systemImage: "hand.raised") }
+                Button(role: .destructive) { action = .drop } label: { Label("Ask to drop", systemImage: "minus.circle") }
             }
         } else if mode == .open {
-            Button { action = .claim } label: {
-                Label("Claim this shift", systemImage: "plus.circle.fill")
+            Section {
+                Button { action = .claim } label: {
+                    Label("Claim this shift", systemImage: "plus.circle.fill").frame(maxWidth: .infinity)
+                }
+                .primaryActionRow()
+                .accessibilityIdentifier("shift.claim")
             }
-            .buttonStyle(PrimaryButtonStyle())
-            .accessibilityIdentifier("shift.claim")
         }
-    }
-}
-
-private struct DetailRow: View {
-    let symbol: String
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Palette.inkSoft)
-                .frame(width: 22)
-            Text(label).font(TypeScale.callout).foregroundStyle(Palette.inkSoft)
-            Spacer()
-            Text(value).font(TypeScale.callout).foregroundStyle(Palette.ink).multilineTextAlignment(.trailing)
-        }
-        .padding(.vertical, 13)
-        .accessibilityElement(children: .combine)
-    }
-}
-
-struct ActionTile: View {
-    let symbol: String
-    let title: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) { TileContent(symbol: symbol, title: title) }
-            .buttonStyle(PressableStyle())
     }
 }

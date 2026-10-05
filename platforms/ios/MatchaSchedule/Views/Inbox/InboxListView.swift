@@ -10,37 +10,40 @@ struct InboxListView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            ScrollView {
-                VStack(spacing: 10) {
-                    if let error, loaded { ErrorBanner(message: error) }
-                    if !loaded {
-                        ForEach(0..<4, id: \.self) { _ in GlassPlaceholder(leading: .circle(50), lineWidths: [130, 200], label: "Loading messages") }
-                    } else if conversations.isEmpty {
-                        GlassMessage(
-                            symbol: "bubble.left.and.bubble.right.fill",
-                            title: "No messages yet",
-                            message: "Message a coworker or your manager about a shift.",
-                            actionTitle: "New message",
-                            action: { showCompose = true }
-                        )
-                        .rise()
-                    } else {
-                        ForEach(Array(conversations.enumerated()), id: \.element.id) { index, conversation in
-                            NavigationLink(value: conversation.id) {
-                                ConversationRow(conversation: conversation, myID: appState.currentUserID ?? "")
-                            }
-                            .buttonStyle(PressableStyle())
-                            .accessibilityIdentifier("conversation.row")
-                            .rise(delay: min(Double(index) * 0.03, 0.2))
+            List {
+                if let error, loaded {
+                    Section { ErrorRow(message: error) { Task { await load() } } }
+                }
+                if !loaded {
+                    ForEach(0..<4, id: \.self) { _ in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Coworker name").font(.headline)
+                            Text("The last message in the conversation").font(.subheadline)
                         }
+                        .redacted(reason: .placeholder)
+                        .accessibilityLabel("Loading messages")
+                    }
+                } else {
+                    ForEach(conversations) { conversation in
+                        NavigationLink(value: conversation.id) {
+                            ConversationRow(conversation: conversation, myID: appState.currentUserID ?? "")
+                        }
+                        .accessibilityIdentifier("conversation.row")
                     }
                 }
-                .padding(.horizontal, Metrics.gutter)
-                .padding(.bottom, 32)
-                .animation(.spring(response: 0.45, dampingFraction: 0.86), value: conversations.map(\.id))
             }
-            .scrollIndicators(.hidden)
-            .ambientBackground()
+            .listStyle(.plain)
+            .overlay {
+                if loaded && conversations.isEmpty && error == nil {
+                    ContentUnavailableView {
+                        Label("No messages yet", systemImage: "bubble.left.and.bubble.right")
+                    } description: {
+                        Text("Message a coworker or your manager about a shift.")
+                    } actions: {
+                        Button("New message") { showCompose = true }
+                    }
+                }
+            }
             .navigationTitle("Messages")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -57,7 +60,6 @@ struct InboxListView: View {
                     await load()
                     path.append(id)
                 }
-                .presentationCornerRadius(32)
             }
             .refreshable { await load() }
         }
@@ -105,47 +107,36 @@ private struct ConversationRow: View {
 
     var body: some View {
         let name = DM.title(conversation, myId: myID)
-        HStack(spacing: 14) {
-            ZStack(alignment: .topTrailing) {
-                Avatar(name: name, size: 50)
-                if unread > 0 {
-                    Circle().fill(Palette.leaf)
-                        .frame(width: 13, height: 13)
-                        .overlay(Circle().strokeBorder(Palette.surfaceSolid, lineWidth: 2))
-                        .offset(x: 2, y: -2)
-                }
-            }
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 12) {
+            Avatar(name: name, size: 44)
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(name)
-                        .font(.inter(16, unread > 0 ? .bold : .semibold, relativeTo: .headline))
-                        .foregroundStyle(Palette.ink)
+                        .font(.headline)
                         .lineLimit(1)
                     Spacer(minLength: 8)
                     if let at = conversation.lastMessageAt {
                         Text(Instant.short(at))
-                            .font(TypeScale.caption)
-                            .foregroundStyle(unread > 0 ? Palette.leaf : Palette.inkFaint)
+                            .font(.caption)
+                            .foregroundStyle(Color.secondary)
                     }
                 }
                 HStack(alignment: .top) {
                     Text(conversation.lastMessagePreview ?? "No messages yet")
-                        .font(unread > 0 ? .inter(14, .medium, relativeTo: .subheadline) : TypeScale.subhead)
-                        .foregroundStyle(unread > 0 ? Palette.ink : Palette.inkSoft)
+                        .font(.subheadline)
+                        .foregroundStyle(unread > 0 ? Color.primary : Color.secondary)
                         .lineLimit(2)
-                        .multilineTextAlignment(.leading)
                     Spacer(minLength: 8)
                     if unread > 0 {
                         Text("\(min(unread, 99))")
-                            .font(TypeScale.caption).foregroundStyle(.white)
+                            .font(.caption.weight(.semibold)).foregroundStyle(.white)
                             .padding(.horizontal, 7).padding(.vertical, 2)
-                            .background(Palette.leaf, in: Capsule())
+                            .background(Color.accentColor, in: Capsule())
+                            .accessibilityLabel("\(unread) unread")
                     }
                 }
             }
         }
-        .padding(14)
-        .glassSurface(elevated: unread > 0)
-        .contentShape(Rectangle())
+        .padding(.vertical, 2)
     }
 }

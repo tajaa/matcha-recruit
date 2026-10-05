@@ -54,6 +54,10 @@ final class InboxAndPushTests: XCTestCase {
         let id = "11111111-1111-1111-1111-111111111111"
         XCTAssertEqual(PushRoute.destination(for: ["type": "schedule_published"]), .schedule)
         XCTAssertEqual(PushRoute.destination(for: ["type": "schedule_request_decided"]), .requests)
+        // A break starting is about the shift, not a request.
+        XCTAssertEqual(PushRoute.destination(for: [
+            "type": "schedule_break_reminder", "link": "matchaschedule://schedule",
+        ]), .schedule)
         XCTAssertEqual(PushRoute.destination(for: ["type": "inbox_message", "metadata": ["conversation_id": id]]), .inbox(id))
         XCTAssertNil(PushRoute.destination(for: ["type": "inbox_message", "metadata": ["conversation_id": "../bad"]]))
         XCTAssertEqual(PushRoute.destination(for: URL(string: "matchaschedule://requests/\(id)")!), .requests)

@@ -12,7 +12,7 @@ struct RootView: View {
                 LaunchView()
             case .signedOut:
                 LoginView()
-                    .transition(.opacity.combined(with: .scale(scale: 1.02)))
+                    .transition(.opacity)
             case .ready(let profile):
                 MainTabs(profile: profile)
                     .transition(.opacity)
@@ -45,8 +45,6 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.35), value: phaseKey)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .foregroundStyle(Palette.ink)
-        .font(TypeScale.body)
         .onReceive(NotificationCenter.default.publisher(for: .schedulePushTapped)) { notification in
             appState.handlePush(notification.userInfo ?? [:])
         }
@@ -78,32 +76,22 @@ private struct BrandMark: View {
             .font(.system(size: size * 0.42, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: size, height: size)
-            .background(RoundedRectangle(cornerRadius: size * 0.3, style: .continuous).fill(Palette.leafGradient))
-            .overlay(RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.45), lineWidth: 1))
-            .shadow(color: Palette.leaf.opacity(0.4), radius: 14, y: 8)
+            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
             .accessibilityHidden(true)
     }
 }
 
 private struct LaunchView: View {
-    @State private var breathe = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var body: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 16) {
             BrandMark(size: 72)
-                .scaleEffect(breathe ? 1.04 : 0.96)
+            ProgressView()
             Text("Opening your schedule")
-                .font(TypeScale.callout)
-                .foregroundStyle(Palette.inkSoft)
+                .font(.subheadline)
+                .foregroundStyle(Color.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .ambientBackground(.opener)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { breathe = true }
-        }
+        .background(Color(.systemGroupedBackground))
     }
 }
 
@@ -120,50 +108,184 @@ private struct StatusView: View {
     @State private var busy = false
 
     var body: some View {
-        VStack(spacing: 20) {
-            Spacer()
-            VStack(spacing: 16) {
-                Image(systemName: symbol)
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(Palette.leaf)
-                    .frame(width: 72, height: 72)
-                    .background(Palette.leaf.opacity(0.14), in: Circle())
-                Text(title).font(TypeScale.title).multilineTextAlignment(.center)
-                Text(message).font(TypeScale.body).foregroundStyle(Palette.inkSoft)
-                    .multilineTextAlignment(.center)
-                if let error { Text(error).font(TypeScale.subhead).foregroundStyle(Palette.alert) }
-                if let action {
-                    Button {
-                        busy = true
-                        Task {
-                            defer { busy = false }
-                            do { try await action() } catch { self.error = error.localizedDescription }
-                        }
-                    } label: {
-                        if busy { ProgressView().tint(.white) } else { Text(actionTitle) }
+        ContentUnavailableView {
+            Label(title, systemImage: symbol)
+        } description: {
+            Text(message)
+            if let error { Text(error).foregroundStyle(.red) }
+        } actions: {
+            if let action {
+                Button {
+                    busy = true
+                    Task {
+                        defer { busy = false }
+                        do { try await action() } catch { self.error = error.localizedDescription }
                     }
-                    .buttonStyle(PrimaryButtonStyle())
-                    .disabled(busy)
-                    .padding(.top, 4)
+                } label: {
+                    if busy { ProgressView() } else { Text(actionTitle) }
                 }
-                if let link {
-                    Link("Open hey-matcha.com", destination: link)
-                        .font(TypeScale.callout)
-                        .foregroundStyle(Palette.leaf)
-                }
+                .buttonStyle(.borderedProminent)
+                .disabled(busy)
             }
-            .padding(28)
-            .glassSurface(cornerRadius: Metrics.heroRadius)
-            .rise()
-            Spacer()
+            if let link {
+                Link("Open hey-matcha.com", destination: link)
+            }
         }
-        .padding(Metrics.gutter)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .ambientBackground()
+        .background(Color(.systemGroupedBackground))
     }
 }
 
 // MARK: - Sign in
+
+/// The light behind the sign-in screen: morning in light mode, a late shift
+/// in dark. It drifts slowly so the glass above it has something to bend;
+/// still under Reduce Motion.
+private struct LoginBackdrop: View {
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var colors: [Color] {
+        let hex: [UInt32] = scheme == .dark
+            ? [0x3B2A12, 0x06231B, 0x1B2A63,
+               0x062019, 0x0F6B4C, 0x06231B,
+               0x020B08, 0x083226, 0x03130E]
+            : [0xFFDDB8, 0xDDF6EA, 0xB4EBD4,
+               0xF6FCF8, 0xC4F0DD, 0x98E2C4,
+               0xFFFFFF, 0xE6F8F0, 0xC6F0DE]
+        return hex.map { value in
+            Color(.sRGB, red: Double((value >> 16) & 0xFF) / 255, green: Double((value >> 8) & 0xFF) / 255,
+                  blue: Double(value & 0xFF) / 255)
+        }
+    }
+
+    var body: some View {
+        Group {
+            if #available(iOS 18.0, *) {
+                TimelineView(.animation(minimumInterval: 1.0 / 20, paused: reduceMotion)) { context in
+                    MeshGradient(width: 3, height: 3,
+                                 points: points(at: reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate),
+                                 colors: colors)
+                }
+            } else {
+                LinearGradient(colors: [colors[0], colors[4], colors[8]], startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    private func points(at time: TimeInterval) -> [SIMD2<Float>] {
+        let t = Float(time)
+        func drift(_ speed: Float, _ phase: Float, _ amount: Float) -> Float { sin(t * speed + phase) * amount }
+        return [
+            [0, 0], [0.5 + drift(0.21, 0, 0.10), 0], [1, 0],
+            [0, 0.45 + drift(0.17, 1, 0.08)],
+            [0.5 + drift(0.13, 2, 0.14), 0.42 + drift(0.15, 3, 0.10)],
+            [1, 0.5 + drift(0.19, 4, 0.08)],
+            [0, 1], [0.5 + drift(0.23, 5, 0.10), 1], [1, 1],
+        ]
+    }
+}
+
+/// What the app is for, shown with its own objects: a next shift, an approved
+/// swap and an open shift, floating as glass. Decoration, hidden from
+/// VoiceOver.
+private struct LoginHero: View {
+    @State private var shown = false
+    @State private var floating = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            // Staggered, not tilted or overlapped: glass cannot see through
+            // other glass, and it mis-sizes under a rotation.
+            swapNotice
+                .offset(x: 50, y: -94 + bob(3))
+                .modifier(Arrival(shown: shown, delay: 0.18))
+            shiftCard
+                .offset(x: -22, y: bob(-4))
+                .modifier(Arrival(shown: shown, delay: 0.05))
+            openShift
+                .offset(x: 44, y: 88 + bob(3))
+                .modifier(Arrival(shown: shown, delay: 0.3))
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 240)
+        .accessibilityHidden(true)
+        .task {
+            shown = true
+            guard !reduceMotion else { return }
+            // Started once the pieces have landed: a repeating animation begun
+            // in the same pass as their first layout also repeats that layout.
+            try? await Task.sleep(for: .seconds(1.4))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true)) { floating = true }
+        }
+    }
+
+    private func bob(_ amount: CGFloat) -> CGFloat { floating ? amount : -amount }
+
+    private var shiftCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "sunrise.fill").foregroundStyle(.orange)
+                Text("TOMORROW").tracking(0.8)
+                Spacer()
+                Text("in 14h")
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Color.secondary)
+            Text("6:30 – 2:30 PM")
+                .font(.system(size: 28, weight: .bold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text("Barista · Downtown")
+                .font(.subheadline)
+                .foregroundStyle(Color.secondary)
+        }
+        .padding(18)
+        .frame(width: 264)
+        .glassPanel(in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+    }
+
+    private var swapNotice: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.title3)
+                .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Swap approved").font(.subheadline.weight(.semibold))
+                Text("Saturday is covered").font(.caption).foregroundStyle(Color.secondary)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .glassPanel(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var openShift: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "plus.circle.fill").foregroundStyle(Color.accentColor)
+            Text("Open shift · Fri 4 PM").font(.subheadline.weight(.medium))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .glassPanel(in: Capsule())
+    }
+
+    /// Each piece settles into place in turn; a plain fade under Reduce Motion.
+    private struct Arrival: ViewModifier {
+        let shown: Bool
+        let delay: Double
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        func body(content: Content) -> some View {
+            content
+                .opacity(shown ? 1 : 0)
+                .scaleEffect(shown || reduceMotion ? 1 : 0.9)
+                .offset(y: shown || reduceMotion ? 0 : 24)
+                .animation(.spring(response: 0.7, dampingFraction: 0.78).delay(delay), value: shown)
+        }
+    }
+}
 
 private struct LoginView: View {
     private enum Field { case email, password }
@@ -176,51 +298,46 @@ private struct LoginView: View {
     @State private var error: String?
     @FocusState private var focus: Field?
 
-    private var canSubmit: Bool {
-        !busy && !email.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty
-    }
-
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 12) {
-                    BrandMark(size: 44)
-                    Text("Matcha Schedule")
-                        .font(.inter(17, .semibold, relativeTo: .headline))
-                        .foregroundStyle(Palette.ink)
-                }
-                .rise()
-                .padding(.top, 24)
-
-                Spacer(minLength: 72)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Your shifts,\nin your pocket.")
-                        .font(TypeScale.hero)
-                        .tracking(-0.8)
-                        .foregroundStyle(Palette.ink)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("Sign in with the work email your manager invited.")
-                        .font(TypeScale.body)
-                        .foregroundStyle(Palette.inkSoft)
-                }
-                .rise(delay: 0.06)
-                .padding(.bottom, 28)
-
-                VStack(spacing: 12) {
-                    GlassField(icon: "envelope.fill", focused: focus == .email) {
-                        TextField("Email", text: $email)
-                            .textContentType(.username)
-                            .keyboardType(.emailAddress)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .submitLabel(.next)
-                            .focused($focus, equals: .email)
-                            .onSubmit { focus = .password }
-                            .accessibilityIdentifier("login.email")
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 10) {
+                        BrandMark(size: 34)
+                        Text("Matcha Schedule").font(.headline)
                     }
-                    GlassField(icon: "lock.fill", focused: focus == .password) {
-                        HStack {
+                    .padding(.top, 12)
+
+                    LoginHero()
+                        .padding(.top, 20)
+
+                    Spacer(minLength: 20)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Your shifts,\nin your pocket.")
+                            .font(.system(size: 38, weight: .bold))
+                            .tracking(-0.6)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Sign in with the work email your manager invited.")
+                            .font(.body)
+                            .foregroundStyle(Color.secondary)
+                    }
+                    .padding(.bottom, 24)
+
+                    VStack(spacing: 0) {
+                        field(symbol: "envelope") {
+                            TextField("Email", text: $email)
+                                .textContentType(.username)
+                                .keyboardType(.emailAddress)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .submitLabel(.next)
+                                .focused($focus, equals: .email)
+                                .onSubmit { focus = .password }
+                                .accessibilityIdentifier("login.email")
+                        }
+                        Divider().padding(.leading, 52)
+                        field(symbol: "lock") {
                             Group {
                                 if revealPassword {
                                     TextField("Password", text: $password)
@@ -233,52 +350,77 @@ private struct LoginView: View {
                             .textContentType(.password)
                             .submitLabel(.go)
                             .focused($focus, equals: .password)
-                            .onSubmit { if canSubmit { submit() } }
+                            .onSubmit(submit)
                             Button { revealPassword.toggle() } label: {
                                 Image(systemName: revealPassword ? "eye.slash" : "eye")
-                                    .foregroundStyle(Palette.inkFaint)
+                                    .foregroundStyle(Color.secondary)
                             }
                             .accessibilityLabel(revealPassword ? "Hide password" : "Show password")
                         }
                     }
+                    .glassPanel(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+
                     if let error {
-                        ErrorBanner(message: error)
+                        ErrorRow(message: error)
+                            .padding(.top, 14)
+                            .padding(.horizontal, 4)
                     }
+
+                    // Never greyed out: with a field still empty, it takes
+                    // the employee to that field.
                     Button(action: submit) {
                         LoadingLabel(title: "Sign in", busy: busy)
+                            .font(.headline)
+                            .padding(.vertical, 6)
                     }
-                    .buttonStyle(PrimaryButtonStyle())
-                    .disabled(!canSubmit)
-                    .padding(.top, 6)
+                    .prominentGlassButton()
+                    .controlSize(.large)
+                    .buttonBorderShape(.capsule)
+                    .disabled(busy)
+                    .padding(.top, 16)
                     .accessibilityIdentifier("login.submit")
                     // Only when an error appears; clearing it on a retry is not a failure.
                     .sensoryFeedback(trigger: error) { _, new in new == nil ? nil : .error }
-                }
-                .rise(delay: 0.12)
 
-                Text("Can't sign in? Ask your manager to resend your invite.")
-                    .font(TypeScale.caption)
-                    .foregroundStyle(Palette.inkFaint)
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 22)
-                    .rise(delay: 0.18)
+                    Text("Can't sign in? Ask your manager to resend your invite.")
+                        .font(.footnote)
+                        .foregroundStyle(Color.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 16)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 16)
+                .frame(minHeight: proxy.size.height)
+                .animation(.default, value: error)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 24)
-            .animation(.spring(response: 0.4, dampingFraction: 0.85), value: error)
+            .scrollDismissesKeyboard(.interactively)
+            .scrollBounceBehavior(.basedOnSize)
         }
-        .scrollDismissesKeyboard(.interactively)
-        .scrollBounceBehavior(.basedOnSize)
-        .ambientBackground(.opener)
+        .background { LoginBackdrop() }
+    }
+
+    private func field(symbol: String, @ViewBuilder content: () -> some View) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .foregroundStyle(Color.secondary)
+                .frame(width: 24)
+                .accessibilityHidden(true)
+            content()
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 56)
     }
 
     private func submit() {
+        let address = email.trimmingCharacters(in: .whitespaces)
+        guard !address.isEmpty else { focus = .email; return }
+        guard !password.isEmpty else { focus = .password; return }
         focus = nil
         busy = true
         error = nil
         Task {
             defer { busy = false }
-            do { try await appState.signIn(email: email.trimmingCharacters(in: .whitespaces), password: password) }
+            do { try await appState.signIn(email: address, password: password) }
             catch { self.error = error.localizedDescription }
         }
     }
@@ -306,7 +448,6 @@ private struct MainTabs: View {
                 .badge(appState.unreadNotifications)
                 .tag(3)
         }
-        .tint(Palette.leaf)
         .sensoryFeedback(.selection, trigger: appState.selectedTab)
     }
 }
@@ -321,75 +462,72 @@ private struct MeView: View {
     @State private var permission: UNAuthorizationStatus?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                profileCard.rise()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    SectionTitle(title: "Notifications")
-                    VStack(spacing: 0) {
-                        NavigationLink {
-                            NotificationFeedView()
-                        } label: {
-                            MeRow(symbol: "bell.fill", tint: Palette.leaf, title: "Notifications") {
-                                if appState.unreadNotifications > 0 {
-                                    Text("\(appState.unreadNotifications)")
-                                        .font(TypeScale.caption).foregroundStyle(.white)
-                                        .padding(.horizontal, 8).padding(.vertical, 3)
-                                        .background(Palette.leaf, in: Capsule())
-                                        .contentTransition(.numericText())
-                                }
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(Palette.inkFaint)
-                            }
-                        }
-                        .buttonStyle(PressableStyle())
-                        .accessibilityIdentifier("me.notifications")
-                        Divider().overlay(Palette.inkFaint.opacity(0.3)).padding(.leading, 52)
-                        MeRow(symbol: "app.badge.fill", tint: Palette.dusk, title: "Push alerts") {
-                            StatusPill(text: permissionLabel, color: permissionColor)
-                        }
-                        if permission == .denied || permission == .notDetermined {
-                            Button(permission == .denied ? "Turn on in Settings" : "Turn on push alerts") {
-                                if permission == .denied {
-                                    if let url = URL(string: UIApplication.openSettingsURLString) {
-                                        UIApplication.shared.open(url)
-                                    }
-                                } else {
-                                    Task {
-                                        await PushService.shared.activate()
-                                        permission = await PushService.shared.authorizationStatus()
-                                    }
-                                }
-                            }
-                            .buttonStyle(GlassButtonStyle(tint: Palette.leaf))
-                            .padding(.bottom, 12)
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .glassSurface(elevated: false)
-                    if let pushError = PushService.shared.lastError {
-                        ErrorBanner(message: "Push alerts couldn't be set up: \(pushError)")
+        List {
+            Section {
+                HStack(spacing: 14) {
+                    Avatar(name: profile.displayName, size: 56)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(profile.displayName).font(.title3.weight(.semibold))
+                        Text(profile.company_name).font(.subheadline).foregroundStyle(Color.secondary)
                     }
                 }
-                .rise(delay: 0.06)
+                .padding(.vertical, 4)
+            }
 
-                VStack(alignment: .leading, spacing: 10) {
-                    SectionTitle(title: "Appearance")
-                    HStack(spacing: 10) {
-                        ForEach(AppearancePreference.allCases) { option in
-                            AppearanceTile(option: option, selected: appearance == option) {
-                                appearance = option
+            Section {
+                NavigationLink {
+                    NotificationFeedView()
+                } label: {
+                    Label("Notifications", systemImage: "bell")
+                        .badge(appState.unreadNotifications)
+                }
+                .accessibilityIdentifier("me.notifications")
+                LabeledContent {
+                    Text(permissionLabel)
+                } label: {
+                    Label("Push alerts", systemImage: "app.badge")
+                }
+                if permission == .denied || permission == .notDetermined {
+                    Button(permission == .denied ? "Turn on in Settings" : "Turn on push alerts") {
+                        if permission == .denied {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        } else {
+                            Task {
+                                await PushService.shared.activate()
+                                permission = await PushService.shared.authorizationStatus()
                             }
                         }
                     }
-                    .padding(12)
-                    .glassSurface(elevated: false)
-                    .sensoryFeedback(.selection, trigger: appearance)
                 }
-                .rise(delay: 0.08)
+                if let pushError = PushService.shared.lastError {
+                    ErrorRow(message: "Push alerts couldn't be set up: \(pushError)")
+                }
+            } header: {
+                Text("Notifications")
+            }
 
+            Section("Appearance") {
+                // Buttons rather than a Picker: each option keeps its own
+                // identifier for the screen tour.
+                ForEach(AppearancePreference.allCases) { option in
+                    Button { appearance = option } label: {
+                        HStack {
+                            Text(option.label).foregroundStyle(Color.primary)
+                            Spacer()
+                            if appearance == option {
+                                Image(systemName: "checkmark").fontWeight(.semibold)
+                            }
+                        }
+                    }
+                    .accessibilityAddTraits(appearance == option ? .isSelected : [])
+                    .accessibilityIdentifier("appearance.\(option.rawValue)")
+                }
+            }
+            .sensoryFeedback(.selection, trigger: appearance)
+
+            Section {
                 Button(role: .destructive) {
                     signingOut = true
                     Task {
@@ -400,43 +538,17 @@ private struct MeView: View {
                     }
                 } label: {
                     HStack {
-                        if signingOut { ProgressView() } else { Image(systemName: "rectangle.portrait.and.arrow.right") }
                         Text("Sign out")
+                        if signingOut { Spacer(); ProgressView() }
                     }
-                    .font(TypeScale.headline)
-                    .foregroundStyle(Palette.alert)
-                    .frame(maxWidth: .infinity, minHeight: 52)
-                    .glassSurface(cornerRadius: 26, elevated: false)
                 }
-                .buttonStyle(PressableStyle())
                 .disabled(signingOut)
-                .rise(delay: 0.1)
-
-                Text(versionLine)
-                    .font(TypeScale.caption)
-                    .foregroundStyle(Palette.inkFaint)
-                    .frame(maxWidth: .infinity)
+            } footer: {
+                Text(versionLine).frame(maxWidth: .infinity).padding(.top, 8)
             }
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.bottom, 32)
         }
-        .scrollIndicators(.hidden)
-        .ambientBackground()
         .navigationTitle("Me")
         .task { permission = await PushService.shared.authorizationStatus() }
-    }
-
-    private var profileCard: some View {
-        HStack(spacing: 16) {
-            Avatar(name: profile.displayName, size: 64)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(profile.displayName).font(TypeScale.title).foregroundStyle(Palette.ink)
-                Text(profile.company_name).font(TypeScale.callout).foregroundStyle(Palette.inkSoft)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(20)
-        .glassSurface(cornerRadius: Metrics.heroRadius)
     }
 
     private var versionLine: String {
@@ -455,132 +567,5 @@ private struct MeView: View {
         case .notDetermined: "Not set up"
         default: "Checking"
         }
-    }
-
-    private var permissionColor: Color {
-        switch permission {
-        case .authorized, .provisional, .ephemeral: Palette.leaf
-        case .denied: Palette.alert
-        default: Palette.inkSoft
-        }
-    }
-}
-
-private struct MeRow<Trailing: View>: View {
-    let symbol: String
-    let tint: Color
-    let title: String
-    @ViewBuilder let trailing: () -> Trailing
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(tint.gradient))
-            Text(title).font(TypeScale.callout).foregroundStyle(Palette.ink)
-            Spacer()
-            trailing()
-        }
-        .padding(.vertical, 12)
-        .contentShape(Rectangle())
-    }
-}
-
-// MARK: - Appearance picker
-
-/// A miniature of the app in each appearance, the way iOS Settings shows it.
-private struct AppearanceTile: View {
-    let option: AppearancePreference
-    let selected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                swatch
-                    .frame(height: 92)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(selected ? Palette.leaf : Palette.inkFaint.opacity(0.3),
-                                          lineWidth: selected ? 2 : 1)
-                    )
-                    .shadow(color: Palette.shadow.opacity(selected ? 0.16 : 0.06), radius: 8, y: 4)
-                    .scaleEffect(selected ? 1 : 0.96)
-                Text(option.label)
-                    .font(TypeScale.callout)
-                    .foregroundStyle(Palette.ink)
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 18))
-                    .foregroundStyle(selected ? Palette.leaf : Palette.inkFaint)
-                    .contentTransition(.symbolEffect(.replace))
-            }
-            .frame(maxWidth: .infinity)
-            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: selected)
-        }
-        .buttonStyle(PressableStyle())
-        .accessibilityLabel("\(option.label) appearance")
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityIdentifier("appearance.\(option.rawValue)")
-    }
-
-    @ViewBuilder
-    private var swatch: some View {
-        switch option {
-        case .light: Miniature(dark: false)
-        case .dark: Miniature(dark: true)
-        case .system: Miniature(dark: false).overlay(Miniature(dark: true).mask(DiagonalHalf()))
-        }
-    }
-}
-
-/// Fixed colors on purpose: each miniature shows its own appearance whatever
-/// the phone is currently in.
-private struct Miniature: View {
-    let dark: Bool
-
-    var body: some View {
-        let base = Color(hex: dark ? 0x0A120D : 0xF1F6EC)
-        let card = Color(hex: dark ? 0x1D2B22 : 0xFFFFFF)
-        let line = Color(hex: dark ? 0x3A4B40 : 0xDCE5D6)
-        ZStack(alignment: .topLeading) {
-            base
-            LinearGradient(colors: [Color(hex: 0x9FD37F, alpha: dark ? 0.25 : 0.45), .clear],
-                           startPoint: .topTrailing, endPoint: .center)
-            VStack(alignment: .leading, spacing: 6) {
-                RoundedRectangle(cornerRadius: 2).fill(line).frame(width: 28, height: 5)
-                HStack(spacing: 5) {
-                    Capsule().fill(Color(hex: 0xF39A6B)).frame(width: 3)
-                    VStack(alignment: .leading, spacing: 4) {
-                        RoundedRectangle(cornerRadius: 2).fill(line).frame(width: 30, height: 4)
-                        RoundedRectangle(cornerRadius: 2).fill(line.opacity(0.7)).frame(width: 20, height: 4)
-                    }
-                }
-                .padding(7)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(card, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                HStack(spacing: 5) {
-                    Capsule().fill(Color(hex: 0x7C6CE6)).frame(width: 3)
-                    RoundedRectangle(cornerRadius: 2).fill(line).frame(width: 26, height: 4)
-                }
-                .padding(7)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(card, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            }
-            .padding(9)
-        }
-    }
-}
-
-private struct DiagonalHalf: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.closeSubpath()
-        return path
     }
 }

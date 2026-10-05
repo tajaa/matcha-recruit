@@ -8,39 +8,33 @@ struct NotificationFeedView: View {
     @State private var busy = false
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 10) {
-                if let error { ErrorBanner(message: error) }
-                if !loaded {
-                    ProgressView().padding(.top, 40)
-                } else if notifications.isEmpty && error == nil {
-                    GlassMessage(symbol: "bell.badge", title: "You're all caught up",
-                                 message: "Schedule updates and replies to your requests land here.")
-                        .rise()
-                } else {
-                    ForEach(Array(notifications.enumerated()), id: \.element.id) { index, notice in
-                        Button { Task { await open(notice) } } label: {
-                            NoticeRow(notice: notice)
-                        }
-                        .buttonStyle(PressableStyle())
-                        .disabled(busy)
-                        .rise(delay: min(Double(index) * 0.03, 0.2))
+        List {
+            if let error {
+                Section { ErrorRow(message: error) { Task { await load() } } }
+            }
+            if !loaded {
+                Section { HStack { ProgressView(); Text("Loading notifications").foregroundStyle(Color.secondary) } }
+            } else if !notifications.isEmpty {
+                ForEach(notifications) { notice in
+                    Button { Task { await open(notice) } } label: {
+                        NoticeRow(notice: notice)
                     }
+                    .disabled(busy)
                 }
             }
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.bottom, 32)
-            .animation(.spring(response: 0.4, dampingFraction: 0.86), value: notifications.map(\.is_read))
         }
-        .scrollIndicators(.hidden)
-        .ambientBackground()
+        .overlay {
+            if loaded && notifications.isEmpty && error == nil {
+                ContentUnavailableView("You're all caught up", systemImage: "bell",
+                                       description: Text("Schedule updates and replies to your requests land here."))
+            }
+        }
         .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { Task { await markAllRead() } } label: {
-                    Text("Mark all read").font(TypeScale.callout)
-                }
-                .disabled(busy || appState.unreadNotifications == 0)
+                Button("Mark all read") { Task { await markAllRead() } }
+                    .disabled(busy || appState.unreadNotifications == 0)
             }
         }
         .refreshable { await load() }
@@ -86,45 +80,42 @@ struct NotificationFeedView: View {
 private struct NoticeRow: View {
     let notice: ScheduleNotification
 
-    private var style: (symbol: String, color: Color) {
+    private var symbol: String {
         switch notice.type {
-        case "schedule_published": ("calendar.badge.checkmark", Palette.leaf)
-        case "schedule_offer_received": ("arrow.left.arrow.right", Palette.dusk)
-        case "schedule_request_accepted": ("hand.thumbsup.fill", Palette.leaf)
-        case "schedule_request_withdrawn": ("arrow.uturn.backward", Palette.amber)
-        case "schedule_request_decided": ("checkmark.seal.fill", Palette.dusk)
-        case "inbox_message": ("bubble.left.fill", Palette.leaf)
-        default: ("bell.fill", Palette.inkSoft)
+        case "schedule_published": "calendar.badge.checkmark"
+        case "schedule_break_reminder": "cup.and.saucer"
+        case "schedule_offer_received": "arrow.left.arrow.right"
+        case "schedule_request_accepted": "hand.thumbsup"
+        case "schedule_request_withdrawn": "arrow.uturn.backward"
+        case "schedule_request_decided": "checkmark.seal"
+        case "inbox_message": "bubble.left"
+        default: "bell"
         }
     }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: style.symbol)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(style.color)
-                .frame(width: 38, height: 38)
-                .background(style.color.opacity(0.14), in: Circle())
-            VStack(alignment: .leading, spacing: 4) {
+            Image(systemName: symbol)
+                .foregroundStyle(notice.is_read ? Color.secondary : Color.accentColor)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(notice.title)
-                        .font(.inter(15, notice.is_read ? .semibold : .bold, relativeTo: .headline))
-                        .foregroundStyle(Palette.ink)
+                        .font(notice.is_read ? .body : .headline)
+                        .foregroundStyle(Color.primary)
                     Spacer(minLength: 8)
                     Text(Instant.short(notice.created_at))
-                        .font(TypeScale.caption).foregroundStyle(Palette.inkFaint)
+                        .font(.caption).foregroundStyle(Color.secondary)
                 }
                 if let body = notice.body {
-                    Text(body).font(TypeScale.subhead).foregroundStyle(Palette.inkSoft)
+                    Text(body).font(.subheadline).foregroundStyle(Color.secondary)
                         .multilineTextAlignment(.leading)
                 }
             }
             if !notice.is_read {
-                Circle().fill(Palette.leaf).frame(width: 8, height: 8).padding(.top, 6)
+                Circle().fill(Color.accentColor).frame(width: 8, height: 8).padding(.top, 6)
+                    .accessibilityLabel("Unread")
             }
         }
-        .padding(14)
-        .glassSurface(tint: notice.is_read ? nil : style.color, elevated: !notice.is_read)
-        .opacity(notice.is_read ? 0.88 : 1)
     }
 }

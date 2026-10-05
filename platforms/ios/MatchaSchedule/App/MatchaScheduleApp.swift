@@ -7,15 +7,10 @@ struct MatchaScheduleApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(AppearancePreference.storageKey) private var appearance = AppearancePreference.system
 
-    init() {
-        Appearance.configure()
-    }
-
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(appState)
-                .tint(Palette.leaf)
                 .task { await appState.restore() }
                 .onAppear { AppearancePreference.apply(appearance) }
                 .onChange(of: appearance) { _, preference in
