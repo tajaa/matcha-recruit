@@ -115,6 +115,7 @@ struct AvailabilityView: View {
                 .disabled(loading || saving || pending != nil)
             }
         }
+        .appBackdrop()
         .navigationTitle("Availability")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }

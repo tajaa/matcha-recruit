@@ -16,8 +16,8 @@ struct MatchaScheduleApp: App {
             RootView()
                 .environment(appState)
                 .font(.app(.body))
-                // Explicit: the asset-catalog global accent is not always applied.
-                .tint(Color.brand)
+                // Neutral controls; emerald is kept for what it marks (today, unread).
+                .tint(Color.primary)
                 .task { await appState.restore() }
                 .onAppear { AppearancePreference.apply(appearance) }
                 .onChange(of: appearance) { _, preference in

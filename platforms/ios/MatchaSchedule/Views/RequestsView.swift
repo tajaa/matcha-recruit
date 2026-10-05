@@ -9,73 +9,78 @@ struct RequestsView: View {
     @State private var busyID: String?
     @State private var error: String?
     @State private var showUnavailable = false
+    @State private var showAvailability = false
+    @State private var showTimeOff = false
 
     var body: some View {
         List {
-            Section {
-                Button { showUnavailable = true } label: {
-                    Label {
-                        Text("Can't work").foregroundStyle(Color.primary)
-                    } icon: {
-                        Image(systemName: "calendar.badge.minus")
-                    }
-                }
-                NavigationLink {
-                    AvailabilityView { Task { await load() } }
-                } label: {
-                    Label("Availability", systemImage: "clock.arrow.2.circlepath")
-                }
+            HStack(spacing: 10) {
+                shortcut("Can't work", symbol: "calendar.badge.minus") { showUnavailable = true }
+                shortcut("Availability", symbol: "clock.arrow.2.circlepath") { showAvailability = true }
                 if profile.enabled_features.time_off {
-                    NavigationLink { PTOView() } label: {
-                        Label("Time off", systemImage: "sun.horizon")
-                    }
+                    shortcut("Time off", symbol: "sun.horizon") { showTimeOff = true }
                 }
             }
+            .bareRow(top: 8, bottom: 4)
 
             if let error {
-                Section { ErrorRow(message: error) { Task { await load() } } }
+                ErrorRow(message: error) { Task { await load() } }.cardRow()
             }
 
-            Section("Waiting on you") {
-                if !loaded && loading {
-                    placeholderRow
-                } else if offers.isEmpty {
-                    Text("No offers from coworkers right now.").foregroundStyle(Color.secondary)
-                } else {
-                    ForEach(offers) { offer in
+            SectionLabel("Waiting on you")
+            if !loaded && loading {
+                placeholderRow
+            } else if offers.isEmpty {
+                Text("No offers from coworkers right now.")
+                    .foregroundStyle(Color.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .cardRow()
+            } else {
+                ForEach(offers) { offer in
+                    GlassHero {
                         OfferRow(offer: offer, busy: busyID == offer.id, disabled: busyID != nil) {
                             Task { await accept(offer) }
                         }
                     }
+                    .bareRow(top: 6, bottom: 6)
                 }
             }
 
-            Section("Your requests") {
-                if !loaded && loading {
-                    placeholderRow
-                    placeholderRow
-                } else if requests.isEmpty {
-                    Text("Swaps, drops and time off you ask for will show up here.").foregroundStyle(Color.secondary)
-                } else {
-                    ForEach(requests) { request in
-                        RequestRow(
-                            request: request,
-                            canEnd: request.isPending && (
-                                request.employee_id == profile.id ||
-                                (request.status == "awaiting_manager" && request.target_employee_id == profile.id)
-                            ),
-                            busy: busyID == request.id,
-                            disabled: busyID != nil
-                        ) { Task { await end(request) } }
-                    }
+            SectionLabel("Your requests")
+            if !loaded && loading {
+                placeholderRow
+                placeholderRow
+            } else if requests.isEmpty {
+                Text("Swaps, drops and time off you ask for will show up here.")
+                    .foregroundStyle(Color.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .cardRow()
+            } else {
+                ForEach(requests) { request in
+                    RequestRow(
+                        request: request,
+                        canEnd: request.isPending && (
+                            request.employee_id == profile.id ||
+                            (request.status == "awaiting_manager" && request.target_employee_id == profile.id)
+                        ),
+                        busy: busyID == request.id,
+                        disabled: busyID != nil
+                    ) { Task { await end(request) } }
+                    .cardRow()
                 }
             }
         }
+        .listStyle(.plain)
+        .appBackdrop()
         .animation(.default, value: offers.map(\.id))
         .animation(.default, value: requests.map(\.id))
         .navigationTitle("Requests")
         .refreshable { await load() }
         .task { await load() }
+        .navigationDestination(isPresented: $showAvailability) {
+            AvailabilityView { Task { await load() } }
+        }
+        .navigationDestination(isPresented: $showTimeOff) { PTOView() }
         .sheet(isPresented: $showUnavailable) {
             NavigationStack {
                 UnavailableView { Task { await load() } }
@@ -83,12 +88,27 @@ struct RequestsView: View {
         }
     }
 
+    private func shortcut(_ title: String, symbol: String, perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            VStack(spacing: 6) {
+                Image(systemName: symbol).font(.title3)
+                Text(title).font(.app(.subheadline, .medium)).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+        }
+        .glassButton()
+        .buttonBorderShape(.roundedRectangle(radius: 20))
+    }
+
     private var placeholderRow: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("Shift swap request").font(.app(.headline))
             Text("Monday, Jan 1 · 9:00 AM").font(.app(.subheadline))
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .redacted(reason: .placeholder)
+        .cardRow()
         .accessibilityLabel("Loading requests")
     }
 
@@ -242,11 +262,11 @@ private struct OfferRow: View {
             Button(action: onAccept) {
                 LoadingLabel(title: offer.request_type == "swap" ? "Accept swap" : "Take this shift", busy: busy)
             }
-            .buttonStyle(.borderedProminent)
+            .prominentGlassButton()
+            .buttonBorderShape(.capsule)
             .disabled(disabled)
-            .padding(.top, 2)
+            .padding(.top, 6)
         }
-        .padding(.vertical, 4)
     }
 }
 
@@ -351,6 +371,7 @@ private struct UnavailableView: View {
         }
         // The pickers choose days on the store's calendar.
         .environment(\.timeZone, zone)
+        .appBackdrop()
         .navigationTitle("Can't work")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

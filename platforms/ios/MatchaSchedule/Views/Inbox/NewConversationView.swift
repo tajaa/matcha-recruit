@@ -54,6 +54,7 @@ struct NewConversationView: View {
                 }
             }
         }
+        .appBackdrop()
         .overlay {
             if searching && results.isEmpty {
                 ProgressView()
@@ -97,6 +98,7 @@ struct NewConversationView: View {
                 .disabled(creating || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
+        .appBackdrop()
     }
 
     private func runSearch() async {

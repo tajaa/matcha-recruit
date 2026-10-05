@@ -133,6 +133,7 @@ struct RequestComposerView: View {
                 .disabled(saving || loading || (action == .swap && (targetEmployeeID.isEmpty || counterShiftID.isEmpty)))
             }
         }
+        .appBackdrop()
         .navigationTitle(action.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

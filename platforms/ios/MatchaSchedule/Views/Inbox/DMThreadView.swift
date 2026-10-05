@@ -58,6 +58,7 @@ struct DMThreadView: View {
             }
         }
         .safeAreaInset(edge: .bottom) { composer }
+        .background { AppBackdrop() }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
@@ -80,15 +81,16 @@ struct DMThreadView: View {
                 TextField("Message", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .focused($composing)
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .padding(.horizontal, 16).padding(.vertical, 11)
+                    .glassPanel(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                 Button { Task { await send() } } label: {
-                    if sending {
-                        ProgressView().frame(width: 34, height: 34)
-                    } else {
-                        Image(systemName: "arrow.up.circle.fill").font(.system(size: 34))
+                    Group {
+                        if sending { ProgressView() } else { Image(systemName: "arrow.up").fontWeight(.bold) }
                     }
+                    .frame(width: 22, height: 30)
                 }
+                .prominentGlassButton()
+                .buttonBorderShape(.circle)
                 .disabled(!canSend)
                 .accessibilityLabel("Send message")
                 .sensoryFeedback(.impact(weight: .light), trigger: messages.count)
@@ -96,7 +98,6 @@ struct DMThreadView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.bar)
     }
 
     private var canSend: Bool {
@@ -156,7 +157,7 @@ private struct MessageBubble: View {
                     Text(message.content)
                         .foregroundStyle(isMine ? Color.white : Color.primary)
                         .padding(.horizontal, 14).padding(.vertical, 9)
-                        .background(isMine ? Color.brand : Color(.secondarySystemFill),
+                        .background(isMine ? Color.brand : Color(.secondarySystemGroupedBackground),
                                     in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
                 ForEach(message.attachments ?? []) { attachment in
