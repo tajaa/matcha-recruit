@@ -60,7 +60,18 @@ struct ScheduleView: View {
             // minute a shift ends instead of counting down to the past.
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 List {
-                    Section {
+                    nextShift(now: WallClock.now(context.date, timeZone: zone))
+
+                    if let error {
+                        ErrorRow(message: error) { Task { await reload() } }.cardRow()
+                    }
+
+                    weekContent
+                }
+                .listStyle(.plain)
+                // The week floats over the shifts, which scroll beneath it.
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    VStack(spacing: 10) {
                         WeekHeader(
                             week: week,
                             today: todayKey,
@@ -75,21 +86,16 @@ struct ScheduleView: View {
                         }
                         .pickerStyle(.segmented)
                     }
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
-                    .listRowSeparator(.hidden)
-
-                    if let error {
-                        Section { ErrorRow(message: error) { Task { await reload() } } }
-                    }
-
-                    nextShift(now: WallClock.now(context.date, timeZone: zone))
-
-                    weekContent
+                    .padding(.horizontal, 12)
+                    .padding(.top, 4)
+                    .padding(.bottom, 12)
+                    .glassPanel(in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
                 }
-                .listStyle(.insetGrouped)
             }
         }
+        .appBackdrop()
         .navigationTitle("Schedule")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -125,21 +131,25 @@ struct ScheduleView: View {
     @ViewBuilder
     private func nextShift(now: Date) -> some View {
         if let shift = ScheduleService.nextShift(in: upcoming, now: now) {
-            Section("Next shift") {
-                Button { selectedShift = shift } label: {
+            Button { selectedShift = shift } label: {
+                GlassHero {
                     NextShiftRow(shift: shift, now: now, location: snapshot?.locations[shift.location_id ?? ""])
                 }
-                .accessibilityIdentifier("schedule.next")
             }
+            .buttonStyle(.plain)
+            .bareRow(top: 8, bottom: 8)
+            .accessibilityIdentifier("schedule.next")
         } else if upcomingState == .failed {
-            Section("Next shift") {
+            VStack(alignment: .leading, spacing: 8) {
                 Label("Couldn't load your next shift. Your week below is unaffected.",
                       systemImage: "exclamationmark.arrow.circlepath")
                     .font(.app(.subheadline))
                     .foregroundStyle(Color.secondary)
                 Button("Try again") { Task { await loadUpcoming() } }
+                    .buttonStyle(.borderless)
                     .accessibilityIdentifier("schedule.next.retry")
             }
+            .cardRow()
         }
     }
 
@@ -148,63 +158,62 @@ struct ScheduleView: View {
     @ViewBuilder
     private var weekContent: some View {
         if current == nil && error == nil {
-            Section {
-                ForEach(0..<3, id: \.self) { _ in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("9:00 AM – 5:00 PM").font(.app(.headline))
-                        Text("Role · Store name").font(.app(.subheadline))
-                    }
+            ForEach(0..<3, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("9:00 AM – 5:00 PM").font(.app(.headline))
+                    Text("Role · Store name").font(.app(.subheadline))
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .redacted(reason: .placeholder)
+                .cardRow()
+                .accessibilityLabel("Loading shifts")
             }
-            .redacted(reason: .placeholder)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Loading shifts")
         } else if current != nil && displayed.isEmpty && (page == .team || openShifts.isEmpty) {
-            Section {
-                ContentUnavailableView(
-                    page == .mine ? "Nothing scheduled this week" : "No team shifts this week",
-                    systemImage: page == .mine ? "calendar" : "person.3",
-                    description: Text(page == .mine
-                        ? "Pick up an open shift when one is posted, or check another week."
-                        : "Published shifts at your store will show up here.")
-                )
-            }
-            .listRowBackground(Color.clear)
+            ContentUnavailableView(
+                page == .mine ? "Nothing scheduled this week" : "No team shifts this week",
+                systemImage: page == .mine ? "calendar" : "person.3",
+                description: Text(page == .mine
+                    ? "Pick up an open shift when one is posted, or check another week."
+                    : "Published shifts at your store will show up here.")
+            )
+            .bareRow(top: 24)
         } else {
             ForEach(groupedDays, id: \.key) { day in
-                Section(dayTitle(day.key)) {
-                    ForEach(Array(day.shifts.enumerated()), id: \.element.id) { index, shift in
-                        Button { selectedShift = shift } label: {
-                            ShiftRow(
-                                shift: shift,
-                                location: current?.locations[shift.location_id ?? ""],
-                                showsCrew: page == .team,
-                                employeeID: profile.id
-                            )
-                        }
-                        .accessibilityIdentifier("shift.row")
-                        // The day strip scrolls to a day's first shift.
-                        .id(index == 0 ? day.key : "shift-" + shift.id)
+                Text(dayTitle(day.key))
+                    .font(.app(.title3))
+                    .bareRow(top: 14, bottom: 2)
+                    .id(day.key)
+                ForEach(day.shifts) { shift in
+                    Button { selectedShift = shift } label: {
+                        ShiftRow(
+                            shift: shift,
+                            location: current?.locations[shift.location_id ?? ""],
+                            showsCrew: page == .team,
+                            employeeID: profile.id
+                        )
                     }
+                    .cardRow()
+                    .accessibilityIdentifier("shift.row")
                 }
             }
             if page == .mine && !openShifts.isEmpty {
-                Section {
-                    ForEach(openShifts) { shift in
-                        Button { selectedShift = shift } label: {
-                            ShiftRow(
-                                shift: shift,
-                                location: current?.locations[shift.location_id ?? ""],
-                                showsDay: true,
-                                isOpen: true
-                            )
-                        }
-                        .accessibilityIdentifier("shift.row")
-                    }
-                } header: {
-                    Text("Open shifts")
-                } footer: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Open shifts").font(.app(.title3))
                     Text("Claim one and your manager approves it.")
+                        .font(.app(.subheadline)).foregroundStyle(Color.secondary)
+                }
+                .bareRow(top: 14, bottom: 2)
+                ForEach(openShifts) { shift in
+                    Button { selectedShift = shift } label: {
+                        ShiftRow(
+                            shift: shift,
+                            location: current?.locations[shift.location_id ?? ""],
+                            showsDay: true,
+                            isOpen: true
+                        )
+                    }
+                    .cardRow()
+                    .accessibilityIdentifier("shift.row")
                 }
             }
         }
@@ -306,7 +315,6 @@ private struct WeekHeader: View {
                 }
             }
         }
-        // Each control in the row takes its own taps.
         .buttonStyle(.borderless)
         .sensoryFeedback(.selection, trigger: week)
     }
@@ -336,7 +344,7 @@ private struct WeekHeader: View {
                     .font(.app(.body, isToday ? .semibold : .regular))
                     .monospacedDigit()
                     .foregroundStyle(isToday ? Color.white : parts.isEmpty ? Color.secondary : Color.primary)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 34, height: 34)
                     .background { if isToday { Circle().fill(Color.brand) } }
                 HStack(spacing: 3) {
                     ForEach(Array(parts.prefix(3).enumerated()), id: \.offset) { _, part in

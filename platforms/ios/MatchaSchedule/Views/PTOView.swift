@@ -9,40 +9,52 @@ struct PTOView: View {
     var body: some View {
         List {
             if let error {
-                Section { ErrorRow(message: error) { Task { await load() } } }
+                ErrorRow(message: error) { Task { await load() } }.cardRow()
             }
             if let summary {
-                Section {
-                    LabeledContent("Available") {
+                GlassHero {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Available").font(.app(.subheadline, .medium)).foregroundStyle(Color.secondary)
                         Text("\(Self.trimmed(summary.balance.balance_hours)) hours")
-                            .font(.app(.title2, .bold))
+                            .font(.app(.largeTitle, .bold))
                             .monospacedDigit()
-                            .foregroundStyle(Color.primary)
                             .contentTransition(.numericText())
-                    }
-                    Button { showForm = true } label: { Label("Request time off", systemImage: "plus") }
-                }
-                Section("Waiting for approval") {
-                    if summary.pending_requests.isEmpty {
-                        Text("Nothing pending.").foregroundStyle(Color.secondary)
-                    }
-                    ForEach(summary.pending_requests) { request in
-                        PTORow(request: request, pending: true, busy: busyID == request.id,
-                               disabled: busyID != nil) { Task { await cancel(request) } }
+                        Button { showForm = true } label: {
+                            Label("Request time off", systemImage: "plus").font(.app(.subheadline, .semibold))
+                        }
+                        .prominentGlassButton()
+                        .buttonBorderShape(.capsule)
                     }
                 }
-                Section("Approved this year") {
-                    if summary.approved_requests.isEmpty {
-                        Text("No approved time off yet this year.").foregroundStyle(Color.secondary)
-                    }
-                    ForEach(summary.approved_requests) { request in
-                        PTORow(request: request, pending: false, busy: false, disabled: true) {}
-                    }
+                .bareRow(top: 8, bottom: 4)
+
+                SectionLabel("Waiting for approval")
+                if summary.pending_requests.isEmpty {
+                    Text("Nothing pending.").foregroundStyle(Color.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading).cardRow()
+                }
+                ForEach(summary.pending_requests) { request in
+                    PTORow(request: request, pending: true, busy: busyID == request.id,
+                           disabled: busyID != nil) { Task { await cancel(request) } }
+                        .cardRow()
+                }
+                SectionLabel("Approved this year")
+                if summary.approved_requests.isEmpty {
+                    Text("No approved time off yet this year.").foregroundStyle(Color.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading).cardRow()
+                }
+                ForEach(summary.approved_requests) { request in
+                    PTORow(request: request, pending: false, busy: false, disabled: true) {}
+                        .cardRow()
                 }
             } else if error == nil {
-                Section { HStack { ProgressView(); Text("Loading your time off").foregroundStyle(Color.secondary) } }
+                HStack { ProgressView(); Text("Loading your time off").foregroundStyle(Color.secondary) }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .cardRow()
             }
         }
+        .listStyle(.plain)
+        .appBackdrop()
         .navigationTitle("Time off")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
@@ -169,6 +181,7 @@ private struct PTORequestForm: View {
         }
         // The pickers choose days on the store's calendar.
         .environment(\.timeZone, zone)
+        .appBackdrop()
         .navigationTitle("Request time off")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

@@ -91,7 +91,7 @@ private struct LaunchView: View {
                 .foregroundStyle(Color.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemGroupedBackground))
+        .background { AppBackdrop(vivid: true) }
     }
 }
 
@@ -131,60 +131,11 @@ private struct StatusView: View {
                 Link("Open hey-matcha.com", destination: link)
             }
         }
-        .background(Color(.systemGroupedBackground))
+        .background { AppBackdrop(vivid: true) }
     }
 }
 
 // MARK: - Sign in
-
-/// The light behind the sign-in screen: morning in light mode, a late shift
-/// in dark. It drifts slowly so the glass above it has something to bend;
-/// still under Reduce Motion.
-private struct LoginBackdrop: View {
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var colors: [Color] {
-        let hex: [UInt32] = scheme == .dark
-            ? [0x3B2A12, 0x06231B, 0x1B2A63,
-               0x062019, 0x0F6B4C, 0x06231B,
-               0x020B08, 0x083226, 0x03130E]
-            : [0xFFDDB8, 0xDDF6EA, 0xB4EBD4,
-               0xF6FCF8, 0xC4F0DD, 0x98E2C4,
-               0xFFFFFF, 0xE6F8F0, 0xC6F0DE]
-        return hex.map { value in
-            Color(.sRGB, red: Double((value >> 16) & 0xFF) / 255, green: Double((value >> 8) & 0xFF) / 255,
-                  blue: Double(value & 0xFF) / 255)
-        }
-    }
-
-    var body: some View {
-        Group {
-            if #available(iOS 18.0, *) {
-                TimelineView(.animation(minimumInterval: 1.0 / 20, paused: reduceMotion)) { context in
-                    MeshGradient(width: 3, height: 3,
-                                 points: points(at: reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate),
-                                 colors: colors)
-                }
-            } else {
-                LinearGradient(colors: [colors[0], colors[4], colors[8]], startPoint: .topLeading, endPoint: .bottomTrailing)
-            }
-        }
-        .ignoresSafeArea()
-    }
-
-    private func points(at time: TimeInterval) -> [SIMD2<Float>] {
-        let t = Float(time)
-        func drift(_ speed: Float, _ phase: Float, _ amount: Float) -> Float { sin(t * speed + phase) * amount }
-        return [
-            [0, 0], [0.5 + drift(0.21, 0, 0.10), 0], [1, 0],
-            [0, 0.45 + drift(0.17, 1, 0.08)],
-            [0.5 + drift(0.13, 2, 0.14), 0.42 + drift(0.15, 3, 0.10)],
-            [1, 0.5 + drift(0.19, 4, 0.08)],
-            [0, 1], [0.5 + drift(0.23, 5, 0.10), 1], [1, 1],
-        ]
-    }
-}
 
 /// What the app is for, shown with its own objects: a next shift, an approved
 /// swap and an open shift, floating as glass. Decoration, hidden from
@@ -396,7 +347,7 @@ private struct LoginView: View {
             .scrollDismissesKeyboard(.interactively)
             .scrollBounceBehavior(.basedOnSize)
         }
-        .background { LoginBackdrop() }
+        .background { AppBackdrop(vivid: true) }
     }
 
     private func field(symbol: String, @ViewBuilder content: () -> some View) -> some View {
@@ -448,6 +399,7 @@ private struct MainTabs: View {
                 .badge(appState.unreadNotifications)
                 .tag(3)
         }
+        .tabBarMinimizesOnScroll()
         .sensoryFeedback(.selection, trigger: appState.selectedTab)
     }
 }
@@ -463,7 +415,7 @@ private struct MeView: View {
 
     var body: some View {
         List {
-            Section {
+            GlassHero {
                 HStack(spacing: 14) {
                     Avatar(name: profile.displayName, size: 56)
                     VStack(alignment: .leading, spacing: 2) {
@@ -471,17 +423,19 @@ private struct MeView: View {
                         Text(profile.company_name).font(.app(.subheadline)).foregroundStyle(Color.secondary)
                     }
                 }
-                .padding(.vertical, 4)
             }
+            .bareRow(top: 8, bottom: 4)
 
-            Section {
-                NavigationLink {
-                    NotificationFeedView()
-                } label: {
-                    Label("Notifications", systemImage: "bell")
-                        .badge(appState.unreadNotifications)
-                }
-                .accessibilityIdentifier("me.notifications")
+            SectionLabel("Notifications")
+            NavigationLink {
+                NotificationFeedView()
+            } label: {
+                Label("Notifications", systemImage: "bell")
+                    .badge(appState.unreadNotifications)
+            }
+            .cardRow()
+            .accessibilityIdentifier("me.notifications")
+            VStack(alignment: .leading, spacing: 10) {
                 LabeledContent {
                     Text(permissionLabel)
                 } label: {
@@ -500,53 +454,67 @@ private struct MeView: View {
                             }
                         }
                     }
+                    .buttonStyle(.borderless)
                 }
                 if let pushError = PushService.shared.lastError {
                     ErrorRow(message: "Push alerts couldn't be set up: \(pushError)")
                 }
-            } header: {
-                Text("Notifications")
             }
+            .cardRow()
 
-            Section("Appearance") {
-                // Buttons rather than a Picker: each option keeps its own
-                // identifier for the screen tour.
+            SectionLabel("Appearance")
+            // Buttons rather than a Picker: each option keeps its own
+            // identifier for the screen tour.
+            HStack(spacing: 6) {
                 ForEach(AppearancePreference.allCases) { option in
                     Button { appearance = option } label: {
-                        HStack {
-                            Text(option.label).foregroundStyle(Color.primary)
-                            Spacer()
-                            if appearance == option {
-                                Image(systemName: "checkmark").fontWeight(.semibold)
-                            }
-                        }
+                        Text(option.label)
+                            .font(.app(.subheadline, appearance == option ? .semibold : .regular))
+                            .foregroundStyle(appearance == option ? Color(.systemBackground) : Color.primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background { if appearance == option { Capsule().fill(Color.primary) } }
+                            .contentShape(Capsule())
                     }
+                    .buttonStyle(.borderless)
                     .accessibilityAddTraits(appearance == option ? .isSelected : [])
                     .accessibilityIdentifier("appearance.\(option.rawValue)")
                 }
             }
+            .cardRow()
             .sensoryFeedback(.selection, trigger: appearance)
 
-            Section {
-                Button(role: .destructive) {
-                    signingOut = true
-                    Task {
-                        defer { signingOut = false }
-                        // Never fails: offline sign-out clears locally and
-                        // queues the server-side revoke for the next launch.
-                        await appState.signOut()
-                    }
-                } label: {
-                    HStack {
-                        Text("Sign out")
-                        if signingOut { Spacer(); ProgressView() }
-                    }
+            Button(role: .destructive) {
+                signingOut = true
+                Task {
+                    defer { signingOut = false }
+                    // Never fails: offline sign-out clears locally and
+                    // queues the server-side revoke for the next launch.
+                    await appState.signOut()
                 }
-                .disabled(signingOut)
-            } footer: {
-                Text(versionLine).frame(maxWidth: .infinity).padding(.top, 8)
+            } label: {
+                HStack {
+                    if signingOut { ProgressView() }
+                    Text("Sign out").font(.app(.headline))
+                }
+                .foregroundStyle(.red)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
             }
+            .glassButton()
+            .controlSize(.large)
+            .buttonBorderShape(.capsule)
+            .disabled(signingOut)
+            .bareRow(top: 20, bottom: 4)
+
+            Text(versionLine)
+                .font(.app(.footnote))
+                .foregroundStyle(Color.secondary)
+                .frame(maxWidth: .infinity)
+                .bareRow(top: 4, bottom: 16)
         }
+        .listStyle(.plain)
+        .appBackdrop()
         .navigationTitle("Me")
         .task { permission = await PushService.shared.authorizationStatus() }
     }

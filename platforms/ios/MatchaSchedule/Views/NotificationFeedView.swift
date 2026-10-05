@@ -10,19 +10,24 @@ struct NotificationFeedView: View {
     var body: some View {
         List {
             if let error {
-                Section { ErrorRow(message: error) { Task { await load() } } }
+                ErrorRow(message: error) { Task { await load() } }.cardRow()
             }
             if !loaded {
-                Section { HStack { ProgressView(); Text("Loading notifications").foregroundStyle(Color.secondary) } }
-            } else if !notifications.isEmpty {
+                HStack { ProgressView(); Text("Loading notifications").foregroundStyle(Color.secondary) }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .cardRow()
+            } else {
                 ForEach(notifications) { notice in
                     Button { Task { await open(notice) } } label: {
                         NoticeRow(notice: notice)
                     }
                     .disabled(busy)
+                    .cardRow()
                 }
             }
         }
+        .listStyle(.plain)
+        .appBackdrop()
         .overlay {
             if loaded && notifications.isEmpty && error == nil {
                 ContentUnavailableView("You're all caught up", systemImage: "bell",

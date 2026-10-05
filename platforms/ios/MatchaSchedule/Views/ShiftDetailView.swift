@@ -24,7 +24,8 @@ struct ShiftDetailView: View {
 
     var body: some View {
         List {
-            Section {
+            // No glass here: the sheet is already glass, and glass cannot sit on glass.
+            Group {
                 VStack(alignment: .leading, spacing: 6) {
                     Label(part.label, systemImage: part.symbol)
                         .font(.app(.subheadline, .medium))
@@ -44,10 +45,11 @@ struct ShiftDetailView: View {
                         .padding(.top, 2)
                     }
                 }
-                .padding(.vertical, 4)
             }
+            .padding(.horizontal, 4)
+            .bareRow(top: 8, bottom: 10)
 
-            Section {
+            VStack(spacing: 12) {
                 LabeledContent("Date", value: WallClock.label(shift.starts_at, format: "EEEE, MMMM d"))
                 if let duration = WallClock.duration(from: shift.starts_at, to: shift.ends_at) {
                     LabeledContent("Length", value: duration)
@@ -57,29 +59,38 @@ struct ShiftDetailView: View {
                     LabeledContent("Department", value: department)
                 }
             }
+            .cardRow()
 
             breaks
 
             if let note = myAssignment?.manager_note,
                !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Section("From your manager") { Text(note) }
+                SectionLabel("From your manager")
+                Text(note).frame(maxWidth: .infinity, alignment: .leading).cardRow()
             }
             if let notes = shift.notes, !notes.isEmpty {
-                Section("Shift notes") { Text(notes) }
+                SectionLabel("Shift notes")
+                Text(notes).frame(maxWidth: .infinity, alignment: .leading).cardRow()
             }
             if !crew.isEmpty {
-                Section(mode == .mine ? "Working with you" : "On this shift") {
+                SectionLabel(mode == .mine ? "Working with you" : "On this shift")
+                VStack(alignment: .leading, spacing: 12) {
                     ForEach(crew) { person in
                         HStack(spacing: 12) {
                             Avatar(name: person.name, size: 32)
                             Text(person.name)
+                            Spacer(minLength: 0)
                         }
                     }
                 }
+                .cardRow()
             }
 
             actions
         }
+        .listStyle(.plain)
+        // Cleared so the sheet's own glass shows behind the cards.
+        .scrollContentBackground(.hidden)
         .navigationTitle("Shift")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -105,7 +116,8 @@ struct ShiftDetailView: View {
         let planned = myAssignment?.planned_breaks ?? []
         let minutes = shift.break_minutes ?? 0
         if guidance?.entitlement != nil || guidance?.mealBreakWaived == true || !planned.isEmpty || minutes > 0 {
-            Section("Breaks") {
+            SectionLabel("Breaks")
+            VStack(alignment: .leading, spacing: 12) {
                 if let entitlement = guidance?.entitlement {
                     Label(entitlement, systemImage: guidance?.needsAttention == true ? "exclamationmark.triangle" : "info.circle")
                         .font(.app(.subheadline))
@@ -128,37 +140,57 @@ struct ShiftDetailView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardRow()
         }
     }
 
     @ViewBuilder
     private var actions: some View {
         if submitted {
-            Section {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Sent to your manager").font(.app(.headline))
-                        Text("Track it in Requests.").font(.app(.subheadline)).foregroundStyle(Color.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.brand)
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sent to your manager").font(.app(.headline))
+                    Text("Track it in Requests.").font(.app(.subheadline)).foregroundStyle(Color.secondary)
                 }
+            } icon: {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.brand)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardRow()
             .sensoryFeedback(.success, trigger: submitted)
         } else if mode == .mine {
-            Section("Need a change?") {
-                Button { action = .swap } label: { Label("Swap with a coworker", systemImage: "arrow.left.arrow.right") }
-                Button { action = .pickup } label: { Label("Offer it up", systemImage: "hand.raised") }
-                Button(role: .destructive) { action = .drop } label: { Label("Ask to drop", systemImage: "minus.circle") }
+            SectionLabel("Need a change?")
+            HStack(spacing: 10) {
+                change("Swap", symbol: "arrow.left.arrow.right") { action = .swap }
+                change("Offer up", symbol: "hand.raised") { action = .pickup }
+                change("Drop", symbol: "minus.circle") { action = .drop }
             }
+            .bareRow(top: 6, bottom: 16)
         } else if mode == .open {
-            Section {
-                Button { action = .claim } label: {
-                    Label("Claim this shift", systemImage: "plus.circle.fill").frame(maxWidth: .infinity)
-                }
-                .primaryActionRow()
-                .accessibilityIdentifier("shift.claim")
+            Button { action = .claim } label: {
+                LoadingLabel(title: "Claim this shift", busy: false)
+                    .font(.app(.headline))
+                    .padding(.vertical, 6)
             }
+            .prominentGlassButton()
+            .controlSize(.large)
+            .buttonBorderShape(.capsule)
+            .bareRow(top: 12, bottom: 16)
+            .accessibilityIdentifier("shift.claim")
         }
+    }
+
+    private func change(_ title: String, symbol: String, perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            VStack(spacing: 6) {
+                Image(systemName: symbol).font(.title3)
+                Text(title).font(.app(.subheadline, .medium))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+        }
+        .glassButton()
+        .buttonBorderShape(.roundedRectangle(radius: 18))
     }
 }

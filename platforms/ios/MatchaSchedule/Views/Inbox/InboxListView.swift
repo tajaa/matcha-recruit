@@ -12,7 +12,7 @@ struct InboxListView: View {
         NavigationStack(path: $path) {
             List {
                 if let error, loaded {
-                    Section { ErrorRow(message: error) { Task { await load() } } }
+                    ErrorRow(message: error) { Task { await load() } }.cardRow()
                 }
                 if !loaded {
                     ForEach(0..<4, id: \.self) { _ in
@@ -20,7 +20,9 @@ struct InboxListView: View {
                             Text("Coworker name").font(.app(.headline))
                             Text("The last message in the conversation").font(.app(.subheadline))
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .redacted(reason: .placeholder)
+                        .cardRow()
                         .accessibilityLabel("Loading messages")
                     }
                 } else {
@@ -28,11 +30,13 @@ struct InboxListView: View {
                         NavigationLink(value: conversation.id) {
                             ConversationRow(conversation: conversation, myID: appState.currentUserID ?? "")
                         }
+                        .cardRow()
                         .accessibilityIdentifier("conversation.row")
                     }
                 }
             }
             .listStyle(.plain)
+            .appBackdrop()
             .overlay {
                 if loaded && conversations.isEmpty && error == nil {
                     ContentUnavailableView {
