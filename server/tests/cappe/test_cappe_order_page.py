@@ -193,7 +193,7 @@ def _wire_checkout(monkeypatch, *, requires_approval, fulfillment="digital", str
     monkeypatch.setattr(commerce, "fetch_option_groups", AsyncMock(return_value={}))
     monkeypatch.setattr(commerce, "lock_stock_rows", AsyncMock())
     monkeypatch.setattr(commerce, "fetch_site_owner", AsyncMock(return_value=owner))
-    monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200)))
+    monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200, has=lambda _f: False)))
     monkeypatch.setattr(commerce, "require_can_sell", lambda _: None)
     monkeypatch.setattr(commerce, "check_recipient_send_ok", AsyncMock(return_value=True))
     monkeypatch.setattr(commerce, "get_cappe_stripe", lambda: stripe)
@@ -293,7 +293,7 @@ def _wire_pay(monkeypatch, row, stripe=None):
     stripe = stripe or PayStripe()
     monkeypatch.setattr(commerce, "get_connection", lambda: Ctx(conn))
     monkeypatch.setattr(commerce, "get_cappe_stripe", lambda: stripe)
-    monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200)))
+    monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200, has=lambda _f: False)))
     monkeypatch.setattr(commerce, "require_can_sell", lambda _: None)
     return conn, stripe
 

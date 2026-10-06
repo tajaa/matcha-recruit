@@ -56,6 +56,7 @@ _SITE_COLS = (
     "template_id, template_slug, status, theme_config, meta_config, timezone, is_multi_location, "
     "tax_rate_bps, tax_label, "
     "shipping_flat_cents, shipping_free_threshold_cents, shipping_label, "
+    "home_country, currency, "
     "receipt_prefix, "
     "listed, directory_category, directory_tags, directory_blurb, directory_confirmed_at, "
     "published_at, created_at, updated_at"
@@ -365,6 +366,28 @@ async def get_site(site_id: UUID, account: CappeAccount = Depends(require_cappe_
     return site_row_to_dict(row, page_count=page_count)
 
 
+async def _guard_currency_change(conn, site_id: UUID) -> None:
+    """A store with live subscriptions can't change currency: each one bills
+    in the currency it started in, and Stripe holds a customer to a single
+    currency, so the store's next subscriber could not check out. Locks the
+    site row so a second save can't race this check."""
+    await conn.execute("SELECT 1 FROM cappe_sites WHERE id = $1 FOR UPDATE", site_id)
+    live = await conn.fetchval(
+        "SELECT COUNT(*) FROM cappe_shopper_subscriptions WHERE site_id = $1 "
+        "AND status NOT IN ('canceled', 'incomplete_expired')",
+        site_id,
+    )
+    if live:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "has_subscriptions", "count": live,
+                "message": f"{live} subscription{'s are' if live != 1 else ' is'} still billing in the "
+                           "current currency. End them before changing the store's currency.",
+            },
+        )
+
+
 @router.put("/sites/{site_id}", response_model=CappeSite)
 async def update_site(
     site_id: UUID, body: CappeSiteUpdate, account: CappeAccount = Depends(require_cappe_account)
@@ -421,6 +444,14 @@ async def update_site(
             add("shipping_free_threshold_cents", body.shipping_free_threshold_cents)
         if body.shipping_label is not None:
             add("shipping_label", body.shipping_label.strip() or "Shipping")
+        if body.home_country is not None:
+            add("home_country", body.home_country)
+        new_currency = None
+        if body.currency is not None and body.currency != await conn.fetchval(
+            "SELECT currency FROM cappe_sites WHERE id = $1", site_id,
+        ):
+            new_currency = body.currency
+            add("currency", new_currency)
         if "receipt_prefix" in body.model_fields_set:
             add("receipt_prefix", body.receipt_prefix or None)
         if body.status is not None:
@@ -442,13 +473,30 @@ async def update_site(
 
         sets.append("updated_at = NOW()")
         args.extend([site_id, account.id])
-        try:
-            row = await conn.fetchrow(
+        def write():
+            return conn.fetchrow(
                 f"""UPDATE cappe_sites SET {', '.join(sets)}
                     WHERE id = ${len(args) - 1} AND account_id = ${len(args)}
                     RETURNING {_SITE_COLS}""",
                 *args,
             )
+
+        try:
+            if new_currency:
+                async with conn.transaction():
+                    await _guard_currency_change(conn, site_id)
+                    row = await write()
+                    # Every product is priced in the store's currency. Prices
+                    # keep their numbers; the owner reviews them (the dashboard
+                    # says so). Orders keep the currency they were placed in.
+                    await conn.execute(
+                        "UPDATE cappe_products SET currency = $1, updated_at = NOW() WHERE site_id = $2",
+                        new_currency, site_id,
+                    )
+            else:
+                row = await write()
+        except HTTPException:
+            raise
         except Exception as exc:  # unique custom_domain / slug collision, etc.
             s = str(exc)
             if "cappe_sites_custom_domain_key" in s:

@@ -6,7 +6,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from ._validators import MAX_SNAPSHOT_BYTES, app_url_scheme, assert_json_size, iana_timezone
+from ._validators import (
+    MAX_SNAPSHOT_BYTES, app_url_scheme, assert_json_size, iana_timezone,
+    ship_country as country_code, store_currency,
+)
 
 # Apex-domain shape (labels 1-63 chars, alnum/hyphen, real-looking TLD).
 _DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")
@@ -143,6 +146,13 @@ class CappeSiteUpdate(_SnapshotSizeLimit):
     # Explicit null clears the threshold (model_fields_set gate in the route).
     shipping_free_threshold_cents: Optional[int] = Field(default=None, ge=0)
     shipping_label: Optional[str] = Field(default=None, max_length=40)
+    # Where the store is based: its shipping settings and tax rate above are
+    # the rates for this country (services/shipping.py).
+    home_country: Optional[str] = Field(default=None, max_length=2)
+    _home = field_validator("home_country")(country_code)
+    # What the store charges in. Products follow it; see routes/sites.py.
+    currency: Optional[str] = Field(default=None, max_length=3)
+    _currency = field_validator("currency")(store_currency)
     # Reaches a Content-Disposition filename on both receipt routes, so it is
     # restricted to characters that can't break out of the quoted header value.
     receipt_prefix: Optional[str] = Field(
@@ -188,6 +198,8 @@ class CappeSite(BaseModel):
     shipping_flat_cents: int = 0
     shipping_free_threshold_cents: Optional[int] = None
     shipping_label: str = "Shipping"
+    home_country: str = "US"
+    currency: str = "USD"
     receipt_prefix: Optional[str] = None
     # Discover directory. `listed` is the tenant's own opt-out; the platform-side
     # `directory_blocked` takedown is deliberately NOT exposed here — a suspended

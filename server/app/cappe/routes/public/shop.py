@@ -12,6 +12,8 @@ from ...services.cart import price_cart, priceable_products
 from ...services.recurring import build_subscription_lines
 from ...services.common import receipt_filename as _receipt_filename
 from ...services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
+from ...services.entitlements import resolve_entitlements
+from ...services.shipping import Destination, home_country, load_zones, resolve_destination, ship_countries
 from .._shared import fetch_option_groups, loads_list
 from ._common import _published_site, _read_rate_limit, _reject_reserved
 
@@ -81,7 +83,10 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
     await _read_rate_limit(request)
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
-        settings = await conn.fetchrow("SELECT tax_rate_bps,shipping_flat_cents,shipping_free_threshold_cents FROM cappe_sites WHERE id=$1", site["id"])
+        settings = await conn.fetchrow(
+            "SELECT tax_rate_bps,shipping_flat_cents,shipping_free_threshold_cents,home_country,currency "
+            "FROM cappe_sites WHERE id=$1", site["id"],
+        )
         # Whether checkout goes to a card payment page. The storefront cart
         # asks for a shipping address itself only when it does NOT (Stripe
         # collects it otherwise).
@@ -97,13 +102,43 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
         groups = await fetch_option_groups(conn, [r["id"] for r in products])
         discounts = await fetch_active_discounts(conn, site["id"])
         today = site_today(await conn.fetchval("SELECT NOW()"), site["timezone"])
+        ships = any(r["fulfillment"] == "physical" for r in products)
+        zones = []
+        if ships and not body.interval:
+            plan = await conn.fetchval(
+                "SELECT a.plan FROM cappe_sites s JOIN cappe_accounts a ON a.id = s.account_id WHERE s.id = $1",
+                site["id"],
+            )
+            zones = await load_zones(conn, site["id"], await resolve_entitlements(plan, conn=conn))
+    settings = dict(settings)
     products = priceable_products(products, groups, discounts, today)
+    # Where the bag ships and what that costs. Subscriptions ship within the
+    # home country only (their shipping is fixed into the Stripe price).
+    shipping: dict = {}
+    dest = None
+    if ships:
+        home = home_country(settings)
+        country = body.ship_country or home
+        dest = resolve_destination(settings, zones, country)
+        shipping = {
+            "ship_country": country, "home_country": home, "ships_to": dest is not None,
+            "ship_countries": ship_countries(settings, zones),
+        }
+        if dest is None:
+            # Priced without shipping or tax so nothing misleading shows; the
+            # bag refuses checkout and says why.
+            dest = Destination(country=country, flat_cents=0, free_threshold_cents=None, charge_tax=False)
     if body.interval:
+        if ships and shipping["ship_country"] != shipping["home_country"]:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Subscriptions ship within {home_country(settings)} only.",
+            )
         _stripe_lines, lines, totals = build_subscription_lines(
-            products, body.items, body.interval, dict(settings)
+            products, body.items, body.interval, settings
         )
-        return {"lines": lines, **totals, "pays_by_card": pays_by_card}
-    return {**price_cart(products, body.items, dict(settings)), "pays_by_card": pays_by_card}
+        return {"lines": lines, **totals, "pays_by_card": pays_by_card, **shipping}
+    return {**price_cart(products, body.items, settings, dest), "pays_by_card": pays_by_card, **shipping}
 
 
 @router.post("/public/orders/{token}/pay")

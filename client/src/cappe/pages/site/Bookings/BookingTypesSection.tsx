@@ -14,10 +14,11 @@ interface BookingTypesSectionProps {
   patchType: (id: string, patch: Partial<CappeBookingType>) => Promise<boolean> | void
   removeType: (t: CappeBookingType) => void
   toggleTypeStaff: (t: CappeBookingType, staffId: string) => void
+  currency?: string
 }
 
 export function BookingTypesSection({
-  types, typeForm, setTypeForm, addType, staff, patchType, removeType, toggleTypeStaff,
+  types, typeForm, setTypeForm, addType, staff, patchType, removeType, toggleTypeStaff, currency = 'USD',
 }: BookingTypesSectionProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
   return (
@@ -32,7 +33,7 @@ export function BookingTypesSection({
             <option value="flat">Flat price</option>
             <option value="hourly">Per hour</option>
           </select>
-          <input value={typeForm.price} onChange={(e) => setTypeForm({ ...typeForm, price: e.target.value })} type="number" min="0" step="0.01" placeholder={typeForm.pricing_mode === 'hourly' ? '$/hr' : '$'} className={`w-24 ${inputCls}`} />
+          <input value={typeForm.price} onChange={(e) => setTypeForm({ ...typeForm, price: e.target.value })} type="number" min="0" step="0.01" placeholder={typeForm.pricing_mode === 'hourly' ? `${currency}/hr` : currency} className={`w-24 ${inputCls}`} />
         </div>
         <div className="flex gap-2">
           <input value={typeForm.category} onChange={(e) => setTypeForm({ ...typeForm, category: e.target.value })} placeholder="Category — e.g. Color (optional)" className={`flex-1 ${inputCls}`} />
@@ -68,6 +69,7 @@ export function BookingTypesSection({
             <li key={t.id} className="py-2.5">
               <TypeEditor
                 type={t}
+                currency={currency}
                 onCancel={() => setEditingId(null)}
                 onSave={async (patch) => { if (await patchType(t.id, patch)) setEditingId(null) }}
               />
@@ -78,7 +80,7 @@ export function BookingTypesSection({
                 <span className="text-zinc-200">{t.name}</span>
                 {t.status !== 'active' && <span className="ml-1.5 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase text-zinc-400">{t.status} — not bookable</span>}
                 {t.category && <span className="ml-1.5 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">{t.category}</span>}
-                <span className="text-zinc-400"> · {t.duration_minutes} min · {t.pricing_mode === 'hourly' ? `${money(t.price_cents)}/hr` : money(t.price_cents)}{t.buffer_minutes ? ` · ${t.buffer_minutes}m buffer` : ''}</span>
+                <span className="text-zinc-400"> · {t.duration_minutes} min · {t.pricing_mode === 'hourly' ? `${money(t.price_cents, currency)}/hr` : money(t.price_cents, currency)}{t.buffer_minutes ? ` · ${t.buffer_minutes}m buffer` : ''}</span>
                 {t.description && <div className="truncate text-xs text-zinc-500">{t.description}</div>}
                 {staff.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -112,8 +114,9 @@ export function BookingTypesSection({
 
 /** Edit an appointment type in place. Changes apply to new bookings; existing
  *  ones keep the time and price they were booked at. */
-function TypeEditor({ type: t, onSave, onCancel }: {
+function TypeEditor({ type: t, currency, onSave, onCancel }: {
   type: CappeBookingType
+  currency: string
   onSave: (patch: Partial<CappeBookingType>) => Promise<void>
   onCancel: () => void
 }) {
@@ -165,7 +168,7 @@ function TypeEditor({ type: t, onSave, onCancel }: {
           <option value="flat">Flat price</option>
           <option value="hourly">Per hour</option>
         </select>
-        <input value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} type="number" min="0" step="0.01" aria-label="Price" placeholder={form.pricing_mode === 'hourly' ? '$/hr' : '$'} className={`w-24 ${inputCls}`} />
+        <input value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} type="number" min="0" step="0.01" aria-label="Price" placeholder={form.pricing_mode === 'hourly' ? `${currency}/hr` : currency} className={`w-24 ${inputCls}`} />
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-1 text-xs text-zinc-400">

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ShippingSettingsCard from './ShippingSettingsCard'
 import StockAdjustModal from './StockAdjustModal'
@@ -21,7 +22,7 @@ describe.each([
 ])('%s — a failed load', (_name, Card, noun) => {
   it('offers no form to save, so blank boxes cannot overwrite the real settings', async () => {
     api.get.mockRejectedValueOnce(new Error('Server error — try again in a moment.'))
-    render(<Card siteId="s-1" />)
+    render(<MemoryRouter><Card siteId="s-1" /></MemoryRouter>)
     expect(await screen.findByRole('alert')).toHaveTextContent(`Couldn’t load your ${noun}`)
     expect(screen.queryByRole('button', { name: /Save/ })).not.toBeInTheDocument()
     expect(api.put).not.toHaveBeenCalled()
@@ -29,8 +30,10 @@ describe.each([
 
   it('loads the form on retry', async () => {
     api.get.mockRejectedValueOnce(new Error('down'))
-    render(<Card siteId="s-1" />)
-    api.get.mockResolvedValueOnce({ tax_rate_bps: 875, shipping_flat_cents: 600 })
+    render(<MemoryRouter><Card siteId="s-1" /></MemoryRouter>)
+    api.get.mockImplementation((path: string) => Promise.resolve(path.endsWith('/shipping-zones')
+      ? { enabled: false, home_country: 'US', currency: 'USD', countries: ['US', 'CA'], zones: [] }
+      : { tax_rate_bps: 875, shipping_flat_cents: 600 }))
     fireEvent.click(await screen.findByRole('button', { name: 'Try again' }))
     expect(await screen.findByRole('button', { name: /Save/ })).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()

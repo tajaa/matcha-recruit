@@ -11,6 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..services.booking_lifecycle import transition_error
+from ..services.shipping import site_currency
 from ..services.email import (
     format_when,
     send_cappe_booking_cancelled_by_host_email,
@@ -465,8 +466,7 @@ async def list_requests(site_id: UUID, account: CappeAccount = Depends(require_c
     requires_approval) and orders needing approval (pending + requires_approval),
     newest first."""
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
-        currency = "USD"
+        currency = site_currency(await get_owned_site(conn, site_id, account.id))
         booking_rows = await conn.fetch(
             """SELECT b.id, b.customer_name, b.customer_email, b.starts_at, b.note,
                       b.quoted_price_cents, b.rider_acknowledged, b.created_at,

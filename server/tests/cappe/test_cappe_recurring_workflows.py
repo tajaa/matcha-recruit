@@ -315,6 +315,8 @@ async def test_subscription_checkout_charges_the_promotional_quote_amount(monkey
         # lookup; the cart only uses the flag to decide whether to ask for an
         # address.
         "pays_by_card": False,
+        # Physical goods: where the bag ships. Subscriptions ship home only.
+        "ship_country": "US", "home_country": "US", "ships_to": True, "ship_countries": ["US"],
     }
     billed = sum(
         line["price_data"]["unit_amount"] * line["quantity"]

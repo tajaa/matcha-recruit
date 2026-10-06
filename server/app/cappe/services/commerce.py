@@ -42,6 +42,7 @@ from .entitlements import (
 )
 from .stripe_connect import CONNECT_CHECKOUT_TTL_SECONDS, CappeStripeError, get_cappe_stripe
 from .cart import cart_totals
+from .shipping import home_country, load_zones, not_shippable, resolve_destination
 
 logger = logging.getLogger("cappe.commerce")
 
@@ -575,6 +576,9 @@ async def open_order_checkout(
         customer_email=email or None,
         **({"customer_id": customer_id} if customer_id else {}),
         collect_shipping_address=has_physical,
+        # The country the order was priced for, and only that one: an address
+        # anywhere else would ship somewhere the shipping and tax weren't for.
+        ship_countries=[order["ship_country"]] if has_physical and order.get("ship_country") else None,
         expires_in_seconds=CONNECT_CHECKOUT_TTL_SECONDS,
         shipping_option=(
             {
@@ -615,6 +619,7 @@ async def pay_for_order(token: str) -> dict:
             """SELECT o.id, o.site_id, o.status, o.requires_approval, o.subscription_id, o.pay_by,
                       o.subtotal_cents, o.tax_cents, o.shipping_cents, o.total_cents, o.currency,
                       o.customer_email, o.stripe_session_id, o.access_token,
+                      COALESCE(o.ship_country, s.home_country) AS ship_country,
                       o.pay_by IS NOT NULL AND o.pay_by < NOW() AS overdue,
                       s.name AS site_name, s.slug, s.subdomain, s.custom_domain,
                       s.tax_label, s.shipping_label,
@@ -669,6 +674,22 @@ async def pay_for_order(token: str) -> dict:
         tax_label=row["tax_label"] or "Tax", shipping_label=row["shipping_label"] or "Shipping",
     )
     return {"checkout_url": sess.get("url")}
+
+
+def _order_ship_country(body, address, site_cfg) -> str:
+    """Where a physical order ships: the country the bag was priced for, else
+    the typed address's country, else the store's home country (all an app
+    that predates shipping zones ever sends). A typed address in another
+    country than the one priced is refused rather than quietly re-priced."""
+    requested = getattr(body, "ship_country", None)
+    typed = address.country if address is not None else None
+    if requested and typed and typed != requested:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Your address is in {typed}, but your order was priced for shipping to {requested}. "
+                   "Pick the same country for both.",
+        )
+    return requested or typed or home_country(site_cfg)
 
 
 async def create_public_order(site, body, background, *, shopper=None) -> dict:
@@ -866,32 +887,43 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             # line item below so the charge matches the receipt total.
             tax_cfg = await conn.fetchrow(
                 "SELECT tax_rate_bps, tax_label, shipping_flat_cents, "
-                "shipping_free_threshold_cents, shipping_label "
+                "shipping_free_threshold_cents, shipping_label, home_country "
                 "FROM cappe_sites WHERE id = $1", site["id"]
             )
-            tax_label = (tax_cfg["tax_label"] if tax_cfg else None) or "Tax"
-            shipping_label = (tax_cfg["shipping_label"] if tax_cfg else None) or "Shipping"
+            cfg = dict(tax_cfg) if tax_cfg else {}
+            tax_label = cfg.get("tax_label") or "Tax"
+            shipping_label = cfg.get("shipping_label") or "Shipping"
             has_physical = any(f == "physical" for (_p, _t, _u, _q, f, *_r) in line_rows)
+            address = getattr(body, "shipping_address", None) if has_physical else None
+            ship_country, destination = None, None
+            if has_physical:
+                ship_country = _order_ship_country(body, address, cfg)
+                destination = resolve_destination(
+                    cfg, await load_zones(conn, site["id"], owner_ent), ship_country,
+                )
+                if destination is None:
+                    raise not_shippable(ship_country)
             totals = cart_totals([
                 {"unit_price_cents": unit, "quantity": qty, "fulfillment": fulfillment}
                 for (_pid, _title, unit, qty, fulfillment, *_rest) in line_rows
-            ], dict(tax_cfg) if tax_cfg else {})
+            ], cfg, destination)
             tax_cents, shipping_cents, total_cents = totals["tax_cents"], totals["shipping_cents"], totals["total_cents"]
             order = await conn.fetchrow(
                 """INSERT INTO cappe_orders
                        (site_id, customer_email, customer_name, status, subtotal_cents, tax_cents,
-                        shipping_cents, total_cents, currency, note, requires_approval, shipping_address)
-                   VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+                        shipping_cents, total_cents, currency, note, requires_approval, shipping_address,
+                        ship_country)
+                   VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
                    RETURNING id, status, subtotal_cents, tax_cents, shipping_cents, total_cents,
-                             currency, access_token, requires_approval""",
+                             currency, access_token, requires_approval, ship_country""",
                 site["id"], email, body.customer_name, subtotal, tax_cents, shipping_cents,
                 total_cents, order_currency or "USD", body.note, order_requires_approval,
                 # The buyer's address, when the storefront asked for it (a
                 # physical order the store collects payment for itself — Stripe
                 # collects it otherwise, and the paid webhook fills it in).
                 # Stored in Stripe's shape so the dashboard reads one format.
-                json.dumps(body.shipping_address.as_stripe_shape())
-                if (has_physical and getattr(body, "shipping_address", None)) else None,
+                json.dumps(address.as_stripe_shape(ship_country)) if address is not None else None,
+                ship_country,
             )
             if shopper:
                 await conn.execute("UPDATE cappe_orders SET shopper_id=$1 WHERE id=$2 AND site_id=$3",

@@ -3,9 +3,13 @@
 // checkout sends the whole bag as one order. Prices shown here are the
 // SERVER's (POST /quote) — the estimate is only a placeholder while it loads.
 var RT=window.__CAPPE_RT__;if(!RT||RT.preview||!RT.slug)return;
-var KEY='cz-cart:'+RT.slug,OKEY='cz-cart-order:'+RT.slug,MAX_QTY=99;
+var KEY='cz-cart:'+RT.slug,OKEY='cz-cart-order:'+RT.slug,CKEY='cz-cart-country:'+RT.slug,MAX_QTY=99;
 function load(){try{var v=JSON.parse(localStorage.getItem(KEY)||'[]');return Array.isArray(v)?v:[];}catch(e){return [];}}
-var items=load(),quote=null,qseq=0,busy=false;
+var items=load(),quote=null,qseq=0,busy=false,shipTo=null;
+try{shipTo=localStorage.getItem(CKEY)||null;}catch(e){}
+// Country names in the buyer's language; the code if the browser can't.
+var names=null;try{names=new Intl.DisplayNames([navigator.language||'en'],{type:'region'});}catch(e){}
+function countryName(c){try{return (names&&names.of(c))||c;}catch(e){return c;}}
 function persist(){try{localStorage.setItem(KEY,JSON.stringify(items));}catch(e){}}
 function keyOf(l){return [l.product_id,(l.selected_option_ids||[]).slice().sort().join(','),JSON.stringify(l.intake_answers||{})].join('|');}
 function count(){var n=0;items.forEach(function(i){n+=i.quantity||0;});return n;}
@@ -25,6 +29,8 @@ root.innerHTML='<div class="cz-bag__scrim" data-close></div>'+
 '<div class="cz-bag__head"><h2 id="czbag-title">Your bag</h2><button type="button" class="cz-pd__x" data-close aria-label="Close">×</button></div>'+
 '<div class="cz-bag__lines" data-lines></div>'+
 '<div class="cz-bag__foot" data-foot>'+
+'<label class="cz-bag__ship" data-shipwrap hidden><span class="cz-label">Ship to</span>'+
+'<select class="cz-field" data-ship aria-label="Ship to"></select></label><p class="cz-bag__shipnote" data-shipnote hidden></p>'+
 '<dl class="cz-bag__totals" data-totals></dl><p class="cz-msg" data-notice></p>'+
 '<input class="cz-field" type="email" data-email placeholder="Your email" autocomplete="email" aria-label="Your email" />'+
 '<input class="cz-field" type="text" data-name placeholder="Your name" autocomplete="name" aria-label="Your name" />'+
@@ -33,13 +39,14 @@ root.innerHTML='<div class="cz-bag__scrim" data-close></div>'+
 '<input class="cz-field" data-a="line2" placeholder="Apartment, suite (optional)" autocomplete="address-line2" aria-label="Apartment or suite" />'+
 '<div class="cz-bag__row"><input class="cz-field" data-a="city" placeholder="City" autocomplete="address-level2" aria-label="City" />'+
 '<input class="cz-field" data-a="state" placeholder="State / region" autocomplete="address-level1" aria-label="State or region" /></div>'+
-'<div class="cz-bag__row"><input class="cz-field" data-a="postal_code" placeholder="Postal code" autocomplete="postal-code" aria-label="Postal code" />'+
-'<input class="cz-field" data-a="country" placeholder="Country (e.g. US)" maxlength="2" autocomplete="country" aria-label="Country code" value="US" /></div></fieldset>'+
+'<input class="cz-field" data-a="postal_code" placeholder="Postal code" autocomplete="postal-code" aria-label="Postal code" /></fieldset>'+
 '<button type="button" class="cz-btn cz-btn--solid cz-btn--block" data-go>Checkout</button>'+
 '<p class="cz-msg" data-msg role="status"></p></div></aside>';
 document.body.appendChild(root);
 var linesEl=root.querySelector('[data-lines]'),totalsEl=root.querySelector('[data-totals]'),noticeEl=root.querySelector('[data-notice]'),
-addrEl=root.querySelector('[data-addr]'),goEl=root.querySelector('[data-go]'),msgEl=root.querySelector('[data-msg]'),footEl=root.querySelector('[data-foot]');
+addrEl=root.querySelector('[data-addr]'),goEl=root.querySelector('[data-go]'),msgEl=root.querySelector('[data-msg]'),footEl=root.querySelector('[data-foot]'),
+shipWrap=root.querySelector('[data-shipwrap]'),shipEl=root.querySelector('[data-ship]'),shipNote=root.querySelector('[data-shipnote]'),shipList='';
+shipEl.addEventListener('change',function(){shipTo=shipEl.value;try{localStorage.setItem(CKEY,shipTo);}catch(e){}quote=null;render();refreshQuote();});
 root.querySelectorAll('[data-close]').forEach(function(el){el.addEventListener('click',close);});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!root.hidden)close();});
 
@@ -47,6 +54,14 @@ function open(){root.hidden=false;document.body.style.overflow='hidden';render()
 function close(){root.hidden=true;document.body.style.overflow='';btn.focus();}
 function needsAddress(){return !!(quote&&quote.pays_by_card===false&&items.some(function(i){return i.fulfillment==='physical';}));}
 function lineOf(i){return quote&&quote.lines&&quote.lines[i];}
+// Where the bag ships: a picker when the store ships to more than one
+// country, a note when it ships home only. The quote is what decides.
+function paintShip(){var list=quote&&quote.ship_countries;
+if(!list){shipWrap.hidden=true;shipNote.hidden=true;return;}
+if(list.length<2){shipWrap.hidden=true;shipNote.hidden=false;shipNote.textContent='Ships within '+countryName(list[0])+' only.';return;}
+shipNote.hidden=true;shipWrap.hidden=false;var key=list.join(',');
+if(key!==shipList){shipList=key;shipEl.innerHTML=list.map(function(c,i){return '<option value="'+RT.esc(c)+'">'+RT.esc(countryName(c))+'</option>'+(i===0&&list.length>1?'<option disabled>──────────</option>':'');}).join('');}
+shipEl.value=quote.ship_country;}
 
 function render(){
 paintButton();
@@ -67,18 +82,26 @@ var cur=(quote&&quote.currency)||(items[0]&&items[0].currency)||'USD',rows=[];
 if(quote&&quote.total_cents!=null){rows.push(['Subtotal',quote.subtotal_cents]);if(quote.tax_cents)rows.push(['Tax',quote.tax_cents]);if(quote.shipping_cents)rows.push(['Shipping',quote.shipping_cents]);rows.push(['Total',quote.total_cents]);}
 totalsEl.innerHTML=rows.map(function(r){return '<div'+(r[0]==='Total'?' class="cz-bag__total"':'')+'><dt>'+r[0]+'</dt><dd>'+RT.money(r[1],cur)+'</dd></div>';}).join('')||'<div><dt>Total</dt><dd>…</dd></div>';
 var approval=items.some(function(i){return i.requires_approval;});
-noticeEl.textContent=approval?'Something in your bag needs the store’s approval first. You won’t be charged now — if they accept, you’ll get an email with a link to pay.':'';
+var noShip=!!(quote&&quote.ships_to===false);
+paintShip();
+noticeEl.className='cz-msg'+(noShip?' err':'');
+noticeEl.textContent=noShip?'This store doesn’t ship to '+countryName(quote.ship_country)+'. Choose another country.':
+(approval?'Something in your bag needs the store’s approval first. You won’t be charged now — if they accept, you’ll get an email with a link to pay.':'');
 addrEl.hidden=!needsAddress();
-var blocked=!quote||(quote.lines||[]).some(function(l){return l.available===false;});
+var blocked=!quote||noShip||(quote.lines||[]).some(function(l){return l.available===false;});
 goEl.disabled=busy||blocked;goEl.textContent=busy?'Placing order…':(approval?'Send order request':(quote&&quote.pays_by_card?'Checkout':'Place order'));
 }
 function changed(){persist();quote=null;render();refreshQuote();}
 // The server prices the bag: options, promotions, tax and shipping. A slow
 // answer for an older bag can't overwrite a newer one.
 function refreshQuote(){if(!items.length){quote=null;render();return;}var seq=++qseq;
-RT.post('/quote',{items:items.map(function(i){return {product_id:i.product_id,quantity:i.quantity,selected_option_ids:i.selected_option_ids||[]};})})
+var req={items:items.map(function(i){return {product_id:i.product_id,quantity:i.quantity,selected_option_ids:i.selected_option_ids||[]};})};
+if(shipTo)req.ship_country=shipTo;
+RT.post('/quote',req)
 .then(function(q){if(seq!==qseq)return;quote=q;render();})
-.catch(function(e){if(seq!==qseq)return;quote=null;render();msgEl.className='cz-msg err';msgEl.textContent=e.message||'Could not price your bag.';});}
+.catch(function(e){if(seq!==qseq)return;
+if(shipTo){shipTo=null;try{localStorage.removeItem(CKEY);}catch(x){}refreshQuote();return;}
+quote=null;render();msgEl.className='cz-msg err';msgEl.textContent=e.message||'Could not price your bag.';});}
 
 goEl.addEventListener('click',function(){
 var email=root.querySelector('[data-email]').value.trim(),name=root.querySelector('[data-name]').value.trim();
@@ -87,10 +110,11 @@ if(!email){msgEl.textContent='Enter your email so the store can send your receip
 var body={customer_email:email,customer_name:name||null,
 items:items.map(function(i){return {product_id:i.product_id,quantity:i.quantity,selected_option_ids:i.selected_option_ids||[],intake_answers:i.intake_answers||{}};}),
 success_url:location.href.split('#')[0],cancel_url:location.href.split('#')[0]};
+// The country the bag was priced for; the payment page takes an address there only.
+if(quote&&quote.ship_country)body.ship_country=quote.ship_country;
 if(needsAddress()){var a={};addrEl.querySelectorAll('[data-a]').forEach(function(el){a[el.getAttribute('data-a')]=el.value.trim();});
-a.country=(a.country||'').toUpperCase();
-if(!a.line1||!a.city||!/^[A-Z]{2}$/.test(a.country)){msgEl.textContent='Add your shipping address (address, city and a two-letter country code).';return;}
-a.name=name||null;body.shipping_address=a;}
+if(!a.line1||!a.city){msgEl.textContent='Add your shipping address (at least the address and city).';return;}
+a.country=quote.ship_country;a.name=name||null;body.shipping_address=a;}
 busy=true;render();msgEl.className='cz-msg';msgEl.textContent='';
 RT.post('/orders',body).then(function(res){
 // Remember which order this bag became: the order page empties the bag only

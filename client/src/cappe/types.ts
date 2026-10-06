@@ -97,6 +97,10 @@ export type CappeSite = {
   shipping_flat_cents?: number | null
   shipping_free_threshold_cents?: number | null
   shipping_label?: string | null
+  /** Where the store is based: its shipping settings and tax rate are this country's. */
+  home_country?: string
+  /** What the store charges in; every product follows it. */
+  currency?: string
   listed?: boolean
   directory_category?: string | null
   directory_tags?: string[]
@@ -497,6 +501,8 @@ export type CappeOrder = {
   tax_cents: number
   shipping_cents: number
   shipping_address?: CappeShippingAddress | null
+  /** Where a physical order was priced to ship. */
+  ship_country?: string | null
   carrier?: string | null
   tracking_number?: string | null
   total_cents: number | null
@@ -1250,4 +1256,30 @@ export type EarningsRow = {
   fee_cents: number | null
   status: string
   paid_at: string | null
+}
+
+// --- Shipping zones ------------------------------------------------------------
+
+/** A destination beyond the store's home country, with its own rates. */
+export type CappeShippingZoneInput = {
+  name: string
+  countries: string[]
+  /** Covers every country no other zone names. At most one per store. */
+  rest_of_world: boolean
+  flat_cents: number
+  free_threshold_cents: number | null
+  /** Charge the store's tax rate on goods shipped here. */
+  charge_tax: boolean
+}
+
+export type CappeShippingZone = CappeShippingZoneInput & { id: string; sort_order: number }
+
+export type CappeShippingZones = {
+  /** Whether the plan includes zones; saved zones are paused when it doesn't. */
+  enabled: boolean
+  home_country: string
+  currency: string
+  /** Every country a zone can name. */
+  countries: string[]
+  zones: CappeShippingZone[]
 }

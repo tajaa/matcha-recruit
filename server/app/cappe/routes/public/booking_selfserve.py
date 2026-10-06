@@ -9,6 +9,7 @@ from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
 from ...models.cappe import CappeBookingQuote, CappeBookingQuoteRequest, CappeBookingReschedule, CappePublicBooking
 from ...services.booking_lifecycle import holds_money, linked_order
+from ...services.shipping import site_currency
 from ...services.commerce import booking_quote_cents, booking_times, fetch_rate_rules, resolve_booking_slot
 from ...services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
 from ...services.email import (
@@ -243,7 +244,7 @@ async def public_booking_quote(slug: str, body: CappeBookingQuoteRequest, reques
     )
     final = apply_discount_cents(quote, pct)
     return CappeBookingQuote(
-        price_cents=final, currency="USD", pricing_mode=pricing_mode,
+        price_cents=final, currency=site_currency(site), pricing_mode=pricing_mode,
         requires_approval=bool(btype["requires_approval"]), duration_minutes=int(duration_min),
         original_price_cents=quote if pct else None, discount_percent=pct,
     )

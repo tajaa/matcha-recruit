@@ -343,8 +343,9 @@ async def _execute_create_product(conn, site: dict[str, Any], account: Any, payl
     status_ = "draft" if payload["fulfillment"] == "digital" and not payload.get("digital_file_url") else "active"
     row = await conn.fetchrow(
         """INSERT INTO cappe_products
-               (site_id, name, description, price_cents, status, fulfillment, digital_file_url, category)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+               (site_id, name, description, price_cents, status, fulfillment, digital_file_url, category, currency)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+                   COALESCE((SELECT currency FROM cappe_sites WHERE id = $1), 'USD'))
            RETURNING id, name, status, fulfillment""",
         site["id"], payload["name"], payload.get("description"), payload["price_cents"],
         status_, payload["fulfillment"], payload.get("digital_file_url"), payload.get("category"),

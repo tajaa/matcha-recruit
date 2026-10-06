@@ -68,6 +68,18 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
 - **A failed attempt to take a card is an error, never a fallback to the unpaid flow**
   (`commerce.create_public_order` → `release_unpaid_order` + 502).
 
+## Shipping and currency (2026-10, `services/shipping.py`)
+
+- **A physical order's payment page takes an address only in the country it was priced for**
+  (`cappe_orders.ship_country` → Stripe `allowed_countries=[ship_country]`). Shipping and tax are
+  per destination; widening the list lets a buyer pay home rates and ship abroad.
+- **The home country's rates are the site's own columns** (`shipping_*`, `tax_rate_bps`); zones
+  (`cappe_shipping_zones`, plan feature `shipping_zones`) add other countries. No zones = home only.
+  Subscriptions ship home only (their shipping is fixed into the Stripe price).
+- **One store, one currency** (`cappe_sites.currency`, two-decimal allowlist `SITE_CURRENCIES`,
+  mirrored in the migration and `client/src/cappe/utils/countries.ts`). Products take it on create
+  and follow it on change; a change is refused while subscriptions are billing.
+
 ## Site templates (`services/site_templates/`)
 
 - **The catalog is code, not the `cappe_templates` table.** One `SiteTemplate` per entry, one module

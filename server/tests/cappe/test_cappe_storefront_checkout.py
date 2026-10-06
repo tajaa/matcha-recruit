@@ -70,6 +70,8 @@ async def test_public_quote_and_signed_order_use_authoritative_shopper(monkeypat
     monkeypatch.setattr(routes, "_published_site", lambda *_args: _async(site))
     monkeypatch.setattr(routes, "fetch_option_groups", lambda *_args: _async({product_id: []}))
     monkeypatch.setattr(routes, "fetch_active_discounts", lambda *_args: _async([]))
+    monkeypatch.setattr(routes, "resolve_entitlements", lambda *_args, **_kw: _async(None))
+    monkeypatch.setattr(routes, "load_zones", lambda *_args: _async([]))
     quote = await routes.quote(
         "ahnimal", routes.CartQuoteRequest(items=[CappeCartItem(product_id=product_id, quantity=2)]), _request(),
     )

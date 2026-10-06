@@ -48,6 +48,8 @@ const sameSet = (a: string[], b: string[]) => [...a].sort().join() === [...b].so
 export default function Shop() {
   const { siteId } = useParams<{ siteId: string }>()
   const [products, setProducts] = useState<CappeProduct[] | null>(null)
+  // The store's currency (Shipping & currency card); every product is priced in it.
+  const [currency, setCurrency] = useState('USD')
   const [bookingTypes, setBookingTypes] = useState<CappeBookingType[]>([])
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
@@ -324,7 +326,14 @@ export default function Shop() {
     <SurfaceShell title="Shop" subtitle="Anything you sell — goods, downloads, services, or bookable sessions.">
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
       <TaxSettingsCard siteId={siteId || ''} />
-      <ShippingSettingsCard siteId={siteId || ''} />
+      <ShippingSettingsCard
+        siteId={siteId || ''}
+        onCurrencyChange={(c) => {
+          setCurrency(c)
+          // The server moved every product to it in the same save.
+          setProducts((ps) => (ps && ps.some((p) => p.currency !== c) ? ps.map((p) => ({ ...p, currency: c })) : ps))
+        }}
+      />
 
       <form onSubmit={saveProduct} className="mb-6 space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
         <div className="flex items-center justify-between gap-3">
@@ -333,7 +342,7 @@ export default function Shop() {
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Name" className={`sm:col-span-2 ${input}`} />
-          <input value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="Price (USD)" type="number" step="0.01" min="0" className={input} />
+          <input value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder={`Price (${currency})`} type="number" step="0.01" min="0" className={input} />
         </div>
         <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Description (optional)" rows={2} className={input} />
         <div className="grid gap-3 sm:grid-cols-3">

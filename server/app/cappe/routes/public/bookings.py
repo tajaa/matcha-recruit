@@ -28,6 +28,7 @@ from ...services.email import (
     send_cappe_booking_alert_email,
     send_cappe_booking_received_email,
 )
+from ...services.shipping import site_currency
 from ...services.slots import generate_slots, merge_any_staff_slots
 from ...services.booking_suggestions import (
     extract_booking_preference,
@@ -128,7 +129,8 @@ async def public_booking_types(slug: str, request: Request, location_id: UUID | 
     by_type: dict = {}
     for r in staff:
         by_type.setdefault(r["booking_type_id"], []).append(r["staff_id"])
-    return [{**dict(r), "staff_ids": by_type.get(r["id"], [])} for r in rows]
+    currency = site_currency(site)
+    return [{**dict(r), "staff_ids": by_type.get(r["id"], []), "currency": currency} for r in rows]
 
 
 @router.get("/public/sites/{slug}/rider")
@@ -474,6 +476,7 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
         "starts_at": booking["starts_at"].isoformat(),
         "ends_at": booking["ends_at"].isoformat(),
         "quoted_price_cents": booking["quoted_price_cents"],
+        "currency": site_currency(site),
         "requires_approval": booking["requires_approval"],
         # What the times mean, and where the customer can change the booking.
         # The token is the one emailed to the same person who just made it.

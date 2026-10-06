@@ -33,6 +33,7 @@ from .public import router as public_router
 from .reviews import router as reviews_router
 from .rider import router as rider_router
 from .staff import router as staff_router
+from .shipping import router as shipping_router
 from .shop import router as shop_router
 from .shopper_subscriptions import router as shopper_subscriptions_router
 from .sites import router as sites_router
@@ -73,6 +74,7 @@ cappe_router.include_router(sites_router)
 cappe_router.include_router(pages_router)
 cappe_router.include_router(presets_router)
 cappe_router.include_router(shop_router)
+cappe_router.include_router(shipping_router)
 cappe_router.include_router(newsletter_router)
 cappe_router.include_router(forms_router)
 cappe_router.include_router(bookings_router)
