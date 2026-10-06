@@ -21,13 +21,14 @@ from html import escape
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from ...core.services.redis_cache import cache_get, cache_set, get_redis_cache
+from ...core.services.redis_cache import cache_get, cache_set, check_rate_limit, client_ip, get_redis_cache
 from ...database import get_connection
 from ..models._validators import is_app_url_scheme
 from ..services.booking_suggestion_access import canonical_suggestion_host
 from ..services.commerce import release_abandoned_checkout
 from ..services.common import normalize_host_header
 from ..services.render import render_site_html
+from ..services.render.order_page import render_order_page
 from ..services.render_cache import invalidate_site_render_cache
 from ..services.stripe_connect import CappeStripeError
 from ._shared import RESERVED_SUBDOMAINS, loads, loads_list
@@ -377,6 +378,94 @@ async def render_home(request: Request):
 @router.get("/p/{page_slug}", response_class=HTMLResponse)
 async def render_page(page_slug: str, request: Request):
     return await _render(request, page_slug)
+
+
+async def _resolve_site_any_status(conn, host: str | None):
+    """Host header → site row, published or not. Only for a page a buyer
+    reaches with an order token: unpublishing a store must not take away the
+    downloads and receipts its customers already paid for."""
+    sub = subdomain_from_host(host)
+    cols = "id, name, slug, subdomain, custom_domain, theme_config, meta_config, timezone, account_id"
+    if sub:
+        return await conn.fetchrow(f"SELECT {cols} FROM cappe_sites WHERE subdomain = $1", sub)
+    candidates = _custom_domain_candidates(host)
+    if not candidates:
+        return None
+    return await conn.fetchrow(f"SELECT {cols} FROM cappe_sites WHERE custom_domain = ANY($1::text[])", candidates)
+
+
+_ORDER_PAGE_HEADERS = {
+    "Cache-Control": "no-store",
+    # The token is in the URL: no request from this page may carry it on.
+    "Referrer-Policy": "no-referrer",
+    "X-Robots-Tag": "noindex, nofollow",
+}
+
+
+@router.get("/order/{token}", response_class=HTMLResponse)
+async def order_page(token: str, request: Request):
+    """The buyer's order page on the store's own host — see
+    `services/render/order_page.py`. Resolved by the order's unguessable token
+    AND the host: one store's host never shows another store's order."""
+    host = request.headers.get("host")
+    if subdomain_from_host(host) is None and not _custom_domain_candidates(host):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if not re.fullmatch(r"[0-9a-f]{32}", token):
+        return _not_found_html("Order not found")
+    await check_rate_limit(client_ip(request), "cappe_order_page", 30, 60)
+    async with get_connection() as conn:
+        site = await _resolve_site_any_status(conn, host)
+        if site is None:
+            return _not_found_html("Site not found")
+        order = await conn.fetchrow(
+            """SELECT o.id, o.status, o.requires_approval, o.approved_at, o.pay_by, o.decline_reason,
+                      o.subtotal_cents, o.tax_cents, o.shipping_cents, o.total_cents, o.refunded_cents,
+                      o.currency, o.carrier, o.tracking_number, o.shipping_address, o.receipt_number,
+                      o.stripe_session_id, s.tax_label, s.shipping_label
+                 FROM cappe_orders o JOIN cappe_sites s ON s.id = o.site_id
+                WHERE o.access_token = $1 AND o.site_id = $2""",
+            token, site["id"],
+        )
+        if order is None:
+            return _not_found_html("Order not found")
+        items = await conn.fetch(
+            """SELECT oi.title, oi.quantity, oi.fulfillment, oi.unit_price_cents, oi.selected_options,
+                      oi.deliverable_url, p.digital_file_url, b.starts_at AS booking_starts_at
+                 FROM cappe_order_items oi
+                 LEFT JOIN cappe_products p ON p.id = oi.product_id
+                 LEFT JOIN cappe_bookings b ON b.id = oi.booking_id
+                WHERE oi.order_id = $1 ORDER BY oi.created_at""",
+            order["id"],
+        )
+        owner = await conn.fetchrow(
+            "SELECT stripe_account_id, stripe_charges_enabled, status FROM cappe_accounts WHERE id = $1",
+            site["account_id"],
+        )
+        nav_rows = await conn.fetch(
+            "SELECT title, slug FROM cappe_pages WHERE site_id = $1 AND status = 'published' "
+            "ORDER BY sort_order, created_at",
+            site["id"],
+        )
+        now = await conn.fetchval("SELECT NOW()")
+    takes_cards = bool(owner and owner["stripe_account_id"] and owner["stripe_charges_enabled"]
+                       and (owner["status"] or "active") == "active")
+    order_ctx = {
+        **dict(order),
+        "shipping_address": loads(order["shipping_address"]) or None,
+        "site_name": site["name"], "timezone": site["timezone"],
+    }
+    item_ctx = [{
+        **dict(it),
+        "selected_options": loads_list(it["selected_options"]),
+        "download_url": it["digital_file_url"] if it["fulfillment"] == "digital" else None,
+    } for it in items]
+    html = render_order_page(
+        {**_site_dict(site), "timezone": site["timezone"]},
+        [{"slug": r["slug"], "title": r["title"]} for r in nav_rows],
+        order_ctx, item_ctx, token=token, takes_cards=takes_cards, now=now,
+        clear_cart=order["status"] not in ("cancelled", "declined"),
+    )
+    return HTMLResponse(html, headers={**tenant_security_headers(), **_ORDER_PAGE_HEADERS})
 
 
 @router.get("/__cappe/booking-suggestions/access", response_class=HTMLResponse)

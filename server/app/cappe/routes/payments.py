@@ -320,9 +320,17 @@ async def _cancel_unpaid_session(etype, obj, event) -> dict:
                     WHERE o.id = $1 AND o.status = 'pending'
                       AND s.id = o.site_id AND a.id = s.account_id
                       AND a.stripe_account_id = $2
+                      -- Only the order's CURRENT page ending releases it: a
+                      -- page "Pay now" replaced expires later and must not
+                      -- cancel an order whose newer page is still open.
+                      AND (o.stripe_session_id IS NULL OR o.stripe_session_id = $3)
+                      -- An approved order stays open until its pay-by date;
+                      -- the buyer can open a new page from the order page.
+                      AND (o.pay_by IS NULL OR o.pay_by < NOW())
                 RETURNING o.id, o.site_id""",
                 oid,
                 event_account_id,
+                obj.get("id"),
             )
             if row is not None:
                 await restock_order(
@@ -382,6 +390,10 @@ async def _mark_order_paid(obj, event, background) -> dict:
                     WHERE o.id = $1 AND o.status = 'pending'
                       AND s.id = o.site_id AND a.id = s.account_id
                       AND a.stripe_account_id = $4
+                      -- Paid on the order's current page. A page "Pay now"
+                      -- replaced is expired first, so this only refuses a
+                      -- race; that payment is refunded below.
+                      AND (o.stripe_session_id IS NULL OR o.stripe_session_id = $6)
                     RETURNING o.id, o.site_id, o.customer_email, o.customer_name, o.shopper_id,
                               o.total_cents, o.subtotal_cents, o.currency,
                               s.name AS site_name, a.email AS owner_email, a.name AS owner_name""",
@@ -390,6 +402,7 @@ async def _mark_order_paid(obj, event, background) -> dict:
                 fee,
                 event_account_id,
                 json.dumps(dict(ship)) if ship else None,
+                obj.get("id"),
             )
         if row is not None:
             from ..services.push import notify_order_event
@@ -422,6 +435,22 @@ async def _mark_order_paid(obj, event, background) -> dict:
                     oid,
                     event_account_id,
                 )
+                paid_on = None
+                if already in ("pending", "paid", "fulfilled") and payment_intent:
+                    paid_on = await conn.fetchrow(
+                        "SELECT stripe_session_id, stripe_payment_intent FROM cappe_orders WHERE id = $1",
+                        oid,
+                    )
+            stray_payment = bool(paid_on) and (
+                # Paid on a page that is no longer the order's current one.
+                (already == "pending" and paid_on["stripe_session_id"] not in (None, obj.get("id")))
+                # A second payment for an order that is already paid.
+                or (already in ("paid", "fulfilled") and paid_on["stripe_payment_intent"]
+                    and paid_on["stripe_payment_intent"] != payment_intent)
+            )
+            if stray_payment:
+                await _refund_stray_order_payment(oid, obj.get("id"), payment_intent, event_account_id, already)
+                return {"received": True, "status": "refunded_stray_payment"}
             if already is None:
                 logger.error(
                     "cappe webhook: order %s not matched; releasing claim for retry",
@@ -603,6 +632,30 @@ async def _settle_collab_installment(cpid: UUID, obj, event_account_id: str, bac
         background.add_task(_notify_collab_paid, paid["offer_id"], paid["label"], paid["amount_cents"])
         if completed:
             background.add_task(_notify_collab_completed, paid["offer_id"])
+
+
+async def _refund_stray_order_payment(order_id, session_id, intent, account_id, order_status) -> None:
+    """Refund a storefront payment the order cannot take: made on a page that
+    was replaced, or a second payment for an order already paid. These used to
+    be logged as an "idempotent skip" while the money stayed taken. ERROR
+    either way — a human should know an automatic refund happened."""
+    try:
+        await get_cappe_stripe().refund_connected_charge(
+            account_id=account_id, payment_intent=intent,
+            idempotency_key=f"cappe-order-stray-{intent}",
+        )
+    except CappeStripeError as exc:
+        logger.error(
+            "cappe webhook: order %s (%s) received a payment it cannot take (session %s, intent %s, "
+            "account %s) and the automatic refund FAILED: %s — MANUAL REFUND REQUIRED",
+            order_id, order_status, session_id, intent, account_id, exc,
+        )
+        return
+    logger.error(
+        "cappe webhook: order %s (%s) received a payment it cannot take (session %s, intent %s, "
+        "account %s) — refunded automatically",
+        order_id, order_status, session_id, intent, account_id,
+    )
 
 
 async def _refund_unapplied_collab_charge(cpid, session_id, intent, account_id, reason) -> None:

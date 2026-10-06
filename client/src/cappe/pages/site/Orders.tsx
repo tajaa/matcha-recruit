@@ -285,6 +285,14 @@ export default function Orders() {
                 {o.requires_approval && o.status === 'pending' && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-400"><Clock className="h-3 w-3" /> needs approval</span>
                 )}
+                {!o.requires_approval && o.status === 'pending' && o.pay_by && (
+                  <span
+                    title="You accepted this order. The customer was emailed a link to pay; if they don't by then, it's released and its stock returned."
+                    className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-sky-400"
+                  >
+                    <Clock className="h-3 w-3" /> awaiting payment until {new Date(o.pay_by).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  </span>
+                )}
                 {o.dispute_status && (
                   <span title="A chargeback was opened against this order — respond in your Stripe dashboard." className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-400"><AlertTriangle className="h-3 w-3" /> dispute: {o.dispute_status.replace(/_/g, ' ')}</span>
                 )}
@@ -584,6 +592,7 @@ function TrackingEditor({ siteId, order, onSaved }: {
         </button>
       )}
       {error && <span className="text-xs text-red-400">{error}</span>}
+      <p className="basis-full text-[11px] text-zinc-500">The customer is emailed when you add a tracking number or mark the order fulfilled.</p>
     </div>
   )
 }

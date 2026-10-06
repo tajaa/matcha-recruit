@@ -334,27 +334,118 @@ async def send_cappe_welcome_email(to_email: str, to_name: str | None) -> None:
 
 # ── transactional: orders ────────────────────────────────────────────────────
 
+_NEXT_STEP = {
+    # (requires_approval, who settles the money next) → what the buyer is told
+    (True, "card_after_approval"):
+        "The store will review your order. If they accept it, you'll get an email with a link to pay — "
+        "nothing has been charged yet.",
+    (True, "store"): "The store will review your order and be in touch about payment.",
+    (True, "free"): "The store will review your order and confirm by email.",
+    (False, "store"): "The store will be in touch about payment and delivery. Nothing has been charged.",
+    (False, "card_after_approval"): "The store will be in touch about payment and delivery.",
+    (False, "free"): "Your order is confirmed.",
+}
+
+
 async def send_cappe_order_receipt_email(
     to_email: str, to_name: str | None, site_name: str, items_summary: str,
     total_cents: int, currency: str, requires_approval: bool,
+    order_url: str | None = None, payment: str = "free",
 ) -> None:
-    """Self-contained order confirmation / receipt for the customer (no external
-    page needed — the email is the receipt). Best-effort."""
+    """"Order received" for an order that was NOT paid on the spot — waiting
+    for approval, or for a store that takes payment itself. It used to say
+    "Your order is confirmed" to a buyer who had paid nothing. `payment` says
+    who settles next ("card_after_approval" | "store" | "free"). Best-effort."""
     e_site, e_items, total = escape(site_name or ""), escape(items_summary or ""), fmt_money(total_cents, currency)
-    next_line = (
-        "The seller will review your order and confirm by email."
-        if requires_approval else "Your order is confirmed — you'll hear from the seller with next steps."
-    )
+    next_line = _NEXT_STEP.get((bool(requires_approval), payment), _NEXT_STEP[(False, "store")])
     body = (
         f'<p style="margin:0 0 6px;font-size:13px;color:#a1a1aa;">Thanks for your order from {e_site}.</p>'
         f'<div style="border:1px solid #27272a;border-radius:10px;padding:14px 16px;margin:14px 0;color:#d4d4d8;font-size:15px;">'
         f'<div style="margin-bottom:8px;">{e_items}</div>'
         f'<div style="font-weight:700;color:#fafafa;font-size:17px;">Total: {escape(total)}</div></div>'
-        f'<p style="margin:0;font-size:13px;line-height:1.6;color:#a1a1aa;">{next_line}</p>'
+        f'<p style="margin:0;font-size:13px;line-height:1.6;color:#a1a1aa;">{escape(next_line)}</p>'
     )
-    html = _email_shell(f"Order received — {e_site}", body, accent="#10b981")
-    text = f"Thanks for your order from {site_name}.\n\n{items_summary}\nTotal: {total}\n\n{next_line}"
+    html = _email_shell(f"Order received — {e_site}", body, accent="#10b981",
+                        cta_label="View your order" if order_url else None, cta_url=order_url)
+    text = (f"Thanks for your order from {site_name}.\n\n{items_summary}\nTotal: {total}\n\n{next_line}"
+            + (f"\n\nYour order: {order_url}" if order_url else ""))
     await _send(to_email, to_name, f"Your order — {site_name}", html, text, label="order receipt")
+
+
+async def send_cappe_order_approved_email(
+    to_email: str, to_name: str | None, site_name: str, items_summary: str,
+    total_cents: int, currency: str, order_url: str | None, pay_by_label: str | None,
+) -> None:
+    """The store accepted an order that waited for approval. With
+    `pay_by_label` the buyer pays by card from the order page before then;
+    without, the store collects payment itself. Best-effort."""
+    e_site, total = escape(site_name or ""), fmt_money(total_cents, currency)
+    if pay_by_label:
+        lead = f"Good news — {e_site} accepted your order. Pay {escape(total)} to complete it."
+        tail = f"The order is held for you until {escape(pay_by_label)}; after that it's released."
+        cta, plain = "Pay now", f"Pay {total} to complete it, by {pay_by_label}"
+    else:
+        lead = f"Good news — {e_site} accepted your order."
+        tail = "They'll be in touch about payment and delivery."
+        cta, plain = "View your order", "They'll be in touch about payment and delivery"
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#d4d4d8;">{lead}</p>'
+        f'<div style="border-left:3px solid #10b981;padding:8px 0 8px 14px;color:#fafafa;font-size:15px;">'
+        f'{escape(items_summary or "Your order")}</div>'
+        f'<p style="margin:14px 0 0;font-size:13px;color:#a1a1aa;">{tail}</p>'
+    )
+    html = _email_shell(f"Order accepted — {e_site}", body, accent="#10b981",
+                        cta_label=cta if order_url else None, cta_url=order_url)
+    text = f"{site_name} accepted your order ({items_summary}). {plain}." + (f"\n\n{order_url}" if order_url else "")
+    await _send(to_email, to_name, f"Order accepted — {site_name}", html, text, label="order approved")
+
+
+async def send_cappe_order_declined_email(
+    to_email: str, to_name: str | None, site_name: str, items_summary: str, reason: str | None,
+) -> None:
+    """The store turned down an order that waited for approval. The buyer used
+    to hear nothing outside the iOS app. Best-effort."""
+    e_site = escape(site_name or "")
+    why = f'<p style="margin:12px 0 0;font-size:13px;color:#a1a1aa;">Reason: {escape(reason)}</p>' if reason else ""
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f"{e_site} couldn't accept your order, so it has been cancelled. You have not been charged.</p>"
+        f'<div style="border-left:3px solid #71717a;padding:8px 0 8px 14px;color:#fafafa;font-size:15px;">'
+        f'{escape(items_summary or "Your order")}</div>{why}'
+    )
+    html = _email_shell(f"Order update — {e_site}", body)
+    text = (f"{site_name} couldn't accept your order ({items_summary}), so it has been cancelled. "
+            "You have not been charged." + (f"\nReason: {reason}" if reason else ""))
+    await _send(to_email, to_name, f"Order update — {site_name}", html, text, label="order declined")
+
+
+async def send_cappe_order_shipped_email(
+    to_email: str, to_name: str | None, site_name: str, items_summary: str,
+    carrier: str | None, tracking_number: str | None, order_url: str | None, shipped: bool,
+) -> None:
+    """The order shipped (`shipped`, with tracking when given) or is ready (a
+    digital/service order fulfilled). Shipping used to be an app push only, so
+    a guest buyer never learned their parcel was on its way. Best-effort."""
+    e_site = escape(site_name or "")
+    track = " ".join(x for x in (carrier, tracking_number) if x)
+    if shipped:
+        heading, lead = f"Your order is on its way — {e_site}", f"Your order from {e_site} has shipped."
+    else:
+        heading, lead = f"Your order is ready — {e_site}", f"Your order from {e_site} is ready."
+    track_html = (
+        f'<p style="margin:14px 0 0;font-size:14px;color:#fafafa;">Tracking: <b>{escape(track)}</b></p>'
+        if track else ""
+    )
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#d4d4d8;">{lead}</p>'
+        f'<div style="border-left:3px solid #c6f16b;padding:8px 0 8px 14px;color:#fafafa;font-size:15px;">'
+        f'{escape(items_summary or "Your order")}</div>{track_html}'
+    )
+    html = _email_shell(heading, body, cta_label="View your order" if order_url else None, cta_url=order_url)
+    text = (f"{lead.replace(e_site, site_name or '')} {items_summary}."
+            + (f"\nTracking: {track}" if track else "") + (f"\n\n{order_url}" if order_url else ""))
+    subject = f"Shipped — {site_name}" if shipped else f"Ready — {site_name}"
+    await _send(to_email, to_name, subject, html, text, label="order shipped")
 
 
 async def send_cappe_order_alert_email(

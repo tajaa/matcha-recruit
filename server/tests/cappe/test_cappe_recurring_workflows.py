@@ -311,6 +311,10 @@ async def test_subscription_checkout_charges_the_promotional_quote_amount(monkey
         }],
         "subtotal_cents": 720, "tax_cents": 72, "shipping_cents": 500,
         "total_cents": 1292, "currency": "USD",
+        # This test's fake connection answers None for the card-payments
+        # lookup; the cart only uses the flag to decide whether to ask for an
+        # address.
+        "pays_by_card": False,
     }
     billed = sum(
         line["price_data"]["unit_amount"] * line["quantity"]

@@ -32,11 +32,14 @@ class FakeConn:
     """`candidates` is the sweep; `claims` the per-order status-guarded UPDATE
     (None = a webhook won the race)."""
 
-    def __init__(self, candidates, claims, manual=()):
+    def __init__(self, candidates, claims, manual=(), overdue=()):
         self._candidates = candidates
         self._claims = list(claims)
         # Orders that never went to Stripe — the second, slower sweep.
         self._manual = list(manual)
+        # Approved orders past their pay-by date that never opened a page.
+        self._overdue = list(overdue)
+        self.overdue_fetch_args = None
         self.fetch_args = None
         self.manual_fetch_args = None
         self.fetchrow_sql = []
@@ -44,6 +47,9 @@ class FakeConn:
         self.closed = False
 
     async def fetch(self, sql, *args):
+        if "pay_by IS NOT NULL AND pay_by < NOW()" in sql:
+            self.overdue_fetch_args = (sql, args)
+            return self._overdue
         if "stripe_session_id IS NULL" in sql:
             self.manual_fetch_args = (sql, args)
             return self._manual
@@ -150,7 +156,7 @@ def test_session_is_expired_before_the_order_is_released(monkeypatch):
     out = asyncio.run(mod._run())
 
     assert stripe.expired == [("acct_1", "cs_1")]
-    assert out == {"candidates": 1, "released": 1, "settling": 0, "reconciled": 0, "manual_released": 0}
+    assert out == {"candidates": 1, "released": 1, "settling": 0, "reconciled": 0, "manual_released": 0, "overdue_released": 0}
     assert log == [("restock", "o-1", "restock"), ("bookings", "o-1")]
 
 
@@ -163,7 +169,7 @@ def test_completed_checkout_is_never_cancelled(monkeypatch):
 
     out = asyncio.run(mod._run())
 
-    assert out == {"candidates": 1, "released": 0, "settling": 1, "reconciled": 0, "manual_released": 0}
+    assert out == {"candidates": 1, "released": 0, "settling": 1, "reconciled": 0, "manual_released": 0, "overdue_released": 0}
     assert log == []
     assert conn.fetchrow_sql == []     # no order UPDATE was attempted
     # Sent to the back of the sweep so it cannot starve newer abandoned carts.
@@ -189,7 +195,7 @@ def test_paid_session_with_a_lost_webhook_is_reconciled(monkeypatch):
     monkeypatch.setattr(mod, "issue_receipt_on", _receipt)
     out = asyncio.run(mod._run())
 
-    assert out == {"candidates": 1, "released": 0, "settling": 0, "reconciled": 1, "manual_released": 0}
+    assert out == {"candidates": 1, "released": 0, "settling": 0, "reconciled": 1, "manual_released": 0, "overdue_released": 0}
     assert "status = 'paid'" in conn.fetchrow_sql[0] and "status = 'pending'" in conn.fetchrow_sql[0]
     assert receipts == [("o-1", "s-1")]
     assert log == []                   # paid stock is NOT handed back
@@ -210,7 +216,7 @@ def test_stripe_being_unreachable_leaves_the_order_for_next_cycle(monkeypatch):
     out = asyncio.run(mod._run())
 
     # Not knowing whether the page is still payable is a reason NOT to release.
-    assert out == {"candidates": 1, "released": 0, "settling": 0, "reconciled": 0, "manual_released": 0}
+    assert out == {"candidates": 1, "released": 0, "settling": 0, "reconciled": 0, "manual_released": 0, "overdue_released": 0}
     assert log == []
 
 
@@ -238,7 +244,7 @@ def test_order_already_released_by_the_webhook_is_skipped(monkeypatch):
     log = []
     conn = FakeConn([_cand()], [None])
     _patch(monkeypatch, conn, log=log)
-    assert asyncio.run(mod._run()) == {"candidates": 1, "released": 0, "settling": 0, "reconciled": 0, "manual_released": 0}
+    assert asyncio.run(mod._run()) == {"candidates": 1, "released": 0, "settling": 0, "reconciled": 0, "manual_released": 0, "overdue_released": 0}
     assert log == []
 
 
@@ -327,3 +333,32 @@ def test_one_manual_release_failing_does_not_stop_the_rest(monkeypatch):
     assert asyncio.run(mod._run())["manual_released"] == 1
     assert calls == ["m-1", "m-2"]
 
+
+
+
+# ── approved orders the buyer never paid for ─────────────────────────────────
+
+def test_the_stripe_sweep_spares_approved_orders_until_their_pay_by_date(monkeypatch):
+    """Accepting an order opens a window to pay; an abandoned page inside it
+    must not release the order. Abandonment counts from the CURRENT page."""
+    conn = FakeConn([], [])
+    _patch(monkeypatch, conn, stripe=FakeStripe())
+    asyncio.run(mod._run())
+    sql = conn.fetch_args[0]
+    assert "(o.pay_by IS NULL OR o.pay_by < NOW())" in sql
+    assert "COALESCE(o.checkout_opened_at, o.created_at) < NOW()" in sql
+
+
+def test_an_approved_order_past_its_pay_by_date_is_released(monkeypatch):
+    log = []
+    conn = FakeConn([], [{"id": "o-9", "site_id": "s-1"}], overdue=[{"id": "o-9"}])
+    _patch(monkeypatch, conn, stripe=FakeStripe(), log=log)
+    out = asyncio.run(mod._run())
+    assert out["overdue_released"] == 1
+    assert "AND pay_by < NOW()" in conn.fetchrow_sql[-1] and "status = 'pending'" in conn.fetchrow_sql[-1]
+
+
+def test_an_overdue_order_paid_meanwhile_is_left_alone(monkeypatch):
+    conn = FakeConn([], [None], overdue=[{"id": "o-9"}])
+    _patch(monkeypatch, conn, stripe=FakeStripe())
+    assert asyncio.run(mod._run())["overdue_released"] == 0

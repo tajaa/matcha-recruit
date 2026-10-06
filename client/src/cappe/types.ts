@@ -521,6 +521,10 @@ export type CappeOrder = {
   /** List view only (the list carries no `items`). */
   item_count?: number
   items_summary?: string | null
+  /** Accepted and waiting for the buyer to pay from the emailed link, until then. */
+  pay_by?: string | null
+  shipped_notified_at?: string | null
+  platform_fee_cents?: number | null
 }
 
 // --- Newsletter -------------------------------------------------------------

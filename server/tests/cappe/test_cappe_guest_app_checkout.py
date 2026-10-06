@@ -117,8 +117,11 @@ async def test_checkout_returns_bind_guest_and_signed_orders_without_leaking_tok
         if return_kind != "app":
             page = origin + "/" if return_kind == "external" else requested_return
             if outcome == "success":
-                assert target == page
-                assert result["order_token"] not in target
+                # A buyer who pays lands on their order page on the store's own
+                # host — the confirmation, and where downloads are released.
+                # That page is ours (no merchant blocks, no-store, no-referrer),
+                # so it is the one storefront page that may carry the token.
+                assert target == f"{origin}/order/{result['order_token']}"
                 continue
             # A web buyer who backs out is routed through our own handler, which
             # releases the order and redirects on. The token rides that one hop
