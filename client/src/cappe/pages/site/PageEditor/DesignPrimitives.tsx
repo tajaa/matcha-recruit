@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Trash2 } from 'lucide-react'
 import { useCappeMe } from '../../../hooks/useCappeMe'
+import { isPremiumPlan } from '../../../utils/plan'
 import { confirmLeave } from '../../../utils/unsavedGuard'
 import { BILLING_PATH } from '../../CappeBilling/paths'
 import { dLabel, inputCls } from './styles'
@@ -12,7 +13,7 @@ import { arr, str } from './valueHelpers'
 // eslint-disable-next-line react-refresh/only-export-components
 export function usePremium(): boolean {
   const { account } = useCappeMe()
-  return account?.plan === 'pro' || account?.plan === 'business' || account?.plan === 'creator'
+  return isPremiumPlan(account?.plan)
 }
 
 export function PremiumLock({ children }: { children: ReactNode }) {

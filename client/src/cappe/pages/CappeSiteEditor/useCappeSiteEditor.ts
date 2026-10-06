@@ -6,6 +6,10 @@ import type { CappePagePreset } from '../../data/cappePagePresets'
 import type { CappePage, CappeSite } from '../../types'
 import { bizFromMeta, bizToMeta, type BizMeta } from './bizMeta'
 
+// `themeBusy` value while the template's original design is being restored —
+// not a preset id, so the Design grid can show the spinner on the right card.
+export const TEMPLATE_RESET_KEY = '__template__'
+
 export function useCappeSiteEditor() {
   const { siteId } = useParams<{ siteId: string }>()
   const navigate = useNavigate()
@@ -93,6 +97,22 @@ export function useCappeSiteEditor() {
     }
   }
 
+  async function resetToTemplate() {
+    if (!siteId) return
+    setThemeBusy(TEMPLATE_RESET_KEY)
+    setError(null)
+    setNotice(null)
+    try {
+      const updated = await cappeApi.post<CappeSite>(`/sites/${siteId}/theme/reset-to-template`)
+      setSite(updated)
+      setNotice('Template design restored.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to restore the template design')
+    } finally {
+      setThemeBusy(null)
+    }
+  }
+
   async function publish() {
     if (!siteId) return
     setPublishing(true)
@@ -174,7 +194,7 @@ export function useCappeSiteEditor() {
     name, setName, subdomain, setSubdomain, logo, setLogo, timezone, setTimezone,
     biz, setBiz, saving, themeBusy, publishing, setupRefresh,
     newPageTitle, setNewPageTitle, addingPage,
-    save, applyTheme, publish, addPage, addPreset, deletePage, deleteSite,
+    save, applyTheme, resetToTemplate, publish, addPage, addPreset, deletePage, deleteSite,
     bumpSetupRefresh, reloadPages,
   }
 }

@@ -3,16 +3,28 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import CappeOnboardingWizard from './CappeOnboardingWizard'
 
-const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
-vi.mock('../api', () => ({ cappeApi: api }))
-vi.mock('../hooks/useCappeMe', () => ({
-  useCappeMe: () => ({ account: { name: 'Pat Lee', account_type: 'business' } }),
-}))
+const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), categories: vi.fn() }))
+vi.mock('../api', () => ({ cappeApi: api, fetchCappeDirectoryCategories: api.categories }))
 
+const me = vi.hoisted(() => ({ account: { name: 'Pat Lee', account_type: 'business', plan: 'free' } }))
+vi.mock('../hooks/useCappeMe', () => ({ useCappeMe: () => ({ account: me.account }) }))
+
+const SWATCH = { bg: '#fff', surface: '#eee', brand: '#0a0', text: '#111' }
 const TEMPLATES = [
-  { id: 't-blog', name: 'Journal', slug: 'journal', category: 'blog', description: 'Writing first.', preview_image_url: null, is_premium: false, price_cents: 0 },
-  { id: 't-cafe', name: 'Corner Cafe', slug: 'corner-cafe', category: 'food', description: 'Menu and hours.', preview_image_url: null, is_premium: false, price_cents: 0 },
+  { slug: 'journal', name: 'Journal', category: 'other', category_label: 'Other', tags: [], description: 'Writing first.',
+    mode: 'light', heading_font: 'Fraunces', swatch: SWATCH, pages: [{ slug: 'home', title: 'Home' }] },
+  { slug: 'corner-cafe', name: 'Corner Cafe', category: 'food-drink', category_label: 'Food & Drink', tags: [], description: 'Menu and hours.',
+    mode: 'dark', heading_font: 'Playfair Display', swatch: SWATCH, pages: [{ slug: 'home', title: 'Home' }] },
 ]
+const CATEGORIES = {
+  categories: [
+    { slug: 'food-drink', label: 'Food & Drink', count: 0 },
+    { slug: 'art-design', label: 'Art & Design', count: 0 },
+    { slug: 'trades-home', label: 'Trades & Home Services', count: 0 },
+    { slug: 'other', label: 'Other', count: 0 },
+  ],
+  total: 0,
+}
 
 function Where() {
   return <p data-testid="where">{useLocation().pathname}</p>
@@ -29,11 +41,22 @@ function renderWizard() {
   )
 }
 
-async function toStartStep(mode: 'One location' | 'Multiple locations', name: string) {
+async function toCategoryStep(mode: 'One location' | 'Multiple locations', name: string) {
   fireEvent.click(screen.getByRole('button', { name: new RegExp(mode) }))
   fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
   fireEvent.change(screen.getByLabelText('Business name'), { target: { value: name } })
   fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+  await screen.findByRole('heading', { name: 'What kind of business is it?' })
+}
+
+async function toStartStep(mode: 'One location' | 'Multiple locations', name: string, category: string | null = 'Food & Drink') {
+  await toCategoryStep(mode, name)
+  if (category) {
+    fireEvent.click(await screen.findByRole('button', { name: category }))
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+  } else {
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+  }
   await screen.findByRole('heading', { name: 'How do you want to start?' })
 }
 
@@ -41,6 +64,8 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   api.get.mockReset().mockResolvedValue(TEMPLATES)
   api.post.mockReset().mockResolvedValue({ id: 'site-1' })
+  api.categories.mockReset().mockResolvedValue(CATEGORIES)
+  me.account = { name: 'Pat Lee', account_type: 'business', plan: 'free' }
 })
 
 describe('CappeOnboardingWizard', () => {
@@ -52,6 +77,30 @@ describe('CappeOnboardingWizard', () => {
 
     expect(screen.getByText(/mara-s-coffee\./)).toBeInTheDocument()
     expect(api.post).not.toHaveBeenCalled()
+  })
+
+  it('asks the kind of business once and cannot continue without an answer or a skip', async () => {
+    renderWizard()
+    await toCategoryStep('One location', 'Corner Bakery')
+
+    expect(screen.getByRole('button', { name: /Continue/ })).toBeDisabled()
+    fireEvent.click(await screen.findByRole('button', { name: 'Trades & Home Services' }))
+    expect(screen.getByRole('button', { name: 'Trades & Home Services' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: /Continue/ })).toBeEnabled()
+  })
+
+  it('offers a personal account the creative slice of the taxonomy', async () => {
+    me.account = { name: 'Pat Lee', account_type: 'personal', plan: 'free' }
+    renderWizard()
+    fireEvent.click(screen.getByRole('button', { name: /One location/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+    fireEvent.change(screen.getByLabelText('Your name or business name'), { target: { value: 'Pat Lee' } })
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+    await screen.findByRole('heading', { name: "What's the site for?" })
+
+    expect(await screen.findByRole('button', { name: 'Art & Design' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Food & Drink' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Trades & Home Services' })).not.toBeInTheDocument()
   })
 
   it('creates a blank site when asked to', async () => {
@@ -66,12 +115,12 @@ describe('CappeOnboardingWizard', () => {
     })
   })
 
-  it('starts from a template, recommended ones first', async () => {
+  it('starts from a template, the chosen category first, and seeds the Discover listing', async () => {
     renderWizard()
-    await toStartStep('One location', 'Corner Bakery')
+    await toStartStep('One location', 'Corner Bakery', 'Food & Drink')
 
     const picks = await screen.findAllByRole('button', { name: /^Use the .* template$/ })
-    // A business account sees the food template ahead of the blog one.
+    // The food template leads because that is what the person told us.
     expect(picks.map((b) => b.getAttribute('aria-label'))).toEqual([
       'Use the Corner Cafe template', 'Use the Journal template',
     ])
@@ -79,8 +128,34 @@ describe('CappeOnboardingWizard', () => {
 
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/cappe/sites/site-1'))
     expect(api.post).toHaveBeenCalledWith('/sites/from-template', {
-      template_id: 't-cafe', name: 'Corner Bakery', is_multi_location: false,
+      template_slug: 'corner-cafe', name: 'Corner Bakery', is_multi_location: false, directory_category: 'food-drink',
     })
+  })
+
+  it('skipping the category sends none and keeps the catalog order', async () => {
+    renderWizard()
+    await toStartStep('One location', 'Corner Bakery', null)
+
+    const picks = await screen.findAllByRole('button', { name: /^Use the .* template$/ })
+    expect(picks.map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Use the Journal template', 'Use the Corner Cafe template',
+    ])
+    fireEvent.click(picks[1])
+
+    await waitFor(() => expect(api.post).toHaveBeenCalled())
+    expect(api.post).toHaveBeenCalledWith('/sites/from-template', {
+      template_slug: 'corner-cafe', name: 'Corner Bakery', is_multi_location: false,
+    })
+  })
+
+  it('still reaches the shelf when the category list cannot load', async () => {
+    api.categories.mockRejectedValueOnce(new Error('offline'))
+    renderWizard()
+    await toCategoryStep('One location', 'Corner Bakery')
+
+    expect(await screen.findByText(/Couldn't load the category list/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    await screen.findByRole('heading', { name: 'How do you want to start?' })
   })
 
   it('keeps the several-locations answer on the template path and seeds the first branch', async () => {
@@ -90,11 +165,14 @@ describe('CappeOnboardingWizard', () => {
     fireEvent.change(screen.getByLabelText('Business name'), { target: { value: 'Corner Bakery' } })
     fireEvent.change(screen.getByPlaceholderText('e.g. Downtown'), { target: { value: 'Mission' } })
     fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+    await screen.findByRole('heading', { name: 'What kind of business is it?' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Other' }))
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
     fireEvent.click(await screen.findByRole('button', { name: 'Use the Journal template' }))
 
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/cappe/sites/site-1/locations'))
     expect(api.post).toHaveBeenNthCalledWith(1, '/sites/from-template', {
-      template_id: 't-blog', name: 'Corner Bakery', is_multi_location: true,
+      template_slug: 'journal', name: 'Corner Bakery', is_multi_location: true, directory_category: 'other',
     })
     expect(api.post).toHaveBeenNthCalledWith(2, '/sites/site-1/locations', { name: 'Mission', is_default: true })
   })

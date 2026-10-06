@@ -78,7 +78,7 @@ export default function CappeSiteEditor() {
       />
 
       {/* Design / theme */}
-      <DesignSection site={s.site} themeBusy={s.themeBusy} onApplyTheme={s.applyTheme} />
+      <DesignSection site={s.site} themeBusy={s.themeBusy} onApplyTheme={s.applyTheme} onResetTemplate={s.resetToTemplate} />
 
       {/* Pages */}
       <PagesSection
