@@ -13,6 +13,13 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
 - `hooks/useCappeMe.ts` — own auth-state hook (not `hooks/useMe`)
 - `host.ts` — `isCappeHost` / `cappeSiteHost` host detection
 - `types.ts`, `data/` — cappe types, `cappeThemes`/`cappePagePresets`/`timezones`
+- `components/TemplateGallery.tsx` — the template shelf (category filter chips, full-site preview
+  modal, "For you" ordering by the Discover category the wizard asked for). Shared by
+  `pages/CappeTemplates.tsx` and the wizard's last step. Every template is on every plan; a paid
+  account's previews pass `premium=1` so it sees the polish it will keep.
+- `onboarding/CappeOnboardingWizard.tsx` asks the Discover category ONCE (step 3) — it sorts the
+  shelf and seeds `directory_category` on `POST /sites/from-template`.
+- `utils/plan.ts` — `isPremiumPlan`, the client mirror of the server's `design_gate.PREMIUM_PLANS`.
 
 ## Backend pairing
 

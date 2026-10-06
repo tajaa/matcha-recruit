@@ -34,6 +34,7 @@ from ..services.directory import (
 )
 from ..services.readiness import compute_readiness
 from ..services.render import render_site_html
+from ..services.site_templates import clone_structure, get_template, legacy_template_slug, template_theme
 from .render import invalidate_render_cache, tenant_security_headers
 from ._shared import (
     SUBDOMAIN_MAX_LEN,
@@ -52,7 +53,7 @@ router = APIRouter()
 _SITE_COLS = (
     "app_url_scheme, app_bundle_id, "
     "id, account_id, name, slug, subdomain, custom_domain, source_type, "
-    "template_id, status, theme_config, meta_config, timezone, is_multi_location, "
+    "template_id, template_slug, status, theme_config, meta_config, timezone, is_multi_location, "
     "tax_rate_bps, tax_label, "
     "shipping_flat_cents, shipping_free_threshold_cents, shipping_label, "
     "receipt_prefix, "
@@ -176,6 +177,7 @@ async def list_sites(account: CappeAccount = Depends(require_cappe_account)):
 @router.post("/sites", response_model=CappeSite, status_code=status.HTTP_201_CREATED)
 async def create_site(body: CappeSiteCreate, account: CappeAccount = Depends(require_cappe_account)):
     """Create a blank or bring-your-own site."""
+    category = normalize_category(body.directory_category) if body.directory_category else None
     async with get_connection() as conn:
         async with conn.transaction():
             await _lock_account_for_site_creation(conn, account.id)
@@ -186,14 +188,16 @@ async def create_site(body: CappeSiteCreate, account: CappeAccount = Depends(req
             async def _insert(slug: str):
                 return await conn.fetchrow(
                     f"""INSERT INTO cappe_sites
-                            (account_id, name, slug, subdomain, source_type, is_multi_location)
-                        VALUES ($1, $2, $3, $3, $4, $5)
+                            (account_id, name, slug, subdomain, source_type, is_multi_location,
+                             directory_category)
+                        VALUES ($1, $2, $3, $3, $4, $5, $6)
                         RETURNING {_SITE_COLS}""",
                     account.id,
                     body.name,
                     slug,
                     body.source_type,
                     body.is_multi_location,
+                    category,
                 )
 
             row = await _insert_site_with_free_slug(conn, body.name, _insert)
@@ -213,58 +217,65 @@ async def create_site(body: CappeSiteCreate, account: CappeAccount = Depends(req
 async def create_site_from_template(
     body: CappeSiteFromTemplate, account: CappeAccount = Depends(require_cappe_account)
 ):
-    """Clone a template into a new site: copy its theme and pages in one
-    transaction."""
+    """Clone a registry template into a new site: theme + pages in one
+    transaction, personalised to the business name and gated to the plan.
+
+    Every template is available on every plan. The clone runs the SAME
+    `gate_theme`/`gate_content` the editor's save path runs (inside
+    `clone_structure`), so a free account's live site is exactly what its
+    editor will keep — the old copy-everything clone shipped premium effects
+    that vanished on the first save.
+    """
+    slug = body.template_slug
+    if slug is None and getattr(body, "template_id", None) is not None:
+        # A tab from before the registry: map the retired row onto its
+        # replacement. Read-only, outside the account lock.
+        async with get_connection() as conn:
+            slug = legacy_template_slug(
+                await conn.fetchval("SELECT slug FROM cappe_templates WHERE id = $1", body.template_id)
+            )
+    template = get_template(slug)
+    if template is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+
+    name = (body.name or "").strip() or template.sample_name
+    theme, pages = clone_structure(template, business_name=name, plan=account.plan)
+    # An unknown category is dropped rather than rejected — the wizard sends
+    # one of the fixed slugs, and a stale client must not block site creation.
+    category = normalize_category(body.directory_category) if body.directory_category else None
+
     async with get_connection() as conn:
-        # Validate before taking the account lock: a missing/inactive template
-        # remains a 404 and cannot make a legitimate create wait behind it.
-        template = await conn.fetchrow(
-            "SELECT id, name, structure, is_active FROM cappe_templates WHERE id = $1",
-            body.template_id,
-        )
-        if template is None or not template["is_active"]:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
-
-        structure = loads(template["structure"])
-        theme = structure.get("theme") or {}
-        pages = structure.get("pages") or []
-
-        name = body.name or template["name"]
-
         async with conn.transaction():
             await _lock_account_for_site_creation(conn, account.id)
             await _enforce_site_limit(conn, account)
             async def _insert(slug: str):
                 return await conn.fetchrow(
                     f"""INSERT INTO cappe_sites
-                            (account_id, name, slug, subdomain, source_type, template_id,
-                             theme_config, is_multi_location)
-                        VALUES ($1, $2, $3, $3, 'template', $4, $5, $6)
+                            (account_id, name, slug, subdomain, source_type, template_slug,
+                             theme_config, is_multi_location, directory_category)
+                        VALUES ($1, $2, $3, $3, 'template', $4, $5, $6, $7)
                         RETURNING {_SITE_COLS}""",
                     account.id,
                     name,
                     slug,
-                    template["id"],
+                    template.slug,
                     json.dumps(theme),
                     body.is_multi_location,
+                    category,
                 )
 
             site = await _insert_site_with_free_slug(conn, name, _insert)
             inserted = 0
-            for i, page in enumerate(pages):
-                if not isinstance(page, dict):
-                    continue
-                p_title = str(page.get("title") or f"Page {i + 1}")[:255]
-                p_slug = slugify(page.get("slug") or p_title)
+            for page in pages:
                 page_id = await conn.fetchval(
                     """INSERT INTO cappe_pages (site_id, title, slug, content, sort_order, status)
                        VALUES ($1, $2, $3, $4, $5, 'draft')
                        ON CONFLICT (site_id, slug) DO NOTHING RETURNING id""",
                     site["id"],
-                    p_title,
-                    p_slug,
-                    json.dumps(page.get("content") or {}),
-                    int(page.get("sort_order", i)),
+                    page["title"],
+                    slugify(page["slug"] or page["title"]),
+                    json.dumps(page["content"]),
+                    page["sort_order"],
                 )
                 inserted += page_id is not None
             if not inserted:
@@ -274,6 +285,37 @@ async def create_site_from_template(
                 inserted = 1
 
     return site_row_to_dict(site, page_count=inserted)
+
+
+@router.post("/sites/{site_id}/theme/reset-to-template", response_model=CappeSite)
+async def reset_theme_to_template(
+    site_id: UUID, account: CappeAccount = Depends(require_cappe_account),
+):
+    """Put the template's original look back on a site whose owner has since
+    applied a theme preset or hand-edited the palette. Pages are untouched —
+    this is the design, not the content. Gated to the plan exactly like the
+    original clone."""
+    async with get_connection() as conn:
+        site = await get_owned_site(conn, site_id, account.id)
+        template = get_template(site["template_slug"]) if "template_slug" in site else None
+        if template is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="This site wasn't started from a template that's still in the catalog.",
+            )
+        row = await conn.fetchrow(
+            f"""UPDATE cappe_sites SET theme_config = $1, updated_at = NOW()
+                WHERE id = $2 AND account_id = $3
+                RETURNING {_SITE_COLS}""",
+            json.dumps(template_theme(template, plan=account.plan)),
+            site_id,
+            account.id,
+        )
+        if row is None:
+            # Deleted between the ownership read and the write.
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+    await invalidate_render_cache(site_id)
+    return site_row_to_dict(row)
 
 
 @router.post("/sites/{site_id}/preview", response_class=HTMLResponse)

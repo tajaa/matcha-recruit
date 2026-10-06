@@ -49,6 +49,7 @@ from ....core.services.rate_limiter import ApiRateLimiter, RateLimitExceeded
 from ....core.services.storage import get_storage
 from ..browser_pool import SHOT_EXT, SHOT_MIME
 from ..design_gate import is_premium_plan
+from ..site_templates.imagery import inline_placeholders
 from .. import image_quota
 from .turn import (
     DEFAULT_MODEL_TIER,
@@ -651,6 +652,10 @@ async def run_merlin_agent(
             # not I/O) — off the event loop so it doesn't stall every other
             # request while a Max turn takes up to 5 shots.
             html = await asyncio.to_thread(render_html, work_blocks, work_theme)
+            # The shot is `set_content` at about:blank, where a template's
+            # root-relative placeholder path resolves to nothing. Inline them
+            # so a template image slot draws as it does for a real visitor.
+            html = inline_placeholders(html)
             png, blocked_hosts = await screenshot_html(html, viewport, focus_block=focus_index)
         except ScreenshotUnavailable as exc:
             # Chromium missing or crashed. The turn continues blind rather than

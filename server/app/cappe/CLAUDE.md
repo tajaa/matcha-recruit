@@ -44,3 +44,36 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
 - **Money-path webhooks gate on `payment_status == "paid"`** (`routes/payments.py`,
   `routes/domains.py`); `async_payment_succeeded/failed` and `session.expired` are handled and the
   abandoned-order reaper (`cappe_order_reaper`) is the backstop for restocking.
+
+## Site templates (`services/site_templates/`)
+
+- **The catalog is code, not the `cappe_templates` table.** One `SiteTemplate` per entry, one module
+  per Discover category (`food_drink.py`, `beauty_grooming.py`, …), aggregated in `__init__.py`.
+  `routes/templates.py` and `POST /sites/from-template` read the registry; `cappe_templates` and
+  `cappe_sites.template_id` are inert (dropping them is its own approved migration). A site records
+  the registry key in `cappe_sites.template_slug` (`zzzzcappe37`). The hand-run
+  `scripts/seed_cappe_templates.py` is gone — nothing needs seeding.
+- **Every template is available on every plan; nothing is priced per template.** Templates are the
+  free plan's path to a finished site — Merlin's agent loop is the paid one. Author a template
+  COMPLETE (premium keys, `_design` bags included) and make sure it looks finished without them:
+  `clone_structure` runs the same `gate_theme`/`gate_content` the editor's save path runs, so a free
+  clone is exactly what the editor keeps and a paid clone gets the polish. The old clone copied
+  everything and shipped effects that vanished on the first save.
+- **`tests/cappe/test_site_templates.py` is the drift gate** — every block through the real
+  `add_block` validation with nothing filtered, every page rendered gated AND ungated, every
+  Discover category covered, ≥40% light mode, internal links resolve, no third-party hosts, no
+  invented facts (years, "Est."), `{{business_name}}` on every home page. Run it after touching a
+  block field, a design key, the directory taxonomy, or a template.
+- **Imagery never comes from outside our origin.** Slots are manifest keys (`imagery.py`); until
+  `scripts/cappe_template_imagery.py` has generated a photo (same Gemini image model + S3/CloudFront
+  as owners' images; URLs land in the committed `imagery_urls.json`) the slot shows the
+  deterministic placeholder tile from `GET /templates/placeholder/{key}.svg`. That route REDIRECTS
+  to the photo once it exists, so a site cloned early (which stored the placeholder path) upgrades
+  on its own — keep its cache short and never `immutable`. Off-origin renders (Merlin's about:blank
+  screenshots) must pass their HTML through `imagery.inline_placeholders`.
+- **The preview route sets `tenant_security_headers()` itself.** It is only ever shown in an
+  iframe; without a handler-set CSP `main.py:add_security_headers` stamps `frame-ancestors 'none'`
+  on it and the gallery draws blank. `test_preview_survives_the_real_security_middleware` pins it.
+- **Previews are memoised per (slug, page, premium)** and browsable (`?page=` links rewritten), so
+  the gallery's N cards cost N dict lookups; the rate limit only has to stop a scraper.
+

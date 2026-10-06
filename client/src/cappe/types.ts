@@ -78,6 +78,8 @@ export type CappeSite = {
   custom_domain: string | null
   source_type: 'template' | 'byo' | 'blank' | string
   template_id: string | null
+  /** Registry key of the template the site was cloned from (null for blank sites). */
+  template_slug?: string | null
   status: CappeSiteStatus
   theme_config: Record<string, unknown>
   meta_config: Record<string, unknown>
@@ -333,19 +335,20 @@ export type CappeCanvasBlock = {
   _design?: Record<string, unknown>
 }
 
+/** One template-gallery card (models/sites.py:CappeTemplateSummary). Every
+ *  template is available on every plan, so there is no premium flag or price;
+ *  `category` is a Discover taxonomy slug and `pages` drives the preview tabs. */
 export type CappeTemplateSummary = {
-  id: string
-  name: string
   slug: string
+  name: string
   category: string
-  description: string | null
-  preview_image_url: string | null
-  is_premium: boolean
-  price_cents: number
-}
-
-export type CappeTemplateDetail = CappeTemplateSummary & {
-  structure: Record<string, unknown>
+  category_label: string
+  tags: string[]
+  description: string
+  mode: 'light' | 'dark' | string
+  heading_font: string
+  swatch: { bg: string; surface: string; brand: string; text: string }
+  pages: { slug: string; title: string }[]
 }
 
 // --- Shop -------------------------------------------------------------------
