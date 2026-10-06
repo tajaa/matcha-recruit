@@ -263,7 +263,7 @@ async def test_subscription_checkout_charges_the_promotional_quote_amount(monkey
         "stripe_checkout_session_id": None, "stripe_subscription_id": None,
     }
     discounts = [{
-        "percent_off": 20, "scope": "product", "target_id": product_id,
+        "percent_off": 20, "scope": "product", "target_id": product_id, "location_id": None,
         # 2026-09-19 00:00 UTC is still 2026-09-18 at the site.
         "active": True, "starts_on": date(2026, 9, 18), "ends_on": date(2026, 9, 18),
     }]

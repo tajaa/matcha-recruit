@@ -25,12 +25,63 @@ from ...core.services.redis_cache import cache_get, cache_set, get_redis_cache
 from ...database import get_connection
 from ..models._validators import is_app_url_scheme
 from ..services.booking_suggestion_access import canonical_suggestion_host
+from ..services.commerce import release_abandoned_checkout
 from ..services.common import normalize_host_header
 from ..services.render import render_site_html
 from ..services.render_cache import invalidate_site_render_cache
+from ..services.stripe_connect import CappeStripeError
 from ._shared import RESERVED_SUBDOMAINS, loads, loads_list
 
 router = APIRouter()
+
+
+_NO_STORE = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+
+
+async def _release_abandoned(order_token: str) -> None:
+    """Hand back what an unpaid order was holding now that its buyer has left
+    the payment page. Best-effort: if Stripe cannot be reached nothing is
+    changed, the page still times out on its own, and the reaper is the
+    backstop — not worth failing the buyer's return over."""
+    try:
+        await release_abandoned_checkout(order_token)
+    except CappeStripeError:
+        pass
+
+
+def _local_path(value: str) -> str:
+    """`value` if it is a path on this site, else the home page. Refuses
+    anything a browser could read as another host (`//evil.test`, `/\\evil`)."""
+    if (
+        not value.startswith("/") or value.startswith("//")
+        or "\\" in value or any(ord(ch) < 32 for ch in value)
+    ):
+        return "/"
+    return value
+
+
+@router.get("/__cappe/checkout-return")
+async def checkout_return(request: Request, o: str = "", next: str = "/"):
+    """Where Stripe sends a WEB buyer who backs out of the payment page.
+
+    The order has been holding its stock and booking slots since it was
+    created; nothing used to hand them back until the session timed out, so a
+    buyer who clicked Back and tried again was told the item — the one THEY
+    were holding — was out of stock. This closes the page, releases the order,
+    and sends the buyer on to the page the storefront asked for. The token
+    stops here: the redirect target never carries it."""
+    if not re.fullmatch(r"[0-9a-f]{32}", o):
+        raise HTTPException(400, "Invalid checkout return")
+    async with get_connection() as conn:
+        site = await _resolve_published_site(conn, request.headers.get("host"))
+        if not site:
+            raise HTTPException(404, "Site not found")
+        mine = await conn.fetchval(
+            "SELECT 1 FROM cappe_orders WHERE access_token=$1 AND site_id=$2", o, site["id"],
+        )
+    if mine:
+        await _release_abandoned(o)
+    return RedirectResponse(_local_path(next), status_code=302, headers=_NO_STORE)
 
 
 @router.get("/__cappe/app-return")
@@ -43,11 +94,16 @@ async def app_return(request: Request, o: str = "", r: str = "success"):
             raise HTTPException(404, "Site not found")
         scheme = await conn.fetchval("SELECT app_url_scheme FROM cappe_sites WHERE id=$1", site["id"])
         exists = await conn.fetchval("SELECT id FROM cappe_orders WHERE access_token=$1 AND site_id=$2", o, site["id"])
+        is_order = bool(exists)
         if not exists:
             exists = await conn.fetchval("SELECT id FROM cappe_shopper_subscriptions WHERE checkout_token=$1 AND site_id=$2", o, site["id"])
     if not exists:
         raise HTTPException(404, "Order not found")
-    headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+    if is_order and r == "cancel":
+        # Same release as the web return. A subscription checkout holds no
+        # stock and has its own expiry path.
+        await _release_abandoned(o)
+    headers = _NO_STORE
     # Same rule as the write side (`CappeSiteUpdate`), re-checked here so a row
     # that predates the denylist can never become a web/script redirect.
     if is_app_url_scheme(scheme):

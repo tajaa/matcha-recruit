@@ -77,6 +77,7 @@ async def test_checkout_returns_bind_guest_and_signed_orders_without_leaking_tok
     monkeypatch.setattr(commerce, "get_connection", lambda: conn)
     monkeypatch.setattr(commerce, "fetch_active_discounts", AsyncMock(return_value=[]))
     monkeypatch.setattr(commerce, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(commerce, "lock_stock_rows", AsyncMock())
     monkeypatch.setattr(commerce, "fetch_site_owner", AsyncMock(return_value=owner))
     monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200)))
     monkeypatch.setattr(commerce, "require_can_sell", lambda _: None)
@@ -99,18 +100,43 @@ async def test_checkout_returns_bind_guest_and_signed_orders_without_leaking_tok
     assert ("customer_id" in checkout_args) is signed_in
     monkeypatch.setattr(render, "get_connection", lambda: conn)
     monkeypatch.setattr(render, "_resolve_published_site", AsyncMock(return_value=site))
+    released = AsyncMock(return_value="released")
+    monkeypatch.setattr(render, "release_abandoned_checkout", released)
+    # Stock is only held for half an hour, not Stripe's default day.
+    assert checkout_args["expires_in_seconds"] == commerce.CONNECT_CHECKOUT_TTL_SECONDS
+
+    def _request(parsed):
+        return Request({"type": "http", "method": "GET", "path": parsed.path,
+                        "headers": [(b"host", parsed.netloc.encode())]})
+
     for outcome in ("success", "cancel"):
         target = checkout_args[f"{outcome}_url"]
-        if return_kind != "app":
-            assert target == (origin + "/" if return_kind == "external" else requested_return)
-            assert result["order_token"] not in target
-            continue
         parsed = urlsplit(target)
         assert f"{parsed.scheme}://{parsed.netloc}" == origin
         query = parse_qs(parsed.query)
+        if return_kind != "app":
+            page = origin + "/" if return_kind == "external" else requested_return
+            if outcome == "success":
+                assert target == page
+                assert result["order_token"] not in target
+                continue
+            # A web buyer who backs out is routed through our own handler, which
+            # releases the order and redirects on. The token rides that one hop
+            # and never reaches the storefront page.
+            onward = page[len(origin):]
+            assert parsed.path == commerce.CHECKOUT_RETURN_PATH
+            assert query == {"o": [result["order_token"]], "next": [onward]}
+            response = await render.checkout_return(_request(parsed), o=query["o"][0], next=query["next"][0])
+            assert response.status_code == 302
+            assert response.headers["location"] == onward
+            assert result["order_token"] not in response.headers["location"]
+            assert response.headers["cache-control"] == "no-store"
+            released.assert_awaited_once_with(result["order_token"])
+            continue
         assert query == {"o": [result["order_token"]], "r": [outcome]}
-        request = Request({"type": "http", "method": "GET", "path": parsed.path,
-                           "headers": [(b"host", parsed.netloc.encode())]})
-        response = await render.app_return(request, o=query["o"][0], r=query["r"][0])
+        response = await render.app_return(_request(parsed), o=query["o"][0], r=query["r"][0])
         assert response.status_code == 302
         assert response.headers["location"] == f"ahnimal://order/{result['order_token']}?r={outcome}"
+    if return_kind == "app":
+        # The app's cancel return releases the order too; its success return does not.
+        released.assert_awaited_once_with(result["order_token"])

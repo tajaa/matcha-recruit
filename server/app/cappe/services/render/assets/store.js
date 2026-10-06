@@ -8,7 +8,10 @@ var ty=(['email','number','tel','date'].indexOf(f.type)>=0)?f.type:'text';return
 function optsHtml(p){return (p.option_groups||[]).map(function(g){
 return '<div class="cz-opt-group" data-group="'+RT.esc(g.id)+'" data-single="'+(g.select_type==='single'?'1':'')+'" data-required="'+(g.required?'1':'')+'"><label class="cz-label">'+RT.esc(g.name)+(g.required?' *':'')+'</label><div class="cz-opts">'+
 (g.options||[]).map(function(o){var dc=o.price_delta_cents||0;var d=dc?(' '+(dc>0?'+':'−')+RT.money(Math.abs(dc),p.currency)):'';
-return '<button type="button" class="cz-opt" data-opt="'+RT.esc(o.id)+'" data-delta="'+dc+'">'+RT.esc(o.name)+d+'</button>';}).join('')+'</div></div>';}).join('');}
+var gone=p.fulfillment==='physical'&&out(o.inventory);
+return '<button type="button" class="cz-opt" data-opt="'+RT.esc(o.id)+'" data-delta="'+dc+'"'+(gone?' disabled':'')+'>'+RT.esc(o.name)+d+(gone?' · sold out':'')+'</button>';}).join('')+'</div></div>';}).join('');}
+function out(v){return v!=null&&v<=0;}
+function soldOut(p){return p.fulfillment==='physical'&&out(p.inventory);}
 function stars(n){n=Math.round(n||0);var s='';for(var i=1;i<=5;i++)s+=(i<=n?'★':'☆');return s;}
 var REVIEWS=[];
 // One shared product-detail overlay (acts like a product page).
@@ -38,10 +41,10 @@ info.innerHTML=(p.category?'<div class="cz-eyebrow">'+RT.esc(p.category)+'</div>
 
 optsHtml(p)+(p.intake_fields||[]).map(field).join('')+
 (booking?'<div><label class="cz-label">Preferred time</label><input class="cz-field" type="datetime-local" data-when /></div>':'')+
-'<div class="cz-pd__buy"><label class="cz-label">Quantity</label><input class="cz-field cz-pd__qty" type="number" min="1" value="1" data-qty />'+
+'<div class="cz-pd__buy"><label class="cz-label">Quantity</label><input class="cz-field cz-pd__qty" type="number" min="1" value="1"'+((p.fulfillment==='physical'&&p.inventory>0)?' max="'+p.inventory+'"':'')+' data-qty />'+
 '<input class="cz-field" type="email" data-email placeholder="Your email" /><input class="cz-field" type="text" data-name placeholder="Your name" />'+
 '<p class="cz-msg" data-quote></p><button class="cz-btn cz-btn--solid cz-btn--block" data-go></button><p class="cz-msg" data-status></p></div>';
-var sb=info.querySelector('[data-go]'),msg=info.querySelector('[data-status]');
+var sb=info.querySelector('[data-go]'),msg=info.querySelector('[data-status]'),gone=soldOut(p);
 // Local estimate only: same half-up integer math as the server's apply_discount_cents,
 // so it agrees to the cent. The authoritative figure is the server quote below.
 function unit(){var s=p.price_cents||0;info.querySelectorAll('.cz-opt--on').forEach(function(b){s+=parseInt(b.getAttribute('data-delta'),10)||0;});s=Math.max(0,s);if(p.discount_percent)s=Math.floor((s*(100-p.discount_percent)+50)/100);return s;}
@@ -54,13 +57,14 @@ function chosen(){var ids=[];info.querySelectorAll('.cz-opt--on').forEach(functi
 var qseq=0,qtimer=null,qbox=info.querySelector('[data-quote]');
 function quote(){var seq=++qseq;RT.post('/quote',{items:[{product_id:p.id,quantity:qn(),selected_option_ids:chosen()}]}).then(function(q){
 if(seq!==qseq||!q||q.total_cents==null)return;var l=(q.lines||[])[0];if(l&&l.reason)return;
+if(l&&l.available===false){sb.disabled=true;sb.textContent='Out of stock';if(qbox)qbox.textContent='Not enough in stock for that choice. Try a lower quantity or another option.';return;}
 var cur=q.currency||p.currency,parts=[];
 if(q.tax_cents>0)parts.push('Tax '+RT.money(q.tax_cents,cur));
 if(q.shipping_cents>0)parts.push('Shipping '+RT.money(q.shipping_cents,cur));
 sb.textContent=verb()+RT.money(q.total_cents,cur);
 if(qbox)qbox.textContent=parts.length?('Subtotal '+RT.money(q.subtotal_cents,cur)+' · '+parts.join(' · ')):'';
 }).catch(function(){});}
-function refresh(){sb.textContent=verb()+RT.money(unit()*qn(),p.currency);if(qbox)qbox.textContent='';clearTimeout(qtimer);qtimer=setTimeout(quote,250);}
+function refresh(){if(gone){sb.disabled=true;sb.textContent='Sold out';return;}sb.disabled=false;sb.textContent=verb()+RT.money(unit()*qn(),p.currency);if(qbox)qbox.textContent='';clearTimeout(qtimer);qtimer=setTimeout(quote,250);}
 info.querySelectorAll('.cz-opt-group').forEach(function(g){var single=g.getAttribute('data-single')==='1';g.querySelectorAll('.cz-opt').forEach(function(o){o.addEventListener('click',function(){if(single){g.querySelectorAll('.cz-opt').forEach(function(x){x.classList.remove('cz-opt--on');});o.classList.add('cz-opt--on');}else o.classList.toggle('cz-opt--on');refresh();});});});
 info.querySelector('[data-qty]').addEventListener('input',refresh);refresh();
 sb.addEventListener('click',function(){var email=info.querySelector('[data-email]').value.trim();
@@ -81,7 +85,7 @@ if(!(history.state&&history.state.czpd))history.pushState({czpd:1},'');
 function card(p){var c=document.createElement('button');c.type='button';c.className='cz-product';
 var iu=RT.url(p.image_url);var img=iu?'<img class="cz-product__img" src="'+RT.esc(iu)+'" alt="" />':'<div class="cz-product__img"></div>';
 var price;if(p.discount_percent&&p.discounted_price_cents!=null){price='<span class="cz-pd__was">'+RT.money(p.price_cents,p.currency)+'</span>'+RT.money(p.discounted_price_cents,p.currency);}else{price=p.price_cents?RT.money(p.price_cents,p.currency):'Free';}
-c.innerHTML=img+'<div class="cz-product__body"><h3>'+RT.esc(p.name)+'</h3><div class="cz-product__foot"><span class="cz-price">'+price+'</span>'+((p.option_groups||[]).length?'<span class="cz-product__opts">Options</span>':'')+'</div></div>';
+c.innerHTML=img+'<div class="cz-product__body"><h3>'+RT.esc(p.name)+'</h3><div class="cz-product__foot"><span class="cz-price">'+price+'</span>'+(soldOut(p)?'<span class="cz-product__opts">Sold out</span>':((p.option_groups||[]).length?'<span class="cz-product__opts">Options</span>':''))+'</div></div>';
 c.addEventListener('click',function(){openDetail(p);});return c;}
 function grid(list){var g=document.createElement('div');g.className='cz-store-grid';list.forEach(function(p){g.appendChild(card(p));});return g;}
 Promise.all([RT.get('/products'),RT.get('/reviews').catch(function(){return [];})]).then(function(r){

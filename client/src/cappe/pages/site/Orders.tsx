@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Loader2, Receipt, ChevronDown, ChevronRight, Calendar, Check, X, Clock, Truck, Undo2, AlertTriangle } from 'lucide-react'
+import { Loader2, Receipt, ChevronDown, ChevronRight, Calendar, Check, X, Clock, Truck, Undo2, AlertTriangle, Search, PackageCheck } from 'lucide-react'
 import { cappeApi } from '../../api'
 import SurfaceShell, { centsToMoney } from '../../components/SurfaceShell'
 import StripeConnectCard from '../../components/StripeConnectCard'
@@ -22,8 +22,21 @@ const STATUS_ACTION_LABEL: Record<string, string> = {
   cancelled: 'Cancel order',
   fulfilled: 'Mark fulfilled',
 }
+const STATUS_FILTERS: { value: string; label: string }[] = [
+  { value: '', label: 'All orders' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'paid', label: 'Paid — to fulfil' },
+  { value: 'fulfilled', label: 'Fulfilled' },
+  { value: 'refunded', label: 'Refunded' },
+  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'declined', label: 'Declined' },
+]
+/** Orders fetched per page. The list used to load every order ever taken. */
+const ORDERS_PAGE = 50
 /** Paid by card through the storefront — the refund goes back through Stripe. */
 const paidByCard = (o: CappeOrder) => (o.payment_ref || '').startsWith('pi_')
+/** Statuses that hold goods on their way to (or with) the customer. */
+const shipping = (o: CappeOrder) => o.status === 'paid' || o.status === 'fulfilled'
 const DELIVERABLE_ACCEPT = '.pdf,.zip,.doc,.docx,.xls,.xlsx,.csv,.txt,image/*'
 
 const fulfillBadge: Record<string, string> = {
@@ -42,19 +55,78 @@ const statusStyle: Record<string, string> = {
   declined: 'bg-red-500/15 text-red-400',
 }
 
+function ordersPath(siteId: string, status: string, q: string, offset: number) {
+  const params = new URLSearchParams({ limit: String(ORDERS_PAGE), offset: String(offset) })
+  if (status) params.set('status', status)
+  if (q) params.set('q', q)
+  return `/sites/${siteId}/orders?${params.toString()}`
+}
+
 export default function Orders() {
   const { siteId } = useParams<{ siteId: string }>()
-  const [orders, setOrders] = useState<CappeOrder[] | null>(null)
+  // The list is stored with the filter it was loaded for, so changing the
+  // filter shows the spinner (a stale key reads as "not loaded") without the
+  // effect having to reset anything itself.
+  const [page, setPage] = useState<{ key: string; orders: CappeOrder[] } | null>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [statusFilter, setStatusFilter] = useState('')
+  const [search, setSearch] = useState('')
+  const [query, setQuery] = useState('')       // `search`, debounced
   const [error, setError] = useState<string | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
   const [refunding, setRefunding] = useState<string | null>(null)
+  const [refundTarget, setRefundTarget] = useState<CappeOrder | null>(null)
+  // Each load is numbered so a slow answer for an old filter can't overwrite
+  // the list for the current one.
+  const loadSeq = useRef(0)
+  const key = `${statusFilter}|${query}`
+  const orders = page && page.key === key ? page.orders : null
+  function setOrders(update: (os: CappeOrder[]) => CappeOrder[]) {
+    setPage((p) => (p ? { ...p, orders: update(p.orders) } : p))
+  }
 
   useEffect(() => {
+    const t = setTimeout(() => setQuery(search.trim()), 300)
+    return () => clearTimeout(t)
+  }, [search])
+
+  useEffect(() => {
+    const seq = ++loadSeq.current
+    const loading = `${statusFilter}|${query}`
     cappeApi
-      .get<CappeOrder[]>(`/sites/${siteId}/orders`)
-      .then(setOrders)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load orders'))
-  }, [siteId])
+      .get<CappeOrder[]>(ordersPath(siteId || '', statusFilter, query, 0))
+      .then((rows) => {
+        if (seq !== loadSeq.current) return
+        setPage({ key: loading, orders: rows })
+        setHasMore(rows.length === ORDERS_PAGE)
+      })
+      .catch((e) => {
+        if (seq !== loadSeq.current) return
+        setPage({ key: loading, orders: [] })
+        setError(e instanceof Error ? e.message : 'Failed to load orders')
+      })
+  }, [siteId, statusFilter, query])
+
+  async function loadMore() {
+    if (!orders) return
+    const seq = loadSeq.current
+    setLoadingMore(true)
+    try {
+      const more = await cappeApi.get<CappeOrder[]>(ordersPath(siteId || '', statusFilter, query, orders.length))
+      if (seq !== loadSeq.current) return
+      // An order that moved up the list between pages must not show twice.
+      setOrders((os) => {
+        const seen = new Set(os.map((o) => o.id))
+        return [...os, ...more.filter((o) => !seen.has(o.id))]
+      })
+      setHasMore(more.length === ORDERS_PAGE)
+    } catch (e) {
+      fail(e, 'Could not load more orders')
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   // Every mutation below moves real money or a customer's order. An unhandled
   // rejection here left the row showing its old status with nothing on screen
@@ -65,13 +137,20 @@ export default function Orders() {
     setError(e instanceof Error ? e.message : fallback)
   }
 
+  /** Replace one order in place, keeping the lines already loaded for it. */
+  function replace(updated: CappeOrder) {
+    setOrders((os) => os.map((x) => (x.id === updated.id
+      ? { ...updated, items: updated.items?.length ? updated.items : x.items, items_summary: x.items_summary, item_count: x.item_count }
+      : x)))
+  }
+
   async function toggle(order: CappeOrder) {
     if (openId === order.id) { setOpenId(null); return }
     setOpenId(order.id)
     if (order.items.length === 0) {
       try {
         const full = await cappeApi.get<CappeOrder>(`/sites/${siteId}/orders/${order.id}`)
-        setOrders((o) => (o || []).map((x) => (x.id === order.id ? full : x)))
+        replace(full)
       } catch (e) {
         setOpenId(null)  // otherwise the row stays open on a permanent spinner
         fail(e, 'Could not load this order')
@@ -90,24 +169,18 @@ export default function Orders() {
     )) return
     setError(null)
     try {
-      const updated = await cappeApi.patch<CappeOrder>(`/sites/${siteId}/orders/${order.id}`, { status })
-      setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
+      replace(await cappeApi.patch<CappeOrder>(`/sites/${siteId}/orders/${order.id}`, { status }))
     } catch (e) {
       fail(e, 'Could not change the order status')
     }
   }
 
-  async function refundOrder(order: CappeOrder) {
-    const amount = centsToMoney(order.total_cents ?? order.subtotal_cents, order.currency)
-    const question = paidByCard(order)
-      ? `Refund ${amount} to the customer's card?\n\nThe full amount is returned through Stripe. This can't be undone.`
-      : `Mark this order as refunded?\n\nIt wasn't paid by card here, so no money moves — return ${amount} to the customer yourself. This only updates your records.`
-    if (!window.confirm(question)) return
+  async function refundOrder(order: CappeOrder, restock: boolean) {
+    setRefundTarget(null)
     setError(null)
     setRefunding(order.id)
     try {
-      const updated = await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/refund`)
-      setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
+      replace(await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/refund`, { restock }))
     } catch (e) {
       fail(e, 'Could not refund this order')
     } finally {
@@ -118,8 +191,7 @@ export default function Orders() {
   async function acceptOrder(order: CappeOrder) {
     setError(null)
     try {
-      const updated = await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/accept`)
-      setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
+      replace(await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/accept`))
     } catch (e) {
       fail(e, 'Could not accept this order')
     }
@@ -132,8 +204,7 @@ export default function Orders() {
     const reason = answer.trim() || undefined
     setError(null)
     try {
-      const updated = await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/decline`, { reason })
-      setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
+      replace(await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/decline`, { reason }))
     } catch (e) {
       fail(e, 'Could not decline this order')
     }
@@ -145,7 +216,7 @@ export default function Orders() {
       const updated = await cappeApi.patch<CappeOrderItem>(
         `/sites/${siteId}/orders/${order.id}/items/${item.id}`, { deliverable_url: url },
       )
-      setOrders((o) => (o || []).map((x) =>
+      setOrders((os) => os.map((x) =>
         x.id === order.id ? { ...x, items: x.items.map((i) => (i.id === item.id ? updated : i)) } : x,
       ))
     } catch (e) {
@@ -153,27 +224,62 @@ export default function Orders() {
     }
   }
 
+  const filtered = Boolean(statusFilter || query)
+
   return (
     <SurfaceShell title="Orders" subtitle="Orders placed through your storefront.">
       <StripeConnectCard />
-      {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
+      {error && <p role="alert" className="mb-4 text-sm text-red-400">{error}</p>}
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-400 focus-within:border-emerald-500">
+          <Search className="h-4 w-4 shrink-0" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by customer, email or receipt number"
+            aria-label="Search orders"
+            className="w-full bg-transparent text-zinc-100 placeholder:text-zinc-500 outline-none"
+          />
+        </label>
+        <select
+          value={statusFilter}
+          onChange={(e) => { setError(null); setOpenId(null); setStatusFilter(e.target.value) }}
+          aria-label="Show orders"
+          className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100"
+        >
+          {STATUS_FILTERS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+        </select>
+      </div>
+
       {orders === null ? (
         <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-zinc-400" /></div>
       ) : orders.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-zinc-700 py-12 text-center text-sm text-zinc-500">
-          <Receipt className="mx-auto mb-2 h-7 w-7 text-zinc-300" /> No orders yet.
+          <Receipt className="mx-auto mb-2 h-7 w-7 text-zinc-300" /> {filtered ? 'No orders match.' : 'No orders yet.'}
         </div>
       ) : (
         <div className="divide-y divide-zinc-800 rounded-2xl border border-zinc-800 bg-zinc-900">
           {orders.map((o) => (
             <div key={o.id}>
-              <div className="flex items-center gap-4 px-5 py-3">
-                <button onClick={() => toggle(o)} className="text-zinc-400 hover:text-zinc-300">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
+                <button onClick={() => toggle(o)} aria-label={openId === o.id ? 'Hide order details' : 'Show order details'} className="text-zinc-400 hover:text-zinc-300">
                   {openId === o.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                 </button>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-zinc-100">{o.customer_email || 'No email'}</div>
-                  <div className="text-xs text-zinc-400">{new Date(o.created_at).toLocaleString()}</div>
+                <div className="min-w-0 flex-1 basis-48">
+                  <div className="truncate text-sm font-medium text-zinc-100">
+                    {o.customer_name || o.customer_email || 'No email'}
+                    {o.customer_name && o.customer_email && <span className="ml-2 font-normal text-zinc-500">{o.customer_email}</span>}
+                  </div>
+                  {o.items_summary && (
+                    <div className="truncate text-xs text-zinc-300">
+                      {o.items_summary}
+                      {(o.item_count ?? 0) > 3 && <span className="text-zinc-500"> · {o.item_count} items</span>}
+                    </div>
+                  )}
+                  <div className="text-xs text-zinc-400">
+                    {new Date(o.created_at).toLocaleString()}{o.receipt_number ? ` · ${o.receipt_number}` : ''}
+                  </div>
                 </div>
                 <div className="text-sm font-medium text-zinc-300">{centsToMoney(o.total_cents ?? o.subtotal_cents, o.currency)}</div>
                 {o.requires_approval && o.status === 'pending' && (
@@ -186,7 +292,7 @@ export default function Orders() {
                   <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-300">{centsToMoney(o.refunded_cents ?? 0, o.currency)} refunded</span>
                 )}
                 <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${statusStyle[o.status]}`}>{o.status}</span>
-                {(o.status === 'paid' || o.status === 'fulfilled') && (
+                {shipping(o) && (
                   <button
                     onClick={() => cappeApi.openBlob(`/sites/${siteId}/orders/${o.id}/receipt.pdf`, `${o.receipt_number || `receipt-${o.id}`}.pdf`).catch((e) => setError(e instanceof Error ? e.message : 'Could not open receipt'))}
                     title="View / print receipt"
@@ -213,9 +319,9 @@ export default function Orders() {
                         {NEXT_STATUSES[o.status].map((s) => <option key={s} value={s}>{STATUS_ACTION_LABEL[s] || s}</option>)}
                       </select>
                     )}
-                    {(o.status === 'paid' || o.status === 'fulfilled') && !o.subscription_id && (
+                    {shipping(o) && !o.subscription_id && (
                       <button
-                        onClick={() => refundOrder(o)}
+                        onClick={() => setRefundTarget(o)}
                         disabled={refunding === o.id}
                         title={paidByCard(o) ? "Return the full amount to the customer's card" : 'Record a refund you made yourself'}
                         className="flex items-center gap-1 rounded-lg border border-red-500/40 px-2.5 py-1 text-xs font-medium text-red-300 hover:bg-red-500/10 disabled:opacity-60"
@@ -227,8 +333,14 @@ export default function Orders() {
                 )}
               </div>
               {openId === o.id && (
-                <div className="space-y-2 bg-zinc-950 px-12 py-3">
+                <div className="space-y-2 bg-zinc-950 px-5 py-3 sm:px-12">
                   {o.subscription_id && <span className="rounded bg-emerald-500/15 px-2 py-1 text-xs text-emerald-400">Subscription</span>}
+                  {o.note && (
+                    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-xs text-zinc-300">
+                      <div className="mb-1 font-medium text-zinc-400">Customer note</div>
+                      <p className="whitespace-pre-wrap">{o.note}</p>
+                    </div>
+                  )}
                   {o.shipping_address && (
                     <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-xs text-zinc-300">
                       <div className="mb-1 flex items-center gap-1.5 font-medium text-zinc-400"><Truck className="h-3.5 w-3.5" /> Ship to</div>
@@ -242,13 +354,11 @@ export default function Orders() {
                       {o.shipping_address.address?.country && <div>{o.shipping_address.address.country}</div>}
                     </div>
                   )}
-                  {(o.shipping_address != null || o.items.some((i) => i.fulfillment === 'physical')) && (
-                    <TrackingEditor
-                      siteId={siteId || ''}
-                      order={o}
-                      onSaved={(u) => setOrders((os) => (os || []).map((x) => (x.id === o.id ? u : x)))}
-                    />
-                  )}
+                  {shipping(o) && (o.shipping_address != null || o.items.some((i) => i.fulfillment === 'physical')) ? (
+                    <TrackingEditor siteId={siteId || ''} order={o} onSaved={replace} />
+                  ) : (o.carrier || o.tracking_number) ? (
+                    <p className="text-xs text-zinc-400">Tracking: {[o.carrier, o.tracking_number].filter(Boolean).join(' ')}</p>
+                  ) : null}
                   {o.items.length === 0 ? (
                     <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />
                   ) : (
@@ -257,9 +367,9 @@ export default function Orders() {
                       const needsDeliverable = it.fulfillment === 'service' || it.fulfillment === 'digital'
                       return (
                         <div key={it.id} className="rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-sm">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span className="text-zinc-200">{it.quantity} × {it.title}</span>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="truncate text-zinc-200">{it.quantity} × {it.title}</span>
                               <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${fulfillBadge[it.fulfillment] || fulfillBadge.physical}`}>{it.fulfillment}</span>
                             </div>
                             <span className="text-zinc-300">{centsToMoney(it.unit_price_cents * it.quantity, o.currency)}</span>
@@ -297,13 +407,111 @@ export default function Orders() {
                       )
                     })
                   )}
+                  {o.items.length > 0 && <Totals order={o} />}
                 </div>
               )}
             </div>
           ))}
         </div>
       )}
+      {orders && hasMore && (
+        <div className="mt-4 flex justify-center">
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+          >
+            {loadingMore && <Loader2 className="h-4 w-4 animate-spin" />} Load more orders
+          </button>
+        </div>
+      )}
+      {refundTarget && (
+        <RefundDialog
+          order={refundTarget}
+          onCancel={() => setRefundTarget(null)}
+          onConfirm={(restock) => refundOrder(refundTarget, restock)}
+        />
+      )}
     </SurfaceShell>
+  )
+}
+
+/** Subtotal → total as the customer was charged, plus anything refunded. */
+function Totals({ order: o }: { order: CappeOrder }) {
+  const rows: [string, number][] = [['Subtotal', o.subtotal_cents]]
+  if (o.tax_cents) rows.push(['Tax', o.tax_cents])
+  if (o.shipping_cents) rows.push(['Shipping', o.shipping_cents])
+  return (
+    <dl className="ml-auto max-w-xs space-y-0.5 pt-1 text-xs">
+      {rows.map(([label, cents]) => (
+        <div key={label} className="flex justify-between gap-6 text-zinc-400"><dt>{label}</dt><dd>{centsToMoney(cents, o.currency)}</dd></div>
+      ))}
+      <div className="flex justify-between gap-6 border-t border-zinc-800 pt-1 font-medium text-zinc-200">
+        <dt>Total</dt><dd>{centsToMoney(o.total_cents ?? o.subtotal_cents, o.currency)}</dd>
+      </div>
+      {(o.refunded_cents ?? 0) > 0 && (
+        <div className="flex justify-between gap-6 text-red-300"><dt>Refunded</dt><dd>−{centsToMoney(o.refunded_cents ?? 0, o.currency)}</dd></div>
+      )}
+    </dl>
+  )
+}
+
+/** Confirm a refund, and say whether the goods come back to the shelf.
+ *  The default matches the server's: back in stock unless the order was
+ *  already fulfilled — a refund for a parcel that was lost or kept used to
+ *  add stock that was never coming back. */
+function RefundDialog({ order, onCancel, onConfirm }: {
+  order: CappeOrder
+  onCancel: () => void
+  onConfirm: (restock: boolean) => void
+}) {
+  const [restock, setRestock] = useState(order.status !== 'fulfilled')
+  const amount = centsToMoney(order.total_cents ?? order.subtotal_cents, order.currency)
+  const card = paidByCard(order)
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onCancel}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="refund-title"
+        className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="refund-title" className="text-lg font-semibold text-zinc-50">
+          {card ? `Refund ${amount}?` : 'Mark this order as refunded?'}
+        </h2>
+        <p className="mt-2 text-sm text-zinc-400">
+          {card
+            ? "The full amount goes back to the customer's card through Stripe. This can't be undone."
+            : `It wasn't paid by card here, so no money moves — return ${amount} to the customer yourself. This only updates your records.`}
+        </p>
+        <label className="mt-4 flex items-start gap-2 text-sm text-zinc-300">
+          <input
+            type="checkbox"
+            checked={restock}
+            onChange={(e) => setRestock(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-zinc-600 bg-zinc-950 text-emerald-500"
+          />
+          <span>
+            Put the items back in stock
+            <span className="block text-xs text-zinc-500">
+              {order.status === 'fulfilled'
+                ? 'This order was fulfilled. Tick this only if the goods were returned to you.'
+                : 'Untick if the goods are not coming back. Items that don’t track stock are unaffected.'}
+            </span>
+          </span>
+        </label>
+        <div className="mt-6 flex justify-end gap-2">
+          <button onClick={onCancel} className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800">Keep order</button>
+          <button
+            onClick={() => onConfirm(restock)}
+            className="flex items-center gap-1.5 rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white hover:bg-red-400"
+          >
+            <Undo2 className="h-4 w-4" /> {card ? `Refund ${amount}` : 'Mark refunded'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -317,12 +525,18 @@ function TrackingEditor({ siteId, order, onSaved }: {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function save() {
+  // `fulfil` saves the tracking AND marks a paid order fulfilled in one PATCH
+  // — the usual moment a parcel gets its tracking number.
+  async function save(fulfil: boolean) {
     setSaving(true); setError(null)
     try {
       const updated = await cappeApi.patch<CappeOrder>(
         `/sites/${siteId}/orders/${order.id}`,
-        { carrier: carrier.trim() || null, tracking_number: tracking.trim() || null },
+        {
+          carrier: carrier.trim() || null,
+          tracking_number: tracking.trim() || null,
+          ...(fulfil ? { status: 'fulfilled' } : {}),
+        },
       )
       onSaved({ ...updated, items: order.items })
     } catch (e) {
@@ -339,6 +553,7 @@ function TrackingEditor({ siteId, order, onSaved }: {
         onChange={(e) => setCarrier(e.target.value)}
         maxLength={40}
         placeholder="Carrier — e.g. USPS"
+        aria-label="Carrier"
         className="w-36 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 placeholder:text-zinc-500"
       />
       <input
@@ -346,15 +561,25 @@ function TrackingEditor({ siteId, order, onSaved }: {
         onChange={(e) => setTracking(e.target.value)}
         maxLength={120}
         placeholder="Tracking number"
+        aria-label="Tracking number"
         className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 placeholder:text-zinc-500"
       />
       <button
-        onClick={save}
+        onClick={() => save(false)}
         disabled={saving}
         className="flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
       >
         {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save
       </button>
+      {order.status === 'paid' && (
+        <button
+          onClick={() => save(true)}
+          disabled={saving}
+          className="flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1 text-xs font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-60"
+        >
+          <PackageCheck className="h-3.5 w-3.5" /> Save &amp; mark fulfilled
+        </button>
+      )}
       {error && <span className="text-xs text-red-400">{error}</span>}
     </div>
   )

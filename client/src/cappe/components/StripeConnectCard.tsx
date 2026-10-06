@@ -6,7 +6,15 @@ import { cappeApi } from '../api'
 // status and a button to connect/finish their Stripe account. Until charges are
 // enabled, storefront orders can't take card payment (they fall back to manual
 // pending). Account-level (not per-site) — same connected account across sites.
-type Status = { connected: boolean; charges_enabled: boolean; details_submitted: boolean }
+type Status = { connected: boolean; charges_enabled: boolean; details_submitted: boolean; platform_fee_bps?: number | null }
+
+/** The plan's take rate as words. The fee is per plan; this card used to say
+ *  "2%" to everyone. */
+function feeText(bps: number | null | undefined): string {
+  if (bps == null) return 'Gummfit takes your plan’s platform fee'
+  if (bps <= 0) return 'Gummfit takes no platform fee on your plan'
+  return `Gummfit takes ${bps / 100}%`
+}
 
 export default function StripeConnectCard() {
   const [status, setStatus] = useState<Status | null>(null)
@@ -34,7 +42,7 @@ export default function StripeConnectCard() {
   if (status.charges_enabled) {
     return (
       <div className="mb-5 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/[0.06] px-4 py-2.5 text-sm text-emerald-300">
-        <CheckCircle2 className="h-4 w-4" /> Card payments active — customer purchases pay out to your Stripe account (Gummfit takes 2%).
+        <CheckCircle2 className="h-4 w-4 shrink-0" /> Card payments active — customer purchases pay out to your Stripe account ({feeText(status.platform_fee_bps)}).
       </div>
     )
   }
@@ -49,7 +57,7 @@ export default function StripeConnectCard() {
               {status.connected ? 'Finish connecting Stripe to accept payments' : 'Connect Stripe to sell on your storefront'}
             </p>
             <p className="mt-0.5 text-xs text-amber-200/70">
-              Customers pay by card; the money goes straight to your Stripe account. Gummfit takes a 2% fee. Until then, orders stay pending for you to handle manually.
+              Customers pay by card; the money goes straight to your Stripe account. {feeText(status.platform_fee_bps)}. Until then, orders stay pending for you to handle manually.
             </p>
           </div>
         </div>

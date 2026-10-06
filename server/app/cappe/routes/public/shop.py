@@ -81,7 +81,10 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         settings = await conn.fetchrow("SELECT tax_rate_bps,shipping_flat_cents,shipping_free_threshold_cents FROM cappe_sites WHERE id=$1", site["id"])
-        products = await conn.fetch("SELECT * FROM cappe_products WHERE site_id=$1 AND id=ANY($2::uuid[])", site["id"], [i.product_id for i in body.items])
+        # Active products only: a draft's name and price are not public, and
+        # this used to quote them to anyone holding the product's id. A missing
+        # product prices as an unavailable line, same as one that never existed.
+        products = await conn.fetch("SELECT * FROM cappe_products WHERE site_id=$1 AND status='active' AND id=ANY($2::uuid[])", site["id"], [i.product_id for i in body.items])
         groups = await fetch_option_groups(conn, [r["id"] for r in products])
         discounts = await fetch_active_discounts(conn, site["id"])
         today = site_today(await conn.fetchval("SELECT NOW()"), site["timezone"])

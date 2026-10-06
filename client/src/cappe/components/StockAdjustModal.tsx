@@ -26,12 +26,21 @@ export default function StockAdjustModal({ siteId, product, onClose, onUpdated }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [log, setLog] = useState<CappeInventoryAdjustment[] | null>(null)
+  const [logError, setLogError] = useState<string | null>(null)
 
+  // A failed load used to show "No stock changes yet" — a false statement
+  // about the stock record, not an error.
   function loadLog() {
     cappeApi.get<CappeInventoryAdjustment[]>(`/sites/${siteId}/products/${product.id}/inventory-log`)
-      .then(setLog).catch(() => setLog([]))
+      .then((rows) => { setLog(rows); setLogError(null) })
+      .catch((e) => { setLog([]); setLogError(e instanceof Error ? e.message : 'Could not load the stock history') })
   }
   useEffect(loadLog, [siteId, product.id])
+  function retryLog() {
+    setLogError(null)
+    setLog(null)
+    loadLog()
+  }
 
   async function submit() {
     const n = parseInt(delta, 10)
@@ -54,6 +63,13 @@ export default function StockAdjustModal({ siteId, product, onClose, onUpdated }
   }
 
   const productTracks = product.inventory != null
+  const variantName = (optionId: string) => {
+    for (const g of product.option_groups || []) {
+      const o = (g.options || []).find((x) => x.id === optionId)
+      if (o) return `${g.name}: ${o.name}`
+    }
+    return 'a removed option'
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
@@ -96,7 +112,12 @@ export default function StockAdjustModal({ siteId, product, onClose, onUpdated }
 
         <div className="mt-5 border-t border-zinc-800 pt-4">
           <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-500"><History className="h-3.5 w-3.5" /> History</div>
-          {log === null ? (
+          {logError ? (
+            <p role="alert" className="text-xs text-red-400">
+              Couldn’t load the stock history. {logError}{' '}
+              <button onClick={retryLog} className="underline hover:text-red-300">Try again</button>
+            </p>
+          ) : log === null ? (
             <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />
           ) : log.length === 0 ? (
             <p className="text-xs text-zinc-500">No stock changes yet.</p>
@@ -106,7 +127,7 @@ export default function StockAdjustModal({ siteId, product, onClose, onUpdated }
                 <li key={a.id} className="flex items-center justify-between gap-2 rounded-md bg-zinc-950/60 px-2.5 py-1.5">
                   <span className="flex items-center gap-2">
                     <span className={`font-semibold ${a.delta >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{a.delta >= 0 ? `+${a.delta}` : a.delta}</span>
-                    <span className="text-zinc-400">{a.reason}{a.note ? ` · ${a.note}` : ''}</span>
+                    <span className="text-zinc-400">{a.reason}{a.option_id ? ` · ${variantName(a.option_id)}` : ''}{a.note ? ` · ${a.note}` : ''}</span>
                   </span>
                   <span className="text-zinc-500">{a.balance_after != null ? `→ ${a.balance_after}` : ''} · {new Date(a.created_at).toLocaleDateString()}</span>
                 </li>

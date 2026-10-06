@@ -26,11 +26,13 @@ from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount
 from ..services.common import url_within_origins
+from ..services.entitlements import resolve_entitlements
 from ..services.email import (
     app_origin,
     dashboard_url,
     send_cappe_collab_completed_email,
     send_cappe_collab_paid_email,
+    send_cappe_order_alert_email,
 )
 from ..services.inventory import release_order_bookings, restock_order, retake_order_stock
 from ..services.order_lifecycle import mark_order_refunded
@@ -107,6 +109,9 @@ class ConnectStatusResponse(BaseModel):
     connected: bool
     charges_enabled: bool
     details_submitted: bool
+    # The caller's plan take rate, so the dashboard states the real fee instead
+    # of a hard-coded one. None when the billing catalog can't be read.
+    platform_fee_bps: Optional[int] = None
 
 
 @router.post("/payments/connect", response_model=ConnectLinkResponse)
@@ -155,17 +160,23 @@ async def connect_status(account: CappeAccount = Depends(require_cappe_account))
         acct_id = await conn.fetchval(
             "SELECT stripe_account_id FROM cappe_accounts WHERE id = $1", account.id
         )
+        try:
+            fee_bps = (await resolve_entitlements(account.plan, conn=conn)).platform_fee_bps
+        except Exception:  # noqa: BLE001 — the fee line is informational
+            fee_bps = None
     if not acct_id:
         return {
             "connected": False,
             "charges_enabled": False,
             "details_submitted": False,
+            "platform_fee_bps": fee_bps,
         }
     # Connection released before the Stripe round-trip — see connect_account.
     try:
         acct = await cs.retrieve_account(acct_id)
     except CappeStripeError:
-        return {"connected": True, "charges_enabled": False, "details_submitted": False}
+        return {"connected": True, "charges_enabled": False, "details_submitted": False,
+                "platform_fee_bps": fee_bps}
     charges = bool(acct.get("charges_enabled"))
     details = bool(acct.get("details_submitted"))
     async with get_connection() as conn:
@@ -176,7 +187,8 @@ async def connect_status(account: CappeAccount = Depends(require_cappe_account))
             details,
             account.id,
         )
-    return {"connected": True, "charges_enabled": charges, "details_submitted": details}
+    return {"connected": True, "charges_enabled": charges, "details_submitted": details,
+            "platform_fee_bps": fee_bps}
 
 
 @router.post("/payments/webhook")
@@ -370,7 +382,9 @@ async def _mark_order_paid(obj, event, background) -> dict:
                     WHERE o.id = $1 AND o.status = 'pending'
                       AND s.id = o.site_id AND a.id = s.account_id
                       AND a.stripe_account_id = $4
-                    RETURNING o.id, o.site_id, o.customer_email, o.customer_name, o.shopper_id""",
+                    RETURNING o.id, o.site_id, o.customer_email, o.customer_name, o.shopper_id,
+                              o.total_cents, o.subtotal_cents, o.currency,
+                              s.name AS site_name, a.email AS owner_email, a.name AS owner_name""",
                 oid,
                 payment_intent,
                 fee,
@@ -386,6 +400,17 @@ async def _mark_order_paid(obj, event, background) -> dict:
             background.add_task(
                 issue_receipt_for_paid_order, row["id"], row["site_id"]
             )
+            # Tell the owner. The alert used to go out only for orders that took
+            # NO card — so a store with Stripe connected, the normal case, heard
+            # nothing about a sale until someone opened the dashboard.
+            if row.get("owner_email"):
+                background.add_task(
+                    send_cappe_order_alert_email, row["owner_email"], row.get("owner_name"),
+                    row.get("site_name") or "", row.get("customer_name"),
+                    row.get("total_cents") or row.get("subtotal_cents") or 0,
+                    row.get("currency") or "USD",
+                    dashboard_url(f"/sites/{row['site_id']}/orders"),
+                )
             logger.info("cappe order %s marked paid via Stripe", order_id)
         else:
             async with get_connection() as conn:
@@ -695,6 +720,9 @@ async def _sync_charge_refunded(obj, event) -> dict:
                     moved = await mark_order_refunded(
                         conn, order_id=order["id"], site_id=order["site_id"],
                         refunded_cents=refunded or None, stripe_refund_id=refund_id,
+                        # Same default as the refund route: goods that already
+                        # shipped are not assumed to be back on the shelf.
+                        restock=order["status"] != "fulfilled",
                     )
                     if moved is not None:
                         logger.info("cappe order %s refunded in Stripe; synced", order["id"])

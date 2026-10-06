@@ -238,15 +238,25 @@ def test_tracking_push_requires_a_new_number_on_a_live_order(
 # ── inventory: retake is the exact inverse of restock ────────────────────────
 
 class StockConn:
+    """`fetch` answers the line query and swallows the row locks; `fetchval`
+    is every stock UPDATE; `execute` is the write-back of what a line took."""
+
     def __init__(self, items, balance):
         self.items, self.balance, self.updates = items, balance, []
+        self.locks, self.recorded = [], []
 
     async def fetch(self, sql, *args):
+        if "FOR UPDATE" in sql:
+            self.locks.append((sql, args))
+            return []
         return self.items
 
     async def fetchval(self, sql, *args):
         self.updates.append((sql, args))
         return self.balance
+
+    async def execute(self, sql, *args):
+        self.recorded.append((sql, args))
 
 
 def test_retake_decrements_product_and_variants_and_may_go_negative(monkeypatch):
@@ -257,7 +267,8 @@ def test_retake_decrements_product_and_variants_and_may_go_negative(monkeypatch)
 
     monkeypatch.setattr(inv_mod, "log_adjustment", _log)
     conn = StockConn(
-        [{"product_id": "p-1", "quantity": 5, "selected_option_ids": ["opt-1"]}], balance=-2,
+        [{"id": "line-1", "product_id": "p-1", "quantity": 5, "selected_option_ids": ["opt-1"]}],
+        balance=-2,
     )
     asyncio.run(inv_mod.retake_order_stock(conn, site_id=SITE, order_id=ORDER))
 
@@ -277,7 +288,9 @@ def test_retake_skips_untracked_stock(monkeypatch):
         logged.append(kw)
 
     monkeypatch.setattr(inv_mod, "log_adjustment", _log)
-    conn = StockConn([{"product_id": "p-1", "quantity": 1, "selected_option_ids": None}], None)
+    conn = StockConn(
+        [{"id": "line-1", "product_id": "p-1", "quantity": 1, "selected_option_ids": None}], None,
+    )
     asyncio.run(inv_mod.retake_order_stock(conn, site_id=SITE, order_id=ORDER))
     assert logged == []          # inventory IS NULL = unlimited, nothing to record
 
