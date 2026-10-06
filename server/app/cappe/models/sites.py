@@ -89,11 +89,17 @@ class CappeSiteCreate(BaseModel):
 
 
 class CappeSiteFromTemplate(BaseModel):
-    template_id: UUID
+    # Registry key from `services/site_templates` (the catalog left the
+    # `cappe_templates` table — see that package's docstring).
+    template_slug: str = Field(min_length=1, max_length=160, pattern=r"^[a-z0-9-]+$")
     name: Optional[str] = Field(default=None, max_length=255)
     # Same meaning as on CappeSiteCreate; the onboarding wizard can now start
     # from a template and must not lose its "several locations" answer.
     is_multi_location: bool = False
+    # The onboarding wizard's "what kind of business?" answer — one of the
+    # Discover taxonomy slugs. Seeds the site's directory listing so the
+    # question is asked once, not again on the Discover card.
+    directory_category: Optional[str] = Field(default=None, max_length=60)
 
 
 class CappeSiteUpdate(_SnapshotSizeLimit):
@@ -156,6 +162,7 @@ class CappeSite(BaseModel):
     custom_domain: Optional[str] = None
     source_type: str
     template_id: Optional[UUID] = None
+    template_slug: Optional[str] = None
     status: str
     theme_config: dict[str, Any] = Field(default_factory=dict)
     meta_config: dict[str, Any] = Field(default_factory=dict)
@@ -254,18 +261,18 @@ class CappePage(BaseModel):
 # --- Templates --------------------------------------------------------------
 
 class CappeTemplateSummary(BaseModel):
-    id: UUID
-    name: str
+    """One gallery card. Built by `site_templates.template_summary`; every
+    template is available on every plan, so there is no premium flag or price."""
     slug: str
-    category: str
-    description: Optional[str] = None
-    preview_image_url: Optional[str] = None
-    is_premium: bool
-    price_cents: int
-
-
-class CappeTemplateDetail(CappeTemplateSummary):
-    structure: dict[str, Any] = Field(default_factory=dict)
+    name: str
+    category: str                      # a Discover taxonomy slug
+    category_label: str
+    tags: list[str] = Field(default_factory=list)
+    description: str
+    mode: str                          # "light" | "dark"
+    heading_font: str
+    swatch: dict[str, str] = Field(default_factory=dict)   # bg / surface / brand / text
+    pages: list[dict[str, str]] = Field(default_factory=list)  # [{slug, title}] for the preview tabs
 
 
 __all__ = [
@@ -284,5 +291,4 @@ __all__ = [
     "CappePagePreview",
     "CappePage",
     "CappeTemplateSummary",
-    "CappeTemplateDetail",
 ]

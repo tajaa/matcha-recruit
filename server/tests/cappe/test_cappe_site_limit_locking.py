@@ -70,16 +70,14 @@ class _Conn:
             assert self.in_transaction
             self.events.append("slug")
             return 1 if args[0] in self.taken else None
+        if "INSERT INTO cappe_pages" in sql:
+            # The template path inserts its real pages with RETURNING id.
+            assert self.in_transaction
+            self.events.append("page")
+            return uuid4()
         raise AssertionError(sql)
 
     async def fetchrow(self, sql, *args):
-        if "FROM cappe_templates" in sql:
-            assert not self.in_transaction
-            self.events.append("template")
-            return {
-                "id": args[0], "name": "Starter", "is_active": True,
-                "structure": json.dumps({"theme": {}, "pages": []}),
-            }
         if "INSERT INTO cappe_sites" in sql:
             assert self.depth == 2, "site INSERT must run inside its savepoint"
             if self.collisions:
@@ -91,7 +89,7 @@ class _Conn:
             return self._site_row(
                 name=args[1], slug=args[2],
                 source_type="template" if self.template else args[3],
-                template_id=args[3] if self.template else None,
+                template_slug=args[3] if self.template else None,
             )
         raise AssertionError(sql)
 
@@ -102,13 +100,13 @@ class _Conn:
         self.events.append("page")
         return "INSERT 0 1"
 
-    def _site_row(self, *, name, slug, source_type, template_id):
+    def _site_row(self, *, name, slug, source_type, template_slug):
         now = datetime(2026, 9, 20, tzinfo=timezone.utc)
         return {
             "id": self.site_id, "account_id": self.account_id,
             "name": name, "slug": slug, "subdomain": slug,
             "custom_domain": None, "source_type": source_type,
-            "template_id": template_id, "status": "draft",
+            "template_id": None, "template_slug": template_slug, "status": "draft",
             "theme_config": "{}", "meta_config": "{}", "timezone": "UTC",
             "is_multi_location": False, "tax_rate_bps": 0, "tax_label": "Tax",
             "shipping_flat_cents": 0, "shipping_free_threshold_cents": None,
@@ -163,16 +161,29 @@ async def test_template_site_limit_check_and_insert_share_account_lock(monkeypat
     conn = _Conn(account.id, template=True)
     _patch_dependencies(monkeypatch, conn)
 
-    await sites.create_site_from_template(
-        SimpleNamespace(template_id=uuid4(), name="Demo", is_multi_location=True), account,
+    site = await sites.create_site_from_template(
+        SimpleNamespace(
+            template_slug="saveur-bistro", name="Demo", is_multi_location=True,
+            directory_category="food-drink",
+        ),
+        account,
     )
 
-    assert conn.events == [
-        "template", "begin", "lock", "entitlements", "count", "slug",
-        "savepoint", "site", "page", "commit",
-    ]
-    # The wizard's "several locations" answer survives the template path.
-    assert conn.inserted_args[-1] is True
+    # No catalog read: the registry is in-process, so the first DB touch is
+    # the account lock. One page INSERT per template page.
+    assert conn.events[:7] == ["begin", "lock", "entitlements", "count", "slug", "savepoint", "site"]
+    assert conn.events[-1] == "commit"
+    assert conn.events.count("page") == len(sites.get_template("saveur-bistro").pages)
+    assert site["page_count"] == conn.events.count("page")
+    # The wizard's answers survive the template path: several locations, and
+    # the Discover category it picked.
+    (_acct, _name, _slug, template_slug, theme_json, multi, category) = conn.inserted_args
+    assert template_slug == "saveur-bistro"
+    assert multi is True
+    assert category == "food-drink"
+    # A free account's clone is gated exactly like the editor's save path.
+    assert "premium" not in json.loads(theme_json)
+    assert json.loads(theme_json)["template"] == "saveur-bistro"
 
 
 @pytest.mark.asyncio
