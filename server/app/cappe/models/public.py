@@ -70,6 +70,10 @@ class CappePublicReview(BaseModel):
     rating: Optional[int] = None
     body: str
     created_at: datetime
+    product_id: Optional[UUID] = None
+    verified: bool = False            # written from a paid order
+    owner_reply: Optional[str] = None
+    owner_replied_at: Optional[datetime] = None
 
 
 # --- Discover directory ------------------------------------------------------

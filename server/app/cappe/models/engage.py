@@ -259,6 +259,22 @@ class CappeReviewCreate(BaseModel):
     author_name: str = Field(min_length=1, max_length=120)
     rating: int = Field(ge=1, le=5)
     body: str = Field(min_length=1, max_length=2000)
+    # What it's about (omitted = the store in general).
+    product_id: Optional[UUID] = None
+    # From a paid order's page: the review is marked a verified purchase.
+    order_token: Optional[str] = Field(default=None, max_length=64)
+    # Left empty by people; filled in by bots (the field is hidden).
+    website: Optional[str] = Field(default=None, max_length=200)
+
+
+class CappeReviewReply(BaseModel):
+    """The store's public answer to a review (empty clears it)."""
+    reply: Optional[str] = Field(default=None, max_length=2000)
+
+
+class CappeReviewSettings(BaseModel):
+    """Who may post reviews: anyone, only buyers (from their order page), or nobody."""
+    submissions: Literal["anyone", "buyers", "off"]
 
 
 class CappeReviewModerate(BaseModel):
@@ -274,6 +290,11 @@ class CappeReview(BaseModel):
     body: str
     status: str
     created_at: datetime
+    product_id: Optional[UUID] = None
+    product_name: Optional[str] = None
+    verified: bool = False
+    owner_reply: Optional[str] = None
+    owner_replied_at: Optional[datetime] = None
 
 
 __all__ = [
@@ -302,6 +323,8 @@ __all__ = [
     "CappePostUpdate",
     "CappePost",
     "CappeReviewCreate",
+    "CappeReviewReply",
+    "CappeReviewSettings",
     "CappeReviewModerate",
     "CappeReview",
 ]

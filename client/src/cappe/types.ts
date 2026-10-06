@@ -889,7 +889,18 @@ export type CappeReview = {
   body: string
   status: 'pending' | 'approved' | 'hidden'
   created_at: string
+  /** What it's about; null = the store in general. */
+  product_id?: string | null
+  product_name?: string | null
+  /** Written from a paid order's page. */
+  verified?: boolean
+  /** The store's public answer. */
+  owner_reply?: string | null
+  owner_replied_at?: string | null
 }
+
+/** Who may post reviews: anyone, only buyers (from their order page), or nobody. */
+export type CappeReviewSubmissions = 'anyone' | 'buyers' | 'off'
 
 export type CappeClient = {
   email: string

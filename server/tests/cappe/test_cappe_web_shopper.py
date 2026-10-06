@@ -326,7 +326,7 @@ def test_the_product_list_drops_subscribe_options_a_store_cant_fulfil(monkeypatc
     conn = Conn([("SELECT NOW()", None)])
 
     async def _fetch(sql, *args):
-        return [row]
+        return [] if "FROM cappe_reviews" in sql else [row]
 
     conn.fetch = _fetch
     monkeypatch.setattr(public_shop, "get_connection", lambda: Ctx(conn))

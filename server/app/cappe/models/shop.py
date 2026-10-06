@@ -155,6 +155,9 @@ class CappeProduct(BaseModel):
     # shape; public routes populate these from the active promotion calendar.
     discount_percent: int = 0
     discounted_price_cents: Optional[int] = None
+    # Approved reviews of this product (public listing only).
+    rating_count: int = 0
+    rating_avg: Optional[float] = None
 
 
 class CappeStockAdjust(BaseModel):
