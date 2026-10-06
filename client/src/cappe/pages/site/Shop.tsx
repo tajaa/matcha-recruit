@@ -266,10 +266,26 @@ export default function Shop() {
     }
   }
 
+  // Taking a product customers subscribe to off sale is refused until the
+  // owner agrees to end those subscriptions (after the period they've paid
+  // for). Ask, then repeat the request with that answer.
+  async function withSubscribers<T>(call: (endSubscriptions: boolean) => Promise<T>): Promise<T | null> {
+    try {
+      return await call(false)
+    } catch (e) {
+      if (!(e instanceof CappeApiError) || e.code !== 'has_subscriptions') throw e
+      if (!window.confirm(`${e.message}\n\nEnd those subscriptions and continue?`)) return null
+      return call(true)
+    }
+  }
+
   async function setStatus(prod: CappeProduct, status: string) {
     setError(null)
     try {
-      const updated = await cappeApi.put<CappeProduct>(`/sites/${siteId}/products/${prod.id}`, { status })
+      const updated = await withSubscribers((end) => cappeApi.put<CappeProduct>(
+        `/sites/${siteId}/products/${prod.id}${end ? '?end_subscriptions=true' : ''}`, { status },
+      ))
+      if (!updated) return
       setProducts((p) => (p || []).map((x) => (x.id === prod.id ? updated : x)))
       if (editing?.id === updated.id) setEditing(updated)
     } catch (e) {
@@ -281,7 +297,11 @@ export default function Shop() {
     if (!window.confirm(`Delete "${prod.name}"? This can't be undone. Past orders keep their line for it. To hide it instead, set it to archived.`)) return
     setError(null)
     try {
-      await cappeApi.delete(`/sites/${siteId}/products/${prod.id}`)
+      const done = await withSubscribers(async (end) => {
+        await cappeApi.delete(`/sites/${siteId}/products/${prod.id}${end ? '?end_subscriptions=true' : ''}`)
+        return true
+      })
+      if (!done) return
       setProducts((p) => (p || []).filter((x) => x.id !== prod.id))
       if (editing?.id === prod.id) resetForm()
     } catch (e) {

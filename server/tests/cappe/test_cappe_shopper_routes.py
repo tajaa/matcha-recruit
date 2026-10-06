@@ -148,7 +148,7 @@ async def test_shopper_auth_routes_start_verify_refresh_and_logout(monkeypatch):
 
     monkeypatch.setattr(routes, "get_connection", lambda: _Ctx(conn))
     monkeypatch.setattr(routes, "check_rate_limit", rate)
-    monkeypatch.setattr(routes, "check_recipient_send_ok", lambda _email: _async(True))
+    monkeypatch.setattr(routes, "check_recipient_send_ok", lambda _email, **_kw: _async(True))
     monkeypatch.setattr(routes.auth, "published_shopper_site", published)
     monkeypatch.setattr(routes.auth, "issue_login_code", issue)
     monkeypatch.setattr(routes.auth, "verify_login_code", verify)
@@ -210,8 +210,8 @@ async def test_profile_addresses_and_account_delete_are_site_scoped(monkeypatch)
     address = routes.ShopperAddress(
         label="Home", name="Buyer", line1="1 Main", city="Oakland", postal_code="94601", is_default=True,
     )
-    created = await routes.add_address(address, (site, shopper))
-    edited = await routes.edit_address(address_id, address, (site, shopper))
+    created = await routes.add_address(address, _Bg(), (site, shopper))
+    edited = await routes.edit_address(address_id, address, _Bg(), (site, shopper))
     assert created["id"] == edited["id"] == address_id
     assert any("SET is_default=false" in sql for sql, _ in conn.calls)
     assert (await routes.delete_address(address_id, (site, shopper))).status_code == 204
@@ -221,7 +221,7 @@ async def test_profile_addresses_and_account_delete_are_site_scoped(monkeypatch)
     missing = _Conn(values=lambda query, _args: shopper["id"] if "cappe_shoppers" in query else None)
     monkeypatch.setattr(routes, "get_connection", lambda: _Ctx(missing))
     with pytest.raises(HTTPException) as caught:
-        await routes.edit_address(address_id, address, (site, shopper))
+        await routes.edit_address(address_id, address, _Bg(), (site, shopper))
     assert caught.value.status_code == 404
 
     zero = _Conn(execute_result="DELETE 0")
@@ -288,3 +288,13 @@ async def test_favorites_orders_and_devices_enforce_shopper_ownership(monkeypatc
     with pytest.raises(HTTPException) as caught:
         await routes.order(uuid4(), (site, shopper))
     assert caught.value.status_code == 404
+
+
+class _Bg:
+    """BackgroundTasks stand-in: records what a route queued."""
+
+    def __init__(self):
+        self.tasks = []
+
+    def add_task(self, fn, *args, **kwargs):
+        self.tasks.append((fn.__name__, args))

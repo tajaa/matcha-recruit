@@ -563,7 +563,10 @@ async def test_subscription_webhooks_are_account_scoped_ordered_and_schedule_sid
     async def sync(_conn, local, stripe_sub, event_at):
         synced.append((local["id"], stripe_sub["id"], stripe_sub["status"], event_at))
 
-    async def record(_conn, local, invoice):
+    recorded = []
+
+    async def record(_conn, local, invoice, payment_intent=None):
+        recorded.append(payment_intent)
         return uuid4(), True
 
     class _Stripe:
@@ -573,16 +576,24 @@ async def test_subscription_webhooks_are_account_scoped_ordered_and_schedule_sid
                 "cappe_shopper_subscription_id": str(row["id"]),
             }}
 
+        async def connected_invoice_payment_intent(self, account, invoice):
+            return "pi_renewal"
+
     monkeypatch.setattr(recurring, "sync_subscription", sync)
     monkeypatch.setattr(recurring, "record_invoice_order", record)
     monkeypatch.setattr(recurring, "get_cappe_stripe", lambda: _Stripe())
     background = _Background()
     event = {"account": "acct_owner", "created": 1_700_000_000}
-    invoice = {"id": "in_1", "subscription": "sub_1", "paid": True,
-               "billing_reason": "subscription_cycle"}
+    # The current API shape: `status`, no `paid` (the old fake hid that
+    # renewals on current versions recorded nothing).
+    invoice = {"id": "in_1", "parent": {"subscription_details": {"subscription": "sub_1"}},
+               "status": "paid", "billing_reason": "subscription_cycle"}
     assert await recurring.handle_event("invoice.paid", invoice, event, background) == {"received": True}
     names = [name for name, _ in background.tasks]
     assert "issue_receipt_for_paid_order" in names and "notify_order_event" in names
+    # The order is stored with the payment intent that paid it, so a refund or
+    # a dispute can find it.
+    assert recorded == ["pi_renewal"]
     assert synced and synced[0][3].tzinfo is not None
 
     # Subscription update payloads can arrive out of order within the same

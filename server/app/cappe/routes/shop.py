@@ -287,6 +287,34 @@ def _order_row(row, items=None) -> dict:
     return d
 
 
+async def _guard_subscribers(site_id, product_id, end_subscriptions: bool) -> None:
+    """A product shoppers subscribe to can't silently leave the shop.
+
+    Deleting or archiving it used to leave every subscription renewing: the
+    shopper kept being charged for a product the store no longer sold (and
+    after a delete, its renewal order lines pointed at nothing). The owner now
+    has to say so — `end_subscriptions=true` stops those subscriptions renewing
+    after the period already paid for; without it the change is refused with
+    the count, so the dashboard can ask."""
+    from ..services.recurring import end_subscriptions_at_period_end, live_subscriptions_for_product
+
+    async with get_connection() as conn:
+        rows = await live_subscriptions_for_product(conn, site_id, product_id)
+    if not rows:
+        return
+    if not end_subscriptions:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "has_subscriptions",
+                "count": len(rows),
+                "message": f"{len(rows)} customer subscription{'s' if len(rows) != 1 else ''} include this product. "
+                           "Ending them stops their renewals after the period already paid for.",
+            },
+        )
+    await end_subscriptions_at_period_end(rows)
+
+
 async def _validate_booking_type(conn, site_id, booking_type_id) -> None:
     """Ensure a referenced booking type belongs to this site (or 400)."""
     if booking_type_id is None:
@@ -375,7 +403,12 @@ async def get_product(
 async def update_product(
     site_id: UUID, product_id: UUID, body: CappeProductUpdate,
     account: CappeAccount = Depends(require_cappe_account),
+    end_subscriptions: bool = Query(False),
 ):
+    if body.status in ("archived", "draft"):
+        async with get_connection() as conn:
+            await get_owned_site(conn, site_id, account.id)
+        await _guard_subscribers(site_id, product_id, end_subscriptions)
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         existing = await conn.fetchrow("SELECT * FROM cappe_products WHERE id=$1 AND site_id=$2", product_id, site_id)
@@ -453,8 +486,12 @@ async def update_product(
 
 @router.delete("/sites/{site_id}/products/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_product(
-    site_id: UUID, product_id: UUID, account: CappeAccount = Depends(require_cappe_account)
+    site_id: UUID, product_id: UUID, account: CappeAccount = Depends(require_cappe_account),
+    end_subscriptions: bool = Query(False),
 ):
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+    await _guard_subscribers(site_id, product_id, end_subscriptions)
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         result = await conn.execute(

@@ -159,7 +159,12 @@ describe('Orders — refund is an action, not a status', () => {
     expect(screen.getByRole('button', { name: /Refund/ })).toBeEnabled()
   })
 
-  it('does not offer the button on a subscription order (refunded from Stripe, synced back)', async () => {
+  it('refunds a renewal order that knows its payment like any card order', async () => {
+    await renderOrders([order({ status: 'paid', subscription_id: 'sub-1', payment_ref: 'pi_renewal' })])
+    expect(screen.getByRole('button', { name: /Refund/ })).toBeInTheDocument()
+  })
+
+  it('does not offer the button on an older subscription order with no payment recorded (refund it in Stripe)', async () => {
     await renderOrders([order({ status: 'paid', subscription_id: 'sub-1', payment_ref: null })])
     expect(screen.queryByRole('button', { name: /Refund/ })).not.toBeInTheDocument()
   })

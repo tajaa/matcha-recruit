@@ -262,6 +262,44 @@ class CappeStripe:
         except Exception as exc:
             raise CappeStripeError("Could not start subscription checkout") from exc
 
+    async def connected_invoice_payment_intent(self, account_id: str, invoice: dict) -> Optional[str]:
+        """The PaymentIntent that paid an invoice on a connected account.
+
+        A renewal order needs it: refunds (`refund_connected_charge`), the
+        `charge.refunded` sync and disputes all find an order by its payment
+        intent, and a subscription order used to store none — so it could not
+        be refunded from the dashboard, a refund in Stripe never reached it,
+        and a chargeback on it was invisible.
+
+        Older API versions put `payment_intent` on the invoice; current ones
+        list it under InvoicePayment. Both are read. Returns None rather than
+        raising: the order is recorded either way.
+        """
+        legacy = invoice.get("payment_intent")
+        if isinstance(legacy, str) and legacy:
+            return legacy
+        if isinstance(legacy, dict) and isinstance(legacy.get("id"), str):
+            return legacy["id"]
+        invoice_id = invoice.get("id")
+        if not invoice_id:
+            return None
+        self._ensure_key()
+
+        def _lookup():
+            lister = getattr(stripe, "InvoicePayment", None)
+            if lister is None:
+                return None
+            for pay in (lister.list(invoice=invoice_id, limit=10, stripe_account=account_id).get("data") or []):
+                intent = (pay.get("payment") or {}).get("payment_intent")
+                if pay.get("status") == "paid" and isinstance(intent, str):
+                    return intent
+            return None
+
+        try:
+            return await asyncio.to_thread(_lookup)
+        except Exception:  # noqa: BLE001 — best-effort; the order still records
+            return None
+
     async def retrieve_connected_subscription(self, account_id, subscription_id):
         self._ensure_key()
         try:

@@ -588,6 +588,77 @@ async def send_cappe_booking_rescheduled_email(
     await _send(to_email, to_name, subject, html, text, label="booking rescheduled")
 
 
+# ── transactional: shopper subscriptions ─────────────────────────────────────
+
+_INTERVAL_WORD = {"week": "every week", "month": "every month"}
+
+
+async def send_cappe_subscription_started_email(
+    to_email: str, to_name: str | None, site_name: str, items_summary: str,
+    total_cents: int, currency: str, interval: str,
+) -> None:
+    """Confirm a new subscription: what, how much, how often, how to stop.
+    The shopper used to get only a receipt, which says none of the last two.
+    Best-effort."""
+    e_site = escape(site_name or "")
+    every = _INTERVAL_WORD.get(interval, f"every {interval}")
+    amount = fmt_money(total_cents, currency)
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f"Your subscription with {e_site} has started. Your receipt for the first delivery is in a separate email.</p>"
+        f'<div style="border-left:3px solid #c6f16b;padding:8px 0 8px 14px;color:#fafafa;font-size:15px;">'
+        f"<b>{escape(items_summary or 'Your items')}</b><br>"
+        f'<span style="color:#a1a1aa;">{escape(amount)} {escape(every)}</span></div>'
+        f'<p style="margin:14px 0 0;font-size:13px;color:#a1a1aa;">You can cancel any time from your account with '
+        f"{e_site}; it stops before the next charge.</p>"
+    )
+    html = _email_shell(f"Subscription started — {e_site}", body)
+    text = (
+        f"Your subscription with {site_name} has started: {items_summary}, {amount} {every}.\n\n"
+        f"Cancel any time from your account with {site_name}; it stops before the next charge."
+    )
+    await _send(to_email, to_name, f"Subscription started — {site_name}", html, text, label="subscription started")
+
+
+async def send_cappe_subscription_payment_failed_email(
+    to_email: str, to_name: str | None, site_name: str, items_summary: str,
+) -> None:
+    """A renewal could not be charged. Sent once per invoice. Best-effort."""
+    e_site = escape(site_name or "")
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f"We couldn't charge your card for your subscription with {e_site}.</p>"
+        f'<div style="border-left:3px solid #f59e0b;padding:8px 0 8px 14px;color:#fafafa;font-size:15px;">'
+        f"<b>{escape(items_summary or 'Your subscription')}</b></div>"
+        f'<p style="margin:14px 0 0;font-size:13px;line-height:1.6;color:#a1a1aa;">The payment will be retried over the next '
+        f"few days. If it keeps failing, the subscription ends. Contact {e_site} to update your card.</p>"
+    )
+    html = _email_shell(f"Payment failed — {e_site}", body, accent="#f59e0b")
+    text = (
+        f"We couldn't charge your card for your subscription with {site_name} ({items_summary}). "
+        f"It will be retried over the next few days; if it keeps failing, the subscription ends. "
+        f"Contact {site_name} to update your card."
+    )
+    await _send(to_email, to_name, f"Payment failed — {site_name}", html, text, label="subscription payment failed")
+
+
+async def send_cappe_subscription_cancelled_email(
+    to_email: str, to_name: str | None, site_name: str, items_summary: str,
+) -> None:
+    """A subscription has ended (cancelled by anyone, or after failed
+    payments). Sent once. Best-effort."""
+    e_site = escape(site_name or "")
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f"Your subscription with {e_site} has ended. You won't be charged for it again.</p>"
+        f'<div style="border-left:3px solid #71717a;padding:8px 0 8px 14px;color:#fafafa;font-size:15px;">'
+        f"<b>{escape(items_summary or 'Your subscription')}</b></div>"
+    )
+    html = _email_shell(f"Subscription ended — {e_site}", body)
+    text = f"Your subscription with {site_name} ({items_summary}) has ended. You won't be charged for it again."
+    await _send(to_email, to_name, f"Subscription ended — {site_name}", html, text, label="subscription cancelled")
+
+
 # ── transactional: creator marketplace collabs ───────────────────────────────
 
 async def send_cappe_offer_received_email(

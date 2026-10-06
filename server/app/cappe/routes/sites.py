@@ -503,7 +503,23 @@ async def delete_site(
     certificate, and make reconnecting the same domain to a new site fail with
     "already exists". So the tenant ids are copied into `cappe_edge_tombstones`
     in the SAME transaction as the delete: the record survives the cascade, a
-    failed cleanup, and a container swap, and the edge sweeper drains it."""
+    failed cleanup, and a container swap, and the edge sweeper drains it.
+
+    The site's customer subscriptions are cancelled at Stripe FIRST. The
+    cascade used to delete them locally and leave them billing, with the
+    shoppers' accounts — their only way to cancel — deleted too. If any can't
+    be confirmed cancelled, the site is not deleted."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+    from ..services.recurring import cancel_site_subscriptions
+    try:
+        await cancel_site_subscriptions(site_id)
+    except HTTPException as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Your customers' subscriptions on this site couldn't all be cancelled in Stripe, "
+                   "so the site was not deleted (nobody keeps being charged). Try again in a minute.",
+        ) from exc
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         async with conn.transaction():
