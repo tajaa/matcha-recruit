@@ -109,6 +109,28 @@ async def optional_shopper(slug: str, credentials: HTTPAuthorizationCredentials 
     return dict(shopper)
 
 
+async def require_shopper_session(slug: str, credentials: HTTPAuthorizationCredentials = Depends(shopper_security)):
+    """A valid shopper session on this site, whatever state the STORE is in.
+
+    `require_shopper` also requires the site to be published, its owner
+    active, and the plan to include shopper accounts — right for signing in
+    and buying, wrong for getting out: unpublishing a store or downgrading its
+    plan used to lock shoppers out of cancelling subscriptions that kept
+    renewing. Use this only for a shopper seeing and cancelling what they
+    already have. The token must still be a live session bound to this site.
+    """
+    if credentials is None:
+        raise HTTPException(401, "Shopper sign-in required")
+    from .services.shopper_auth import resolve_shopper
+
+    async with get_connection() as conn:
+        site = await conn.fetchrow("SELECT * FROM cappe_sites WHERE slug=$1", slug)
+        if not site:
+            raise HTTPException(404, "Site not found")
+        shopper, _ = await resolve_shopper(conn, site, credentials.credentials)
+    return dict(site), dict(shopper)
+
+
 async def require_shopper(slug: str, credentials: HTTPAuthorizationCredentials = Depends(shopper_security)):
     if credentials is None:
         raise HTTPException(401, "Shopper sign-in required")

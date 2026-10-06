@@ -319,7 +319,10 @@ export default function Orders() {
                         {NEXT_STATUSES[o.status].map((s) => <option key={s} value={s}>{STATUS_ACTION_LABEL[s] || s}</option>)}
                       </select>
                     )}
-                    {shipping(o) && !o.subscription_id && (
+                    {/* A renewal order paid through Stripe now carries its payment
+                        intent and is refunded like any card order; one without
+                        it (recorded before that) is refunded in Stripe. */}
+                    {shipping(o) && (!o.subscription_id || paidByCard(o)) && (
                       <button
                         onClick={() => setRefundTarget(o)}
                         disabled={refunding === o.id}

@@ -8,6 +8,12 @@ export type CappeShopperSubscription = {
   currency: string
   cancel_at_period_end: boolean
   current_period_end: string | null
+  created_at?: string
+  /** Owner's list only. */
+  customer_email?: string | null
+  customer_name?: string | null
+  order_count?: number
+  last_order_at?: string | null
 }
 // Cappe is a separate product from matcha; these types are independent of the
 // matcha MeResponse / dashboard types.

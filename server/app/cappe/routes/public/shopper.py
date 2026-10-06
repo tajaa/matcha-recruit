@@ -29,7 +29,9 @@ async def start(slug: str, body: ShopperStart, request: Request, background: Bac
         raise HTTPException(422, "Reserved/test email domains are not accepted")
     async with get_connection() as conn:
         site = await auth.published_shopper_site(conn, slug)
-    if await check_recipient_send_ok(email):
+    # Its own budget per recipient (see check_recipient_send_ok). Still 204
+    # either way, so the endpoint never says whether an address has an account.
+    if await check_recipient_send_ok(email, bucket="cappe_shopper_code_email", limit=8):
         async with get_connection() as conn:
             code = await auth.issue_login_code(conn, site=site, email=email)
         background.add_task(send_cappe_shopper_code_email, email, site["name"], code)
@@ -146,14 +148,43 @@ async def save_address(body, context, address_id=None):
     return dict(row)
 
 
+async def push_default_address(site, shopper) -> None:
+    """Copy the shopper's default address onto their customer on the store's
+    connected Stripe account. A subscription renewal ships to the address on
+    that customer; edits made here used to stay here, so renewals kept going to
+    the old address. Best-effort: a background task, and only for a shopper who
+    already has a Stripe customer (one is created at checkout otherwise)."""
+    from app.cappe.services.shopper_customers import connected_customer
+    from app.cappe.services.stripe_connect import CappeStripeError
+
+    if not shopper.get("stripe_customer_id"):
+        return
+    async with get_connection() as conn:
+        account_id = await conn.fetchval(
+            "SELECT a.stripe_account_id FROM cappe_accounts a WHERE a.id=$1", site["account_id"],
+        )
+    if not account_id:
+        return
+    try:
+        await connected_customer(shopper, account_id)
+    except (CappeStripeError, HTTPException):
+        pass
+
+
 @router.post(PREFIX + "/me/addresses", status_code=201)
-async def add_address(body: ShopperAddress, context=Depends(require_shopper)):
-    return await save_address(body, context)
+async def add_address(body: ShopperAddress, background: BackgroundTasks, context=Depends(require_shopper)):
+    row = await save_address(body, context)
+    if row.get("is_default"):
+        background.add_task(push_default_address, *context)
+    return row
 
 
 @router.patch(PREFIX + "/me/addresses/{address_id}")
-async def edit_address(address_id: UUID, body: ShopperAddress, context=Depends(require_shopper)):
-    return await save_address(body, context, address_id)
+async def edit_address(address_id: UUID, body: ShopperAddress, background: BackgroundTasks, context=Depends(require_shopper)):
+    row = await save_address(body, context, address_id)
+    if row.get("is_default"):
+        background.add_task(push_default_address, *context)
+    return row
 
 
 @router.delete(PREFIX + "/me/addresses/{address_id}", status_code=204)

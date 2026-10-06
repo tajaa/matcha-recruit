@@ -241,17 +241,21 @@ async def fetch_site_owner(conn, site_id):
     )
 
 
-async def check_recipient_send_ok(email: str | None) -> bool:
+async def check_recipient_send_ok(email: str | None, *, bucket: str = "cappe_recipient_email", limit: int = 5) -> bool:
     """Per-recipient throttle for outbound transactional email on PUBLIC,
     unauthenticated endpoints (order receipts, booking confirmations). Keyed on
     the RECIPIENT (not the caller IP) so rotating source IPs can't flood one
     victim's inbox from our sender. Never blocks the underlying action — the
     order/booking is still created; only the email is skipped past the cap.
-    Returns True when it's OK to send."""
+    Returns True when it's OK to send.
+
+    `bucket` separates kinds of mail that must not starve each other: a
+    shopper's sign-in codes used to share one budget with receipts and booking
+    emails, so a busy hour of orders left them unable to sign in at all."""
     if not email:
         return False
     try:
-        await check_rate_limit(email.lower(), "cappe_recipient_email", 5, 3600)
+        await check_rate_limit(email.lower(), bucket, limit, 3600)
         return True
     except HTTPException:
         return False
