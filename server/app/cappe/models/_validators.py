@@ -86,3 +86,24 @@ __all__ = [
     "https_url", "assert_json_size", "MAX_SNAPSHOT_BYTES",
     "APP_URL_SCHEME_RE", "BLOCKED_APP_URL_SCHEMES", "is_app_url_scheme", "app_url_scheme",
 ]
+
+
+def iana_timezone(value: Any) -> Any:
+    """Accept an IANA timezone name ("America/New_York"), or None/empty.
+
+    A site's or location's timezone decides what hour every booking slot,
+    reminder and confirmation shows. Any string used to be stored; one Python
+    couldn't load silently fell back to UTC at every read, so the business's
+    customers were shown the wrong hour with nothing to say why."""
+    if value is None:
+        return None
+    name = str(value).strip()
+    if not name:
+        return None
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        raise ValueError(f"Unknown timezone {name!r} — use a name like America/New_York")
+    return name

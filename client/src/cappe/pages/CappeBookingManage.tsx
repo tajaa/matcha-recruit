@@ -48,9 +48,17 @@ export default function CappeBookingManage() {
     setRescheduling(true)
     setError(null)
     setSlots(null)
+    // Ask for the times the server will accept for THIS booking: its stylist,
+    // at its location, in that location's timezone. Without these the page
+    // offered the shared calendar in the site's timezone, and a picked time
+    // could land at a different hour or be refused as taken.
+    const params = new URLSearchParams()
+    if (booking.staff_id) params.set('staff_id', booking.staff_id)
+    if (booking.location_id) params.set('location_id', booking.location_id)
+    const query = params.toString() ? `?${params.toString()}` : ''
     try {
       const res = await cappePublicGet<CappeSlotsResponse>(
-        `/public/sites/${booking.slug}/booking-types/${booking.booking_type_id}/slots`,
+        `/public/sites/${booking.slug}/booking-types/${booking.booking_type_id}/slots${query}`,
       )
       setSlots(res.slots)
       setSlotsTz(res.timezone)
@@ -73,7 +81,9 @@ export default function CappeBookingManage() {
       })
       setBooking(updated)
       setRescheduling(false)
-      setNotice('Your booking was moved.')
+      setNotice(updated.status === 'pending'
+        ? 'Your booking was moved. The new time needs the host’s approval — you’ll get an email once it’s confirmed.'
+        : 'Your booking was moved. A confirmation is on its way.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not reschedule')
     } finally {
@@ -129,6 +139,11 @@ export default function CappeBookingManage() {
             <div className="mt-1 flex items-center gap-1.5 text-sm text-zinc-400">
               <Calendar className="h-4 w-4" /> {formatBookingDateTime(booking.starts_at, booking.timezone)}
             </div>
+            {(booking.staff_name || booking.location_name) && (
+              <div className="mt-1 text-sm text-zinc-400">
+                {[booking.staff_name && `With ${booking.staff_name}`, booking.location_name && `at ${booking.location_name}`].filter(Boolean).join(' ')}
+              </div>
+            )}
             <div className="mt-1 text-xs text-zinc-500">Times shown in {booking.timezone}</div>
           </div>
           <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
@@ -145,14 +160,16 @@ export default function CappeBookingManage() {
       </div>
 
       {booking.can_modify && !rescheduling && (
-        <div className="mt-4 flex gap-2">
-          <button
+        <div className="mt-4 flex flex-wrap gap-2">
+          {/* A service that was deleted has nothing to reschedule with — the
+              button used to be there and do nothing. */}
+          {booking.booking_type_id && <button
             onClick={openReschedule}
             disabled={busy}
             className="flex items-center gap-1.5 rounded-lg bg-lime-400 px-4 py-2.5 text-sm font-semibold text-zinc-950 hover:bg-lime-300 disabled:opacity-60"
           >
             <Calendar className="h-4 w-4" /> Reschedule
-          </button>
+          </button>}
           <button
             onClick={cancel}
             disabled={busy}
@@ -160,6 +177,9 @@ export default function CappeBookingManage() {
           >
             <XCircle className="h-4 w-4" /> Cancel
           </button>
+          {!booking.booking_type_id && (
+            <p className="basis-full text-xs text-zinc-500">This service is no longer booked online — contact {booking.site_name} to change the time.</p>
+          )}
         </div>
       )}
 
@@ -183,7 +203,9 @@ export default function CappeBookingManage() {
           {slots === null ? (
             <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-zinc-600" /></div>
           ) : slots.length === 0 ? (
-            <p className="py-4 text-sm text-zinc-500">No open times in the next few weeks.</p>
+            <p className="py-4 text-sm text-zinc-500">
+              No open times in the next few weeks{booking.staff_name ? ` with ${booking.staff_name}` : ''}. Contact {booking.site_name} to arrange another time.
+            </p>
           ) : (
             <>
               <p className="mb-3 text-xs text-zinc-500">Times in {slotsTz}</p>

@@ -3,14 +3,19 @@
 Public booking intake (with availability-window + overlap validation) lives in
 public.py.
 """
-from typing import Optional
+from typing import Annotated, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from ...database import get_connection
 from ..dependencies import require_cappe_account
-from ..services.email import format_when, send_cappe_booking_decision_email
+from ..services.booking_lifecycle import transition_error
+from ..services.email import (
+    format_when,
+    send_cappe_booking_cancelled_by_host_email,
+    send_cappe_booking_decision_email,
+)
 from ..models.cappe import (
     CappeAccount,
     CappeApprovalDecline,
@@ -103,6 +108,31 @@ _BOOKING_COLS = (
 # `b.`-qualified column list for joins against cappe_staff (id/site_id/created_at
 # are ambiguous otherwise).
 _BOOKING_COLS_Q = ", ".join("b." + c.strip() for c in _BOOKING_COLS.split(","))
+
+# One booking with what the dashboard shows beside it: staff and location
+# names, the timezone its times mean, and the shop order it came from.
+_BOOKING_VIEW = f"""
+    SELECT {_BOOKING_COLS_Q}, st.name AS staff_name, loc.name AS location_name,
+           COALESCE(loc.timezone, s.timezone) AS timezone,
+           ord.id AS order_id, ord.status AS order_status
+      FROM cappe_bookings b
+      JOIN cappe_sites s ON s.id = b.site_id
+      LEFT JOIN cappe_staff st ON st.id = b.staff_id
+      LEFT JOIN cappe_locations loc ON loc.id = b.location_id
+      LEFT JOIN LATERAL (
+            SELECT o.id, o.status FROM cappe_order_items oi
+              JOIN cappe_orders o ON o.id = oi.order_id
+             WHERE oi.booking_id = b.id
+             ORDER BY o.created_at DESC LIMIT 1
+      ) ord ON true
+"""
+
+
+async def _booking_view(conn, site_id, booking_id) -> dict:
+    row = await conn.fetchrow(f"{_BOOKING_VIEW} WHERE b.id = $1 AND b.site_id = $2", booking_id, site_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    return _booking_row(row)
 
 
 def _booking_row(r) -> dict:
@@ -280,8 +310,13 @@ async def replace_availability(
 @router.get("/sites/{site_id}/bookings", response_model=list[CappeBooking])
 async def list_bookings(
     site_id: UUID, location_id: Optional[UUID] = Query(None),
+    limit: Annotated[int, Query(ge=1, le=1000)] = 500,
+    offset: Annotated[int, Query(ge=0)] = 0,
     account: CappeAccount = Depends(require_cappe_account),
 ):
+    """Bookings, latest start first, a page at a time (this returned every
+    booking the site had ever taken), each with its staff, location,
+    timezone and the shop order it came from."""
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         args: list = [site_id]
@@ -289,12 +324,12 @@ async def list_bookings(
         if location_id is not None:
             args.append(location_id)
             loc = f" AND b.location_id = ${len(args)}"
+        args.extend([limit, offset])
         rows = await conn.fetch(
-            f"""SELECT {_BOOKING_COLS_Q}, st.name AS staff_name, loc.name AS location_name
-                FROM cappe_bookings b
-                LEFT JOIN cappe_staff st ON st.id = b.staff_id
-                LEFT JOIN cappe_locations loc ON loc.id = b.location_id
-                WHERE b.site_id = $1{loc} ORDER BY b.starts_at DESC""",
+            f"""{_BOOKING_VIEW}
+                WHERE b.site_id = $1{loc}
+                ORDER BY b.starts_at DESC
+                LIMIT ${len(args) - 1} OFFSET ${len(args)}""",
             *args,
         )
     return [_booking_row(r) for r in rows]
@@ -302,22 +337,58 @@ async def list_bookings(
 
 @router.patch("/sites/{site_id}/bookings/{booking_id}", response_model=CappeBooking)
 async def update_booking_status(
-    site_id: UUID, booking_id: UUID, body: CappeBookingStatusUpdate,
+    site_id: UUID, booking_id: UUID, body: CappeBookingStatusUpdate, background: BackgroundTasks,
     account: CappeAccount = Depends(require_cappe_account),
 ):
+    """Move a booking along `booking_lifecycle.ALLOWED_TRANSITIONS`.
+
+    This used to write any status over any other: re-confirming a cancelled
+    booking took its slot back unchecked, "confirmed" skipped the approval
+    stamp and email, and a cancellation told the customer nothing.
+    Confirming a request now IS approving it (same stamp, same email), and
+    cancelling a live booking emails the customer."""
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
-        row = await conn.fetchrow(
-            f"""UPDATE cappe_bookings SET status = $1, updated_at = NOW()
-                WHERE id = $2 AND site_id = $3 RETURNING {_BOOKING_COLS}""",
-            body.status, booking_id, site_id,
-        )
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
-    return _booking_row(row)
+        site = await get_owned_site(conn, site_id, account.id)
+        async with conn.transaction():
+            current = await conn.fetchrow(
+                "SELECT status FROM cappe_bookings WHERE id = $1 AND site_id = $2 FOR UPDATE",
+                booking_id, site_id,
+            )
+            if current is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+            refusal = transition_error(current["status"], body.status)
+            if refusal:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refusal)
+            changed = body.status != current["status"]
+            approving = changed and current["status"] == "pending" and body.status == "confirmed"
+            row = await conn.fetchrow(
+                f"""UPDATE cappe_bookings
+                       SET status = $1, updated_at = NOW(),
+                           approved_at = CASE WHEN $4 THEN NOW() ELSE approved_at END
+                     WHERE id = $2 AND site_id = $3 RETURNING {_BOOKING_COLS}""",
+                body.status, booking_id, site_id, approving,
+            )
+        if changed and approving and row["requires_approval"]:
+            await _notify_booking_decision(conn, background, site, row, approved=True)
+        elif changed and body.status == "cancelled" and row["customer_email"]:
+            await _notify_host_cancelled(conn, background, site, row)
+        view = await _booking_view(conn, site_id, booking_id)
+    return view
 
 
 # --- Approval queue ---------------------------------------------------------
+
+async def _booking_when(conn, site, row) -> str:
+    """The booking's start in ITS timezone — the location's, else the site's.
+    Approval emails used the site's, so a location in another zone told its
+    customers the wrong hour."""
+    tz = site["timezone"]
+    if row["location_id"] is not None:
+        tz = await conn.fetchval(
+            "SELECT timezone FROM cappe_locations WHERE id = $1", row["location_id"],
+        ) or tz
+    return format_when(row["starts_at"], tz)
+
 
 async def _notify_booking_decision(conn, background, site, row, *, approved, reason=None):
     """Email the customer that their pending booking was approved/declined."""
@@ -329,7 +400,18 @@ async def _notify_booking_decision(conn, background, site, row, *, approved, rea
     )
     background.add_task(
         send_cappe_booking_decision_email, email, row["customer_name"], site["name"],
-        approved, format_when(row["starts_at"], site["timezone"]), type_name or "Booking", reason,
+        approved, await _booking_when(conn, site, row), type_name or "Booking", reason,
+    )
+
+
+async def _notify_host_cancelled(conn, background, site, row):
+    """Email the customer that the business cancelled their booking."""
+    type_name = await conn.fetchval(
+        "SELECT name FROM cappe_booking_types WHERE id = $1", row["booking_type_id"]
+    )
+    background.add_task(
+        send_cappe_booking_cancelled_by_host_email, row["customer_email"], row["customer_name"],
+        site["name"], type_name or "Booking", await _booking_when(conn, site, row),
     )
 
 
@@ -351,7 +433,8 @@ async def accept_booking(
         if row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending booking to accept")
         await _notify_booking_decision(conn, background, site, row, approved=True)
-    return _booking_row(row)
+        view = await _booking_view(conn, site_id, booking_id)
+    return view
 
 
 @router.post("/sites/{site_id}/bookings/{booking_id}/decline", response_model=CappeBooking)
@@ -372,7 +455,8 @@ async def decline_booking(
         if row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending booking to decline")
         await _notify_booking_decision(conn, background, site, row, approved=False, reason=body.reason)
-    return _booking_row(row)
+        view = await _booking_view(conn, site_id, booking_id)
+    return view
 
 
 @router.get("/sites/{site_id}/requests", response_model=list[CappeRequestSummary])

@@ -32,6 +32,7 @@ from .email import (
     send_cappe_order_receipt_email,
 )
 from .inventory import log_adjustment as _inv_log
+from .booking_lifecycle import booking_lock_key, lock_booking_resource
 from .inventory import lock_stock_rows, release_order_bookings, restock_order
 from .options import fetch_option_groups, validate_and_price_options
 from .entitlements import (
@@ -284,6 +285,20 @@ def _anchor_local(dt, tz_name):
         return dt.replace(tzinfo=timezone.utc)
 
 
+class OutsideAvailability(HTTPException):
+    """The requested time falls in none of the availability windows that apply.
+
+    Its own type so the "any available" loop can tell "this stylist doesn't
+    work then" (try the next one) from a request that is wrong for everyone.
+    That loop only moved on after a 409, so on a salon where each stylist has
+    their own hours, every slot that came from anyone but the first stylist
+    failed with a 400.
+    """
+
+    def __init__(self):
+        super().__init__(status_code=status.HTTP_400_BAD_REQUEST, detail="Time is outside availability")
+
+
 async def resolve_booking_slot(
     conn, site, btype, starts_at, ends_at_override=None, exclude_booking_id=None, staff_id=None,
     location_id=None, tz=None,
@@ -335,7 +350,7 @@ async def resolve_booking_slot(
         btype["id"], staff_id, location_id,
     )
     if not window:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Time is outside availability")
+        raise OutsideAvailability()
 
     # Overlap is per shared RESOURCE, not per booking type. A staffed booking's
     # resource is the STAFF MEMBER — a person can't be in two places at once, so
@@ -346,25 +361,32 @@ async def resolve_booking_slot(
     # falls back to the (location, type) slot it occupies — that way two
     # resource-less service types can still run in parallel, while a second
     # booking of the SAME offering in the same slot is still blocked.
-    # NOTE: this app-level check is the primary guard; the DB unique index
-    # (site_id, booking_type_id, staff_id, location_id, starts_at) is only an
-    # exact-start backstop and does NOT enforce these cross-type semantics — a
-    # GiST range-exclusion constraint would be the belt-and-suspenders follow-up.
+    # The check below is a read; the insert that follows it is a write. Two
+    # requests for the same resource used to both pass the read — the unique
+    # index only catches an identical start on an identical service — so the
+    # resource is locked first and the second request waits for the first.
+    await lock_booking_resource(conn, booking_lock_key(
+        site_id=site["id"], booking_type_id=btype["id"], staff_id=staff_id, location_id=location_id,
+    ))
+    # The gap kept between two bookings is the larger of their two buffers. It
+    # used to be only the NEW booking's, so a no-buffer service could be booked
+    # straight up against one that needs half an hour to turn the room around.
     buf_min = int(btype.get("buffer_minutes") or 0)
     overlap = await conn.fetchval(
-        """SELECT 1 FROM cappe_bookings
-           WHERE site_id = $1 AND status IN ('pending', 'confirmed')
-             AND ($5::uuid IS NULL OR id <> $5)
+        """SELECT 1 FROM cappe_bookings b
+             LEFT JOIN cappe_booking_types obt ON obt.id = b.booking_type_id
+           WHERE b.site_id = $1 AND b.status IN ('pending', 'confirmed')
+             AND ($5::uuid IS NULL OR b.id <> $5)
              AND (
-                   ($6::uuid IS NOT NULL AND staff_id = $6)
-                OR ($6::uuid IS NULL AND staff_id IS NULL
-                    AND location_id IS NOT DISTINCT FROM $8
-                    AND booking_type_id = $2)
+                   ($6::uuid IS NOT NULL AND b.staff_id = $6)
+                OR ($6::uuid IS NULL AND b.staff_id IS NULL
+                    AND b.location_id IS NOT DISTINCT FROM $8
+                    AND b.booking_type_id = $2)
              )
-              AND tstzrange(starts_at, ends_at)
+              AND tstzrange(b.starts_at, b.ends_at)
                   && tstzrange(
-                       $3::timestamptz - ($7::integer * interval '1 minute'),
-                       $4::timestamptz + ($7::integer * interval '1 minute')
+                       $3::timestamptz - (GREATEST($7::integer, COALESCE(obt.buffer_minutes, 0)) * interval '1 minute'),
+                       $4::timestamptz + (GREATEST($7::integer, COALESCE(obt.buffer_minutes, 0)) * interval '1 minute')
                      )
            LIMIT 1""",
         site["id"], btype["id"], s_utc, e_utc, exclude_booking_id, staff_id, buf_min, location_id,

@@ -4,7 +4,9 @@ from datetime import datetime, time
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from ._validators import iana_timezone
 
 # pricing_mode: flat = price_cents is the whole-booking price; hourly =
 # price_cents is the base rate per hour, scaled by matching rate rules.
@@ -28,6 +30,7 @@ class CappeLocationCreate(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
     timezone: Optional[str] = Field(default=None, max_length=64)
+    _tz = field_validator("timezone")(iana_timezone)
     hours: list[CappeLocationHours] = Field(default_factory=list)
     contact_phone: Optional[str] = Field(default=None, max_length=64)
     contact_email: Optional[EmailStr] = None
@@ -42,6 +45,7 @@ class CappeLocationUpdate(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
     timezone: Optional[str] = Field(default=None, max_length=64)
+    _tz = field_validator("timezone")(iana_timezone)
     hours: Optional[list[CappeLocationHours]] = None
     contact_phone: Optional[str] = Field(default=None, max_length=64)
     contact_email: Optional[EmailStr] = None
@@ -264,9 +268,19 @@ class CappeBooking(BaseModel):
     rider_acknowledged: bool = False
     rider_snapshot: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
+    # The shop order this booking was bought through, if any. Cancelling or
+    # declining the booking does not move money: a PAID order has to be
+    # refunded from Orders, and the dashboard says so.
+    order_id: Optional[UUID] = None
+    order_status: Optional[str] = None
+    # The timezone the booking's times mean (its location's, else the site's).
+    timezone: Optional[str] = None
 
 
 class CappeBookingStatusUpdate(BaseModel):
+    """An owner's status change. The allowed moves are
+    `booking_lifecycle.ALLOWED_TRANSITIONS`; `declined` goes through the
+    decline action (it carries a reason and an email)."""
     status: Literal["pending", "confirmed", "cancelled", "completed"]
 
 
@@ -289,6 +303,9 @@ class CappeBookingRequest(BaseModel):
     rider_acknowledged: bool = False
     staff_id: Optional[UUID] = None  # None = "any available" (auto-assigned)
     location_id: Optional[UUID] = None  # None = single/main location
+    # Bot trap: a hidden field a person never fills in. The widget always
+    # rendered it; nothing sent or checked it.
+    website: str = Field(default="", max_length=200)
 
 
 class CappeBookingSuggestionRequest(BaseModel):

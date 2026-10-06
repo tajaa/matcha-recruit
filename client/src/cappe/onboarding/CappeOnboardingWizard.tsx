@@ -90,12 +90,21 @@ export default function CappeOnboardingWizard() {
             is_multi_location: mode === 'multi',
             ...listing,
           })
+      // Sites were created in UTC and nothing asked again, so every booking
+      // time, reminder and confirmation was off by the owner's UTC offset.
+      // The browser's zone is the right default for almost every owner; it
+      // stays editable in site settings. Best-effort: the site exists already.
+      const timezone = browserTimezone()
+      if (timezone) {
+        await cappeApi.put(`/sites/${site.id}`, { timezone }).catch(() => {})
+      }
       if (mode === 'multi') {
         // Seed the first branch; the rest are added in the Locations manager.
         await cappeApi
           .post<CappeLocation>(`/sites/${site.id}/locations`, {
             name: branch.trim() || 'Main',
             is_default: true,
+            ...(timezone ? { timezone } : {}),
           })
           .catch(() => {
             /* non-fatal: they can add branches in the Locations manager */
@@ -346,4 +355,14 @@ export default function CappeOnboardingWizard() {
       </div>
     </div>
   )
+}
+
+/** The visitor's IANA timezone ("America/Chicago"), or null if the browser
+ *  won't say. */
+function browserTimezone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null
+  } catch {
+    return null
+  }
 }

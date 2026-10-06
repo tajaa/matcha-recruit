@@ -12,10 +12,13 @@ interface DiscountsSectionProps {
   addDiscount: () => void
   saveDiscounts: () => void
   savingDiscounts: boolean
+  /** A shared (all-locations) row shown inside a location's view: read-only. */
+  isShared?: (row: CappeDiscount) => boolean
 }
 
 export function DiscountsSection({
   discounts, setDiscounts, setDiscount, types, products, addDiscount, saveDiscounts, savingDiscounts,
+  isShared = () => false,
 }: DiscountsSectionProps) {
   return (
     <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
@@ -23,12 +26,14 @@ export function DiscountsSection({
       <p className="mb-3 mt-1 text-xs text-zinc-500">
         Quiet week? Drop a discount across <span className="text-zinc-300">all offerings</span> or a single service/product.
         Leave dates blank to run until you turn it off. The best single discount applies — they don't stack.
+        A discount added inside a location applies to bookings there only, never to the online shop.
       </p>
       <div className="space-y-2">
         {discounts.map((d, i) => {
           const targetValue = d.scope === 'all' ? 'all' : `${d.scope === 'booking_type' ? 'bt' : 'pr'}:${d.target_id ?? ''}`
+          const locked = isShared(d)
           return (
-            <div key={d.id} className="flex flex-wrap items-center gap-2">
+            <fieldset key={d.id} disabled={locked} className={`flex flex-wrap items-center gap-2 ${locked ? 'opacity-60' : ''}`}>
               <input value={d.label} onChange={(e) => setDiscount(i, { label: e.target.value })} placeholder="Label (e.g. Slow-week special)" className={`w-44 ${inputCls}`} />
               <div className="flex items-center gap-1">
                 <input type="number" min="1" max="90" value={d.percent_off} onChange={(e) => setDiscount(i, { percent_off: parseInt(e.target.value, 10) || 0 })} className={`w-16 ${inputCls}`} />
@@ -68,8 +73,8 @@ export function DiscountsSection({
                 <input type="checkbox" checked={d.active} onChange={(e) => setDiscount(i, { active: e.target.checked })} className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-950 text-emerald-500" />
                 Active
               </label>
-              <button type="button" onClick={() => setDiscounts((ds) => ds.filter((_, idx) => idx !== i))} className="text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
-            </div>
+              {locked ? <span title="Shared by every location — change it in the All locations view" className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-semibold uppercase text-zinc-400">All locations</span> : <button type="button" aria-label="Remove discount" onClick={() => setDiscounts((ds) => ds.filter((_, idx) => idx !== i))} className="text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>}
+            </fieldset>
           )
         })}
         {discounts.length === 0 && <p className="text-sm text-zinc-400">No discounts running.</p>}

@@ -1,6 +1,7 @@
-import type { Dispatch, SetStateAction } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { useState, type Dispatch, type SetStateAction } from 'react'
+import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import type { CappeBookingType, CappePricingMode, CappeStaff } from '../../../types'
+import { parseMoneyCents } from '../../../utils/money'
 import { money, inputCls } from './constants'
 import type { TypeForm } from './types'
 
@@ -10,14 +11,15 @@ interface BookingTypesSectionProps {
   setTypeForm: Dispatch<SetStateAction<TypeForm>>
   addType: (e: React.FormEvent) => void
   staff: CappeStaff[]
-  patchType: (id: string, patch: Partial<CappeBookingType>) => void
-  removeType: (id: string) => void
+  patchType: (id: string, patch: Partial<CappeBookingType>) => Promise<boolean> | void
+  removeType: (t: CappeBookingType) => void
   toggleTypeStaff: (t: CappeBookingType, staffId: string) => void
 }
 
 export function BookingTypesSection({
   types, typeForm, setTypeForm, addType, staff, patchType, removeType, toggleTypeStaff,
 }: BookingTypesSectionProps) {
+  const [editingId, setEditingId] = useState<string | null>(null)
   return (
     <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
       <h2 className="mb-3 text-sm font-semibold text-zinc-100">Appointment types</h2>
@@ -62,10 +64,19 @@ export function BookingTypesSection({
         <p className="text-sm text-zinc-400">No appointment types yet.</p>
       ) : (
         <ul className="divide-y divide-zinc-800">
-          {types.map((t) => (
+          {types.map((t) => editingId === t.id ? (
+            <li key={t.id} className="py-2.5">
+              <TypeEditor
+                type={t}
+                onCancel={() => setEditingId(null)}
+                onSave={async (patch) => { if (await patchType(t.id, patch)) setEditingId(null) }}
+              />
+            </li>
+          ) : (
             <li key={t.id} className="flex flex-wrap items-center gap-3 py-2.5 text-sm">
               <div className="min-w-0 flex-1">
                 <span className="text-zinc-200">{t.name}</span>
+                {t.status !== 'active' && <span className="ml-1.5 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase text-zinc-400">{t.status} — not bookable</span>}
                 {t.category && <span className="ml-1.5 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">{t.category}</span>}
                 <span className="text-zinc-400"> · {t.duration_minutes} min · {t.pricing_mode === 'hourly' ? `${money(t.price_cents)}/hr` : money(t.price_cents)}{t.buffer_minutes ? ` · ${t.buffer_minutes}m buffer` : ''}</span>
                 {t.description && <div className="truncate text-xs text-zinc-500">{t.description}</div>}
@@ -89,11 +100,90 @@ export function BookingTypesSection({
                 <input type="checkbox" checked={t.requires_approval} onChange={(e) => patchType(t.id, { requires_approval: e.target.checked })} className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-950 text-emerald-500" />
                 Needs approval
               </label>
-              <button onClick={() => removeType(t.id)} className="text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+              <button onClick={() => setEditingId(t.id)} aria-label={`Edit ${t.name}`} title={`Edit ${t.name}`} className="text-zinc-400 hover:text-emerald-400"><Pencil className="h-4 w-4" /></button>
+              <button onClick={() => removeType(t)} aria-label={`Delete ${t.name}`} title={`Delete ${t.name}`} className="text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
             </li>
           ))}
         </ul>
       )}
     </section>
+  )
+}
+
+/** Edit an appointment type in place. Changes apply to new bookings; existing
+ *  ones keep the time and price they were booked at. */
+function TypeEditor({ type: t, onSave, onCancel }: {
+  type: CappeBookingType
+  onSave: (patch: Partial<CappeBookingType>) => Promise<void>
+  onCancel: () => void
+}) {
+  const [form, setForm] = useState({
+    name: t.name,
+    description: t.description || '',
+    duration: String(t.duration_minutes),
+    pricing_mode: t.pricing_mode,
+    price: t.price_cents == null ? '' : String(t.price_cents / 100),
+    buffer: String(t.buffer_minutes || 0),
+    category: t.category || '',
+    status: t.status,
+  })
+  const [problem, setProblem] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    const duration = parseInt(form.duration, 10)
+    const buffer = parseInt(form.buffer, 10)
+    const price = form.price.trim() === '' ? 0 : parseMoneyCents(form.price)
+    if (!form.name.trim()) { setProblem('Give it a name'); return }
+    if (!Number.isFinite(duration) || duration < 1) { setProblem('Enter the length in minutes'); return }
+    if (!Number.isFinite(buffer) || buffer < 0) { setProblem('Enter the buffer in minutes (0 for none)'); return }
+    if (price === null) { setProblem('Enter the price as a plain amount, e.g. 75 or 75.00'); return }
+    setProblem(null)
+    setSaving(true)
+    try {
+      await onSave({
+        name: form.name.trim(), description: form.description.trim() || null,
+        duration_minutes: duration, pricing_mode: form.pricing_mode, price_cents: price,
+        buffer_minutes: buffer, category: form.category.trim() || null, status: form.status,
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} aria-label={`Edit ${t.name}`} className="grid gap-2 rounded-lg border border-zinc-700 bg-zinc-950/60 p-3 sm:grid-cols-2">
+      <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} aria-label="Name" className={inputCls} />
+      <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Category (optional)" aria-label="Category" className={inputCls} />
+      <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Short description (optional)" aria-label="Description" className={`sm:col-span-2 ${inputCls}`} />
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-1 text-xs text-zinc-400">
+          <input value={form.duration} onChange={(e) => setForm({ ...form, duration: e.target.value })} type="number" min="1" aria-label="Length in minutes" className={`w-20 ${inputCls}`} /> min
+        </label>
+        <select value={form.pricing_mode} onChange={(e) => setForm({ ...form, pricing_mode: e.target.value as CappePricingMode })} aria-label="Pricing" className={inputCls}>
+          <option value="flat">Flat price</option>
+          <option value="hourly">Per hour</option>
+        </select>
+        <input value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} type="number" min="0" step="0.01" aria-label="Price" placeholder={form.pricing_mode === 'hourly' ? '$/hr' : '$'} className={`w-24 ${inputCls}`} />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-1 text-xs text-zinc-400">
+          <input value={form.buffer} onChange={(e) => setForm({ ...form, buffer: e.target.value })} type="number" min="0" step="5" aria-label="Buffer minutes" className={`w-20 ${inputCls}`} /> min buffer
+        </label>
+        <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as CappeBookingType['status'] })} aria-label="Status" className={inputCls}>
+          <option value="active">Bookable</option>
+          <option value="archived">Archived — hidden from booking</option>
+        </select>
+      </div>
+      <p className="text-xs text-zinc-500 sm:col-span-2">Changes apply to new bookings. Existing bookings keep their time and price.</p>
+      {problem && <p role="alert" className="text-xs text-red-400 sm:col-span-2">{problem}</p>}
+      <div className="flex gap-2 sm:col-span-2">
+        <button type="submit" disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-60">
+          {saving && <Loader2 className="h-4 w-4 animate-spin" />} Save
+        </button>
+        <button type="button" onClick={onCancel} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancel</button>
+      </div>
+    </form>
   )
 }

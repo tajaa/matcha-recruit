@@ -21,7 +21,7 @@ export default function Bookings() {
 
   return (
     <SurfaceShell title="Bookings" subtitle="Appointment types, availability, pricing, and requests.">
-      {b.error && <p className="mb-4 text-sm text-red-400">{b.error}</p>}
+      {b.error && <p role="alert" className="sticky top-2 z-10 mb-4 rounded-lg border border-red-500/30 bg-zinc-950/95 px-3 py-2 text-sm text-red-400">{b.error}</p>}
 
       {/* Location switcher — manage each location's appts/staff/hours separately.
           Multi-location sites only; single-location sites keep a simpler page. */}
@@ -75,6 +75,7 @@ export default function Bookings() {
         staffForm={b.staffForm}
         setStaffForm={b.setStaffForm}
         addStaff={b.addStaff}
+        updateStaff={b.updateStaff}
         removeStaff={b.removeStaff}
         setShowStaffImport={b.setShowStaffImport}
       />
@@ -111,6 +112,7 @@ export default function Bookings() {
         addSlot={b.addSlot}
         saveAvailability={b.saveAvailability}
         savingAvail={b.savingAvail}
+        isShared={b.isShared}
       />
 
       {/* Rate rules — dynamic time pricing (for hourly types) */}
@@ -123,6 +125,7 @@ export default function Bookings() {
         addRule={b.addRule}
         saveRules={b.saveRules}
         savingRules={b.savingRules}
+        isShared={b.isShared}
       />
 
       {/* Discounts — promotional markdowns */}
@@ -135,6 +138,7 @@ export default function Bookings() {
         addDiscount={b.addDiscount}
         saveDiscounts={b.saveDiscounts}
         savingDiscounts={b.savingDiscounts}
+        isShared={b.isShared}
       />
 
       {/* Rider — Pro creators only */}

@@ -84,15 +84,16 @@ sb.addEventListener('click',function(){var t=cur(),email=box.querySelector('[dat
 if(!sel){msg.textContent='Pick a time';msg.className='cz-msg err';return;}
 if(!email){msg.textContent='Email required';msg.className='cz-msg err';return;}
 var ackEl=box.querySelector('[data-ack]');if(ackEl&&!ackEl.checked){msg.textContent='Please agree to the requirements';msg.className='cz-msg err';return;}
- var body={booking_type_id:t.id,starts_at:sel.start,customer_email:email,customer_name:box.querySelector('[data-name]').value.trim(),rider_acknowledged:ackEl?ackEl.checked:false};
+ var body={booking_type_id:t.id,starts_at:sel.start,customer_email:email,customer_name:box.querySelector('[data-name]').value.trim(),rider_acknowledged:ackEl?ackEl.checked:false,website:box.querySelector('[data-website]').value};
 if(t.pricing_mode==='hourly'&&sel.end)body.ends_at=sel.end;
 if(selStaff)body.staff_id=selStaff;
 if(selLoc)body.location_id=selLoc;
  sb.disabled=true;msg.textContent='Requesting…';msg.className='cz-msg';
-RT.post('/bookings',body).then(function(res){var price=res.quoted_price_cents?(' — '+RT.money(res.quoted_price_cents,'USD')):'';
+RT.post('/bookings',body).then(function(res){bookingTimezone=res.timezone||bookingTimezone;var price=res.quoted_price_cents?(' — '+RT.money(res.quoted_price_cents,'USD')):'';
  var note=res.requires_approval?'Request sent for '+RT.esc(formatBookingWhen(res.starts_at))+price+'. The host will review and confirm by email.':'Booked for '+RT.esc(formatBookingWhen(res.starts_at))+price+'. A confirmation is on its way.';
- note+=' Times in '+RT.esc(res.timezone||bookingTimezone)+'.';
-box.innerHTML='<p class="cz-msg ok">'+note+'</p>';
+ note+=' Times in '+RT.esc(bookingTimezone)+'.';
+var mu=RT.url(res.manage_url);
+box.innerHTML='<p class="cz-msg ok">'+note+'</p>'+(mu?'<p class="cz-msg"><a href="'+RT.esc(mu)+'" target="_blank" rel="noopener">View, move or cancel your booking</a></p>':'');
  }).catch(function(e){sb.disabled=false;sb.textContent='Request booking';sel=null;msg.textContent=e.message;msg.className='cz-msg err';loadSlots();});});
   box.dispatchEvent(new CustomEvent('cappe:booking-ready'));
  }).catch(function(){box.innerHTML='<p style="color:var(--muted)">Unable to load.</p>';});}})();

@@ -72,7 +72,7 @@ def test_booking_overlap_query_uses_timestamp_range_bounds():
     from pathlib import Path
 
     source = Path(__file__).parents[2].joinpath("app/cappe/services/commerce.py").read_text()
-    query = source[source.index("AND tstzrange(starts_at, ends_at)"):]
+    query = source[source.index("AND tstzrange(b.starts_at, b.ends_at)"):]
     query = query[:query.index("LIMIT 1")]
     assert "$3::timestamptz" in query
     assert "$4::timestamptz" in query

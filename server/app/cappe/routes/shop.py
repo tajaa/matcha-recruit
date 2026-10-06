@@ -828,18 +828,32 @@ async def accept_order(
     site_id: UUID, order_id: UUID, account: CappeAccount = Depends(require_cappe_account)
 ):
     """Approve an order that was held for review. Stays 'pending' — approval is
-    not payment — but is stamped approved and leaves the requests queue."""
+    not payment — but is stamped approved and leaves the requests queue.
+
+    Its booking lines are approved with it. A booking bought through the shop
+    that needs approval lands `pending`; accepting the order used to leave it
+    there, so the appointment the owner had just said yes to sat in the
+    booking queue waiting for a second yes."""
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
-        order = await conn.fetchrow(
-            f"""UPDATE cappe_orders
-                SET requires_approval = false, approved_at = NOW(), updated_at = NOW()
-                WHERE id = $1 AND site_id = $2 AND status = 'pending' AND requires_approval = true
-                RETURNING {_ORDER_COLS}""",
-            order_id, site_id,
-        )
-        if order is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending order to accept")
+        async with conn.transaction():
+            order = await conn.fetchrow(
+                f"""UPDATE cappe_orders
+                    SET requires_approval = false, approved_at = NOW(), updated_at = NOW()
+                    WHERE id = $1 AND site_id = $2 AND status = 'pending' AND requires_approval = true
+                    RETURNING {_ORDER_COLS}""",
+                order_id, site_id,
+            )
+            if order is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending order to accept")
+            await conn.execute(
+                """UPDATE cappe_bookings
+                      SET status = 'confirmed', approved_at = NOW(), updated_at = NOW()
+                    WHERE site_id = $2 AND status = 'pending'
+                      AND id IN (SELECT booking_id FROM cappe_order_items
+                                  WHERE order_id = $1 AND booking_id IS NOT NULL)""",
+                order_id, site_id,
+            )
         items = await conn.fetch(
             f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
             order_id,
