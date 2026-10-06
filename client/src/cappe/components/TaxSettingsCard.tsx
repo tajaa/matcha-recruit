@@ -17,14 +17,19 @@ export default function TaxSettingsCard({ siteId }: { siteId: string }) {
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // A failed load must not fall through to the form: its blank boxes, saved,
+  // would write zeros over the store's real settings.
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+
   useEffect(() => {
     cappeApi.get<CappeSite>(`/sites/${siteId}`).then((s) => {
       setRate(s.tax_rate_bps ? (s.tax_rate_bps / 100).toString() : '')
       setLabel(s.tax_label || 'Tax')
       setPrefix(s.receipt_prefix || '')
       setLoaded(true)
-    }).catch(() => setLoaded(true))
-  }, [siteId])
+    }).catch((e) => setLoadError(e instanceof Error ? e.message : 'Could not load these settings'))
+  }, [siteId, attempt])
 
   async function save() {
     setError(null); setSaved(false)
@@ -51,6 +56,14 @@ export default function TaxSettingsCard({ siteId }: { siteId: string }) {
     }
   }
 
+  if (loadError) {
+    return (
+      <div role="alert" className="mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/[0.06] px-4 py-3 text-sm text-red-300">
+        Couldn’t load your tax settings, so they can’t be edited right now. {loadError}
+        <button onClick={() => { setLoadError(null); setAttempt((n) => n + 1) }} className="rounded-lg border border-red-500/40 px-2.5 py-1 text-xs font-medium hover:bg-red-500/10">Try again</button>
+      </div>
+    )
+  }
   if (!loaded) return null
 
   return (

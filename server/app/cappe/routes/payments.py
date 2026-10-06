@@ -26,6 +26,7 @@ from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount
 from ..services.common import url_within_origins
+from ..services.entitlements import resolve_entitlements
 from ..services.email import (
     app_origin,
     dashboard_url,
@@ -108,6 +109,9 @@ class ConnectStatusResponse(BaseModel):
     connected: bool
     charges_enabled: bool
     details_submitted: bool
+    # The caller's plan take rate, so the dashboard states the real fee instead
+    # of a hard-coded one. None when the billing catalog can't be read.
+    platform_fee_bps: Optional[int] = None
 
 
 @router.post("/payments/connect", response_model=ConnectLinkResponse)
@@ -156,17 +160,23 @@ async def connect_status(account: CappeAccount = Depends(require_cappe_account))
         acct_id = await conn.fetchval(
             "SELECT stripe_account_id FROM cappe_accounts WHERE id = $1", account.id
         )
+        try:
+            fee_bps = (await resolve_entitlements(account.plan, conn=conn)).platform_fee_bps
+        except Exception:  # noqa: BLE001 — the fee line is informational
+            fee_bps = None
     if not acct_id:
         return {
             "connected": False,
             "charges_enabled": False,
             "details_submitted": False,
+            "platform_fee_bps": fee_bps,
         }
     # Connection released before the Stripe round-trip — see connect_account.
     try:
         acct = await cs.retrieve_account(acct_id)
     except CappeStripeError:
-        return {"connected": True, "charges_enabled": False, "details_submitted": False}
+        return {"connected": True, "charges_enabled": False, "details_submitted": False,
+                "platform_fee_bps": fee_bps}
     charges = bool(acct.get("charges_enabled"))
     details = bool(acct.get("details_submitted"))
     async with get_connection() as conn:
@@ -177,7 +187,8 @@ async def connect_status(account: CappeAccount = Depends(require_cappe_account))
             details,
             account.id,
         )
-    return {"connected": True, "charges_enabled": charges, "details_submitted": details}
+    return {"connected": True, "charges_enabled": charges, "details_submitted": details,
+            "platform_fee_bps": fee_bps}
 
 
 @router.post("/payments/webhook")

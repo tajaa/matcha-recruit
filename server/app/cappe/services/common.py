@@ -174,6 +174,14 @@ def site_origins(site: Any) -> list[str]:
     if custom:
         origins.append(f"https://{custom}")
         origins.append(f"https://www.{custom}")
+    # Local development only, and only when asked for: the renderer serves a
+    # site at `http://<sub>.localhost:<port>`, and without this origin every
+    # Stripe return URL a local storefront sends is rewritten to the production
+    # host, so checkout returns and the cancel release cannot be tried locally.
+    # Appended last, so the canonical host stays the fallback home page.
+    port = os.getenv("CAPPE_LOCAL_STOREFRONT_PORT", "").strip()
+    if sub and port.isdigit():
+        origins.append(f"http://{sub}.localhost:{port}")
     return origins
 
 

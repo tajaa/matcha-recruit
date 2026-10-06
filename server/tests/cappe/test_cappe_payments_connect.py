@@ -44,6 +44,8 @@ def base_domain(monkeypatch):
         cappe_base_domain = "gummfit.com"
 
     monkeypatch.setattr(app_config, "get_settings", lambda: S())
+    # A developer's own .env may turn the local storefront origin on.
+    monkeypatch.delenv("CAPPE_LOCAL_STOREFRONT_PORT", raising=False)
     return "gummfit.com"
 
 
@@ -108,6 +110,20 @@ def test_site_origins_is_case_and_dot_insensitive(base_domain):
     ]
 
 
+def test_a_local_storefront_origin_exists_only_when_asked_for(base_domain, monkeypatch):
+    """`CAPPE_LOCAL_STOREFRONT_PORT` is a dev opt-in. Unset — the production
+    case — nothing on localhost is an allowed Stripe return."""
+    assert url_within_origins("http://shop.localhost:8001/", site_origins({"subdomain": "shop"})) is None
+    monkeypatch.setenv("CAPPE_LOCAL_STOREFRONT_PORT", "8001")
+    origins = site_origins({"subdomain": "shop"})
+    # Last, so the canonical host stays the fallback home page.
+    assert origins == ["https://shop.gummfit.com", "http://shop.localhost:8001"]
+    assert url_within_origins("http://shop.localhost:8001/thanks", origins)
+    assert url_within_origins("http://other.localhost:8001/", origins) is None
+    monkeypatch.setenv("CAPPE_LOCAL_STOREFRONT_PORT", "8001; evil")
+    assert site_origins({"subdomain": "shop"}) == ["https://shop.gummfit.com"]
+
+
 def test_site_with_neither_host_yields_no_origins(base_domain):
     """An empty origin list means every caller-supplied URL is refused, which is
     the safe direction — never an accidental allow-all."""
@@ -156,3 +172,59 @@ def test_receipt_filename_falls_back_when_nothing_usable_remains(value, expected
 
 def test_receipt_filename_is_length_capped():
     assert len(receipt_filename("X" * 500)) == 64 + len(".pdf")
+
+
+# ── /payments/status states the caller's real fee ────────────────────────────
+
+class _Conn:
+    def __init__(self, acct_id):
+        self.acct_id = acct_id
+
+    async def fetchval(self, *_a):
+        return self.acct_id
+
+    async def execute(self, *_a):
+        return None
+
+
+class _Ctx:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        return self.conn
+
+    async def __aexit__(self, *_exc):
+        return False
+
+
+@pytest.mark.parametrize("acct_id,charges", [(None, False), ("acct_1", True)])
+def test_connect_status_reports_the_plan_fee(monkeypatch, acct_id, charges):
+    """The dashboard used to say "Gummfit takes 2%" to every plan."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.cappe.routes import payments as mod
+
+    monkeypatch.setattr(mod, "get_connection", lambda: _Ctx(_Conn(acct_id)))
+    monkeypatch.setattr(mod, "resolve_entitlements", AsyncMock(return_value=SimpleNamespace(platform_fee_bps=150)))
+    stripe = SimpleNamespace(retrieve_account=AsyncMock(return_value={"charges_enabled": True, "details_submitted": True}))
+    monkeypatch.setattr(mod, "get_cappe_stripe", lambda: stripe)
+    out = asyncio.run(mod.connect_status(account=SimpleNamespace(id="a-1", plan="business")))
+    assert out["platform_fee_bps"] == 150 and out["charges_enabled"] is charges
+
+
+def test_connect_status_survives_an_unreadable_catalog(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.cappe.routes import payments as mod
+
+    monkeypatch.setattr(mod, "get_connection", lambda: _Ctx(_Conn(None)))
+    monkeypatch.setattr(mod, "resolve_entitlements", AsyncMock(side_effect=RuntimeError("no catalog")))
+    monkeypatch.setattr(mod, "get_cappe_stripe", lambda: SimpleNamespace())
+    out = asyncio.run(mod.connect_status(account=SimpleNamespace(id="a-1", plan="business")))
+    assert out == {"connected": False, "charges_enabled": False, "details_submitted": False,
+                   "platform_fee_bps": None}
