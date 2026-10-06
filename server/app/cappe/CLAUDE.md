@@ -83,6 +83,12 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
   mirrored in the migration and `client/src/cappe/utils/countries.ts`). Products take it on create
   and follow it on change; a change is refused while subscriptions are billing.
 
+- **A promo code applies to lines with no automatic discount, split pro rata before tax**
+  (`promos.allocate`, each line's `promo_discount_cents`). `cappe_orders.subtotal_cents` is AFTER
+  the code (fees and refunds use it); a discounted line goes to Stripe as one item at its
+  discounted total — never a negative line. Uses are counted under the code's row lock and given
+  back in `inventory.release_order_bookings`. Subscriptions refuse codes.
+
 ## Site templates (`services/site_templates/`)
 
 - **The catalog is code, not the `cappe_templates` table.** One `SiteTemplate` per entry, one module

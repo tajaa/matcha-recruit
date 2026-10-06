@@ -43,6 +43,8 @@ from .entitlements import (
 from .stripe_connect import CONNECT_CHECKOUT_TTL_SECONDS, CappeStripeError, get_cappe_stripe
 from .cart import cart_totals
 from .shipping import home_country, load_zones, not_shippable, resolve_destination
+from .promos import allocate as allocate_promo, evaluate as evaluate_promo, find_code, normalize_code
+from .promos import redeem as redeem_promo, refuse as refuse_promo, used_by as promo_used_by
 
 logger = logging.getLogger("cappe.commerce")
 
@@ -84,23 +86,35 @@ def crossed_low_stock(before: int, after: int, threshold: Optional[int]) -> bool
 
 def build_stripe_line_items(
     line_rows: Iterable[tuple], currency: str, tax_cents: int, tax_label: str,
+    line_discounts: Optional[Sequence[int]] = None,
 ) -> list[dict]:
     """Cart lines as Stripe `price_data` line items, plus tax as its own line
     (shipping rides `shipping_options`, not a line item — see
     build_shipping_options). Sum of these unit_amount×quantity equals
     `subtotal_cents + tax_cents`; adding `shipping_cents` from
-    `shipping_options` brings the charge to `total_cents`."""
-    line_items = [
-        {
+    `shipping_options` brings the charge to `total_cents`.
+
+    A line a promo code discounted is sent as ONE item at its discounted total
+    ("Mug × 2"): its share doesn't always divide by the quantity, and Stripe
+    refuses a negative "discount" line."""
+    rows = list(line_rows)
+    discounts = list(line_discounts or []) + [0] * len(rows)
+    line_items = []
+    for (_pid, title, unit, qty, *_r), off in zip(rows, discounts):
+        name = (title or "Item")[:240]
+        if off:
+            unit_amount, quantity = int(unit) * int(qty) - int(off), 1
+            name = f"{name} × {int(qty)}" if int(qty) > 1 else name
+        else:
+            unit_amount, quantity = int(unit), int(qty)
+        line_items.append({
             "price_data": {
                 "currency": currency,
-                "unit_amount": int(unit),
-                "product_data": {"name": (title or "Item")[:250]},
+                "unit_amount": unit_amount,
+                "product_data": {"name": name[:250]},
             },
-            "quantity": int(qty),
-        }
-        for (_pid, title, unit, qty, *_r) in line_rows
-    ]
+            "quantity": quantity,
+        })
     if tax_cents and tax_cents > 0:
         line_items.append({
             "price_data": {
@@ -543,7 +557,7 @@ def bind_return_urls(success_url, cancel_url, site, token):
 
 async def open_order_checkout(
     *, order, line_rows, owner, owner_ent, success_url, cancel_url, email,
-    shopper=None, has_physical, tax_label, shipping_label,
+    shopper=None, has_physical, tax_label, shipping_label, line_discounts=None,
 ):
     """Open a Stripe Checkout page for an existing order and record it as the
     order's current page. Shared by order creation and by "Pay now" on an order
@@ -560,7 +574,7 @@ async def open_order_checkout(
     fee = entitlement_fee_cents(pay_total, owner_ent.platform_fee_bps)
     # Tax as its own line so the charged amount equals the receipt total. The
     # platform fee stays on the goods subtotal.
-    line_items = build_stripe_line_items(line_rows, cur, order["tax_cents"], tax_label)
+    line_items = build_stripe_line_items(line_rows, cur, order["tax_cents"], tax_label, line_discounts)
     customer_id = None
     if shopper:
         from .shopper_customers import connected_customer
@@ -653,7 +667,7 @@ async def pay_for_order(token: str) -> dict:
         owner_ent = await resolve_entitlements(row["plan"], conn=conn)
         require_can_sell(owner_ent)
         items = await conn.fetch(
-            "SELECT product_id, title, unit_price_cents, quantity, fulfillment "
+            "SELECT product_id, title, unit_price_cents, quantity, fulfillment, promo_discount_cents "
             "FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
             row["id"],
         )
@@ -672,6 +686,7 @@ async def pay_for_order(token: str) -> dict:
         success_url=page, cancel_url=page, email=row["customer_email"],
         has_physical=any(it["fulfillment"] == "physical" for it in items),
         tax_label=row["tax_label"] or "Tax", shipping_label=row["shipping_label"] or "Shipping",
+        line_discounts=[int(it.get("promo_discount_cents") or 0) for it in items],
     )
     return {"checkout_url": sess.get("url")}
 
@@ -739,6 +754,7 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             low_stock_hits: list[tuple[str, int]] = []  # (product name, balance) for the owner alert
             # (product_id, title, unit_price, qty, fulfillment, intake_answers, booking_id)
             line_rows = []
+            on_sale: list[bool] = []  # per line: an automatic discount applied (no promo code on top)
             # Batch-load option groups for every product in the cart once, instead
             # of one query per line item inside the loop below (N+1).
             opt_groups_by_product = await fetch_option_groups(
@@ -868,6 +884,7 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                     (item.product_id, product["name"], unit_price, qty, f, intake, booking_id,
                      opt_snapshot, item.selected_option_ids or [], stock_taken, options_taken)
                 )
+                on_sale.append(bool(dpct))
 
             subtotal = order_subtotal((unit, qty) for (_, _, unit, qty, *_rest) in line_rows)
 
@@ -880,6 +897,28 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             # `owner_ent` was resolved above the transaction; see the note there.
             if subtotal > 0:
                 require_can_sell(owner_ent)
+
+            # A promo code: checked and counted under its row lock, split over
+            # the lines with no automatic discount, before tax and shipping.
+            promo_code = normalize_code(getattr(body, "promo_code", None))
+            promo, discount = None, 0
+            shares = [0] * len(line_rows)
+            if promo_code:
+                if not owner_ent.has("promo_codes"):
+                    raise refuse_promo("This store doesn't take promo codes.")
+                promo = await find_code(conn, site["id"], promo_code, lock=True)
+                line_totals = [unit * qty for (_p, _t, unit, qty, *_r) in line_rows]
+                eligible = [not sale and total > 0 for sale, total in zip(on_sale, line_totals)]
+                discount, reason = evaluate_promo(
+                    promo, eligible_cents=sum(t for t, ok in zip(line_totals, eligible) if ok),
+                    on_date=today, currency=order_currency or "USD",
+                )
+                if reason:
+                    raise refuse_promo(reason)
+                if promo["once_per_customer"] and await promo_used_by(conn, promo["id"], email):
+                    raise refuse_promo("You've already used that code.")
+                shares = allocate_promo(discount, line_totals, eligible)
+                subtotal -= discount
 
             # Tax (per-site rate, physical lines only) + shipping come from the
             # same `cart_totals` the public quote endpoint uses, so a quote and
@@ -904,16 +943,16 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 if destination is None:
                     raise not_shippable(ship_country)
             totals = cart_totals([
-                {"unit_price_cents": unit, "quantity": qty, "fulfillment": fulfillment}
-                for (_pid, _title, unit, qty, fulfillment, *_rest) in line_rows
+                {"unit_price_cents": unit, "quantity": qty, "fulfillment": fulfillment, "promo_discount_cents": share}
+                for (_pid, _title, unit, qty, fulfillment, *_rest), share in zip(line_rows, shares)
             ], cfg, destination)
             tax_cents, shipping_cents, total_cents = totals["tax_cents"], totals["shipping_cents"], totals["total_cents"]
             order = await conn.fetchrow(
                 """INSERT INTO cappe_orders
                        (site_id, customer_email, customer_name, status, subtotal_cents, tax_cents,
                         shipping_cents, total_cents, currency, note, requires_approval, shipping_address,
-                        ship_country)
-                   VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
+                        ship_country, promo_code, discount_cents)
+                   VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14)
                    RETURNING id, status, subtotal_cents, tax_cents, shipping_cents, total_cents,
                              currency, access_token, requires_approval, ship_country""",
                 site["id"], email, body.customer_name, subtotal, tax_cents, shipping_cents,
@@ -923,22 +962,27 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 # collects it otherwise, and the paid webhook fills it in).
                 # Stored in Stripe's shape so the dashboard reads one format.
                 json.dumps(address.as_stripe_shape(ship_country)) if address is not None else None,
-                ship_country,
+                ship_country, promo_code if promo else None, discount,
             )
+            if promo:
+                await redeem_promo(
+                    conn, promo=promo, site_id=site["id"], order_id=order["id"], email=email,
+                    discount_cents=discount,
+                )
             if shopper:
                 await conn.execute("UPDATE cappe_orders SET shopper_id=$1 WHERE id=$2 AND site_id=$3",
                                    shopper["id"], order["id"], site["id"])
             for (product_id, title, unit_price, qty, f, intake, booking_id, opt_snapshot, sel_ids,
-                 stock_taken, options_taken) in line_rows:
+                 stock_taken, options_taken), share in zip(line_rows, shares):
                 await conn.execute(
                     """INSERT INTO cappe_order_items
                            (order_id, site_id, product_id, title, unit_price_cents, quantity,
                             fulfillment, intake_answers, selected_options, booking_id, selected_option_ids,
-                            stock_decremented, decremented_option_ids)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::uuid[])""",
+                            stock_decremented, decremented_option_ids, promo_discount_cents)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::uuid[], $14)""",
                     order["id"], site["id"], product_id, title, unit_price, qty,
                     f, json.dumps(intake), json.dumps(opt_snapshot), booking_id, sel_ids,
-                    stock_taken, options_taken,
+                    stock_taken, options_taken, share,
                 )
 
     # Low-stock alert to the owner (stock was decremented at order creation,
@@ -981,6 +1025,7 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 order=order, line_rows=line_rows, owner=owner, owner_ent=owner_ent,
                 success_url=success_url, cancel_url=cancel_url, email=email, shopper=shopper,
                 has_physical=has_physical, tax_label=tax_label, shipping_label=shipping_label,
+                line_discounts=shares,
             )
             checkout_url = sess.get("url")
         except CappeStripeError as exc:

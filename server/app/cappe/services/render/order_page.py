@@ -124,12 +124,19 @@ def _items_html(order: dict, items: list[dict]) -> str:
 
 def _totals_html(order: dict) -> str:
     cur = order.get("currency") or "USD"
-    rows = [("Subtotal", order.get("subtotal_cents") or 0)]
+    discount = int(order.get("discount_cents") or 0)
+    rows = [("Subtotal", (order.get("subtotal_cents") or 0) + discount)]
+    if discount:
+        code = order.get("promo_code")
+        rows.append((f"Discount ({code})" if code else "Discount", -discount))
     if order.get("tax_cents"):
         rows.append((order.get("tax_label") or "Tax", order["tax_cents"]))
     if order.get("shipping_cents"):
         rows.append((order.get("shipping_label") or "Shipping", order["shipping_cents"]))
-    body = "".join(f"<div><dt>{escape(label)}</dt><dd>{escape(fmt_money(c, cur))}</dd></div>" for label, c in rows)
+    body = "".join(
+        f"<div><dt>{escape(label)}</dt><dd>{'−' if c < 0 else ''}{escape(fmt_money(abs(c), cur))}</dd></div>"
+        for label, c in rows
+    )
     total = order.get("total_cents") or order.get("subtotal_cents") or 0
     body += f'<div class="cz-order__total"><dt>Total</dt><dd>{escape(fmt_money(total, cur))}</dd></div>'
     if order.get("refunded_cents"):

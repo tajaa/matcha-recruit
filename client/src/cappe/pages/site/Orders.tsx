@@ -462,13 +462,16 @@ export default function Orders() {
 
 /** Subtotal → total as the customer was charged, plus anything refunded. */
 function Totals({ order: o }: { order: CappeOrder }) {
-  const rows: [string, number][] = [['Subtotal', o.subtotal_cents]]
+  // `subtotal_cents` is after a promo code; show the goods before it, then the code.
+  const discount = o.discount_cents ?? 0
+  const rows: [string, number][] = [['Subtotal', o.subtotal_cents + discount]]
+  if (discount) rows.push([o.promo_code ? `Discount (${o.promo_code})` : 'Discount', -discount])
   if (o.tax_cents) rows.push(['Tax', o.tax_cents])
   if (o.shipping_cents) rows.push(['Shipping', o.shipping_cents])
   return (
     <dl className="ml-auto max-w-xs space-y-0.5 pt-1 text-xs">
       {rows.map(([label, cents]) => (
-        <div key={label} className="flex justify-between gap-6 text-zinc-400"><dt>{label}</dt><dd>{centsToMoney(cents, o.currency)}</dd></div>
+        <div key={label} className="flex justify-between gap-6 text-zinc-400"><dt>{label}</dt><dd>{cents < 0 ? '−' : ''}{centsToMoney(Math.abs(cents), o.currency)}</dd></div>
       ))}
       <div className="flex justify-between gap-6 border-t border-zinc-800 pt-1 font-medium text-zinc-200">
         <dt>Total</dt><dd>{centsToMoney(o.total_cents ?? o.subtotal_cents, o.currency)}</dd>

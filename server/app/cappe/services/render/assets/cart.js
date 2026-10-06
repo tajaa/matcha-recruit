@@ -3,10 +3,12 @@
 // checkout sends the whole bag as one order. Prices shown here are the
 // SERVER's (POST /quote) — the estimate is only a placeholder while it loads.
 var RT=window.__CAPPE_RT__;if(!RT||RT.preview||!RT.slug)return;
-var KEY='cz-cart:'+RT.slug,OKEY='cz-cart-order:'+RT.slug,CKEY='cz-cart-country:'+RT.slug,MAX_QTY=99;
+var KEY='cz-cart:'+RT.slug,OKEY='cz-cart-order:'+RT.slug,CKEY='cz-cart-country:'+RT.slug,PKEY='cz-cart-promo:'+RT.slug,MAX_QTY=99;
 function load(){try{var v=JSON.parse(localStorage.getItem(KEY)||'[]');return Array.isArray(v)?v:[];}catch(e){return [];}}
 var items=load(),quote=null,qseq=0,busy=false,shipTo=null;
 try{shipTo=localStorage.getItem(CKEY)||null;}catch(e){}
+var promoCode=null;try{promoCode=localStorage.getItem(PKEY)||null;}catch(e){}
+function setPromo(c){promoCode=c||null;try{if(promoCode)localStorage.setItem(PKEY,promoCode);else localStorage.removeItem(PKEY);}catch(e){}}
 // Country names in the buyer's language; the code if the browser can't.
 var names=null;try{names=new Intl.DisplayNames([navigator.language||'en'],{type:'region'});}catch(e){}
 function countryName(c){try{return (names&&names.of(c))||c;}catch(e){return c;}}
@@ -31,6 +33,9 @@ root.innerHTML='<div class="cz-bag__scrim" data-close></div>'+
 '<div class="cz-bag__foot" data-foot>'+
 '<label class="cz-bag__ship" data-shipwrap hidden><span class="cz-label">Ship to</span>'+
 '<select class="cz-field" data-ship aria-label="Ship to"></select></label><p class="cz-bag__shipnote" data-shipnote hidden></p>'+
+'<div class="cz-bag__promo" data-promowrap hidden><div class="cz-bag__row">'+
+'<input class="cz-field" data-promo placeholder="Promo code" maxlength="40" autocapitalize="characters" aria-label="Promo code" />'+
+'<button type="button" class="cz-btn cz-btn--ghost" data-promo-apply>Apply</button></div><p class="cz-msg" data-promo-msg role="status"></p></div>'+
 '<dl class="cz-bag__totals" data-totals></dl><p class="cz-msg" data-notice></p>'+
 '<input class="cz-field" type="email" data-email placeholder="Your email" autocomplete="email" aria-label="Your email" />'+
 '<input class="cz-field" type="text" data-name placeholder="Your name" autocomplete="name" aria-label="Your name" />'+
@@ -46,6 +51,11 @@ document.body.appendChild(root);
 var linesEl=root.querySelector('[data-lines]'),totalsEl=root.querySelector('[data-totals]'),noticeEl=root.querySelector('[data-notice]'),
 addrEl=root.querySelector('[data-addr]'),goEl=root.querySelector('[data-go]'),msgEl=root.querySelector('[data-msg]'),footEl=root.querySelector('[data-foot]'),
 shipWrap=root.querySelector('[data-shipwrap]'),shipEl=root.querySelector('[data-ship]'),shipNote=root.querySelector('[data-shipnote]'),shipList='';
+var promoWrap=root.querySelector('[data-promowrap]'),promoEl=root.querySelector('[data-promo]'),promoMsg=root.querySelector('[data-promo-msg]');
+function applyPromo(){var c=promoEl.value.trim().toUpperCase();setPromo(c);quote=null;render();refreshQuote();}
+root.querySelector('[data-promo-apply]').addEventListener('click',applyPromo);
+promoEl.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();applyPromo();}});
+promoMsg.addEventListener('click',function(e){if(e.target&&e.target.hasAttribute('data-promo-remove')){setPromo(null);promoEl.value='';quote=null;render();refreshQuote();}});
 shipEl.addEventListener('change',function(){shipTo=shipEl.value;try{localStorage.setItem(CKEY,shipTo);}catch(e){}quote=null;render();refreshQuote();});
 root.querySelectorAll('[data-close]').forEach(function(el){el.addEventListener('click',close);});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!root.hidden)close();});
@@ -79,8 +89,15 @@ linesEl.querySelectorAll('[data-inc]').forEach(function(b){b.addEventListener('c
 linesEl.querySelectorAll('[data-dec]').forEach(function(b){b.addEventListener('click',function(){var i=+b.getAttribute('data-dec');if(items[i].quantity>1){items[i].quantity--;changed();}});});
 linesEl.querySelectorAll('[data-rm]').forEach(function(b){b.addEventListener('click',function(){items.splice(+b.getAttribute('data-rm'),1);changed();});});
 var cur=(quote&&quote.currency)||(items[0]&&items[0].currency)||'USD',rows=[];
-if(quote&&quote.total_cents!=null){rows.push(['Subtotal',quote.subtotal_cents]);if(quote.tax_cents)rows.push(['Tax',quote.tax_cents]);if(quote.shipping_cents)rows.push(['Shipping',quote.shipping_cents]);rows.push(['Total',quote.total_cents]);}
-totalsEl.innerHTML=rows.map(function(r){return '<div'+(r[0]==='Total'?' class="cz-bag__total"':'')+'><dt>'+r[0]+'</dt><dd>'+RT.money(r[1],cur)+'</dd></div>';}).join('')||'<div><dt>Total</dt><dd>…</dd></div>';
+// A code's discount is off the subtotal the server sends; show it on its own line.
+var promo=quote&&quote.promo,disc=promo&&promo.valid?promo.discount_cents:0;
+if(quote&&quote.total_cents!=null){rows.push(['Subtotal',quote.subtotal_cents+disc]);if(disc)rows.push(['Discount ('+promo.code+')',-disc]);if(quote.tax_cents)rows.push(['Tax',quote.tax_cents]);if(quote.shipping_cents)rows.push(['Shipping',quote.shipping_cents]);rows.push(['Total',quote.total_cents]);}
+totalsEl.innerHTML=rows.map(function(r){return '<div'+(r[0]==='Total'?' class="cz-bag__total"':'')+'><dt>'+RT.esc(r[0])+'</dt><dd>'+(r[1]<0?'−':'')+RT.money(Math.abs(r[1]),cur)+'</dd></div>';}).join('')||'<div><dt>Total</dt><dd>…</dd></div>';
+promoWrap.hidden=!(quote&&quote.promo_codes);
+if(promoCode&&!promoEl.value)promoEl.value=promoCode;
+if(promo&&promo.valid){promoMsg.className='cz-msg';promoMsg.innerHTML=RT.esc(promo.code)+' applied. <button type="button" class="cz-bag__rm" data-promo-remove>Remove</button>';}
+else if(promo){promoMsg.className='cz-msg err';promoMsg.textContent=promo.message||'That code can’t be used.';}
+else{promoMsg.textContent='';}
 var approval=items.some(function(i){return i.requires_approval;});
 var noShip=!!(quote&&quote.ships_to===false);
 paintShip();
@@ -97,6 +114,7 @@ function changed(){persist();quote=null;render();refreshQuote();}
 function refreshQuote(){if(!items.length){quote=null;render();return;}var seq=++qseq;
 var req={items:items.map(function(i){return {product_id:i.product_id,quantity:i.quantity,selected_option_ids:i.selected_option_ids||[]};})};
 if(shipTo)req.ship_country=shipTo;
+if(promoCode)req.promo_code=promoCode;
 RT.post('/quote',req)
 .then(function(q){if(seq!==qseq)return;quote=q;render();})
 .catch(function(e){if(seq!==qseq)return;
@@ -112,6 +130,8 @@ items:items.map(function(i){return {product_id:i.product_id,quantity:i.quantity,
 success_url:location.href.split('#')[0],cancel_url:location.href.split('#')[0]};
 // The country the bag was priced for; the payment page takes an address there only.
 if(quote&&quote.ship_country)body.ship_country=quote.ship_country;
+// Only a code the quote accepted: an invalid one would refuse the whole order.
+if(quote&&quote.promo&&quote.promo.valid)body.promo_code=quote.promo.code;
 if(needsAddress()){var a={};addrEl.querySelectorAll('[data-a]').forEach(function(el){a[el.getAttribute('data-a')]=el.value.trim();});
 if(!a.line1||!a.city){msgEl.textContent='Add your shipping address (at least the address and city).';return;}
 a.country=quote.ship_country;a.name=name||null;body.shipping_address=a;}

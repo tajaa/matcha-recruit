@@ -14,6 +14,7 @@ from ...services.common import receipt_filename as _receipt_filename
 from ...services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
 from ...services.entitlements import resolve_entitlements
 from ...services.shipping import Destination, home_country, load_zones, resolve_destination, ship_countries
+from ...services.promos import find_code, normalize_code
 from .._shared import fetch_option_groups, loads_list
 from ._common import _published_site, _read_rate_limit, _reject_reserved
 
@@ -103,13 +104,25 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
         discounts = await fetch_active_discounts(conn, site["id"])
         today = site_today(await conn.fetchval("SELECT NOW()"), site["timezone"])
         ships = any(r["fulfillment"] == "physical" for r in products)
-        zones = []
+        code = normalize_code(body.promo_code)
+        if code and body.interval:
+            raise HTTPException(status_code=422, detail="Promo codes can't be used on subscriptions.")
+        zones, promo = [], None
+        plan = await conn.fetchval(
+            "SELECT a.plan FROM cappe_sites s JOIN cappe_accounts a ON a.id = s.account_id WHERE s.id = $1",
+            site["id"],
+        )
+        ent = await resolve_entitlements(plan, conn=conn)
+        # Whether the bag offers a code box at all.
+        takes_codes = ent is None or ent.has("promo_codes")
         if ships and not body.interval:
-            plan = await conn.fetchval(
-                "SELECT a.plan FROM cappe_sites s JOIN cappe_accounts a ON a.id = s.account_id WHERE s.id = $1",
-                site["id"],
-            )
-            zones = await load_zones(conn, site["id"], await resolve_entitlements(plan, conn=conn))
+            zones = await load_zones(conn, site["id"], ent)
+        if code:
+            promo = {
+                "code": code,
+                "row": await find_code(conn, site["id"], code) if takes_codes else None,
+                "reason": None if takes_codes else "This store doesn't take promo codes.",
+            }
     settings = dict(settings)
     products = priceable_products(products, groups, discounts, today)
     # Where the bag ships and what that costs. Subscriptions ship within the
@@ -138,7 +151,8 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
             products, body.items, body.interval, settings
         )
         return {"lines": lines, **totals, "pays_by_card": pays_by_card, **shipping}
-    return {**price_cart(products, body.items, settings, dest), "pays_by_card": pays_by_card, **shipping}
+    return {**price_cart(products, body.items, settings, dest, promo=promo, on_date=today),
+            "pays_by_card": pays_by_card, "promo_codes": bool(takes_codes), **shipping}
 
 
 @router.post("/public/orders/{token}/pay")
@@ -194,7 +208,7 @@ async def public_order_receipt(token: str, request: Request):
     await check_rate_limit(client_ip(request), "cappe_receipt", 30, 60)
     async with get_connection() as conn:
         order = await conn.fetchrow(
-            "SELECT id, status, customer_email, customer_name, subtotal_cents, "
+            "SELECT id, status, customer_email, customer_name, subtotal_cents, promo_code, discount_cents, "
             "tax_cents, shipping_cents, total_cents, carrier, tracking_number, currency, created_at, "
             "requires_approval, approved_at, pay_by, stripe_session_id IS NOT NULL AS checkout_opened "
             "FROM cappe_orders WHERE access_token = $1",
@@ -219,6 +233,8 @@ async def public_order_receipt(token: str, request: Request):
         customer_email=order["customer_email"],
         customer_name=order["customer_name"],
         subtotal_cents=order["subtotal_cents"],
+        promo_code=order.get("promo_code"),
+        discount_cents=order.get("discount_cents") or 0,
         currency=order["currency"],
         tax_cents=order["tax_cents"],
         shipping_cents=order["shipping_cents"],

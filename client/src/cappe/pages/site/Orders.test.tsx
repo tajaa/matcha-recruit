@@ -228,6 +228,23 @@ describe('Orders — part refunds', () => {
   })
 })
 
+describe('Orders — promo codes', () => {
+  it('shows the code and what it took off in the totals', async () => {
+    api.get.mockResolvedValueOnce([order({ subtotal_cents: 3600, total_cents: 3600, promo_code: 'SAVE10', discount_cents: 400 })])
+    render(
+      <MemoryRouter initialEntries={['/sites/s-1/orders']}>
+        <Routes><Route path="/sites/:siteId/orders" element={<Orders />} /></Routes>
+      </MemoryRouter>,
+    )
+    await screen.findAllByText('buyer@example.com')
+    api.get.mockResolvedValueOnce(order({ subtotal_cents: 3600, total_cents: 3600, promo_code: 'SAVE10', discount_cents: 400, items: [line()] }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show order details' }))
+    expect(await screen.findByText('Discount (SAVE10)')).toBeInTheDocument()
+    expect(screen.getByText('−$4.00')).toBeInTheDocument()
+    expect(screen.getAllByText('$40.00').length).toBeGreaterThan(0)   // the goods before the code
+  })
+})
+
 describe('Orders — what Stripe told us', () => {
   it('flags an open dispute beside the order', async () => {
     await renderOrders([order({ dispute_status: 'needs_response' })])

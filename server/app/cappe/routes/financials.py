@@ -148,7 +148,8 @@ async def financials(
         )
         top = await conn.fetch(
             f"""SELECT (array_agg(i.product_id))[1] AS product_id, MAX(i.title) AS title,
-                       SUM(i.quantity) AS units, SUM(i.unit_price_cents * i.quantity) AS revenue
+                       SUM(i.quantity) AS units,
+                       SUM(i.unit_price_cents * i.quantity - i.promo_discount_cents) AS revenue
                   FROM cappe_order_items i JOIN cappe_orders o ON o.id = i.order_id
                  WHERE o.site_id = $1 AND {_PAID} AND {_WHEN} >= $2 AND {_WHEN} < $3
                    AND o.currency = $4
@@ -229,6 +230,7 @@ async def export_financials(
                 f"""SELECT {_WHEN} AS at, o.receipt_number, o.id, o.status, o.customer_name,
                            o.customer_email, o.currency, o.subtotal_cents, o.tax_cents,
                            o.shipping_cents, COALESCE(o.total_cents, o.subtotal_cents) AS total_cents,
+                           o.promo_code, o.discount_cents,
                            o.refunded_cents, o.platform_fee_cents, o.ship_country,
                            (o.stripe_payment_intent IS NOT NULL) AS card
                       FROM cappe_orders o
@@ -252,7 +254,8 @@ async def export_financials(
     out = csv.writer(buf)
     if kind == "orders":
         out.writerow(["Date", "Order", "Status", "Customer", "Email", "Currency", "Goods", "Tax",
-                      "Shipping", "Total", "Refunded", "Platform fee", "Ships to", "Paid by"])
+                      "Shipping", "Total", "Refunded", "Platform fee", "Ships to", "Paid by",
+                      "Promo code", "Discount"])
         for r in rows:
             out.writerow([_cell(v) for v in (
                 r["at"].astimezone(tz).strftime("%Y-%m-%d %H:%M"),
@@ -260,6 +263,7 @@ async def export_financials(
                 r["customer_email"], r["currency"], _money(r["subtotal_cents"]), _money(r["tax_cents"]),
                 _money(r["shipping_cents"]), _money(r["total_cents"]), _money(r["refunded_cents"]),
                 _money(r["platform_fee_cents"]), r["ship_country"], "card" if r["card"] else "offline",
+                r.get("promo_code"), _money(r.get("discount_cents")),
             )])
     else:
         out.writerow(["Date", "Order", "Amount", "Currency", "Made in", "Reason", "Stripe refund", "Email"])

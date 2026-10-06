@@ -54,11 +54,14 @@ def test_ordinary_links_survive(href):
 
 class FetchConn:
     def __init__(self, rows):
-        self.rows, self.sql = rows, None
+        self.rows, self.sql, self.executed = rows, None, []
 
     async def fetch(self, sql, *args):
         self.sql = sql
         return self.rows
+
+    async def execute(self, sql, *args):
+        self.executed.append((sql, args))
 
 
 def test_release_order_bookings_frees_only_live_holds():
@@ -70,6 +73,10 @@ def test_release_order_bookings_frees_only_live_holds():
     assert "status IN ('pending', 'confirmed')" in conn.sql
     assert "status = 'cancelled'" in conn.sql
     assert "booking_id IS NOT NULL" in conn.sql
+    # ...and gives back the promo-code use the order was holding.
+    ((promo_sql, promo_args),) = conn.executed
+    assert "SET status = 'released'" in promo_sql and "redemption_count - 1" in promo_sql
+    assert promo_args == ("o-1",)
 
 
 def test_owner_cancel_path_releases_bookings_too():

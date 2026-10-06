@@ -30,6 +30,7 @@ from .newsletter import router as newsletter_router
 from .pages import router as pages_router
 from .payments import router as payments_router
 from .presets import router as presets_router
+from .promo_codes import router as promo_codes_router
 from .public import router as public_router
 from .reviews import router as reviews_router
 from .rider import router as rider_router
@@ -77,6 +78,7 @@ cappe_router.include_router(presets_router)
 cappe_router.include_router(shop_router)
 cappe_router.include_router(shipping_router)
 cappe_router.include_router(financials_router)
+cappe_router.include_router(promo_codes_router)
 cappe_router.include_router(newsletter_router)
 cappe_router.include_router(forms_router)
 cappe_router.include_router(bookings_router)
