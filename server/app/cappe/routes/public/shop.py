@@ -45,18 +45,39 @@ async def public_products(slug: str, request: Request):
         discounts = await fetch_active_discounts(conn, site["id"])
         now_utc = await conn.fetchval("SELECT NOW()")
         groups = await fetch_option_groups(conn, [r["id"] for r in rows])
+        subscribable = any(r["subscription_intervals"] for r in rows) and await _sells_subscriptions(conn, site["id"])
     today = site_today(now_utc, site["timezone"])
     out = []
     for r in rows:
         pct = best_discount_percent(discounts, kind="product", target_id=str(r["id"]), on_date=today)
         out.append({
             **dict(r),
+            # The storefront offers "Subscribe" only where it can be completed.
+            **({} if subscribable else {"subscription_intervals": [], "subscription_discount_bps": 0}),
             "intake_fields": loads_list(r["intake_fields"]),
             "option_groups": groups.get(r["id"], []),
             "discount_percent": pct,
             "discounted_price_cents": apply_discount_cents(r["price_cents"], pct) if pct else None,
         })
     return out
+
+
+async def _sells_subscriptions(conn, site_id) -> bool:
+    """Whether a shopper can subscribe here: the plan has recurring orders and
+    shopper accounts, and the store takes cards. A product keeps its
+    subscription settings through a downgrade; this keeps the storefront from
+    offering what checkout would refuse."""
+    owner = await conn.fetchrow(
+        "SELECT a.plan, a.status, a.stripe_account_id, a.stripe_charges_enabled "
+        "FROM cappe_sites s JOIN cappe_accounts a ON a.id = s.account_id WHERE s.id = $1",
+        site_id,
+    )
+    if not owner or (owner["status"] or "active") != "active":
+        return False
+    if not (owner["stripe_account_id"] and owner["stripe_charges_enabled"]):
+        return False
+    ent = await resolve_entitlements(owner["plan"], conn=conn)
+    return ent.has("recurring_orders") and ent.has("shopper_accounts")
 
 
 @router.post("/public/sites/{slug}/orders", status_code=status.HTTP_201_CREATED)

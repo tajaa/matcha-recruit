@@ -28,6 +28,7 @@ from ..services.booking_suggestion_access import canonical_suggestion_host
 from ..services.commerce import release_abandoned_checkout
 from ..services.common import normalize_host_header
 from ..services.render import render_site_html
+from ..services.render.account_page import render_account_page
 from ..services.render.order_page import render_order_page
 from ..services.render_cache import invalidate_site_render_cache
 from ..services.stripe_connect import CappeStripeError
@@ -465,6 +466,31 @@ async def order_page(token: str, request: Request):
         [{"slug": r["slug"], "title": r["title"]} for r in nav_rows],
         order_ctx, item_ctx, token=token, takes_cards=takes_cards, now=now,
         clear_cart=order["status"] not in ("cancelled", "declined"),
+    )
+    return HTMLResponse(html, headers={**tenant_security_headers(), **_ORDER_PAGE_HEADERS})
+
+
+@router.get("/account", response_class=HTMLResponse)
+async def account_page(request: Request):
+    """The shopper's account page on the store's own host — see
+    `services/render/account_page.py`. Renders for an unpublished store too: a
+    shopper must still be able to cancel what they subscribed to."""
+    host = request.headers.get("host")
+    if subdomain_from_host(host) is None and not _custom_domain_candidates(host):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    await check_rate_limit(client_ip(request), "cappe_account_page", 60, 60)
+    async with get_connection() as conn:
+        site = await _resolve_site_any_status(conn, host)
+        if site is None:
+            return _not_found_html("Site not found")
+        nav_rows = await conn.fetch(
+            "SELECT title, slug FROM cappe_pages WHERE site_id = $1 AND status = 'published' "
+            "ORDER BY sort_order, created_at",
+            site["id"],
+        )
+    html = render_account_page(
+        {**_site_dict(site), "timezone": site["timezone"]},
+        [{"slug": r["slug"], "title": r["title"]} for r in nav_rows],
     )
     return HTMLResponse(html, headers={**tenant_security_headers(), **_ORDER_PAGE_HEADERS})
 

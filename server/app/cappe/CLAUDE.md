@@ -89,6 +89,11 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
   discounted total — never a negative line. Uses are counted under the code's row lock and given
   back in `inventory.release_order_bookings`. Subscriptions refuse codes.
 
+- **Web shoppers keep the refresh token in the `__Host-cz_shopper` cookie only** (host-only,
+  HttpOnly, Secure, SameSite=Strict; `routes/public/shopper_web.py`). It is never in a response body
+  or page storage; cookie endpoints also require `X-Cappe-Web: 1`. Web sign-out deletes that one
+  session — the app's `/auth/logout` revokes every session and device, so never point the web at it.
+
 ## Site templates (`services/site_templates/`)
 
 - **The catalog is code, not the `cappe_templates` table.** One `SiteTemplate` per entry, one module

@@ -710,7 +710,7 @@ _INTERVAL_WORD = {"week": "every week", "month": "every month"}
 
 async def send_cappe_subscription_started_email(
     to_email: str, to_name: str | None, site_name: str, items_summary: str,
-    total_cents: int, currency: str, interval: str,
+    total_cents: int, currency: str, interval: str, account_url: str | None = None,
 ) -> None:
     """Confirm a new subscription: what, how much, how often, how to stop.
     The shopper used to get only a receipt, which says none of the last two.
@@ -726,17 +726,26 @@ async def send_cappe_subscription_started_email(
         f'<span style="color:#a1a1aa;">{escape(amount)} {escape(every)}</span></div>'
         f'<p style="margin:14px 0 0;font-size:13px;color:#a1a1aa;">You can cancel any time from your account with '
         f"{e_site}; it stops before the next charge.</p>"
+        + _account_link(account_url, "Manage your subscription")
     )
     html = _email_shell(f"Subscription started — {e_site}", body)
     text = (
         f"Your subscription with {site_name} has started: {items_summary}, {amount} {every}.\n\n"
         f"Cancel any time from your account with {site_name}; it stops before the next charge."
+        + (f"\nManage your subscription: {account_url}" if account_url else "")
     )
     await _send(to_email, to_name, f"Subscription started — {site_name}", html, text, label="subscription started")
 
 
+def _account_link(account_url: str | None, label: str) -> str:
+    if not account_url:
+        return ""
+    return (f'<p style="margin:16px 0 0;"><a href="{escape(account_url, quote=True)}" '
+            f'style="color:#c6f16b;">{escape(label)}</a></p>')
+
+
 async def send_cappe_subscription_payment_failed_email(
-    to_email: str, to_name: str | None, site_name: str, items_summary: str,
+    to_email: str, to_name: str | None, site_name: str, items_summary: str, account_url: str | None = None,
 ) -> None:
     """A renewal could not be charged. Sent once per invoice. Best-effort."""
     e_site = escape(site_name or "")
@@ -746,13 +755,15 @@ async def send_cappe_subscription_payment_failed_email(
         f'<div style="border-left:3px solid #f59e0b;padding:8px 0 8px 14px;color:#fafafa;font-size:15px;">'
         f"<b>{escape(items_summary or 'Your subscription')}</b></div>"
         f'<p style="margin:14px 0 0;font-size:13px;line-height:1.6;color:#a1a1aa;">The payment will be retried over the next '
-        f"few days. If it keeps failing, the subscription ends. Contact {e_site} to update your card.</p>"
+        f"few days. If it keeps failing, the subscription ends. "
+        + ("Update the card it charges from your account.</p>" if account_url else f"Contact {e_site} to update your card.</p>")
+        + _account_link(account_url, "Update your card")
     )
     html = _email_shell(f"Payment failed — {e_site}", body, accent="#f59e0b")
     text = (
         f"We couldn't charge your card for your subscription with {site_name} ({items_summary}). "
         f"It will be retried over the next few days; if it keeps failing, the subscription ends. "
-        f"Contact {site_name} to update your card."
+        + (f"Update your card: {account_url}" if account_url else f"Contact {site_name} to update your card.")
     )
     await _send(to_email, to_name, f"Payment failed — {site_name}", html, text, label="subscription payment failed")
 
