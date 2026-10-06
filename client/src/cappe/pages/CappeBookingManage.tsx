@@ -11,6 +11,11 @@ function money(cents: number | null): string {
 }
 // Public, token-gated page where a customer views / cancels / reschedules their
 // booking from an emailed link. No account required.
+/** "24 hours", "2 days" — how long before the start changes close. */
+function cutoffText(hours: number): string {
+  return hours % 24 === 0 && hours >= 24 ? `${hours / 24} day${hours === 24 ? '' : 's'}` : `${hours} hour${hours === 1 ? '' : 's'}`
+}
+
 export default function CappeBookingManage() {
   const { token } = useParams<{ token: string }>()
   const [booking, setBooking] = useState<CappePublicBooking | null>(null)
@@ -180,6 +185,9 @@ export default function CappeBookingManage() {
           {!booking.booking_type_id && (
             <p className="basis-full text-xs text-zinc-500">This service is no longer booked online — contact {booking.site_name} to change the time.</p>
           )}
+          {(booking.cancel_cutoff_hours ?? 0) > 0 && (
+            <p className="basis-full text-xs text-zinc-500">You can change or cancel this online until {cutoffText(booking.cancel_cutoff_hours ?? 0)} before it starts.</p>
+          )}
         </div>
       )}
 
@@ -190,7 +198,10 @@ export default function CappeBookingManage() {
       )}
       {!booking.can_modify && !cancelled && (
         <p className="mt-4 flex items-center gap-1.5 text-sm text-zinc-500">
-          <CheckCircle2 className="h-4 w-4" /> This booking can no longer be changed online.
+          <CheckCircle2 className="h-4 w-4" />
+          {(booking.cancel_cutoff_hours ?? 0) > 0 && new Date(booking.starts_at) > new Date()
+            ? `Changes close ${cutoffText(booking.cancel_cutoff_hours ?? 0)} before the appointment. Contact ${booking.site_name} to change it.`
+            : 'This booking can no longer be changed online.'}
         </p>
       )}
 

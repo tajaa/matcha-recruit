@@ -9,6 +9,7 @@ from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
 from ...models.cappe import CappeBookingQuote, CappeBookingQuoteRequest, CappeBookingReschedule, CappePublicBooking
 from ...services.booking_lifecycle import holds_money, linked_order
+from ...services.booking_rules import cutoff_message, self_service_open
 from ...services.shipping import site_currency
 from ...services.commerce import booking_quote_cents, booking_times, fetch_rate_rules, resolve_booking_slot
 from ...services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
@@ -46,7 +47,7 @@ async def _booking_by_token(conn, token: str):
                   b.access_token,
                   bt.name AS type_name, bt.duration_minutes, bt.pricing_mode, bt.buffer_minutes,
                   bt.price_cents AS bt_price_cents, bt.requires_approval AS bt_requires_approval,
-                  bt.status AS bt_status,
+                  bt.status AS bt_status, bt.cancel_cutoff_hours, bt.min_notice_minutes, bt.max_advance_days,
                   s.name AS site_name, s.slug, COALESCE(loc.timezone, s.timezone) AS timezone,
                   st.name AS staff_name, loc.name AS location_name
            FROM cappe_bookings b
@@ -60,7 +61,8 @@ async def _booking_by_token(conn, token: str):
 
 
 def _booking_can_modify(row, now_utc) -> bool:
-    return row["status"] in ("pending", "confirmed") and row["starts_at"] > now_utc
+    """Future, still on, and before the service's cancel cutoff."""
+    return self_service_open(row, now_utc)
 
 
 def _public_view(row, *, status_now=None, starts_at=None, ends_at=None, price=None, can_modify) -> CappePublicBooking:
@@ -74,6 +76,7 @@ def _public_view(row, *, status_now=None, starts_at=None, ends_at=None, price=No
         timezone=row["timezone"], can_modify=can_modify,
         staff_id=row["staff_id"], staff_name=row["staff_name"],
         location_id=row["location_id"], location_name=row["location_name"],
+        cancel_cutoff_hours=row.get("cancel_cutoff_hours") or 0,
     )
 
 
@@ -100,7 +103,7 @@ async def public_booking_cancel(token: str, request: Request, background: Backgr
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
             now_utc = await conn.fetchval("SELECT NOW()")
             if not _booking_can_modify(row, now_utc):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This booking can no longer be cancelled")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=cutoff_message(row, row["site_name"]))
             await conn.execute(
                 "UPDATE cappe_bookings SET status = 'cancelled', updated_at = NOW() WHERE id = $1", row["id"],
             )
@@ -136,7 +139,7 @@ async def public_booking_reschedule(
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
             now_utc = await conn.fetchval("SELECT NOW()")
             if not _booking_can_modify(row, now_utc):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This booking can no longer be changed")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=cutoff_message(row, row["site_name"]))
             if row["booking_type_id"] is None or row["duration_minutes"] is None or row["bt_status"] != "active":
                 # The service was deleted or taken off sale. There is no
                 # duration or price to move it with (this used to be a 500).
@@ -150,6 +153,7 @@ async def public_booking_reschedule(
                 "id": row["booking_type_id"], "duration_minutes": row["duration_minutes"],
                 "pricing_mode": row["pricing_mode"], "price_cents": row["bt_price_cents"],
                 "requires_approval": row["bt_requires_approval"], "buffer_minutes": row["buffer_minutes"],
+                "min_notice_minutes": row.get("min_notice_minutes"), "max_advance_days": row.get("max_advance_days"),
             }
             # Keep the same stylist + location on reschedule (tz is location-aware).
             slot = await resolve_booking_slot(

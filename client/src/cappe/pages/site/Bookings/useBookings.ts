@@ -78,6 +78,13 @@ export function useBookings() {
     setTypes(t); setSlots(a); setBookings(b); setRules(r); setRider(rd); setProducts(p); setDiscounts(d); setStaff(st)
   }
 
+  /** A booking the owner made or moved: replace it in place, or add it. */
+  function upsertBooking(booking: CappeBooking) {
+    setBookings((bs) => (bs.some((x) => x.id === booking.id)
+      ? bs.map((x) => (x.id === booking.id ? booking : x))
+      : [booking, ...bs]))
+  }
+
   function switchLocation(loc: string) {
     setSelLoc(loc)
     loadConfig(locations, loc).catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
@@ -440,7 +447,7 @@ export function useBookings() {
     addRule, setRule, saveRules,
     addRiderItem, setRiderItem, saveRider,
     addDiscount, setDiscount, saveDiscounts,
-    acceptBooking, declineBooking, setBookingStatus,
+    acceptBooking, declineBooking, setBookingStatus, upsertBooking, siteTimezone,
     pending, hasHourly,
   }
 }

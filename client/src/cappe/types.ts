@@ -687,8 +687,27 @@ export type CappeBookingType = {
   buffer_minutes: number
   staff_ids: string[]
   location_id?: string | null
+  /** The soonest a customer can book, in minutes from now. */
+  min_notice_minutes?: number
+  /** The furthest ahead a customer can book (null = no limit). */
+  max_advance_days?: number | null
+  /** Customers can change or cancel online until this long before the start. */
+  cancel_cutoff_hours?: number
   created_at: string
   updated_at: string
+}
+
+/** A closed period — the whole business, one location, or one staff member. */
+export type CappeTimeOff = {
+  id: string
+  staff_id: string | null
+  staff_name: string | null
+  location_id: string | null
+  location_name: string | null
+  starts_at: string
+  ends_at: string
+  reason: string | null
+  created_at: string
 }
 
 export type CappeAvailabilitySlot = {
@@ -788,6 +807,8 @@ export type CappeBooking = {
   decline_reason: string | null
   rider_acknowledged: boolean
   rider_snapshot: Array<{ label: string; detail?: string | null; is_required: boolean }>
+  /** The owner booked it (a phone call, a walk-in). */
+  created_by_owner?: boolean
   created_at: string
   /** The shop order this booking was bought through, if any. Cancelling the
    *  booking does not refund a PAID order. */
@@ -864,6 +885,8 @@ export type CappePublicBooking = {
   staff_name?: string | null
   location_id?: string | null
   location_name?: string | null
+  /** Changes close this long before the start (0 = up to the start). */
+  cancel_cutoff_hours?: number
 }
 
 export type CappeSlot = {

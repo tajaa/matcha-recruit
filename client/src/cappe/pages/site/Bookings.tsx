@@ -5,6 +5,7 @@ import { useBookings } from './Bookings/useBookings'
 import { LocationSwitcher } from './Bookings/LocationSwitcher'
 import { PendingRequests } from './Bookings/PendingRequests'
 import { ScheduleSection } from './Bookings/ScheduleSection'
+import { TimeOffSection } from './Bookings/TimeOffSection'
 import { StaffSection } from './Bookings/StaffSection'
 import { BookingTypesSection } from './Bookings/BookingTypesSection'
 import { AvailabilitySection } from './Bookings/AvailabilitySection'
@@ -67,6 +68,10 @@ export default function Bookings() {
         timezoneForBooking={b.timezoneForBooking}
         allLocations={b.isAllLocationsView}
         currency={b.currency}
+        siteId={b.siteId}
+        locations={b.locations}
+        selLoc={b.selLoc}
+        upsertBooking={b.upsertBooking}
       />
 
       {/* Staff / stylists */}
@@ -81,6 +86,8 @@ export default function Bookings() {
         removeStaff={b.removeStaff}
         setShowStaffImport={b.setShowStaffImport}
       />
+
+      <TimeOffSection siteId={b.siteId || ''} staff={b.staff} locations={b.locations} timezone={b.calendarTimezone} />
 
       {b.showStaffImport && (
         <StaffImportModal

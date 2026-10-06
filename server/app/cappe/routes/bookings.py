@@ -12,10 +12,14 @@ from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..services.booking_lifecycle import transition_error
 from ..services.shipping import site_currency
+from ..services.commerce import _anchor_local, create_booking_in_tx, resolve_booking_slot
 from ..services.email import (
+    booking_manage_url,
     format_when,
     send_cappe_booking_cancelled_by_host_email,
     send_cappe_booking_decision_email,
+    send_cappe_booking_received_email,
+    send_cappe_booking_rescheduled_email,
 )
 from ..models.cappe import (
     CappeAccount,
@@ -27,9 +31,13 @@ from ..models.cappe import (
     CappeBookingType,
     CappeBookingTypeCreate,
     CappeBookingTypeUpdate,
+    CappeOwnerBookingCreate,
+    CappeOwnerReschedule,
     CappeRateRule,
     CappeRateRulesReplace,
     CappeRequestSummary,
+    CappeTimeOff,
+    CappeTimeOffInput,
 )
 from ._shared import build_patch, get_owned_site, loads_list
 
@@ -37,7 +45,8 @@ router = APIRouter()
 
 _TYPE_COLS = (
     "id, site_id, name, description, duration_minutes, price_cents, status, "
-    "requires_approval, pricing_mode, category, buffer_minutes, location_id, created_at, updated_at"
+    "requires_approval, pricing_mode, category, buffer_minutes, location_id, created_at, updated_at, "
+    "min_notice_minutes, max_advance_days, cancel_cutoff_hours"
 )
 _AVAIL_COLS = "id, weekday, start_time, end_time, booking_type_id, staff_id, location_id"
 
@@ -102,7 +111,7 @@ _RULE_COLS = "id, site_id, booking_type_id, label, weekday, start_time, end_time
 _BOOKING_COLS = (
     "id, site_id, booking_type_id, staff_id, location_id, customer_name, customer_email, starts_at, "
     "ends_at, status, note, requires_approval, quoted_price_cents, approved_at, "
-    "decline_reason, rider_acknowledged, rider_snapshot, created_at"
+    "decline_reason, rider_acknowledged, rider_snapshot, created_at, created_by_owner"
 )
 
 
@@ -174,10 +183,12 @@ async def create_booking_type(
             row = await conn.fetchrow(
                 f"""INSERT INTO cappe_booking_types
                         (site_id, name, description, duration_minutes, price_cents, status,
-                         requires_approval, pricing_mode, category, buffer_minutes, location_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING {_TYPE_COLS}""",
+                         requires_approval, pricing_mode, category, buffer_minutes, location_id,
+                         min_notice_minutes, max_advance_days, cancel_cutoff_hours)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING {_TYPE_COLS}""",
                 site_id, body.name, body.description, body.duration_minutes, body.price_cents, body.status,
                 body.requires_approval, body.pricing_mode, body.category, body.buffer_minutes, body.location_id,
+                body.min_notice_minutes, body.max_advance_days, body.cancel_cutoff_hours,
             )
             await _replace_type_staff(conn, site_id, row["id"], body.staff_ids)
         staff = await _staff_ids_for_types(conn, [row["id"]])
@@ -196,7 +207,8 @@ async def update_booking_type(
             sets, args = build_patch(body, (
                 "name", "description", "duration_minutes", "price_cents", "status",
                 "requires_approval", "pricing_mode", "category", "buffer_minutes", "location_id",
-            ), nullable={"description", "price_cents", "category", "location_id"})
+                "min_notice_minutes", "max_advance_days", "cancel_cutoff_hours",
+            ), nullable={"description", "price_cents", "category", "location_id", "max_advance_days"})
             if sets:
                 sets.append("updated_at = NOW()")
                 args.extend([type_id, site_id])
@@ -375,6 +387,175 @@ async def update_booking_status(
             await _notify_host_cancelled(conn, background, site, row)
         view = await _booking_view(conn, site_id, booking_id)
     return view
+
+
+# --- Owner bookings and time off ----------------------------------------------
+
+async def _owner_btype(conn, site_id, type_id):
+    btype = await conn.fetchrow(
+        "SELECT id, name, duration_minutes, price_cents, pricing_mode, requires_approval, buffer_minutes, status "
+        "FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
+        type_id, site_id,
+    )
+    if btype is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+    return dict(btype)
+
+
+async def _owner_where(conn, site, site_id, staff_id, location_id):
+    """Check the staff member and location are this site's, and return the
+    timezone the booking's times mean."""
+    if staff_id is not None and not await conn.fetchval(
+        "SELECT 1 FROM cappe_staff WHERE id = $1 AND site_id = $2", staff_id, site_id,
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown staff member")
+    tz = site["timezone"]
+    if location_id is not None:
+        tz_row = await conn.fetchrow(
+            "SELECT timezone FROM cappe_locations WHERE id = $1 AND site_id = $2", location_id, site_id,
+        )
+        if tz_row is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown location")
+        tz = tz_row["timezone"] or tz
+    return tz
+
+
+@router.post("/sites/{site_id}/bookings", response_model=CappeBooking, status_code=status.HTTP_201_CREATED)
+async def create_owner_booking(
+    site_id: UUID, body: CappeOwnerBookingCreate, background: BackgroundTasks,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """The owner books someone in — a phone call, a walk-in. It isn't held to
+    the service's notice, horizon, opening hours or time off (the owner knows
+    when they can see someone), and it's confirmed straight away. It still
+    can't double-book a staff member or a slot."""
+    async with get_connection() as conn:
+        site = await get_owned_site(conn, site_id, account.id)
+        btype = await _owner_btype(conn, site_id, body.booking_type_id)
+        tz = await _owner_where(conn, site, site_id, body.staff_id, body.location_id)
+        async with conn.transaction():
+            row = await create_booking_in_tx(
+                conn, site, btype, body.starts_at, body.customer_name.strip(),
+                str(body.customer_email).lower() if body.customer_email else None, body.note,
+                ends_at_override=body.ends_at, staff_id=body.staff_id, location_id=body.location_id,
+                tz=tz, owner=True,
+            )
+            await conn.execute("UPDATE cappe_bookings SET created_by_owner = true WHERE id = $1", row["id"])
+        if body.notify and body.customer_email:
+            background.add_task(
+                send_cappe_booking_received_email, str(body.customer_email), body.customer_name, site["name"],
+                btype["name"], format_when(row["starts_at"], tz), False, booking_manage_url(row["access_token"]),
+            )
+        return await _booking_view(conn, site_id, row["id"])
+
+
+@router.put("/sites/{site_id}/bookings/{booking_id}/time", response_model=CappeBooking)
+async def reschedule_owner_booking(
+    site_id: UUID, booking_id: UUID, body: CappeOwnerReschedule, background: BackgroundTasks,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """The owner moves a booking to another time (and, optionally, another
+    staff member). Repriced; the customer is emailed. Like an owner booking,
+    not held to the customer rules, but it can't double-book."""
+    async with get_connection() as conn:
+        site = await get_owned_site(conn, site_id, account.id)
+        async with conn.transaction():
+            current = await conn.fetchrow(
+                "SELECT id, booking_type_id, staff_id, location_id, status, starts_at, customer_email, "
+                "customer_name, access_token FROM cappe_bookings WHERE id = $1 AND site_id = $2 FOR UPDATE",
+                booking_id, site_id,
+            )
+            if current is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+            if current["status"] not in ("pending", "confirmed"):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                    detail=f"A {current['status']} booking can't be moved.")
+            if current["booking_type_id"] is None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                    detail="Its service was deleted, so it can't be repriced for a new time.")
+            btype = await _owner_btype(conn, site_id, current["booking_type_id"])
+            staff_id = body.staff_id if "staff_id" in body.model_fields_set else current["staff_id"]
+            tz = await _owner_where(conn, site, site_id, staff_id, current["location_id"])
+            slot = await resolve_booking_slot(
+                conn, site, btype, body.starts_at, body.ends_at, exclude_booking_id=booking_id,
+                staff_id=staff_id, location_id=current["location_id"], tz=tz, owner=True,
+            )
+            try:
+                await conn.execute(
+                    "UPDATE cappe_bookings SET starts_at = $2, ends_at = $3, quoted_price_cents = $4, "
+                    "staff_id = $5, reminder_sent_at = NULL, updated_at = NOW() WHERE id = $1",
+                    booking_id, slot["s_utc"], slot["e_utc"], slot["quote_cents"], staff_id,
+                )
+            except Exception as exc:
+                if "idx_cappe_bookings_no_doublebook" in str(exc):
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That slot is taken")
+                raise
+        if body.notify and current["customer_email"]:
+            background.add_task(
+                send_cappe_booking_rescheduled_email, current["customer_email"], current["customer_name"],
+                site["name"], btype["name"], format_when(current["starts_at"], tz), format_when(slot["s_utc"], tz),
+                for_owner=False, needs_approval=False, link=booking_manage_url(current["access_token"]),
+            )
+        return await _booking_view(conn, site_id, booking_id)
+
+
+_TIME_OFF_VIEW = """
+    SELECT t.id, t.staff_id, t.location_id, t.starts_at, t.ends_at, t.reason, t.created_at,
+           st.name AS staff_name, loc.name AS location_name
+      FROM cappe_time_off t
+      LEFT JOIN cappe_staff st ON st.id = t.staff_id
+      LEFT JOIN cappe_locations loc ON loc.id = t.location_id
+"""
+
+
+@router.get("/sites/{site_id}/time-off", response_model=list[CappeTimeOff])
+async def list_time_off(
+    site_id: UUID, include_past: bool = Query(False),
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Closed periods, soonest first (past ones only when asked)."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        rows = await conn.fetch(
+            f"{_TIME_OFF_VIEW} WHERE t.site_id = $1 AND ($2 OR t.ends_at > NOW()) ORDER BY t.starts_at LIMIT 500",
+            site_id, include_past,
+        )
+    return [dict(r) for r in rows]
+
+
+@router.post("/sites/{site_id}/time-off", response_model=CappeTimeOff, status_code=status.HTTP_201_CREATED)
+async def add_time_off(
+    site_id: UUID, body: CappeTimeOffInput, account: CappeAccount = Depends(require_cappe_account),
+):
+    """Close a period — the whole business, one location or one staff member.
+    Bookings already in it are left alone (the owner decides what to do
+    with them); new ones can't be made in it."""
+    async with get_connection() as conn:
+        site = await get_owned_site(conn, site_id, account.id)
+        tz = await _owner_where(conn, site, site_id, body.staff_id, body.location_id)
+        # Times without a zone mean the store's (or the location's) local time.
+        starts, ends = _anchor_local(body.starts_at, tz), _anchor_local(body.ends_at, tz)
+        new_id = await conn.fetchval(
+            "INSERT INTO cappe_time_off (site_id, staff_id, location_id, starts_at, ends_at, reason) "
+            "VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+            site_id, body.staff_id, body.location_id, starts, ends,
+            (body.reason or "").strip() or None,
+        )
+        row = await conn.fetchrow(f"{_TIME_OFF_VIEW} WHERE t.id = $1", new_id)
+    return dict(row)
+
+
+@router.delete("/sites/{site_id}/time-off/{time_off_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_time_off(
+    site_id: UUID, time_off_id: UUID, account: CappeAccount = Depends(require_cappe_account),
+):
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        deleted = await conn.fetchval(
+            "DELETE FROM cappe_time_off WHERE id = $1 AND site_id = $2 RETURNING id", time_off_id, site_id,
+        )
+    if deleted is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time off not found")
 
 
 # --- Approval queue ---------------------------------------------------------

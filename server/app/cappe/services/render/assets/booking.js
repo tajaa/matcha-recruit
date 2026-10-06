@@ -39,10 +39,16 @@ function renderStaff(t){selStaff=null;var ids=(t&&t.staff_ids)||[];if(!ids.lengt
 staffWrap.innerHTML='<p class="cz-label">With</p><div class="cz-staffrow"><button type="button" class="cz-staff cz-staff--on" data-staff-id="">Any available</button>'+
 ids.map(function(id){var s=staffById[id];if(!s)return '';var iu=RT.url(s.image_url);return '<button type="button" class="cz-staff" data-staff-id="'+RT.esc(id)+'">'+(iu?'<img src="'+RT.esc(iu)+'" alt="" />':'')+RT.esc(s.name)+'</button>';}).join('')+'</div>';
 staffWrap.querySelectorAll('.cz-staff').forEach(function(b){b.addEventListener('click',function(){staffWrap.querySelectorAll('.cz-staff').forEach(function(x){x.classList.remove('cz-staff--on');});b.classList.add('cz-staff--on');selStaff=b.getAttribute('data-staff-id')||null;loadSlots();});});}
- function loadSlots(){sel=null;sb.disabled=true;sb.textContent='Select a time';slotWrap.innerHTML='<p style="color:var(--muted)">Loading times…</p>';
+// `from` pages through dates three weeks at a time; the server says where
+// the next page starts, and stops at the service's booking horizon.
+ function loadSlots(from){sel=null;sb.disabled=true;sb.textContent='Select a time';slotWrap.innerHTML='<p style="color:var(--muted)">Loading times…</p>';
 var t=cur();if(!t)return;
- RT.get('/booking-types/'+encodeURIComponent(t.id)+'/slots'+qjoin(locP(),selStaff?('staff_id='+encodeURIComponent(selStaff)):'')).then(function(d){var slots=(d&&d.slots)||[];bookingTimezone=(d&&d.timezone)||bookingTimezone;
-if(!slots.length){slotWrap.innerHTML='<p style="color:var(--muted)">No open times in the next few weeks. Please check back soon.</p>';return;}
+ RT.get('/booking-types/'+encodeURIComponent(t.id)+'/slots'+qjoin(locP(),selStaff?('staff_id='+encodeURIComponent(selStaff)):'',from?('from='+encodeURIComponent(from)):'')).then(function(d){var slots=(d&&d.slots)||[];bookingTimezone=(d&&d.timezone)||bookingTimezone;
+var pager='<div class="cz-pager">'+(from?'<button type="button" class="cz-btn cz-btn--ghost" data-prev>← Soonest dates</button>':'')+
+(d&&d.next_from?'<button type="button" class="cz-btn cz-btn--ghost" data-next>Later dates →</button>':'')+'</div>';
+function wirePager(){var pv=slotWrap.querySelector('[data-prev]'),nx=slotWrap.querySelector('[data-next]');
+if(pv)pv.addEventListener('click',function(){loadSlots(null);});if(nx)nx.addEventListener('click',function(){loadSlots(d.next_from);});}
+if(!slots.length){slotWrap.innerHTML='<p style="color:var(--muted)">'+(from?'No open times in these weeks.':'No open times in the next few weeks.')+(d&&d.next_from?' Try later dates.':' Please check back soon.')+'</p>'+pager;wirePager();return;}
 var days=[],byDay={};slots.forEach(function(s){if(!byDay[s.date]){byDay[s.date]=[];days.push(s.date);}byDay[s.date].push(s);});
 // One price line when every slot costs the same; otherwise show price per time.
 var uniform=slots.every(function(s){return s.price_cents===slots[0].price_cents;});
@@ -51,7 +57,7 @@ var tzNote=d.timezone?(' · times in '+RT.esc(d.timezone)):'';
 var discNote=d.discount_percent?(' · <span style="color:var(--brand)">'+d.discount_percent+'% off</span>'):'';
 slotWrap.innerHTML='<p class="cz-label">Pick a day'+tzNote+priceNote+discNote+'</p>'+
 '<div class="cz-daystrip">'+days.map(function(dt,i){return '<button type="button" class="cz-day" data-day="'+i+'">'+RT.esc(byDay[dt][0].day_label)+'<span>'+byDay[dt].length+' open</span></button>';}).join('')+'</div>'+
-'<div class="cz-times" data-times></div>';
+'<div class="cz-times" data-times></div>'+pager;wirePager();
 var timesWrap=slotWrap.querySelector('[data-times]'),dayBtns=slotWrap.querySelectorAll('.cz-day');
 function showDay(i){sel=null;sb.disabled=true;sb.textContent='Select a time';
 dayBtns.forEach(function(b,j){b.classList.toggle('cz-day--on',j===i);});

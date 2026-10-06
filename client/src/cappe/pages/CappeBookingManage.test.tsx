@@ -58,4 +58,16 @@ describe('CappeBookingManage', () => {
     expect(screen.queryByRole('button', { name: /Reschedule/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Cancel/ })).toBeInTheDocument()
   })
+
+  it('says when online changes close', async () => {
+    api.get.mockResolvedValueOnce(booking({ cancel_cutoff_hours: 24 }))
+    renderPage()
+    expect(await screen.findByText(/until 1 day before it starts/)).toBeInTheDocument()
+  })
+
+  it('past the cutoff, says who to ask', async () => {
+    api.get.mockResolvedValueOnce(booking({ can_modify: false, cancel_cutoff_hours: 48, starts_at: '2099-01-01T10:00:00Z' }))
+    renderPage()
+    expect(await screen.findByText(/Changes close 2 days before the appointment. Contact Salon/)).toBeInTheDocument()
+  })
 })

@@ -33,6 +33,7 @@ from .email import (
 )
 from .inventory import log_adjustment as _inv_log
 from .booking_lifecycle import booking_lock_key, lock_booking_resource
+from .booking_rules import check_window as check_booking_window, time_off_overlaps
 from .inventory import lock_stock_rows, release_order_bookings, restock_order
 from .options import fetch_option_groups, validate_and_price_options
 from .entitlements import (
@@ -314,13 +315,22 @@ class OutsideAvailability(HTTPException):
     failed with a 400.
     """
 
+    def __init__(self, detail: str = "Time is outside availability"):
+        super().__init__(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+class TimeOff(OutsideAvailability):
+    """The time falls in a closed period (`cappe_time_off`). A kind of
+    "outside availability", so the "any available" loop moves on to the next
+    staff member when only this one is off."""
+
     def __init__(self):
-        super().__init__(status_code=status.HTTP_400_BAD_REQUEST, detail="Time is outside availability")
+        super().__init__("That time isn't available. Choose another.")
 
 
 async def resolve_booking_slot(
     conn, site, btype, starts_at, ends_at_override=None, exclude_booking_id=None, staff_id=None,
-    location_id=None, tz=None,
+    location_id=None, tz=None, owner=False,
 ):
     """Validate availability + overlap and price a booking window. Returns
     {s_utc, e_utc, quote_cents, requires_approval, booking_status}; raises 4xx on
@@ -333,7 +343,11 @@ async def resolve_booking_slot(
     requires_approval. For an hourly type the buyer may pass `ends_at_override`
     to book a variable-length window; otherwise the type's duration is used.
     `location_id`/`tz` scope availability + overlap + pricing to one location and
-    use that location's timezone (None → site timezone)."""
+    use that location's timezone (None → site timezone).
+
+    The service's minimum notice and horizon, the opening hours and time off
+    (`booking_rules`) bind customers; `owner=True` — a booking the owner makes
+    or moves — skips them. Nobody skips the double-booking check."""
     tz = tz or site["timezone"]
     starts_at = _anchor_local(starts_at, tz)
     pricing_mode = btype.get("pricing_mode", "flat")
@@ -352,11 +366,44 @@ async def resolve_booking_slot(
     s_utc, e_utc = bt["start_utc"], bt["end_utc"]
 
     now_utc = await conn.fetchval("SELECT NOW()")
-    if s_utc <= now_utc:
+    if s_utc <= now_utc and not owner:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose a future time")
     if bt["spans_midnight"]:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Booking can't span midnight")
+    if not owner:
+        await _customer_rules(conn, site, btype, bt, s_utc, e_utc, now_utc, staff_id, location_id)
 
+    # Lock + overlap: below, for everyone.
+    await _lock_and_check_overlap(conn, site, btype, s_utc, e_utc, exclude_booking_id, staff_id, location_id)
+
+    # Price the booked window (flat → base; hourly → per-minute × rate rules),
+    # then apply the best active discount judged on today (location timezone).
+    rules = await fetch_rate_rules(conn, site["id"], btype["id"], location_id)
+    quote_cents = booking_quote_cents(
+        btype.get("price_cents") or 0, pricing_mode, bt["local_start"], bt["local_end"], rules
+    )
+    discounts = await fetch_active_discounts(conn, site["id"])
+    pct = best_discount_percent(
+        discounts, kind="booking_type", target_id=str(btype["id"]),
+        on_date=site_today(now_utc, tz), location_id=location_id,
+    )
+    quote_cents = apply_discount_cents(quote_cents, pct)
+
+    requires_approval = bool(btype.get("requires_approval")) and not owner
+    return {
+        "s_utc": s_utc, "e_utc": e_utc, "quote_cents": quote_cents,
+        "requires_approval": requires_approval,
+        # Approval-required types land 'pending' (creator queue); others
+        # auto-confirm so an open calendar books straight through. The owner's
+        # own booking is confirmed: they are the approval.
+        "booking_status": "pending" if requires_approval else "confirmed",
+    }
+
+
+async def _customer_rules(conn, site, btype, bt, s_utc, e_utc, now_utc, staff_id, location_id) -> None:
+    """What binds a customer's booking but not the owner's: notice + horizon,
+    the opening hours, and time off."""
+    check_booking_window(btype, s_utc, now_utc)
     window = await conn.fetchval(
         """SELECT 1 FROM cappe_availability
            WHERE site_id = $1 AND weekday = $2
@@ -370,7 +417,13 @@ async def resolve_booking_slot(
     )
     if not window:
         raise OutsideAvailability()
+    if await time_off_overlaps(conn, site["id"], start_utc=s_utc, end_utc=e_utc,
+                               staff_id=staff_id, location_id=location_id):
+        raise TimeOff()
 
+
+async def _lock_and_check_overlap(conn, site, btype, s_utc, e_utc, exclude_booking_id, staff_id, location_id) -> None:
+    """Lock the contended resource, then refuse an overlapping booking."""
     # Overlap is per shared RESOURCE, not per booking type. A staffed booking's
     # resource is the STAFF MEMBER — a person can't be in two places at once, so
     # they conflict with ANY overlapping booking of theirs regardless of service
@@ -413,38 +466,18 @@ async def resolve_booking_slot(
     if overlap:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That slot is taken")
 
-    # Price the booked window (flat → base; hourly → per-minute × rate rules),
-    # then apply the best active discount judged on today (location timezone).
-    rules = await fetch_rate_rules(conn, site["id"], btype["id"], location_id)
-    quote_cents = booking_quote_cents(
-        btype.get("price_cents") or 0, pricing_mode, bt["local_start"], bt["local_end"], rules
-    )
-    discounts = await fetch_active_discounts(conn, site["id"])
-    pct = best_discount_percent(
-        discounts, kind="booking_type", target_id=str(btype["id"]),
-        on_date=site_today(now_utc, tz), location_id=location_id,
-    )
-    quote_cents = apply_discount_cents(quote_cents, pct)
-
-    requires_approval = bool(btype.get("requires_approval"))
-    return {
-        "s_utc": s_utc, "e_utc": e_utc, "quote_cents": quote_cents,
-        "requires_approval": requires_approval,
-        # Approval-required types land 'pending' (creator queue); others
-        # auto-confirm so an open calendar books straight through.
-        "booking_status": "pending" if requires_approval else "confirmed",
-    }
-
 
 async def create_booking_in_tx(
     conn, site, btype, starts_at, customer_name, customer_email, note,
     ends_at_override=None, rider_acknowledged=False, rider_snapshot=None, staff_id=None,
-    location_id=None, tz=None,
+    location_id=None, tz=None, owner=False,
 ):
     """Validate + price + insert a booking. MUST run inside a transaction.
-    Shared by the public booking intake and booking-fulfillment order lines."""
+    Shared by the public booking intake, booking-fulfillment order lines and
+    the owner's own bookings (`owner=True`, see resolve_booking_slot)."""
     slot = await resolve_booking_slot(
         conn, site, btype, starts_at, ends_at_override, staff_id=staff_id, location_id=location_id, tz=tz,
+        owner=owner,
     )
     try:
         return await conn.fetchrow(
@@ -852,7 +885,8 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                     if item.starts_at is None:
                         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pick a time for the booking")
                     btype = await conn.fetchrow(
-                        "SELECT id, duration_minutes, status, price_cents, pricing_mode, requires_approval "
+                        "SELECT id, duration_minutes, status, price_cents, pricing_mode, requires_approval, "
+                        "buffer_minutes, min_notice_minutes, max_advance_days "
                         "FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
                         product["booking_type_id"], site["id"],
                     )

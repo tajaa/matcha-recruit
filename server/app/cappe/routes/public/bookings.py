@@ -1,5 +1,6 @@
 """Cappe public surface — bookings (locations, staff, booking types, rider,
 availability, slots, create)."""
+from datetime import date, timedelta
 from uuid import UUID
 
 from fastapi import BackgroundTasks, Depends, HTTPException, Query, Request, status
@@ -29,6 +30,7 @@ from ...services.email import (
     send_cappe_booking_received_email,
 )
 from ...services.shipping import site_currency
+from ...services.booking_rules import blocked_for, load_time_off
 from ...services.slots import generate_slots, merge_any_staff_slots
 from ...services.booking_suggestions import (
     extract_booking_preference,
@@ -47,6 +49,8 @@ _SUGGESTION_SEARCH_DAYS = 14
 # service — and it was applied to each stylist BEFORE the "any available"
 # merge, so the merged list was ragged as well as short.
 PUBLIC_SLOT_CAP = 300
+# How far the widget can page when a service sets no horizon of its own.
+MAX_SLOT_DAYS = 365
 suggestions_router = limited_public_router()
 # Kept as a module alias for existing body-limit tests and downstream imports.
 _BookingSuggestionBodyLimitRoute = CappePublicJsonBodyLimitRoute
@@ -116,7 +120,8 @@ async def public_booking_types(slug: str, request: Request, location_id: UUID | 
         site = await _published_site(conn, slug)
         rows = await conn.fetch(
             "SELECT id, site_id, name, description, duration_minutes, price_cents, status, "
-            "requires_approval, pricing_mode, category, buffer_minutes, location_id, created_at, updated_at "
+            "requires_approval, pricing_mode, category, buffer_minutes, location_id, created_at, updated_at, "
+            "min_notice_minutes, max_advance_days, cancel_cutoff_hours "
             "FROM cappe_booking_types WHERE site_id = $1 AND status = 'active' "
             "AND (location_id IS NULL OR location_id = $2) ORDER BY created_at",
             site["id"], location_id,
@@ -173,6 +178,7 @@ async def public_booking_slots(
     days: int = Query(default=21, ge=1, le=60),
     staff_id: UUID | None = Query(default=None),
     location_id: UUID | None = Query(default=None),
+    from_date: date | None = Query(default=None, alias="from"),
 ):
     """Concrete, openable slots for a booking type — the widget renders these as
     one-tap chips so a visitor never has to guess a valid time. Already-booked
@@ -180,12 +186,17 @@ async def public_booking_slots(
 
     `staff_id`: a concrete stylist → that staff's slots; omitted → "any available"
     (union across the service's staff for a staffed service, else the legacy
-    shared calendar)."""
+    shared calendar).
+
+    `from` pages through dates: the slots from that day for `days` days, and
+    `next_from` for the next page (None at the service's booking horizon).
+    The widget used to stop at the first few weeks with no way further."""
     await _read_rate_limit(request)
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         btype = await conn.fetchrow(
-            "SELECT id, duration_minutes, price_cents, pricing_mode, requires_approval, buffer_minutes, status "
+            "SELECT id, duration_minutes, price_cents, pricing_mode, requires_approval, buffer_minutes, status, "
+            "min_notice_minutes, max_advance_days "
             "FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
             type_id, site["id"],
         )
@@ -193,17 +204,25 @@ async def public_booking_slots(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking type not found")
         _, tz = await _location_ctx(conn, site, location_id)
         discounts = await fetch_active_discounts(conn, site["id"])
+        now_utc = await conn.fetchval("SELECT NOW()")
+        today = site_today(now_utc, tz)
+        start_day = max(0, (from_date - today).days) if from_date else 0
+        horizon = btype.get("max_advance_days")
         slots = await _load_live_booking_slots(
             conn, site=site, booking_type=btype, location_id=location_id,
             timezone_name=tz, days=days, staff_id=staff_id, discounts=discounts,
-            max_slots=PUBLIC_SLOT_CAP,
-        )
-        now_utc = await conn.fetchval("SELECT NOW()")
-        pct = best_discount_percent(
-            discounts,
-            kind="booking_type", target_id=str(type_id),
-            on_date=site_today(now_utc, tz), location_id=location_id,
-        )
+            max_slots=PUBLIC_SLOT_CAP, start_day=start_day,
+        ) if horizon is None or start_day <= int(horizon) else []
+    pct = best_discount_percent(
+        discounts,
+        kind="booking_type", target_id=str(type_id),
+        on_date=today, location_id=location_id,
+    )
+    next_day = start_day + days
+    next_from = (
+        (today + timedelta(days=next_day)).isoformat()
+        if next_day <= (int(horizon) if horizon else MAX_SLOT_DAYS) else None
+    )
     return {
         "timezone": tz,
         "duration_minutes": btype["duration_minutes"],
@@ -211,6 +230,8 @@ async def public_booking_slots(
         "requires_approval": bool(btype["requires_approval"]),
         "discount_percent": pct,
         "slots": slots,
+        "from": (today + timedelta(days=start_day)).isoformat(),
+        "next_from": next_from,
     }
 
 
@@ -218,9 +239,10 @@ async def _load_live_booking_slots(
     conn, *, site, booking_type, location_id: UUID | None,
     timezone_name: str, days: int, staff_id: UUID | None,
     discounts: list[dict] | None = None, include_staff_ids: bool = False,
-    max_slots: int | None = PUBLIC_SLOT_CAP,
+    max_slots: int | None = PUBLIC_SLOT_CAP, start_day: int = 0,
 ) -> list[dict]:
-    """Generate live candidates shared by the normal picker and AI suggestions."""
+    """Generate live candidates shared by the normal picker and AI suggestions.
+    The service's notice and horizon and any time off are honoured."""
     type_id = booking_type["id"]
     # DISTINCT: a window saved both as shared and for a location (the location
     # editor used to copy shared rows into the location on every save) must
@@ -243,6 +265,10 @@ async def _load_live_booking_slots(
     rules = await fetch_rate_rules(conn, site["id"], type_id, location_id)
     discounts = discounts if discounts is not None else await fetch_active_discounts(conn, site["id"])
     now_utc = await conn.fetchval("SELECT NOW()")
+    time_off = await load_time_off(
+        conn, site["id"], location_id=location_id,
+        start_utc=now_utc + timedelta(days=start_day - 1), end_utc=now_utc + timedelta(days=start_day + days + 1),
+    )
     availability = [
         {
             "weekday": r["weekday"], "start_time": r["start_time"], "end_time": r["end_time"],
@@ -255,6 +281,8 @@ async def _load_live_booking_slots(
         "id": str(booking_type["id"]), "duration_minutes": booking_type["duration_minutes"],
         "price_cents": booking_type["price_cents"], "pricing_mode": booking_type["pricing_mode"],
         "buffer_minutes": booking_type["buffer_minutes"],
+        "min_notice_minutes": booking_type.get("min_notice_minutes") or 0,
+        "max_advance_days": booking_type.get("max_advance_days"),
     }
 
     def _busy_for(sid):
@@ -266,6 +294,7 @@ async def _load_live_booking_slots(
         slots = generate_slots(
             availability, btype, _busy_for(sid), timezone_name, now_utc, rules,
             days_ahead=days, max_slots=max_slots, staff_id=sid,
+            start_day=start_day, blocked=blocked_for(time_off, sid),
         )
         if include_staff_ids:
             for slot in slots:
@@ -280,6 +309,7 @@ async def _load_live_booking_slots(
             per_staff.append((sid, generate_slots(
                 availability, btype, _busy_for(sid), timezone_name, now_utc, rules,
                 days_ahead=days, max_slots=None, staff_id=sid,
+                start_day=start_day, blocked=blocked_for(time_off, sid),
             )))
         slots = merge_any_staff_slots(per_staff)
         if max_slots is not None:
@@ -288,6 +318,7 @@ async def _load_live_booking_slots(
         slots = generate_slots(
             availability, btype, _busy_for(None), timezone_name, now_utc, rules,
             days_ahead=days, max_slots=max_slots,
+            start_day=start_day, blocked=blocked_for(time_off, None),
         )
 
     pct = best_discount_percent(
@@ -323,7 +354,8 @@ async def public_booking_suggestions(
         await check_rate_limit(str(site["id"]), "cappe_booking_suggest_site_hr", 30, 3600)
         loc_id, tz = await _location_ctx(conn, site, body.location_id)
         btype = await conn.fetchrow(
-            "SELECT id, duration_minutes, price_cents, pricing_mode, requires_approval, buffer_minutes, status "
+            "SELECT id, duration_minutes, price_cents, pricing_mode, requires_approval, buffer_minutes, status, "
+            "min_notice_minutes, max_advance_days "
             "FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
             body.booking_type_id, site["id"],
         )
@@ -392,7 +424,8 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
         site = await _published_site(conn, slug)
         loc_id, loc_tz = await _location_ctx(conn, site, body.location_id)
         btype = await conn.fetchrow(
-            "SELECT id, name, duration_minutes, status, price_cents, pricing_mode, requires_approval, buffer_minutes "
+            "SELECT id, name, duration_minutes, status, price_cents, pricing_mode, requires_approval, buffer_minutes, "
+            "min_notice_minutes, max_advance_days "
             "FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
             body.booking_type_id, site["id"],
         )
