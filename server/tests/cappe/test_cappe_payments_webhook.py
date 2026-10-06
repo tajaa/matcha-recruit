@@ -240,13 +240,19 @@ def test_cancel_without_a_resolvable_order_touches_nothing(monkeypatch, meta, ev
     assert restocks == []
 
 
-def test_collab_installment_is_left_for_manual_retry(monkeypatch):
-    """A collab payment is not a storefront order: there is no stock to release
-    and the brand can re-open checkout, so the webhook must not rewrite it."""
+def test_collab_checkout_ending_never_touches_a_storefront_order(monkeypatch):
+    """A collab payment is not a storefront order: there is no stock to
+    release. The installment itself goes back to `due` — see
+    `_reopen_collab_installment` in test_cappe_payments_refunds.py."""
     conn = FakeConn({"id": "o-1", "site_id": "s-1"})
     restocks = []
     _patch_conn(monkeypatch, conn, restocks)
+    reopened = []
 
+    async def _reopen(collab_payment_id, obj, account_id, etype):
+        reopened.append((collab_payment_id, account_id, etype))
+
+    monkeypatch.setattr(mod, "_reopen_collab_installment", _reopen)
     out = asyncio.run(mod._cancel_unpaid_session(
         "checkout.session.expired",
         {"metadata": {"collab_payment_id": "cp-1"}},
@@ -255,6 +261,7 @@ def test_collab_installment_is_left_for_manual_retry(monkeypatch):
     assert out == {"received": True}
     assert conn.fetchrow_args is None
     assert restocks == []
+    assert reopened == [("cp-1", "acct_1", "checkout.session.expired")]
 
 
 

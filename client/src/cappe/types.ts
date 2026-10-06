@@ -270,6 +270,10 @@ export type CappeDomain = {
   failure_reason: string | null
   verification_token: string | null
   transfer_requested_at: string | null
+  /** Set when the last automatic renewal could not collect; `renewal_error`
+   *  is the reason shown beside the "Renew now" button. */
+  renewal_failed_at?: string | null
+  renewal_error?: string | null
   created_at: string
 }
 
@@ -486,6 +490,13 @@ export type CappeOrder = {
   requires_approval: boolean
   approved_at: string | null
   decline_reason: string | null
+  /** Set by a refund. A PARTIAL refund made in Stripe records its amount in
+   *  `refunded_cents` while the status stays paid. */
+  refunded_at?: string | null
+  refunded_cents?: number
+  /** Stripe's status for a chargeback opened against this order, if any. */
+  dispute_status?: string | null
+  disputed_at?: string | null
   metadata: Record<string, unknown>
   created_at: string
   updated_at: string

@@ -35,23 +35,39 @@ info.innerHTML=(p.category?'<div class="cz-eyebrow">'+RT.esc(p.category)+'</div>
 '<h2 class="cz-pd__name">'+RT.esc(p.name)+'</h2>'+
 '<div class="cz-pd__price">'+priceHtml+'</div>'+
 (p.description?'<p class="cz-pd__desc">'+RT.esc(p.description)+'</p>':'')+
-(p.fulfillment==='physical'?'<p class="cz-msg">Shipping calculated at checkout.</p>':'')+
+
 optsHtml(p)+(p.intake_fields||[]).map(field).join('')+
 (booking?'<div><label class="cz-label">Preferred time</label><input class="cz-field" type="datetime-local" data-when /></div>':'')+
 '<div class="cz-pd__buy"><label class="cz-label">Quantity</label><input class="cz-field cz-pd__qty" type="number" min="1" value="1" data-qty />'+
 '<input class="cz-field" type="email" data-email placeholder="Your email" /><input class="cz-field" type="text" data-name placeholder="Your name" />'+
-'<button class="cz-btn cz-btn--solid cz-btn--block" data-go></button><p class="cz-msg"></p></div>';
-var sb=info.querySelector('[data-go]'),msg=info.querySelector('.cz-msg');
-function unit(){var s=p.price_cents||0;info.querySelectorAll('.cz-opt--on').forEach(function(b){s+=parseInt(b.getAttribute('data-delta'),10)||0;});s=Math.max(0,s);if(p.discount_percent)s=Math.round(s*(100-p.discount_percent)/100);return s;}
+'<p class="cz-msg" data-quote></p><button class="cz-btn cz-btn--solid cz-btn--block" data-go></button><p class="cz-msg" data-status></p></div>';
+var sb=info.querySelector('[data-go]'),msg=info.querySelector('[data-status]');
+// Local estimate only: same half-up integer math as the server's apply_discount_cents,
+// so it agrees to the cent. The authoritative figure is the server quote below.
+function unit(){var s=p.price_cents||0;info.querySelectorAll('.cz-opt--on').forEach(function(b){s+=parseInt(b.getAttribute('data-delta'),10)||0;});s=Math.max(0,s);if(p.discount_percent)s=Math.floor((s*(100-p.discount_percent)+50)/100);return s;}
 function qn(){return Math.max(1,parseInt(info.querySelector('[data-qty]').value,10)||1);}
-function refresh(){sb.textContent=(booking?'Request — ':'Add to bag — ')+RT.money(unit()*qn(),p.currency);}
+function verb(){return booking?'Request — ':'Add to bag — ';}
+function chosen(){var ids=[];info.querySelectorAll('.cz-opt--on').forEach(function(b){ids.push(b.getAttribute('data-opt'));});return ids;}
+// Ask the server what this cart will actually cost — tax and shipping included —
+// and show THAT before the buyer commits. Sequence-numbered so a slow answer for
+// an earlier selection can't overwrite a newer one; any failure keeps the estimate.
+var qseq=0,qtimer=null,qbox=info.querySelector('[data-quote]');
+function quote(){var seq=++qseq;RT.post('/quote',{items:[{product_id:p.id,quantity:qn(),selected_option_ids:chosen()}]}).then(function(q){
+if(seq!==qseq||!q||q.total_cents==null)return;var l=(q.lines||[])[0];if(l&&l.reason)return;
+var cur=q.currency||p.currency,parts=[];
+if(q.tax_cents>0)parts.push('Tax '+RT.money(q.tax_cents,cur));
+if(q.shipping_cents>0)parts.push('Shipping '+RT.money(q.shipping_cents,cur));
+sb.textContent=verb()+RT.money(q.total_cents,cur);
+if(qbox)qbox.textContent=parts.length?('Subtotal '+RT.money(q.subtotal_cents,cur)+' · '+parts.join(' · ')):'';
+}).catch(function(){});}
+function refresh(){sb.textContent=verb()+RT.money(unit()*qn(),p.currency);if(qbox)qbox.textContent='';clearTimeout(qtimer);qtimer=setTimeout(quote,250);}
 info.querySelectorAll('.cz-opt-group').forEach(function(g){var single=g.getAttribute('data-single')==='1';g.querySelectorAll('.cz-opt').forEach(function(o){o.addEventListener('click',function(){if(single){g.querySelectorAll('.cz-opt').forEach(function(x){x.classList.remove('cz-opt--on');});o.classList.add('cz-opt--on');}else o.classList.toggle('cz-opt--on');refresh();});});});
 info.querySelector('[data-qty]').addEventListener('input',refresh);refresh();
 sb.addEventListener('click',function(){var email=info.querySelector('[data-email]').value.trim();
 if(!email){msg.textContent='Email required';msg.className='cz-msg err';return;}
 var ok=true;info.querySelectorAll('.cz-opt-group').forEach(function(g){if(g.getAttribute('data-required')==='1'&&!g.querySelector('.cz-opt--on'))ok=false;});
 if(!ok){msg.textContent='Please choose the required options';msg.className='cz-msg err';return;}
-var optIds=[];info.querySelectorAll('.cz-opt--on').forEach(function(b){optIds.push(b.getAttribute('data-opt'));});
+var optIds=chosen();
 var ans={};(p.intake_fields||[]).forEach(function(f){var el=info.querySelector('[data-k="'+f.key+'"]');if(el)ans[f.key]=el.value;});
 var item={product_id:p.id,quantity:qn(),intake_answers:ans,selected_option_ids:optIds};
 if(booking){var w=info.querySelector('[data-when]').value;if(!w){msg.textContent='Pick a time';msg.className='cz-msg err';return;}item.starts_at=w;}

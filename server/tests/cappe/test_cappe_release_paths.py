@@ -161,38 +161,76 @@ def test_decline_closes_checkout_then_frees_stock_and_every_held_slot(monkeypatc
     assert not any("cappe_bookings" in sql for sql in conn.sql)   # no inline release left
 
 
-@pytest.mark.parametrize("new_status,closes", [
-    ("cancelled", True), ("refunded", True), ("fulfilled", False), (None, False),
-])
-def test_only_a_releasing_transition_closes_checkout(monkeypatch, new_status, closes):
-    conn = OrderConn([{"status": "pending"}, {"id": ORDER, "status": new_status or "pending"}])
+class Background:
+    def __init__(self):
+        self.tasks = []
+
+    def add_task(self, fn, *args):
+        self.tasks.append((fn.__name__, args))
+
+
+class PatchConn(OrderConn):
+    """`update_order_status` pre-reads the status (fetchval) before it decides
+    whether the buyer's payment page has to be closed."""
+
+    def __init__(self, current, rows):
+        super().__init__(rows)
+        self.current = current
+
+    async def fetchval(self, sql, *args):
+        self.sql.append(sql)
+        return self.current
+
+
+def _patch_route(monkeypatch, conn):
     log = _route(monkeypatch, conn)
+
+    async def _closed(site_id, order_id, account_id, *, then="refund it"):
+        log.append("close")
+
+    monkeypatch.setattr(shop_mod, "_close_open_checkout", _closed)
+    return log
+
+
+@pytest.mark.parametrize("new_status,closes,releases", [
+    ("cancelled", True, True),      # the order is released: close, restock, free slots
+    ("paid", True, False),          # paid by hand: close the page, reverse nothing
+    (None, False, False),           # tracking-only edit
+])
+def test_only_a_transition_off_pending_closes_checkout(monkeypatch, new_status, closes, releases):
+    conn = PatchConn("pending", [
+        {"status": "pending", "tracking_number": None},
+        {"id": ORDER, "status": new_status or "pending"},
+    ])
+    log = _patch_route(monkeypatch, conn)
     monkeypatch.setattr(shop_mod, "build_patch", lambda *a, **k: (["status = $1"], [new_status]))
     asyncio.run(shop_mod.update_order_status(
-        SITE, ORDER, SimpleNamespace(status=new_status, tracking_number=None), account=SimpleNamespace(id=ACCOUNT_ID),
+        SITE, ORDER, SimpleNamespace(status=new_status, tracking_number=None), Background(),
+        account=SimpleNamespace(id=ACCOUNT_ID),
     ))
     assert ("close" in log) is closes
-    assert ("bookings" in log) is closes
+    assert ("bookings" in log) is releases
 
 
-@pytest.mark.parametrize(("body", "current_tracking", "expected"), [
-    (CappeOrderStatusUpdate(tracking_number="same"), "same", []),
-    (CappeOrderStatusUpdate(status="cancelled", tracking_number="new"), "old", []),
-    (CappeOrderStatusUpdate(tracking_number="new"), "old", ["shipped"]),
+@pytest.mark.parametrize(("current", "body", "current_tracking", "expected"), [
+    ("paid", CappeOrderStatusUpdate(tracking_number="same"), "same", []),
+    # A new number on an order being released is not a shipment.
+    ("pending", CappeOrderStatusUpdate(status="cancelled", tracking_number="new"), "old", []),
+    ("paid", CappeOrderStatusUpdate(tracking_number="new"), "old", ["shipped"]),
+    ("paid", CappeOrderStatusUpdate(status="fulfilled", tracking_number="new"), "old", ["fulfilled"]),
 ])
 def test_tracking_push_requires_a_new_number_on_a_live_order(
-    monkeypatch, body, current_tracking, expected,
+    monkeypatch, current, body, current_tracking, expected,
 ):
-    updated_status = body.status or "paid"
-    conn = OrderConn([
-        {"status": "paid", "tracking_number": current_tracking},
-        {"id": ORDER, "status": updated_status, "tracking_number": body.tracking_number},
+    conn = PatchConn(current, [
+        {"status": current, "tracking_number": current_tracking},
+        {"id": ORDER, "status": body.status or current, "tracking_number": body.tracking_number},
     ])
-    _route(monkeypatch, conn)
+    _patch_route(monkeypatch, conn)
     pushed = []
     monkeypatch.setattr("app.cappe.services.push.schedule_push", lambda _order, event: pushed.append(event))
     asyncio.run(shop_mod.update_order_status(
-        SITE, ORDER, body, account=SimpleNamespace(id=ACCOUNT_ID),
+        SITE, ORDER, body, Background(), account=SimpleNamespace(id=ACCOUNT_ID),
     ))
     assert pushed == expected
 

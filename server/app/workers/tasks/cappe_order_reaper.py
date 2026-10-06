@@ -37,6 +37,16 @@ Idempotent and conservative:
   * the status flip is guarded on `status = 'pending'` and the restock + booking
     release run in the same transaction, so a concurrent webhook and this task
     cannot both release the same order.
+
+**Orders that never went to Stripe** (a store without Connect, where the owner
+collects payment by hand) get a second, much slower sweep. They hold stock
+exactly like any other pending order, the endpoint that creates them is
+anonymous, and nothing above ever looks at them — so an unattended one held a
+tenant's inventory for ever, and anyone could empty a no-Connect storefront's
+shelves for free. After `MANUAL_ABANDONED_AFTER` with no activity they are
+released. Deliberately conservative: an order the owner has ACCEPTED, or
+touched at all inside the window (`updated_at`), is left alone — those are
+orders somebody is working, however slowly.
 """
 
 import asyncio
@@ -56,6 +66,8 @@ logger = logging.getLogger(__name__)
 # "The buyer is long gone." Safe well inside Stripe's 24h session lifetime only
 # because the session is expired before the order is touched (see above).
 ABANDONED_AFTER = "2 hours"
+# A hand-collected order nobody has touched in this long is not coming back.
+MANUAL_ABANDONED_AFTER = "7 days"
 
 
 async def _reconcile_paid(conn, stripe_client, cand) -> bool:
@@ -88,6 +100,48 @@ async def _reconcile_paid(conn, stripe_client, cand) -> bool:
     )
     await issue_receipt_on(conn, row["id"], row["site_id"])
     return True
+
+
+async def _release_stale_manual_orders(conn, cap: int) -> int:
+    """Release pending orders that never had a Stripe session and that nobody
+    has touched for `MANUAL_ABANDONED_AFTER` (see the module doc). There is no
+    payment page to close first — these orders never had one."""
+    stale = await conn.fetch(
+        f"""SELECT id, site_id FROM cappe_orders
+             WHERE status = 'pending'
+               AND stripe_session_id IS NULL
+               AND subscription_id IS NULL
+               AND approved_at IS NULL
+               AND created_at < NOW() - INTERVAL '{MANUAL_ABANDONED_AFTER}'
+               AND updated_at < NOW() - INTERVAL '{MANUAL_ABANDONED_AFTER}'
+             ORDER BY created_at ASC
+             LIMIT $1""",
+        cap,
+    )
+    released = 0
+    for cand in stale:
+        try:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "UPDATE cappe_orders SET status = 'cancelled', updated_at = NOW() "
+                    "WHERE id = $1 AND status = 'pending' AND stripe_session_id IS NULL "
+                    "RETURNING id, site_id",
+                    cand["id"],
+                )
+                if row is None:
+                    continue
+                await restock_order(
+                    conn, site_id=row["site_id"], order_id=row["id"], reason="restock"
+                )
+                await release_order_bookings(conn, order_id=row["id"])
+            released += 1
+            logger.info(
+                "cappe order %s cancelled + released (unpaid for %s, never sent to Stripe)",
+                cand["id"], MANUAL_ABANDONED_AFTER,
+            )
+        except Exception:
+            logger.exception("cappe order reaper: failed to release manual order %s", cand["id"])
+    return released
 
 
 async def _run() -> dict:
@@ -182,9 +236,12 @@ async def _run() -> dict:
                     "cappe order reaper: failed to release order %s", cand["id"]
                 )
 
+        manual_released = await _release_stale_manual_orders(conn, cap)
+
         return {
             "candidates": len(candidates), "released": released,
             "settling": settling, "reconciled": reconciled,
+            "manual_released": manual_released,
         }
     finally:
         await conn.close()

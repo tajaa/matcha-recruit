@@ -33,6 +33,7 @@ from ..services.email import (
     send_cappe_collab_paid_email,
 )
 from ..services.inventory import release_order_bookings, restock_order, retake_order_stock
+from ..services.order_lifecycle import mark_order_refunded
 from ..services.receipt import issue_receipt_for_paid_order
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 
@@ -186,13 +187,19 @@ async def payments_webhook(request: Request, background: BackgroundTasks):
         money cleared (see `session_is_paid`).
       - checkout.session.async_payment_failed / .expired → cancel the still-
         pending order and put its stock back.
+      - charge.refunded → a refund made in the Stripe dashboard (or by our own
+        refund route) lands on the order / collab installment.
+      - charge.dispute.created / .updated / .closed → the chargeback is
+        recorded on the order; a lost one closes it out.
       - account.updated → refresh the business's capability flags.
     Always returns 200 on handled events so Stripe stops retrying.
 
-    The three delayed-payment event types must be enabled on the Connect
-    webhook endpoint in the Stripe dashboard; until they are, the abandoned-
-    order reaper (workers/tasks/cappe_order_reaper.py) is the only thing that
-    frees stock held by an unpaid session."""
+    The delayed-payment, refund and dispute event types must be enabled on the
+    Connect webhook endpoint in the Stripe dashboard (list in
+    `docs/ops/CAPPE_PAYMENTS.md`). Until the delayed-payment ones are, the
+    abandoned-order reaper is the only thing that frees stock held by an unpaid
+    session; until the refund ones are, a dashboard refund leaves the order
+    `paid` here."""
     payload = await request.body()
     signature = request.headers.get("stripe-signature", "")
     cs = get_cappe_stripe()
@@ -247,6 +254,12 @@ async def _handle_connect_event(etype, obj, event, background) -> dict:
     if etype in ("checkout.session.async_payment_failed", "checkout.session.expired"):
         return await _cancel_unpaid_session(etype, obj, event)
 
+    if etype == "charge.refunded":
+        return await _sync_charge_refunded(obj, event)
+
+    if etype in ("charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed"):
+        return await _sync_dispute(obj, event)
+
     if etype == "account.updated":
         acct_id = obj.get("id") or event.get("account")
         if acct_id:
@@ -282,14 +295,8 @@ async def _cancel_unpaid_session(etype, obj, event) -> dict:
     except (ValueError, TypeError):
         oid = None
     if oid is None or not event_account_id:
-        if meta.get("collab_payment_id"):
-            # Collab installments are not auto-reversed here: the brand can
-            # re-open checkout, and the row is left for the existing due/
-            # processing flow rather than silently rewritten by a webhook.
-            logger.warning(
-                "cappe webhook: collab payment %s %s — left for manual retry",
-                meta.get("collab_payment_id"), etype,
-            )
+        if meta.get("collab_payment_id") and event_account_id:
+            await _reopen_collab_installment(meta["collab_payment_id"], obj, event_account_id, etype)
         return {"received": True}
 
     async with get_connection() as conn:
@@ -467,84 +474,302 @@ async def _mark_order_paid(obj, event, background) -> dict:
         except (ValueError, TypeError):
             cpid = None
         if cpid is not None:
-            session_id = obj.get("id")
-            amount_total = obj.get("amount_total")
-            async with get_connection() as conn:
-                # Match on payment id + amount + connected account, NOT the
-                # session id — checkout_payment lets the brand re-open
-                # checkout on a still-processing payment, which overwrites
-                # stripe_checkout_session_id with the new session. If the
-                # brand instead completes an earlier, now-orphaned session
-                # in a stale tab, matching on session id would find zero
-                # rows and the real charge would never get recorded. The
-                # payment id (trusted: comes from this event's own
-                # metadata) plus connected-account ownership is sufficient;
-                # session id is stored for audit only.
-                crow = await conn.fetchrow(
-                    """UPDATE cappe_collab_payments cp
-                          SET status = 'paid', paid_at = NOW(),
-                              stripe_payment_intent = $2, stripe_checkout_session_id = $4,
-                              updated_at = NOW()
-                         FROM cappe_collab_offers o, cappe_creator_profiles p, cappe_accounts ca
-                        WHERE cp.id = $1 AND cp.status IN ('due', 'processing')
-                          AND o.id = cp.offer_id AND p.id = o.creator_profile_id
-                          AND ca.id = p.account_id AND ca.stripe_account_id = $3
-                    RETURNING cp.offer_id, cp.trigger, cp.label, cp.amount_cents""",
-                    cpid,
-                    obj.get("payment_intent"),
-                    event_account_id,
-                    session_id,
+            await _settle_collab_installment(cpid, obj, event_account_id, background)
+
+    return {"received": True}
+
+
+# ── collab installments ─────────────────────────────────────────────────────
+
+def _collab_reject_reason(row, session_id, amount_total, currency) -> Optional[str]:
+    """Why a settled Checkout Session must NOT be applied to this installment,
+    or None when it is exactly the payment we asked for.
+
+    Everything in the session's metadata is attacker-controllable by the
+    connected account it was created on — and that account is the CREATOR's.
+    Matching on the payment id alone meant a creator could mint their own
+    50-cent session carrying the installment id, pay it, and have the
+    installment marked paid and the offer activated with the platform fee
+    never collected. So a session only settles an installment when it is the
+    one our server created for it, for the stored amount, in the stored
+    currency.
+    """
+    if row["status"] not in ("due", "processing"):
+        return f"installment is already {row['status']}"
+    if not row["stripe_checkout_session_id"] or session_id != row["stripe_checkout_session_id"]:
+        return "paid through a checkout session that is not this installment's current one"
+    try:
+        if amount_total is None or int(amount_total) != int(row["amount_cents"]):
+            return f"Stripe total {amount_total} does not match the installment's {row['amount_cents']}"
+    except (TypeError, ValueError):
+        return f"unreadable Stripe total {amount_total!r}"
+    if currency and str(currency).lower() != str(row["currency"] or "").lower():
+        return f"currency {currency} does not match the installment's {row['currency']}"
+    return None
+
+
+async def _settle_collab_installment(cpid: UUID, obj, event_account_id: str, background) -> None:
+    """Apply a settled Checkout Session to its collab installment — or, when it
+    cannot be applied, give the money back.
+
+    "Cannot be applied" covers the two double-charge windows (a stale tab
+    paying a session the brand had re-opened past; a session paid after the
+    offer was cancelled) and a forged or mismatched session. In every one of
+    them a card has been charged for nothing, and the old code could only log
+    it for a human. The charge is refunded on the creator's connected account,
+    platform fee included.
+    """
+    session_id = obj.get("id")
+    intent = obj.get("payment_intent")
+    reject: Optional[str] = None
+    paid = None
+    completed = False
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """SELECT cp.id, cp.offer_id, cp.status, cp.trigger, cp.label,
+                          cp.amount_cents, cp.currency,
+                          cp.stripe_checkout_session_id, cp.stripe_payment_intent
+                     FROM cappe_collab_payments cp
+                     JOIN cappe_collab_offers o ON o.id = cp.offer_id
+                     JOIN cappe_creator_profiles p ON p.id = o.creator_profile_id
+                     JOIN cappe_accounts ca ON ca.id = p.account_id
+                    WHERE cp.id = $1 AND ca.stripe_account_id = $2
+                      FOR UPDATE OF cp""",
+                cpid, event_account_id,
+            )
+            if row is None:
+                # No such installment on THIS connected account. Not provably
+                # ours, so it is not ours to refund either.
+                logger.error(
+                    "cappe collab webhook: session %s on account %s names installment %s, which "
+                    "does not exist for that account — ignored; reconcile in Stripe if real",
+                    session_id, event_account_id, cpid,
                 )
-                if (
-                    crow is not None
-                    and amount_total is not None
-                    and int(amount_total) != int(crow["amount_cents"])
-                ):
-                    logger.warning(
-                        "cappe collab webhook: payment %s matched with Stripe total %s != stored %s",
-                        collab_payment_id,
-                        amount_total,
-                        crow["amount_cents"],
-                    )
-                completed = False
-                if crow is not None:
-                    if crow["trigger"] == "on_accept":
+                return
+            if row["status"] == "paid" and intent and row["stripe_payment_intent"] == intent:
+                return  # this very payment, delivered again
+            reject = _collab_reject_reason(row, session_id, obj.get("amount_total"), obj.get("currency"))
+            if reject is None:
+                paid = await conn.fetchrow(
+                    """UPDATE cappe_collab_payments
+                          SET status = 'paid', paid_at = NOW(),
+                              stripe_payment_intent = $2, updated_at = NOW()
+                        WHERE id = $1 AND status IN ('due', 'processing')
+                    RETURNING offer_id, trigger, label, amount_cents""",
+                    cpid, intent,
+                )
+                if paid is not None:
+                    if paid["trigger"] == "on_accept":
                         await conn.execute(
                             "UPDATE cappe_collab_offers SET status = 'active', "
                             "last_action_at = NOW(), updated_at = NOW() "
                             "WHERE id = $1 AND status = 'accepted'",
-                            crow["offer_id"],
+                            paid["offer_id"],
                         )
                     from ..services.collab import check_completion
 
-                    completed = await check_completion(conn, crow["offer_id"])
-            if crow is not None:
-                background.add_task(
-                    _notify_collab_paid,
-                    crow["offer_id"],
-                    crow["label"],
-                    crow["amount_cents"],
-                )
-                if completed:
-                    background.add_task(_notify_collab_completed, crow["offer_id"])
-            else:
-                # Real money moved (Stripe already charged the brand and
-                # credited the creator's connected account) but no row
-                # matched — most likely the payment was cancelled (e.g.
-                # the offer was cancelled while this checkout was still
-                # in flight, see cancel_offer's docstring). There's no
-                # automated refund path; this needs a human to reconcile
-                # in Stripe, so it goes to ERROR (persisted to
-                # server_error_reports) rather than WARNING.
-                logger.error(
-                    "cappe collab webhook: payment %s (session %s, account %s) charged but not "
-                    "matched to a due/processing row — needs manual reconciliation in Stripe",
-                    collab_payment_id,
-                    session_id,
-                    event_account_id,
-                )
+                    completed = await check_completion(conn, paid["offer_id"])
 
+    if reject is not None:
+        await _refund_unapplied_collab_charge(cpid, session_id, intent, event_account_id, reject)
+        return
+    if paid is not None:
+        background.add_task(_notify_collab_paid, paid["offer_id"], paid["label"], paid["amount_cents"])
+        if completed:
+            background.add_task(_notify_collab_completed, paid["offer_id"])
+
+
+async def _refund_unapplied_collab_charge(cpid, session_id, intent, account_id, reason) -> None:
+    """Refund a collab charge that settled but cannot be applied. No DB
+    connection is held across the Stripe call. ERROR either way: an automatic
+    refund is still something a human should know happened, and a failed one
+    is money owed."""
+    if not intent:
+        logger.error(
+            "cappe collab webhook: installment %s session %s on %s settled but cannot be applied "
+            "(%s) and carries no payment intent — MANUAL REFUND REQUIRED",
+            cpid, session_id, account_id, reason,
+        )
+        return
+    try:
+        await get_cappe_stripe().refund_connected_charge(
+            account_id=account_id, payment_intent=intent,
+            idempotency_key=f"cappe-collab-unapplied-{intent}",
+        )
+    except CappeStripeError as exc:
+        logger.error(
+            "cappe collab webhook: installment %s session %s (intent %s, account %s) settled but "
+            "cannot be applied (%s), and the automatic refund FAILED: %s — MANUAL REFUND REQUIRED",
+            cpid, session_id, intent, account_id, reason, exc,
+        )
+        return
+    logger.error(
+        "cappe collab webhook: installment %s session %s (intent %s, account %s) settled but could "
+        "not be applied (%s) — the charge was refunded automatically",
+        cpid, session_id, intent, account_id, reason,
+    )
+
+
+async def _reopen_collab_installment(collab_payment_id, obj, event_account_id: str, etype) -> None:
+    """A collab checkout expired or its delayed payment failed: put the
+    installment back to `due` so the brand sees "Pay" again.
+
+    Only when the dead session is the installment's CURRENT one — an older
+    session expiring must not reopen an installment whose newer checkout is
+    still in flight. Nothing is charged on this path, so there is nothing to
+    refund.
+    """
+    try:
+        cpid = UUID(str(collab_payment_id))
+    except (ValueError, TypeError):
+        return
+    async with get_connection() as conn:
+        reopened = await conn.fetchval(
+            """UPDATE cappe_collab_payments cp
+                  SET status = 'due', updated_at = NOW()
+                 FROM cappe_collab_offers o, cappe_creator_profiles p, cappe_accounts ca
+                WHERE cp.id = $1 AND cp.status = 'processing'
+                  AND cp.stripe_checkout_session_id = $2
+                  AND o.id = cp.offer_id AND p.id = o.creator_profile_id
+                  AND ca.id = p.account_id AND ca.stripe_account_id = $3
+            RETURNING cp.id""",
+            cpid, obj.get("id"), event_account_id,
+        )
+    if reopened is not None:
+        logger.info("cappe collab installment %s back to due after %s", cpid, etype)
+
+
+# ── refunds + disputes made in Stripe ───────────────────────────────────────
+
+async def _order_for_charge(conn, intent, invoice_id, account_id):
+    """The order a connected-account charge belongs to, locked. Card orders are
+    keyed by payment intent; subscription orders by invoice. The join to the
+    event's own connected account is what stops one business's signed event
+    from reaching another's order."""
+    for column, value in (("stripe_payment_intent", intent), ("stripe_invoice_id", invoice_id)):
+        if not isinstance(value, str) or not value:
+            continue
+        row = await conn.fetchrow(
+            f"""SELECT o.id, o.site_id, o.status
+                  FROM cappe_orders o
+                  JOIN cappe_sites s ON s.id = o.site_id
+                  JOIN cappe_accounts a ON a.id = s.account_id
+                 WHERE o.{column} = $1 AND a.stripe_account_id = $2
+                 ORDER BY o.created_at DESC
+                 LIMIT 1
+                   FOR UPDATE OF o""",
+            value, account_id,
+        )
+        if row is not None:
+            return row
+    return None
+
+
+async def _sync_charge_refunded(obj, event) -> dict:
+    """`charge.refunded` on a connected account.
+
+    Before this, a refund issued from the Stripe dashboard changed nothing
+    here: the order stayed `paid`, its digital download stayed live, and its
+    stock was never returned. A FULL refund now does what the refund route
+    does; a PARTIAL one records its amount and leaves the order paid (the
+    customer still has the goods). Idempotent — `mark_order_refunded` only
+    moves a paid/fulfilled order, so our own refund route's echo of this event
+    is a no-op.
+    """
+    account_id = event.get("account")
+    if not account_id:
+        return {"received": True}
+    intent = obj.get("payment_intent")
+    amount = int(obj.get("amount") or 0)
+    refunded = int(obj.get("amount_refunded") or 0)
+    full = bool(obj.get("refunded")) or (amount > 0 and refunded >= amount)
+    refunds = ((obj.get("refunds") or {}).get("data") or []) if isinstance(obj.get("refunds"), dict) else []
+    refund_id = refunds[0].get("id") if refunds else None
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            order = await _order_for_charge(conn, intent, obj.get("invoice"), account_id)
+            if order is not None:
+                if full:
+                    moved = await mark_order_refunded(
+                        conn, order_id=order["id"], site_id=order["site_id"],
+                        refunded_cents=refunded or None, stripe_refund_id=refund_id,
+                    )
+                    if moved is not None:
+                        logger.info("cappe order %s refunded in Stripe; synced", order["id"])
+                    return {"received": True, "status": "refunded"}
+                await conn.execute(
+                    "UPDATE cappe_orders SET refunded_cents = $2, "
+                    "stripe_refund_id = COALESCE($3, stripe_refund_id), updated_at = NOW() "
+                    "WHERE id = $1",
+                    order["id"], refunded, refund_id,
+                )
+                logger.info(
+                    "cappe order %s partially refunded in Stripe (%s of %s)", order["id"], refunded, amount
+                )
+                return {"received": True, "status": "partially_refunded"}
+
+            if isinstance(intent, str) and intent and full:
+                collab = await conn.fetchrow(
+                    """UPDATE cappe_collab_payments cp
+                          SET status = 'refunded', refunded_at = NOW(),
+                              stripe_refund_id = COALESCE($3, cp.stripe_refund_id),
+                              updated_at = NOW()
+                         FROM cappe_collab_offers o, cappe_creator_profiles p, cappe_accounts ca
+                        WHERE cp.stripe_payment_intent = $1 AND cp.status = 'paid'
+                          AND o.id = cp.offer_id AND p.id = o.creator_profile_id
+                          AND ca.id = p.account_id AND ca.stripe_account_id = $2
+                    RETURNING cp.id, cp.offer_id""",
+                    intent, account_id, refund_id,
+                )
+                if collab is not None:
+                    # The offer's own state (active / completed) is NOT rewound:
+                    # whether a refunded milestone un-completes a collab is a
+                    # judgement, not arithmetic.
+                    logger.error(
+                        "cappe collab installment %s (offer %s) was refunded in Stripe — marked "
+                        "refunded; review the offer's status",
+                        collab["id"], collab["offer_id"],
+                    )
+                    return {"received": True, "status": "collab_refunded"}
     return {"received": True}
+
+
+async def _sync_dispute(obj, event) -> dict:
+    """`charge.dispute.*` on a connected account: record the chargeback on the
+    order so the owner sees it beside the order rather than only in Stripe.
+
+    A LOST dispute means the money is gone for good, so the order is closed
+    out as refunded — without a restock, because unlike a refund nothing came
+    back to the shelf.
+    """
+    account_id = event.get("account")
+    intent = obj.get("payment_intent")
+    if not account_id or not isinstance(intent, str) or not intent:
+        return {"received": True}
+    dispute_status = str(obj.get("status") or "open")[:40]
+    async with get_connection() as conn:
+        async with conn.transaction():
+            order = await _order_for_charge(conn, intent, None, account_id)
+            if order is None:
+                return {"received": True}
+            await conn.execute(
+                "UPDATE cappe_orders SET dispute_status = $2, "
+                "disputed_at = COALESCE(disputed_at, NOW()), updated_at = NOW() WHERE id = $1",
+                order["id"], dispute_status,
+            )
+            if dispute_status == "lost":
+                await mark_order_refunded(
+                    conn, order_id=order["id"], site_id=order["site_id"],
+                    refunded_cents=int(obj.get("amount") or 0) or None,
+                    stripe_refund_id=None, restock=False,
+                )
+    logger.error(
+        "cappe order %s: Stripe dispute %s is %s (reason: %s)",
+        order["id"], obj.get("id"), dispute_status, obj.get("reason"),
+    )
+    return {"received": True, "status": "dispute_recorded"}
 
 
 async def _notify_collab_paid(offer_id: UUID, label: str, amount_cents: int) -> None:

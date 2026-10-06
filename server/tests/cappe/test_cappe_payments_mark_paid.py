@@ -20,7 +20,6 @@ import pytest  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 
 from app.cappe.routes import payments as mod  # noqa: E402
-from app.cappe.services import collab as collab_svc  # noqa: E402
 from app.cappe.services.stripe_connect import CappeStripeError  # noqa: E402
 
 ORDER_ID = "11111111-1111-4111-8111-111111111111"
@@ -177,47 +176,33 @@ def _collab_obj(amount_total=5000):
             "metadata": {"collab_payment_id": COLLAB_ID}}
 
 
-def test_on_accept_installment_activates_the_offer_and_notifies(monkeypatch):
-    conn = _use(monkeypatch, ScriptedConn(rows=[{
-        "offer_id": "off-1", "trigger": "on_accept", "label": "Deposit", "amount_cents": 5000,
-    }]))
+def test_a_collab_session_is_handed_to_the_installment_settler(monkeypatch):
+    """Settling an installment — and refusing or refunding one that cannot be
+    applied — lives in `_settle_collab_installment`
+    (tests/cappe/test_cappe_payments_refunds.py). Here: the paid path reaches
+    it with the event's own connected account."""
+    seen = []
 
-    async def _done(_conn, offer_id):
-        return True
+    async def _settle(cpid, obj, account_id, background):
+        seen.append((str(cpid), obj["id"], account_id))
 
-    monkeypatch.setattr(collab_svc, "check_completion", _done)
-    bg = Background()
-    assert _run(_collab_obj(), {"account": "acct_c"}, bg) == {"received": True}
-
-    kinds = [c[0] for c in conn.calls]
-    assert kinds == ["fetchrow", "execute"]
-    assert "status = 'active'" in conn.calls[1][1]
-    assert [t[0] for t in bg.tasks] == ["_notify_collab_paid", "_notify_collab_completed"]
-
-
-def test_installment_total_mismatch_is_logged(monkeypatch, caplog):
-    _use(monkeypatch, ScriptedConn(rows=[{
-        "offer_id": "off-1", "trigger": "on_delivery", "label": "Final", "amount_cents": 5000,
-    }]))
-
-    async def _not_done(_conn, offer_id):
-        return False
-
-    monkeypatch.setattr(collab_svc, "check_completion", _not_done)
-    bg = Background()
-    with caplog.at_level(logging.WARNING, logger=mod.logger.name):
-        _run(_collab_obj(amount_total=4200), {"account": "acct_c"}, bg)
-    assert any("!= stored" in r.getMessage() for r in caplog.records)
-    assert [t[0] for t in bg.tasks] == ["_notify_collab_paid"]
+    monkeypatch.setattr(mod, "_settle_collab_installment", _settle)
+    conn = _use(monkeypatch, ScriptedConn())
+    assert _run(_collab_obj(), {"account": "acct_c"}) == {"received": True}
+    assert seen == [(COLLAB_ID, "cs_c", "acct_c")]
+    assert conn.calls == []
 
 
-def test_unmatched_installment_is_an_error_for_manual_reconciliation(monkeypatch, caplog):
-    _use(monkeypatch, ScriptedConn(rows=[None]))
-    bg = Background()
-    with caplog.at_level(logging.ERROR, logger=mod.logger.name):
-        _run(_collab_obj(), {"account": "acct_c"}, bg)
-    assert bg.tasks == []
-    assert any("manual reconciliation" in r.getMessage() for r in caplog.records)
+def test_a_collab_session_without_an_event_account_is_not_settled(monkeypatch):
+    seen = []
+
+    async def _settle(*args):
+        seen.append(args)
+
+    monkeypatch.setattr(mod, "_settle_collab_installment", _settle)
+    _use(monkeypatch, ScriptedConn())
+    _run(_collab_obj(), {})
+    assert seen == []
 
 
 def test_unparseable_collab_id_touches_nothing(monkeypatch):

@@ -57,16 +57,20 @@ from ..models.cappe import (
     CappeDomainConfig,
     CappeDomainConnectRequest,
     CappeDomainPurchaseRequest,
+    CappeDomainRenewRequest,
     CappeDomainSearchResult,
 )
 from ..services.email import dashboard_url
 from ...core.services.porkbun import PorkbunError, get_porkbun
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 from ..services.domain_register import (
+    PURCHASE_SESSION_SECONDS,
+    begin_registration,
     finalize_domain_registration,
     provision_domain_edge,
     retry_domain_edge,
 )
+from .payments import _own_dashboard_url
 
 logger = logging.getLogger("cappe.domains")
 
@@ -78,8 +82,14 @@ _SEARCH_TLDS = ["com", "co", "shop", "store", "io", "site"]
 _DOMAIN_COLS = (
     "id, site_id, domain, kind, status, retail_cents AS price_cents, "
     "auto_renew, expires_at, failure_reason, verification_token, transfer_requested_at, "
-    "edge_status, edge_error, cf_routing_endpoint, created_at"
+    "edge_status, edge_error, cf_routing_endpoint, renewal_failed_at, renewal_error, created_at"
 )
+# A domain can be renewed by hand once it is this close to expiry (or past it).
+_MANUAL_RENEW_WINDOW_DAYS = 60
+# Statuses in which a domain is really held — these block a second claim.
+# `pending` deliberately does not: an unpaid checkout or an unverified connect
+# must never be able to lock a name away from whoever actually owns or buys it.
+_HELD_STATUSES = ("registering", "active", "transfer_requested")
 # ICANN locks a freshly registered domain from transferring out for 60 days.
 _TRANSFER_LOCK_DAYS = 60
 # Host prefix where a connect domain must publish its ownership TXT record.
@@ -190,25 +200,33 @@ async def purchase_domain(
 
     async with get_connection() as conn:
         await _require_owned_site(conn, account.id, body.site_id)
-        try:
-            row = await conn.fetchrow(
-                """INSERT INTO cappe_domains
-                       (account_id, site_id, domain, kind, status, wholesale_cents, retail_cents)
-                   VALUES ($1, $2, $3, 'register', 'pending', $4, $5)
-                   RETURNING id""",
-                account.id, body.site_id, body.domain, wholesale, retail,
+        if await conn.fetchval(
+            "SELECT 1 FROM cappe_domains WHERE domain = $1 AND status = ANY($2::text[])",
+            body.domain, list(_HELD_STATUSES),
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="That domain is already being set up"
             )
-        except Exception as exc:  # unique domain collision, etc.
-            if "cappe_domains_domain_key" in str(exc):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT, detail="That domain is already being set up"
-                )
-            raise
+        # No unique-violation handler: the only unique indexes on this table
+        # are partial (`WHERE status = 'active'`), so a `pending` INSERT cannot
+        # collide. The handler that used to sit here matched a constraint name
+        # (`cappe_domains_domain_key`) that no migration ever created.
+        row = await conn.fetchrow(
+            """INSERT INTO cappe_domains
+                   (account_id, site_id, domain, kind, status, wholesale_cents, retail_cents)
+               VALUES ($1, $2, $3, 'register', 'pending', $4, $5)
+               RETURNING id""",
+            account.id, body.site_id, body.domain, wholesale, retail,
+        )
     domain_id = row["id"]
 
     cs = get_cappe_stripe()
-    success = body.success_url or dashboard_url(f"/sites/{body.site_id}?domain=success")
-    cancel = body.cancel_url or dashboard_url(f"/sites/{body.site_id}?domain=canceled")
+    # Stripe renders these as links on its own hosted page, so a caller-supplied
+    # URL is only honoured when it points back at our app — otherwise a real
+    # Stripe checkout becomes a springboard to any address the caller picks.
+    # Billing and storefront checkout already filtered theirs; this did not.
+    success = _own_dashboard_url(body.success_url) or dashboard_url(f"/sites/{body.site_id}?domain=success")
+    cancel = _own_dashboard_url(body.cancel_url) or dashboard_url(f"/sites/{body.site_id}?domain=canceled")
     try:
         session = await cs.create_platform_checkout_session(
             currency="usd",
@@ -225,6 +243,9 @@ async def purchase_domain(
             metadata={"type": "cappe_domain", "domain_id": str(domain_id)},
             customer_email=account.email,
             save_card=True,  # store the card so the renewal cron can charge off-session
+            # A short-lived session: the pending row is a claim on the name for
+            # as long as it can still be paid (see `reap_abandoned_purchase`).
+            expires_in_seconds=PURCHASE_SESSION_SECONDS,
         )
     except CappeStripeError as exc:
         async with get_connection() as conn:
@@ -260,41 +281,36 @@ async def connect_domain(
         # this domain already exists (a prior connect click, a pending purchase,
         # or another account's claim). Resolve it explicitly: reuse THIS account's
         # own still-pending connect claim (repeat clicks become a no-op), else 409.
-        existing = await conn.fetchrow(
-            "SELECT account_id, site_id, kind, status FROM cappe_domains WHERE domain = $1",
-            body.domain,
+        # Repeat clicks reuse THIS account's own still-pending connect claim.
+        mine = await conn.fetchrow(
+            f"SELECT {_DOMAIN_COLS} FROM cappe_domains "
+            "WHERE domain = $1 AND account_id = $2 AND site_id = $3 "
+            "AND kind = 'connect' AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+            body.domain, account.id, body.site_id,
         )
-        if existing is not None:
-            reusable = (
-                existing["account_id"] == account.id
-                and existing["site_id"] == body.site_id
-                and existing["kind"] == "connect"
-                and existing["status"] == "pending"
-            )
-            if reusable:
-                row = await conn.fetchrow(
-                    f"SELECT {_DOMAIN_COLS} FROM cappe_domains WHERE domain = $1", body.domain
-                )
-                return dict(row)
+        if mine is not None:
+            return dict(mine)
+        # Only a domain that is really HELD blocks a new claim. This used to
+        # 409 on ANY existing row for the name — so one account starting (and
+        # abandoning) a purchase, or filing an unverified connect, locked the
+        # real owner out indefinitely. Pending claims are harmless: nothing is
+        # served or certified until one of them is verified, and the partial
+        # unique index lets only one go active.
+        if await conn.fetchval(
+            "SELECT 1 FROM cappe_domains WHERE domain = $1 AND status = ANY($2::text[])",
+            body.domain, list(_HELD_STATUSES),
+        ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="That domain is already connected or being set up",
             )
-        try:
-            row = await conn.fetchrow(
-                f"""INSERT INTO cappe_domains
-                        (account_id, site_id, domain, kind, status, verification_token)
-                    VALUES ($1, $2, $3, 'connect', 'pending', $4)
-                    RETURNING {_DOMAIN_COLS}""",
-                account.id, body.site_id, body.domain, token,
-            )
-        except Exception as exc:  # lost a race to a concurrent claim on the same domain
-            if "cappe_domains_domain_key" in str(exc):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="That domain is already connected or being set up",
-                )
-            raise
+        row = await conn.fetchrow(
+            f"""INSERT INTO cappe_domains
+                    (account_id, site_id, domain, kind, status, verification_token)
+                VALUES ($1, $2, $3, 'connect', 'pending', $4)
+                RETURNING {_DOMAIN_COLS}""",
+            account.id, body.site_id, body.domain, token,
+        )
     return dict(row)
 
 
@@ -524,6 +540,71 @@ async def set_auto_renew(
     return dict(row)
 
 
+# ── Renew by hand (the retry path when the automatic renewal can't collect) ──
+@router.post("/domains/{domain_id}/renew", response_model=CappeDomainCheckoutResponse)
+async def renew_domain(
+    domain_id: UUID, body: CappeDomainRenewRequest,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Pay for another year through Checkout.
+
+    The automatic renewal charges a saved card, and there was no way forward
+    when that failed, when there was no card, or when auto-renew was off: the
+    domain simply lapsed. This is that way forward. The card used here is
+    saved and becomes the one future renewals charge (see the webhook).
+    """
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT id, site_id, domain, kind, status, retail_cents,
+                      (expires_at IS NULL OR expires_at < NOW() + ($3 || ' days')::interval) AS due
+                 FROM cappe_domains WHERE id = $1 AND account_id = $2""",
+            domain_id, account.id, str(_MANUAL_RENEW_WINDOW_DAYS),
+        )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Domain not found")
+    if row["kind"] != "register":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A connected domain is renewed at your own registrar",
+        )
+    if row["status"] != "active":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Only an active domain can be renewed"
+        )
+    if not row["retail_cents"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="This domain has no renewal price on file"
+        )
+    if not row["due"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"This domain isn't due for renewal yet — it can be renewed within "
+                   f"{_MANUAL_RENEW_WINDOW_DAYS} days of its expiry date.",
+        )
+    back = dashboard_url(f"/sites/{row['site_id']}")
+    try:
+        session = await get_cappe_stripe().create_platform_checkout_session(
+            currency="usd",
+            line_items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {"name": f"Domain renewal — {row['domain']} (1 year)"},
+                    "unit_amount": int(row["retail_cents"]),
+                },
+                "quantity": 1,
+            }],
+            success_url=_own_dashboard_url(body.success_url) or f"{back}?domain=renewed",
+            cancel_url=_own_dashboard_url(body.cancel_url) or back,
+            metadata={"type": "cappe_domain_renewal", "domain_id": str(domain_id)},
+            customer_email=account.email,
+            save_card=True,
+            expires_in_seconds=PURCHASE_SESSION_SECONDS,
+        )
+    except CappeStripeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    return {"domain_id": domain_id, "checkout_url": session["url"]}
+
+
 # ── Transfer-out request (Porkbun has no auth-code API → manual fulfillment) ─
 @router.post("/domains/{domain_id}/transfer-request", response_model=CappeDomain)
 async def request_transfer(domain_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
@@ -625,6 +706,134 @@ async def retry_edge(domain_id: UUID, account: CappeAccount = Depends(require_ca
     return dict(updated)
 
 
+async def _apply_manual_renewal(event_type: str, obj: dict, meta: dict) -> dict:
+    """A `POST /domains/{id}/renew` checkout reached a terminal event."""
+    try:
+        did = UUID(str(meta.get("domain_id")))
+    except (ValueError, TypeError):
+        return {"received": True, "status": "ignored"}
+    if event_type == "checkout.session.async_payment_failed":
+        logger.info("cappe domain %s manual renewal payment failed", did)
+        return {"received": True, "status": "payment_failed"}
+    if obj.get("payment_status") != "paid":
+        return {"received": True, "status": "unpaid"}
+
+    payment_intent = obj.get("payment_intent")
+    cs = get_cappe_stripe()
+    payment_method_id = None
+    if payment_intent:
+        try:
+            payment_method_id = await cs.payment_method_for_intent(payment_intent)
+        except CappeStripeError as exc:
+            logger.warning("cappe domain %s: could not read the renewal payment method: %s", did, exc)
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """UPDATE cappe_domains
+                  SET expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + INTERVAL '1 year',
+                      stripe_customer_id = COALESCE($2, stripe_customer_id),
+                      stripe_payment_method_id = COALESCE($3, stripe_payment_method_id),
+                      renewal_attempted_at = NOW(), renewal_failed_at = NULL,
+                      renewal_notified_at = NULL, renewal_error = NULL, updated_at = NOW()
+                WHERE id = $1 AND kind = 'register' AND status = 'active'
+            RETURNING domain""",
+            did, obj.get("customer"), payment_method_id,
+        )
+    if row is None:
+        # Paid for a domain that lapsed or was removed while the page was open.
+        # The year can't be applied, so the money goes back.
+        try:
+            if payment_intent:
+                await cs.refund(payment_intent, idempotency_key=f"cappe-domain-renewal-unapplied-{payment_intent}")
+            logger.error(
+                "cappe domain %s: manual renewal paid (intent %s) but the domain is no longer "
+                "active — refunded automatically", did, payment_intent,
+            )
+        except CappeStripeError as exc:
+            logger.error(
+                "cappe domain %s: manual renewal paid (intent %s) for an inactive domain and the "
+                "refund FAILED: %s — MANUAL REFUND REQUIRED", did, payment_intent, exc,
+            )
+        return {"received": True, "status": "renewal_unapplied"}
+    # Our charge only recoups the registrar's renewal; Porkbun's own auto-renew
+    # is what actually extends the registration. It is switched off for a
+    # domain that was lapsing or had auto-renew off, so put it back on.
+    try:
+        await get_porkbun().set_auto_renew(row["domain"], True)
+    except PorkbunError as exc:
+        logger.error(
+            "cappe domain %s renewed and paid, but Porkbun auto-renew could not be switched on: "
+            "%s — renew it at the registrar by hand", did, exc,
+        )
+    logger.info("cappe domain %s renewed by hand (+1yr)", did)
+    return {"received": True, "status": "renewed"}
+
+
+async def _sync_platform_refund(obj: dict) -> Optional[str]:
+    """`charge.refunded` on OUR account. Returns a status when the charge was
+    a domain's, None when it is somebody else's (subscription billing follows
+    the subscription's own status and needs nothing here).
+
+    A full refund of a domain's purchase or renewal means nobody is paying for
+    it any more, so every future charge stops — ours and the registrar's. The
+    domain is NOT torn down: it keeps serving to the end of the term already
+    bought, then lapses with the same notice as any other unrenewed domain.
+    Before this a refunded domain stayed `active` and Porkbun kept renewing it
+    on our account for good.
+    """
+    intent = obj.get("payment_intent")
+    amount = int(obj.get("amount") or 0)
+    refunded = int(obj.get("amount_refunded") or 0)
+    if not (bool(obj.get("refunded")) or (amount > 0 and refunded >= amount)):
+        return None  # a partial (goodwill) refund changes nothing
+    refunds = ((obj.get("refunds") or {}).get("data") or []) if isinstance(obj.get("refunds"), dict) else []
+    refund_id = refunds[0].get("id") if refunds else None
+    meta = obj.get("metadata") or {}
+
+    row = None
+    async with get_connection() as conn:
+        if isinstance(intent, str) and intent:
+            row = await conn.fetchrow(
+                """UPDATE cappe_domains
+                      SET refund_status = 'refunded',
+                          refunded_at = COALESCE(refunded_at, NOW()),
+                          stripe_refund_id = COALESCE($2, stripe_refund_id),
+                          auto_renew = false,
+                          status = CASE WHEN status IN ('pending', 'registering') THEN 'failed' ELSE status END,
+                          failure_reason = CASE WHEN status IN ('pending', 'registering')
+                                                THEN 'Refunded before registration' ELSE failure_reason END,
+                          updated_at = NOW()
+                    WHERE stripe_payment_intent = $1
+                RETURNING id, domain, kind, status""",
+                intent, refund_id,
+            )
+        if row is None and meta.get("type") == "cappe_domain_renewal":
+            try:
+                did = UUID(str(meta.get("domain_id")))
+            except (ValueError, TypeError):
+                did = None
+            if did is not None:
+                row = await conn.fetchrow(
+                    "UPDATE cappe_domains SET auto_renew = false, updated_at = NOW() "
+                    "WHERE id = $1 RETURNING id, domain, kind, status",
+                    did,
+                )
+    if row is None:
+        return None
+    if row["kind"] == "register" and row["status"] in ("active", "transfer_requested"):
+        try:
+            await get_porkbun().set_auto_renew(row["domain"], False)
+        except PorkbunError as exc:
+            logger.error(
+                "cappe domain %s refunded, but Porkbun auto-renew could not be switched off: %s",
+                row["id"], exc,
+            )
+    logger.error(
+        "cappe domain %s (%s) was refunded in Stripe — auto-renew switched off; it will lapse at "
+        "the end of its current term", row["id"], row["domain"],
+    )
+    return "domain_refunded"
+
+
 # ── Platform webhook (domain purchases; OUR account, no event.account) ─────
 @router.post("/domains/webhook")
 async def domains_webhook(request: Request, background: BackgroundTasks):
@@ -699,21 +908,20 @@ async def domains_webhook(request: Request, background: BackgroundTasks):
                 )
                 return {"received": True, "status": "unpaid"}
 
-            payment_intent = obj.get("payment_intent")
-            customer_id = obj.get("customer")  # saved-card Customer (renewals)
-            async with get_connection() as conn:
-                row = await conn.fetchrow(
-                    """UPDATE cappe_domains
-                          SET status = 'registering', stripe_payment_intent = $2,
-                              stripe_customer_id = $3, updated_at = NOW()
-                        WHERE id = $1 AND status = 'pending'
-                        RETURNING id""",
-                    did, payment_intent, customer_id,
-                )
-            if row is not None:
+            # `customer` is the saved-card Customer; the payment method itself
+            # is read and stored inside begin_registration (renewals need it).
+            if await begin_registration(did, obj.get("payment_intent"), obj.get("customer")):
                 background.add_task(finalize_domain_registration, did)
                 logger.info("cappe domain %s paid; registering", did)
             return {"received": True}
+
+        if meta.get("type") == "cappe_domain_renewal" and event_type in _DOMAIN_CHECKOUT_EVENTS:
+            return await _apply_manual_renewal(event_type, obj, meta)
+
+        if event_type == "charge.refunded":
+            refund_status = await _sync_platform_refund(obj)
+            if refund_status:
+                return {"received": True, "status": refund_status}
 
         # Everything else that could be ours: subscription billing. The handler
         # resolves the subscription against our own tables and returns

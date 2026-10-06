@@ -196,6 +196,13 @@ class CappeOrder(BaseModel):
     requires_approval: bool = False
     approved_at: Optional[datetime] = None
     decline_reason: Optional[str] = None
+    # A refund is an event with an amount, not only a status: a PARTIAL refund
+    # made in Stripe records its amount here while the status stays paid.
+    refunded_at: Optional[datetime] = None
+    refunded_cents: int = 0
+    # A chargeback opened against the order (Stripe's dispute status), if any.
+    dispute_status: Optional[str] = None
+    disputed_at: Optional[datetime] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime

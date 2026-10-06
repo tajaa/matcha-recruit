@@ -16,6 +16,7 @@ All Stripe calls run in a worker thread (`asyncio.to_thread`) — the SDK is syn
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any, Optional
 
 try:
@@ -28,6 +29,28 @@ from ...config import get_settings
 
 class CappeStripeError(Exception):
     """Raised when Cappe Stripe operations fail or are misconfigured."""
+
+
+class CappeStripeCardError(CappeStripeError):
+    """The CARD was refused — declined, expired, or it needs the cardholder
+    present (authentication_required) — or there is no card to charge.
+
+    Kept apart from `CappeStripeError` because the two demand opposite
+    responses. A refused card is the customer's to fix: tell them, and
+    eventually lapse what they are not paying for. An outage, a bad key or a
+    malformed request is OURS: retry later and never punish the customer for
+    it. The renewal sweep used to treat both as "could not collect" and expired
+    a paid-up tenant's domain on any Stripe error at all.
+    """
+
+    def __init__(self, message: str, *, code: Optional[str] = None):
+        super().__init__(message)
+        self.code = code
+
+
+def _is_card_error(exc: BaseException) -> bool:
+    card_error = getattr(stripe, "CardError", None) if stripe is not None else None
+    return isinstance(card_error, type) and isinstance(exc, card_error)
 
 
 def platform_fee_cents(amount_cents: int) -> int:
@@ -284,6 +307,44 @@ class CappeStripe:
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to expire checkout session: {exc}") from exc
 
+    async def refund_connected_charge(
+        self, *, account_id: str, payment_intent: str, idempotency_key: Optional[str] = None,
+    ):
+        """Refund, in full, a DIRECT charge that lives on a connected account —
+        a storefront order or a collab installment.
+
+        `refund()` below cannot do this: it runs on the platform account, where
+        a connected account's PaymentIntent does not exist. The `stripe_account`
+        header is what reaches it. `refund_application_fee=True` hands our
+        platform fee back too — keeping a fee on a sale that was undone would
+        make the merchant pay us for a refund.
+
+        The idempotency key makes a retried or double-clicked refund return the
+        first refund rather than attempting a second.
+        """
+        self._ensure_key()
+
+        def _refund():
+            kwargs: dict[str, Any] = {"idempotency_key": idempotency_key} if idempotency_key else {}
+            return stripe.Refund.create(
+                payment_intent=payment_intent,
+                refund_application_fee=True,
+                stripe_account=account_id,
+                **kwargs,
+            )
+
+        try:
+            return await asyncio.to_thread(_refund)
+        except Exception as exc:  # noqa: BLE001
+            if getattr(exc, "code", None) == "charge_already_refunded":
+                # Refunded already — in the Stripe dashboard, or by an earlier
+                # attempt whose response we never saw. The money IS back with
+                # the customer, which is what the caller needs to know; failing
+                # here would leave the order un-refundable from our side for
+                # ever.
+                return {"id": None, "already_refunded": True}
+            raise CappeStripeError(f"Failed to refund: {exc}") from exc
+
     # ── Platform checkout (our own revenue — domains, plans; NO Connect) ───
     async def create_platform_checkout_session(
         self,
@@ -295,11 +356,16 @@ class CappeStripe:
         metadata: dict[str, str],
         customer_email: Optional[str] = None,
         save_card: bool = False,
+        expires_in_seconds: Optional[int] = None,
     ):
         """Checkout Session on OUR platform account (we keep 100%). Used for
         domain registration and plan billing — no connected account, no fee.
         With save_card, create a Customer + store the card off-session so renewals
-        can charge it later."""
+        can charge it later.
+
+        `expires_in_seconds` shortens Stripe's default 24h session lifetime
+        (minimum 30 minutes). A domain purchase holds a claim on the name while
+        its session is payable, so the shorter the better."""
         self._ensure_key()
 
         def _create():
@@ -308,6 +374,8 @@ class CappeStripe:
             if save_card:
                 pi_data["setup_future_usage"] = "off_session"
                 kwargs["customer_creation"] = "always"
+            if expires_in_seconds:
+                kwargs["expires_at"] = int(time.time()) + max(1800, int(expires_in_seconds))
             return stripe.checkout.Session.create(
                 mode="payment",
                 success_url=success_url,
@@ -324,14 +392,90 @@ class CappeStripe:
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to create checkout session: {exc}") from exc
 
+    async def expire_platform_checkout_session(self, session_id: str) -> str:
+        """Close a PLATFORM Checkout Session; returns 'expired' or 'complete'.
+        Same contract as `expire_checkout_session`, minus the connected account."""
+        self._ensure_key()
+
+        def _expire():
+            sess = stripe.checkout.Session.retrieve(session_id)
+            state = str(sess.get("status") or "")
+            if state == "open":
+                sess = stripe.checkout.Session.expire(session_id)
+                state = str(sess.get("status") or "")
+            return state
+
+        try:
+            return await asyncio.to_thread(_expire)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to expire checkout session: {exc}") from exc
+
+    async def retrieve_platform_checkout_session(self, session_id: str):
+        self._ensure_key()
+        try:
+            return await asyncio.to_thread(stripe.checkout.Session.retrieve, session_id)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to retrieve checkout session: {exc}") from exc
+
+    async def payment_method_for_intent(self, payment_intent: str) -> Optional[str]:
+        """The PaymentMethod id a platform PaymentIntent was paid with.
+
+        Read at purchase time and stored, because it is the only thing an
+        off-session charge can use: a PaymentIntent does NOT fall back to "the
+        customer's card". `setup_future_usage` attaches the card to the Customer
+        but nothing ever made it a default, so a renewal that passed only the
+        customer id had nothing to charge.
+        """
+        self._ensure_key()
+        try:
+            pi = await asyncio.to_thread(stripe.PaymentIntent.retrieve, payment_intent)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to retrieve payment intent: {exc}") from exc
+        pm = pi.get("payment_method")
+        if isinstance(pm, dict):
+            pm = pm.get("id")
+        return pm if isinstance(pm, str) and pm else None
+
+    async def card_fingerprint(self, payment_method_id: str) -> Optional[str]:
+        """Stripe's stable per-card fingerprint for a platform PaymentMethod —
+        the same physical card yields the same value across customers."""
+        self._ensure_key()
+        try:
+            pm = await asyncio.to_thread(stripe.PaymentMethod.retrieve, payment_method_id)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to retrieve payment method: {exc}") from exc
+        fingerprint = (pm.get("card") or {}).get("fingerprint")
+        return fingerprint if isinstance(fingerprint, str) and fingerprint else None
+
+    async def saved_card_for_customer(self, customer_id: str) -> Optional[str]:
+        """Most recently attached card PaymentMethod on a platform Customer, or
+        None. The fallback for rows written before the payment method id was
+        stored at purchase."""
+        self._ensure_key()
+
+        def _list():
+            return stripe.PaymentMethod.list(customer=customer_id, type="card", limit=1)
+
+        try:
+            listed = await asyncio.to_thread(_list)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to list payment methods: {exc}") from exc
+        data = listed.get("data") or []
+        return data[0].get("id") if data else None
+
     async def charge_off_session(
-        self, *, customer_id: str, amount_cents: int, currency: str, metadata: dict[str, str],
-        idempotency_key: Optional[str] = None,
+        self, *, customer_id: str, payment_method_id: str, amount_cents: int, currency: str,
+        metadata: dict[str, str], idempotency_key: Optional[str] = None,
     ):
-        """Charge a saved-card Customer off-session (e.g. a domain renewal).
-        Raises CappeStripeError on decline so the caller can dun/lapse. The
-        idempotency key (24h replay) keeps a retrying cron from double-charging
-        or re-hammering a declined card within a renewal window."""
+        """Charge a Customer's saved card off-session (e.g. a domain renewal).
+
+        `payment_method_id` is required — see `payment_method_for_intent`.
+
+        Raises `CappeStripeCardError` when the CARD is the problem (declined,
+        expired, authentication required) and plain `CappeStripeError` for
+        everything else, so the caller can dun the customer for the first and
+        simply retry the second. The idempotency key keeps a retrying cron from
+        double-charging."""
         self._ensure_key()
 
         def _charge():
@@ -340,6 +484,7 @@ class CappeStripe:
                 amount=amount_cents,
                 currency=currency,
                 customer=customer_id,
+                payment_method=payment_method_id,
                 off_session=True,
                 confirm=True,
                 metadata=metadata,
@@ -349,20 +494,62 @@ class CappeStripe:
         try:
             return await asyncio.to_thread(_charge)
         except Exception as exc:  # noqa: BLE001
+            if _is_card_error(exc):
+                raise CappeStripeCardError(
+                    f"Card was refused: {exc}", code=getattr(exc, "code", None)
+                ) from exc
             raise CappeStripeError(f"Off-session charge failed: {exc}") from exc
 
-    async def refund(self, payment_intent: str):
+    async def refund(self, payment_intent: str, *, idempotency_key: Optional[str] = None):
         """Refund a platform charge in full (e.g. domain registration failed
-        after the customer paid)."""
+        after the customer paid). The idempotency key makes a retried refund
+        return the first one instead of failing as already-refunded."""
         self._ensure_key()
 
         def _refund():
-            return stripe.Refund.create(payment_intent=payment_intent)
+            kwargs = {"idempotency_key": idempotency_key} if idempotency_key else {}
+            return stripe.Refund.create(payment_intent=payment_intent, **kwargs)
 
         try:
             return await asyncio.to_thread(_refund)
         except Exception as exc:  # noqa: BLE001
+            if getattr(exc, "code", None) == "charge_already_refunded":
+                return {"id": None, "already_refunded": True}  # see refund_connected_charge
             raise CappeStripeError(f"Failed to refund: {exc}") from exc
+
+    async def refund_invoice(self, invoice_id: str) -> list[str]:
+        """Refund every paid payment on a platform invoice; returns refund ids.
+
+        For a subscription that should never have existed (the double-checkout
+        race): cancelling it stops future billing but leaves the invoice it
+        already collected in our account.
+
+        `Invoice.payment_intent` was removed from recent API versions in favour
+        of the InvoicePayment list, so both shapes are read.
+        """
+        self._ensure_key()
+
+        def _refund_all():
+            intents: list[str] = []
+            lister = getattr(stripe, "InvoicePayment", None)
+            if lister is not None:
+                for pay in (lister.list(invoice=invoice_id, limit=10).get("data") or []):
+                    intent = (pay.get("payment") or {}).get("payment_intent")
+                    if pay.get("status") == "paid" and isinstance(intent, str):
+                        intents.append(intent)
+            if not intents:
+                legacy = stripe.Invoice.retrieve(invoice_id).get("payment_intent")
+                if isinstance(legacy, str):
+                    intents.append(legacy)
+            return [
+                stripe.Refund.create(payment_intent=pi, idempotency_key=f"cappe-invoice-refund-{pi}")["id"]
+                for pi in intents
+            ]
+
+        try:
+            return await asyncio.to_thread(_refund_all)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to refund invoice: {exc}") from exc
 
     async def verify_platform_webhook(self, payload: bytes, signature: str):
         """Verify a PLATFORM webhook (domain/plan checkout). Distinct endpoint +
@@ -591,6 +778,11 @@ class CappeStripe:
                 price=price_id,
                 quantity=int(quantity),
                 proration_behavior="always_invoice",
+                # Without this the item is added even when the proration
+                # invoice's payment fails, and the add-on is provisioned unpaid.
+                # With it, a failed payment leaves the subscription untouched
+                # and parks the change in `pending_update`.
+                payment_behavior="pending_if_incomplete",
             )
 
         try:
@@ -608,10 +800,16 @@ class CappeStripe:
         self._ensure_key()
 
         def _modify():
+            kwargs: dict[str, Any] = {}
+            if invoice_now:
+                # An INCREASE is only real once its invoice is paid — see
+                # add_subscription_item.
+                kwargs["payment_behavior"] = "pending_if_incomplete"
             return stripe.SubscriptionItem.modify(
                 item_id,
                 quantity=int(quantity),
                 proration_behavior="always_invoice" if invoice_now else "create_prorations",
+                **kwargs,
             )
 
         try:

@@ -788,3 +788,49 @@ async def send_cappe_subscribe_confirm_email(
     # the confirmation is retried instead of stranding the row pending forever.
     return await _send(to_email, to_name, f"Confirm your subscription to {site_name}", html, text,
                        label="subscribe confirm", log_recipient=False)
+
+
+# ── transactional: domain renewals ───────────────────────────────────────────
+
+async def send_cappe_domain_renewal_problem_email(
+    to_email: str, to_name: str | None, domain: str, expires_on: str, reason: str, link: str,
+) -> None:
+    """A domain is about to lapse and we could not renew it: the card was
+    refused, there is no card on file, or auto-renew is off. Sent ONCE per
+    renewal cycle — before this, a failed renewal was silent right up to the
+    day the domain went offline."""
+    e_domain, e_date = escape(domain), escape(expires_on)
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f'<b style="color:#fafafa;">{e_domain}</b> expires on <b style="color:#fafafa;">{e_date}</b> '
+        f'and has not been renewed: {escape(reason)}</p>'
+        '<p style="margin:0;font-size:13px;line-height:1.6;color:#a1a1aa;">'
+        "Renew it from your site's domain settings to keep your address — and your site — online.</p>"
+    )
+    html = _email_shell(f"Action needed — renew {e_domain}", body, cta_label="Renew domain",
+                        cta_url=link, accent="#f59e0b")
+    text = (f"{domain} expires on {expires_on} and has not been renewed: {reason}\n\n"
+            f"Renew it to keep your site online: {link}")
+    await _send(to_email, to_name, f"Action needed — renew {domain}", html, text,
+                label="domain renewal problem")
+
+
+async def send_cappe_domain_lapsed_email(
+    to_email: str, to_name: str | None, domain: str, link: str,
+) -> None:
+    """The domain was not renewed and has lapsed."""
+    e_domain = escape(domain)
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f'<b style="color:#fafafa;">{e_domain}</b> was not renewed and has expired. '
+        "Your site is still available at its gummfit address.</p>"
+        '<p style="margin:0;font-size:13px;line-height:1.6;color:#a1a1aa;">'
+        "If you still want this domain, reply to this email as soon as you can — an expired "
+        "domain can often be recovered for a short time.</p>"
+    )
+    html = _email_shell(f"{e_domain} has expired", body, cta_label="Open domain settings",
+                        cta_url=link, accent="#ef4444")
+    text = (f"{domain} was not renewed and has expired. Your site is still available at its "
+            f"gummfit address.\n\nIf you still want this domain, reply to this email soon.\n\n{link}")
+    await _send(to_email, to_name, f"{domain} has expired", html, text, label="domain lapsed")
+
