@@ -31,6 +31,7 @@ from ..services.email import (
     dashboard_url,
     send_cappe_collab_completed_email,
     send_cappe_collab_paid_email,
+    send_cappe_order_alert_email,
 )
 from ..services.inventory import release_order_bookings, restock_order, retake_order_stock
 from ..services.order_lifecycle import mark_order_refunded
@@ -370,7 +371,9 @@ async def _mark_order_paid(obj, event, background) -> dict:
                     WHERE o.id = $1 AND o.status = 'pending'
                       AND s.id = o.site_id AND a.id = s.account_id
                       AND a.stripe_account_id = $4
-                    RETURNING o.id, o.site_id, o.customer_email, o.customer_name, o.shopper_id""",
+                    RETURNING o.id, o.site_id, o.customer_email, o.customer_name, o.shopper_id,
+                              o.total_cents, o.subtotal_cents, o.currency,
+                              s.name AS site_name, a.email AS owner_email, a.name AS owner_name""",
                 oid,
                 payment_intent,
                 fee,
@@ -386,6 +389,17 @@ async def _mark_order_paid(obj, event, background) -> dict:
             background.add_task(
                 issue_receipt_for_paid_order, row["id"], row["site_id"]
             )
+            # Tell the owner. The alert used to go out only for orders that took
+            # NO card — so a store with Stripe connected, the normal case, heard
+            # nothing about a sale until someone opened the dashboard.
+            if row.get("owner_email"):
+                background.add_task(
+                    send_cappe_order_alert_email, row["owner_email"], row.get("owner_name"),
+                    row.get("site_name") or "", row.get("customer_name"),
+                    row.get("total_cents") or row.get("subtotal_cents") or 0,
+                    row.get("currency") or "USD",
+                    dashboard_url(f"/sites/{row['site_id']}/orders"),
+                )
             logger.info("cappe order %s marked paid via Stripe", order_id)
         else:
             async with get_connection() as conn:
@@ -695,6 +709,9 @@ async def _sync_charge_refunded(obj, event) -> dict:
                     moved = await mark_order_refunded(
                         conn, order_id=order["id"], site_id=order["site_id"],
                         refunded_cents=refunded or None, stripe_refund_id=refund_id,
+                        # Same default as the refund route: goods that already
+                        # shipped are not assumed to be back on the shelf.
+                        restock=order["status"] != "fulfilled",
                     )
                     if moved is not None:
                         logger.info("cappe order %s refunded in Stripe; synced", order["id"])

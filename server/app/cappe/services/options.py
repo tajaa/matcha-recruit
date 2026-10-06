@@ -60,6 +60,37 @@ def validate_and_price_options(groups, selected_ids):
     return delta_total, snapshot
 
 
+def match_prior_rows(prior: list, incoming: list) -> tuple[list, list]:
+    """Pair each incoming option group / option with the stored row it continues.
+
+    Returns `(paired, gone)`: `paired[i]` is the stored row `incoming[i]`
+    updates (None = it is new), `gone` the stored rows nothing claimed.
+
+    Ids are honoured first, across the whole list, so an id always wins over a
+    same-named sibling; whatever is left pairs by name, one stored row per
+    incoming row. The name pass is what keeps ids stable for a client that
+    never sends them. A rename without an id is therefore a delete + create —
+    which is exactly what every save used to be for every row.
+    """
+    left = list(prior)
+    paired: list = [None] * len(incoming)
+    for i, item in enumerate(incoming):
+        if item.id is None:
+            continue
+        hit = next((row for row in left if row["id"] == item.id), None)
+        if hit is not None:
+            left.remove(hit)
+            paired[i] = hit
+    for i, item in enumerate(incoming):
+        if paired[i] is not None:
+            continue
+        hit = next((row for row in left if row["name"] == item.name), None)
+        if hit is not None:
+            left.remove(hit)
+            paired[i] = hit
+    return paired, left
+
+
 async def fetch_option_groups(conn, product_ids: list) -> dict:
     """{product_id: [group dicts with nested options]} for the given products.
     Read-only; shared by the owner shop routes and the public storefront."""

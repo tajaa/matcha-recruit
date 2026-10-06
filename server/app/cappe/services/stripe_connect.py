@@ -68,6 +68,11 @@ def platform_fee_cents(amount_cents: int) -> int:
 # later one-column follow-up, not scope here.
 CAPPE_SHIPPING_COUNTRIES = ["US"]
 
+# How long a storefront payment page stays payable: Stripe's 30-minute minimum
+# plus a minute, so a slightly fast clock here can never produce a rejected
+# `expires_at`.
+CONNECT_CHECKOUT_TTL_SECONDS = 31 * 60
+
 
 def build_shipping_options(shipping_option: Optional[dict], currency: str) -> Optional[list[dict]]:
     """Translate {label, amount_cents} into Stripe's shipping_options shape.
@@ -159,6 +164,7 @@ class CappeStripe:
         customer_id: Optional[str] = None,
         collect_shipping_address: bool = False,
         shipping_option: Optional[dict] = None,
+        expires_in_seconds: Optional[int] = None,
     ):
         """Create a Checkout Session ON the connected account (direct charge),
         taking a platform `application_fee_amount`. Returns the Session.
@@ -173,6 +179,12 @@ class CappeStripe:
         With `collect_shipping_address`, Stripe collects the buyer's address
         (US only) and `shipping_option` renders as a real shipping row included
         in amount_total; the fee stays on the goods subtotal.
+
+        `expires_in_seconds` shortens Stripe's default 24h session lifetime. The
+        order behind a session holds stock from the moment it is created, so an
+        abandoned page would otherwise keep those units off the shelf for a day.
+        Stripe refuses anything under 30 minutes; `CONNECT_CHECKOUT_TTL_SECONDS`
+        leaves a minute of clock-skew margin above that.
         """
         self._ensure_key()
         fee = max(0, int(application_fee_cents))
@@ -190,6 +202,10 @@ class CappeStripe:
                 opts = build_shipping_options(shipping_option, currency)
                 if opts:
                     extra["shipping_options"] = opts
+            if expires_in_seconds:
+                extra["expires_at"] = int(time.time()) + max(
+                    CONNECT_CHECKOUT_TTL_SECONDS, int(expires_in_seconds)
+                )
             return stripe.checkout.Session.create(
                 mode="payment",
                 success_url=success_url,

@@ -23,23 +23,43 @@ def _in_window(d: dict, on_date: date) -> bool:
     return True
 
 
+def _at_location(d: dict, kind: str, location_id) -> bool:
+    """Whether a discount is in force where the sale happens.
+
+    A discount with no location applies everywhere. One created for a location
+    applies to bookings AT that location only — and never to products: the
+    online shop has no location, so "10% off at the Mission salon" used to take
+    10% off everything the shop sold.
+    """
+    where = d.get("location_id")
+    if where is None:
+        return True
+    if kind != "booking_type" or location_id is None:
+        return False
+    return str(where) == str(location_id)
+
+
 def best_discount_percent(
     discounts: Sequence[dict],
     *,
     kind: str,                       # 'booking_type' or 'product'
     target_id: Optional[str],
     on_date: date,
+    location_id=None,                # the booking's location, when it has one
 ) -> int:
     """Highest applicable percent-off for one offering, else 0.
 
     A discount applies when it's active, within its date window on `on_date`,
-    and its scope matches — `all` (everything), or the matching scope+target.
+    in force at `location_id` (see `_at_location`), and its scope matches —
+    `all` (everything), or the matching scope+target.
     """
     best = 0
     for d in discounts:
         if not d.get("active"):
             continue
         if not _in_window(d, on_date):
+            continue
+        if not _at_location(d, kind, location_id):
             continue
         scope = d.get("scope")
         if scope == "all":
@@ -83,7 +103,7 @@ def site_today(now_utc, tz_name) -> date:
 async def fetch_active_discounts(conn, site_id) -> list[dict]:
     """Active discounts for a site, shaped for `best_discount_percent`."""
     rows = await conn.fetch(
-        "SELECT percent_off, scope, target_id, active, starts_on, ends_on "
+        "SELECT percent_off, scope, target_id, active, starts_on, ends_on, location_id "
         "FROM cappe_discounts WHERE site_id = $1 AND active = true",
         site_id,
     )
@@ -92,6 +112,7 @@ async def fetch_active_discounts(conn, site_id) -> list[dict]:
             "percent_off": r["percent_off"], "scope": r["scope"],
             "target_id": str(r["target_id"]) if r["target_id"] else None,
             "active": r["active"], "starts_on": r["starts_on"], "ends_on": r["ends_on"],
+            "location_id": str(r["location_id"]) if r["location_id"] else None,
         }
         for r in rows
     ]

@@ -20,14 +20,24 @@ Fulfillment = Literal["physical", "digital", "service", "booking"]
 # pick any (checkboxes). Each option carries a SIGNED price delta. The whole set
 # is replaced on product create/update (mirrors availability/rate-rule replace).
 class CappeProductOptionInput(BaseModel):
+    # An existing option's id, so an edit UPDATES the row instead of replacing
+    # it. Order lines, subscriptions and the stock ledger all point at option
+    # ids; a save that minted new ones orphaned every one of them. Omitted →
+    # matched by name within its group, else created.
+    id: Optional[UUID] = None
     name: str = Field(min_length=1, max_length=120)
     price_delta_cents: int = 0
     sort_order: int = 0
-    # Per-variant stock (NULL = untracked/unlimited). Decremented at checkout.
+    # Per-variant stock, decremented at checkout. On an EXISTING option this is
+    # tri-state: omitted leaves the stock alone, a number sets it, an explicit
+    # null stops tracking. A new option with none is untracked.
     inventory: Optional[int] = Field(default=None, ge=0)
+    # The stock the editor was showing (see CappeProductUpdate.expected_inventory).
+    expected_inventory: Optional[int] = None
 
 
 class CappeProductOptionGroupInput(BaseModel):
+    id: Optional[UUID] = None
     name: str = Field(min_length=1, max_length=120)
     select_type: Literal["single", "multi"] = "single"
     required: bool = False
@@ -104,6 +114,10 @@ class CappeProductUpdate(BaseModel):
     intake_fields: Optional[list[dict[str, Any]]] = None
     category: Optional[str] = Field(default=None, max_length=120)
     option_groups: Optional[list[CappeProductOptionGroupInput]] = None
+    # The stock the editor was showing when `inventory` was typed. Sent with a
+    # stock change so a sale made in between is a 409 instead of being
+    # overwritten. Not a column — never written.
+    expected_inventory: Optional[int] = None
 
     @field_validator("subscription_intervals")
     @classmethod
@@ -158,7 +172,6 @@ class CappeInventoryAdjustment(BaseModel):
     reason: str
     note: Optional[str] = None
     created_at: datetime
-    updated_at: datetime
 
 
 class CappeOrderItem(BaseModel):
@@ -207,6 +220,9 @@ class CappeOrder(BaseModel):
     created_at: datetime
     updated_at: datetime
     items: list[CappeOrderItem] = Field(default_factory=list)
+    # List view only (the list carries no `items`): enough to tell orders apart.
+    item_count: int = 0
+    items_summary: Optional[str] = None
 
 
 # --- Approval queue (unified bookings + orders awaiting the creator) ---------
@@ -250,6 +266,13 @@ class CappeOrderStatusUpdate(BaseModel):
         if self.status is None and not ({"carrier", "tracking_number"} & self.model_fields_set):
             raise ValueError("Provide status, carrier, or tracking_number")
         return self
+
+
+class CappeRefundRequest(BaseModel):
+    """Refund options. `restock` omitted → goods come back to the shelf unless
+    the order was already fulfilled (shipped goods are usually not coming back;
+    a lost parcel refunded with a restock invents stock)."""
+    restock: Optional[bool] = None
 
 
 class CappeDeliverableUpdate(BaseModel):
@@ -370,6 +393,7 @@ __all__ = [
     "CappeOrder",
     "CappeRequestSummary",
     "CappeOrderStatusUpdate",
+    "CappeRefundRequest",
     "CappeDeliverableUpdate",
     "CappeCartItem",
     "CappeCheckoutRequest",

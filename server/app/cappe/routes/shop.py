@@ -7,9 +7,10 @@ site without Connect, an approval-gated cart — are created 'pending' and the
 owner advances status by hand here.
 """
 import json
+from typing import Annotated, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from ...database import get_connection
 from ..dependencies import require_cappe_account
@@ -24,9 +25,11 @@ from ..models.cappe import (
     CappeProduct,
     CappeProductCreate,
     CappeProductUpdate,
+    CappeRefundRequest,
     CappeStockAdjust,
 )
 from ._shared import build_patch, fetch_option_groups, get_owned_site, loads, loads_list
+from ..services.options import match_prior_rows
 from ..services.common import receipt_filename as _receipt_filename
 from ..services.directory import refresh_site_search
 from ..services.inventory import log_adjustment, release_order_bookings, restock_order
@@ -143,56 +146,137 @@ def _item_row(row) -> dict:
     return d
 
 
+def _stock_conflict(now: int | None) -> HTTPException:
+    """The stock the editor was showing is not the stock on the shelf any more."""
+    state = "is no longer tracked" if now is None else f"is now {now}"
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=f"Stock changed while you were editing — it {state} (a sale, a return or another "
+               "edit). Reload the product and set the stock again.",
+    )
+
+
 async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
-    """Replace a product's option groups+options in one shot (None = leave as-is,
-    [] = clear). Mirrors the availability/rate-rule replace pattern."""
+    """Bring a product's option groups + options in line with `groups`
+    (None = leave as-is, [] = clear), keeping the id of everything that
+    survives.
+
+    This used to delete every group and insert the set again, so each save
+    minted new option ids. Order lines (`selected_option_ids`), subscription
+    snapshots and the stock ledger all point at option ids: after any edit a
+    cancelled or refunded order no longer restocked its variant, renewals
+    stopped decrementing it, and a shopper with the product open was told
+    "Unknown product option". Rows are now matched (`match_prior_rows`) and
+    updated in place.
+
+    Option stock is tri-state on an existing option — omitted leaves it alone,
+    a number sets it (with a ledger row), null stops tracking — so an edit that
+    is not about stock cannot write a stale count over sales made since the
+    form loaded. MUST run inside the caller's transaction, after it has locked
+    the product row (products before options, the order `lock_stock_rows` uses).
+    """
     if groups is None:
         return
-    # Preserve per-variant stock across the destructive replace: if an incoming
-    # option omits inventory (None), inherit the prior value matched by
-    # (group name, option name) so an unrelated product edit can't wipe stock.
-    prior = await conn.fetch(
-        "SELECT g.name AS gname, o.name AS oname, o.inventory, o.id AS oid "
-        "FROM cappe_product_options o JOIN cappe_product_option_groups g ON g.id = o.group_id "
-        "WHERE g.product_id = $1",
-        product_id,
-    )
-    prior_inv = {(r["gname"], r["oname"]): r["inventory"] for r in prior}
-    prior_oid = {(r["gname"], r["oname"]): r["oid"] for r in prior}
-    ledger: dict = {}
-    old_ids = [r["oid"] for r in prior]
-    if old_ids:
-        for r in await conn.fetch(
-            "SELECT id, option_id FROM cappe_inventory_adjustments WHERE option_id = ANY($1)", old_ids
-        ):
-            ledger.setdefault(r["option_id"], []).append(r["id"])
-    await conn.execute(
-        "DELETE FROM cappe_product_option_groups WHERE product_id = $1 AND site_id = $2",
+    prior_groups = await conn.fetch(
+        "SELECT id, name FROM cappe_product_option_groups "
+        "WHERE product_id = $1 AND site_id = $2 ORDER BY sort_order, created_at",
         product_id, site_id,
     )
-    for gi, g in enumerate(groups):
-        gid = await conn.fetchval(
-            """INSERT INTO cappe_product_option_groups
-                   (site_id, product_id, name, select_type, required, sort_order)
-               VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
-            site_id, product_id, g.name, g.select_type, g.required,
-            g.sort_order if g.sort_order is not None else gi,
-        )
-        for oi, o in enumerate(g.options or []):
-            inv = o.inventory if o.inventory is not None else prior_inv.get((g.name, o.name))
-            new_oid = await conn.fetchval(
-                """INSERT INTO cappe_product_options
-                       (site_id, group_id, name, price_delta_cents, sort_order, inventory)
+    prior_options = await conn.fetch(
+        "SELECT o.id, o.group_id, o.name, o.inventory FROM cappe_product_options o "
+        "JOIN cappe_product_option_groups g ON g.id = o.group_id "
+        "WHERE g.product_id = $1 AND o.site_id = $2 ORDER BY o.id FOR UPDATE OF o",
+        product_id, site_id,
+    )
+    options_by_group: dict = {}
+    for row in prior_options:
+        options_by_group.setdefault(row["group_id"], []).append(row)
+
+    group_pairs, groups_gone = match_prior_rows(list(prior_groups), groups)
+    for gi, (g, was) in enumerate(zip(groups, group_pairs)):
+        # Position is the order unless the caller pinned one: rows keep their
+        # created_at now, so it can no longer stand in for "the order sent".
+        g_sort = g.sort_order if "sort_order" in g.model_fields_set else gi
+        if was is None:
+            gid = await conn.fetchval(
+                """INSERT INTO cappe_product_option_groups
+                       (site_id, product_id, name, select_type, required, sort_order)
                    VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
-                site_id, gid, o.name, o.price_delta_cents,
-                o.sort_order if o.sort_order is not None else oi, inv,
+                site_id, product_id, g.name, g.select_type, g.required, g_sort,
             )
-            move = ledger.get(prior_oid.get((g.name, o.name)))
-            if move:
-                await conn.execute(
-                    "UPDATE cappe_inventory_adjustments SET option_id = $1 WHERE id = ANY($2)",
-                    new_oid, move,
+            stored = []
+        else:
+            gid = was["id"]
+            await conn.execute(
+                "UPDATE cappe_product_option_groups "
+                "SET name = $1, select_type = $2, required = $3, sort_order = $4 WHERE id = $5",
+                g.name, g.select_type, g.required, g_sort, gid,
+            )
+            stored = options_by_group.get(gid, [])
+
+        incoming = g.options or []
+        option_pairs, options_gone = match_prior_rows(stored, incoming)
+        for oi, (o, owas) in enumerate(zip(incoming, option_pairs)):
+            o_sort = o.sort_order if "sort_order" in o.model_fields_set else oi
+            if owas is None:
+                new_oid = await conn.fetchval(
+                    """INSERT INTO cappe_product_options
+                           (site_id, group_id, name, price_delta_cents, sort_order, inventory)
+                       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
+                    site_id, gid, o.name, o.price_delta_cents, o_sort, o.inventory,
                 )
+                if o.inventory is not None:
+                    await log_adjustment(
+                        conn, site_id=site_id, product_id=product_id, option_id=new_oid,
+                        delta=o.inventory, balance_after=o.inventory,
+                        reason="adjustment", note="Opening stock",
+                    )
+                continue
+            sets = "name = $1, price_delta_cents = $2, sort_order = $3"
+            args = [o.name, o.price_delta_cents, o_sort]
+            if "inventory" in o.model_fields_set and o.inventory != owas["inventory"]:
+                if "expected_inventory" in o.model_fields_set and o.expected_inventory != owas["inventory"]:
+                    raise _stock_conflict(owas["inventory"])
+                sets += ", inventory = $4"
+                args.append(o.inventory)
+                if o.inventory is not None:
+                    await log_adjustment(
+                        conn, site_id=site_id, product_id=product_id, option_id=owas["id"],
+                        delta=o.inventory - (owas["inventory"] or 0), balance_after=o.inventory,
+                        reason="adjustment", note="Set in the product editor",
+                    )
+            args.append(owas["id"])
+            await conn.execute(
+                f"UPDATE cappe_product_options SET {sets} WHERE id = ${len(args)}", *args,
+            )
+        if options_gone:
+            await conn.execute(
+                "DELETE FROM cappe_product_options WHERE id = ANY($1::uuid[]) AND site_id = $2",
+                [row["id"] for row in options_gone], site_id,
+            )
+    if groups_gone:
+        await conn.execute(
+            "DELETE FROM cappe_product_option_groups WHERE id = ANY($1::uuid[]) AND site_id = $2",
+            [row["id"] for row in groups_gone], site_id,
+        )
+
+
+def _subscription_changed(body, existing) -> bool:
+    """Whether an edit actually changes the product's subscription settings.
+
+    The editor sends them on every save, so "the field is present" used to
+    count as a change — and a plan without recurring orders got a 402 for
+    fixing a typo. Only a different value is a change.
+    """
+    fields = body.model_fields_set
+    if "subscription_intervals" in fields and (
+        sorted(body.subscription_intervals or []) != sorted(existing["subscription_intervals"] or [])
+    ):
+        return True
+    return (
+        "subscription_discount_bps" in fields
+        and body.subscription_discount_bps != existing["subscription_discount_bps"]
+    )
 
 
 def _order_row(row, items=None) -> dict:
@@ -258,6 +342,11 @@ async def create_product(
                 body.requires_approval, json.dumps(body.intake_fields), body.category,
                 body.subscription_intervals, body.subscription_discount_bps,
             )
+            if body.inventory is not None:
+                await log_adjustment(
+                    conn, site_id=site_id, product_id=row["id"], delta=body.inventory,
+                    balance_after=body.inventory, reason="adjustment", note="Opening stock",
+                )
             await _replace_option_groups(conn, site_id, row["id"], body.option_groups)
         groups = await fetch_option_groups(conn, [row["id"]])
         # Product names are indexed at weight D, so "cold brew" finds the cafe
@@ -294,7 +383,7 @@ async def update_product(
             raise HTTPException(404, "Product not found")
         from ..services.recurring import validate_product_subscription
         await validate_product_subscription(conn, account.plan, {**dict(existing), **body.model_dump(exclude_unset=True)},
-                                            changed=bool({"subscription_intervals", "subscription_discount_bps"} & body.model_fields_set))
+                                            changed=_subscription_changed(body, existing))
         # Only when the caller is actually changing fulfillment — an unrelated
         # edit (a price tweak, a rename) to a product that predates the gate
         # must not start 403-ing.
@@ -304,6 +393,21 @@ async def update_product(
             )
         await _validate_booking_type(conn, site_id, body.booking_type_id)
         async with conn.transaction():
+            # Stock is read under the row lock, not from `existing` above: the
+            # number that matters is the one on the shelf when this writes.
+            shelf = await conn.fetchrow(
+                "SELECT inventory FROM cappe_products WHERE id = $1 AND site_id = $2 FOR UPDATE",
+                product_id, site_id,
+            )
+            if shelf is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+            stock_edit = "inventory" in body.model_fields_set and body.inventory != shelf["inventory"]
+            if (
+                stock_edit
+                and "expected_inventory" in body.model_fields_set
+                and body.expected_inventory != shelf["inventory"]
+            ):
+                raise _stock_conflict(shelf["inventory"])
             sets, args = build_patch(body, (
                 "name", "description", "price_cents", "currency", "image_url",
                 "sku", "inventory", "low_stock_threshold", "status", "sort_order",
@@ -333,6 +437,14 @@ async def update_product(
                 )
             if row is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+            if stock_edit and body.inventory is not None:
+                # A stock number typed into the product form is a stock change
+                # like any other, and used to be the one kind with no record.
+                await log_adjustment(
+                    conn, site_id=site_id, product_id=product_id,
+                    delta=body.inventory - (shelf["inventory"] or 0), balance_after=body.inventory,
+                    reason="adjustment", note="Set in the product editor",
+                )
             await _replace_option_groups(conn, site_id, product_id, body.option_groups)
         groups = await fetch_option_groups(conn, [product_id])
         await refresh_site_search(conn, site_id)
@@ -438,12 +550,47 @@ async def inventory_log(
 # --- Orders -----------------------------------------------------------------
 
 @router.get("/sites/{site_id}/orders", response_model=list[CappeOrder])
-async def list_orders(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+async def list_orders(
+    site_id: UUID,
+    account: CappeAccount = Depends(require_cappe_account),
+    order_status: Annotated[Optional[str], Query(alias="status", max_length=20)] = None,
+    q: Annotated[Optional[str], Query(max_length=120)] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    """A page of orders, newest first, optionally narrowed by status and by a
+    customer / receipt search. This returned every order the store had ever
+    taken on every load. Each row carries a count and a short summary of its
+    lines (the list has no `items`), so orders can be told apart at a glance."""
+    where, args = ["site_id = $1"], [site_id]
+    if order_status:
+        args.append(order_status)
+        where.append(f"status = ${len(args)}")
+    needle = (q or "").strip()
+    if needle:
+        # Escape LIKE wildcards: a search for "50%" is a literal, not a pattern.
+        args.append("%" + needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+        where.append(
+            f"(customer_email ILIKE ${len(args)} OR customer_name ILIKE ${len(args)} "
+            f"OR receipt_number ILIKE ${len(args)})"
+        )
+    args.extend([limit, offset])
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         rows = await conn.fetch(
-            f"SELECT {_ORDER_COLS} FROM cappe_orders WHERE site_id = $1 ORDER BY created_at DESC",
-            site_id,
+            f"""SELECT {_ORDER_COLS},
+                       (SELECT COALESCE(SUM(i.quantity), 0) FROM cappe_order_items i
+                         WHERE i.order_id = o.id) AS item_count,
+                       (SELECT string_agg(
+                                   t.title || CASE WHEN t.quantity > 1 THEN ' × ' || t.quantity ELSE '' END,
+                                   ', ' ORDER BY t.created_at)
+                          FROM (SELECT title, quantity, created_at FROM cappe_order_items i
+                                 WHERE i.order_id = o.id ORDER BY i.created_at LIMIT 3) t) AS items_summary
+                  FROM cappe_orders o
+                 WHERE {' AND '.join(where)}
+                 ORDER BY created_at DESC
+                 LIMIT ${len(args) - 1} OFFSET ${len(args)}""",
+            *args,
         )
     return [_order_row(r) for r in rows]
 
@@ -580,9 +727,14 @@ async def update_order_status(
 
 @router.post("/sites/{site_id}/orders/{order_id}/refund", response_model=CappeOrder)
 async def refund_order(
-    site_id: UUID, order_id: UUID, account: CappeAccount = Depends(require_cappe_account),
+    site_id: UUID, order_id: UUID, body: Optional[CappeRefundRequest] = None,
+    account: CappeAccount = Depends(require_cappe_account),
 ):
     """Refund a paid order in full — the money first, then the record.
+
+    `restock` says whether the goods go back on the shelf. Left out, they do
+    unless the order was already fulfilled: a refund for a parcel that was lost
+    or kept used to add stock that was never coming back.
 
     A card order is refunded on the business's own connected Stripe account
     (the charge lives there, not on the platform), platform fee included. Only
@@ -616,6 +768,10 @@ async def refund_order(
             detail="Only a paid order can be refunded.",
         )
 
+    restock = (
+        body.restock if body is not None and body.restock is not None
+        else row["status"] != "fulfilled"
+    )
     refund_id = None
     if row["status"] != "refunded":
         if row["stripe_payment_intent"]:
@@ -652,7 +808,7 @@ async def refund_order(
         async with conn.transaction():
             await mark_order_refunded(
                 conn, order_id=order_id, site_id=site_id,
-                refunded_cents=None, stripe_refund_id=refund_id,
+                refunded_cents=None, stripe_refund_id=refund_id, restock=restock,
             )
             order = await conn.fetchrow(
                 f"SELECT {_ORDER_COLS} FROM cappe_orders WHERE id = $1 AND site_id = $2",

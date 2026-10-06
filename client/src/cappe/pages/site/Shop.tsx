@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Loader2, Plus, Trash2, Package, SlidersHorizontal, AlertTriangle, Pencil } from 'lucide-react'
-import { cappeApi } from '../../api'
+import { Loader2, Plus, Trash2, Package, SlidersHorizontal, AlertTriangle, Pencil, Search } from 'lucide-react'
+import { cappeApi, CappeApiError } from '../../api'
 import SurfaceShell, { centsToMoney } from '../../components/SurfaceShell'
 import TaxSettingsCard from '../../components/TaxSettingsCard'
 import ShippingSettingsCard from '../../components/ShippingSettingsCard'
 import StockAdjustModal from '../../components/StockAdjustModal'
 import ImageUpload from '../../components/ImageUpload'
-import type { CappeBookingType, CappeFulfillment, CappeProduct } from '../../types'
+import type { CappeBookingType, CappeFulfillment, CappeProduct, CappeProductOptionGroupInput } from '../../types'
 import { parseMoneyCents, parseSignedMoneyCents } from '../../utils/money'
 
 const STATUSES = ['active', 'draft', 'archived'] as const
@@ -34,10 +34,16 @@ function keyFromLabel(label: string): string {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'field'
 }
 
-type IntakeRow = { label: string; type: string; required: boolean }
-type OptRow = { name: string; price: string; stock: string }
-type OptGroupRow = { name: string; select_type: 'single' | 'multi'; required: boolean; options: OptRow[] }
-const EMPTY = { name: '', description: '', price: '', inventory: '', low_stock_threshold: '', image_url: '', digital_file_url: '', booking_type_id: '', category: '' }
+// `choices` is the comma-separated list behind a `select` question.
+type IntakeRow = { label: string; type: string; required: boolean; choices: string }
+// `id` is the stored row an option/group continues: sending it back is what
+// keeps option ids stable across a save (orders and the stock ledger point at them).
+type OptRow = { id?: string; name: string; price: string; stock: string }
+type OptGroupRow = { id?: string; name: string; select_type: 'single' | 'multi'; required: boolean; options: OptRow[] }
+const EMPTY = { name: '', description: '', price: '', sku: '', inventory: '', low_stock_threshold: '', image_url: '', digital_file_url: '', booking_type_id: '', category: '' }
+
+const stockText = (value: number | null | undefined) => (value == null ? '' : String(value))
+const sameSet = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join()
 
 export default function Shop() {
   const { siteId } = useParams<{ siteId: string }>()
@@ -54,9 +60,16 @@ export default function Shop() {
   const [optionGroups, setOptionGroups] = useState<OptGroupRow[]>([])
   const [adjustProduct, setAdjustProduct] = useState<CappeProduct | null>(null)
   const [editing, setEditing] = useState<CappeProduct | null>(null)
+  const [publish, setPublish] = useState(true)
+  const [query, setQuery] = useState('')
 
-  const isLowStock = (p: CappeProduct) =>
-    p.fulfillment === 'physical' && p.inventory != null && p.low_stock_threshold != null && p.inventory <= p.low_stock_threshold
+  // The product's own count, or any variant's, at or under the alert level.
+  const isLowStock = (p: CappeProduct) => {
+    if (p.fulfillment !== 'physical' || p.low_stock_threshold == null) return false
+    const limit = p.low_stock_threshold
+    const counts = [p.inventory, ...p.option_groups.flatMap((g) => g.options.map((o) => o.inventory))]
+    return counts.some((n) => n != null && n <= limit)
+  }
 
   // option-group editors
   const setGroup = (gi: number, patch: Partial<OptGroupRow>) =>
@@ -81,6 +94,19 @@ export default function Shop() {
     setIntervals([])
     setSubscriptionDiscount('0')
     setEditing(null)
+    setPublish(true)
+  }
+
+  // Bring the form's stock boxes in line with the shelf (after an adjustment in
+  // the stock modal, or after a save was refused because stock had moved).
+  function syncStock(product: CappeProduct) {
+    setEditing(product)
+    setForm((f) => ({ ...f, inventory: stockText(product.inventory) }))
+    const shelf = new Map(product.option_groups.flatMap((g) => g.options).map((o) => [o.id, o.inventory]))
+    setOptionGroups((groups) => groups.map((g) => ({
+      ...g,
+      options: g.options.map((o) => (o.id && shelf.has(o.id) ? { ...o, stock: stockText(shelf.get(o.id)) } : o)),
+    })))
   }
 
   function editProduct(product: CappeProduct) {
@@ -89,7 +115,8 @@ export default function Shop() {
       name: product.name,
       description: product.description || '',
       price: String(product.price_cents / 100),
-      inventory: product.inventory == null ? '' : String(product.inventory),
+      sku: product.sku || '',
+      inventory: stockText(product.inventory),
       low_stock_threshold: product.low_stock_threshold == null ? '' : String(product.low_stock_threshold),
       image_url: product.image_url || '',
       digital_file_url: product.digital_file_url || '',
@@ -100,15 +127,19 @@ export default function Shop() {
     setRequireApproval(product.requires_approval)
     setIntervals(product.subscription_intervals || [])
     setSubscriptionDiscount(String((product.subscription_discount_bps || 0) / 100))
-    setIntake(product.intake_fields.map((field) => ({ label: field.label, type: field.type, required: field.required })))
+    setIntake(product.intake_fields.map((field) => ({
+      label: field.label, type: field.type, required: field.required, choices: (field.options || []).join(', '),
+    })))
     setOptionGroups(product.option_groups.map((group) => ({
+      id: group.id,
       name: group.name,
       select_type: group.select_type,
       required: group.required,
       options: group.options.map((option) => ({
+        id: option.id,
         name: option.name,
         price: String(option.price_delta_cents / 100),
-        stock: option.inventory == null ? '' : String(option.inventory),
+        stock: stockText(option.inventory),
       })),
     })))
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -138,18 +169,16 @@ export default function Shop() {
     try {
       const discount = Number(subscriptionDiscount)
       if (!Number.isFinite(discount) || discount < 0 || discount > 50) throw new Error('Subscription discount must be between 0 and 50%')
-      const payload = {
-        subscription_intervals: ['physical', 'digital'].includes(fulfillment) ? intervals : [],
-        subscription_discount_bps: ['physical', 'digital'].includes(fulfillment) && intervals.length
-          ? Math.round(discount * 100)
-          : 0,
+      const physical = fulfillment === 'physical'
+      const stock = (raw: string) => (physical && raw !== '' ? parseInt(raw, 10) : null)
+      const subIntervals = ['physical', 'digital'].includes(fulfillment) ? intervals : []
+      const subDiscount = subIntervals.length ? Math.round(discount * 100) : 0
+      const details = {
         name: form.name.trim(),
         description: form.description.trim() || null,
         price_cents: priceCents,
-        status: 'active',
-        fulfillment,
-        inventory: fulfillment === 'physical' && form.inventory !== '' ? parseInt(form.inventory, 10) : null,
-        low_stock_threshold: fulfillment === 'physical' && form.low_stock_threshold !== '' ? parseInt(form.low_stock_threshold, 10) : null,
+        sku: form.sku.trim() || null,
+        low_stock_threshold: physical && form.low_stock_threshold !== '' ? parseInt(form.low_stock_threshold, 10) : null,
         image_url: form.image_url.trim() || null,
         digital_file_url: fulfillment === 'digital' ? form.digital_file_url.trim() || null : null,
         booking_type_id: fulfillment === 'booking' ? form.booking_type_id || null : null,
@@ -157,53 +186,115 @@ export default function Shop() {
         intake_fields: wantsIntake
           ? intake.filter((f) => f.label.trim()).map((f) => ({
               key: keyFromLabel(f.label), label: f.label.trim(), type: f.type, required: f.required,
+              ...(f.type === 'select'
+                ? { options: f.choices.split(',').map((c) => c.trim()).filter(Boolean) }
+                : {}),
             }))
           : [],
         category: form.category.trim() || null,
-        option_groups: optionGroups
-          .filter((g) => g.name.trim())
-          .map((g) => ({
-            name: g.name.trim(), select_type: g.select_type, required: g.required,
-            options: g.options.filter((o) => o.name.trim()).map((o) => ({
-              name: o.name.trim(), price_delta_cents: o.price.trim() === '' ? 0 : (parseSignedMoneyCents(o.price) ?? 0),
-              inventory: fulfillment === 'physical' && o.stock !== '' ? parseInt(o.stock, 10) : null,
-            })),
-          })),
+      }
+      const emptySelect = wantsIntake
+        ? intake.find((f) => f.label.trim() && f.type === 'select' && !f.choices.split(',').some((c) => c.trim()))
+        : undefined
+      if (emptySelect) throw new Error(`"${emptySelect.label.trim()}" is a dropdown — add at least one choice for it`)
+      // Stock is sent only when this save is changing it, with the count the
+      // form was showing: a save that isn't about stock must not write a stale
+      // number over sales made since the form loaded.
+      const groupsFor = (was: CappeProduct | null): CappeProductOptionGroupInput[] => {
+        const shelf = new Map((was?.option_groups || []).flatMap((g) => g.options).map((o) => [o.id, o.inventory ?? null]))
+        return optionGroups.filter((g) => g.name.trim()).map((g) => ({
+          ...(g.id ? { id: g.id } : {}),
+          name: g.name.trim(), select_type: g.select_type, required: g.required,
+          options: g.options.filter((o) => o.name.trim()).map((o) => {
+            const next = stock(o.stock)
+            const known = o.id !== undefined && shelf.has(o.id)
+            const before = known ? shelf.get(o.id as string) ?? null : null
+            const stockChange = known
+              ? (next === before ? {} : { inventory: next, expected_inventory: before })
+              : (next === null ? {} : { inventory: next })
+            return {
+              ...(o.id ? { id: o.id } : {}),
+              name: o.name.trim(),
+              price_delta_cents: o.price.trim() === '' ? 0 : (parseSignedMoneyCents(o.price) ?? 0),
+              ...stockChange,
+            }
+          }),
+        }))
       }
       if (editing) {
-        // The API applies plan entitlement checks only when fulfillment is in
-        // the request. Leave an unchanged legacy fulfillment alone so a price
-        // or copy edit is always allowed.
-        const { fulfillment: requestedFulfillment, ...unchangedSafePayload } = payload
+        const nextStock = stock(form.inventory)
+        const subscriptionChanged = !sameSet(subIntervals, editing.subscription_intervals || [])
+          || subDiscount !== (editing.subscription_discount_bps || 0)
+        // Only what changed goes in the request for the three things the API
+        // treats as an event: stock (logged, and refused if it moved),
+        // fulfillment and subscription settings (both plan-gated). Status is
+        // changed from the list, never as a side effect of a save — this used
+        // to republish every draft or archived product that was edited.
         const updated = await cappeApi.put<CappeProduct>(`/sites/${siteId}/products/${editing.id}`, {
-          ...unchangedSafePayload,
-          ...(requestedFulfillment !== editing.fulfillment ? { fulfillment: requestedFulfillment } : {}),
+          ...details,
+          option_groups: groupsFor(editing),
+          ...(fulfillment !== editing.fulfillment ? { fulfillment } : {}),
+          ...(nextStock !== editing.inventory ? { inventory: nextStock, expected_inventory: editing.inventory } : {}),
+          ...(subscriptionChanged ? { subscription_intervals: subIntervals, subscription_discount_bps: subDiscount } : {}),
         })
         setProducts((products) => (products || []).map((product) => product.id === updated.id ? updated : product))
       } else {
-        const created = await cappeApi.post<CappeProduct>(`/sites/${siteId}/products`, { ...payload, status: 'active' })
+        const created = await cappeApi.post<CappeProduct>(`/sites/${siteId}/products`, {
+          ...details,
+          fulfillment,
+          status: publish ? 'active' : 'draft',
+          inventory: stock(form.inventory),
+          option_groups: groupsFor(null),
+          subscription_intervals: subIntervals,
+          subscription_discount_bps: subDiscount,
+        })
         setProducts((products) => [...(products || []), created])
       }
       resetForm()
     } catch (e) {
       setError(e instanceof Error ? e.message : `Failed to ${editing ? 'save' : 'add'} product`)
+      if (editing && e instanceof CappeApiError && e.status === 409) {
+        // Stock moved while the form was open. Show what the shelf holds now so
+        // the next save starts from the truth; everything else typed is kept.
+        cappeApi.get<CappeProduct>(`/sites/${siteId}/products/${editing.id}`).then((fresh) => {
+          setProducts((products) => (products || []).map((product) => product.id === fresh.id ? fresh : product))
+          syncStock(fresh)
+        }).catch(() => {})
+      }
     } finally {
       setAdding(false)
     }
   }
 
   async function setStatus(prod: CappeProduct, status: string) {
-    const updated = await cappeApi.put<CappeProduct>(`/sites/${siteId}/products/${prod.id}`, { status })
-    setProducts((p) => (p || []).map((x) => (x.id === prod.id ? updated : x)))
+    setError(null)
+    try {
+      const updated = await cappeApi.put<CappeProduct>(`/sites/${siteId}/products/${prod.id}`, { status })
+      setProducts((p) => (p || []).map((x) => (x.id === prod.id ? updated : x)))
+      if (editing?.id === updated.id) setEditing(updated)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : `Could not change ${prod.name}`)
+    }
   }
 
-  async function remove(id: string) {
-    await cappeApi.delete(`/sites/${siteId}/products/${id}`)
-    setProducts((p) => (p || []).filter((x) => x.id !== id))
+  async function remove(prod: CappeProduct) {
+    if (!window.confirm(`Delete "${prod.name}"? This can't be undone. Past orders keep their line for it. To hide it instead, set it to archived.`)) return
+    setError(null)
+    try {
+      await cappeApi.delete(`/sites/${siteId}/products/${prod.id}`)
+      setProducts((p) => (p || []).filter((x) => x.id !== prod.id))
+      if (editing?.id === prod.id) resetForm()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : `Could not delete ${prod.name}`)
+    }
   }
+
+  const needle = query.trim().toLowerCase()
+  const shown = (products || []).filter((p) => !needle
+    || [p.name, p.category, p.sku].some((v) => (v || '').toLowerCase().includes(needle)))
 
   const meta = (p: CappeProduct) => {
-    if (p.fulfillment === 'physical') return p.inventory === null ? 'unlimited' : `${p.inventory} in stock`
+    if (p.fulfillment === 'physical') return p.inventory === null ? 'unlimited' : p.inventory <= 0 ? 'sold out' : `${p.inventory} in stock`
     if (p.fulfillment === 'digital') return p.digital_file_url ? 'file attached' : 'no file yet'
     if (p.fulfillment === 'booking') return 'booking'
     return 'service'
@@ -225,7 +316,10 @@ export default function Shop() {
           <input value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="Price (USD)" type="number" step="0.01" min="0" className={input} />
         </div>
         <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Description (optional)" rows={2} className={input} />
-        <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Category — e.g. Drinks, Pastries (optional, groups your storefront)" className={input} />
+        <div className="grid gap-3 sm:grid-cols-3">
+          <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Category — e.g. Drinks, Pastries (optional, groups your storefront)" className={`sm:col-span-2 ${input}`} />
+          <input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="SKU (optional)" maxLength={120} className={input} />
+        </div>
 
         {/* fulfillment */}
         <div>
@@ -260,6 +354,12 @@ export default function Shop() {
           <div className="grid gap-3 sm:grid-cols-2">
             <input value={form.inventory} onChange={(e) => setForm({ ...form, inventory: e.target.value })} placeholder="Stock (blank = unlimited)" type="number" min="0" className={input} />
             <input value={form.low_stock_threshold} onChange={(e) => setForm({ ...form, low_stock_threshold: e.target.value })} placeholder="Low-stock alert at… (optional)" type="number" min="0" className={input} />
+            {editing && (
+              <p className="text-xs text-zinc-500 sm:col-span-2">
+                Changing a stock number here is recorded in the product&apos;s stock history. For a delivery, damage or a
+                return, use <SlidersHorizontal className="inline h-3 w-3" /> Adjust stock in the list instead — it records why.
+              </p>
+            )}
           </div>
         )}
 
@@ -324,7 +424,7 @@ export default function Shop() {
             <div className="mb-2 text-xs font-medium text-zinc-400">Intake questions (asked at checkout)</div>
             <div className="space-y-2">
               {intake.map((f, i) => (
-                <div key={i} className="flex items-center gap-2">
+                <div key={i} className="flex flex-wrap items-center gap-2">
                   <input value={f.label} onChange={(e) => setIntake((xs) => xs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} placeholder="Question label" className={`flex-1 ${input}`} />
                   <select value={f.type} onChange={(e) => setIntake((xs) => xs.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100">
                     {FIELD_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -332,10 +432,13 @@ export default function Shop() {
                   <label className="flex items-center gap-1 text-xs text-zinc-500">
                     <input type="checkbox" checked={f.required} onChange={(e) => setIntake((xs) => xs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} className="h-4 w-4 rounded border-zinc-600 bg-zinc-900 text-emerald-500" /> req
                   </label>
-                  <button type="button" onClick={() => setIntake((xs) => xs.filter((_, j) => j !== i))} className="text-zinc-500 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+                  <button type="button" onClick={() => setIntake((xs) => xs.filter((_, j) => j !== i))} aria-label="Remove question" className="text-zinc-500 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+                  {f.type === 'select' && (
+                    <input value={f.choices} onChange={(e) => setIntake((xs) => xs.map((x, j) => (j === i ? { ...x, choices: e.target.value } : x)))} placeholder="Choices, separated by commas — e.g. Small, Medium, Large" aria-label="Dropdown choices" className={`basis-full ${input}`} />
+                  )}
                 </div>
               ))}
-              <button type="button" onClick={() => setIntake((xs) => [...xs, { label: '', type: 'text', required: false }])} className="text-xs font-medium text-emerald-400 hover:text-emerald-300">+ Add question</button>
+              <button type="button" onClick={() => setIntake((xs) => [...xs, { label: '', type: 'text', required: false, choices: '' }])} className="text-xs font-medium text-emerald-400 hover:text-emerald-300">+ Add question</button>
             </div>
           </div>
         )}
@@ -394,6 +497,13 @@ export default function Shop() {
           Review &amp; approve each order before it's confirmed
         </label>
 
+        {!editing && (
+          <label className="flex items-center gap-2 text-sm text-zinc-300">
+            <input type="checkbox" checked={publish} onChange={(event) => setPublish(event.target.checked)} className="h-4 w-4 rounded border-zinc-600 bg-zinc-950 text-emerald-500" />
+            Show in my shop right away <span className="text-xs text-zinc-500">(untick to save as a draft)</span>
+          </label>
+        )}
+
         <button type="submit" disabled={adding} className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-60">
           {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : editing ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />} {editing ? 'Save changes' : 'Add product'}
         </button>
@@ -406,9 +516,17 @@ export default function Shop() {
           <Package className="mx-auto mb-2 h-7 w-7 text-zinc-300" /> No products yet.
         </div>
       ) : (
-        <div className="divide-y divide-zinc-800 rounded-2xl border border-zinc-800 bg-zinc-900">
-          {products.map((p) => (
-            <div key={p.id} className="flex items-center gap-4 px-5 py-3">
+        <>
+        {products.length > 6 && (
+          <label className="mb-3 flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-400 focus-within:border-emerald-500">
+            <Search className="h-4 w-4 shrink-0" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search products by name, category or SKU" aria-label="Search products" className="w-full bg-transparent text-zinc-100 placeholder:text-zinc-500 outline-none" />
+          </label>
+        )}
+        {shown.length === 0 && <p className="py-8 text-center text-sm text-zinc-500">No products match “{query.trim()}”.</p>}
+        <div className="divide-y divide-zinc-800 rounded-2xl border border-zinc-800 bg-zinc-900 empty:hidden">
+          {shown.map((p) => (
+            <div key={p.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
               <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-zinc-800">
                 {p.image_url && <img src={p.image_url} alt="" className="h-full w-full object-cover" />}
               </div>
@@ -421,21 +539,22 @@ export default function Shop() {
                   )}
                 </div>
                 <div className="text-xs text-zinc-500">
-                  {p.category ? `${p.category} · ` : ''}{centsToMoney(p.price_cents, p.currency)} · {meta(p)}
+                  {p.category ? `${p.category} · ` : ''}{centsToMoney(p.price_cents, p.currency)} · {meta(p)}{p.sku ? ` · SKU ${p.sku}` : ''}
                   {p.option_groups?.length ? ` · ${p.option_groups.length} option${p.option_groups.length > 1 ? 's' : ''}` : ''}
                 </div>
               </div>
               {p.fulfillment === 'physical' && (
-                <button onClick={() => setAdjustProduct(p)} title="Adjust stock" className="text-zinc-400 hover:text-emerald-400"><SlidersHorizontal className="h-4 w-4" /></button>
+                <button onClick={() => setAdjustProduct(p)} title="Adjust stock" aria-label={`Adjust stock for ${p.name}`} className="text-zinc-400 hover:text-emerald-400"><SlidersHorizontal className="h-4 w-4" /></button>
               )}
-              <button onClick={() => editProduct(p)} title={`Edit ${p.name}`} className="text-zinc-400 hover:text-emerald-400"><Pencil className="h-4 w-4" /></button>
-              <select value={p.status} onChange={(e) => setStatus(p, e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100">
+              <button onClick={() => editProduct(p)} title={`Edit ${p.name}`} aria-label={`Edit ${p.name}`} className="text-zinc-400 hover:text-emerald-400"><Pencil className="h-4 w-4" /></button>
+              <select value={p.status} onChange={(e) => setStatus(p, e.target.value)} aria-label={`Status of ${p.name}`} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100">
                 {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
-              <button onClick={() => remove(p.id)} className="text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+              <button onClick={() => remove(p)} title={`Delete ${p.name}`} aria-label={`Delete ${p.name}`} className="text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
             </div>
           ))}
         </div>
+        </>
       )}
 
       {adjustProduct && (
@@ -443,7 +562,13 @@ export default function Shop() {
           siteId={siteId || ''}
           product={adjustProduct}
           onClose={() => setAdjustProduct(null)}
-          onUpdated={(u) => { setProducts((p) => (p || []).map((x) => (x.id === u.id ? u : x))); setAdjustProduct(u) }}
+          onUpdated={(u) => {
+            setProducts((p) => (p || []).map((x) => (x.id === u.id ? u : x)))
+            setAdjustProduct(u)
+            // Keep an open edit form on the same count, or its next save would
+            // be refused as stale.
+            if (editing?.id === u.id) syncStock(u)
+          }}
         />
       )}
     </SurfaceShell>

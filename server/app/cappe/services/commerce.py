@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Iterable, Optional, Sequence
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
@@ -32,14 +32,14 @@ from .email import (
     send_cappe_order_receipt_email,
 )
 from .inventory import log_adjustment as _inv_log
-from .inventory import release_order_bookings, restock_order
+from .inventory import lock_stock_rows, release_order_bookings, restock_order
 from .options import fetch_option_groups, validate_and_price_options
 from .entitlements import (
     fee_cents as entitlement_fee_cents,
     require_can_sell,
     resolve_entitlements,
 )
-from .stripe_connect import CappeStripeError, get_cappe_stripe
+from .stripe_connect import CONNECT_CHECKOUT_TTL_SECONDS, CappeStripeError, get_cappe_stripe
 from .cart import cart_totals
 
 logger = logging.getLogger("cappe.commerce")
@@ -48,6 +48,36 @@ logger = logging.getLogger("cappe.commerce")
 def order_subtotal(line_items: Iterable[tuple[int, int]]) -> int:
     """Sum unit_price_cents * quantity over (price, qty) pairs."""
     return sum(int(price) * int(qty) for price, qty in line_items)
+
+
+# Where Stripe sends a WEB buyer who backs out of the payment page
+# (`routes/render.py:checkout_return`).
+CHECKOUT_RETURN_PATH = "/__cappe/checkout-return"
+
+
+def checkout_cancel_url(cancel_url: str, order_token: str) -> str:
+    """Route a storefront `cancel_url` through the site's own checkout-return
+    handler, which releases the abandoned order and then redirects on to the
+    page the storefront asked for.
+
+    The order token rides THIS url only — a server endpoint that answers with a
+    redirect — and never the storefront page itself. A tenant page can carry
+    the merchant's own scripts and embeds, and the token opens the buyer's
+    receipt and downloads. `cancel_url` must already be origin-validated; only
+    its path, query and fragment are carried over, so the redirect cannot leave
+    the site.
+    """
+    parts = urlsplit(cancel_url)
+    onward = urlunsplit(("", "", parts.path or "/", parts.query, parts.fragment))
+    query = urlencode({"o": order_token, "next": onward})
+    return f"{parts.scheme}://{parts.netloc}{CHECKOUT_RETURN_PATH}?{query}"
+
+
+def crossed_low_stock(before: int, after: int, threshold: Optional[int]) -> bool:
+    """True when a sale takes stock from above the owner's threshold to at or
+    below it. The alert used to fire on `after <= threshold` alone, so once a
+    product was low EVERY further sale sent another email."""
+    return threshold is not None and after <= threshold < before
 
 
 def build_stripe_line_items(
@@ -351,7 +381,7 @@ async def resolve_booking_slot(
     discounts = await fetch_active_discounts(conn, site["id"])
     pct = best_discount_percent(
         discounts, kind="booking_type", target_id=str(btype["id"]),
-        on_date=site_today(now_utc, tz),
+        on_date=site_today(now_utc, tz), location_id=location_id,
     )
     quote_cents = apply_discount_cents(quote_cents, pct)
 
@@ -411,6 +441,46 @@ async def release_unpaid_order(order_id, site_id) -> bool:
     return True
 
 
+async def release_abandoned_checkout(token: str) -> str:
+    """A buyer came back from Stripe's payment page without paying: close the
+    page and hand back what their order was holding. Returns
+
+      * ``"released"``  — the order was pending on an open page; now cancelled.
+      * ``"paid"``      — the buyer DID finish checkout; nothing is released and
+                          the paid webhook decides the order.
+      * ``"unchanged"`` — nothing to do (unknown token, already settled or
+                          released, or an order that never went to Stripe —
+                          those belong to the owner, not to a browser redirect).
+
+    Follows the payments invariant: the Stripe page is closed FIRST and the
+    order released only once Stripe confirms nobody can pay it. No connection
+    is held across the Stripe call. Raises `CappeStripeError` if Stripe cannot
+    be reached — the order is then left exactly as it was.
+    """
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT o.id, o.site_id, o.status, o.stripe_session_id, a.stripe_account_id
+                 FROM cappe_orders o
+                 JOIN cappe_sites s ON s.id = o.site_id
+                 JOIN cappe_accounts a ON a.id = s.account_id
+                WHERE o.access_token = $1""",
+            token,
+        )
+    if (
+        row is None
+        or row["status"] != "pending"
+        or not row["stripe_session_id"]
+        or not row["stripe_account_id"]
+    ):
+        return "unchanged"
+    state = await get_cappe_stripe().expire_checkout_session(
+        row["stripe_account_id"], row["stripe_session_id"]
+    )
+    if state != "expired":
+        return "paid"
+    return "released" if await release_unpaid_order(row["id"], row["site_id"]) else "unchanged"
+
+
 async def create_public_order(site, body, background, *, shopper=None) -> dict:
     """Create an order for a mixed cart (physical / digital / service /
     booking). Prices + totals are recomputed server-side from the live product
@@ -463,6 +533,15 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             opt_groups_by_product = await fetch_option_groups(
                 conn, [it.product_id for it in body.items]
             )
+            # Take every stock lock up front, in id order. The per-line
+            # `FOR UPDATE`s below then re-lock rows this transaction already
+            # holds, so two carts listing the same products in opposite order
+            # queue instead of deadlocking.
+            await lock_stock_rows(
+                conn, site_id=site["id"],
+                product_ids=[it.product_id for it in body.items],
+                option_ids=[oid for it in body.items for oid in (it.selected_option_ids or [])],
+            )
             for item in body.items:
                 product = await conn.fetchrow(
                     "SELECT id, name, price_cents, currency, inventory, low_stock_threshold, "
@@ -483,8 +562,14 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 qty = item.quantity
                 booking_id = None
                 intake = item.intake_answers or {}
+                # What this line takes off the shelf — written to the order line
+                # so a later restock credits exactly this and nothing else.
+                # None on non-physical lines: there is nothing to reverse.
+                stock_taken = False if f == "physical" else None
+                options_taken: list | None = [] if f == "physical" else None
 
                 if f == "physical":
+                    thr = product["low_stock_threshold"]
                     if product["inventory"] is not None:
                         new_bal = await conn.fetchval(
                             "UPDATE cappe_products SET inventory = inventory - $1, updated_at = NOW() "
@@ -496,20 +581,21 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                                 status_code=status.HTTP_409_CONFLICT,
                                 detail=f"Insufficient stock for {product['name']}",
                             )
+                        stock_taken = True
                         await _inv_log(
                             conn, site_id=site["id"], product_id=item.product_id,
                             delta=-qty, balance_after=new_bal, reason="sale",
                         )
-                        thr = product["low_stock_threshold"]
-                        if thr is not None and new_bal <= thr:
+                        if crossed_low_stock(new_bal + qty, new_bal, thr):
                             low_stock_hits.append((product["name"], new_bal))
                     # Per-variant stock: decrement each selected option that tracks it.
                     for oid in (item.selected_option_ids or []):
-                        inv = await conn.fetchval(
-                            "SELECT inventory FROM cappe_product_options "
+                        opt = await conn.fetchrow(
+                            "SELECT name, inventory FROM cappe_product_options "
                             "WHERE id = $1 AND site_id = $2 FOR UPDATE",
                             oid, site["id"],
                         )
+                        inv = opt["inventory"] if opt else None
                         if inv is None:
                             continue  # untracked variant
                         if inv < qty:
@@ -520,10 +606,15 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                         await conn.execute(
                             "UPDATE cappe_product_options SET inventory = $1 WHERE id = $2", inv - qty, oid
                         )
+                        options_taken.append(oid)
                         await _inv_log(
                             conn, site_id=site["id"], product_id=item.product_id, option_id=oid,
                             delta=-qty, balance_after=inv - qty, reason="sale",
                         )
+                        # Variants have no threshold of their own; the product's
+                        # is the owner's "tell me when it is this low".
+                        if crossed_low_stock(inv, inv - qty, thr):
+                            low_stock_hits.append((f"{product['name']} — {opt['name']}", inv - qty))
                 elif f == "service":
                     validate_intake(loads_list(product["intake_fields"]), intake)
                 elif f == "digital":
@@ -564,7 +655,7 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 unit_price = apply_discount_cents(max(0, product["price_cents"] + opt_delta), dpct)
                 line_rows.append(
                     (item.product_id, product["name"], unit_price, qty, f, intake, booking_id,
-                     opt_snapshot, item.selected_option_ids or [])
+                     opt_snapshot, item.selected_option_ids or [], stock_taken, options_taken)
                 )
 
             subtotal = order_subtotal((unit, qty) for (_, _, unit, qty, *_rest) in line_rows)
@@ -609,14 +700,17 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             if shopper:
                 await conn.execute("UPDATE cappe_orders SET shopper_id=$1 WHERE id=$2 AND site_id=$3",
                                    shopper["id"], order["id"], site["id"])
-            for product_id, title, unit_price, qty, f, intake, booking_id, opt_snapshot, sel_ids in line_rows:
+            for (product_id, title, unit_price, qty, f, intake, booking_id, opt_snapshot, sel_ids,
+                 stock_taken, options_taken) in line_rows:
                 await conn.execute(
                     """INSERT INTO cappe_order_items
                            (order_id, site_id, product_id, title, unit_price_cents, quantity,
-                            fulfillment, intake_answers, selected_options, booking_id, selected_option_ids)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)""",
+                            fulfillment, intake_answers, selected_options, booking_id, selected_option_ids,
+                            stock_decremented, decremented_option_ids)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::uuid[])""",
                     order["id"], site["id"], product_id, title, unit_price, qty,
                     f, json.dumps(intake), json.dumps(opt_snapshot), booking_id, sel_ids,
+                    stock_taken, options_taken,
                 )
 
     # Low-stock alert to the owner (stock was decremented at order creation,
@@ -656,6 +750,13 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 success_url = callback
             else:
                 cancel_url = callback
+    # A web buyer who backs out of Stripe's page is sent through the site's
+    # checkout-return handler, which hands the held stock and slots straight
+    # back instead of leaving them for the session to time out. Bound here,
+    # after origin validation, because the token does not exist when the
+    # storefront asks for checkout. (The app return above releases too.)
+    if cancel_url and urlsplit(cancel_url).path != "/__cappe/app-return":
+        cancel_url = checkout_cancel_url(cancel_url, order["access_token"])
     can_pay = bool(
         pay_total > 0 and owner and owner["stripe_account_id"]
         and owner["stripe_charges_enabled"] and return_urls_requested
@@ -687,6 +788,7 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 customer_email=email or None,
                 **({"customer_id": customer_id} if customer_id else {}),
                 collect_shipping_address=has_physical,
+                expires_in_seconds=CONNECT_CHECKOUT_TTL_SECONDS,
                 shipping_option=(
                     {
                         "label": shipping_label if order["shipping_cents"] > 0 else "Free shipping",

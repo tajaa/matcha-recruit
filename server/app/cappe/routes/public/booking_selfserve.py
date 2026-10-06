@@ -178,7 +178,7 @@ async def public_booking_quote(slug: str, body: CappeBookingQuoteRequest, reques
         now_utc = await conn.fetchval("SELECT NOW()")
     pct = best_discount_percent(
         discounts, kind="booking_type", target_id=str(btype["id"]),
-        on_date=site_today(now_utc, tz),
+        on_date=site_today(now_utc, tz), location_id=loc_id,
     )
     final = apply_discount_cents(quote, pct)
     return CappeBookingQuote(

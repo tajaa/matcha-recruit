@@ -190,7 +190,7 @@ async def public_booking_slots(
         pct = best_discount_percent(
             discounts,
             kind="booking_type", target_id=str(type_id),
-            on_date=site_today(now_utc, tz),
+            on_date=site_today(now_utc, tz), location_id=location_id,
         )
     return {
         "timezone": tz,
@@ -271,7 +271,7 @@ async def _load_live_booking_slots(
 
     pct = best_discount_percent(
         discounts, kind="booking_type", target_id=str(type_id),
-        on_date=site_today(now_utc, timezone_name),
+        on_date=site_today(now_utc, timezone_name), location_id=location_id,
     )
     if pct:
         for slot in slots:

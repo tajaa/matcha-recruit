@@ -377,7 +377,17 @@ export type CappeProductOptionGroup = {
   options: CappeProductOption[]
 }
 // Input shapes for the product editor (whole-set replace).
-export type CappeProductOptionInput = { name: string; price_delta_cents: number; sort_order?: number; inventory?: number | null }
+// `id` keeps an existing option's row (and so its id) through a save. Stock is
+// tri-state on an existing option: omitted = leave alone, number = set,
+// null = stop tracking; `expected_inventory` is what the form was showing.
+export type CappeProductOptionInput = {
+  id?: string
+  name: string
+  price_delta_cents: number
+  sort_order?: number
+  inventory?: number | null
+  expected_inventory?: number | null
+}
 
 export type CappeInventoryAdjustment = {
   id: string
@@ -390,6 +400,7 @@ export type CappeInventoryAdjustment = {
   created_at: string
 }
 export type CappeProductOptionGroupInput = {
+  id?: string
   name: string
   select_type: 'single' | 'multi'
   required: boolean
@@ -501,6 +512,9 @@ export type CappeOrder = {
   created_at: string
   updated_at: string
   items: CappeOrderItem[]
+  /** List view only (the list carries no `items`). */
+  item_count?: number
+  items_summary?: string | null
 }
 
 // --- Newsletter -------------------------------------------------------------
