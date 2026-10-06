@@ -19,6 +19,7 @@ from .clients import router as clients_router
 from .collab import router as collab_router
 from .creators import router as creators_router
 from .discounts import router as discounts_router
+from .financials import router as financials_router
 from .domains import router as domains_router
 from .forms import router as forms_router
 from .locations import router as locations_router
@@ -75,6 +76,7 @@ cappe_router.include_router(pages_router)
 cappe_router.include_router(presets_router)
 cappe_router.include_router(shop_router)
 cappe_router.include_router(shipping_router)
+cappe_router.include_router(financials_router)
 cappe_router.include_router(newsletter_router)
 cappe_router.include_router(forms_router)
 cappe_router.include_router(bookings_router)

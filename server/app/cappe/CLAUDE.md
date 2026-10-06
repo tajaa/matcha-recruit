@@ -47,9 +47,12 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
 
 ## Payments invariants (2026-10 review) — runbook: `docs/ops/CAPPE_PAYMENTS.md`
 
-- **`refunded` is reached only by `order_lifecycle.mark_order_refunded`** — called by
-  `POST /orders/{id}/refund` AFTER Stripe accepts the refund, and by the `charge.refunded` webhook.
-  The status PATCH refuses it. Never add a path that writes the status without the money moving.
+- **Every refund is a row in `cappe_order_refunds`, and `refunded` is reached only by
+  `refunds.apply_refund`** settling the refund that brings the refunded total to the order total.
+  The dashboard writes the row `pending` (with the owner's restock choice) BEFORE calling Stripe;
+  `charge.refunded` (`refunds.sync_stripe_refunds`) applies a covered pending row with that choice
+  and records anything beyond as a Stripe-dashboard refund. The status PATCH refuses `refunded`.
+  Never add a path that writes the status without the money moving.
 - **Order status changes go through `order_lifecycle.ALLOWED_TRANSITIONS`.** No cycle may pass
   through a restock; `cancelled` / `refunded` / `declined` are terminal.
 - **Close the Stripe page before releasing or settling anything by hand** — storefront orders

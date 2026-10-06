@@ -262,15 +262,21 @@ def test_reopen_that_matches_nothing_is_quiet(monkeypatch):
 ORDER = {"id": "o-1", "site_id": "s-1", "status": "paid"}
 
 
-def _refund_harness(monkeypatch, conn, moved=True):
+def _refund_harness(monkeypatch, conn, outcome=None):
+    """Fake the refund ledger: what the webhook hands it lands in `seen`."""
     seen = []
 
-    async def _mark(_conn, *, order_id, site_id, refunded_cents, stripe_refund_id, restock=True, **_kw):
-        seen.append({"order": order_id, "cents": refunded_cents, "refund": stripe_refund_id, "restock": restock})
-        return {"id": order_id} if moved else None
+    async def _sync(_conn, *, order_id, site_id, amount_refunded, stripe_refund_id):
+        seen.append({"order": order_id, "cents": amount_refunded, "refund": stripe_refund_id})
+        return outcome or ("refunded" if amount_refunded >= 5000 else "partially_refunded")
+
+    async def _full(_conn, *, order_id, site_id, source, restock, stripe_refund_id=None):
+        seen.append({"order": order_id, "source": source, "restock": restock})
+        return {"id": "r-1"}
 
     _use(monkeypatch, conn)
-    monkeypatch.setattr(mod, "mark_order_refunded", _mark)
+    monkeypatch.setattr(mod, "sync_stripe_refunds", _sync)
+    monkeypatch.setattr(mod, "refund_in_full", _full)
     return seen
 
 
@@ -281,43 +287,34 @@ def _charge(**over):
     return obj
 
 
-def test_a_full_refund_made_in_stripe_refunds_the_order_here(monkeypatch):
+def test_a_refund_made_in_stripe_brings_the_ledger_up_to_stripes_total(monkeypatch):
     conn = SqlConn([("o.stripe_payment_intent = $1", ORDER)])
     seen = _refund_harness(monkeypatch, conn)
     out = asyncio.run(mod._sync_charge_refunded(_charge(), {"account": "acct_1"}))
     assert out == {"received": True, "status": "refunded"}
-    assert seen == [{"order": "o-1", "cents": 5000, "refund": "re_dash", "restock": True}]
+    assert seen == [{"order": "o-1", "cents": 5000, "refund": "re_dash"}]
     # Scoped to the event's own connected account, and locked.
     lookup = conn.calls[0]
     assert "a.stripe_account_id = $2" in lookup[1] and "FOR UPDATE OF o" in lookup[1]
     assert lookup[2] == ("pi_1", "acct_1")
 
 
-def test_amount_refunded_reaching_the_total_counts_as_full_without_the_flag(monkeypatch):
+def test_a_full_refund_flag_without_an_amount_counts_the_whole_charge(monkeypatch):
     conn = SqlConn([("o.stripe_payment_intent = $1", ORDER)])
     seen = _refund_harness(monkeypatch, conn)
-    asyncio.run(mod._sync_charge_refunded(_charge(refunded=False, refunds=None), {"account": "acct_1"}))
+    asyncio.run(mod._sync_charge_refunded(_charge(amount_refunded=0, refunds=None), {"account": "acct_1"}))
     assert seen[0]["cents"] == 5000 and seen[0]["refund"] is None
 
 
-def test_our_own_refund_routes_echo_is_an_idempotent_no_op(monkeypatch):
-    conn = SqlConn([("o.stripe_payment_intent = $1", {**ORDER, "status": "refunded"})])
-    _refund_harness(monkeypatch, conn, moved=False)
-    out = asyncio.run(mod._sync_charge_refunded(_charge(), {"account": "acct_1"}))
-    assert out == {"received": True, "status": "refunded"}
-
-
-def test_a_partial_refund_records_its_amount_and_leaves_the_order_paid(monkeypatch):
+def test_a_partial_refund_is_handed_to_the_ledger_as_a_part(monkeypatch):
     conn = SqlConn([("o.stripe_payment_intent = $1", ORDER)])
     seen = _refund_harness(monkeypatch, conn)
     out = asyncio.run(mod._sync_charge_refunded(
         _charge(amount_refunded=1200, refunded=False), {"account": "acct_1"},
     ))
     assert out == {"received": True, "status": "partially_refunded"}
-    assert seen == []                                    # status untouched, nothing restocked
-    _, sql, args = conn.sql("SET refunded_cents = $2")[0]
-    assert "status" not in sql.split("SET", 1)[1].split("WHERE")[0]
-    assert args == ("o-1", 1200, "re_dash")
+    assert seen == [{"order": "o-1", "cents": 1200, "refund": "re_dash"}]
+    assert conn.sql(" SET ") == []                       # the ledger writes, not the webhook
 
 
 def test_a_subscription_orders_refund_is_matched_by_its_invoice(monkeypatch):
@@ -392,7 +389,7 @@ def test_a_lost_dispute_closes_the_order_without_restocking(monkeypatch):
     ))
     # The money is gone but so are the goods — crediting the shelf would
     # invent inventory.
-    assert seen == [{"order": "o-1", "cents": 5000, "refund": None, "restock": False}]
+    assert seen == [{"order": "o-1", "source": "dispute", "restock": False}]
 
 
 @pytest.mark.parametrize("obj,event", [

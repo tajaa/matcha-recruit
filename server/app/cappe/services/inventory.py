@@ -38,8 +38,8 @@ async def log_adjustment(
 
 
 _PHYSICAL_LINES = (
-    "SELECT id, product_id, quantity, selected_option_ids, stock_decremented, decremented_option_ids "
-    "FROM cappe_order_items WHERE order_id = $1 AND fulfillment = 'physical' ORDER BY id"
+    "SELECT id, product_id, quantity, selected_option_ids, stock_decremented, decremented_option_ids, "
+    "restocked_quantity FROM cappe_order_items WHERE order_id = $1 AND fulfillment = 'physical' ORDER BY id"
 )
 
 
@@ -77,7 +77,7 @@ def _line_option_ids(line) -> list:
     return list(recorded if recorded is not None else (line.get("selected_option_ids") or []))
 
 
-async def restock_order(conn, *, site_id: UUID, order_id: UUID, reason: str) -> None:
+async def restock_order(conn, *, site_id: UUID, order_id: UUID, reason: str, only: dict | None = None) -> None:
     """Restock every physical line item of an order (product + selected
     variants), writing an audit row per adjustment. Shared by every order path
     that reverses a sale (owner decline, cancel, refund) — used to live only in
@@ -88,15 +88,31 @@ async def restock_order(conn, *, site_id: UUID, order_id: UUID, reason: str) -> 
     (`stock_decremented`, `decremented_option_ids`); without it, a product sold
     while it was not tracking stock and switched to tracking afterwards gained
     units it never lost. Lines from before the record existed (NULL) fall back
-    to "whatever tracks stock now"."""
+    to "whatever tracks stock now".
+
+    Each line credits only units not already back (`restocked_quantity`): a
+    part refund that returned two units, then a full refund, must not return
+    them twice. `only` ({line id: units}) restocks just those units — a part
+    refund's lines; omitted, every unit still out goes back."""
     phys = await conn.fetch(_PHYSICAL_LINES, order_id)
+    if only is not None:
+        phys = [it for it in phys if str(it["id"]) in only]
     await lock_stock_rows(
         conn, site_id=site_id,
         product_ids=[it["product_id"] for it in phys],
         option_ids=[oid for it in phys for oid in _line_option_ids(it)],
     )
     for it in phys:
-        pid, q = it["product_id"], it["quantity"]
+        pid = it["product_id"]
+        q = int(it["quantity"]) - int(it.get("restocked_quantity") or 0)
+        if only is not None:
+            q = min(q, int(only[str(it["id"])]))
+        if q <= 0:
+            continue
+        await conn.execute(
+            "UPDATE cappe_order_items SET restocked_quantity = restocked_quantity + $2 WHERE id = $1",
+            it["id"], q,
+        )
         if pid is not None and it.get("stock_decremented") is not False:
             bal = await conn.fetchval(
                 "UPDATE cappe_products SET inventory = inventory + $1, updated_at = NOW() "
@@ -190,6 +206,8 @@ async def retake_order_stock(conn, *, site_id: UUID, order_id: UUID) -> None:
                         conn, site_id=site_id, product_id=pid, option_id=oid, delta=-q,
                         balance_after=obal, reason="sale",
                     )
+        # Every unit is out again: none of it is back on the shelf.
+        await conn.execute("UPDATE cappe_order_items SET restocked_quantity = 0 WHERE id = $1", it["id"])
         if it.get("stock_decremented") is None:
             # First time this line's stock is taken with a record (a renewal
             # order, or a line older than the record): write down what came off

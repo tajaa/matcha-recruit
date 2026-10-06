@@ -449,8 +449,10 @@ def test_retake_writes_down_what_it_took_when_the_line_had_no_record(monkeypatch
     line = _line(selected_option_ids=[o1])
     conn = StockConn([line])
     asyncio.run(inv_mod.retake_order_stock(conn, site_id=SITE, order_id=ORDER))
-    (sql, args), = conn.recorded
+    reset, (sql, args) = conn.recorded
     assert "stock_decremented = $2" in sql and args == (line["id"], True, [o1])
+    # Every unit is out again, so none counts as back on the shelf.
+    assert "restocked_quantity = 0" in reset[0] and reset[1] == (line["id"],)
 
 
 def test_retake_of_a_recorded_line_takes_only_that_and_records_nothing_new(monkeypatch):
@@ -460,7 +462,8 @@ def test_retake_of_a_recorded_line_takes_only_that_and_records_nothing_new(monke
         selected_option_ids=[o1, o2], stock_decremented=False, decremented_option_ids=[o1],
     )])
     asyncio.run(inv_mod.retake_order_stock(conn, site_id=SITE, order_id=ORDER))
-    assert _targets(conn) == [("option", o1)] and conn.recorded == []
+    assert _targets(conn) == [("option", o1)]
+    assert [sql for sql, _a in conn.recorded] == ["UPDATE cappe_order_items SET restocked_quantity = 0 WHERE id = $1"]
 
 
 # ── checkout: the physical branch ────────────────────────────────────────────
@@ -798,48 +801,13 @@ async def test_the_public_quote_reads_active_products_only(monkeypatch):
 
 # ── refunds and restocking ───────────────────────────────────────────────────
 
-def _wire_refund(monkeypatch, status_now):
-    conn = SqlConn([
-        ("SELECT o.status, o.stripe_payment_intent", {
-            "status": status_now, "stripe_payment_intent": None,
-            "stripe_invoice_id": None, "stripe_account_id": None,
-        }),
-        ("FROM cappe_orders WHERE id = $1 AND site_id = $2", {"id": ORDER}),
-    ])
-    marked = AsyncMock(return_value={"id": ORDER})
-    monkeypatch.setattr(shop_mod, "get_connection", lambda: Ctx(conn))
-    monkeypatch.setattr(shop_mod, "get_owned_site", AsyncMock())
-    monkeypatch.setattr(shop_mod, "mark_order_refunded", marked)
-    monkeypatch.setattr(shop_mod, "_order_row", lambda order, items: dict(order))
-    return marked
-
-
-@pytest.mark.parametrize("status_now,body,restock", [
-    ("paid", None, True),                                   # not shipped: goods are still here
-    ("fulfilled", None, False),                             # shipped: do not invent stock
-    ("fulfilled", CappeRefundRequest(restock=True), True),  # owner says it came back
-    ("paid", CappeRefundRequest(restock=False), False),     # owner says it did not
-    ("paid", CappeRefundRequest(), True),
-])
-def test_a_refund_restocks_only_goods_that_are_coming_back(monkeypatch, status_now, body, restock):
-    marked = _wire_refund(monkeypatch, status_now)
-    asyncio.run(shop_mod.refund_order(SITE, ORDER, body, account=ACCOUNT))
-    assert marked.await_args.kwargs["restock"] is restock
-
-
-@pytest.mark.parametrize("status_now,restock", [("paid", True), ("fulfilled", False)])
-def test_a_refund_made_in_stripe_follows_the_same_rule(monkeypatch, status_now, restock):
-    conn = SqlConn()
-    marked = AsyncMock(return_value={"id": ORDER})
-    monkeypatch.setattr(payments_mod, "get_connection", lambda: Ctx(conn))
-    monkeypatch.setattr(payments_mod, "_order_for_charge",
-                        AsyncMock(return_value={"id": ORDER, "site_id": SITE, "status": status_now}))
-    monkeypatch.setattr(payments_mod, "mark_order_refunded", marked)
-    out = asyncio.run(payments_mod._sync_charge_refunded(
-        {"payment_intent": "pi_1", "amount": 1000, "amount_refunded": 1000, "refunded": True},
-        {"account": "acct_1"},
-    ))
-    assert out["status"] == "refunded" and marked.await_args.kwargs["restock"] is restock
+def test_a_refund_made_in_stripe_restocks_only_on_a_full_refund_of_unshipped_goods():
+    """Moved to the refund ledger (test_cappe_refund_ledger.py); pinned here by
+    source so the rule can't drift from the one the refund route uses."""
+    import inspect
+    from app.cappe.services import refunds
+    src = inspect.getsource(refunds.sync_stripe_refunds)
+    assert 'restock=extra >= left and order["status"] != "fulfilled"' in src
 
 
 # ── the owner hears about a card order ───────────────────────────────────────

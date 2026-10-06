@@ -5,7 +5,8 @@ import { cappeApi } from '../../api'
 import SurfaceShell, { centsToMoney } from '../../components/SurfaceShell'
 import StripeConnectCard from '../../components/StripeConnectCard'
 import ImageUpload from '../../components/ImageUpload'
-import type { CappeOrder, CappeOrderItem } from '../../types'
+import type { CappeOrder, CappeOrderItem, CappeRefundBody } from '../../types'
+import { parseMoneyCents } from '../../utils/money'
 
 // What an owner may move an order to by hand. Mirrors the server's
 // `order_lifecycle.ALLOWED_TRANSITIONS` — the server is the authority and
@@ -37,6 +38,12 @@ const ORDERS_PAGE = 50
 const paidByCard = (o: CappeOrder) => (o.payment_ref || '').startsWith('pi_')
 /** Statuses that hold goods on their way to (or with) the customer. */
 const shipping = (o: CappeOrder) => o.status === 'paid' || o.status === 'fulfilled'
+/** What can still be refunded: the total less every refund so far. */
+const refundableLeft = (o: CappeOrder) => Math.max(0, (o.total_cents ?? o.subtotal_cents) - (o.refunded_cents ?? 0))
+const REFUND_SOURCE: Record<string, string> = {
+  dashboard: 'Refunded here', manual: 'Recorded here (paid outside Stripe)', stripe: 'Refunded in Stripe',
+  dispute: 'Lost dispute', legacy: 'Refunded',
+}
 const DELIVERABLE_ACCEPT = '.pdf,.zip,.doc,.docx,.xls,.xlsx,.csv,.txt,image/*'
 
 const fulfillBadge: Record<string, string> = {
@@ -175,12 +182,12 @@ export default function Orders() {
     }
   }
 
-  async function refundOrder(order: CappeOrder, restock: boolean) {
+  async function refundOrder(order: CappeOrder, body: CappeRefundBody) {
     setRefundTarget(null)
     setError(null)
     setRefunding(order.id)
     try {
-      replace(await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/refund`, { restock }))
+      replace(await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/refund`, body))
     } catch (e) {
       fail(e, 'Could not refund this order')
     } finally {
@@ -330,11 +337,11 @@ export default function Orders() {
                     {/* A renewal order paid through Stripe now carries its payment
                         intent and is refunded like any card order; one without
                         it (recorded before that) is refunded in Stripe. */}
-                    {shipping(o) && (!o.subscription_id || paidByCard(o)) && (
+                    {shipping(o) && (!o.subscription_id || paidByCard(o)) && refundableLeft(o) > 0 && (
                       <button
                         onClick={() => setRefundTarget(o)}
                         disabled={refunding === o.id}
-                        title={paidByCard(o) ? "Return the full amount to the customer's card" : 'Record a refund you made yourself'}
+                        title={paidByCard(o) ? "Return all or part of the money to the customer's card" : 'Record a refund you made yourself'}
                         className="flex items-center gap-1 rounded-lg border border-red-500/40 px-2.5 py-1 text-xs font-medium text-red-300 hover:bg-red-500/10 disabled:opacity-60"
                       >
                         {refunding === o.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />} Refund
@@ -419,6 +426,7 @@ export default function Orders() {
                     })
                   )}
                   {o.items.length > 0 && <Totals order={o} />}
+                  {(o.refunds?.length ?? 0) > 0 && <RefundHistory order={o} />}
                 </div>
               )}
             </div>
@@ -440,7 +448,12 @@ export default function Orders() {
         <RefundDialog
           order={refundTarget}
           onCancel={() => setRefundTarget(null)}
-          onConfirm={(restock) => refundOrder(refundTarget, restock)}
+          onConfirm={(body) => refundOrder(refundTarget, body)}
+          loadOrder={async () => {
+            const full = await cappeApi.get<CappeOrder>(`/sites/${siteId}/orders/${refundTarget.id}`)
+            replace(full)
+            return full
+          }}
         />
       )}
     </SurfaceShell>
@@ -467,58 +480,170 @@ function Totals({ order: o }: { order: CappeOrder }) {
   )
 }
 
-/** Confirm a refund, and say whether the goods come back to the shelf.
- *  The default matches the server's: back in stock unless the order was
- *  already fulfilled — a refund for a parcel that was lost or kept used to
- *  add stock that was never coming back. */
-function RefundDialog({ order, onCancel, onConfirm }: {
+/** The order's refunds, oldest first: how much, where it was made, why. */
+function RefundHistory({ order: o }: { order: CappeOrder }) {
+  return (
+    <div className="ml-auto max-w-sm rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-xs">
+      <div className="mb-1 font-medium text-zinc-400">Refunds</div>
+      <ul className="space-y-1">
+        {(o.refunds ?? []).map((r) => (
+          <li key={r.id} className="flex flex-wrap justify-between gap-x-4 text-zinc-300">
+            <span>
+              {new Date(r.created_at).toLocaleDateString()} · {REFUND_SOURCE[r.source] ?? r.source}
+              {r.status === 'pending' && <span className="text-amber-300"> · processing</span>}
+              {r.status === 'failed' && <span className="text-red-300"> · failed{r.failure ? `: ${r.failure}` : ''}</span>}
+              {r.reason && <span className="block text-zinc-500">{r.reason}</span>}
+            </span>
+            <span className={r.status === 'succeeded' ? 'text-red-300' : 'text-zinc-500 line-through'}>
+              −{centsToMoney(r.amount_cents, o.currency)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/** Confirm a refund — all of what's left, or part of it — and say which goods
+ *  come back to the shelf. A full refund's default matches the server's: back
+ *  in stock unless the order was already fulfilled (a refund for a parcel that
+ *  was lost or kept used to add stock that was never coming back). A part
+ *  refund restocks exactly the units chosen, nothing else. */
+function RefundDialog({ order, onCancel, onConfirm, loadOrder }: {
   order: CappeOrder
   onCancel: () => void
-  onConfirm: (restock: boolean) => void
+  onConfirm: (body: CappeRefundBody) => void
+  /** The order with its lines, for choosing which units come back. */
+  loadOrder: () => Promise<CappeOrder>
 }) {
+  const left = refundableLeft(order)
+  const [part, setPart] = useState(false)
   const [restock, setRestock] = useState(order.status !== 'fulfilled')
-  const amount = centsToMoney(order.total_cents ?? order.subtotal_cents, order.currency)
+  const [amount, setAmount] = useState((left / 100).toFixed(2))
+  const [reason, setReason] = useState('')
+  const [lines, setLines] = useState<CappeOrder['items'] | null>(order.items.length ? order.items : null)
+  const [back, setBack] = useState<Record<string, string>>({})
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const card = paidByCard(order)
+  const fullText = centsToMoney(left, order.currency)
+  const partCents = parseMoneyCents(amount)
+  const label = part && partCents !== null ? centsToMoney(partCents, order.currency) : fullText
+  const physical = (lines ?? []).filter((it) => it.fulfillment === 'physical'
+    && it.quantity - (it.restocked_quantity ?? 0) > 0)
+
+  function choosePart() {
+    setPart(true)
+    if (lines === null) {
+      loadOrder().then((full) => setLines(full.items)).catch(() => setLoadError('Couldn’t load the items, so none can be restocked from here.'))
+    }
+  }
+
+  function confirm() {
+    setError(null)
+    const why = reason.trim() || undefined
+    if (!part) { onConfirm({ restock, ...(why ? { reason: why } : {}) }); return }
+    if (partCents === null || partCents <= 0) { setError('Enter the amount to refund, e.g. 12.50'); return }
+    if (partCents > left) { setError(`At most ${fullText} is left to refund.`); return }
+    const chosen = []
+    for (const it of physical) {
+      const raw = (back[it.id] ?? '').trim()
+      if (!raw) continue
+      const n = Number(raw)
+      const max = it.quantity - (it.restocked_quantity ?? 0)
+      if (!Number.isInteger(n) || n < 0 || n > max) { setError(`Return between 0 and ${max} of “${it.title}”.`); return }
+      if (n > 0) chosen.push({ item_id: it.id, quantity: n })
+    }
+    onConfirm({ amount_cents: partCents, lines: chosen, ...(why ? { reason: why } : {}) })
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onCancel}>
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="refund-title"
-        className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl"
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="refund-title" className="text-lg font-semibold text-zinc-50">
-          {card ? `Refund ${amount}?` : 'Mark this order as refunded?'}
+          {card ? `Refund ${label}?` : 'Record a refund?'}
         </h2>
         <p className="mt-2 text-sm text-zinc-400">
           {card
-            ? "The full amount goes back to the customer's card through Stripe. This can't be undone."
-            : `It wasn't paid by card here, so no money moves — return ${amount} to the customer yourself. This only updates your records.`}
+            ? "It goes back to the customer's card through Stripe. This can't be undone."
+            : `It wasn't paid by card here, so no money moves — return ${label} to the customer yourself. This only updates your records.`}
         </p>
-        <label className="mt-4 flex items-start gap-2 text-sm text-zinc-300">
-          <input
-            type="checkbox"
-            checked={restock}
-            onChange={(e) => setRestock(e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-zinc-600 bg-zinc-950 text-emerald-500"
-          />
-          <span>
-            Put the items back in stock
-            <span className="block text-xs text-zinc-500">
-              {order.status === 'fulfilled'
-                ? 'This order was fulfilled. Tick this only if the goods were returned to you.'
-                : 'Untick if the goods are not coming back. Items that don’t track stock are unaffected.'}
+        <div className="mt-4 flex gap-1 rounded-lg border border-zinc-700 p-0.5 text-xs">
+          <button type="button" onClick={() => setPart(false)} aria-pressed={!part}
+            className={`flex-1 rounded-md px-2 py-1.5 ${!part ? 'bg-zinc-100 font-semibold text-zinc-900' : 'text-zinc-400 hover:text-zinc-200'}`}>
+            Everything left ({fullText})
+          </button>
+          <button type="button" onClick={choosePart} aria-pressed={part}
+            className={`flex-1 rounded-md px-2 py-1.5 ${part ? 'bg-zinc-100 font-semibold text-zinc-900' : 'text-zinc-400 hover:text-zinc-200'}`}>
+            Part of it
+          </button>
+        </div>
+        {!part ? (
+          <label className="mt-4 flex items-start gap-2 text-sm text-zinc-300">
+            <input
+              type="checkbox"
+              checked={restock}
+              onChange={(e) => setRestock(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-zinc-600 bg-zinc-950 text-emerald-500"
+            />
+            <span>
+              Put the items back in stock
+              <span className="block text-xs text-zinc-500">
+                {order.status === 'fulfilled'
+                  ? 'This order was fulfilled. Tick this only if the goods were returned to you.'
+                  : 'Untick if the goods are not coming back. Items that don’t track stock are unaffected.'}
+              </span>
             </span>
-          </span>
+          </label>
+        ) : (
+          <div className="mt-4 space-y-3">
+            <label className="block text-xs text-zinc-400">
+              Amount ({order.currency})
+              <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal"
+                className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500" />
+            </label>
+            {loadError && <p className="text-xs text-amber-300">{loadError}</p>}
+            {lines === null && !loadError && <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />}
+            {physical.length > 0 && (
+              <fieldset className="space-y-1.5">
+                <legend className="mb-1 text-xs text-zinc-400">Back in stock (only what was returned to you)</legend>
+                {physical.map((it) => {
+                  const max = it.quantity - (it.restocked_quantity ?? 0)
+                  return (
+                    <label key={it.id} className="flex items-center justify-between gap-3 text-sm text-zinc-300">
+                      <span className="truncate">{it.title}</span>
+                      <span className="flex items-center gap-1.5 text-xs text-zinc-500">
+                        <input value={back[it.id] ?? ''} onChange={(e) => setBack({ ...back, [it.id]: e.target.value })}
+                          inputMode="numeric" placeholder="0" aria-label={`Units of ${it.title} back in stock`}
+                          className="w-14 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-right text-sm text-zinc-100 outline-none focus:border-emerald-500" />
+                        of {max}
+                      </span>
+                    </label>
+                  )
+                })}
+              </fieldset>
+            )}
+          </div>
+        )}
+        <label className="mt-4 block text-xs text-zinc-400">
+          Reason (optional, for your records)
+          <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} placeholder="e.g. Arrived damaged"
+            className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500" />
         </label>
+        {error && <p role="alert" className="mt-3 text-xs text-red-400">{error}</p>}
         <div className="mt-6 flex justify-end gap-2">
           <button onClick={onCancel} className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800">Keep order</button>
           <button
-            onClick={() => onConfirm(restock)}
+            onClick={confirm}
             className="flex items-center gap-1.5 rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white hover:bg-red-400"
           >
-            <Undo2 className="h-4 w-4" /> {card ? `Refund ${amount}` : 'Mark refunded'}
+            <Undo2 className="h-4 w-4" /> {card ? `Refund ${label}` : 'Mark refunded'}
           </button>
         </div>
       </div>

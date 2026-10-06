@@ -419,6 +419,30 @@ async def send_cappe_order_declined_email(
     await _send(to_email, to_name, f"Order update — {site_name}", html, text, label="order declined")
 
 
+async def send_cappe_order_refunded_email(
+    to_email: str, to_name: str | None, site_name: str, amount_cents: int, currency: str,
+    full: bool, order_url: str | None,
+) -> None:
+    """The store refunded some or all of an order. Buyers used to learn of a
+    refund only from their bank statement. Best-effort."""
+    e_site = escape(site_name or "")
+    amount = fmt_money(amount_cents, currency)
+    lead = (f"{e_site} refunded your order: {escape(amount)}." if full
+            else f"{e_site} refunded {escape(amount)} of your order.")
+    note = ("It goes back to the card you paid with and usually shows within 5–10 business days."
+            if order_url else "")
+    cta = (f'<p style="margin:18px 0 0;"><a href="{escape(order_url, quote=True)}" '
+           f'style="color:#c6f16b;">View your order</a></p>') if order_url else ""
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#d4d4d8;">{lead}</p>'
+        f'<p style="margin:0;font-size:13px;color:#a1a1aa;">{note}</p>{cta}'
+    )
+    html = _email_shell(f"Refund — {e_site}", body)
+    text = (f"{site_name} refunded {'your order' if full else 'part of your order'}: {amount}. {note}"
+            + (f"\nView your order: {order_url}" if order_url else ""))
+    await _send(to_email, to_name, f"Refund from {site_name}", html, text, label="order refunded")
+
+
 async def send_cappe_order_shipped_email(
     to_email: str, to_name: str | None, site_name: str, items_summary: str,
     carrier: str | None, tracking_number: str | None, order_url: str | None, shipped: bool,

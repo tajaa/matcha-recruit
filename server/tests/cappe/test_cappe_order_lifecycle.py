@@ -88,64 +88,6 @@ def test_no_cycle_passes_through_a_restock_twice():
     assert lifecycle.allowed_next_statuses("refunded") == []
 
 
-# ── mark_order_refunded ──────────────────────────────────────────────────────
-
-class RefundConn:
-    def __init__(self, row):
-        self.row, self.sql, self.args = row, None, None
-
-    async def fetchrow(self, sql, *args):
-        self.sql, self.args = sql, args
-        return self.row
-
-
-def _stock_log(monkeypatch):
-    log = []
-
-    async def _restock(_conn, *, site_id, order_id, reason):
-        log.append(f"restock:{reason}")
-
-    async def _bookings(_conn, *, order_id):
-        log.append("bookings")
-        return 1
-
-    monkeypatch.setattr(lifecycle, "restock_order", _restock)
-    monkeypatch.setattr(lifecycle, "release_order_bookings", _bookings)
-    return log
-
-
-def test_refunding_a_paid_order_restocks_and_frees_its_slots(monkeypatch):
-    log = _stock_log(monkeypatch)
-    conn = RefundConn({"id": ORDER, "site_id": SITE})
-    row = asyncio.run(lifecycle.mark_order_refunded(
-        conn, order_id=ORDER, site_id=SITE, refunded_cents=None, stripe_refund_id="re_1",
-    ))
-    assert row == {"id": ORDER, "site_id": SITE}
-    assert log == ["restock:return", "bookings"]
-    # Guarded on a status that actually holds money — this is what makes the
-    # refund route and the charge.refunded webhook safe to both run.
-    assert "status IN ('paid', 'fulfilled')" in conn.sql
-    assert "status = 'refunded'" in conn.sql and "refunded_at = NOW()" in conn.sql
-    assert conn.args == (ORDER, SITE, None, "re_1")
-
-
-def test_an_order_not_holding_money_is_left_alone(monkeypatch):
-    log = _stock_log(monkeypatch)
-    assert asyncio.run(lifecycle.mark_order_refunded(
-        RefundConn(None), order_id=ORDER, site_id=SITE, refunded_cents=500, stripe_refund_id=None,
-    )) is None
-    assert log == []
-
-
-def test_a_lost_dispute_closes_the_order_without_inventing_stock(monkeypatch):
-    log = _stock_log(monkeypatch)
-    asyncio.run(lifecycle.mark_order_refunded(
-        RefundConn({"id": ORDER, "site_id": SITE}), order_id=ORDER, site_id=SITE,
-        refunded_cents=900, stripe_refund_id=None, restock=False,
-    ))
-    assert log == ["bookings"]
-
-
 # ── route harness ────────────────────────────────────────────────────────────
 
 class Tx:
@@ -211,8 +153,9 @@ class FakeStripe:
     def __init__(self, exc=None, refund=None):
         self.exc, self.refund, self.refunded = exc, refund or {"id": "re_live"}, []
 
-    async def refund_connected_charge(self, *, account_id, payment_intent, idempotency_key=None):
-        self.refunded.append((account_id, payment_intent, idempotency_key))
+    async def refund_connected_charge(self, *, account_id, payment_intent, idempotency_key=None,
+                                      amount_cents=None, metadata=None):
+        self.refunded.append((account_id, payment_intent, idempotency_key, amount_cents, metadata))
         if self.exc:
             raise self.exc
         return self.refund
@@ -234,16 +177,13 @@ def _wire(monkeypatch, conn, stripe=None):
         log.append("bookings")
         return 0
 
-    async def _refunded(_conn, *, order_id, site_id, refunded_cents, stripe_refund_id, **_kw):
-        log.append(f"mark_refunded:{stripe_refund_id}")
-        return {"id": order_id, "site_id": site_id}
 
     monkeypatch.setattr(shop_mod, "get_connection", lambda: Ctx(conn))
     monkeypatch.setattr(shop_mod, "get_owned_site", _owned)
     monkeypatch.setattr(shop_mod, "_close_open_checkout", _closed)
     monkeypatch.setattr(shop_mod, "restock_order", _restock)
     monkeypatch.setattr(shop_mod, "release_order_bookings", _bookings)
-    monkeypatch.setattr(shop_mod, "mark_order_refunded", _refunded)
+    _wire_ledger(monkeypatch, log)
     monkeypatch.setattr(shop_mod, "_order_row", lambda order, items: dict(order))
     monkeypatch.setattr(shop_mod, "get_cappe_stripe", lambda: stripe or FakeStripe())
     monkeypatch.setattr("app.cappe.services.push.schedule_push", lambda *_a: None)
@@ -361,60 +301,168 @@ def test_tracking_only_patch_on_a_vanished_order_is_404(monkeypatch):
 
 # ── POST …/refund ────────────────────────────────────────────────────────────
 
-def _refund_conn(status="paid", intent="pi_1", invoice=None, acct="acct_1", after=None):
+REFUND_ID = uuid4()
+
+
+def _wire_ledger(monkeypatch, log, *, order=None, pending=None, lines=()):
+    """The refund ledger, faked: what the route asks of it lands in `log`."""
+    state = {"order": order or {"id": ORDER, "site_id": SITE, "status": "paid", "total_cents": 5000,
+                                "subtotal_cents": 5000, "refunded_cents": 0, "currency": "USD"}}
+
+    async def _lock(_conn, order_id, site_id):
+        return state["order"]
+
+    async def _plan(_conn, order_id, requested):
+        return list(lines)
+
+    async def _start(_conn, *, order, amount_cents, restock, lines, reason, source):
+        log.append(("start", amount_cents, restock, list(lines), source))
+        return {"id": REFUND_ID}
+
+    async def _apply(_conn, *, refund_id, site_id, stripe_refund_id=None):
+        log.append(("apply", stripe_refund_id))
+        return {"id": refund_id}
+
+    async def _fail(_conn, refund_id, failure):
+        log.append(("fail", failure))
+
+    async def _pending(_conn, order_id):
+        return pending
+
+    async def _view(_conn, site_id, order_id):
+        return {"id": order_id, "status": state["order"]["status"]}
+
+    monkeypatch.setattr(shop_mod, "lock_order", _lock)
+    monkeypatch.setattr(shop_mod, "plan_restock_lines", _plan)
+    monkeypatch.setattr(shop_mod, "start_refund", _start)
+    monkeypatch.setattr(shop_mod, "apply_refund", _apply)
+    monkeypatch.setattr(shop_mod, "fail_refund", _fail)
+    monkeypatch.setattr(shop_mod, "pending_refund", _pending)
+    monkeypatch.setattr(shop_mod, "_order_view", _view)
+    return state
+
+
+def _refund_conn(status="paid", intent="pi_1", invoice=None, acct="acct_1"):
     return SqlConn([
         ("a.stripe_account_id", {
             "status": status, "stripe_payment_intent": intent,
             "stripe_invoice_id": invoice, "stripe_account_id": acct,
         }),
-        ("FROM cappe_orders WHERE id = $1 AND site_id = $2", after or {"id": ORDER, "status": "refunded"}),
     ])
 
 
-def _refund(conn):
-    return asyncio.run(shop_mod.refund_order(SITE, ORDER, account=ACCOUNT))
+def _refund(body=None):
+    return asyncio.run(shop_mod.refund_order(SITE, ORDER, body, account=ACCOUNT))
 
 
-def test_card_order_is_refunded_at_stripe_before_anything_is_recorded(monkeypatch):
+def _ledger_events(log):
+    return [e for e in log if isinstance(e, tuple)]
+
+
+def test_card_order_is_refunded_at_stripe_between_writing_and_settling_the_ledger(monkeypatch):
     conn, stripe = _refund_conn(), FakeStripe()
     log = _wire(monkeypatch, conn, stripe)
-    out = _refund(conn)
-    # On the BUSINESS's connected account (the charge lives there), with a key
-    # that makes a double-click return the first refund.
-    assert stripe.refunded == [("acct_1", "pi_1", f"cappe-order-refund-{ORDER}")]
-    assert log == ["mark_refunded:re_live"]
-    assert out["status"] == "refunded"
+    _refund()
+    # Written first (so the webhook applies the owner's choice), then Stripe —
+    # on the BUSINESS's connected account, keyed by the ledger row so a
+    # double-click returns the first refund — then settled.
+    assert _ledger_events(log) == [("start", 5000, True, [], "dashboard"), ("apply", "re_live")]
+    (acct, intent, key, amount, meta), = stripe.refunded
+    assert (acct, intent, key, amount) == ("acct_1", "pi_1", f"cappe-refund-{REFUND_ID}", 5000)
+    assert meta["cappe_refund_id"] == str(REFUND_ID)
 
 
-def test_a_refund_stripe_refuses_leaves_the_order_exactly_as_it_was(monkeypatch):
+def test_a_part_refund_sends_only_its_amount_and_restocks_only_its_lines(monkeypatch):
+    from app.cappe.models.shop import CappeRefundRequest
+    conn, stripe = _refund_conn(), FakeStripe()
+    log = _wire(monkeypatch, conn, stripe)
+    line = {"item_id": str(uuid4()), "quantity": 1}
+    _wire_ledger(monkeypatch, log, lines=[line])
+    _refund(CappeRefundRequest(amount_cents=1200, lines=[line], reason="One mug arrived broken"))
+    assert _ledger_events(log)[0] == ("start", 1200, False, [line], "dashboard")
+    assert stripe.refunded[0][3] == 1200
+
+
+def test_a_refund_larger_than_whats_left_is_refused(monkeypatch):
+    from app.cappe.models.shop import CappeRefundRequest
+    conn, stripe = _refund_conn(), FakeStripe()
+    log = _wire(monkeypatch, conn, stripe)
+    _wire_ledger(monkeypatch, log, order={"id": ORDER, "site_id": SITE, "status": "paid", "total_cents": 5000,
+                                          "refunded_cents": 4000, "currency": "USD"})
+    with pytest.raises(HTTPException) as exc:
+        _refund(CappeRefundRequest(amount_cents=2000))
+    assert exc.value.status_code == 422 and "$10.00" in exc.value.detail
+    assert _ledger_events(log) == [] and stripe.refunded == []
+
+
+@pytest.mark.parametrize("status_now,restock,expected", [
+    ("paid", None, True),          # not shipped: the goods are still here
+    ("fulfilled", None, False),    # shipped: do not invent stock
+    ("fulfilled", True, True),     # the owner says it came back
+    ("paid", False, False),        # the owner says it did not
+])
+def test_a_full_refund_restocks_only_goods_that_are_coming_back(monkeypatch, status_now, restock, expected):
+    from app.cappe.models.shop import CappeRefundRequest
+    conn, stripe = _refund_conn(status=status_now), FakeStripe()
+    log = _wire(monkeypatch, conn, stripe)
+    _wire_ledger(monkeypatch, log, order={"id": ORDER, "site_id": SITE, "status": status_now,
+                                          "total_cents": 5000, "refunded_cents": 0, "currency": "USD"})
+    _refund(CappeRefundRequest(restock=restock))
+    assert _ledger_events(log)[0][2] is expected
+
+
+def test_a_refund_stripe_refuses_is_marked_failed_and_changes_nothing_else(monkeypatch):
     conn, stripe = _refund_conn(), FakeStripe(exc=CappeStripeError("insufficient funds"))
     log = _wire(monkeypatch, conn, stripe)
     with pytest.raises(HTTPException) as exc:
-        _refund(conn)
+        _refund()
     assert exc.value.status_code == 502 and "left as is" in exc.value.detail
-    assert log == []                               # never marked refunded, never restocked
+    assert _ledger_events(log) == [("start", 5000, True, [], "dashboard"), ("fail", "insufficient funds")]
 
 
-def test_a_charge_already_refunded_in_stripe_still_closes_the_order(monkeypatch):
+def test_a_charge_already_refunded_in_stripe_still_settles(monkeypatch):
     conn = _refund_conn()
     log = _wire(monkeypatch, conn, FakeStripe(refund={"id": None, "already_refunded": True}))
-    _refund(conn)
-    assert log == ["mark_refunded:None"]
+    _refund()
+    assert _ledger_events(log)[-1] == ("apply", None)
 
 
 def test_an_order_paid_outside_stripe_is_only_recorded(monkeypatch):
     conn, stripe = _refund_conn(intent=None), FakeStripe()
     log = _wire(monkeypatch, conn, stripe)
-    _refund(conn)
+    _refund()
     assert stripe.refunded == []                   # there is no charge to reverse
-    assert log == ["mark_refunded:None"]
+    assert _ledger_events(log) == [("start", 5000, True, [], "manual"), ("apply", None)]
 
 
-def test_a_subscription_order_is_sent_to_stripe_not_silently_marked(monkeypatch):
+def test_a_refund_still_in_flight_blocks_another(monkeypatch):
+    conn, stripe = _refund_conn(), FakeStripe()
+    log = _wire(monkeypatch, conn, stripe)
+    _wire_ledger(monkeypatch, log, pending={"id": uuid4(), "age": 5})
+    with pytest.raises(HTTPException) as exc:
+        _refund()
+    assert exc.value.status_code == 409 and "still being processed" in exc.value.detail
+    assert stripe.refunded == []
+
+
+@pytest.mark.parametrize("found,event", [
+    ({"id": "re_old", "status": "succeeded"}, ("apply", "re_old")),
+    (None, ("fail", "Stripe has no record of this refund")),
+])
+def test_a_refund_whose_request_died_is_settled_from_stripe_first(monkeypatch, found, event):
+    conn, stripe = _refund_conn(), FakeStripe()
+    stripe.find_connected_refund = lambda **_kw: _async(found)
+    log = _wire(monkeypatch, conn, stripe)
+    _wire_ledger(monkeypatch, log, pending={"id": uuid4(), "age": 600})
+    _refund()
+    assert _ledger_events(log)[0] == event
+
+
+def test_a_subscription_order_without_its_payment_is_sent_to_stripe(monkeypatch):
     conn, stripe = _refund_conn(intent=None, invoice="in_1"), FakeStripe()
     log = _wire(monkeypatch, conn, stripe)
     with pytest.raises(HTTPException) as exc:
-        _refund(conn)
+        _refund()
     assert exc.value.status_code == 409 and "subscription" in exc.value.detail
     assert log == [] and stripe.refunded == []
 
@@ -423,7 +471,7 @@ def test_a_card_order_with_no_connected_account_cannot_be_refunded_here(monkeypa
     conn, stripe = _refund_conn(acct=None), FakeStripe()
     log = _wire(monkeypatch, conn, stripe)
     with pytest.raises(HTTPException) as exc:
-        _refund(conn)
+        _refund()
     assert exc.value.status_code == 409 and "no longer connected" in exc.value.detail
     assert log == []
 
@@ -433,32 +481,60 @@ def test_only_an_order_holding_money_can_be_refunded(monkeypatch, status):
     conn, stripe = _refund_conn(status=status), FakeStripe()
     log = _wire(monkeypatch, conn, stripe)
     with pytest.raises(HTTPException) as exc:
-        _refund(conn)
+        _refund()
     assert exc.value.status_code == 409
     assert log == [] and stripe.refunded == []
 
 
 def test_refunding_an_already_refunded_order_is_a_no_op_that_returns_it(monkeypatch):
     conn, stripe = _refund_conn(status="refunded"), FakeStripe()
-    _wire(monkeypatch, conn, stripe)
-    assert _refund(conn)["status"] == "refunded"
-    assert stripe.refunded == []                   # no second refund
+    log = _wire(monkeypatch, conn, stripe)
+    _wire_ledger(monkeypatch, log, order={"id": ORDER, "status": "refunded"})
+    assert _refund()["status"] == "refunded"
+    assert stripe.refunded == [] and log == []     # no second refund
 
 
 def test_refund_of_a_missing_order_is_404(monkeypatch):
     conn = SqlConn([])
     _wire(monkeypatch, conn)
     with pytest.raises(HTTPException) as exc:
-        _refund(conn)
+        _refund()
     assert exc.value.status_code == 404
 
 
-def test_refund_404s_if_the_order_vanishes_before_it_is_read_back(monkeypatch):
-    conn = SqlConn([
-        ("a.stripe_account_id", {"status": "paid", "stripe_payment_intent": None,
-                                 "stripe_invoice_id": None, "stripe_account_id": None}),
-    ])
-    _wire(monkeypatch, conn)
+def test_refund_404s_if_the_order_vanishes_under_the_lock(monkeypatch):
+    conn = _refund_conn(intent=None)
+    log = _wire(monkeypatch, conn)
+    state = _wire_ledger(monkeypatch, log)
+    state["order"] = None
     with pytest.raises(HTTPException) as exc:
-        _refund(conn)
+        _refund()
     assert exc.value.status_code == 404
+
+
+async def _async(value):
+    return value
+
+
+def test_the_buyer_is_emailed_about_their_refund(monkeypatch):
+    from app.cappe.models.shop import CappeRefundRequest
+    conn = SqlConn([
+        ("a.stripe_account_id", {"status": "paid", "stripe_payment_intent": "pi_1",
+                                 "stripe_invoice_id": None, "stripe_account_id": "acct_1"}),
+        ("o.access_token, s.name", {"access_token": "tok", "name": "Lumière", "subdomain": "lumiere",
+                                    "custom_domain": None}),
+    ])
+    log = _wire(monkeypatch, conn, FakeStripe())
+
+    async def _view(_conn, site_id, order_id):
+        return {"id": order_id, "status": "paid", "customer_email": "b@example.com",
+                "customer_name": "B", "currency": "USD"}
+
+    monkeypatch.setattr(shop_mod, "_order_view", _view)
+    bg = Background()
+    asyncio.run(shop_mod.refund_order(SITE, ORDER, CappeRefundRequest(amount_cents=1200), account=ACCOUNT, background=bg))
+    ((name, args),) = bg.tasks
+    assert name == "send_cappe_order_refunded_email"
+    assert args[:6] == ("b@example.com", "B", "Lumière", 1200, "USD", False)
+    assert args[6].endswith("/order/tok")
+    assert log[-1] == ("apply", "re_live")
