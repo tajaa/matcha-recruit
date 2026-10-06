@@ -24,6 +24,119 @@ logger = logging.getLogger("cappe.domain_register")
 # between the claim and the AWS call; it may be re-claimed.
 _STALE_CLAIM = "10 minutes"
 
+# How long a domain purchase's Checkout Session stays payable. Stripe's default
+# is 24h; a purchase row holds a claim on the name for as long as it can still
+# be paid, so the window is kept short and the reconciler clears the row after.
+PURCHASE_SESSION_SECONDS = 3600
+PURCHASE_ABANDONED_AFTER = "2 hours"
+
+
+async def begin_registration(domain_id: UUID, payment_intent, customer_id) -> bool:
+    """A domain purchase has been PAID: record the charge and move the row to
+    `registering`. Returns False if the row was not waiting for payment (a
+    replayed event, or the reconciler got there first).
+
+    Shared by the platform webhook and the abandoned-purchase reconciler so a
+    lost webhook ends in exactly the same state as a delivered one.
+
+    The payment method is read here and stored: it is what next year's
+    off-session renewal charges (see `stripe_connect.payment_method_for_intent`).
+    Best-effort — a failed lookup must not strand a paid registration, and the
+    renewal falls back to listing the customer's saved cards.
+    """
+    payment_method_id = None
+    if payment_intent:
+        try:
+            payment_method_id = await get_cappe_stripe().payment_method_for_intent(payment_intent)
+        except CappeStripeError as exc:
+            logger.warning("cappe domain %s: could not read the payment method: %s", domain_id, exc)
+    async with connection_or_direct() as conn:
+        row = await conn.fetchrow(
+            """UPDATE cappe_domains
+                  SET status = 'registering', stripe_payment_intent = $2,
+                      stripe_customer_id = $3, stripe_payment_method_id = $4,
+                      updated_at = NOW()
+                WHERE id = $1 AND status = 'pending'
+                RETURNING id""",
+            domain_id, payment_intent, customer_id, payment_method_id,
+        )
+    return row is not None
+
+
+async def refund_failed_registration(domain_id: UUID, payment_intent: str) -> bool:
+    """Give the customer their money back for a registration that failed, and
+    RECORD how that went.
+
+    The refund used to be a bare call whose failure was a log line: the
+    customer had paid, had no domain, and nothing anywhere said a refund was
+    still owed. Now a failure marks the row `refund_status='owed'`, which the
+    `cappe_domain_finalize` task retries until it lands. The idempotency key
+    makes every retry return the first refund rather than attempt another.
+    """
+    try:
+        refund = await get_cappe_stripe().refund(
+            payment_intent, idempotency_key=f"cappe-domain-refund-{domain_id}"
+        )
+    except CappeStripeError as exc:
+        logger.error(
+            "cappe domain %s: refund of %s FAILED (%s) — marked refund owed; will retry",
+            domain_id, payment_intent, exc,
+        )
+        async with connection_or_direct() as conn:
+            await conn.execute(
+                "UPDATE cappe_domains SET refund_status = 'owed', updated_at = NOW() "
+                "WHERE id = $1 AND refund_status IS DISTINCT FROM 'refunded'",
+                domain_id,
+            )
+        return False
+    async with connection_or_direct() as conn:
+        await conn.execute(
+            "UPDATE cappe_domains SET refund_status = 'refunded', "
+            "stripe_refund_id = COALESCE($2, stripe_refund_id), "
+            "refunded_at = COALESCE(refunded_at, NOW()), updated_at = NOW() WHERE id = $1",
+            domain_id, refund.get("id"),
+        )
+    return True
+
+
+async def reap_abandoned_purchase(domain_id: UUID, session_id) -> str:
+    """Clear a purchase row whose checkout was started and never paid.
+
+    These rows never expired: every abandoned checkout left a `pending` claim
+    on its domain for ever. The Stripe session is closed FIRST (the storefront
+    rule — never delete what can still be paid) and the outcome decides:
+
+      'deleted'   nobody can pay it any more; the row is gone.
+      'paid'      the buyer DID pay and the webhook was lost — registration is
+                  started here, exactly as the webhook would have.
+      'settling'  checkout finished on a delayed method; its own event decides.
+      'retry'     Stripe unreachable; try again next cycle.
+    """
+    if session_id:
+        cs = get_cappe_stripe()
+        try:
+            state = await cs.expire_platform_checkout_session(session_id)
+            if state != "expired":
+                sess = await cs.retrieve_platform_checkout_session(session_id)
+                if sess.get("payment_status") != "paid":
+                    return "settling"
+                if await begin_registration(domain_id, sess.get("payment_intent"), sess.get("customer")):
+                    logger.warning(
+                        "cappe domain %s was paid at Stripe but still pending — the webhook was "
+                        "lost; registering now", domain_id,
+                    )
+                    await finalize_domain_registration(domain_id)
+                return "paid"
+        except CappeStripeError as exc:
+            logger.warning("cappe domain %s: could not close abandoned checkout: %s", domain_id, exc)
+            return "retry"
+    async with connection_or_direct() as conn:
+        await conn.execute(
+            "DELETE FROM cappe_domains WHERE id = $1 AND kind = 'register' AND status = 'pending'",
+            domain_id,
+        )
+    return "deleted"
+
 
 async def provision_domain_edge(domain_id: UUID, domain: str) -> tuple[str, str | None]:
     """Create the CloudFront tenant for `domain` and persist the result.
@@ -121,10 +234,7 @@ async def finalize_domain_registration(domain_id: UUID) -> None:
                 str(exc)[:500],
             )
         if row["stripe_payment_intent"]:
-            try:
-                await get_cappe_stripe().refund(row["stripe_payment_intent"])
-            except CappeStripeError as refund_exc:
-                logger.error("cappe domain %s refund failed: %s", domain_id, refund_exc)
+            await refund_failed_registration(domain_id, row["stripe_payment_intent"])
         return
 
     async with connection_or_direct() as conn:

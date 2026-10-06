@@ -55,11 +55,20 @@ def best_discount_percent(
 
 
 def apply_discount_cents(cents: int, percent_off: int) -> int:
-    """Reduce a price by `percent_off` percent, rounded to whole cents."""
+    """Reduce a price by `percent_off` percent, rounded HALF-UP to whole cents.
+
+    Integer arithmetic on purpose. This used to be `round(x / 100)`, which is
+    banker's rounding in Python (2.5 → 2) while the storefront script priced
+    the button with JavaScript's `Math.round` (2.5 → 3): on any price that
+    lands on half a cent the page showed one amount and the order charged
+    another. `(n + 50) // 100` is half-up for the non-negative integers this
+    takes, and the storefront (`render/assets/store.js`) computes the same
+    expression — `tests/cappe/test_cappe_pricing.py` pins the two together.
+    """
     pct = max(0, min(int(percent_off or 0), 90))
     if pct == 0:
         return int(cents)
-    return int(round(int(cents) * (100 - pct) / 100))
+    return (int(cents) * (100 - pct) + 50) // 100
 
 
 def site_today(now_utc, tz_name) -> date:

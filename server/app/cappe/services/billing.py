@@ -37,6 +37,102 @@ logger = logging.getLogger(__name__)
 FREE_PLAN_CODE = "free"
 
 
+class DuplicateLiveSubscription(Exception):
+    """`sync_subscription` found a SECOND live Stripe subscription for an
+    account that already has one — the double-checkout race.
+
+    Raised rather than handled in place because handling it means two Stripe
+    calls (cancel, refund), and `sync_subscription` runs inside the caller's
+    transaction on a pooled connection. Making those calls there pinned a
+    connection — and the row locks it held — for the length of two network
+    round-trips. The exception unwinds the transaction first; the caller then
+    runs `resolve_duplicate_subscription` with nothing held.
+    """
+
+    def __init__(self, stripe_subscription_id: str, latest_invoice_id: Optional[str]):
+        super().__init__(f"duplicate live subscription {stripe_subscription_id}")
+        self.stripe_subscription_id = stripe_subscription_id
+        self.latest_invoice_id = latest_invoice_id
+
+
+async def resolve_duplicate_subscription(dup: DuplicateLiveSubscription) -> None:
+    """Undo a duplicate subscription: cancel it now AND refund what it already
+    collected. Call with no connection or transaction open.
+
+    Cancelling alone (what this used to do) stops future billing but keeps the
+    invoice the duplicate had already charged — the customer paid twice for one
+    plan and got one of them back only if somebody noticed the log line.
+    """
+    cs = get_cappe_stripe()
+    try:
+        await cs.cancel_subscription(dup.stripe_subscription_id, at_period_end=False)
+    except CappeStripeError as exc:
+        logger.error(
+            "cappe: could not cancel duplicate subscription %s: %s — CANCEL IT MANUALLY",
+            dup.stripe_subscription_id, exc,
+        )
+    if not dup.latest_invoice_id:
+        logger.error(
+            "cappe: duplicate subscription %s cancelled; it carried no invoice to refund — "
+            "check Stripe for a charge", dup.stripe_subscription_id,
+        )
+        return
+    try:
+        refunds = await cs.refund_invoice(dup.latest_invoice_id)
+    except CappeStripeError as exc:
+        logger.error(
+            "cappe: duplicate subscription %s cancelled but refunding invoice %s FAILED: %s — "
+            "MANUAL REFUND REQUIRED", dup.stripe_subscription_id, dup.latest_invoice_id, exc,
+        )
+        return
+    logger.error(
+        "cappe: duplicate subscription %s cancelled and invoice %s refunded (%d refund(s))",
+        dup.stripe_subscription_id, dup.latest_invoice_id, len(refunds),
+    )
+
+
+async def sync_subscription_tx(
+    account_id: UUID, subscription: Any, *, event_at: Optional[datetime] = None, after=None,
+) -> Optional[UUID]:
+    """`sync_subscription` in its own connection + transaction, with the
+    duplicate-subscription case resolved AFTER both are released.
+
+    `after(conn)` runs in the same transaction once the sync has succeeded
+    (the intro-redemption insert, the latest-invoice stamp). Returns the local
+    subscription id, or None when the event was stale or was a duplicate.
+    """
+    try:
+        async with get_connection() as conn:
+            async with conn.transaction():
+                sub_id = await sync_subscription(
+                    conn, account_id=account_id, subscription=subscription, event_at=event_at
+                )
+                if after is not None:
+                    await after(conn)
+        return sub_id
+    except DuplicateLiveSubscription as dup:
+        await resolve_duplicate_subscription(dup)
+        return None
+
+
+def pending_update_reason(subscription: Any) -> Optional[str]:
+    """A message for the customer when a change we just asked Stripe for did
+    NOT take effect, else None.
+
+    Plan and add-on changes are made with `payment_behavior=
+    'pending_if_incomplete'`: if the proration invoice's payment fails, Stripe
+    leaves the subscription exactly as it was and parks the change in
+    `pending_update`. The routes re-read the subscription, saw the OLD plan,
+    and returned 200 — a declined upgrade looked like a successful no-op.
+    """
+    if _as_dict(subscription).get("pending_update"):
+        return (
+            "Your card was declined for this change, so nothing was changed. "
+            "Update your card from the billing portal and try again."
+        )
+    return None
+
+
 def _as_dict(obj: Any) -> dict:
     """Stripe SDK objects are not plain dicts; normalize."""
     if isinstance(obj, dict):
@@ -282,8 +378,11 @@ async def sync_subscription(
     """Upsert a Stripe Subscription (and its items) and materialize the plan.
 
     Returns the local subscription id, or None if a newer event already applied
-    (the watermark rejected this one) or a duplicate-subscription race was
-    resolved by cancelling this one.
+    (the watermark rejected this one).
+
+    Raises `DuplicateLiveSubscription` when this is a second live subscription
+    for the account. Callers that own the transaction should go through
+    `sync_subscription_tx`, which unwinds it and then cancels + refunds.
     """
     sub = _as_dict(subscription)
     stripe_sub_id = sub.get("id")
@@ -406,19 +505,13 @@ async def sync_subscription(
                 # would leave the event retrying for days while the double
                 # billing continues.
                 logger.error(
-                    "cappe: duplicate live subscription for account %s; cancelling %s",
-                    account_id, stripe_sub_id,
+                    "cappe: duplicate live subscription for account %s; cancelling + "
+                    "refunding %s", account_id, stripe_sub_id,
                 )
-                try:
-                    await get_cappe_stripe().cancel_subscription(
-                        stripe_sub_id, at_period_end=False
-                    )
-                except CappeStripeError as cancel_exc:
-                    logger.error(
-                        "cappe: could not cancel duplicate subscription %s: %s — "
-                        "MANUAL REFUND REQUIRED", stripe_sub_id, cancel_exc,
-                    )
-                return None
+                # No Stripe call from in here — see DuplicateLiveSubscription.
+                raise DuplicateLiveSubscription(
+                    stripe_sub_id, values["latest_invoice_id"]
+                ) from exc
 
             # Any other violation on this table is `stripe_subscription_id`
             # (its only other UNIQUE constraint) — a concurrent delivery of the
@@ -548,21 +641,59 @@ async def handle_checkout_completed(session: dict, event_at: Optional[datetime])
         logger.error("cappe: could not retrieve subscription %s: %s", stripe_sub_id, exc)
         raise
 
-    async with get_connection() as conn:
-        async with conn.transaction():
-            await sync_subscription(
-                conn, account_id=account_uuid, subscription=sub, event_at=event_at
+    intro = str(meta.get("intro")) == "1"
+    fingerprint = await _intro_card_fingerprint(sub) if intro else None
+
+    async def _record_intro(conn) -> None:
+        if not intro:
+            return
+        # PK makes this idempotent under Stripe retries. The fingerprint column
+        # has existed since zzzzcappe26 and was never written, so the "one $1
+        # offer" rule could only ever be per account.
+        await conn.execute(
+            """
+            INSERT INTO cappe_intro_redemptions (account_id, stripe_subscription_id, card_fingerprint)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (account_id) DO UPDATE
+               SET card_fingerprint = COALESCE(cappe_intro_redemptions.card_fingerprint,
+                                               EXCLUDED.card_fingerprint)
+            """,
+            account_uuid, stripe_sub_id, fingerprint,
+        )
+        if fingerprint:
+            reused = await conn.fetchval(
+                "SELECT COUNT(*) FROM cappe_intro_redemptions "
+                "WHERE card_fingerprint = $1 AND account_id <> $2",
+                fingerprint, account_uuid,
             )
-            if str(meta.get("intro")) == "1":
-                # PK makes this idempotent under Stripe retries.
-                await conn.execute(
-                    """
-                    INSERT INTO cappe_intro_redemptions (account_id, stripe_subscription_id)
-                    VALUES ($1, $2) ON CONFLICT (account_id) DO NOTHING
-                    """,
-                    account_uuid, stripe_sub_id,
+            if reused:
+                # Recorded and reported, NOT enforced: the customer was shown
+                # "$1 for 30 days" at checkout, and ending that trial after the
+                # fact would charge them a price they never agreed to. What to
+                # do about serial sign-ups is a product call; this makes them
+                # visible.
+                logger.warning(
+                    "cappe: intro offer for account %s paid with a card already used for the "
+                    "intro on %d other account(s)", account_uuid, reused,
                 )
+
+    await sync_subscription_tx(account_uuid, sub, event_at=event_at, after=_record_intro)
     return {"status": "ok"}
+
+
+async def _intro_card_fingerprint(subscription: Any) -> Optional[str]:
+    """Fingerprint of the card behind a subscription, best-effort. A failure
+    here must never fail the webhook that grants a paid plan."""
+    pm = _as_dict(subscription).get("default_payment_method")
+    if isinstance(pm, dict):
+        pm = pm.get("id")
+    if not isinstance(pm, str) or not pm:
+        return None
+    try:
+        return await get_cappe_stripe().card_fingerprint(pm)
+    except CappeStripeError as exc:
+        logger.info("cappe: could not read intro card fingerprint: %s", exc)
+        return None
 
 
 async def handle_subscription_event(subscription: dict, event_at: Optional[datetime]) -> dict:
@@ -579,10 +710,7 @@ async def handle_subscription_event(subscription: dict, event_at: Optional[datet
             # not route on metadata, which Stripe does not reliably inherit onto
             # every downstream object.
             return {"status": "ignored"}
-        async with conn.transaction():
-            await sync_subscription(
-                conn, account_id=account_id, subscription=subscription, event_at=event_at
-            )
+    await sync_subscription_tx(account_id, subscription, event_at=event_at)
     return {"status": "ok"}
 
 
@@ -634,16 +762,14 @@ async def handle_invoice_event(
         logger.error("cappe: could not retrieve subscription %s: %s", stripe_sub_id, exc)
         raise
 
-    async with get_connection() as conn:
-        async with conn.transaction():
-            await sync_subscription(
-                conn, account_id=account_id, subscription=sub, event_at=event_at
-            )
-            await conn.execute(
-                "UPDATE cappe_subscriptions SET latest_invoice_id = $1, updated_at = NOW() "
-                "WHERE stripe_subscription_id = $2",
-                invoice.get("id"), stripe_sub_id,
-            )
+    async def _stamp_invoice(conn) -> None:
+        await conn.execute(
+            "UPDATE cappe_subscriptions SET latest_invoice_id = $1, updated_at = NOW() "
+            "WHERE stripe_subscription_id = $2",
+            invoice.get("id"), stripe_sub_id,
+        )
+
+    await sync_subscription_tx(account_id, sub, event_at=event_at, after=_stamp_invoice)
     logger.info(
         "cappe: invoice %s for %s (paid=%s)", invoice.get("id"), stripe_sub_id, paid
     )

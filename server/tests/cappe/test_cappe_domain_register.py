@@ -106,9 +106,10 @@ def _patch(monkeypatch, conn, pb, edge, refunds=None):
     monkeypatch.setattr(mod, "get_cloudfront_tenants", lambda: edge)
 
     class FakeStripe:
-        async def refund(self, intent):
+        async def refund(self, intent, *, idempotency_key=None):
             if refunds is not None:
                 refunds.append(intent)
+            return {"id": "re_1"}
 
     monkeypatch.setattr(mod, "get_cappe_stripe", lambda: FakeStripe())
 
@@ -191,6 +192,8 @@ def test_porkbun_failure_refunds_and_marks_the_row_failed(monkeypatch):
 
     assert conn.sql_matching("status = 'failed'")
     assert refunds == ["pi_1"]          # the customer is not charged for nothing
+    # … and the refund is RECORDED, not just attempted.
+    assert conn.sql_matching("refund_status = 'refunded'")
     assert edge.created == []
 
 

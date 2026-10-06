@@ -423,8 +423,14 @@ async def cancel_offer(conn, offer_row, side: str, reason: str) -> None:
         "WHERE offer_id=$1 AND status = ANY($2)",
         offer_row["id"], cancel_statuses,
     )
-    # Paid installments stay 'paid' — milestone money is earned; refunds are
-    # a manual admin action in Stripe, out of scope.
+    # Paid installments stay 'paid' — milestone money is earned. A refund made
+    # in Stripe is synced back by the Connect webhook (`charge.refunded`).
+    #
+    # The Stripe pages of the `processing` rows voided above are closed by the
+    # ROUTE before this runs (`routes/collab.py:cancel_offer_route`) — this
+    # function holds a row lock inside a transaction and must not make a
+    # network call. A page that slips through anyway is caught at the webhook,
+    # which refunds any charge that no longer matches a payable installment.
 
 
 async def touch(conn, offer_id: UUID) -> None:

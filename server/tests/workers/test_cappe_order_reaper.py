@@ -32,15 +32,21 @@ class FakeConn:
     """`candidates` is the sweep; `claims` the per-order status-guarded UPDATE
     (None = a webhook won the race)."""
 
-    def __init__(self, candidates, claims):
+    def __init__(self, candidates, claims, manual=()):
         self._candidates = candidates
         self._claims = list(claims)
+        # Orders that never went to Stripe — the second, slower sweep.
+        self._manual = list(manual)
         self.fetch_args = None
+        self.manual_fetch_args = None
         self.fetchrow_sql = []
         self.executed = []
         self.closed = False
 
     async def fetch(self, sql, *args):
+        if "stripe_session_id IS NULL" in sql:
+            self.manual_fetch_args = (sql, args)
+            return self._manual
         self.fetch_args = (sql, args)
         return self._candidates
 
@@ -144,7 +150,7 @@ def test_session_is_expired_before_the_order_is_released(monkeypatch):
     out = asyncio.run(mod._run())
 
     assert stripe.expired == [("acct_1", "cs_1")]
-    assert out == {"candidates": 1, "released": 1, "settling": 0, "reconciled": 0}
+    assert out == {"candidates": 1, "released": 1, "settling": 0, "reconciled": 0, "manual_released": 0}
     assert log == [("restock", "o-1", "restock"), ("bookings", "o-1")]
 
 
@@ -157,7 +163,7 @@ def test_completed_checkout_is_never_cancelled(monkeypatch):
 
     out = asyncio.run(mod._run())
 
-    assert out == {"candidates": 1, "released": 0, "settling": 1, "reconciled": 0}
+    assert out == {"candidates": 1, "released": 0, "settling": 1, "reconciled": 0, "manual_released": 0}
     assert log == []
     assert conn.fetchrow_sql == []     # no order UPDATE was attempted
     # Sent to the back of the sweep so it cannot starve newer abandoned carts.
@@ -183,7 +189,7 @@ def test_paid_session_with_a_lost_webhook_is_reconciled(monkeypatch):
     monkeypatch.setattr(mod, "issue_receipt_on", _receipt)
     out = asyncio.run(mod._run())
 
-    assert out == {"candidates": 1, "released": 0, "settling": 0, "reconciled": 1}
+    assert out == {"candidates": 1, "released": 0, "settling": 0, "reconciled": 1, "manual_released": 0}
     assert "status = 'paid'" in conn.fetchrow_sql[0] and "status = 'pending'" in conn.fetchrow_sql[0]
     assert receipts == [("o-1", "s-1")]
     assert log == []                   # paid stock is NOT handed back
@@ -204,7 +210,7 @@ def test_stripe_being_unreachable_leaves_the_order_for_next_cycle(monkeypatch):
     out = asyncio.run(mod._run())
 
     # Not knowing whether the page is still payable is a reason NOT to release.
-    assert out == {"candidates": 1, "released": 0, "settling": 0, "reconciled": 0}
+    assert out == {"candidates": 1, "released": 0, "settling": 0, "reconciled": 0, "manual_released": 0}
     assert log == []
 
 
@@ -232,7 +238,7 @@ def test_order_already_released_by_the_webhook_is_skipped(monkeypatch):
     log = []
     conn = FakeConn([_cand()], [None])
     _patch(monkeypatch, conn, log=log)
-    assert asyncio.run(mod._run()) == {"candidates": 1, "released": 0, "settling": 0, "reconciled": 0}
+    assert asyncio.run(mod._run()) == {"candidates": 1, "released": 0, "settling": 0, "reconciled": 0, "manual_released": 0}
     assert log == []
 
 
@@ -266,3 +272,58 @@ def test_connection_is_closed_even_when_the_sweep_raises(monkeypatch):
     with pytest.raises(RuntimeError):
         asyncio.run(mod._run())
     assert conn.closed
+
+
+# ── orders that never went to Stripe ─────────────────────────────────────────
+
+def test_stale_manual_orders_are_swept_conservatively(monkeypatch):
+    conn = FakeConn([], [])
+    _patch(monkeypatch, conn, cap=42)
+    out = asyncio.run(mod._run())
+    sql, args = conn.manual_fetch_args
+    assert "status = 'pending'" in sql and "stripe_session_id IS NULL" in sql
+    # Left alone: anything the owner accepted, anything a subscription created,
+    # and anything touched at all inside the window.
+    assert "approved_at IS NULL" in sql and "subscription_id IS NULL" in sql
+    assert f"created_at < NOW() - INTERVAL '{mod.MANUAL_ABANDONED_AFTER}'" in sql
+    assert f"updated_at < NOW() - INTERVAL '{mod.MANUAL_ABANDONED_AFTER}'" in sql
+    assert args == (42,)
+    assert out["manual_released"] == 0
+
+
+def test_a_stale_manual_order_is_cancelled_and_its_stock_returned(monkeypatch):
+    """No payment page to close first — it never had one."""
+    conn = FakeConn([], [{"id": "m-1", "site_id": "s-1"}], manual=[{"id": "m-1", "site_id": "s-1"}])
+    log = []
+    stripe = _patch(monkeypatch, conn, log=log)
+    out = asyncio.run(mod._run())
+    assert out["manual_released"] == 1
+    assert stripe.expired == []
+    assert log == [("restock", "m-1", "restock"), ("bookings", "m-1")]
+    # Guarded: still pending, still without a session.
+    assert "status = 'pending' AND stripe_session_id IS NULL" in conn.fetchrow_sql[-1]
+
+
+def test_a_manual_order_that_moved_on_meanwhile_is_skipped(monkeypatch):
+    conn = FakeConn([], [None], manual=[{"id": "m-1", "site_id": "s-1"}])
+    log = []
+    _patch(monkeypatch, conn, log=log)
+    assert asyncio.run(mod._run())["manual_released"] == 0
+    assert log == []
+
+
+def test_one_manual_release_failing_does_not_stop_the_rest(monkeypatch):
+    conn = FakeConn([], [{"id": "m-1", "site_id": "s-1"}, {"id": "m-2", "site_id": "s-1"}],
+                    manual=[{"id": "m-1", "site_id": "s-1"}, {"id": "m-2", "site_id": "s-1"}])
+    _patch(monkeypatch, conn)
+    calls = []
+
+    async def _restock(_conn, *, site_id, order_id, reason):
+        calls.append(order_id)
+        if order_id == "m-1":
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(mod, "restock_order", _restock)
+    assert asyncio.run(mod._run())["manual_released"] == 1
+    assert calls == ["m-1", "m-2"]
+

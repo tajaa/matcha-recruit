@@ -297,18 +297,43 @@ def _domain_event(etype, **obj):
                                 **obj}}}
 
 
+def _begin(monkeypatch, result=True):
+    """`begin_registration` (tests/cappe/test_cappe_domain_payments.py) owns the
+    pending → registering write; the webhook only decides whether to call it."""
+    seen = []
+
+    async def _fake(domain_id, payment_intent, customer_id):
+        seen.append((str(domain_id), payment_intent, customer_id))
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(mod, "begin_registration", _fake)
+    return seen
+
+
 def test_paid_domain_checkout_starts_registration(monkeypatch):
-    conn = _use(monkeypatch, ScriptedConn(rows=[{"id": DOMAIN_ID}]))
+    conn = _use(monkeypatch, ScriptedConn())
+    seen = _begin(monkeypatch)
     bg, _ = _webhook(monkeypatch, _domain_event(
         "checkout.session.completed", payment_status="paid",
         payment_intent="pi_1", customer="cus_1",
     ))
     out = _run(mod.domains_webhook(Request(), bg))
     assert out == {"received": True}
-    _, sql, args = conn.calls[0]
-    assert "status = 'registering'" in sql and "status = 'pending'" in sql
-    assert args[1:] == ("pi_1", "cus_1")
+    assert seen == [(DOMAIN_ID, "pi_1", "cus_1")]
+    assert conn.calls == []
     assert [t[0] for t in bg.tasks] == ["finalize_domain_registration"]
+
+
+def test_a_replayed_paid_event_does_not_register_twice(monkeypatch):
+    _use(monkeypatch, ScriptedConn())
+    _begin(monkeypatch, result=False)          # the row was no longer pending
+    bg, _ = _webhook(monkeypatch, _domain_event(
+        "checkout.session.completed", payment_status="paid", payment_intent="pi_1",
+    ))
+    assert _run(mod.domains_webhook(Request(), bg)) == {"received": True}
+    assert bg.tasks == []
 
 
 def test_unpaid_domain_checkout_waits_for_settlement(monkeypatch):
@@ -345,11 +370,8 @@ def test_handler_failure_releases_the_claim_for_retry(monkeypatch):
     class Boom(Exception):
         pass
 
-    class BrokenConn(ScriptedConn):
-        async def fetchrow(self, sql, *args):
-            raise Boom()
-
-    _use(monkeypatch, BrokenConn())
+    _use(monkeypatch, ScriptedConn())
+    _begin(monkeypatch, result=Boom())
     bg, released = _webhook(monkeypatch, _domain_event(
         "checkout.session.completed", payment_status="paid",
     ))

@@ -666,6 +666,27 @@ async def cancel_offer_route(
 ):
     async with get_connection() as conn:
         offer_row, side = await svc.get_offer_side(conn, offer_id, account.id)
+        # Installments this cancel is about to void whose Stripe page may still
+        # be open. `cancel_offer` voids `processing` rows for a creator cancel
+        # or a not-yet-started offer (see its own rules); a brand cancelling an
+        # ACTIVE offer keeps them, so their pages are left alone.
+        voids_processing = side == "creator" or offer_row["status"] == "accepted"
+        open_sessions = await conn.fetch(
+            "SELECT stripe_checkout_session_id FROM cappe_collab_payments "
+            "WHERE offer_id = $1 AND status = 'processing' "
+            "AND stripe_checkout_session_id IS NOT NULL",
+            offer_id,
+        ) if voids_processing else []
+    # Close those pages BEFORE voiding the rows, with no connection held: a
+    # cancelled installment with a live payment page is how a brand pays for a
+    # collab that no longer exists. Same rule the storefront follows.
+    await _close_collab_sessions(
+        offer_row["creator_stripe_account_id"],
+        [r["stripe_checkout_session_id"] for r in open_sessions],
+        settling_detail="A payment on this collab has just been completed and is settling. "
+                        "Wait for it to show as paid, then cancel.",
+    )
+    async with get_connection() as conn:
         async with conn.transaction():
             await svc.cancel_offer(conn, offer_row, side, body.reason)
         email, name = await _resolve_contact(conn, offer_row, side)
@@ -918,6 +939,28 @@ async def request_deliverable_revision(
 # ── Payments ─────────────────────────────────────────────────────────────────
 
 
+async def _close_collab_sessions(
+    creator_account_id, session_ids: list[str], *, settling_detail: str,
+) -> None:
+    """Expire collab Checkout Sessions on the creator's connected account so
+    they can no longer be paid. Raises 502 if Stripe can't be reached (nothing
+    was changed, so the caller's action is simply refused) and 409 if a session
+    has already been completed — that money is in or settling, and the webhook
+    decides what it pays for."""
+    if not creator_account_id:
+        return
+    for session_id in session_ids:
+        try:
+            state = await get_cappe_stripe().expire_checkout_session(creator_account_id, session_id)
+        except CappeStripeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Couldn't close an open payment page, so nothing was changed: {exc}",
+            )
+        if state != "expired":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=settling_detail)
+
+
 @router.post("/collab/offers/{offer_id}/payments/{payment_id}/checkout")
 async def checkout_payment(
     offer_id: UUID,
@@ -953,6 +996,19 @@ async def checkout_payment(
         fee_bps = await svc.resolve_collab_fee_bps(conn)
         fee = max(0, payment["amount_cents"] * fee_bps // 10_000)
 
+    # Re-opening checkout on a `processing` installment used to mint a second
+    # session and leave the first one payable: a stale tab then charged the
+    # brand a second time for the same installment. The earlier page is closed
+    # first; if it turns out to be completed, that payment stands and no new
+    # one is opened.
+    previous_session = payment["stripe_checkout_session_id"]
+    if payment["status"] == "processing" and previous_session:
+        await _close_collab_sessions(
+            offer_row["creator_stripe_account_id"], [previous_session],
+            settling_detail="This payment has already been completed and is settling. "
+                            "It will show as paid shortly.",
+        )
+
     try:
         session = await get_cappe_stripe().create_checkout_session(
             account_id=offer_row["creator_stripe_account_id"],
@@ -983,23 +1039,41 @@ async def checkout_payment(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
 
     async with get_connection() as conn:
+        # Guarded on the session id read above, not only the status: two tabs
+        # clicking Pay at once both pass the status check, and without this
+        # both sessions would stay payable with only the later one on the row.
         updated = await conn.fetchval(
             "UPDATE cappe_collab_payments SET status='processing', stripe_checkout_session_id=$2, "
             "fee_bps_snapshot=$3, fee_cents=$4, updated_at=NOW() "
-            "WHERE id=$1 AND status IN ('due','processing') RETURNING id",
+            "WHERE id=$1 AND status IN ('due','processing') "
+            "AND stripe_checkout_session_id IS NOT DISTINCT FROM $5 RETURNING id",
             payment_id,
             session.get("id"),
             fee_bps,
             fee,
+            previous_session,
         )
     if updated is None:
+        # Settled, cancelled, or another tab opened its own checkout while we
+        # were at Stripe. The session we just created must not outlive that.
         logger.warning(
-            "cappe collab checkout: payment %s settled during Stripe round-trip",
-            payment_id,
+            "cappe collab checkout: payment %s changed during Stripe round-trip; closing the "
+            "new session", payment_id,
         )
+        try:
+            await get_cappe_stripe().expire_checkout_session(
+                offer_row["creator_stripe_account_id"], session.get("id")
+            )
+        except CappeStripeError as exc:
+            # Still safe: the webhook only settles the session stored on the
+            # row, and refunds any other.
+            logger.error(
+                "cappe collab checkout: could not close superseded session %s for payment %s: %s",
+                session.get("id"), payment_id, exc,
+            )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This payment was already settled",
+            detail="This payment was just updated elsewhere — refresh and try again.",
         )
     return {"url": session.get("url")}
 

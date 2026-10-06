@@ -32,6 +32,7 @@ from .email import (
     send_cappe_order_receipt_email,
 )
 from .inventory import log_adjustment as _inv_log
+from .inventory import release_order_bookings, restock_order
 from .options import fetch_option_groups, validate_and_price_options
 from .entitlements import (
     fee_cents as entitlement_fee_cents,
@@ -202,7 +203,8 @@ async def fetch_site_owner(conn, site_id):
     owner's entitlements from them — the platform take rate is per-plan, so the
     plan must be in hand at the point the fee is computed."""
     return await conn.fetchrow(
-        "SELECT a.id, a.plan, a.email, a.name, a.stripe_account_id, a.stripe_charges_enabled "
+        "SELECT a.id, a.plan, a.email, a.name, a.status, a.stripe_account_id, "
+        "a.stripe_charges_enabled "
         "FROM cappe_accounts a JOIN cappe_sites s ON s.account_id = a.id WHERE s.id = $1",
         site_id,
     )
@@ -391,6 +393,24 @@ async def create_booking_in_tx(
         raise
 
 
+async def release_unpaid_order(order_id, site_id) -> bool:
+    """Cancel a still-`pending` order and hand back everything it was holding:
+    stock, variant stock, booking slots. Status-guarded, so it is a no-op for
+    an order that has since been paid or released. Opens its own connection."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "UPDATE cappe_orders SET status = 'cancelled', updated_at = NOW() "
+                "WHERE id = $1 AND site_id = $2 AND status = 'pending' RETURNING id",
+                order_id, site_id,
+            )
+            if row is None:
+                return False
+            await restock_order(conn, site_id=site_id, order_id=order_id, reason="restock")
+            await release_order_bookings(conn, order_id=order_id)
+    return True
+
+
 async def create_public_order(site, body, background, *, shopper=None) -> dict:
     """Create an order for a mixed cart (physical / digital / service /
     booking). Prices + totals are recomputed server-side from the live product
@@ -423,6 +443,14 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
         # 2. `fetch_site_owner` already returns the plan, so hoisting it means
         #    one query serves both the selling gate and the fee below.
         owner = await fetch_site_owner(conn, site["id"])
+        # A suspended or deleted account's storefront takes no orders. The
+        # subscription checkout already required an active owner; the one-off
+        # path did not, so a suspended merchant could keep selling.
+        if owner is None or (owner.get("status") or "active") != "active":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This store isn't taking orders right now.",
+            )
         owner_ent = await resolve_entitlements(owner["plan"] if owner else None, conn=conn)
         async with conn.transaction():
             order_currency = None
@@ -674,8 +702,22 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                     "updated_at = NOW() WHERE id = $3",
                     sess.get("id"), fee, order["id"],
                 )
-        except CappeStripeError:
-            checkout_url = None  # fall back to the manual pending flow below
+        except CappeStripeError as exc:
+            # The buyer asked to pay by card and we could not open the payment
+            # page. Falling through to the unpaid flow told them "Order
+            # placed", emailed a receipt for money never taken, and left stock
+            # held by an order the abandoned-order reaper cannot see (it has no
+            # Stripe session). Undo the order and say what actually happened.
+            logger.error(
+                "cappe checkout: could not open Stripe Checkout for order %s (site %s): %s",
+                order["id"], site["id"], exc,
+            )
+            await release_unpaid_order(order["id"], site["id"])
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Card payments are temporarily unavailable, so your order was not placed "
+                       "and you have not been charged. Please try again in a few minutes.",
+            )
 
     if not checkout_url:
         # Legacy / unpaid flow: notify now (receipt → customer, alert → creator).

@@ -1,13 +1,29 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Loader2, Receipt, ChevronDown, ChevronRight, Calendar, Check, X, Clock, Truck } from 'lucide-react'
+import { Loader2, Receipt, ChevronDown, ChevronRight, Calendar, Check, X, Clock, Truck, Undo2, AlertTriangle } from 'lucide-react'
 import { cappeApi } from '../../api'
 import SurfaceShell, { centsToMoney } from '../../components/SurfaceShell'
 import StripeConnectCard from '../../components/StripeConnectCard'
 import ImageUpload from '../../components/ImageUpload'
 import type { CappeOrder, CappeOrderItem } from '../../types'
 
-const STATUSES = ['pending', 'paid', 'fulfilled', 'cancelled', 'refunded'] as const
+// What an owner may move an order to by hand. Mirrors the server's
+// `order_lifecycle.ALLOWED_TRANSITIONS` — the server is the authority and
+// refuses anything else with a reason; this only keeps impossible choices out
+// of the menu. `refunded` is deliberately absent everywhere: it is reached
+// through the Refund button, which actually returns the money.
+const NEXT_STATUSES: Record<string, string[]> = {
+  pending: ['paid', 'cancelled'],
+  paid: ['fulfilled'],
+  fulfilled: ['paid'],
+}
+const STATUS_ACTION_LABEL: Record<string, string> = {
+  paid: 'Mark paid',
+  cancelled: 'Cancel order',
+  fulfilled: 'Mark fulfilled',
+}
+/** Paid by card through the storefront — the refund goes back through Stripe. */
+const paidByCard = (o: CappeOrder) => (o.payment_ref || '').startsWith('pi_')
 const DELIVERABLE_ACCEPT = '.pdf,.zip,.doc,.docx,.xls,.xlsx,.csv,.txt,image/*'
 
 const fulfillBadge: Record<string, string> = {
@@ -31,6 +47,7 @@ export default function Orders() {
   const [orders, setOrders] = useState<CappeOrder[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
+  const [refunding, setRefunding] = useState<string | null>(null)
 
   useEffect(() => {
     cappeApi
@@ -63,12 +80,38 @@ export default function Orders() {
   }
 
   async function setStatus(order: CappeOrder, status: string) {
+    if (!status || status === order.status) return
+    if (status === 'paid' && order.status === 'pending' && !window.confirm(
+      'Mark this order as paid?\n\nUse this only for money you collected yourself (cash, invoice). '
+      + "The customer's card payment page will be closed.",
+    )) return
+    if (status === 'cancelled' && !window.confirm(
+      'Cancel this order? Its stock and any booked time slots are released.',
+    )) return
     setError(null)
     try {
       const updated = await cappeApi.patch<CappeOrder>(`/sites/${siteId}/orders/${order.id}`, { status })
       setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
     } catch (e) {
       fail(e, 'Could not change the order status')
+    }
+  }
+
+  async function refundOrder(order: CappeOrder) {
+    const amount = centsToMoney(order.total_cents ?? order.subtotal_cents, order.currency)
+    const question = paidByCard(order)
+      ? `Refund ${amount} to the customer's card?\n\nThe full amount is returned through Stripe. This can't be undone.`
+      : `Mark this order as refunded?\n\nIt wasn't paid by card here, so no money moves — return ${amount} to the customer yourself. This only updates your records.`
+    if (!window.confirm(question)) return
+    setError(null)
+    setRefunding(order.id)
+    try {
+      const updated = await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/refund`)
+      setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
+    } catch (e) {
+      fail(e, 'Could not refund this order')
+    } finally {
+      setRefunding(null)
     }
   }
 
@@ -136,6 +179,12 @@ export default function Orders() {
                 {o.requires_approval && o.status === 'pending' && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-400"><Clock className="h-3 w-3" /> needs approval</span>
                 )}
+                {o.dispute_status && (
+                  <span title="A chargeback was opened against this order — respond in your Stripe dashboard." className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-400"><AlertTriangle className="h-3 w-3" /> dispute: {o.dispute_status.replace(/_/g, ' ')}</span>
+                )}
+                {o.status !== 'refunded' && (o.refunded_cents ?? 0) > 0 && (
+                  <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-300">{centsToMoney(o.refunded_cents ?? 0, o.currency)} refunded</span>
+                )}
                 <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${statusStyle[o.status]}`}>{o.status}</span>
                 {(o.status === 'paid' || o.status === 'fulfilled') && (
                   <button
@@ -152,13 +201,29 @@ export default function Orders() {
                     <button onClick={() => declineOrder(o)} className="flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"><X className="h-3.5 w-3.5" /> Decline</button>
                   </>
                 ) : (
-                  <select
-                    value={o.status}
-                    onChange={(e) => setStatus(o, e.target.value)}
-                    className="rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500 px-2 py-1 text-xs"
-                  >
-                    {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
+                  <>
+                    {(NEXT_STATUSES[o.status] || []).length > 0 && (
+                      <select
+                        value=""
+                        aria-label={`Change status of order from ${o.customer_email || 'customer'}`}
+                        onChange={(e) => setStatus(o, e.target.value)}
+                        className="rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500 px-2 py-1 text-xs"
+                      >
+                        <option value="">Change status…</option>
+                        {NEXT_STATUSES[o.status].map((s) => <option key={s} value={s}>{STATUS_ACTION_LABEL[s] || s}</option>)}
+                      </select>
+                    )}
+                    {(o.status === 'paid' || o.status === 'fulfilled') && !o.subscription_id && (
+                      <button
+                        onClick={() => refundOrder(o)}
+                        disabled={refunding === o.id}
+                        title={paidByCard(o) ? "Return the full amount to the customer's card" : 'Record a refund you made yourself'}
+                        className="flex items-center gap-1 rounded-lg border border-red-500/40 px-2.5 py-1 text-xs font-medium text-red-300 hover:bg-red-500/10 disabled:opacity-60"
+                      >
+                        {refunding === o.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />} Refund
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
               {openId === o.id && (

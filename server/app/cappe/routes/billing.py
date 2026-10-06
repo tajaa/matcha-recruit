@@ -117,6 +117,15 @@ async def _subscription_response_or_409(account_id) -> CappeSubscription:
     return result
 
 
+def _raise_if_change_pending(subscription) -> None:
+    """402 when Stripe parked the change we just asked for because its payment
+    failed. Local state has already been synced (to the UNCHANGED subscription)
+    by the time this runs, so the response is the truth: nothing changed."""
+    reason = billing_svc.pending_update_reason(subscription)
+    if reason:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=reason)
+
+
 @router.post("/billing/checkout", response_model=CappeCheckoutResponse)
 async def start_checkout(
     body: CappeCheckoutRequest, account: CappeAccount = Depends(require_cappe_account)
@@ -306,11 +315,8 @@ async def set_addon_quantity(
             status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not update add-on"
         ) from exc
 
-    async with get_connection() as conn:
-        async with conn.transaction():
-            await billing_svc.sync_subscription(
-                conn, account_id=account.id, subscription=fresh
-            )
+    await billing_svc.sync_subscription_tx(account.id, fresh)
+    _raise_if_change_pending(fresh)
     return await _subscription_response_or_409(account.id)
 
 
@@ -396,11 +402,8 @@ async def change_plan(
             status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not change plan"
         ) from exc
 
-    async with get_connection() as conn:
-        async with conn.transaction():
-            await billing_svc.sync_subscription(
-                conn, account_id=account.id, subscription=fresh
-            )
+    await billing_svc.sync_subscription_tx(account.id, fresh)
+    _raise_if_change_pending(fresh)
     return await _subscription_response_or_409(account.id)
 
 

@@ -326,8 +326,10 @@ def test_open_transfer_lapses_at_expiry_without_charging():
 
     src = inspect.getsource(renewals._dispatch_cappe_domain_renewals)
     assert "status = 'transfer_requested' AND expires_at IS NOT NULL AND expires_at < NOW()" in src
-    # and it is still excluded from the charge query
-    assert "status = 'active' AND auto_renew" in src
+    # and it is still excluded from the renewal sweep, which only ever looks at
+    # `active` rows (auto-renew on or off — an auto-renew-off domain used to be
+    # skipped for ever and never lapsed)
+    assert "d.kind = 'register' AND d.status = 'active'" in src
 
 
 # ── site delete ──────────────────────────────────────────────────────────────

@@ -37,6 +37,13 @@ class CappeDomainConnectRequest(BaseModel):
     _norm = field_validator("domain")(normalize_custom_domain)
 
 
+class CappeDomainRenewRequest(BaseModel):
+    """Pay for another year by hand — the retry path when the saved card was
+    refused, there never was one, or auto-renew is off."""
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
+
+
 class CappeDomainCheckoutResponse(BaseModel):
     domain_id: UUID
     checkout_url: str
@@ -75,6 +82,10 @@ class CappeDomain(BaseModel):
     # `_cappe-verify.<domain>` with this value, then call /verify.
     verification_token: Optional[str] = None
     transfer_requested_at: Optional[datetime] = None
+    # Set when the last renewal attempt could not collect — the UI shows the
+    # reason and a "Renew now" button instead of the domain silently lapsing.
+    renewal_failed_at: Optional[datetime] = None
+    renewal_error: Optional[str] = None
     created_at: datetime
 
 
@@ -104,6 +115,7 @@ __all__ = [
     "CappeDomainSearchResult",
     "CappeDomainPurchaseRequest",
     "CappeDomainConnectRequest",
+    "CappeDomainRenewRequest",
     "CappeDomainCheckoutResponse",
     "CappeDomainConfig",
     "CappeDomain",

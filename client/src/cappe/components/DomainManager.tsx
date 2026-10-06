@@ -46,6 +46,16 @@ const money = (cents: number | null) => (cents == null ? '' : `$${(cents / 100).
 
 /** Buy a new domain (Porkbun, charged via Stripe) or connect one you already
  *  own, plus the list of this site's domains with live registration status. */
+// Mirrors the server's manual-renewal window (routes/domains.py
+// `_MANUAL_RENEW_WINDOW_DAYS`): offered once a domain is within 60 days of
+// expiry, or as soon as an automatic renewal has failed.
+const RENEW_WINDOW_MS = 60 * 24 * 60 * 60 * 1000
+function renewDue(d: CappeDomain): boolean {
+  if (d.renewal_failed_at) return true
+  if (!d.expires_at) return false
+  return new Date(d.expires_at).getTime() - Date.now() < RENEW_WINDOW_MS
+}
+
 export default function DomainManager({ siteId }: { siteId: string }) {
   const [domains, setDomains] = useState<CappeDomain[] | null>(null)
   const [query, setQuery] = useState('')
@@ -114,6 +124,19 @@ export default function DomainManager({ siteId }: { siteId: string }) {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start checkout')
       setBuying(null)
+    }
+  }
+
+  // Pay for another year by hand: the way forward when the automatic renewal
+  // was refused, there is no card on file, or auto-renew is off.
+  async function renew(d: CappeDomain) {
+    setActing(d.id); setError(null)
+    try {
+      const res = await cappeApi.post<{ domain_id: string; checkout_url: string }>(`/domains/${d.id}/renew`, {})
+      window.location.assign(res.checkout_url)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not start the renewal')
+      setActing(null)
     }
   }
 
@@ -334,6 +357,16 @@ export default function DomainManager({ siteId }: { siteId: string }) {
                         {verifying === d.id ? <Loader2 className="h-3 w-3 animate-spin" /> : null} Verify
                       </button>
                     )}
+                    {d.kind === 'register' && d.status === 'active' && renewDue(d) && (
+                      <button
+                        onClick={() => renew(d)}
+                        disabled={acting === d.id}
+                        title="Pay for another year now"
+                        className="inline-flex items-center gap-1 rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-300 hover:bg-amber-500/20 disabled:opacity-60"
+                      >
+                        {acting === d.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />} Renew now
+                      </button>
+                    )}
                     {d.kind === 'register' && d.status === 'active' && (
                       <>
                         <button
@@ -431,6 +464,16 @@ export default function DomainManager({ siteId }: { siteId: string }) {
                       </p>
                     )}
                   </div>
+                )}
+                {d.kind === 'register' && d.status === 'active' && d.renewal_failed_at && (
+                  <p className="mt-1.5 flex items-start gap-1.5 text-xs text-amber-300">
+                    <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      This domain could not be renewed automatically{d.renewal_error ? `: ${d.renewal_error}` : '.'}{' '}
+                      {d.expires_at ? `It expires on ${new Date(d.expires_at).toLocaleDateString()}. ` : ''}
+                      Use “Renew now” to keep it.
+                    </span>
+                  </p>
                 )}
                 {d.edge_status === 'failed' && d.edge_error && (
                   <p className="mt-2 text-xs text-red-400">{d.edge_error}</p>
