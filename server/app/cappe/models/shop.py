@@ -190,6 +190,20 @@ class CappeOrderItem(BaseModel):
     booking_id: Optional[UUID] = None
 
 
+class CappeOrderRefund(BaseModel):
+    """One refund in an order's ledger."""
+    id: UUID
+    amount_cents: int
+    restock: bool = False
+    lines: list[dict[str, Any]] = Field(default_factory=list)
+    reason: Optional[str] = None
+    status: str                      # pending | succeeded | failed
+    source: str                      # dashboard | stripe | dispute | manual | legacy
+    stripe_refund_id: Optional[str] = None
+    failure: Optional[str] = None
+    created_at: datetime
+
+
 class CappeOrder(BaseModel):
     subscription_id: Optional[UUID] = None
     id: UUID
@@ -203,6 +217,8 @@ class CappeOrder(BaseModel):
     shipping_address: Optional[dict[str, Any]] = None
     # Where a physical order was priced to ship (two-letter code).
     ship_country: Optional[str] = None
+    # The refund ledger (detail view and refund responses only).
+    refunds: list[CappeOrderRefund] = Field(default_factory=list)
     carrier: Optional[str] = None
     tracking_number: Optional[str] = None
     total_cents: Optional[int] = None
@@ -276,11 +292,25 @@ class CappeOrderStatusUpdate(BaseModel):
         return self
 
 
+class CappeRefundLine(BaseModel):
+    """Units of one order line going back on the shelf with a refund."""
+    item_id: UUID
+    quantity: int = Field(ge=1, le=100_000)
+
+
 class CappeRefundRequest(BaseModel):
-    """Refund options. `restock` omitted → goods come back to the shelf unless
-    the order was already fulfilled (shipped goods are usually not coming back;
-    a lost parcel refunded with a restock invents stock)."""
+    """Refund options.
+
+    `amount_cents` omitted → everything still refundable (a full refund).
+    `lines` → exactly those units go back to stock (a part refund restocks
+    nothing else). `restock` applies to a full refund without `lines`:
+    omitted → goods come back to the shelf unless the order was already
+    fulfilled (shipped goods are usually not coming back; a lost parcel
+    refunded with a restock invents stock)."""
     restock: Optional[bool] = None
+    amount_cents: Optional[int] = Field(default=None, ge=1, le=99_999_999)
+    lines: list[CappeRefundLine] = Field(default_factory=list, max_length=100)
+    reason: Optional[str] = Field(default=None, max_length=500)
 
 
 class CappeDeliverableUpdate(BaseModel):
@@ -479,6 +509,48 @@ class CappeShippingZones(BaseModel):
     zones: list[CappeShippingZone] = Field(default_factory=list)
 
 
+# --- Finances -------------------------------------------------------------------
+
+class CappeFinancialPeriod(BaseModel):
+    period: date
+    orders: int = 0
+    gross_cents: int = 0
+    refunds_cents: int = 0
+
+
+class CappeTopProduct(BaseModel):
+    product_id: Optional[UUID] = None
+    title: str
+    units: int
+    revenue_cents: int
+
+
+class CappeFinancials(BaseModel):
+    """Money in, money back and what's left, for one window of days in the
+    store's own timezone and currency. Before Stripe's processing fees, which
+    Stripe takes on the store's own account and never reports to us."""
+    currency: str
+    start: date
+    end: date
+    group: Literal["day", "week", "month"]
+    orders: int
+    gross_cents: int            # what buyers paid (goods + tax + shipping)
+    goods_cents: int
+    tax_cents: int
+    shipping_cents: int
+    platform_fee_cents: int
+    refunds_cents: int
+    refund_count: int
+    net_cents: int              # gross − refunds − platform fees
+    average_order_cents: int
+    series: list[CappeFinancialPeriod] = Field(default_factory=list)
+    top_products: list[CappeTopProduct] = Field(default_factory=list)
+    # Orders in the window charged in another currency (before the store's
+    # currency changed) — left out of the totals, counted so nothing hides.
+    other_currency_orders: int = 0
+    export_enabled: bool = False
+
+
 __all__ = [
     "Fulfillment",
     "CappeProductOptionInput",
@@ -494,7 +566,9 @@ __all__ = [
     "CappeOrder",
     "CappeRequestSummary",
     "CappeOrderStatusUpdate",
+    "CappeRefundLine",
     "CappeRefundRequest",
+    "CappeOrderRefund",
     "CappeDeliverableUpdate",
     "CappeCartItem",
     "CappeShippingAddressInput",
@@ -509,4 +583,7 @@ __all__ = [
     "CappeShippingZone",
     "CappeShippingZonesReplace",
     "CappeShippingZones",
+    "CappeFinancialPeriod",
+    "CappeTopProduct",
+    "CappeFinancials",
 ]

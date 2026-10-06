@@ -33,14 +33,20 @@ from ..services.options import match_prior_rows
 from ..services.common import order_page_url, receipt_filename as _receipt_filename
 from ..services.email import (
     build_order_items_summary,
+    fmt_money,
     send_cappe_order_approved_email,
     send_cappe_order_declined_email,
+    send_cappe_order_refunded_email,
     send_cappe_order_shipped_email,
 )
 from ..services.directory import refresh_site_search
 from ..services.inventory import log_adjustment, release_order_bookings, restock_order
 from ..services.entitlements import require_fulfillment, resolve_entitlements
-from ..services.order_lifecycle import REFUNDABLE_STATUSES, mark_order_refunded, transition_error
+from ..services.order_lifecycle import REFUNDABLE_STATUSES, transition_error
+from ..services.refunds import (
+    STALE_PENDING_SECONDS, apply_refund, fail_refund, list_refunds, lock_order, pending_refund,
+    plan_restock_lines, refundable_left, start_refund,
+)
 from ..services.receipt import issue_receipt_for_paid_order
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 
@@ -667,17 +673,7 @@ async def get_order(
 ):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
-        order = await conn.fetchrow(
-            f"SELECT {_ORDER_COLS} FROM cappe_orders WHERE id = $1 AND site_id = $2",
-            order_id, site_id,
-        )
-        if order is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
-        items = await conn.fetch(
-            f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
-            order_id,
-        )
-    return _order_row(order, [_item_row(i) for i in items])
+        return await _order_view(conn, site_id, order_id)
 
 
 @router.get("/sites/{site_id}/orders/{order_id}/receipt.pdf")
@@ -817,30 +813,86 @@ async def update_order_status(
     return _order_row(order, [_item_row(i) for i in items])
 
 
+async def _order_view(conn, site_id: UUID, order_id: UUID) -> dict:
+    """An order with its lines and its refund ledger (the detail shape)."""
+    order = await conn.fetchrow(
+        f"SELECT {_ORDER_COLS} FROM cappe_orders WHERE id = $1 AND site_id = $2",
+        order_id, site_id,
+    )
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    items = await conn.fetch(
+        f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
+        order_id,
+    )
+    out = _order_row(order, [_item_row(i) for i in items])
+    out["refunds"] = await list_refunds(conn, order_id)
+    return out
+
+
+async def _settle_stale_refund(site_id: UUID, order_id: UUID, account_id: str, payment_intent: str) -> None:
+    """A refund still `pending` from an earlier request blocks a new one. A
+    young one is in flight; an old one's request died, maybe after Stripe took
+    it — Stripe is asked, and the row settled either way."""
+    async with get_connection() as conn:
+        pending = await pending_refund(conn, order_id)
+    if pending is None:
+        return
+    if (pending["age"] or 0) < STALE_PENDING_SECONDS:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A refund for this order is still being processed. Try again in a minute.",
+        )
+    try:
+        found = await get_cappe_stripe().find_connected_refund(
+            account_id=account_id, payment_intent=payment_intent, cappe_refund_id=str(pending["id"]),
+        )
+    except CappeStripeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Couldn't check an earlier refund with Stripe, so nothing new was refunded: {exc}",
+        )
+    async with get_connection() as conn:
+        async with conn.transaction():
+            if found is not None and found.get("status") not in ("failed", "canceled"):
+                await apply_refund(conn, refund_id=pending["id"], site_id=site_id, stripe_refund_id=found.get("id"))
+            else:
+                await fail_refund(conn, pending["id"], "Stripe has no record of this refund")
+
+
 @router.post("/sites/{site_id}/orders/{order_id}/refund", response_model=CappeOrder)
 async def refund_order(
     site_id: UUID, order_id: UUID, body: Optional[CappeRefundRequest] = None,
     account: CappeAccount = Depends(require_cappe_account),
+    background: BackgroundTasks = None,  # injected by FastAPI; None when called directly
 ):
-    """Refund a paid order in full — the money first, then the record.
+    """Refund a paid order, in full or in part — the money first, then the record.
 
-    `restock` says whether the goods go back on the shelf. Left out, they do
-    unless the order was already fulfilled: a refund for a parcel that was lost
-    or kept used to add stock that was never coming back.
+    `amount_cents` omitted refunds everything still refundable. A part refund
+    leaves the order paid (or fulfilled); the one that brings the refunded
+    total to the order total closes it as `refunded` and frees its booking
+    slots. `lines` puts exactly those units back on the shelf; a full refund
+    without lines restocks everything still out when `restock` says so —
+    by default unless the order was already fulfilled (a refund for a parcel
+    that was lost or kept used to add stock that was never coming back).
 
     A card order is refunded on the business's own connected Stripe account
-    (the charge lives there, not on the platform), platform fee included. Only
-    once Stripe has accepted the refund is the order marked `refunded` and its
-    stock and booking slots handed back. If Stripe refuses, nothing changes
-    and the owner is told why.
+    (the charge lives there), platform fee refunded in proportion. The ledger
+    row is written `pending` first, with the owner's restock choice, so the
+    `charge.refunded` webhook — which can arrive before Stripe's answer does —
+    applies that choice rather than its own default. Only once Stripe has
+    accepted the refund does anything move. If Stripe refuses, the row is
+    marked failed, nothing else changes, and the owner is told why.
 
     An order paid OUTSIDE Stripe (marked paid by hand) has no charge to
-    reverse: it is recorded as refunded and the owner returns the money the
-    way they took it. The dashboard says which case it is before confirming.
+    reverse: the refund is recorded and the owner returns the money the way
+    they took it. The dashboard says which case it is before confirming.
 
-    Idempotent: a repeat call on an already-refunded order returns it, and the
-    Stripe idempotency key means a double-click cannot refund twice.
+    A repeat call on an already-refunded order returns it. Each refund has its
+    own Stripe idempotency key, so a double-click can't refund twice; a second
+    refund while one is in flight is refused.
     """
+    body = body or CappeRefundRequest()
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         row = await conn.fetchrow(
@@ -852,67 +904,95 @@ async def refund_order(
                 WHERE o.id = $1 AND o.site_id = $2""",
             order_id, site_id,
         )
+        if row is not None and row["status"] == "refunded":
+            return await _order_view(conn, site_id, order_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
-    if row["status"] != "refunded" and row["status"] not in REFUNDABLE_STATUSES:
+    if row["status"] not in REFUNDABLE_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only a paid order can be refunded.",
         )
-
-    restock = (
-        body.restock if body is not None and body.restock is not None
-        else row["status"] != "fulfilled"
-    )
-    refund_id = None
-    if row["status"] != "refunded":
-        if row["stripe_payment_intent"]:
-            if not row["stripe_account_id"]:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="This order was paid by card, but your Stripe account is no longer "
-                           "connected. Reconnect it, or refund the payment from your Stripe dashboard.",
-                )
-            # No connection is held across the Stripe round-trip.
-            try:
-                refund = await get_cappe_stripe().refund_connected_charge(
-                    account_id=row["stripe_account_id"],
-                    payment_intent=row["stripe_payment_intent"],
-                    idempotency_key=f"cappe-order-refund-{order_id}",
-                )
-            except CappeStripeError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Stripe did not accept the refund, so the order was left as is: {exc}",
-                )
-            refund_id = refund.get("id")
-        elif row["stripe_invoice_id"]:
-            # A subscription order: its charge belongs to a Stripe invoice we
-            # hold no payment intent for. Refunding it in Stripe is synced back
-            # by the charge.refunded webhook.
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="This order was billed by a subscription. Refund its invoice from your "
-                       "Stripe dashboard — it will show as refunded here once Stripe confirms.",
-            )
+    intent = row["stripe_payment_intent"]
+    if not intent and row["stripe_invoice_id"]:
+        # A subscription order whose payment intent was never recorded.
+        # Refunding its invoice in Stripe is synced back by charge.refunded.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This order was billed by a subscription. Refund its invoice from your "
+                   "Stripe dashboard — it will show as refunded here once Stripe confirms.",
+        )
+    if intent and not row["stripe_account_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This order was paid by card, but your Stripe account is no longer "
+                   "connected. Reconnect it, or refund the payment from your Stripe dashboard.",
+        )
+    if intent:
+        await _settle_stale_refund(site_id, order_id, row["stripe_account_id"], intent)
 
     async with get_connection() as conn:
         async with conn.transaction():
-            await mark_order_refunded(
-                conn, order_id=order_id, site_id=site_id,
-                refunded_cents=None, stripe_refund_id=refund_id, restock=restock,
+            order = await lock_order(conn, order_id, site_id)
+            if order is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+            left = refundable_left(order)
+            if order["status"] not in REFUNDABLE_STATUSES or left <= 0:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Nothing is left to refund on this order.")
+            amount = body.amount_cents or left
+            if amount > left:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"At most {fmt_money(left, order['currency'] or 'USD')} is left to refund on this order.",
+                )
+            lines = await plan_restock_lines(conn, order_id, body.lines)
+            restock_all = (
+                amount >= left and not lines
+                and (body.restock if body.restock is not None else order["status"] != "fulfilled")
             )
-            order = await conn.fetchrow(
-                f"SELECT {_ORDER_COLS} FROM cappe_orders WHERE id = $1 AND site_id = $2",
-                order_id, site_id,
+            refund = await start_refund(
+                conn, order=order, amount_cents=amount, restock=restock_all, lines=lines,
+                reason=body.reason, source="dashboard" if intent else "manual",
             )
-            items = await conn.fetch(
-                f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
+            if not intent:
+                await apply_refund(conn, refund_id=refund["id"], site_id=site_id)
+
+    if intent:
+        # No connection is held across the Stripe round-trip.
+        try:
+            stripe_refund = await get_cappe_stripe().refund_connected_charge(
+                account_id=row["stripe_account_id"], payment_intent=intent,
+                amount_cents=amount, metadata={"cappe_refund_id": str(refund["id"]), "order_id": str(order_id)},
+                idempotency_key=f"cappe-refund-{refund['id']}",
+            )
+        except CappeStripeError as exc:
+            async with get_connection() as conn:
+                await fail_refund(conn, refund["id"], str(exc))
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Stripe did not accept the refund, so the order was left as is: {exc}",
+            )
+        async with get_connection() as conn:
+            async with conn.transaction():
+                await apply_refund(
+                    conn, refund_id=refund["id"], site_id=site_id, stripe_refund_id=stripe_refund.get("id"),
+                )
+
+    async with get_connection() as conn:
+        view = await _order_view(conn, site_id, order_id)
+        if background is not None and view.get("customer_email"):
+            who = await conn.fetchrow(
+                "SELECT o.access_token, s.name, s.subdomain, s.custom_domain FROM cappe_orders o "
+                "JOIN cappe_sites s ON s.id = o.site_id WHERE o.id = $1",
                 order_id,
             )
-    if order is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
-    return _order_row(order, [_item_row(i) for i in items])
+            if who is not None:
+                background.add_task(
+                    send_cappe_order_refunded_email, view["customer_email"], view.get("customer_name"),
+                    who["name"], amount, view.get("currency") or "USD", amount >= left,
+                    order_page_url(who, who["access_token"]),
+                )
+    return view
 
 
 @router.post("/sites/{site_id}/orders/{order_id}/accept", response_model=CappeOrder)

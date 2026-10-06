@@ -9,20 +9,18 @@ Two problems this module exists for:
    it has no cycle that passes through a restock.
 
 2. **`refunded` was a word, not a refund.** Choosing it flipped the status and
-   restocked; no money moved. The status can now only be reached through
-   `mark_order_refunded`, which the refund route calls AFTER Stripe has
-   accepted the refund, and which the Connect webhook calls when a refund made
-   in the Stripe dashboard arrives. The generic PATCH refuses it.
+   restocked; no money moved. The status is now reached only when the refund
+   ledger (`services/refunds.py`) settles the refund that brings the order's
+   refunded total to its full amount — after Stripe accepted it, or when the
+   Connect webhook reports one made in the Stripe dashboard. The generic PATCH
+   refuses it.
 
 Everything here is pure or takes the caller's connection; nothing talks to
 Stripe, so the rules are testable without it.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
-from uuid import UUID
-
-from .inventory import release_order_bookings, restock_order
+from typing import Optional
 
 # What an owner may do by hand. Anything absent is refused.
 #
@@ -71,43 +69,3 @@ def transition_error(current: str, new: Optional[str]) -> Optional[str]:
     if not ALLOWED_TRANSITIONS.get(current):
         return f"A {current} order can't be changed."
     return f"A {current} order can't be moved to {new}."
-
-
-async def mark_order_refunded(
-    conn,
-    *,
-    order_id: UUID,
-    site_id: UUID,
-    refunded_cents: Optional[int],
-    stripe_refund_id: Optional[str],
-    restock: bool = True,
-    returning: str = "id, site_id",
-) -> Any:
-    """Move a paid/fulfilled order to `refunded` and hand its stock and booking
-    slots back. Returns the updated row, or None if the order was not in a
-    refundable status (already refunded, or never paid) — the guard is what
-    makes the refund route and the `charge.refunded` webhook safe to both run
-    for the same refund.
-
-    MUST be called inside the caller's transaction: the status write and the
-    restock have to commit together or a crash between them loses the stock.
-
-    `restock=False` is for a LOST DISPUTE: the money is gone but so are the
-    goods, and crediting the shelf would invent inventory.
-    """
-    row = await conn.fetchrow(
-        f"""UPDATE cappe_orders
-               SET status = 'refunded', refunded_at = NOW(),
-                   refunded_cents = COALESCE($3, total_cents, subtotal_cents, 0),
-                   stripe_refund_id = COALESCE($4, stripe_refund_id),
-                   updated_at = NOW()
-             WHERE id = $1 AND site_id = $2 AND status IN ('paid', 'fulfilled')
-         RETURNING {returning}""",
-        order_id, site_id, refunded_cents, stripe_refund_id,
-    )
-    if row is None:
-        return None
-    if restock:
-        await restock_order(conn, site_id=site_id, order_id=order_id, reason="return")
-    await release_order_bookings(conn, order_id=order_id)
-    return row

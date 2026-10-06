@@ -35,7 +35,7 @@ from ..services.email import (
     send_cappe_order_alert_email,
 )
 from ..services.inventory import release_order_bookings, restock_order, retake_order_stock
-from ..services.order_lifecycle import mark_order_refunded
+from ..services.refunds import refund_in_full, sync_stripe_refunds
 from ..services.receipt import issue_receipt_for_paid_order
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 
@@ -749,11 +749,12 @@ async def _sync_charge_refunded(obj, event) -> dict:
 
     Before this, a refund issued from the Stripe dashboard changed nothing
     here: the order stayed `paid`, its digital download stayed live, and its
-    stock was never returned. A FULL refund now does what the refund route
-    does; a PARTIAL one records its amount and leaves the order paid (the
-    customer still has the goods). Idempotent — `mark_order_refunded` only
-    moves a paid/fulfilled order, so our own refund route's echo of this event
-    is a no-op.
+    stock was never returned. Now the refund ledger catches up to Stripe's
+    total refunded (`refunds.sync_stripe_refunds`): a refund the dashboard
+    started is applied with the owner's restock choice, anything else is
+    recorded as made in Stripe. A FULL refund closes the order (restocking
+    unless it shipped); a PARTIAL one leaves it paid. Idempotent — our own
+    refund route's echo finds the ledger already up to date.
     """
     account_id = event.get("account")
     if not account_id:
@@ -769,27 +770,16 @@ async def _sync_charge_refunded(obj, event) -> dict:
         async with conn.transaction():
             order = await _order_for_charge(conn, intent, obj.get("invoice"), account_id)
             if order is not None:
-                if full:
-                    moved = await mark_order_refunded(
-                        conn, order_id=order["id"], site_id=order["site_id"],
-                        refunded_cents=refunded or None, stripe_refund_id=refund_id,
-                        # Same default as the refund route: goods that already
-                        # shipped are not assumed to be back on the shelf.
-                        restock=order["status"] != "fulfilled",
-                    )
-                    if moved is not None:
-                        logger.info("cappe order %s refunded in Stripe; synced", order["id"])
-                    return {"received": True, "status": "refunded"}
-                await conn.execute(
-                    "UPDATE cappe_orders SET refunded_cents = $2, "
-                    "stripe_refund_id = COALESCE($3, stripe_refund_id), updated_at = NOW() "
-                    "WHERE id = $1",
-                    order["id"], refunded, refund_id,
+                # Stripe's total refunded is the truth; the ledger catches up
+                # to it. A refund the dashboard started and Stripe confirmed
+                # here first is applied with the owner's restock choice.
+                outcome = await sync_stripe_refunds(
+                    conn, order_id=order["id"], site_id=order["site_id"],
+                    amount_refunded=refunded if refunded else (amount if full else 0),
+                    stripe_refund_id=refund_id,
                 )
-                logger.info(
-                    "cappe order %s partially refunded in Stripe (%s of %s)", order["id"], refunded, amount
-                )
-                return {"received": True, "status": "partially_refunded"}
+                logger.info("cappe order %s: Stripe refund synced (%s)", order["id"], outcome)
+                return {"received": True, "status": outcome}
 
             if isinstance(intent, str) and intent and full:
                 collab = await conn.fetchrow(
@@ -841,10 +831,9 @@ async def _sync_dispute(obj, event) -> dict:
                 order["id"], dispute_status,
             )
             if dispute_status == "lost":
-                await mark_order_refunded(
+                await refund_in_full(
                     conn, order_id=order["id"], site_id=order["site_id"],
-                    refunded_cents=int(obj.get("amount") or 0) or None,
-                    stripe_refund_id=None, restock=False,
+                    source="dispute", restock=False,
                 )
     logger.error(
         "cappe order %s: Stripe dispute %s is %s (reason: %s)",

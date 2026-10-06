@@ -370,9 +370,11 @@ class CappeStripe:
 
     async def refund_connected_charge(
         self, *, account_id: str, payment_intent: str, idempotency_key: Optional[str] = None,
+        amount_cents: Optional[int] = None, metadata: Optional[dict] = None,
     ):
-        """Refund, in full, a DIRECT charge that lives on a connected account —
-        a storefront order or a collab installment.
+        """Refund a DIRECT charge that lives on a connected account — a
+        storefront order or a collab installment. In full, or `amount_cents`
+        of it (the platform fee is refunded in proportion).
 
         `refund()` below cannot do this: it runs on the platform account, where
         a connected account's PaymentIntent does not exist. The `stripe_account`
@@ -387,6 +389,10 @@ class CappeStripe:
 
         def _refund():
             kwargs: dict[str, Any] = {"idempotency_key": idempotency_key} if idempotency_key else {}
+            if amount_cents is not None:
+                kwargs["amount"] = int(amount_cents)
+            if metadata:
+                kwargs["metadata"] = metadata
             return stripe.Refund.create(
                 payment_intent=payment_intent,
                 refund_application_fee=True,
@@ -405,6 +411,56 @@ class CappeStripe:
                 # ever.
                 return {"id": None, "already_refunded": True}
             raise CappeStripeError(f"Failed to refund: {exc}") from exc
+
+    async def connected_balance(self, account_id: str) -> dict:
+        """The connected account's Stripe balance and its recent payouts —
+        what the store has coming and what has reached its bank."""
+        self._ensure_key()
+
+        def _read():
+            balance = stripe.Balance.retrieve(stripe_account=account_id)
+            payouts = stripe.Payout.list(limit=10, stripe_account=account_id)
+            return balance, payouts
+
+        try:
+            balance, payouts = await asyncio.to_thread(_read)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to read the Stripe balance: {exc}") from exc
+
+        def amounts(rows):
+            return [{"amount_cents": int(r.get("amount") or 0), "currency": str(r.get("currency") or "").upper()}
+                    for r in rows or []]
+
+        return {
+            "available": amounts(balance.get("available")),
+            "pending": amounts(balance.get("pending")),
+            "payouts": [
+                {"id": p.get("id"), "amount_cents": int(p.get("amount") or 0),
+                 "currency": str(p.get("currency") or "").upper(), "status": p.get("status"),
+                 "arrival_date": p.get("arrival_date")}
+                for p in (payouts.get("data") or [])
+            ],
+        }
+
+    async def find_connected_refund(self, *, account_id: str, payment_intent: str, cappe_refund_id: str):
+        """The refund Stripe holds for one of our ledger rows (matched on the
+        `cappe_refund_id` metadata every refund we create carries), or None.
+
+        For a refund whose request died after Stripe may have accepted it: the
+        ledger row says pending, and only Stripe knows whether money moved."""
+        self._ensure_key()
+
+        def _find():
+            page = stripe.Refund.list(payment_intent=payment_intent, limit=100, stripe_account=account_id)
+            for refund in page.get("data") or []:
+                if (refund.get("metadata") or {}).get("cappe_refund_id") == cappe_refund_id:
+                    return refund
+            return None
+
+        try:
+            return await asyncio.to_thread(_find)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to look up refunds: {exc}") from exc
 
     # ── Platform checkout (our own revenue — domains, plans; NO Connect) ───
     async def create_platform_checkout_session(

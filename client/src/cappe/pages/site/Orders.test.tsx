@@ -170,6 +170,64 @@ describe('Orders — refund is an action, not a status', () => {
   })
 })
 
+describe('Orders — part refunds', () => {
+  it('refunds part of an order and returns only the units chosen', async () => {
+    await renderOrders([order({ status: 'paid' })])
+    api.get.mockResolvedValueOnce(order({ status: 'paid', items: [line(), line({ id: 'i-2', title: 'Zine', fulfillment: 'digital', quantity: 1 })] }))
+    api.post.mockResolvedValue(order({ status: 'paid', refunded_cents: 1250 }))
+    fireEvent.click(screen.getByRole('button', { name: /Refund/ }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Part of it' }))
+    await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/sites/s-1/orders/o-1'))
+    fireEvent.change(within(dialog).getByLabelText(/Amount/), { target: { value: '12.50' } })
+    // Only shipped goods can go back on the shelf.
+    const units = await within(dialog).findByLabelText('Units of Mug back in stock')
+    expect(within(dialog).queryByLabelText('Units of Zine back in stock')).not.toBeInTheDocument()
+    fireEvent.change(units, { target: { value: '1' } })
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: 'One arrived chipped' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Refund $12.50' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/sites/s-1/orders/o-1/refund', {
+      amount_cents: 1250, lines: [{ item_id: 'i-1', quantity: 1 }], reason: 'One arrived chipped',
+    }))
+    expect(await screen.findByText('$12.50 refunded')).toBeInTheDocument()
+  })
+
+  it('refuses more than is left, before asking the server', async () => {
+    await renderOrders([order({ status: 'paid', refunded_cents: 3000, items: [line()] })])
+    fireEvent.click(screen.getByRole('button', { name: /Refund/ }))
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText('Refund $10.00?')).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Part of it' }))
+    fireEvent.change(within(dialog).getByLabelText(/Amount/), { target: { value: '20' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Refund $20.00' }))
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('At most $10.00 is left')
+    expect(api.post).not.toHaveBeenCalled()
+  })
+
+  it('offers no refund once everything has been refunded', async () => {
+    await renderOrders([order({ status: 'paid', refunded_cents: 4000 })])
+    expect(screen.queryByRole('button', { name: /Refund/ })).not.toBeInTheDocument()
+  })
+
+  it('lists the refunds in the order', async () => {
+    api.get.mockResolvedValueOnce([order({ status: 'paid', refunded_cents: 1200 })])
+    render(
+      <MemoryRouter initialEntries={['/sites/s-1/orders']}>
+        <Routes><Route path="/sites/:siteId/orders" element={<Orders />} /></Routes>
+      </MemoryRouter>,
+    )
+    await screen.findAllByText('buyer@example.com')
+    api.get.mockResolvedValueOnce(order({ status: 'paid', refunded_cents: 1200, items: [line()], refunds: [{
+      id: 'r-1', amount_cents: 1200, restock: false, lines: [], reason: 'Late delivery', status: 'succeeded',
+      source: 'stripe', stripe_refund_id: 're_1', failure: null, created_at: '2026-10-02T12:00:00Z',
+    }] }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show order details' }))
+    expect(await screen.findByText(/Refunded in Stripe/)).toBeInTheDocument()
+    expect(screen.getByText('Late delivery')).toBeInTheDocument()
+    expect(screen.getAllByText('−$12.00')).toHaveLength(2)   // the totals' Refunded line, and the refund itself
+  })
+})
+
 describe('Orders — what Stripe told us', () => {
   it('flags an open dispute beside the order', async () => {
     await renderOrders([order({ dispute_status: 'needs_response' })])

@@ -476,6 +476,30 @@ export type CappeOrderItem = {
   selected_options: { group?: string; name?: string; price_delta_cents?: number }[]
   deliverable_url: string | null
   booking_id: string | null
+  /** Units already back on the shelf after a refund. */
+  restocked_quantity?: number
+}
+
+/** One refund in an order's ledger. */
+export type CappeOrderRefund = {
+  id: string
+  amount_cents: number
+  restock: boolean
+  lines: { item_id: string; quantity: number }[]
+  reason: string | null
+  status: 'pending' | 'succeeded' | 'failed'
+  /** dashboard | manual (paid outside Stripe) | stripe (made in Stripe) | dispute | legacy */
+  source: string
+  stripe_refund_id: string | null
+  failure: string | null
+  created_at: string
+}
+
+export type CappeRefundBody = {
+  restock?: boolean
+  amount_cents?: number
+  lines?: { item_id: string; quantity: number }[]
+  reason?: string
 }
 
 export type CappeShippingAddress = {
@@ -503,6 +527,8 @@ export type CappeOrder = {
   shipping_address?: CappeShippingAddress | null
   /** Where a physical order was priced to ship. */
   ship_country?: string | null
+  /** The refund ledger (detail view only). */
+  refunds?: CappeOrderRefund[]
   carrier?: string | null
   tracking_number?: string | null
   total_cents: number | null
@@ -1282,4 +1308,34 @@ export type CappeShippingZones = {
   /** Every country a zone can name. */
   countries: string[]
   zones: CappeShippingZone[]
+}
+
+// --- Finances ------------------------------------------------------------------
+
+export type CappeFinancials = {
+  currency: string
+  start: string
+  end: string
+  group: 'day' | 'week' | 'month'
+  orders: number
+  gross_cents: number
+  goods_cents: number
+  tax_cents: number
+  shipping_cents: number
+  platform_fee_cents: number
+  refunds_cents: number
+  refund_count: number
+  net_cents: number
+  average_order_cents: number
+  series: { period: string; orders: number; gross_cents: number; refunds_cents: number }[]
+  top_products: { product_id: string | null; title: string; units: number; revenue_cents: number }[]
+  other_currency_orders: number
+  export_enabled: boolean
+}
+
+export type CappeBalance = {
+  connected: boolean
+  available: { amount_cents: number; currency: string }[]
+  pending: { amount_cents: number; currency: string }[]
+  payouts: { id: string; amount_cents: number; currency: string; status: string; arrival_date: number | null }[]
 }
