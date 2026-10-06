@@ -11,6 +11,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..services.booking_lifecycle import transition_error
+from ..services.booking_payments import unpaid_hold
+from ..services.entitlements import resolve_entitlements
 from ..services.shipping import site_currency
 from ..services.commerce import _anchor_local, create_booking_in_tx, resolve_booking_slot
 from ..services.email import (
@@ -46,7 +48,7 @@ router = APIRouter()
 _TYPE_COLS = (
     "id, site_id, name, description, duration_minutes, price_cents, status, "
     "requires_approval, pricing_mode, category, buffer_minutes, location_id, created_at, updated_at, "
-    "min_notice_minutes, max_advance_days, cancel_cutoff_hours"
+    "min_notice_minutes, max_advance_days, cancel_cutoff_hours, payment_mode, deposit_cents"
 )
 _AVAIL_COLS = "id, weekday, start_time, end_time, booking_type_id, staff_id, location_id"
 
@@ -124,13 +126,16 @@ _BOOKING_COLS_Q = ", ".join("b." + c.strip() for c in _BOOKING_COLS.split(","))
 _BOOKING_VIEW = f"""
     SELECT {_BOOKING_COLS_Q}, st.name AS staff_name, loc.name AS location_name,
            COALESCE(loc.timezone, s.timezone) AS timezone,
-           ord.id AS order_id, ord.status AS order_status
+           ord.id AS order_id, ord.status AS order_status,
+           COALESCE(ord.balance_due_cents, 0) AS balance_due_cents,
+           COALESCE(b.status = 'pending' AND ord.status = 'pending' AND ord.subtotal_cents > 0, false)
+               AS awaiting_payment
       FROM cappe_bookings b
       JOIN cappe_sites s ON s.id = b.site_id
       LEFT JOIN cappe_staff st ON st.id = b.staff_id
       LEFT JOIN cappe_locations loc ON loc.id = b.location_id
       LEFT JOIN LATERAL (
-            SELECT o.id, o.status FROM cappe_order_items oi
+            SELECT o.id, o.status, o.subtotal_cents, oi.balance_due_cents FROM cappe_order_items oi
               JOIN cappe_orders o ON o.id = oi.order_id
              WHERE oi.booking_id = b.id
              ORDER BY o.created_at DESC LIMIT 1
@@ -154,6 +159,15 @@ def _booking_row(r) -> dict:
 
 
 # --- Booking types ----------------------------------------------------------
+
+async def _check_payment_mode(conn, account, mode) -> None:
+    """Taking a deposit or the full price is selling: the plan has to allow it."""
+    if mode in ("deposit", "full") and not (await resolve_entitlements(account.plan, conn=conn)).can_sell:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Taking payment when someone books needs a plan that can sell.",
+        )
+
 
 @router.get("/sites/{site_id}/booking-types", response_model=list[CappeBookingType])
 async def list_booking_types(
@@ -179,16 +193,18 @@ async def create_booking_type(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         await _validate_location(conn, site_id, body.location_id)
+        await _check_payment_mode(conn, account, body.payment_mode)
         async with conn.transaction():
             row = await conn.fetchrow(
                 f"""INSERT INTO cappe_booking_types
                         (site_id, name, description, duration_minutes, price_cents, status,
                          requires_approval, pricing_mode, category, buffer_minutes, location_id,
-                         min_notice_minutes, max_advance_days, cancel_cutoff_hours)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING {_TYPE_COLS}""",
+                         min_notice_minutes, max_advance_days, cancel_cutoff_hours, payment_mode, deposit_cents)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING {_TYPE_COLS}""",
                 site_id, body.name, body.description, body.duration_minutes, body.price_cents, body.status,
                 body.requires_approval, body.pricing_mode, body.category, body.buffer_minutes, body.location_id,
                 body.min_notice_minutes, body.max_advance_days, body.cancel_cutoff_hours,
+                body.payment_mode, body.deposit_cents,
             )
             await _replace_type_staff(conn, site_id, row["id"], body.staff_ids)
         staff = await _staff_ids_for_types(conn, [row["id"]])
@@ -203,12 +219,15 @@ async def update_booking_type(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         await _validate_location(conn, site_id, body.location_id)
+        await _check_payment_mode(conn, account, body.payment_mode)
+        if body.payment_mode == "deposit" and "deposit_cents" in body.model_fields_set and not body.deposit_cents:
+            raise HTTPException(status_code=422, detail="Say how much the deposit is")
         async with conn.transaction():
             sets, args = build_patch(body, (
                 "name", "description", "duration_minutes", "price_cents", "status",
                 "requires_approval", "pricing_mode", "category", "buffer_minutes", "location_id",
-                "min_notice_minutes", "max_advance_days", "cancel_cutoff_hours",
-            ), nullable={"description", "price_cents", "category", "location_id", "max_advance_days"})
+                "min_notice_minutes", "max_advance_days", "cancel_cutoff_hours", "payment_mode", "deposit_cents",
+            ), nullable={"description", "price_cents", "category", "location_id", "max_advance_days", "deposit_cents"})
             if sets:
                 sets.append("updated_at = NOW()")
                 args.extend([type_id, site_id])
@@ -372,6 +391,8 @@ async def update_booking_status(
             refusal = transition_error(current["status"], body.status)
             if refusal:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refusal)
+            if body.status == "confirmed" and current["status"] == "pending" and await unpaid_hold(conn, booking_id):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_HOLD_MESSAGE)
             changed = body.status != current["status"]
             approving = changed and current["status"] == "pending" and body.status == "confirmed"
             row = await conn.fetchrow(
@@ -560,6 +581,9 @@ async def delete_time_off(
 
 # --- Approval queue ---------------------------------------------------------
 
+_HOLD_MESSAGE = ("This booking is waiting for its payment, and is confirmed when it's paid. "
+                 "If they paid you another way, mark its order paid in Orders.")
+
 async def _booking_when(conn, site, row) -> str:
     """The booking's start in ITS timezone — the location's, else the site's.
     Approval emails used the site's, so a location in another zone told its
@@ -602,9 +626,20 @@ async def accept_booking(
     site_id: UUID, booking_id: UUID, background: BackgroundTasks,
     account: CappeAccount = Depends(require_cappe_account),
 ):
-    """Creator approves a pending (awaiting-approval) booking → confirmed."""
+    """Creator approves a pending (awaiting-approval) booking → confirmed.
+
+    A booking that takes payment is approved through its ORDER: the customer
+    is emailed a link to pay, and the booking is confirmed when they do. It
+    used to be confirmable here with the deposit never paid."""
     async with get_connection() as conn:
         site = await get_owned_site(conn, site_id, account.id)
+        hold = await unpaid_hold(conn, booking_id)
+        if hold is not None:
+            if not hold["requires_approval"]:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_HOLD_MESSAGE)
+            from .shop import accept_order
+            await accept_order(site_id, hold["id"], background, account=account)
+            return await _booking_view(conn, site_id, booking_id)
         row = await conn.fetchrow(
             f"""UPDATE cappe_bookings
                 SET status = 'confirmed', approved_at = NOW(), updated_at = NOW()

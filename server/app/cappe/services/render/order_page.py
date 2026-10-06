@@ -101,6 +101,9 @@ def _items_html(order: dict, items: list[dict]) -> str:
         extra = []
         if it.get("booking_starts_at"):
             extra.append(f'<div class="cz-order__note">{escape(format_when(it["booking_starts_at"], tz))}</div>')
+        if it.get("balance_due_cents"):
+            extra.append(f'<div class="cz-order__note">{escape(fmt_money(it["balance_due_cents"], currency))} '
+                         "more is due at the appointment.</div>")
         download = _safe_link(it.get("download_url")) if released else None
         if download:
             extra.append(f'<a class="cz-btn cz-btn--ghost cz-order__get" href="{escape(download, quote=True)}" '

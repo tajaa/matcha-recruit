@@ -35,6 +35,7 @@ from ..services.email import (
     send_cappe_order_alert_email,
 )
 from ..services.inventory import release_order_bookings, restock_order, retake_order_stock
+from ..services.booking_payments import confirm_paid_bookings, order_has_bookings
 from ..services.refunds import refund_in_full, sync_stripe_refunds
 from ..services.receipt import issue_receipt_for_paid_order
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
@@ -405,6 +406,10 @@ async def _mark_order_paid(obj, event, background) -> dict:
                 obj.get("id"),
             )
         if row is not None:
+            # The bookings it was holding (a deposit, a booking line paid by
+            # card) are confirmed. Idempotent, so a replay can't do harm.
+            async with get_connection() as conn:
+                await confirm_paid_bookings(conn, row["id"])
             from ..services.push import notify_order_event
             if row.get("shopper_id"):
                 background.add_task(notify_order_event, row["id"], "paid")
@@ -460,6 +465,12 @@ async def _mark_order_paid(obj, event, background) -> dict:
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Order not matched; releasing event for retry",
                 )
+            if already in _RELEASED_STATUSES and await _holds_bookings(oid):
+                # A booking's hold was released (abandoned, expired, declined)
+                # before the payment landed. Its slot may be someone else's by
+                # now, so the order can't simply be revived: the money goes back.
+                await _refund_stray_order_payment(oid, obj.get("id"), payment_intent, event_account_id, already)
+                return {"received": True, "status": "refunded_released_booking"}
             if already in _RELEASED_STATUSES:
                 # Money arrived for an order we had already released (owner
                 # cancelled or declined it while the payment page was still
@@ -531,6 +542,11 @@ async def _mark_order_paid(obj, event, background) -> dict:
             await _settle_collab_installment(cpid, obj, event_account_id, background)
 
     return {"received": True}
+
+
+async def _holds_bookings(order_id) -> bool:
+    async with get_connection() as conn:
+        return await order_has_bookings(conn, order_id)
 
 
 # ── collab installments ─────────────────────────────────────────────────────

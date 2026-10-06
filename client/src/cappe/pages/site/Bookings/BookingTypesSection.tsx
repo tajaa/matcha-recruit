@@ -23,6 +23,8 @@ function rulesText(t: CappeBookingType): string {
   if (t.min_notice_minutes) bits.push(`${+(t.min_notice_minutes / 60).toFixed(1)}h notice`)
   if (t.max_advance_days) bits.push(`up to ${t.max_advance_days} days ahead`)
   if (t.cancel_cutoff_hours) bits.push(`changes close ${t.cancel_cutoff_hours}h before`)
+  if (t.payment_mode === 'deposit' && t.deposit_cents) bits.push(`deposit ${(t.deposit_cents / 100).toFixed(2)}`)
+  if (t.payment_mode === 'full') bits.push('paid when booked')
   return bits.length ? ` · ${bits.join(' · ')}` : ''
 }
 
@@ -141,6 +143,8 @@ function TypeEditor({ type: t, currency, onSave, onCancel }: {
     notice: t.min_notice_minutes ? String(t.min_notice_minutes / 60) : '',
     advance: t.max_advance_days ? String(t.max_advance_days) : '',
     cutoff: t.cancel_cutoff_hours ? String(t.cancel_cutoff_hours) : '',
+    pay: t.payment_mode || 'none',
+    deposit: t.deposit_cents ? String(t.deposit_cents / 100) : '',
   })
   const [problem, setProblem] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -160,6 +164,8 @@ function TypeEditor({ type: t, currency, onSave, onCancel }: {
     if (!Number.isFinite(notice) || notice < 0 || notice > 720) { setProblem('Minimum notice is 0 to 720 hours'); return }
     if (advance !== null && (!Number.isInteger(advance) || advance < 1 || advance > 730)) { setProblem('Book up to 1 to 730 days ahead, or leave it empty'); return }
     if (!Number.isInteger(cutoff) || cutoff < 0 || cutoff > 720) { setProblem('Changes close 0 to 720 hours before'); return }
+    const deposit = form.pay === 'deposit' ? parseMoneyCents(form.deposit) : null
+    if (form.pay === 'deposit' && (deposit === null || deposit <= 0)) { setProblem('Enter the deposit as a plain amount, e.g. 20'); return }
     setProblem(null)
     setSaving(true)
     try {
@@ -168,6 +174,7 @@ function TypeEditor({ type: t, currency, onSave, onCancel }: {
         duration_minutes: duration, pricing_mode: form.pricing_mode, price_cents: price,
         buffer_minutes: buffer, category: form.category.trim() || null, status: form.status,
         min_notice_minutes: Math.round(notice * 60), max_advance_days: advance, cancel_cutoff_hours: cutoff,
+        payment_mode: form.pay as CappeBookingType['payment_mode'], deposit_cents: deposit,
       })
     } finally {
       setSaving(false)
@@ -209,6 +216,24 @@ function TypeEditor({ type: t, currency, onSave, onCancel }: {
         <label className="text-xs text-zinc-400">Online changes close (hours before)
           <input value={form.cutoff} onChange={(e) => setForm({ ...form, cutoff: e.target.value })} inputMode="numeric" placeholder="Up to the start" className={`mt-1 w-full ${inputCls}`} />
         </label>
+      </fieldset>
+      <fieldset className="grid gap-2 sm:col-span-2 sm:grid-cols-3">
+        <legend className="mb-1 text-xs font-medium text-zinc-400">Payment when booked</legend>
+        <label className="text-xs text-zinc-400">Take
+          <select value={form.pay} onChange={(e) => setForm({ ...form, pay: e.target.value as typeof form.pay })} aria-label="Payment when booked" className={`mt-1 w-full ${inputCls}`}>
+            <option value="none">Nothing — paid at the appointment</option>
+            <option value="deposit">A deposit</option>
+            <option value="full">The full price</option>
+          </select>
+        </label>
+        {form.pay === 'deposit' && (
+          <label className="text-xs text-zinc-400">Deposit ({currency})
+            <input value={form.deposit} onChange={(e) => setForm({ ...form, deposit: e.target.value })} inputMode="decimal" aria-label="Deposit amount" className={`mt-1 w-full ${inputCls}`} />
+          </label>
+        )}
+        {form.pay !== 'none' && (
+          <p className="self-end pb-2 text-xs text-zinc-500 sm:col-span-1">The time is held until it’s paid; an unpaid hold is released. Needs Stripe connected.</p>
+        )}
       </fieldset>
       <p className="text-xs text-zinc-500 sm:col-span-2">Changes apply to new bookings. Existing bookings keep their time and price. Bookings you make yourself skip these rules.</p>
       {problem && <p role="alert" className="text-xs text-red-400 sm:col-span-2">{problem}</p>}

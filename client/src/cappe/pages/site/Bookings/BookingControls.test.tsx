@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NewBookingForm } from './NewBookingForm'
 import { ScheduleSection } from './ScheduleSection'
 import { TimeOffSection } from './TimeOffSection'
+import { BookingTypesSection } from './BookingTypesSection'
 import { localInputValue } from '../../../utils/bookingTime'
 import type { CappeBooking, CappeBookingType, CappeStaff, CappeTimeOff } from '../../../types'
 
@@ -125,5 +126,58 @@ describe('localInputValue', () => {
   it('writes a timestamp as a local datetime input in a timezone', () => {
     expect(localInputValue('2026-10-20T16:00:00Z', 'America/New_York')).toBe('2026-10-20T12:00')
     expect(localInputValue('2026-10-20T16:00:00Z', 'Nowhere/Invalid')).toBe('2026-10-20T16:00')
+  })
+})
+
+describe('deposits', () => {
+  it('marks a hold awaiting payment and offers no manual confirm', () => {
+    render(<ScheduleSection view="list" setView={() => {}} bookings={[{ ...BOOKING, status: 'pending', awaiting_payment: true }]}
+      slots={[]} types={[TYPE]} staff={STAFF} acceptBooking={() => {}} declineBooking={() => {}} setBookingStatus={() => {}}
+      calendarTimezone="UTC" timezoneForBooking={() => 'UTC'} allLocations={false} />)
+    expect(screen.getByText('Awaiting payment')).toBeInTheDocument()
+    const options = Array.from(screen.getByRole('combobox', { name: /Change booking/ }).querySelectorAll('option')).map((o) => o.textContent)
+    expect(options.join(' ')).not.toMatch(/Confirm/)
+  })
+
+  it('shows what is left to collect after a deposit', () => {
+    render(<ScheduleSection view="list" setView={() => {}} bookings={[{ ...BOOKING, balance_due_cents: 3500 }]}
+      slots={[]} types={[TYPE]} staff={STAFF} acceptBooking={() => {}} declineBooking={() => {}} setBookingStatus={() => {}}
+      calendarTimezone="UTC" timezoneForBooking={() => 'UTC'} allLocations={false} />)
+    expect(screen.getByText('$35.00 due at the appointment')).toBeInTheDocument()
+  })
+})
+
+describe('service rules and payment', () => {
+  it('saves notice, horizon, cutoff and a deposit', async () => {
+    const patch = vi.fn().mockResolvedValue(true)
+    const full = { ...TYPE, description: null, duration_minutes: 60, price_cents: 5000, buffer_minutes: 0,
+      category: null, requires_approval: false } as unknown as CappeBookingType
+    render(<BookingTypesSection types={[full]} typeForm={{ name: '', description: '', duration_minutes: '60', pricing_mode: 'flat',
+      price: '', requires_approval: false, category: '', buffer: '0', staffIds: [] }} setTypeForm={() => {}} addType={() => {}}
+      staff={STAFF} patchType={patch} removeType={() => {}} toggleTypeStaff={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Cut' }))
+    fireEvent.change(screen.getByLabelText('Minimum notice (hours)'), { target: { value: '2' } })
+    fireEvent.change(screen.getByLabelText('Book up to (days ahead)'), { target: { value: '60' } })
+    fireEvent.change(screen.getByLabelText('Online changes close (hours before)'), { target: { value: '24' } })
+    fireEvent.change(screen.getByLabelText('Payment when booked'), { target: { value: 'deposit' } })
+    fireEvent.change(screen.getByLabelText('Deposit amount'), { target: { value: '15' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(patch).toHaveBeenCalledWith('t-1', expect.objectContaining({
+      min_notice_minutes: 120, max_advance_days: 60, cancel_cutoff_hours: 24, payment_mode: 'deposit', deposit_cents: 1500,
+    })))
+  })
+
+  it('refuses a deposit without an amount', () => {
+    const patch = vi.fn()
+    const full = { ...TYPE, description: null, duration_minutes: 60, price_cents: 5000, buffer_minutes: 0,
+      category: null, requires_approval: false } as unknown as CappeBookingType
+    render(<BookingTypesSection types={[full]} typeForm={{ name: '', description: '', duration_minutes: '60', pricing_mode: 'flat',
+      price: '', requires_approval: false, category: '', buffer: '0', staffIds: [] }} setTypeForm={() => {}} addType={() => {}}
+      staff={STAFF} patchType={patch} removeType={() => {}} toggleTypeStaff={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Cut' }))
+    fireEvent.change(screen.getByLabelText('Payment when booked'), { target: { value: 'deposit' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter the deposit')
+    expect(patch).not.toHaveBeenCalled()
   })
 })

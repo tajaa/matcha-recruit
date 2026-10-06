@@ -86,7 +86,8 @@ export function ScheduleSection({
       ) : (
         <ul className="divide-y divide-zinc-800">
           {bookings.map((b) => {
-            const next = NEXT_BOOKING_STATUSES[b.status] || []
+            // A hold is confirmed by its payment, not by hand.
+            const next = (NEXT_BOOKING_STATUSES[b.status] || []).filter((st) => !(b.awaiting_payment && st === 'confirmed'))
             const type = types.find((t) => t.id === b.booking_type_id)
             return (
             <li key={b.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2 text-sm">
@@ -109,6 +110,10 @@ export function ScheduleSection({
                 )}
               </div>
               <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${statusStyle[b.status]}`}>{b.status}</span>
+              {b.awaiting_payment && <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-300">Awaiting payment</span>}
+              {!b.awaiting_payment && (b.balance_due_cents ?? 0) > 0 && b.status !== 'cancelled' && (
+                <span className="text-xs text-zinc-400">{money(b.balance_due_cents ?? 0, currency)} due at the appointment</span>
+              )}
               {canAct && (b.status === 'pending' || b.status === 'confirmed') && b.booking_type_id && (
                 moving?.id === b.id ? (
                   <span className="flex basis-full flex-wrap items-center gap-2 sm:basis-auto">

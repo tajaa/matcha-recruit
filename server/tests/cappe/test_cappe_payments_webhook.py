@@ -15,6 +15,8 @@ os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
+from unittest.mock import AsyncMock
+
 import pytest  # noqa: E402
 
 from app.cappe.routes import payments as mod  # noqa: E402
@@ -304,6 +306,9 @@ def _late_payment(monkeypatch, conn, obj_extra=None):
 
     monkeypatch.setattr(mod, "get_connection", lambda: FakeConnCtx(conn))
     monkeypatch.setattr(mod, "retake_order_stock", _retake)
+    # A cart order: no booking hold, so a late payment restores it (a booking
+    # hold is refunded instead — test_cappe_booking_deposits.py).
+    monkeypatch.setattr(mod, "_holds_bookings", AsyncMock(return_value=False))
     bg = FakeBackground()
     obj = {"id": "cs_1", "payment_intent": "pi_1",
            "metadata": {"order_id": "11111111-1111-4111-8111-111111111111"}}

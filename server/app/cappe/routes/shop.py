@@ -40,6 +40,7 @@ from ..services.email import (
     send_cappe_order_shipped_email,
 )
 from ..services.directory import refresh_site_search
+from ..services.booking_payments import confirm_paid_bookings
 from ..services.inventory import log_adjustment, release_order_bookings, restock_order
 from ..services.entitlements import require_fulfillment, resolve_entitlements
 from ..services.order_lifecycle import REFUNDABLE_STATUSES, transition_error
@@ -769,6 +770,9 @@ async def update_order_status(
             if should_restock(current["status"], body.status):
                 await restock_order(conn, site_id=site_id, order_id=order_id, reason="restock")
                 await release_order_bookings(conn, order_id=order_id)
+            if became_paid:
+                # Paid another way: the bookings it was holding are confirmed.
+                await confirm_paid_bookings(conn, order_id)
             items = await conn.fetch(
                 f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
                 order_id,
@@ -1033,14 +1037,18 @@ async def accept_order(
             )
             if order is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending order to accept")
-            await conn.execute(
-                """UPDATE cappe_bookings
-                      SET status = 'confirmed', approved_at = NOW(), updated_at = NOW()
-                    WHERE site_id = $2 AND status = 'pending'
-                      AND id IN (SELECT booking_id FROM cappe_order_items
-                                  WHERE order_id = $1 AND booking_id IS NOT NULL)""",
-                order_id, site_id,
-            )
+            if order["pay_by"] is None:
+                # Nothing to pay by card (free, or the store takes payment
+                # itself): accepting confirms the bookings. One the buyer now
+                # pays for stays held until the payment lands.
+                await conn.execute(
+                    """UPDATE cappe_bookings
+                          SET status = 'confirmed', approved_at = NOW(), updated_at = NOW()
+                        WHERE site_id = $2 AND status = 'pending'
+                          AND id IN (SELECT booking_id FROM cappe_order_items
+                                      WHERE order_id = $1 AND booking_id IS NOT NULL)""",
+                    order_id, site_id,
+                )
         items = await conn.fetch(
             f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
             order_id,

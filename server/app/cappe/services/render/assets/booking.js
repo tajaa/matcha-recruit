@@ -19,7 +19,9 @@ var byId={};types.forEach(function(t){byId[t.id]=t;});
 var staffById={};staffList.forEach(function(s){staffById[s.id]=s;});
  var selStaff=null,bookingTimezone='UTC';
  function formatBookingWhen(timestamp){return new Date(timestamp).toLocaleString([], {timeZone:bookingTimezone});}
-function priceLabel(t){if(!t.price_cents)return 'Free';var m=RT.money(t.price_cents,t.currency||CUR);return t.pricing_mode==='hourly'?m+'/hr':m;}
+function priceLabel(t){if(!t.price_cents)return 'Free';var m=RT.money(t.price_cents,t.currency||CUR);m=t.pricing_mode==='hourly'?m+'/hr':m;
+// Paid when booked: say so before they pick a time.
+if(t.payment_mode==='deposit'&&t.deposit_cents)m+=' · '+RT.money(t.deposit_cents,t.currency||CUR)+' deposit';else if(t.payment_mode==='full')m+=' · paid when booked';return m;}
 var reqRider=rider.filter(function(i){return i.is_required;});
 var riderHtml='';
 if(rider.length){riderHtml='<div class="cz-rider" style="border:1px solid var(--line);border-radius:var(--radius);padding:.85rem 1rem;margin:.5rem 0;font-size:.9rem">'+
@@ -97,8 +99,12 @@ if(t.pricing_mode==='hourly'&&sel.end)body.ends_at=sel.end;
 if(selStaff)body.staff_id=selStaff;
 if(selLoc)body.location_id=selLoc;
  sb.disabled=true;msg.textContent='Requesting…';msg.className='cz-msg';
-RT.post('/bookings',body).then(function(res){bookingTimezone=res.timezone||bookingTimezone;var price=res.quoted_price_cents?(' — '+RT.money(res.quoted_price_cents,res.currency||CUR)):'';
+RT.post('/bookings',body).then(function(res){bookingTimezone=res.timezone||bookingTimezone;
+// A deposit or the full price: pay now; the slot is held until it's paid.
+if(res.checkout_url){box.innerHTML='<p class="cz-msg">Holding your time — taking you to pay '+RT.esc(RT.money(res.pay_now_cents,res.currency||CUR))+'…</p>';window.location=res.checkout_url;return;}
+var price=res.quoted_price_cents?(' — '+RT.money(res.quoted_price_cents,res.currency||CUR)):'';
  var note=res.requires_approval?'Request sent for '+RT.esc(formatBookingWhen(res.starts_at))+price+'. The host will review and confirm by email.':'Booked for '+RT.esc(formatBookingWhen(res.starts_at))+price+'. A confirmation is on its way.';
+ if(res.order_url&&res.pay_now_cents)note+=' Once it\'s approved you\'ll get an email with a link to pay the '+(res.balance_due_cents?'deposit':'booking')+' ('+RT.esc(RT.money(res.pay_now_cents,res.currency||CUR))+').';
  note+=' Times in '+RT.esc(bookingTimezone)+'.';
 var mu=RT.url(res.manage_url);
 box.innerHTML='<p class="cz-msg ok">'+note+'</p>'+(mu?'<p class="cz-msg"><a href="'+RT.esc(mu)+'" target="_blank" rel="noopener">View, move or cancel your booking</a></p>':'');
