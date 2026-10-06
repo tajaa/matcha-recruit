@@ -107,3 +107,29 @@ def iana_timezone(value: Any) -> Any:
     except (ZoneInfoNotFoundError, ValueError, OSError):
         raise ValueError(f"Unknown timezone {name!r} — use a name like America/New_York")
     return name
+
+
+def ship_country(v: str | None) -> str | None:
+    """Field validator: a two-letter country Stripe will take a shipping
+    address in, upper-cased. `None` passes (the store's home country)."""
+    if v is None:
+        return None
+    from ..services.shipping import SHIP_COUNTRIES
+
+    code = v.strip().upper()
+    if code not in SHIP_COUNTRIES:
+        raise ValueError(f"{v!r} is not a country code we can ship to")
+    return code
+
+
+def store_currency(v: str | None) -> str | None:
+    """Field validator: one of the two-decimal currencies a store can charge
+    in (`services/shipping.SITE_CURRENCIES`), upper-cased."""
+    if v is None:
+        return None
+    from ..services.shipping import SITE_CURRENCIES
+
+    code = v.strip().upper()
+    if code not in SITE_CURRENCIES:
+        raise ValueError(f"Stores can charge in {', '.join(SITE_CURRENCIES)}")
+    return code

@@ -79,7 +79,7 @@ async def test_checkout_returns_bind_guest_and_signed_orders_without_leaking_tok
     monkeypatch.setattr(commerce, "fetch_option_groups", AsyncMock(return_value={}))
     monkeypatch.setattr(commerce, "lock_stock_rows", AsyncMock())
     monkeypatch.setattr(commerce, "fetch_site_owner", AsyncMock(return_value=owner))
-    monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200)))
+    monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200, has=lambda _f: False)))
     monkeypatch.setattr(commerce, "require_can_sell", lambda _: None)
     monkeypatch.setattr(commerce, "get_cappe_stripe", lambda: stripe)
     monkeypatch.setattr(shopper_customers, "connected_customer", AsyncMock(return_value="cus_buyer"))

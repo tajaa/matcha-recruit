@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from ._validators import ship_country as country_code
 from .shop import CappeCartItem
 
 
@@ -61,6 +62,10 @@ class ShopperDevice(BaseModel):
 class CartQuoteRequest(BaseModel):
     items: list[CappeCartItem] = Field(min_length=1, max_length=100)
     interval: Literal["week", "month"] | None = None
+    # Where the physical lines ship (two-letter code). Omitted = the store's
+    # home country, which is all a quote priced before shipping zones.
+    ship_country: str | None = Field(default=None, max_length=2)
+    _ship_country = field_validator("ship_country")(country_code)
 
 
 class SubscriptionCheckout(CartQuoteRequest):

@@ -12,17 +12,25 @@ def unit_price(product, groups, selected_ids, discount_percent=0):
     return apply_discount_cents(max(0, product["price_cents"] + delta), discount_percent), snapshot
 
 
-def cart_totals(lines, site):
-    from .commerce import compute_shipping_cents
+def cart_totals(lines, site, destination=None):
+    """Subtotal, tax, shipping and total for priced lines.
 
+    `destination` (services/shipping.Destination) is where the physical lines
+    ship; None means the store's home country, the only place it shipped to
+    before zones. Tax is the store's rate on physical goods, charged at home
+    and in a zone only when that zone says so.
+    """
+    from .commerce import compute_shipping_cents
+    from .shipping import home_destination
+
+    dest = destination or home_destination(site)
     subtotal = sum(line["unit_price_cents"] * line["quantity"] for line in lines)
     physical = [line for line in lines if line["fulfillment"] == "physical"]
     taxable = sum(line["unit_price_cents"] * line["quantity"] for line in physical)
-    tax = taxable * int(site.get("tax_rate_bps") or 0) // 10000
+    tax = taxable * int(site.get("tax_rate_bps") or 0) // 10000 if dest.charge_tax else 0
     shipping = compute_shipping_cents(
         has_physical=bool(physical), goods_subtotal_cents=taxable,
-        flat_cents=int(site.get("shipping_flat_cents") or 0),
-        free_threshold_cents=site.get("shipping_free_threshold_cents"),
+        flat_cents=dest.flat_cents, free_threshold_cents=dest.free_threshold_cents,
     )
     if subtotal + tax + shipping > 99_999_999:
         raise HTTPException(422, "Cart total exceeds the checkout limit")
@@ -52,7 +60,7 @@ def priceable_products(rows, option_groups, discounts, on_date):
     }
 
 
-def price_cart(products_by_id, items, site):
+def price_cart(products_by_id, items, site, destination=None):
     """Read-only quote; unavailable lines remain visible for cart repair."""
     quantities = Counter()
     option_quantities = Counter()
@@ -87,4 +95,4 @@ def price_cart(products_by_id, items, site):
         lines.append(line)
     if len(currencies) > 1:
         raise HTTPException(422, "Mixed currencies not supported")
-    return {"lines": lines, **cart_totals(lines, site), "currency": next(iter(currencies), "USD")}
+    return {"lines": lines, **cart_totals(lines, site, destination), "currency": next(iter(currencies), "USD")}

@@ -19,11 +19,12 @@ interface ScheduleSectionProps {
   calendarTimezone: string
   timezoneForBooking: (booking: CappeBooking) => string
   allLocations: boolean
+  currency?: string
 }
 
 export function ScheduleSection({
   view, setView, bookings, slots, types, staff, acceptBooking, declineBooking, setBookingStatus,
-  calendarTimezone, timezoneForBooking, allLocations,
+  calendarTimezone, timezoneForBooking, allLocations, currency = 'USD',
 }: ScheduleSectionProps) {
   return (
     <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
@@ -66,7 +67,7 @@ export function ScheduleSection({
                   {type && ` · ${type.name}`}
                   {b.staff_name && ` · with ${b.staff_name}`}
                   {allLocations && b.location_name && ` · ${b.location_name}`}
-                  {' · '}{money(b.quoted_price_cents)}
+                  {' · '}{money(b.quoted_price_cents, currency)}
                 </div>
                 {bookingIsPaid(b) && (b.status === 'cancelled' || b.status === 'declined') && (
                   <div className="mt-0.5 flex items-center gap-1 text-xs text-amber-400">

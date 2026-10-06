@@ -48,6 +48,7 @@ export default function Bookings() {
           allLocations={b.isAllLocationsView}
           acceptBooking={b.acceptBooking}
           declineBooking={b.declineBooking}
+          currency={b.currency}
         />
       )}
 
@@ -65,6 +66,7 @@ export default function Bookings() {
         calendarTimezone={b.calendarTimezone}
         timezoneForBooking={b.timezoneForBooking}
         allLocations={b.isAllLocationsView}
+        currency={b.currency}
       />
 
       {/* Staff / stylists */}
@@ -100,6 +102,7 @@ export default function Bookings() {
         patchType={b.patchType}
         removeType={b.removeType}
         toggleTypeStaff={b.toggleTypeStaff}
+        currency={b.currency}
       />
 
       {/* Availability */}

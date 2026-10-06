@@ -168,6 +168,8 @@ class CappeBookingType(BaseModel):
     buffer_minutes: int = 0
     staff_ids: list[UUID] = Field(default_factory=list)
     location_id: Optional[UUID] = None
+    # The store's currency (prices are in it).
+    currency: str = "USD"
     created_at: datetime
     updated_at: datetime
 

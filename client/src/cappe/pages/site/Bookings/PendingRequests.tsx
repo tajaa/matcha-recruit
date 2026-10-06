@@ -9,9 +9,10 @@ interface PendingRequestsProps {
   allLocations: boolean
   acceptBooking: (b: CappeBooking) => void
   declineBooking: (b: CappeBooking) => void
+  currency?: string
 }
 
-export function PendingRequests({ pending, timezoneForBooking, allLocations, acceptBooking, declineBooking }: PendingRequestsProps) {
+export function PendingRequests({ pending, timezoneForBooking, allLocations, acceptBooking, declineBooking, currency = 'USD' }: PendingRequestsProps) {
   return (
     <section className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/[0.05] p-5">
       <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-amber-200">
@@ -25,7 +26,7 @@ export function PendingRequests({ pending, timezoneForBooking, allLocations, acc
               <div className="text-xs text-zinc-400">
                 {formatBookingDateTime(b.starts_at, timezoneForBooking(b))} – {formatBookingTime(b.ends_at, timezoneForBooking(b))}
                 {allLocations && b.location_name && <>{' · '}{b.location_name}</>}
-                {' · '}<span className="text-emerald-400">{money(b.quoted_price_cents)}</span>
+                {' · '}<span className="text-emerald-400">{money(b.quoted_price_cents, currency)}</span>
                 {b.rider_acknowledged && <span className="ml-2 inline-flex items-center gap-1 text-zinc-500"><ShieldCheck className="h-3 w-3" /> agreed to rider</span>}
               </div>
               {b.note && <div className="mt-1 truncate text-xs text-zinc-500">“{b.note}”</div>}

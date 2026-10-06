@@ -12,6 +12,7 @@ from .common import loads_list, site_origins, url_within_origins
 from .discounts import fetch_active_discounts, site_today
 from .entitlements import resolve_entitlements, require_can_sell
 from .options import fetch_option_groups
+from .shipping import home_country
 from .shopper_customers import connected_customer
 from .stripe_connect import get_cappe_stripe, CappeStripeError
 
@@ -236,6 +237,9 @@ async def checkout(site, shopper, body):
             success_url=callback(success, "success"), cancel_url=callback(cancel, "cancel"),
             metadata={"cappe_shopper_subscription_id": str(row["id"]), "site_id": str(site["id"])},
             collect_shipping=any(line["fulfillment"] == "physical" for line in snapshot),
+            # Subscriptions ship within the home country only: their shipping
+            # and tax are fixed into the recurring price at the home rates.
+            ship_countries=[home_country(site)],
             idempotency_key=f"shopper-sub:{row['id']}",
         )
     except CappeStripeError as exc:

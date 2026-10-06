@@ -64,8 +64,9 @@ def platform_fee_cents(amount_cents: int) -> int:
     return max(0, (amount_cents * bps) // 10_000)
 
 
-# Gummfit storefronts are US-facing. Per-site country config is a deliberate
-# later one-column follow-up, not scope here.
+# Where Stripe takes a shipping address when the caller names no country.
+# Callers pass the order's ship-to country (services/shipping.py); this is the
+# old US-only default for anything that doesn't.
 CAPPE_SHIPPING_COUNTRIES = ["US"]
 
 # How long a storefront payment page stays payable: Stripe's 30-minute minimum
@@ -165,6 +166,7 @@ class CappeStripe:
         collect_shipping_address: bool = False,
         shipping_option: Optional[dict] = None,
         expires_in_seconds: Optional[int] = None,
+        ship_countries: Optional[list[str]] = None,
     ):
         """Create a Checkout Session ON the connected account (direct charge),
         taking a platform `application_fee_amount`. Returns the Session.
@@ -177,8 +179,9 @@ class CappeStripe:
         diverge, and the persisted number would be a lie about money.
 
         With `collect_shipping_address`, Stripe collects the buyer's address
-        (US only) and `shipping_option` renders as a real shipping row included
-        in amount_total; the fee stays on the goods subtotal.
+        in one of `ship_countries` (the country the order was priced for) and
+        `shipping_option` renders as a real shipping row included in
+        amount_total; the fee stays on the goods subtotal.
 
         `expires_in_seconds` shortens Stripe's default 24h session lifetime. The
         order behind a session holds stock from the moment it is created, so an
@@ -198,7 +201,9 @@ class CappeStripe:
             else:
                 extra["customer_email"] = customer_email or None
             if collect_shipping_address:
-                extra["shipping_address_collection"] = {"allowed_countries": CAPPE_SHIPPING_COUNTRIES}
+                extra["shipping_address_collection"] = {
+                    "allowed_countries": list(ship_countries or CAPPE_SHIPPING_COUNTRIES),
+                }
                 opts = build_shipping_options(shipping_option, currency)
                 if opts:
                     extra["shipping_options"] = opts
@@ -244,12 +249,14 @@ class CappeStripe:
 
     async def create_subscription_checkout(self, *, account_id, customer_id, line_items,
                                            application_fee_percent, success_url, cancel_url,
-                                           metadata, collect_shipping, idempotency_key):
+                                           metadata, collect_shipping, idempotency_key,
+                                           ship_countries=None):
         self._ensure_key()
         def create():
             extra = {}
             if collect_shipping:
-                extra = {"shipping_address_collection": {"allowed_countries": CAPPE_SHIPPING_COUNTRIES},
+                extra = {"shipping_address_collection": {
+                             "allowed_countries": list(ship_countries or CAPPE_SHIPPING_COUNTRIES)},
                          "customer_update": {"shipping": "auto"}}
             return stripe.checkout.Session.create(
                 mode="subscription", customer=customer_id, line_items=line_items,

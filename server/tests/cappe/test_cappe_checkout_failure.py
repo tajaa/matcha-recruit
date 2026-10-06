@@ -96,7 +96,7 @@ def _wire(monkeypatch, *, owner, stripe):
     monkeypatch.setattr(commerce, "lock_stock_rows", AsyncMock())
     monkeypatch.setattr(commerce, "fetch_site_owner", AsyncMock(return_value=owner))
     monkeypatch.setattr(commerce, "resolve_entitlements",
-                        AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200)))
+                        AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200, has=lambda _f: False)))
     monkeypatch.setattr(commerce, "require_can_sell", lambda _: None)
     monkeypatch.setattr(commerce, "get_cappe_stripe", lambda: stripe)
     monkeypatch.setattr(commerce, "restock_order", _restock)

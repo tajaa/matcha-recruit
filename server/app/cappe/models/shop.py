@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
-from ._validators import https_url
+from ._validators import https_url, ship_country as country_code
 
 # A product is a general "offering"; `fulfillment` decides how it's delivered.
 #   physical - shipped good (uses inventory)
@@ -68,6 +68,7 @@ class CappeProductCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: Optional[str] = None
     price_cents: int = Field(default=0, ge=0)
+    # Only used if the store row can't be read; the store's currency wins.
     currency: str = Field(default="USD", max_length=3)
     image_url: Optional[str] = None
     sku: Optional[str] = Field(default=None, max_length=120)
@@ -100,6 +101,7 @@ class CappeProductUpdate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=255)
     description: Optional[str] = None
     price_cents: Optional[int] = Field(default=None, ge=0)
+    # Accepted and ignored: a product is priced in its store's currency.
     currency: Optional[str] = Field(default=None, max_length=3)
     image_url: Optional[str] = None
     sku: Optional[str] = Field(default=None, max_length=120)
@@ -199,6 +201,8 @@ class CappeOrder(BaseModel):
     tax_cents: int = 0
     shipping_cents: int = 0
     shipping_address: Optional[dict[str, Any]] = None
+    # Where a physical order was priced to ship (two-letter code).
+    ship_country: Optional[str] = None
     carrier: Optional[str] = None
     tracking_number: Optional[str] = None
     total_cents: Optional[int] = None
@@ -315,15 +319,18 @@ class CappeShippingAddressInput(BaseModel):
     city: str = Field(min_length=1, max_length=120)
     state: Optional[str] = Field(default=None, max_length=120)
     postal_code: Optional[str] = Field(default=None, max_length=32)
-    country: str = Field(default="US", pattern=r"^[A-Z]{2}$")
+    # Omitted = the order's ship-to country (see CappeCheckoutRequest).
+    country: Optional[str] = Field(default=None, max_length=2)
     phone: Optional[str] = Field(default=None, max_length=40)
+    _country = field_validator("country")(country_code)
 
-    def as_stripe_shape(self) -> dict:
+    def as_stripe_shape(self, country: Optional[str] = None) -> dict:
         return {
             "name": self.name, "phone": self.phone,
             "address": {
                 "line1": self.line1, "line2": self.line2, "city": self.city,
-                "state": self.state, "postal_code": self.postal_code, "country": self.country,
+                "state": self.state, "postal_code": self.postal_code,
+                "country": self.country or country,
             },
         }
 
@@ -339,6 +346,11 @@ class CappeCheckoutRequest(BaseModel):
     success_url: Optional[str] = Field(default=None, max_length=2000)
     cancel_url: Optional[str] = Field(default=None, max_length=2000)
     shipping_address: Optional[CappeShippingAddressInput] = None
+    # Where the physical lines ship. Priced from the store's zones, stored on
+    # the order, and the only country the payment page then accepts. Omitted =
+    # the shipping address's country, else the store's home country.
+    ship_country: Optional[str] = Field(default=None, max_length=2)
+    _ship_country = field_validator("ship_country")(country_code)
 
 
 # Buyer-facing receipt (resolved by the order's unguessable access_token).
@@ -409,6 +421,64 @@ class CappeDiscount(BaseModel):
     created_at: datetime
 
 
+# --- Shipping zones (services/shipping.py) -----------------------------------
+
+class CappeShippingZoneInput(BaseModel):
+    """A destination beyond the store's home country, with its own rates."""
+    name: str = Field(min_length=1, max_length=80)
+    # Two-letter codes. Ignored (stored empty) for the "everywhere else" zone.
+    countries: list[str] = Field(default_factory=list, max_length=250)
+    rest_of_world: bool = False
+    flat_cents: int = Field(default=0, ge=0, le=1_000_000)
+    free_threshold_cents: Optional[int] = Field(default=None, ge=0, le=99_999_999)
+    # Charge the store's tax rate on goods shipped here (off by default: the
+    # rate is the home country's).
+    charge_tax: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Give the zone a name")
+        return v.strip()
+
+    @field_validator("countries")
+    @classmethod
+    def _countries(cls, v: list[str]) -> list[str]:
+        out: list[str] = []
+        for code in v:
+            code = country_code(code)
+            if code not in out:
+                out.append(code)
+        return out
+
+    @model_validator(mode="after")
+    def _rest_has_no_list(self):
+        if self.rest_of_world:
+            self.countries = []
+        return self
+
+
+class CappeShippingZone(CappeShippingZoneInput):
+    id: UUID
+    sort_order: int = 0
+
+
+class CappeShippingZonesReplace(BaseModel):
+    zones: list[CappeShippingZoneInput] = Field(default_factory=list, max_length=20)
+
+
+class CappeShippingZones(BaseModel):
+    # Whether the plan includes zones. A downgraded store keeps its zones but
+    # ships to its home country only until it upgrades or clears them.
+    enabled: bool
+    home_country: str
+    currency: str
+    # Every country a zone can name (Stripe's list), for the picker.
+    countries: list[str]
+    zones: list[CappeShippingZone] = Field(default_factory=list)
+
+
 __all__ = [
     "Fulfillment",
     "CappeProductOptionInput",
@@ -435,4 +505,8 @@ __all__ = [
     "CappeDiscountInput",
     "CappeDiscountReplace",
     "CappeDiscount",
+    "CappeShippingZoneInput",
+    "CappeShippingZone",
+    "CappeShippingZonesReplace",
+    "CappeShippingZones",
 ]

@@ -115,7 +115,12 @@ def _legacy_fallback(plan_code: str) -> Entitlements:
         allowed_fulfillment=ALL_FULFILLMENT,
         site_limit=1 if plan_code == "free" else None,
         mailbox_quota_included=0,
-        features={"rider": str(plan_code or "").lower() in {"pro", "creator"}},
+        features={
+            "rider": str(plan_code or "").lower() in {"pro", "creator"},
+            # Zones are applied at checkout, so an unreadable catalog must not
+            # quietly stop a paying store's buyers abroad from checking out.
+            "shipping_zones": str(plan_code or "").lower() in {"business", "pro", "hosting"},
+        },
     )
 
 

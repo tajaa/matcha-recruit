@@ -146,7 +146,7 @@ _ORDER_COLS = (
     "shipping_address, carrier, tracking_number, "
     "currency, payment_ref, note, requires_approval, approved_at, decline_reason, "
     "refunded_at, refunded_cents, dispute_status, disputed_at, "
-    "pay_by, shipped_notified_at, platform_fee_cents, "
+    "pay_by, shipped_notified_at, platform_fee_cents, ship_country, "
     "metadata, created_at, updated_at"
 )
 _ITEM_COLS = (
@@ -385,9 +385,13 @@ async def create_product(
                         (site_id, name, description, price_cents, currency, image_url, sku, inventory,
                          low_stock_threshold, status, sort_order, fulfillment, digital_file_url,
                          booking_type_id, requires_approval, intake_fields, category, subscription_intervals, subscription_discount_bps)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                    VALUES ($1, $2, $3, $4,
+                            -- The store's currency, whatever the client sent:
+                            -- one store, one currency (services/shipping.py).
+                            COALESCE((SELECT currency FROM cappe_sites WHERE id = $1), $5),
+                            $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
                     RETURNING {_PRODUCT_COLS}""",
-                site_id, body.name, body.description, body.price_cents, body.currency,
+                site_id, body.name, body.description, body.price_cents, body.currency.upper(),
                 body.image_url, body.sku, body.inventory, body.low_stock_threshold, body.status,
                 body.sort_order, body.fulfillment, body.digital_file_url, body.booking_type_id,
                 body.requires_approval, json.dumps(body.intake_fields), body.category,
@@ -465,7 +469,9 @@ async def update_product(
             ):
                 raise _stock_conflict(shelf["inventory"])
             sets, args = build_patch(body, (
-                "name", "description", "price_cents", "currency", "image_url",
+                # No "currency": a product is priced in its store's currency,
+                # changed for every product at once in the store settings.
+                "name", "description", "price_cents", "image_url",
                 "sku", "inventory", "low_stock_threshold", "status", "sort_order",
                 "fulfillment", "digital_file_url", "booking_type_id", "requires_approval",
                 "category",

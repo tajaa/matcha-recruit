@@ -12,12 +12,14 @@ else{selLoc=locs.length===1?locs[0].id:'';start();}});
 function start(){
 Promise.all([RT.get('/booking-types'+qjoin(locP())),RT.get('/rider').catch(function(){return {items:[]};}),RT.get('/staff'+qjoin(locP())).catch(function(){return [];})]).then(function(r){
 var types=r[0],rider=(r[1]&&r[1].items)||[],staffList=r[2]||[];
+// The store's currency (every type carries it; older servers sent none).
+var CUR=(types[0]&&types[0].currency)||'USD';
 if(!types.length){box.innerHTML='<p style="color:var(--muted)">No appointments available.</p>';return;}
 var byId={};types.forEach(function(t){byId[t.id]=t;});
 var staffById={};staffList.forEach(function(s){staffById[s.id]=s;});
  var selStaff=null,bookingTimezone='UTC';
  function formatBookingWhen(timestamp){return new Date(timestamp).toLocaleString([], {timeZone:bookingTimezone});}
-function priceLabel(t){if(!t.price_cents)return 'Free';var m=RT.money(t.price_cents,'USD');return t.pricing_mode==='hourly'?m+'/hr':m;}
+function priceLabel(t){if(!t.price_cents)return 'Free';var m=RT.money(t.price_cents,t.currency||CUR);return t.pricing_mode==='hourly'?m+'/hr':m;}
 var reqRider=rider.filter(function(i){return i.is_required;});
 var riderHtml='';
 if(rider.length){riderHtml='<div class="cz-rider" style="border:1px solid var(--line);border-radius:var(--radius);padding:.85rem 1rem;margin:.5rem 0;font-size:.9rem">'+
@@ -44,7 +46,7 @@ if(!slots.length){slotWrap.innerHTML='<p style="color:var(--muted)">No open time
 var days=[],byDay={};slots.forEach(function(s){if(!byDay[s.date]){byDay[s.date]=[];days.push(s.date);}byDay[s.date].push(s);});
 // One price line when every slot costs the same; otherwise show price per time.
 var uniform=slots.every(function(s){return s.price_cents===slots[0].price_cents;});
-var priceNote=(uniform&&slots[0].price_cents)?(' · '+RT.money(slots[0].price_cents,'USD')+(t.pricing_mode==='hourly'?'/hr':'')):'';
+var priceNote=(uniform&&slots[0].price_cents)?(' · '+RT.money(slots[0].price_cents,t.currency||CUR)+(t.pricing_mode==='hourly'?'/hr':'')):'';
 var tzNote=d.timezone?(' · times in '+RT.esc(d.timezone)):'';
 var discNote=d.discount_percent?(' · <span style="color:var(--brand)">'+d.discount_percent+'% off</span>'):'';
 slotWrap.innerHTML='<p class="cz-label">Pick a day'+tzNote+priceNote+discNote+'</p>'+
@@ -53,7 +55,7 @@ slotWrap.innerHTML='<p class="cz-label">Pick a day'+tzNote+priceNote+discNote+'<
 var timesWrap=slotWrap.querySelector('[data-times]'),dayBtns=slotWrap.querySelectorAll('.cz-day');
 function showDay(i){sel=null;sb.disabled=true;sb.textContent='Select a time';
 dayBtns.forEach(function(b,j){b.classList.toggle('cz-day--on',j===i);});
-timesWrap.innerHTML=byDay[days[i]].map(function(s){var pl=(!uniform&&s.price_cents)?(' · '+RT.money(s.price_cents,'USD')):'';
+timesWrap.innerHTML=byDay[days[i]].map(function(s){var pl=(!uniform&&s.price_cents)?(' · '+RT.money(s.price_cents,t.currency||CUR)):'';
 return '<button type="button" class="cz-slot" data-start="'+RT.esc(s.start)+'" data-end="'+RT.esc(s.end)+'">'+RT.esc(s.time_label)+pl+'</button>';}).join('');
 timesWrap.querySelectorAll('.cz-slot').forEach(function(btn){btn.addEventListener('click',function(){
 timesWrap.querySelectorAll('.cz-slot').forEach(function(b){b.classList.remove('cz-slot--on');});
@@ -74,7 +76,7 @@ dayBtns.forEach(function(b,i){b.addEventListener('click',function(){showDay(i);}
    RT.post('/booking-suggestions',params).then(function(d){bookingTimezone=(d&&d.timezone)||bookingTimezone;
    var opts=(d&&d.options)||[];
    if(!opts.length){aiOptions.innerHTML='<p style="color:var(--muted)">No matching open times. Try a broader request or use the picker below.</p>';return;}
-   aiOptions.innerHTML='<p class="cz-label">Suggested times'+(d.unmatched_staff_names&&d.unmatched_staff_names.length?' · Could not match: '+RT.esc(d.unmatched_staff_names.join(', ')):'')+'</p>'+opts.map(function(o,i){return '<button type="button" class="cz-slot" data-ai-option="'+i+'">'+RT.esc(o.day_label)+' · '+RT.esc(o.time_label)+(o.staff_name?' · '+RT.esc(o.staff_name):'')+(o.price_cents?' · '+RT.money(o.price_cents,'USD'):'')+'</button>';}).join('');
+   aiOptions.innerHTML='<p class="cz-label">Suggested times'+(d.unmatched_staff_names&&d.unmatched_staff_names.length?' · Could not match: '+RT.esc(d.unmatched_staff_names.join(', ')):'')+'</p>'+opts.map(function(o,i){return '<button type="button" class="cz-slot" data-ai-option="'+i+'">'+RT.esc(o.day_label)+' · '+RT.esc(o.time_label)+(o.staff_name?' · '+RT.esc(o.staff_name):'')+(o.price_cents?' · '+RT.money(o.price_cents,CUR):'')+'</button>';}).join('');
    aiOptions.querySelectorAll('[data-ai-option]').forEach(function(b,i){b.addEventListener('click',function(){aiOptions.querySelectorAll('[data-ai-option]').forEach(function(x){x.classList.remove('cz-slot--on');});b.classList.add('cz-slot--on');chooseSuggestion(opts[i]);});});
   }).catch(function(){aiOptions.innerHTML='<p class="cz-msg err">Could not find times. Use the picker below.</p>';}).finally(function(){aiGo.disabled=false;aiGo.textContent='Find times';});
  });
@@ -89,7 +91,7 @@ if(t.pricing_mode==='hourly'&&sel.end)body.ends_at=sel.end;
 if(selStaff)body.staff_id=selStaff;
 if(selLoc)body.location_id=selLoc;
  sb.disabled=true;msg.textContent='Requesting…';msg.className='cz-msg';
-RT.post('/bookings',body).then(function(res){bookingTimezone=res.timezone||bookingTimezone;var price=res.quoted_price_cents?(' — '+RT.money(res.quoted_price_cents,'USD')):'';
+RT.post('/bookings',body).then(function(res){bookingTimezone=res.timezone||bookingTimezone;var price=res.quoted_price_cents?(' — '+RT.money(res.quoted_price_cents,res.currency||CUR)):'';
  var note=res.requires_approval?'Request sent for '+RT.esc(formatBookingWhen(res.starts_at))+price+'. The host will review and confirm by email.':'Booked for '+RT.esc(formatBookingWhen(res.starts_at))+price+'. A confirmation is on its way.';
  note+=' Times in '+RT.esc(bookingTimezone)+'.';
 var mu=RT.url(res.manage_url);

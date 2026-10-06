@@ -26,6 +26,7 @@ export function useBookings() {
   const [staff, setStaff] = useState<CappeStaff[]>([])
   const [locations, setLocations] = useState<CappeLocation[]>([])
   const [siteTimezone, setSiteTimezone] = useState('UTC')
+  const [currency, setCurrency] = useState('USD')  // the store's; every price is in it
   const [multiLoc, setMultiLoc] = useState(false)  // site.is_multi_location — gates the branch UI
   const [selLoc, setSelLoc] = useState<string>('')  // '' = Shared / all locations
   const [showLocMgr, setShowLocMgr] = useState(false)
@@ -86,6 +87,7 @@ export function useBookings() {
     cappeApi.get<CappeSite>(`/sites/${siteId}`).then((s) => {
       setMultiLoc(!!s.is_multi_location)
       setSiteTimezone(s.timezone || 'UTC')
+      setCurrency(s.currency || 'USD')
     }).catch(() => {})
     cappeApi.get<CappeLocation[]>(`/sites/${siteId}/locations`).catch(() => [] as CappeLocation[])
       .then((locs) => {
@@ -424,7 +426,7 @@ export function useBookings() {
     siteId, account,
     types, setTypes, slots, setSlots, bookings, rules, setRules, rider, setRider,
     products, discounts, setDiscounts, staff, locations,
-    calendarTimezone, timezoneForBooking, isAllLocationsView,
+    calendarTimezone, timezoneForBooking, isAllLocationsView, currency,
     multiLoc, selLoc, showLocMgr, setShowLocMgr, locForm, setLocForm,
     loading, error, view, setView,
     typeForm, setTypeForm, staffForm, setStaffForm,
