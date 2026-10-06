@@ -434,7 +434,7 @@ async def order_page(token: str, request: Request):
         items = await conn.fetch(
             """SELECT oi.title, oi.quantity, oi.fulfillment, oi.unit_price_cents, oi.selected_options,
                       oi.deliverable_url, p.digital_file_url, b.starts_at AS booking_starts_at,
-                      oi.product_id, (p.id IS NOT NULL AND p.status = 'active') AS reviewable,
+                      oi.product_id, oi.balance_due_cents, (p.id IS NOT NULL AND p.status = 'active') AS reviewable,
                       EXISTS (SELECT 1 FROM cappe_reviews r WHERE r.order_id = oi.order_id
                                AND r.product_id = oi.product_id) AS reviewed
                  FROM cappe_order_items oi

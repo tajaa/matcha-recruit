@@ -94,6 +94,14 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
   or page storage; cookie endpoints also require `X-Cappe-Web: 1`. Web sign-out deletes that one
   session — the app's `/auth/logout` revokes every session and device, so never point the web at it.
 
+- **A booking that takes payment is HELD until it's paid** (`services/booking_payments.py`): a
+  deposit or full-price booking is an order with one booking line; a shop booking line paid by card
+  is held too. Paid → `confirm_paid_bookings` (webhook and "mark paid"); never confirmed by hand
+  while unpaid; a payment landing after the hold was released is refunded, not revived.
+- **Customer booking rules bind customers, not the owner** (`services/booking_rules.py`): notice,
+  horizon, opening hours and time off are skipped by `resolve_booking_slot(owner=True)`; the
+  double-booking lock and overlap check are not.
+
 ## Site templates (`services/site_templates/`)
 
 - **The catalog is code, not the `cappe_templates` table.** One `SiteTemplate` per entry, one module

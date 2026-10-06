@@ -693,6 +693,9 @@ export type CappeBookingType = {
   max_advance_days?: number | null
   /** Customers can change or cancel online until this long before the start. */
   cancel_cutoff_hours?: number
+  /** Taken when booked: nothing, a deposit, or the full price. */
+  payment_mode?: 'none' | 'deposit' | 'full'
+  deposit_cents?: number | null
   created_at: string
   updated_at: string
 }
@@ -809,6 +812,10 @@ export type CappeBooking = {
   rider_snapshot: Array<{ label: string; detail?: string | null; is_required: boolean }>
   /** The owner booked it (a phone call, a walk-in). */
   created_by_owner?: boolean
+  /** Held until its payment (a deposit) lands. */
+  awaiting_payment?: boolean
+  /** Left to collect at the appointment after a deposit. */
+  balance_due_cents?: number
   created_at: string
   /** The shop order this booking was bought through, if any. Cancelling the
    *  booking does not refund a PAID order. */

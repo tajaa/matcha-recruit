@@ -605,7 +605,9 @@ async def test_a_decision_email_uses_the_locations_time(monkeypatch):
 # ── accepting a held order approves its booking ──────────────────────────────
 
 def test_accepting_an_order_confirms_its_bookings(monkeypatch):
-    conn = SqlConn([("UPDATE cappe_orders", {"id": ORDER})])
+    """When there's nothing to pay by card. One the buyer now pays for keeps
+    its bookings held until the payment lands (test_cappe_booking_deposits.py)."""
+    conn = SqlConn([("UPDATE cappe_orders", {"id": ORDER, "pay_by": None})])
     monkeypatch.setattr(shop_mod, "get_connection", lambda: Ctx(conn))
     monkeypatch.setattr(shop_mod, "get_owned_site", AsyncMock())
     monkeypatch.setattr(shop_mod, "_order_row", lambda order, items: dict(order))

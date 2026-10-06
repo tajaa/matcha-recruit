@@ -470,15 +470,21 @@ async def _lock_and_check_overlap(conn, site, btype, s_utc, e_utc, exclude_booki
 async def create_booking_in_tx(
     conn, site, btype, starts_at, customer_name, customer_email, note,
     ends_at_override=None, rider_acknowledged=False, rider_snapshot=None, staff_id=None,
-    location_id=None, tz=None, owner=False,
+    location_id=None, tz=None, owner=False, hold=False,
 ):
     """Validate + price + insert a booking. MUST run inside a transaction.
     Shared by the public booking intake, booking-fulfillment order lines and
-    the owner's own bookings (`owner=True`, see resolve_booking_slot)."""
+    the owner's own bookings (`owner=True`, see resolve_booking_slot).
+
+    `hold=True`: the booking waits for a payment (a deposit, or a booking line
+    in a card order) — `pending`, its slot kept, until the order is paid
+    (`booking_payments.confirm_paid_bookings`) or released."""
     slot = await resolve_booking_slot(
         conn, site, btype, starts_at, ends_at_override, staff_id=staff_id, location_id=location_id, tz=tz,
         owner=owner,
     )
+    if hold:
+        slot["booking_status"] = "pending"
     try:
         return await conn.fetchrow(
             """INSERT INTO cappe_bookings
@@ -781,6 +787,7 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 detail="This store isn't taking orders right now.",
             )
         owner_ent = await resolve_entitlements(owner["plan"] if owner else None, conn=conn)
+        takes_cards = bool(owner and owner["stripe_account_id"] and owner["stripe_charges_enabled"])
         async with conn.transaction():
             order_currency = None
             order_requires_approval = False  # any line needing creator review holds the whole order
@@ -895,8 +902,11 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                     if btype["requires_approval"]:
                         order_requires_approval = True
                     validate_intake(loads_list(product["intake_fields"]), intake)
+                    # Paid by card: held until the payment lands, instead of
+                    # confirmed for an order that may never be paid.
                     booking = await create_booking_in_tx(
                         conn, site, btype, item.starts_at, body.customer_name, email, body.note,
+                        hold=takes_cards and (product["price_cents"] or 0) > 0,
                     )
                     booking_id = booking["id"]
 

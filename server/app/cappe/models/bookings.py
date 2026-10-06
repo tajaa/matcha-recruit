@@ -144,6 +144,16 @@ class CappeBookingTypeCreate(BaseModel):
     min_notice_minutes: int = Field(default=0, ge=0, le=43200)
     max_advance_days: Optional[int] = Field(default=None, ge=1, le=730)
     cancel_cutoff_hours: int = Field(default=0, ge=0, le=720)
+    # Taken when booked (services/booking_payments.py): nothing, a deposit, or
+    # the full price. The rest is collected at the appointment.
+    payment_mode: Literal["none", "deposit", "full"] = "none"
+    deposit_cents: Optional[int] = Field(default=None, ge=1, le=99_999_999)
+
+    @model_validator(mode="after")
+    def _deposit_amount(self):
+        if self.payment_mode == "deposit" and not self.deposit_cents:
+            raise ValueError("Say how much the deposit is")
+        return self
 
 
 class CappeBookingTypeUpdate(BaseModel):
@@ -161,6 +171,8 @@ class CappeBookingTypeUpdate(BaseModel):
     min_notice_minutes: Optional[int] = Field(default=None, ge=0, le=43200)
     max_advance_days: Optional[int] = Field(default=None, ge=1, le=730)
     cancel_cutoff_hours: Optional[int] = Field(default=None, ge=0, le=720)
+    payment_mode: Optional[Literal["none", "deposit", "full"]] = None
+    deposit_cents: Optional[int] = Field(default=None, ge=1, le=99_999_999)
 
 
 class CappeBookingType(BaseModel):
@@ -182,6 +194,8 @@ class CappeBookingType(BaseModel):
     min_notice_minutes: int = 0
     max_advance_days: Optional[int] = None
     cancel_cutoff_hours: int = 0
+    payment_mode: str = "none"
+    deposit_cents: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
@@ -289,6 +303,10 @@ class CappeBooking(BaseModel):
     # refunded from Orders, and the dashboard says so.
     order_id: Optional[UUID] = None
     order_status: Optional[str] = None
+    # A paid booking: what's left to collect at the appointment, and whether
+    # it is still waiting for its payment (held, slot kept).
+    balance_due_cents: int = 0
+    awaiting_payment: bool = False
     # The timezone the booking's times mean (its location's, else the site's).
     timezone: Optional[str] = None
 

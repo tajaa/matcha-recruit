@@ -15,12 +15,20 @@ from ...models.cappe import (
     CappePublicLocation,
     CappePublicStaff,
 )
+from ...services.booking_payments import amount_due_now, create_booking_order, line_title, takes_payment_for
 from ...services.commerce import (
     OutsideAvailability,
+    bind_return_urls,
     check_recipient_send_ok as _recipient_send_ok,
     create_booking_in_tx,
     fetch_rate_rules,
+    fetch_site_owner,
+    open_order_checkout,
+    release_unpaid_order,
 )
+from ...services.common import order_page_url, site_origins, site_public_origin
+from ...services.entitlements import resolve_entitlements
+from ...services.stripe_connect import CappeStripeError
 from ...services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
 from ...services.email import (
     booking_manage_url,
@@ -121,7 +129,7 @@ async def public_booking_types(slug: str, request: Request, location_id: UUID | 
         rows = await conn.fetch(
             "SELECT id, site_id, name, description, duration_minutes, price_cents, status, "
             "requires_approval, pricing_mode, category, buffer_minutes, location_id, created_at, updated_at, "
-            "min_notice_minutes, max_advance_days, cancel_cutoff_hours "
+            "min_notice_minutes, max_advance_days, cancel_cutoff_hours, payment_mode, deposit_cents "
             "FROM cappe_booking_types WHERE site_id = $1 AND status = 'active' "
             "AND (location_id IS NULL OR location_id = $2) ORDER BY created_at",
             site["id"], location_id,
@@ -135,7 +143,15 @@ async def public_booking_types(slug: str, request: Request, location_id: UUID | 
     for r in staff:
         by_type.setdefault(r["booking_type_id"], []).append(r["staff_id"])
     currency = site_currency(site)
-    return [{**dict(r), "staff_ids": by_type.get(r["id"], []), "currency": currency} for r in rows]
+    # A deposit is only asked for where it can be taken; elsewhere the
+    # service books as before, paid at the appointment.
+    paid_types = [r for r in rows if (r.get("payment_mode") or "none") != "none"]
+    async with get_connection() as conn:
+        can_take = bool(paid_types) and await takes_payment_for(conn, site["id"], {"payment_mode": "full"})
+    return [{
+        **dict(r), "staff_ids": by_type.get(r["id"], []), "currency": currency,
+        **({} if can_take else {"payment_mode": "none", "deposit_cents": None}),
+    } for r in rows]
 
 
 @router.get("/public/sites/{slug}/rider")
@@ -425,12 +441,20 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
         loc_id, loc_tz = await _location_ctx(conn, site, body.location_id)
         btype = await conn.fetchrow(
             "SELECT id, name, duration_minutes, status, price_cents, pricing_mode, requires_approval, buffer_minutes, "
-            "min_notice_minutes, max_advance_days "
+            "min_notice_minutes, max_advance_days, payment_mode, deposit_cents "
             "FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
             body.booking_type_id, site["id"],
         )
         if btype is None or btype["status"] != "active":
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking type not found")
+        # A deposit or the full price, taken now: the booking is made as an
+        # order and held until it's paid (services/booking_payments.py).
+        owner_row = owner_ent = order = None
+        pays = False
+        if (btype.get("payment_mode") or "none") != "none":
+            owner_row = await fetch_site_owner(conn, site["id"])
+            owner_ent = await resolve_entitlements(owner_row["plan"], conn=conn) if owner_row else None
+            pays = await takes_payment_for(conn, site["id"], btype, owner=owner_row, ent=owner_ent)
 
         # Rider: if the creator requires any item, the buyer must acknowledge.
         rider = await _site_rider(conn, site["id"])
@@ -454,6 +478,7 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
 
         booking = None
         last_taken = False
+        pay_now = balance = 0
         for sid in candidates:
             try:
                 async with conn.transaction():
@@ -463,8 +488,12 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
                         ends_at_override=body.ends_at,
                         rider_acknowledged=body.rider_acknowledged,
                         rider_snapshot=rider, staff_id=sid,
-                        location_id=loc_id, tz=loc_tz,
+                        location_id=loc_id, tz=loc_tz, hold=pays,
                     )
+                    if pays:
+                        booking, order, pay_now, balance = await _paid_booking(
+                            conn, site, btype, booking, cust_email, body, loc_tz,
+                        )
                 break
             except OutsideAvailability:
                 # With "any available", this stylist simply doesn't work then —
@@ -486,18 +515,29 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That time was just taken.")
         owner = await _site_owner(conn, site["id"])
 
+    checkout_url = None
+    if order is not None and not order["requires_approval"]:
+        checkout_url = await _open_deposit_checkout(site, order, owner_row, owner_ent, cust_email, btype, pay_now, balance,
+                                                    format_when(booking["starts_at"], loc_tz))
+    paid = {
+        "order_token": order["access_token"], "order_url": order_page_url(site, order["access_token"]),
+        "checkout_url": checkout_url, "pay_now_cents": pay_now, "balance_due_cents": balance,
+    } if order is not None else {}
+
     # Notifications (best-effort): confirmation → customer, alert → creator.
+    # A booking going to the payment page now hears from us when it's paid
+    # (receipt to the customer, sale alert to the owner) instead.
     when_label = format_when(booking["starts_at"], loc_tz)
     needs_approval = bool(booking["requires_approval"])
     # Per-recipient throttle (same as the order receipt): booking intake is a
     # public, caller-emailable endpoint, so cap confirmations per recipient to
     # stop IP-rotating email-bomb abuse. The booking is created regardless.
-    if cust_email and await _recipient_send_ok(cust_email):
+    if checkout_url is None and cust_email and await _recipient_send_ok(cust_email):
         background.add_task(
             send_cappe_booking_received_email, cust_email, body.customer_name, site["name"],
             btype["name"], when_label, needs_approval, booking_manage_url(booking["access_token"]),
         )
-    if owner and owner["email"]:
+    if checkout_url is None and owner and owner["email"]:
         background.add_task(
             send_cappe_booking_alert_email, owner["email"], owner["name"], site["name"],
             body.customer_name, btype["name"], when_label, needs_approval,
@@ -515,4 +555,46 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
         # The token is the one emailed to the same person who just made it.
         "timezone": loc_tz,
         "manage_url": booking_manage_url(booking["access_token"]),
+        # A deposit / full payment: where to pay, and what's left for the day.
+        **paid,
     }
+
+
+async def _paid_booking(conn, site, btype, booking, email, body, tz):
+    """In the booking's transaction: make the order a paid booking is held
+    for. A booking that costs nothing (or whose deposit rounds to nothing) is
+    simply confirmed. Returns (booking, order or None, pay_now, balance)."""
+    pay_now, balance = amount_due_now(btype, booking["quoted_price_cents"] or 0)
+    if pay_now <= 0:
+        if not booking["requires_approval"]:
+            await conn.execute("UPDATE cappe_bookings SET status = 'confirmed' WHERE id = $1", booking["id"])
+            booking = {**dict(booking), "status": "confirmed"}
+        return booking, None, 0, balance
+    order = await create_booking_order(
+        conn, site=site, btype=btype, booking=booking, email=email, name=body.customer_name,
+        note=body.note, currency=site_currency(site), pay_now=pay_now, balance=balance,
+        title=line_title(btype, balance, format_when(booking["starts_at"], tz)),
+    )
+    return booking, order, pay_now, balance
+
+
+async def _open_deposit_checkout(site, order, owner, ent, email, btype, pay_now, balance, when_label):
+    """The Stripe page for a paid booking. Paid → the order page; backed out
+    → the checkout-return handler, which releases the hold."""
+    origins = site_origins(site)
+    origin = site_public_origin(site) or (origins[0] if origins else None)
+    success, cancel = bind_return_urls(f"{origin}/", f"{origin}/", site, order["access_token"])
+    try:
+        sess = await open_order_checkout(
+            order=order, line_rows=[(None, line_title(btype, balance, when_label), pay_now, 1, "booking")],
+            owner=owner, owner_ent=ent, success_url=success, cancel_url=cancel, email=email,
+            has_physical=False, tax_label="Tax", shipping_label="Shipping",
+        )
+    except CappeStripeError:
+        await release_unpaid_order(order["id"], site["id"])
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Card payments are temporarily unavailable, so the booking wasn't made and you "
+                   "haven't been charged. Please try again in a few minutes.",
+        )
+    return sess.get("url")

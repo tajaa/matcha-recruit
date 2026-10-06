@@ -65,8 +65,13 @@ class Background:
         self.tasks.append((fn.__name__, args))
 
 
+async def _no_bookings(_conn, _order_id):
+    return 0
+
+
 def _use(monkeypatch, conn):
     monkeypatch.setattr(mod, "get_connection", lambda: ConnCtx(conn))
+    monkeypatch.setattr(mod, "confirm_paid_bookings", _no_bookings)
     return conn
 
 

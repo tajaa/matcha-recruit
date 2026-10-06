@@ -366,7 +366,7 @@ def test_adding_listing_and_removing_time_off(monkeypatch):
 
 def test_service_rules_are_saved_and_returned():
     src = inspect.getsource(owner_routes)
-    assert "min_notice_minutes, max_advance_days, cancel_cutoff_hours)" in src
+    assert "min_notice_minutes, max_advance_days, cancel_cutoff_hours, payment_mode, deposit_cents)" in src
     assert '"min_notice_minutes", "max_advance_days", "cancel_cutoff_hours",' in src
 
 
