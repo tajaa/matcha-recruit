@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Check, Palette, Sparkles, Wand2, X } from 'lucide-react'
+import { Check, Lock, Palette, Sparkles, Wand2, X } from 'lucide-react'
 import { CAPPE_THEMES, FONT_PAIRINGS, RADII } from '../../../data/cappeThemes'
 import { CappeFontPicker } from './CappeFontPicker'
 import { DCheck, DNum, DSelect, GradientPicker, PremiumLock } from './DesignPrimitives'
@@ -106,12 +106,17 @@ export function ThemeDrawer({ themeEditor, designerUnlocked, bridge, probe }: {
       <div className="grid grid-cols-3 gap-1.5">
         {CAPPE_THEMES.map((preset) => {
           const active = theme.preset === preset.id
+          // Same rule as the dashboard's Design section: a premium preset on a
+          // free plan would show its look here and lose it on Save.
+          const locked = preset.premium && !designerUnlocked
           return (
             <button
               key={preset.id}
               onClick={() => applyPreset(preset.id)}
-              className={`relative overflow-hidden rounded-lg border text-left ${active ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-zinc-700 hover:border-zinc-500'}`}
-              title={preset.name}
+              disabled={locked}
+              aria-label={locked ? `${preset.name} theme — included on paid plans` : `${preset.name} theme`}
+              className={`relative overflow-hidden rounded-lg border text-left disabled:cursor-not-allowed disabled:opacity-60 ${active ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-zinc-700 hover:border-zinc-500'}`}
+              title={locked ? `${preset.name} — included on paid plans` : preset.name}
             >
               <div className="flex h-9 items-center gap-1 px-1.5" style={{ background: preset.swatch.bg }}>
                 <span className="h-4 w-4 rounded" style={{ background: preset.swatch.brand }} />
@@ -119,12 +124,16 @@ export function ThemeDrawer({ themeEditor, designerUnlocked, bridge, probe }: {
               </div>
               <div className="flex items-center justify-between gap-0.5 bg-zinc-950 px-1.5 py-1">
                 <span className="truncate text-[10px] text-zinc-300">{preset.name.split(' ')[0]}</span>
-                {preset.premium ? <Sparkles className="h-2.5 w-2.5 text-amber-400" /> : active ? <Check className="h-2.5 w-2.5 text-emerald-400" /> : null}
+                {locked ? <Lock className="h-2.5 w-2.5 text-amber-400/80" /> : preset.premium ? <Sparkles className="h-2.5 w-2.5 text-amber-400" /> : active ? <Check className="h-2.5 w-2.5 text-emerald-400" /> : null}
               </div>
             </button>
           )
         })}
       </div>
+
+      {!designerUnlocked && (
+        <div className="mt-2"><PremiumLock>Designer themes are included on paid plans.</PremiumLock></div>
+      )}
 
       {/* Reset to the currently-applied preset's stock values — a quick escape
           hatch while experimenting (⌘Z still walks the full undo history). */}
@@ -249,7 +258,7 @@ export function ThemeDrawer({ themeEditor, designerUnlocked, bridge, probe }: {
         )}
       </div>
 
-      {/* global style system — spacing / type scale / layout (premium) */}
+      {/* Site-wide style system: spacing, type scale, layout (premium). */}
       <div className="mt-3 space-y-2.5 border-t border-zinc-800 pt-3">
         <p className={`${dHead} flex items-center gap-1`}><Palette className="h-3 w-3 text-amber-400" /> Layout &amp; spacing</p>
         {!designerUnlocked ? (

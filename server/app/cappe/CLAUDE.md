@@ -67,7 +67,13 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
 - **Imagery never comes from outside our origin.** Slots are manifest keys (`imagery.py`); until
   `scripts/cappe_template_imagery.py` has generated a photo (same Gemini image model + S3/CloudFront
   as owners' images; URLs land in the committed `imagery_urls.json`) the slot shows the
-  deterministic placeholder tile from `GET /templates/placeholder/{key}.svg`.
+  deterministic placeholder tile from `GET /templates/placeholder/{key}.svg`. That route REDIRECTS
+  to the photo once it exists, so a site cloned early (which stored the placeholder path) upgrades
+  on its own — keep its cache short and never `immutable`. Off-origin renders (Merlin's about:blank
+  screenshots) must pass their HTML through `imagery.inline_placeholders`.
+- **The preview route sets `tenant_security_headers()` itself.** It is only ever shown in an
+  iframe; without a handler-set CSP `main.py:add_security_headers` stamps `frame-ancestors 'none'`
+  on it and the gallery draws blank. `test_preview_survives_the_real_security_middleware` pins it.
 - **Previews are memoised per (slug, page, premium)** and browsable (`?page=` links rewritten), so
   the gallery's N cards cost N dict lookups; the rate limit only has to stop a scraper.
 

@@ -3,6 +3,7 @@ import { Loader2, Check, Sparkles, Lock, RotateCcw } from 'lucide-react'
 import { CAPPE_THEMES, type CappeThemePreset } from '../../data/cappeThemes'
 import { useCappeMe } from '../../hooks/useCappeMe'
 import { isPremiumPlan } from '../../utils/plan'
+import { confirmLeave } from '../../utils/unsavedGuard'
 import { BILLING_PATH } from '../CappeBilling/paths'
 import type { CappeSite } from '../../types'
 import { TEMPLATE_RESET_KEY } from './useCappeSiteEditor'
@@ -17,9 +18,6 @@ export function DesignSection({
 }) {
   const { account } = useCappeMe()
   const premium = isPremiumPlan(account?.plan)
-  // Set by the clone; a theme preset replaces the whole theme_config and so
-  // drops it — which is exactly when "Template original" stops being active.
-  const templateActive = !!site.theme_config?.template
   const templateBusy = themeBusy === TEMPLATE_RESET_KEY
 
   return (
@@ -29,20 +27,35 @@ export function DesignSection({
         <span className="text-xs text-zinc-500">Applies instantly · re-publish to push live</span>
       </div>
       <p className="mb-4 text-xs text-zinc-500">
-        Pick a look. {premium
-          ? 'Premium themes use designer fonts & palettes.'
-          : 'Premium themes use designer fonts & palettes — included on paid plans.'}
+        Pick a look. Premium themes use designer fonts &amp; palettes
+        {premium ? '.' : (
+          <>
+            {' '}— included on paid plans.{' '}
+            {/* The one deliberate way out of this page from here. Locked cards
+                themselves are inert: a card in a grid of apply-buttons that
+                navigated away took unsaved settings edits with it. */}
+            <Link
+              to={BILLING_PATH}
+              onClick={(e) => { if (!confirmLeave()) e.preventDefault() }}
+              className="font-semibold text-amber-300 underline underline-offset-2 hover:text-amber-200"
+            >
+              See plans
+            </Link>
+          </>
+        )}
       </p>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {site.template_slug && (
           <button
             type="button"
             onClick={onResetTemplate}
-            disabled={!!themeBusy || templateActive}
+            disabled={!!themeBusy}
             aria-label="Restore the template's original design"
-            className={`group relative overflow-hidden rounded-xl border text-left transition disabled:opacity-80 ${
-              templateActive ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-dashed border-zinc-600 hover:border-zinc-400'
-            }`}
+            // Never shown as "active": `theme_config.template` survives every
+            // colour, font and Merlin edit, so it cannot tell an untouched
+            // theme from an edited one — and a card that believed it could
+            // was disabled exactly when the reset was needed.
+            className="group relative overflow-hidden rounded-xl border border-dashed border-zinc-600 text-left transition hover:border-zinc-400 disabled:opacity-60"
           >
             <div className="flex h-16 items-center justify-center gap-2 bg-zinc-950 px-3 text-zinc-400">
               <RotateCcw className="h-5 w-5" />
@@ -50,15 +63,9 @@ export function DesignSection({
             <div className="flex items-center justify-between gap-1 border-t border-zinc-800 bg-zinc-950 px-3 py-2">
               <div className="min-w-0">
                 <div className="text-xs font-semibold text-zinc-200">Template original</div>
-                <div className="truncate text-[10px] text-zinc-500">
-                  {templateActive ? 'As the template shipped' : 'Back to how it started'}
-                </div>
+                <div className="truncate text-[10px] text-zinc-500">Back to how it started</div>
               </div>
-              {templateBusy ? (
-                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-emerald-400" />
-              ) : templateActive ? (
-                <Check className="h-4 w-4 shrink-0 text-emerald-400" />
-              ) : null}
+              {templateBusy && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-emerald-400" />}
             </div>
           </button>
         )}
@@ -99,18 +106,20 @@ export function DesignSection({
           )
           // A locked preset used to apply and then quietly lose its premium
           // keys on save — a theme that looked different from what it kept.
-          // Now the card says so and points at the plan that unlocks it.
+          // Now the card is inert and says why; "See plans" above is the way on.
           if (locked) {
             return (
-              <Link
+              <div
                 key={preset.id}
-                to={BILLING_PATH}
-                aria-label={`${preset.name} theme — included on paid plans. See plans`}
-                className="group relative overflow-hidden rounded-xl border border-zinc-800 text-left opacity-80 transition hover:border-amber-500/50 hover:opacity-100"
+                role="group"
+                aria-disabled="true"
+                aria-label={`${preset.name} theme — included on paid plans`}
+                title="Included on paid plans"
+                className="relative cursor-not-allowed overflow-hidden rounded-xl border border-zinc-800 text-left opacity-70"
               >
                 {swatch}
                 {caption}
-              </Link>
+              </div>
             )
           }
           return (

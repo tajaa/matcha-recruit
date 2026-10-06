@@ -79,6 +79,10 @@ function PreviewModal({
   onClose: () => void
 }) {
   const [page, setPage] = useState(template.pages[0]?.slug ?? 'home')
+  // Links inside the frame navigate it without telling us, so the highlighted
+  // tab can be stale. Every tab click therefore remounts the frame (the nonce
+  // is part of its key) — clicking the highlighted tab always goes there.
+  const [nonce, setNonce] = useState(0)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -110,7 +114,7 @@ function PreviewModal({
                 type="button"
                 role="tab"
                 aria-selected={p.slug === page}
-                onClick={() => setPage(p.slug)}
+                onClick={() => { setPage(p.slug); setNonce((n) => n + 1) }}
                 className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
                   p.slug === page ? 'bg-zinc-100 text-zinc-950' : 'text-zinc-300 hover:bg-zinc-800'
                 }`}
@@ -138,7 +142,7 @@ function PreviewModal({
           </button>
         </div>
         <iframe
-          key={page}
+          key={`${page}:${nonce}`}
           title={`${template.name} — ${page}`}
           src={templatePreviewUrl(template.slug, page, premium)}
           sandbox="allow-scripts"

@@ -56,6 +56,7 @@ __all__ = [
     "SiteTemplate",
     "clone_structure",
     "get_template",
+    "legacy_template_slug",
     "list_templates",
     "template_summary",
     "template_theme",
@@ -85,6 +86,25 @@ def list_templates(category: Optional[str] = None) -> list[SiteTemplate]:
 
 def get_template(slug: Any) -> Optional[SiteTemplate]:
     return TEMPLATES_BY_SLUG.get(slug) if isinstance(slug, str) else None
+
+
+# Slugs the retired `cappe_templates` rows carried → the registry entry that
+# replaced each. Only for a browser tab that loaded the gallery BEFORE this
+# deploy and still posts the old row id; delete with the table.
+_LEGACY_SLUGS: dict[str, str] = {
+    "personal-portfolio": "atelier-portfolio",
+    "business-landing": "launch-saas",
+    "restaurant": "saveur-bistro",
+    "blog": "margin-blog",
+}
+
+
+def legacy_template_slug(old_slug: Any) -> Optional[str]:
+    """Registry slug for a retired table row's slug, or None."""
+    if not isinstance(old_slug, str):
+        return None
+    slug = _LEGACY_SLUGS.get(old_slug, old_slug)
+    return slug if slug in TEMPLATES_BY_SLUG else None
 
 
 def template_summary(t: SiteTemplate) -> dict[str, Any]:

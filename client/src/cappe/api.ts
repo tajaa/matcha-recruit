@@ -342,6 +342,13 @@ export function fetchCappeDirectoryCategories() {
   return cappePublicGet<CappeDirectoryCategories>('/public/directory/categories')
 }
 
+/** The fixed Discover taxonomy, without the per-category site counts the
+ *  directory endpoint computes (and rate-limits) on every call. For pickers
+ *  that only need the list — the onboarding wizard. */
+export function fetchCappeTemplateCategories() {
+  return cappePublicGet<{ slug: string; label: string }[]>('/templates/categories')
+}
+
 // --- Plan pricing (public) ----------------------------------------------------
 // The landing page quotes live prices from the same catalog checkout charges.
 

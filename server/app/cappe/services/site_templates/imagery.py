@@ -20,14 +20,22 @@ opening the generated asset.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import logging
 import pathlib
+import re
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-PLACEHOLDER_PATH = "/api/cappe/templates/placeholder/{key}.svg"
+# The route (relative to the /api/cappe mount) and the path templates embed are
+# the same string by construction — `routes/templates.py` mounts
+# PLACEHOLDER_ROUTE, so the two cannot drift apart.
+PLACEHOLDER_ROUTE = "/templates/placeholder/{key}.svg"
+PLACEHOLDER_PATH = "/api/cappe" + PLACEHOLDER_ROUTE
+_PLACEHOLDER_RE = re.compile(re.escape(PLACEHOLDER_PATH).replace(r"\{key\}", r"([a-z0-9-]+)"))
 _URLS_FILE = pathlib.Path(__file__).with_name("imagery_urls.json")
 
 # Aspect ratios the image model accepts; the renderer's slots map onto them.
@@ -149,7 +157,56 @@ def image_url(key: str) -> str:
 
     Raises for an unknown key — that is an authoring typo, and import-time is
     the cheapest place to find it (the drift test imports every template).
+
+    A site cloned BEFORE a slot's photo exists stores the placeholder path.
+    That path is not a dead end: the placeholder route redirects to the photo
+    once it has been generated, so early sites pick the imagery up without a
+    data migration.
     """
     if key not in IMAGE_MANIFEST:
         raise KeyError(f"template image '{key}' is not in IMAGE_MANIFEST")
     return IMAGE_URLS.get(key) or PLACEHOLDER_PATH.format(key=key)
+
+
+def placeholder_svg(key: str) -> str:
+    """A soft two-tone gradient tile keyed on the slot name: deterministic,
+    brand-neutral, no text. Hue from the key's hash; saturation and lightness
+    kept low so it reads as 'photo to come', not as part of the palette."""
+    h = int(hashlib.sha256(key.encode()).hexdigest()[:8], 16)
+    hue_a = h % 360
+    hue_b = (hue_a + 28) % 360
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800" '
+        'role="img" aria-label="Placeholder image">'
+        f'<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
+        f'<stop offset="0" stop-color="hsl({hue_a} 22% 62%)"/>'
+        f'<stop offset="1" stop-color="hsl({hue_b} 26% 42%)"/></linearGradient>'
+        '<radialGradient id="r" cx="0.75" cy="0.2" r="0.8">'
+        '<stop offset="0" stop-color="#fff" stop-opacity="0.28"/>'
+        '<stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>'
+        '<rect width="1200" height="800" fill="url(#g)"/>'
+        '<rect width="1200" height="800" fill="url(#r)"/>'
+        '</svg>'
+    )
+
+
+def inline_placeholders(html: str) -> str:
+    """Rewrite every placeholder PATH in rendered HTML to something that loads
+    with no origin: the hosted photo if the slot has one, else the tile as a
+    `data:` URI.
+
+    For documents rendered off-origin — Merlin's screenshots `set_content` the
+    HTML at about:blank, where a root-relative `/api/cappe/...` path resolves
+    to nothing, so every template image drew as broken and the agent could
+    "fix" sections that look fine to a real visitor.
+    """
+    def _sub(m: re.Match) -> str:
+        key = m.group(1)
+        if key not in IMAGE_MANIFEST:
+            return m.group(0)
+        hosted = IMAGE_URLS.get(key)
+        if hosted:
+            return hosted
+        return "data:image/svg+xml;base64," + base64.b64encode(placeholder_svg(key).encode()).decode()
+
+    return _PLACEHOLDER_RE.sub(_sub, html)

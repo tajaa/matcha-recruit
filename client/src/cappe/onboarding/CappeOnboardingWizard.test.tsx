@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import CappeOnboardingWizard from './CappeOnboardingWizard'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), categories: vi.fn() }))
-vi.mock('../api', () => ({ cappeApi: api, fetchCappeDirectoryCategories: api.categories }))
+vi.mock('../api', () => ({ cappeApi: api, fetchCappeTemplateCategories: api.categories }))
 
 const me = vi.hoisted(() => ({ account: { name: 'Pat Lee', account_type: 'business', plan: 'free' } }))
 vi.mock('../hooks/useCappeMe', () => ({ useCappeMe: () => ({ account: me.account }) }))
@@ -16,15 +16,12 @@ const TEMPLATES = [
   { slug: 'corner-cafe', name: 'Corner Cafe', category: 'food-drink', category_label: 'Food & Drink', tags: [], description: 'Menu and hours.',
     mode: 'dark', heading_font: 'Playfair Display', swatch: SWATCH, pages: [{ slug: 'home', title: 'Home' }] },
 ]
-const CATEGORIES = {
-  categories: [
-    { slug: 'food-drink', label: 'Food & Drink', count: 0 },
-    { slug: 'art-design', label: 'Art & Design', count: 0 },
-    { slug: 'trades-home', label: 'Trades & Home Services', count: 0 },
-    { slug: 'other', label: 'Other', count: 0 },
-  ],
-  total: 0,
-}
+const CATEGORIES = [
+  { slug: 'food-drink', label: 'Food & Drink' },
+  { slug: 'art-design', label: 'Art & Design' },
+  { slug: 'trades-home', label: 'Trades & Home Services' },
+  { slug: 'other', label: 'Other' },
+]
 
 function Where() {
   return <p data-testid="where">{useLocation().pathname}</p>
@@ -103,13 +100,24 @@ describe('CappeOnboardingWizard', () => {
     expect(screen.queryByRole('button', { name: 'Trades & Home Services' })).not.toBeInTheDocument()
   })
 
-  it('creates a blank site when asked to', async () => {
+  it('creates a blank site when asked to, keeping the category it asked for', async () => {
     renderWizard()
     await toStartStep('One location', ' Corner Bakery ')
     fireEvent.click(screen.getByRole('button', { name: 'Start with a blank site' }))
 
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/cappe/sites/site-1'))
     expect(api.post).toHaveBeenCalledTimes(1)
+    expect(api.post).toHaveBeenCalledWith('/sites', {
+      name: 'Corner Bakery', source_type: 'blank', is_multi_location: false, directory_category: 'food-drink',
+    })
+  })
+
+  it('a blank site with the category skipped sends none', async () => {
+    renderWizard()
+    await toStartStep('One location', 'Corner Bakery', null)
+    fireEvent.click(screen.getByRole('button', { name: 'Start with a blank site' }))
+
+    await waitFor(() => expect(api.post).toHaveBeenCalled())
     expect(api.post).toHaveBeenCalledWith('/sites', {
       name: 'Corner Bakery', source_type: 'blank', is_multi_location: false,
     })

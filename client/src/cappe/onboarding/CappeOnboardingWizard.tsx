@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, MapPin, MapPinned, ArrowRight, ArrowLeft } from 'lucide-react'
-import { cappeApi, fetchCappeDirectoryCategories } from '../api'
+import { cappeApi, fetchCappeTemplateCategories } from '../api'
 import TemplateGallery from '../components/TemplateGallery'
 import { useCappeMe } from '../hooks/useCappeMe'
 import { CAPPE_HOST } from '../host'
 import { creatorPaths } from '../creators/creatorPaths'
 import { subdomainPreview } from '../utils/slug'
-import type { CappeDirectoryCategory, CappeSite, CappeLocation, CappeTemplateSummary } from '../types'
+import type { CappeSite, CappeLocation, CappeTemplateSummary } from '../types'
 
 // Post-signup business-setup wizard. account_type is already chosen at signup;
 // this asks the questions that shape the rest of the product — single vs
@@ -20,6 +20,7 @@ import type { CappeDirectoryCategory, CappeSite, CappeLocation, CappeTemplateSum
 // CappeLayout; CappeSites redirects here on first run (zero sites).
 type Mode = 'single' | 'multi'
 type Step = 1 | 2 | 3 | 4
+type Category = { slug: string; label: string }
 
 // The Discover taxonomy is business-shaped; a personal site picks from the
 // creative slice of it so the question still makes sense.
@@ -39,7 +40,7 @@ export default function CappeOnboardingWizard() {
   const [mode, setMode] = useState<Mode | null>(null)
   const [name, setName] = useState('')
   const [branch, setBranch] = useState('')
-  const [categories, setCategories] = useState<CappeDirectoryCategory[] | null>(null)
+  const [categories, setCategories] = useState<Category[] | null>(null)
   const [category, setCategory] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   // Which template is being cloned, when the site is not starting blank.
@@ -48,8 +49,8 @@ export default function CappeOnboardingWizard() {
 
   useEffect(() => {
     let alive = true
-    fetchCappeDirectoryCategories()
-      .then((r) => { if (alive) setCategories(r.categories) })
+    fetchCappeTemplateCategories()
+      .then((list) => { if (alive) setCategories(list) })
       // The question is a nicety, not a gate: with no taxonomy the person
       // skips it and the setup concierge can still infer a listing later.
       .catch(() => { if (alive) setCategories([]) })
@@ -73,18 +74,21 @@ export default function CappeOnboardingWizard() {
     setSubmitting(true)
     setTemplateSlug(template?.slug ?? null)
     setError(null)
+    // The category was asked before blank-vs-template, so BOTH paths keep it.
+    const listing = category ? { directory_category: category } : {}
     try {
       const site = template
         ? await cappeApi.post<CappeSite>('/sites/from-template', {
             template_slug: template.slug,
             name: name.trim(),
             is_multi_location: mode === 'multi',
-            ...(category ? { directory_category: category } : {}),
+            ...listing,
           })
         : await cappeApi.post<CappeSite>('/sites', {
             name: name.trim(),
             source_type: 'blank',
             is_multi_location: mode === 'multi',
+            ...listing,
           })
       if (mode === 'multi') {
         // Seed the first branch; the rest are added in the Locations manager.

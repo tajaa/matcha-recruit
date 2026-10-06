@@ -86,12 +86,20 @@ class CappeSiteCreate(BaseModel):
     # Set by the onboarding wizard: True when the business runs multiple
     # locations/branches. Drives whether the branch/location UI is surfaced.
     is_multi_location: bool = False
+    # The onboarding wizard's "what kind of business?" answer (a Discover
+    # taxonomy slug). Asked before the blank-vs-template choice, so a blank
+    # site must keep it too.
+    directory_category: Optional[str] = Field(default=None, max_length=60)
 
 
 class CappeSiteFromTemplate(BaseModel):
     # Registry key from `services/site_templates` (the catalog left the
     # `cappe_templates` table — see that package's docstring).
-    template_slug: str = Field(min_length=1, max_length=160, pattern=r"^[a-z0-9-]+$")
+    template_slug: Optional[str] = Field(default=None, min_length=1, max_length=160, pattern=r"^[a-z0-9-]+$")
+    # Pre-registry clients sent the table row's id. Still accepted so a tab
+    # that loaded the old gallery before a deploy can finish creating its site
+    # instead of hitting a 422; the route maps it onto a registry slug.
+    template_id: Optional[UUID] = None
     name: Optional[str] = Field(default=None, max_length=255)
     # Same meaning as on CappeSiteCreate; the onboarding wizard can now start
     # from a template and must not lose its "several locations" answer.
@@ -100,6 +108,12 @@ class CappeSiteFromTemplate(BaseModel):
     # Discover taxonomy slugs. Seeds the site's directory listing so the
     # question is asked once, not again on the Discover card.
     directory_category: Optional[str] = Field(default=None, max_length=60)
+
+    @model_validator(mode="after")
+    def _names_a_template(self):
+        if self.template_slug is None and self.template_id is None:
+            raise ValueError("template_slug is required")
+        return self
 
 
 class CappeSiteUpdate(_SnapshotSizeLimit):

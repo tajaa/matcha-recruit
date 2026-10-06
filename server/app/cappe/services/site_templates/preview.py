@@ -17,7 +17,9 @@ modal lets a person walk every page before choosing. Both hit
 Rendering is memoised per (slug, page, premium). The registry is static for
 the life of the process, so the cache never needs invalidating, and the
 gallery's N cards cost N dict lookups instead of N full renders — the old
-per-card render at 30/min/IP is what made a bigger catalog 429.
+per-card render at 30/min/IP is what made a bigger catalog 429. Only REAL
+(template, page) pairs ever reach the cache: the lookup is validated first, so
+a scraper's junk slugs cannot evict the pages the gallery actually serves.
 """
 from __future__ import annotations
 
@@ -45,16 +47,20 @@ def _rewrite_links(html: str, *, premium: bool) -> str:
     return _HOME_HREF_RE.sub(f'href="?page=home{suffix}"', html)
 
 
-@lru_cache(maxsize=512)
 def render_template_preview(slug: str, page_slug: str = "home", premium: bool = False) -> Optional[str]:
     """Standalone HTML for one page of a template, or None if either the
-    template or the page does not exist."""
+    template or the page does not exist. Misses never touch the cache."""
     t = get_template(slug)
-    if t is None:
+    if t is None or t.page(page_slug or "home") is None:
         return None
-    page = t.page(page_slug) or (t.page("home") if page_slug in ("", "home") else None)
-    if page is None:
-        return None
+    return _render_cached(t.slug, page_slug or "home", bool(premium))
+
+
+# Bounded by the catalog: templates × pages × 2 layers, all validated above.
+@lru_cache(maxsize=512)
+def _render_cached(slug: str, page_slug: str, premium: bool) -> str:
+    t = get_template(slug)
+    page = t.page(page_slug)
     plan = _PREMIUM_PLAN if premium else _FREE_PLAN
     values = {"business_name": t.sample_name}
     site = {

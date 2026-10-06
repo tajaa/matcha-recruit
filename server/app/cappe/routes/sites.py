@@ -34,7 +34,7 @@ from ..services.directory import (
 )
 from ..services.readiness import compute_readiness
 from ..services.render import render_site_html
-from ..services.site_templates import clone_structure, get_template, template_theme
+from ..services.site_templates import clone_structure, get_template, legacy_template_slug, template_theme
 from .render import invalidate_render_cache, tenant_security_headers
 from ._shared import (
     SUBDOMAIN_MAX_LEN,
@@ -177,6 +177,7 @@ async def list_sites(account: CappeAccount = Depends(require_cappe_account)):
 @router.post("/sites", response_model=CappeSite, status_code=status.HTTP_201_CREATED)
 async def create_site(body: CappeSiteCreate, account: CappeAccount = Depends(require_cappe_account)):
     """Create a blank or bring-your-own site."""
+    category = normalize_category(body.directory_category) if body.directory_category else None
     async with get_connection() as conn:
         async with conn.transaction():
             await _lock_account_for_site_creation(conn, account.id)
@@ -187,14 +188,16 @@ async def create_site(body: CappeSiteCreate, account: CappeAccount = Depends(req
             async def _insert(slug: str):
                 return await conn.fetchrow(
                     f"""INSERT INTO cappe_sites
-                            (account_id, name, slug, subdomain, source_type, is_multi_location)
-                        VALUES ($1, $2, $3, $3, $4, $5)
+                            (account_id, name, slug, subdomain, source_type, is_multi_location,
+                             directory_category)
+                        VALUES ($1, $2, $3, $3, $4, $5, $6)
                         RETURNING {_SITE_COLS}""",
                     account.id,
                     body.name,
                     slug,
                     body.source_type,
                     body.is_multi_location,
+                    category,
                 )
 
             row = await _insert_site_with_free_slug(conn, body.name, _insert)
@@ -223,7 +226,15 @@ async def create_site_from_template(
     editor will keep — the old copy-everything clone shipped premium effects
     that vanished on the first save.
     """
-    template = get_template(body.template_slug)
+    slug = body.template_slug
+    if slug is None and getattr(body, "template_id", None) is not None:
+        # A tab from before the registry: map the retired row onto its
+        # replacement. Read-only, outside the account lock.
+        async with get_connection() as conn:
+            slug = legacy_template_slug(
+                await conn.fetchval("SELECT slug FROM cappe_templates WHERE id = $1", body.template_id)
+            )
+    template = get_template(slug)
     if template is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
 
@@ -300,6 +311,9 @@ async def reset_theme_to_template(
             site_id,
             account.id,
         )
+        if row is None:
+            # Deleted between the ownership read and the write.
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
     await invalidate_render_cache(site_id)
     return site_row_to_dict(row)
 

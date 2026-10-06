@@ -89,6 +89,13 @@ describe('TemplateGallery', () => {
     expect(frame().getAttribute('src')).toContain('page=menu')
     expect(within(dialog).getByRole('tab', { name: 'Menu' })).toHaveAttribute('aria-selected', 'true')
 
+    // Links inside the frame can move it off the highlighted page without
+    // telling us; clicking that highlighted tab must still reload the frame.
+    const before = frame()
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'Menu' }))
+    expect(frame()).not.toBe(before)
+    expect(frame().getAttribute('src')).toContain('page=menu')
+
     // Choosing from inside the preview is the same pick as the card's button.
     fireEvent.click(within(dialog).getByRole('button', { name: 'Use this template' }))
     expect(onPick).toHaveBeenCalledWith(SAVEUR)
