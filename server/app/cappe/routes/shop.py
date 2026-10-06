@@ -30,7 +30,13 @@ from ..models.cappe import (
 )
 from ._shared import build_patch, fetch_option_groups, get_owned_site, loads, loads_list
 from ..services.options import match_prior_rows
-from ..services.common import receipt_filename as _receipt_filename
+from ..services.common import order_page_url, receipt_filename as _receipt_filename
+from ..services.email import (
+    build_order_items_summary,
+    send_cappe_order_approved_email,
+    send_cappe_order_declined_email,
+    send_cappe_order_shipped_email,
+)
 from ..services.directory import refresh_site_search
 from ..services.inventory import log_adjustment, release_order_bookings, restock_order
 from ..services.entitlements import require_fulfillment, resolve_entitlements
@@ -59,6 +65,22 @@ def should_restock(current_status: str, new_status: str | None) -> bool:
 
 
 router = APIRouter()
+
+# How long a buyer has to pay for an order the owner approved.
+PAY_WINDOW_DAYS = 3
+
+
+def _items_summary(items) -> str:
+    return build_order_items_summary([{"title": i["title"], "quantity": i["quantity"]} for i in items])
+
+
+async def _order_token(order_id, conn=None):
+    """The order's access token — for the order-page link, never returned
+    to the owner's dashboard (`_ORDER_COLS` leaves it out on purpose)."""
+    if conn is not None:
+        return await conn.fetchval("SELECT access_token FROM cappe_orders WHERE id = $1", order_id)
+    async with get_connection() as own:
+        return await own.fetchval("SELECT access_token FROM cappe_orders WHERE id = $1", order_id)
 
 
 async def _close_open_checkout(
@@ -124,6 +146,7 @@ _ORDER_COLS = (
     "shipping_address, carrier, tracking_number, "
     "currency, payment_ref, note, requires_approval, approved_at, decline_reason, "
     "refunded_at, refunded_cents, dispute_status, disputed_at, "
+    "pay_by, shipped_notified_at, platform_fee_cents, "
     "metadata, created_at, updated_at"
 )
 _ITEM_COLS = (
@@ -713,7 +736,7 @@ async def update_order_status(
                 site_id, order_id, account.id, then="it needs no manual change",
             )
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
+        site = await get_owned_site(conn, site_id, account.id)
         async with conn.transaction():
             # Lock + read the CURRENT status first: whether this transition
             # reverses a stock decrement depends on what it's transitioning
@@ -747,10 +770,36 @@ async def update_order_status(
                 f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
                 order_id,
             )
+            # Tell the buyer it shipped (or is ready): once when it is
+            # fulfilled, and again only for a NEW tracking number.
+            tracking_changed = bool(
+                "tracking_number" in getattr(body, "model_fields_set", set()) and body.tracking_number
+                and body.tracking_number != current["tracking_number"]
+            )
+            notify_ship = False
+            if order.get("customer_email") and order.get("status") in ("paid", "fulfilled"):
+                if tracking_changed:
+                    await conn.execute(
+                        "UPDATE cappe_orders SET shipped_notified_at = NOW() WHERE id = $1", order_id,
+                    )
+                    notify_ship = True
+                elif body.status == "fulfilled" and current["status"] != "fulfilled":
+                    notify_ship = bool(await conn.fetchval(
+                        "UPDATE cappe_orders SET shipped_notified_at = NOW() "
+                        "WHERE id = $1 AND shipped_notified_at IS NULL RETURNING id",
+                        order_id,
+                    ))
     if became_paid:
         # The webhook path issues the receipt for a card payment; an order paid
         # offline used to get none at all.
         background.add_task(issue_receipt_for_paid_order, order_id, site_id)
+    if notify_ship:
+        background.add_task(
+            send_cappe_order_shipped_email, order["customer_email"], order["customer_name"], site["name"],
+            _items_summary(items), order["carrier"], order["tracking_number"],
+            order_page_url(site, await _order_token(order_id)),
+            any(i["fulfillment"] == "physical" for i in items),
+        )
     from ..services.push import schedule_push
     body_fields = getattr(body, "model_fields_set", set())
     if body.status == "fulfilled" and current["status"] != "fulfilled":
@@ -862,24 +911,38 @@ async def refund_order(
 
 @router.post("/sites/{site_id}/orders/{order_id}/accept", response_model=CappeOrder)
 async def accept_order(
-    site_id: UUID, order_id: UUID, account: CappeAccount = Depends(require_cappe_account)
+    site_id: UUID, order_id: UUID, background: BackgroundTasks,
+    account: CappeAccount = Depends(require_cappe_account),
 ):
     """Approve an order that was held for review. Stays 'pending' — approval is
     not payment — but is stamped approved and leaves the requests queue.
+
+    The buyer is emailed. If the store takes cards, the email carries a link
+    to pay on the order page, open for `PAY_WINDOW_DAYS`; an approval order is
+    never charged before this (it used to be charged at checkout, which made
+    the approval meaningless).
 
     Its booking lines are approved with it. A booking bought through the shop
     that needs approval lands `pending`; accepting the order used to leave it
     there, so the appointment the owner had just said yes to sat in the
     booking queue waiting for a second yes."""
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
+        site = await get_owned_site(conn, site_id, account.id)
+        takes_cards = bool(await conn.fetchval(
+            "SELECT stripe_account_id IS NOT NULL AND stripe_charges_enabled FROM cappe_accounts WHERE id = $1",
+            account.id,
+        ))
         async with conn.transaction():
+            # A store that takes cards gives the buyer a window to pay from the
+            # emailed link; the reaper releases the order (and its stock) after.
             order = await conn.fetchrow(
                 f"""UPDATE cappe_orders
-                    SET requires_approval = false, approved_at = NOW(), updated_at = NOW()
+                    SET requires_approval = false, approved_at = NOW(), updated_at = NOW(),
+                        pay_by = CASE WHEN $3 AND subtotal_cents > 0
+                                      THEN NOW() + interval '{PAY_WINDOW_DAYS} days' END
                     WHERE id = $1 AND site_id = $2 AND status = 'pending' AND requires_approval = true
                     RETURNING {_ORDER_COLS}""",
-                order_id, site_id,
+                order_id, site_id, takes_cards,
             )
             if order is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending order to accept")
@@ -895,12 +958,21 @@ async def accept_order(
             f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
             order_id,
         )
+        token = await _order_token(order_id, conn)
+    if order.get("customer_email"):
+        from ..services.email import format_when
+        background.add_task(
+            send_cappe_order_approved_email, order["customer_email"], order["customer_name"], site["name"],
+            _items_summary(items), order["total_cents"] or order["subtotal_cents"], order["currency"],
+            order_page_url(site, token),
+            format_when(order["pay_by"], site["timezone"]) if order["pay_by"] else None,
+        )
     return _order_row(order, [_item_row(i) for i in items])
 
 
 @router.post("/sites/{site_id}/orders/{order_id}/decline", response_model=CappeOrder)
 async def decline_order(
-    site_id: UUID, order_id: UUID, body: CappeApprovalDecline,
+    site_id: UUID, order_id: UUID, body: CappeApprovalDecline, background: BackgroundTasks,
     account: CappeAccount = Depends(require_cappe_account),
 ):
     """Decline an order held for review → 'declined' with an optional reason.
@@ -909,7 +981,7 @@ async def decline_order(
     approval-held cart still goes to Stripe Checkout."""
     await _close_open_checkout(site_id, order_id, account.id)
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
+        site = await get_owned_site(conn, site_id, account.id)
         async with conn.transaction():
             order = await conn.fetchrow(
                 f"""UPDATE cappe_orders
@@ -931,6 +1003,11 @@ async def decline_order(
             )
     from ..services.push import schedule_push
     schedule_push(order_id, "declined")
+    if order.get("customer_email"):
+        background.add_task(
+            send_cappe_order_declined_email, order["customer_email"], order["customer_name"], site["name"],
+            _items_summary(items), body.reason,
+        )
     return _order_row(order, [_item_row(i) for i in items])
 
 

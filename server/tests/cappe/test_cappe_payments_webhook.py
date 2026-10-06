@@ -368,9 +368,53 @@ def test_payment_for_a_refunded_order_is_an_error_not_a_restore(monkeypatch, cap
 
 
 def test_replayed_paid_event_is_still_an_idempotent_skip(monkeypatch):
-    conn = ScriptedConn(rows=[None], vals=["paid"])
+    # The order already holds THIS payment: a replay, not a second charge.
+    conn = ScriptedConn(rows=[None, {"stripe_session_id": "cs_1", "stripe_payment_intent": "pi_1"}], vals=["paid"])
     out, bg, retaken = _late_payment(monkeypatch, conn)
     assert out == {"received": True}
     assert bg.tasks == []          # no second receipt
-    assert len(conn.sql) == 2      # no restore attempted
+    assert len(conn.sql) == 3      # no restore attempted
     assert retaken == []
+
+
+@pytest.mark.parametrize("already,paid_on", [
+    # A second, different payment for an order that is already paid.
+    ("paid", {"stripe_session_id": "cs_1", "stripe_payment_intent": "pi_first"}),
+    ("fulfilled", {"stripe_session_id": "cs_1", "stripe_payment_intent": "pi_first"}),
+    # Paid on a page "Pay now" had replaced with a newer one.
+    ("pending", {"stripe_session_id": "cs_newer", "stripe_payment_intent": None}),
+])
+def test_a_payment_the_order_cannot_take_is_refunded(monkeypatch, caplog, already, paid_on):
+    """These were logged as an 'idempotent skip' while the money stayed taken."""
+    import logging
+    refunds = []
+
+    class _Stripe:
+        async def refund_connected_charge(self, **kw):
+            refunds.append(kw)
+            return {"id": "re_1"}
+
+    monkeypatch.setattr(mod, "get_cappe_stripe", lambda: _Stripe())
+    conn = ScriptedConn(rows=[None, paid_on], vals=[already])
+    with caplog.at_level(logging.ERROR, logger="cappe.payments"):
+        out, bg, retaken = _late_payment(monkeypatch, conn)
+    assert out == {"received": True, "status": "refunded_stray_payment"}
+    assert refunds == [{"account_id": "acct_1", "payment_intent": "pi_1",
+                        "idempotency_key": "cappe-order-stray-pi_1"}]
+    assert bg.tasks == [] and retaken == []
+    assert "refunded automatically" in caplog.text
+
+
+def test_a_failed_stray_refund_is_flagged_for_a_human(monkeypatch, caplog):
+    import logging
+    from app.cappe.services.stripe_connect import CappeStripeError
+
+    class _Stripe:
+        async def refund_connected_charge(self, **kw):
+            raise CappeStripeError("down")
+
+    monkeypatch.setattr(mod, "get_cappe_stripe", lambda: _Stripe())
+    conn = ScriptedConn(rows=[None, {"stripe_session_id": "cs_1", "stripe_payment_intent": "pi_first"}], vals=["paid"])
+    with caplog.at_level(logging.ERROR, logger="cappe.payments"):
+        _late_payment(monkeypatch, conn)
+    assert "MANUAL REFUND REQUIRED" in caplog.text

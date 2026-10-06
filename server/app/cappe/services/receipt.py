@@ -187,8 +187,8 @@ async def render_order_receipt_pdf(conn, order_id: UUID) -> tuple[dict, bytes] |
         """SELECT o.id, o.customer_email, o.customer_name, o.currency, o.subtotal_cents,
                   o.tax_cents, o.shipping_cents, o.shipping_address, o.total_cents,
                   o.receipt_number, o.payment_ref,
-                  o.stripe_payment_intent, o.paid_at, o.created_at, o.site_id,
-                  s.name AS business_name, s.tax_label, s.shipping_label
+                  o.stripe_payment_intent, o.paid_at, o.created_at, o.site_id, o.access_token,
+                  s.name AS business_name, s.tax_label, s.shipping_label, s.subdomain, s.custom_domain
              FROM cappe_orders o JOIN cappe_sites s ON s.id = o.site_id
             WHERE o.id = $1""",
         order_id,
@@ -220,8 +220,15 @@ async def email_receipt(order: dict, pdf: bytes) -> None:
         f'<p style="margin:0 0 12px;color:#d4d4d8;font-size:14px;">Thanks for your purchase from '
         f'{escape(str(biz))}. Your receipt <b>{escape(str(number))}</b> ({_fmt(total, cur)}) is attached.</p>'
     )
-    html = _email_shell(f"Your receipt from {escape(str(biz))}", body, footer=escape(str(biz)))
-    text = f"Thanks for your purchase from {biz}. Receipt {number} — {_fmt(total, cur)} attached."
+    # The order page holds what was bought — downloads included, which the
+    # receipt email never linked to, so a web buyer of a digital product had
+    # no way to reach the file they paid for.
+    from .common import order_page_url
+    page = order_page_url(order, order.get("access_token")) if order.get("access_token") else None
+    html = _email_shell(f"Your receipt from {escape(str(biz))}", body, footer=escape(str(biz)),
+                        cta_label="View your order" if page else None, cta_url=page)
+    text = (f"Thanks for your purchase from {biz}. Receipt {number} — {_fmt(total, cur)} attached."
+            + (f"\n\nYour order: {page}" if page else ""))
     att = [{
         "filename": f"{number}.pdf",
         "content": base64.b64encode(pdf).decode("ascii"),

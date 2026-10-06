@@ -629,7 +629,7 @@ def _wire_release(monkeypatch, row, stripe):
 
 
 PENDING = {"id": ORDER, "site_id": SITE, "status": "pending",
-           "stripe_session_id": "cs_1", "stripe_account_id": "acct_1"}
+           "stripe_session_id": "cs_1", "stripe_account_id": "acct_1", "pay_by": None}
 
 
 def test_an_abandoned_page_is_closed_before_its_order_is_released(monkeypatch):
@@ -658,6 +658,15 @@ def test_only_a_pending_order_on_an_open_page_is_released(monkeypatch, row):
     released = _wire_release(monkeypatch, row, stripe)
     assert asyncio.run(commerce.release_abandoned_checkout("tok")) == "unchanged"
     assert stripe.expired == [] and not released.await_count
+
+
+def test_an_approved_order_awaiting_payment_only_loses_its_page(monkeypatch):
+    """The owner approved it; the buyer can come back and pay until pay_by."""
+    stripe = FakeStripe()
+    released = _wire_release(monkeypatch, {**PENDING, "pay_by": datetime.now(timezone.utc)}, stripe)
+    assert asyncio.run(commerce.release_abandoned_checkout("tok")) == "unchanged"
+    assert stripe.expired == [("acct_1", "cs_1")]
+    released.assert_not_awaited()
 
 
 def test_a_stripe_outage_leaves_the_order_exactly_as_it_was(monkeypatch):

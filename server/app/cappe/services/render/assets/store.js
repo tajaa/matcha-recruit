@@ -18,7 +18,7 @@ var REVIEWS=[];
 var ov=document.createElement('div');ov.className='cz-pd';ov.hidden=true;
 ov.innerHTML='<div class="cz-pd__panel"><button class="cz-pd__x" aria-label="Close">×</button><div class="cz-pd__grid"><div class="cz-pd__media" data-media></div><div class="cz-pd__info" data-info></div></div><div class="cz-pd__reviews" data-reviews></div></div>';
 document.body.appendChild(ov);
-function hideDetail(){ov.hidden=true;document.body.style.overflow='';}
+function hideDetail(){ov.hidden=true;document.body.style.overflow=document.querySelector('.cz-bag:not([hidden])')?'hidden':'';}
 function dismiss(){if(history.state&&history.state.czpd)history.back();else hideDetail();}
 ov.querySelector('.cz-pd__x').addEventListener('click',dismiss);
 ov.addEventListener('click',function(e){if(e.target===ov)dismiss();});
@@ -42,7 +42,7 @@ info.innerHTML=(p.category?'<div class="cz-eyebrow">'+RT.esc(p.category)+'</div>
 optsHtml(p)+(p.intake_fields||[]).map(field).join('')+
 (booking?'<div><label class="cz-label">Preferred time</label><input class="cz-field" type="datetime-local" data-when /></div>':'')+
 '<div class="cz-pd__buy"><label class="cz-label">Quantity</label><input class="cz-field cz-pd__qty" type="number" min="1" value="1"'+((p.fulfillment==='physical'&&p.inventory>0)?' max="'+p.inventory+'"':'')+' data-qty />'+
-'<input class="cz-field" type="email" data-email placeholder="Your email" /><input class="cz-field" type="text" data-name placeholder="Your name" />'+
+(booking?'<input class="cz-field" type="email" data-email placeholder="Your email" /><input class="cz-field" type="text" data-name placeholder="Your name" />':'')+
 '<p class="cz-msg" data-quote></p><button class="cz-btn cz-btn--solid cz-btn--block" data-go></button><p class="cz-msg" data-status></p></div>';
 var sb=info.querySelector('[data-go]'),msg=info.querySelector('[data-status]'),gone=soldOut(p);
 // Local estimate only: same half-up integer math as the server's apply_discount_cents,
@@ -59,6 +59,7 @@ function quote(){var seq=++qseq;RT.post('/quote',{items:[{product_id:p.id,quanti
 if(seq!==qseq||!q||q.total_cents==null)return;var l=(q.lines||[])[0];if(l&&l.reason)return;
 if(l&&l.available===false){sb.disabled=true;sb.textContent='Out of stock';if(qbox)qbox.textContent='Not enough in stock for that choice. Try a lower quantity or another option.';return;}
 var cur=q.currency||p.currency,parts=[];
+if(!booking){sb.textContent=verb()+RT.money(q.subtotal_cents,cur);if(qbox)qbox.textContent='';return;}
 if(q.tax_cents>0)parts.push('Tax '+RT.money(q.tax_cents,cur));
 if(q.shipping_cents>0)parts.push('Shipping '+RT.money(q.shipping_cents,cur));
 sb.textContent=verb()+RT.money(q.total_cents,cur);
@@ -67,16 +68,24 @@ if(qbox)qbox.textContent=parts.length?('Subtotal '+RT.money(q.subtotal_cents,cur
 function refresh(){if(gone){sb.disabled=true;sb.textContent='Sold out';return;}sb.disabled=false;sb.textContent=verb()+RT.money(unit()*qn(),p.currency);if(qbox)qbox.textContent='';clearTimeout(qtimer);qtimer=setTimeout(quote,250);}
 info.querySelectorAll('.cz-opt-group').forEach(function(g){var single=g.getAttribute('data-single')==='1';g.querySelectorAll('.cz-opt').forEach(function(o){o.addEventListener('click',function(){if(single){g.querySelectorAll('.cz-opt').forEach(function(x){x.classList.remove('cz-opt--on');});o.classList.add('cz-opt--on');}else o.classList.toggle('cz-opt--on');refresh();});});});
 info.querySelector('[data-qty]').addEventListener('input',refresh);refresh();
-sb.addEventListener('click',function(){var email=info.querySelector('[data-email]').value.trim();
-if(!email){msg.textContent='Email required';msg.className='cz-msg err';return;}
+sb.addEventListener('click',function(){
 var ok=true;info.querySelectorAll('.cz-opt-group').forEach(function(g){if(g.getAttribute('data-required')==='1'&&!g.querySelector('.cz-opt--on'))ok=false;});
 if(!ok){msg.textContent='Please choose the required options';msg.className='cz-msg err';return;}
 var optIds=chosen();
-var ans={};(p.intake_fields||[]).forEach(function(f){var el=info.querySelector('[data-k="'+f.key+'"]');if(el)ans[f.key]=el.value;});
+var ans={},missing=null;(p.intake_fields||[]).forEach(function(f){var el=info.querySelector('[data-k="'+f.key+'"]');if(el){ans[f.key]=el.value;if(f.required&&!String(el.value).trim()&&!missing)missing=f.label||f.key;}});
+if(missing){msg.textContent='Please answer: '+missing;msg.className='cz-msg err';return;}
+// Everything but a booking goes in the bag; the bag checks out as one order.
+var cart=window.__CAPPE_CART__;
+if(!booking&&cart){var labels=[];info.querySelectorAll('.cz-opt--on').forEach(function(b){labels.push(b.textContent);});
+cart.add({product_id:p.id,title:p.name,quantity:qn(),selected_option_ids:optIds,options_label:labels.join(', '),intake_answers:ans,
+fulfillment:p.fulfillment,requires_approval:!!p.requires_approval,currency:p.currency,est_unit_cents:unit()});
+dismiss();return;}
+var email=(info.querySelector('[data-email]')||{value:''}).value.trim();
+if(!email){msg.textContent='Email required';msg.className='cz-msg err';return;}
 var item={product_id:p.id,quantity:qn(),intake_answers:ans,selected_option_ids:optIds};
 if(booking){var w=info.querySelector('[data-when]').value;if(!w){msg.textContent='Pick a time';msg.className='cz-msg err';return;}item.starts_at=w;}
 sb.disabled=true;msg.textContent='Placing order…';msg.className='cz-msg';
-RT.post('/orders',{customer_email:email,customer_name:info.querySelector('[data-name]').value.trim(),items:[item],success_url:location.href,cancel_url:location.href}).then(function(res){if(res&&res.checkout_url){msg.textContent='Redirecting to secure checkout…';window.location=res.checkout_url;return;}info.querySelector('.cz-pd__buy').innerHTML='<p class="cz-msg ok">Order placed. We will email you'+(p.fulfillment==='digital'?' your download once confirmed':'')+'.</p>';
+RT.post('/orders',{customer_email:email,customer_name:info.querySelector('[data-name]').value.trim(),items:[item],success_url:location.href,cancel_url:location.href}).then(function(res){if(res&&res.checkout_url){msg.textContent='Redirecting to secure checkout…';window.location=res.checkout_url;return;}window.location='/order/'+encodeURIComponent(res.order_token);
 }).catch(function(e){sb.disabled=false;refresh();msg.textContent=e.message;msg.className='cz-msg err';});});
 ov.querySelector('[data-reviews]').innerHTML=reviewsHtml();
 ov.querySelector('.cz-pd__panel').scrollTop=0;ov.hidden=false;document.body.style.overflow='hidden';

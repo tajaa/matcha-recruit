@@ -127,6 +127,9 @@ def _footer(site: dict, meta: dict) -> str:
 # static constant — no per-render interpolation, no user strings in JS. Newsletter
 # mode reuses the public /subscribe endpoint via the widget runtime (__CAPPE_RT__).
 _PROMO_JS = (_ASSETS / "promo.js").read_text(encoding="utf-8")
+# The storefront bag (assets/cart.js). On every live page: it shows its button
+# only on a page with a store, or when the bag already holds something.
+_CART_JS = "<script>" + (_ASSETS / "cart.js").read_text(encoding="utf-8") + "</script>"
 
 
 def _promo_link(label: Any, href: Any, cls: str) -> str:
@@ -196,7 +199,11 @@ def _promos(meta: dict, t: dict) -> tuple[str, str, str]:
 
 
 def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: bool = False, editable: bool = False,
-                     locations: list[dict] | None = None, block_anchors: bool = False) -> str:
+                     locations: list[dict] | None = None, block_anchors: bool = False,
+                     body_override: str | None = None, extra_head: str = "", extra_body_end: str = "") -> str:
+    """Render a page in the site's theme. `body_override` replaces the page's
+    blocks with server-built HTML (the order page) — already escaped by its
+    caller; `extra_head` / `extra_body_end` add our own tags around it."""
     t = _tokens(site.get("theme_config"))
     c = t["colors"]
     slug = site.get("slug") or ""
@@ -234,9 +241,9 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     # canvas editor (`editable`) — it wants `data-cz-block` so a shot can
     # scroll to the section being edited, without the editor runtime/
     # data-cz-field tags `editable` also carries. See _apply_design.
-    body_html = "".join(
+    body_html = body_override if body_override is not None else ("".join(
         _render_block(b, t, i, editable, block_anchors) for i, b in enumerate(blocks)
-    ) or _text({"body": page.get("title")}, t)
+    ) or _text({"body": page.get("title")}, t))
 
     nav_links = "".join(
         f'<a href="{"/" if p["slug"] in ("home", home_slug) else "/p/" + _esc(p["slug"])}">{_esc(p["title"])}</a>'
@@ -310,6 +317,7 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{head_title}</title>
   {head_seo}
+  {extra_head}
   {_gfonts_link(t['heading'], t['body'])}
   <style>{theme_vars}{extra_vars}{_BASE_CSS}{_CANVAS_CSS}</style>
   <script>window.__CAPPE__={cappe_ctx};</script>
@@ -327,5 +335,7 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
   {promo_js}
   {premium_js}
   {canvas_js}
+  {_CART_JS if not (preview or editable) else ""}
+  {extra_body_end}
 </body>
 </html>"""

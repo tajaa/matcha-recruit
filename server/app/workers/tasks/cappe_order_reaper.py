@@ -47,6 +47,15 @@ shelves for free. After `MANUAL_ABANDONED_AFTER` with no activity they are
 released. Deliberately conservative: an order the owner has ACCEPTED, or
 touched at all inside the window (`updated_at`), is left alone — those are
 orders somebody is working, however slowly.
+
+**Orders the owner approved for card payment** are a third case. Accepting one
+sets `pay_by` and emails the buyer a link to pay; until then the order stays
+open whatever happens to any payment page the buyer opens and abandons (the
+Stripe sweep skips it). Once `pay_by` passes unpaid, it is released like any
+other abandoned order — its current page closed first, if it has one.
+Abandonment is measured from `checkout_opened_at` (when the CURRENT page
+opened), not `created_at`: an order approved days after it was placed opens
+its page then, and must not have it closed as "hours old".
 """
 
 import asyncio
@@ -144,6 +153,39 @@ async def _release_stale_manual_orders(conn, cap: int) -> int:
     return released
 
 
+async def _release_overdue_approved_orders(conn, cap: int) -> int:
+    """Release approved orders whose buyer never opened a payment page before
+    `pay_by` passed. (One that did open a page is in the Stripe sweep above,
+    which closes the page first.) Same transaction shape as the other sweeps."""
+    stale = await conn.fetch(
+        """SELECT id FROM cappe_orders
+            WHERE status = 'pending' AND pay_by IS NOT NULL AND pay_by < NOW()
+              AND stripe_session_id IS NULL
+            ORDER BY pay_by ASC
+            LIMIT $1""",
+        cap,
+    )
+    released = 0
+    for cand in stale:
+        try:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "UPDATE cappe_orders SET status = 'cancelled', updated_at = NOW() "
+                    "WHERE id = $1 AND status = 'pending' AND stripe_session_id IS NULL "
+                    "AND pay_by < NOW() RETURNING id, site_id",
+                    cand["id"],
+                )
+                if row is None:
+                    continue
+                await restock_order(conn, site_id=row["site_id"], order_id=row["id"], reason="restock")
+                await release_order_bookings(conn, order_id=row["id"])
+            released += 1
+            logger.info("cappe order %s cancelled + released (approved, not paid by its pay-by date)", cand["id"])
+        except Exception:
+            logger.exception("cappe order reaper: failed to release overdue approved order %s", cand["id"])
+    return released
+
+
 async def _run() -> dict:
     conn = await get_db_connection()
     try:
@@ -159,7 +201,9 @@ async def _run() -> dict:
                   JOIN cappe_accounts a ON a.id = s.account_id
                  WHERE o.status = 'pending'
                    AND o.stripe_session_id IS NOT NULL
-                   AND o.created_at < NOW() - INTERVAL '{ABANDONED_AFTER}'
+                   AND COALESCE(o.checkout_opened_at, o.created_at) < NOW() - INTERVAL '{ABANDONED_AFTER}'
+                   -- An approved order is open until its pay-by date.
+                   AND (o.pay_by IS NULL OR o.pay_by < NOW())
                  ORDER BY o.updated_at ASC
                  LIMIT $1""",
             cap,
@@ -237,11 +281,12 @@ async def _run() -> dict:
                 )
 
         manual_released = await _release_stale_manual_orders(conn, cap)
+        overdue_released = await _release_overdue_approved_orders(conn, cap)
 
         return {
             "candidates": len(candidates), "released": released,
             "settling": settling, "reconciled": reconciled,
-            "manual_released": manual_released,
+            "manual_released": manual_released, "overdue_released": overdue_released,
         }
     finally:
         await conn.close()

@@ -185,6 +185,26 @@ def site_origins(site: Any) -> list[str]:
     return origins
 
 
+def site_public_origin(site) -> str | None:
+    """The origin a buyer knows the store by: its connected custom domain,
+    else its canonical subdomain. Used for links we send (order page, emails),
+    where `site_origins()[0]` — the subdomain — would show a customer of
+    `shop.example.com` an unfamiliar gummfit address."""
+    custom = (_row_field(site, "custom_domain") or "").strip().lower().strip(".")
+    if custom:
+        return f"https://{custom}"
+    canonical = [o for o in site_origins(site) if o.startswith("https://")]
+    return canonical[0] if canonical else None
+
+
+def order_page_url(site, token: str, origin: str | None = None) -> str | None:
+    """The buyer's order page (`routes/render.py:order_page`). `origin` keeps a
+    link on the host the buyer is already using (a Stripe return); otherwise
+    the store's public origin."""
+    base = (origin or site_public_origin(site) or "").rstrip("/")
+    return f"{base}/order/{token}" if base and token else None
+
+
 def url_within_origins(url: str | None, origins: list[str]) -> str | None:
     """Return `url` when it sits under one of `origins`, else None.
 

@@ -155,7 +155,7 @@ def test_decline_closes_checkout_then_frees_stock_and_every_held_slot(monkeypatc
     conn = OrderConn([ORDER_ROW])
     log = _route(monkeypatch, conn)
     asyncio.run(shop_mod.decline_order(
-        SITE, ORDER, SimpleNamespace(reason="out of stock"), account=SimpleNamespace(id=ACCOUNT_ID),
+        SITE, ORDER, SimpleNamespace(reason="out of stock"), Background(), account=SimpleNamespace(id=ACCOUNT_ID),
     ))
     assert log == ["close", "restock:decline_restock", "bookings"]
     assert not any("cappe_bookings" in sql for sql in conn.sql)   # no inline release left

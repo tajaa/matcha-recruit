@@ -216,6 +216,10 @@ class CappeOrder(BaseModel):
     # A chargeback opened against the order (Stripe's dispute status), if any.
     dispute_status: Optional[str] = None
     disputed_at: Optional[datetime] = None
+    # Approved, waiting for the buyer to pay from the emailed link until then.
+    pay_by: Optional[datetime] = None
+    shipped_notified_at: Optional[datetime] = None
+    platform_fee_cents: Optional[int] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
@@ -302,6 +306,28 @@ class CappeCartItem(BaseModel):
         return value
 
 
+class CappeShippingAddressInput(BaseModel):
+    """A shipping address typed into the storefront. Collected there only when
+    the store takes payment itself; with card payments Stripe asks for it."""
+    name: Optional[str] = Field(default=None, max_length=200)
+    line1: str = Field(min_length=1, max_length=200)
+    line2: Optional[str] = Field(default=None, max_length=200)
+    city: str = Field(min_length=1, max_length=120)
+    state: Optional[str] = Field(default=None, max_length=120)
+    postal_code: Optional[str] = Field(default=None, max_length=32)
+    country: str = Field(default="US", pattern=r"^[A-Z]{2}$")
+    phone: Optional[str] = Field(default=None, max_length=40)
+
+    def as_stripe_shape(self) -> dict:
+        return {
+            "name": self.name, "phone": self.phone,
+            "address": {
+                "line1": self.line1, "line2": self.line2, "city": self.city,
+                "state": self.state, "postal_code": self.postal_code, "country": self.country,
+            },
+        }
+
+
 class CappeCheckoutRequest(BaseModel):
     customer_email: EmailStr
     customer_name: Optional[str] = Field(default=None, max_length=255)
@@ -312,6 +338,7 @@ class CappeCheckoutRequest(BaseModel):
     # order stays pending for manual handling.
     success_url: Optional[str] = Field(default=None, max_length=2000)
     cancel_url: Optional[str] = Field(default=None, max_length=2000)
+    shipping_address: Optional[CappeShippingAddressInput] = None
 
 
 # Buyer-facing receipt (resolved by the order's unguessable access_token).
@@ -342,6 +369,10 @@ class CappeOrderReceipt(BaseModel):
     tracking_number: Optional[str] = None
     created_at: datetime
     items: list[CappeReceiptItem] = Field(default_factory=list)
+    # Waiting for the store's approval; approved and payable until `pay_by`.
+    requires_approval: bool = False
+    approved_at: Optional[datetime] = None
+    pay_by: Optional[datetime] = None
 
 
 # --- Discounts (creator-set promotions) -------------------------------------
@@ -396,6 +427,7 @@ __all__ = [
     "CappeRefundRequest",
     "CappeDeliverableUpdate",
     "CappeCartItem",
+    "CappeShippingAddressInput",
     "CappeCheckoutRequest",
     "CappeReceiptItem",
     "CappeOrderReceipt",

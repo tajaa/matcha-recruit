@@ -4,7 +4,8 @@ from fastapi import BackgroundTasks, Depends, HTTPException, Request, status
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
 from ...models.cappe import CappeCheckoutRequest, CappeOrderReceipt, CappeProduct
-from ...services.commerce import create_public_order
+from ...services.commerce import create_public_order, pay_for_order
+from ...services.stripe_connect import CappeStripeError
 from ...dependencies import optional_shopper
 from ...models.shopper import CartQuoteRequest
 from ...services.cart import price_cart, priceable_products
@@ -81,6 +82,14 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         settings = await conn.fetchrow("SELECT tax_rate_bps,shipping_flat_cents,shipping_free_threshold_cents FROM cappe_sites WHERE id=$1", site["id"])
+        # Whether checkout goes to a card payment page. The storefront cart
+        # asks for a shipping address itself only when it does NOT (Stripe
+        # collects it otherwise).
+        pays_by_card = bool(await conn.fetchval(
+            "SELECT a.stripe_account_id IS NOT NULL AND a.stripe_charges_enabled AND a.status = 'active' "
+            "FROM cappe_sites s JOIN cappe_accounts a ON a.id = s.account_id WHERE s.id = $1",
+            site["id"],
+        ))
         # Active products only: a draft's name and price are not public, and
         # this used to quote them to anyone holding the product's id. A missing
         # product prices as an unavailable line, same as one that never existed.
@@ -93,8 +102,24 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
         _stripe_lines, lines, totals = build_subscription_lines(
             products, body.items, body.interval, dict(settings)
         )
-        return {"lines": lines, **totals}
-    return price_cart(products, body.items, dict(settings))
+        return {"lines": lines, **totals, "pays_by_card": pays_by_card}
+    return {**price_cart(products, body.items, dict(settings)), "pays_by_card": pays_by_card}
+
+
+@router.post("/public/orders/{token}/pay")
+async def public_pay_order(token: str, request: Request):
+    """Open a card payment page for a pending order — "Pay now" on the order
+    page, mainly for an order the owner has just approved (an approval order is
+    never charged before that). See `commerce.pay_for_order` for the rules."""
+    await check_rate_limit(client_ip(request), "cappe_order_pay", 10, 60)
+    await check_rate_limit(token, "cappe_order_pay_token", 20, 3600)
+    try:
+        return await pay_for_order(token)
+    except CappeStripeError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Card payments are temporarily unavailable. Nothing was charged — try again in a few minutes.",
+        )
 
 
 @router.get("/public/orders/{token}/receipt.pdf")
@@ -135,7 +160,8 @@ async def public_order_receipt(token: str, request: Request):
     async with get_connection() as conn:
         order = await conn.fetchrow(
             "SELECT id, status, customer_email, customer_name, subtotal_cents, "
-            "tax_cents, shipping_cents, total_cents, carrier, tracking_number, currency, created_at "
+            "tax_cents, shipping_cents, total_cents, carrier, tracking_number, currency, created_at, "
+            "requires_approval, approved_at, pay_by, stripe_session_id IS NOT NULL AS checkout_opened "
             "FROM cappe_orders WHERE access_token = $1",
             token,
         )
@@ -165,6 +191,9 @@ async def public_order_receipt(token: str, request: Request):
         carrier=order["carrier"],
         tracking_number=order["tracking_number"],
         created_at=order["created_at"],
+        requires_approval=bool(order["requires_approval"]),
+        approved_at=order["approved_at"],
+        pay_by=order["pay_by"],
         items=[
             {
                 "title": it["title"],

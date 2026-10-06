@@ -22,7 +22,7 @@ from fastapi import HTTPException, status
 
 from ...core.services.redis_cache import check_rate_limit
 from ...database import get_connection
-from .common import loads_list, site_origins, url_within_origins
+from .common import loads_list, order_page_url, site_origins, url_within_origins
 from .discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
 from .email import (
     build_order_items_summary,
@@ -485,7 +485,7 @@ async def release_abandoned_checkout(token: str) -> str:
     """
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """SELECT o.id, o.site_id, o.status, o.stripe_session_id, a.stripe_account_id
+            """SELECT o.id, o.site_id, o.status, o.stripe_session_id, a.stripe_account_id, o.pay_by
                  FROM cappe_orders o
                  JOIN cappe_sites s ON s.id = o.site_id
                  JOIN cappe_accounts a ON a.id = s.account_id
@@ -504,7 +504,171 @@ async def release_abandoned_checkout(token: str) -> str:
     )
     if state != "expired":
         return "paid"
+    if row["pay_by"] is not None:
+        # An order the owner approved stays open until its pay-by date: the
+        # buyer can come back to the order page and pay. Only the page closes.
+        return "unchanged"
     return "released" if await release_unpaid_order(row["id"], row["site_id"]) else "unchanged"
+
+
+def bind_return_urls(success_url, cancel_url, site, token):
+    """Point already origin-validated Stripe return URLs at this order.
+
+    * The app return (`/__cappe/app-return`) carries the token to the app.
+    * A web buyer who pays lands on the order page (`/order/<token>`), which
+      confirms the order and holds its downloads — the storefront used to
+      send them back to the product page with nothing to say it worked.
+    * A web buyer who backs out goes through the checkout-return handler,
+      which hands the held stock and slots straight back.
+
+    Bound after origin validation, because the token does not exist when the
+    storefront asks for checkout. Each link stays on the host the buyer used.
+    """
+    out = []
+    for field, value in (("success", success_url), ("cancel", cancel_url)):
+        if not value:
+            out.append(value)
+            continue
+        parsed = urlsplit(value)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        if parsed.path == "/__cappe/app-return":
+            out.append(f"{origin}/__cappe/app-return?o={token}&r={field}")
+        elif field == "success":
+            out.append(order_page_url(site, token, origin=origin))
+        else:
+            out.append(checkout_cancel_url(value, token))
+    return out[0], out[1]
+
+
+async def open_order_checkout(
+    *, order, line_rows, owner, owner_ent, success_url, cancel_url, email,
+    shopper=None, has_physical, tax_label, shipping_label,
+):
+    """Open a Stripe Checkout page for an existing order and record it as the
+    order's current page. Shared by order creation and by "Pay now" on an order
+    the owner approved, so both charge exactly what the order says.
+
+    `line_rows` are (product_id, title, unit_price_cents, quantity, ...) — the
+    prices FROZEN on the order, never the live product. Raises
+    CappeStripeError; holds no connection across the Stripe call.
+    """
+    pay_total = order["subtotal_cents"]
+    cur = (order["currency"] or "USD").lower()
+    # Per-plan take rate, computed ONCE here and handed to Stripe, so the number
+    # persisted on the order is the same number Stripe actually takes.
+    fee = entitlement_fee_cents(pay_total, owner_ent.platform_fee_bps)
+    # Tax as its own line so the charged amount equals the receipt total. The
+    # platform fee stays on the goods subtotal.
+    line_items = build_stripe_line_items(line_rows, cur, order["tax_cents"], tax_label)
+    customer_id = None
+    if shopper:
+        from .shopper_customers import connected_customer
+        customer_id = await connected_customer(shopper, owner["stripe_account_id"])
+    sess = await get_cappe_stripe().create_checkout_session(
+        account_id=owner["stripe_account_id"],
+        currency=cur,
+        line_items=line_items,
+        application_fee_cents=fee,
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata={"order_id": str(order["id"]), "platform_fee_cents": str(fee)},
+        customer_email=email or None,
+        **({"customer_id": customer_id} if customer_id else {}),
+        collect_shipping_address=has_physical,
+        expires_in_seconds=CONNECT_CHECKOUT_TTL_SECONDS,
+        shipping_option=(
+            {
+                "label": shipping_label if order["shipping_cents"] > 0 else "Free shipping",
+                "amount_cents": order["shipping_cents"],
+            }
+            if has_physical else None
+        ),
+    )
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE cappe_orders SET stripe_session_id = $1, platform_fee_cents = $2, "
+            "checkout_opened_at = NOW(), updated_at = NOW() WHERE id = $3",
+            sess.get("id"), fee, order["id"],
+        )
+    return sess
+
+
+class PayRefused(HTTPException):
+    """Why "Pay now" can't open a payment page for this order."""
+
+    def __init__(self, detail: str, status_code: int = status.HTTP_409_CONFLICT):
+        super().__init__(status_code=status_code, detail=detail)
+
+
+async def pay_for_order(token: str) -> dict:
+    """Open a payment page for a pending order the buyer holds the token to —
+    the "Pay now" on the order page, used after the owner approves an order
+    (which is never sent to Stripe before that).
+
+    The order's current page, if any, is closed first: one payable page per
+    order. If the buyer already finished paying on it, nothing new is opened.
+    Prices come from the order, never the live products. Returns
+    {"checkout_url": ...}.
+    """
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT o.id, o.site_id, o.status, o.requires_approval, o.subscription_id, o.pay_by,
+                      o.subtotal_cents, o.tax_cents, o.shipping_cents, o.total_cents, o.currency,
+                      o.customer_email, o.stripe_session_id, o.access_token,
+                      o.pay_by IS NOT NULL AND o.pay_by < NOW() AS overdue,
+                      s.name AS site_name, s.slug, s.subdomain, s.custom_domain,
+                      s.tax_label, s.shipping_label,
+                      a.id AS owner_id, a.plan, a.status AS owner_status, a.email AS owner_email,
+                      a.name AS owner_name, a.stripe_account_id, a.stripe_charges_enabled
+                 FROM cappe_orders o
+                 JOIN cappe_sites s ON s.id = o.site_id
+                 JOIN cappe_accounts a ON a.id = s.account_id
+                WHERE o.access_token = $1""",
+            token,
+        )
+        if row is None:
+            raise PayRefused("Order not found", status.HTTP_404_NOT_FOUND)
+        if row["status"] != "pending":
+            raise PayRefused(
+                "This order has already been paid." if row["status"] in ("paid", "fulfilled")
+                else "This order is no longer open."
+            )
+        if row["subscription_id"] is not None:
+            raise PayRefused("This order is billed by a subscription.")
+        if row["requires_approval"]:
+            raise PayRefused("The store hasn't approved this order yet. You'll get an email when it does.")
+        if row["overdue"]:
+            raise PayRefused("The time to pay for this order has passed. Contact the store to order again.")
+        if row["subtotal_cents"] <= 0:
+            raise PayRefused("There's nothing to pay for this order.")
+        if (row["owner_status"] or "active") != "active" or not (
+            row["stripe_account_id"] and row["stripe_charges_enabled"]
+        ):
+            raise PayRefused("This store isn't taking card payments online. They'll be in touch about payment.")
+        owner_ent = await resolve_entitlements(row["plan"], conn=conn)
+        require_can_sell(owner_ent)
+        items = await conn.fetch(
+            "SELECT product_id, title, unit_price_cents, quantity, fulfillment "
+            "FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
+            row["id"],
+        )
+    if row["stripe_session_id"]:
+        state = await get_cappe_stripe().expire_checkout_session(
+            row["stripe_account_id"], row["stripe_session_id"],
+        )
+        if state != "expired":
+            raise PayRefused("Your payment is already being processed — check your email for the receipt.")
+    site = {"subdomain": row["subdomain"], "custom_domain": row["custom_domain"]}
+    page = order_page_url(site, token)
+    line_rows = [(it["product_id"], it["title"], it["unit_price_cents"], it["quantity"], it["fulfillment"])
+                 for it in items]
+    sess = await open_order_checkout(
+        order=row, line_rows=line_rows, owner=row, owner_ent=owner_ent,
+        success_url=page, cancel_url=page, email=row["customer_email"],
+        has_physical=any(it["fulfillment"] == "physical" for it in items),
+        tax_label=row["tax_label"] or "Tax", shipping_label=row["shipping_label"] or "Shipping",
+    )
+    return {"checkout_url": sess.get("url")}
 
 
 async def create_public_order(site, body, background, *, shopper=None) -> dict:
@@ -716,12 +880,18 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             order = await conn.fetchrow(
                 """INSERT INTO cappe_orders
                        (site_id, customer_email, customer_name, status, subtotal_cents, tax_cents,
-                        shipping_cents, total_cents, currency, note, requires_approval)
-                   VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10)
+                        shipping_cents, total_cents, currency, note, requires_approval, shipping_address)
+                   VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
                    RETURNING id, status, subtotal_cents, tax_cents, shipping_cents, total_cents,
                              currency, access_token, requires_approval""",
                 site["id"], email, body.customer_name, subtotal, tax_cents, shipping_cents,
                 total_cents, order_currency or "USD", body.note, order_requires_approval,
+                # The buyer's address, when the storefront asked for it (a
+                # physical order the store collects payment for itself — Stripe
+                # collects it otherwise, and the paid webhook fills it in).
+                # Stored in Stripe's shape so the dashboard reads one format.
+                json.dumps(body.shipping_address.as_stripe_shape())
+                if (has_physical and getattr(body, "shipping_address", None)) else None,
             )
             if shopper:
                 await conn.execute("UPDATE cappe_orders SET shopper_id=$1 WHERE id=$2 AND site_id=$3",
@@ -747,11 +917,6 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             low_stock_hits, dashboard_url(f"/sites/{site['id']}/shop"),
         )
 
-    # If the order is payable AND the business has Stripe Connect ready AND the
-    # storefront passed return URLs → create a Checkout Session (direct charge on
-    # the connected account, 2% platform fee). The receipt waits for the paid
-    # webhook (payments.py). Otherwise fall back to the legacy pending flow.
-    pay_total = order["subtotal_cents"]
     # Stripe renders success/cancel URLs on its own hosted checkout page, and
     # this route is anonymous — so an attacker could point a real, branded
     # Stripe page at any address they like. The storefront widget only ever
@@ -766,70 +931,26 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
         logger.warning(
             "cappe checkout: off-site return URL rejected for site %s", site["id"]
         )
-    # Bind both guest and signed-in app returns to this order after origin
-    # validation. The token does not exist when the app requests checkout.
-    for field, value in (("success", success_url), ("cancel", cancel_url)):
-        if value and urlsplit(value).path == "/__cappe/app-return":
-            parsed = urlsplit(value)
-            callback = f"{parsed.scheme}://{parsed.netloc}/__cappe/app-return?o={order['access_token']}&r={field}"
-            if field == "success":
-                success_url = callback
-            else:
-                cancel_url = callback
-    # A web buyer who backs out of Stripe's page is sent through the site's
-    # checkout-return handler, which hands the held stock and slots straight
-    # back instead of leaving them for the session to time out. Bound here,
-    # after origin validation, because the token does not exist when the
-    # storefront asks for checkout. (The app return above releases too.)
-    if cancel_url and urlsplit(cancel_url).path != "/__cappe/app-return":
-        cancel_url = checkout_cancel_url(cancel_url, order["access_token"])
+    success_url, cancel_url = bind_return_urls(success_url, cancel_url, site, order["access_token"])
+    # An order that waits for the owner's approval is NOT sent to Stripe now.
+    # It used to be: the buyer was charged at once, the order went `paid` and
+    # dropped out of the approval queue — "approve each order" approved
+    # nothing. It stays pending; accepting it emails the buyer a link to pay
+    # (POST /public/orders/{token}/pay).
     can_pay = bool(
-        pay_total > 0 and owner and owner["stripe_account_id"]
-        and owner["stripe_charges_enabled"] and return_urls_requested
-        and success_url and cancel_url
+        order["subtotal_cents"] > 0 and not order["requires_approval"]
+        and owner and owner["stripe_account_id"] and owner["stripe_charges_enabled"]
+        and return_urls_requested and success_url and cancel_url
     )
     checkout_url = None
     if can_pay:
-        cur = (order["currency"] or "USD").lower()
-        # Per-plan take rate, from the entitlements resolved once above.
-        # Computed ONCE here and handed to Stripe, so the number persisted on
-        # the order is the same number Stripe actually takes.
-        fee = entitlement_fee_cents(pay_total, owner_ent.platform_fee_bps)
-        # Tax as its own line so the charged amount equals the receipt total.
-        # The 2% platform fee stays on the goods subtotal (amount_cents below).
-        line_items = build_stripe_line_items(line_rows, cur, order["tax_cents"], tax_label)
         try:
-            customer_id = None
-            if shopper:
-                from .shopper_customers import connected_customer
-                customer_id = await connected_customer(shopper, owner["stripe_account_id"])
-            sess = await get_cappe_stripe().create_checkout_session(
-                account_id=owner["stripe_account_id"],
-                currency=cur,
-                line_items=line_items,
-                application_fee_cents=fee,
-                success_url=success_url,
-                cancel_url=cancel_url,
-                metadata={"order_id": str(order["id"]), "platform_fee_cents": str(fee)},
-                customer_email=email or None,
-                **({"customer_id": customer_id} if customer_id else {}),
-                collect_shipping_address=has_physical,
-                expires_in_seconds=CONNECT_CHECKOUT_TTL_SECONDS,
-                shipping_option=(
-                    {
-                        "label": shipping_label if order["shipping_cents"] > 0 else "Free shipping",
-                        "amount_cents": order["shipping_cents"],
-                    }
-                    if has_physical else None
-                ),
+            sess = await open_order_checkout(
+                order=order, line_rows=line_rows, owner=owner, owner_ent=owner_ent,
+                success_url=success_url, cancel_url=cancel_url, email=email, shopper=shopper,
+                has_physical=has_physical, tax_label=tax_label, shipping_label=shipping_label,
             )
             checkout_url = sess.get("url")
-            async with get_connection() as conn:
-                await conn.execute(
-                    "UPDATE cappe_orders SET stripe_session_id = $1, platform_fee_cents = $2, "
-                    "updated_at = NOW() WHERE id = $3",
-                    sess.get("id"), fee, order["id"],
-                )
         except CappeStripeError as exc:
             # The buyer asked to pay by card and we could not open the payment
             # page. Falling through to the unpaid flow told them "Order
@@ -856,9 +977,13 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
         # an unauthenticated endpoint, so cap sends per recipient to stop IP-rotating
         # email-bomb abuse. The order is created regardless; only the email is gated.
         if email and await check_recipient_send_ok(email):
+            takes_cards = bool(owner and owner["stripe_account_id"] and owner["stripe_charges_enabled"])
             background.add_task(
                 send_cappe_order_receipt_email, email, body.customer_name, site["name"],
                 items_summary, order["total_cents"], order["currency"], order["requires_approval"],
+                order_page_url(site, order["access_token"]),
+                # Who settles the money next, which the email has to say.
+                "free" if order["subtotal_cents"] <= 0 else ("card_after_approval" if takes_cards else "store"),
             )
         if owner and owner["email"]:
             background.add_task(
