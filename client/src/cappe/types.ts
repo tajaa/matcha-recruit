@@ -742,6 +742,12 @@ export type CappeBooking = {
   rider_acknowledged: boolean
   rider_snapshot: Array<{ label: string; detail?: string | null; is_required: boolean }>
   created_at: string
+  /** The shop order this booking was bought through, if any. Cancelling the
+   *  booking does not refund a PAID order. */
+  order_id?: string | null
+  order_status?: string | null
+  /** The timezone the booking's times mean (its location's, else the site's). */
+  timezone?: string | null
 }
 
 // One row in the creator's accept/decline queue (booking or order).
@@ -807,6 +813,10 @@ export type CappePublicBooking = {
   quoted_price_cents: number | null
   timezone: string
   can_modify: boolean
+  staff_id?: string | null
+  staff_name?: string | null
+  location_id?: string | null
+  location_name?: string | null
 }
 
 export type CappeSlot = {

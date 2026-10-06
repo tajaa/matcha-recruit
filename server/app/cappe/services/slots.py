@@ -25,7 +25,7 @@ def _fmt_time(dt: datetime) -> str:
 def generate_slots(
     availability: Sequence[dict],
     btype: dict,
-    bookings: Sequence[tuple[datetime, datetime]],
+    bookings: Sequence[tuple],
     tz_name: Optional[str],
     now_utc: datetime,
     rules: Optional[Sequence[dict]] = None,
@@ -40,8 +40,10 @@ def generate_slots(
       applies to all types; NULL staff = a site-wide window any staff can use.
     - `btype`: dict with id, duration_minutes, price_cents, pricing_mode, and
       optional buffer_minutes (a gap enforced on both sides of each booking).
-    - `bookings`: existing (start_utc, end_utc) aware ranges to subtract — pass
-      only the relevant staff's bookings when generating for a concrete staff.
+    - `bookings`: existing (start_utc, end_utc[, buffer_minutes]) aware ranges
+      to subtract — pass only the relevant staff's bookings when generating for
+      a concrete staff. The gap kept around each is the larger of its own
+      buffer and this type's, the same rule the booking step enforces.
     - `staff_id`: when set, only windows for that staff (or NULL/site-wide) are
       used; when None (legacy / unstaffed), only NULL-staff windows are used.
     - Slots are fixed `duration_minutes` windows stepped through each window;
@@ -72,7 +74,10 @@ def generate_slots(
         return []
 
     now_local = now_utc.astimezone(tz)
-    busy = [(bs, be) for bs, be in bookings]
+    busy = [
+        (b[0], b[1], max(buf, timedelta(minutes=int(b[2] or 0))) if len(b) > 2 else buf)
+        for b in bookings
+    ]
     out: list[dict] = []
 
     for d in range(days_ahead):
@@ -95,7 +100,7 @@ def generate_slots(
                 s_utc = local_start.astimezone(timezone.utc)
                 e_utc = local_end.astimezone(timezone.utc)
                 # Buffer enforces a gap on both sides of each existing booking.
-                if any(s_utc < be + buf and bs < e_utc + buf for bs, be in busy):
+                if any(s_utc < be + gap and bs < e_utc + gap for bs, be, gap in busy):
                     continue  # overlaps an existing booking (or its buffer)
                 price = booking_quote_cents(base, mode, local_start, local_end, rules)
                 out.append({

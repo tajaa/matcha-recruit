@@ -13,10 +13,12 @@ interface RateRulesSectionProps {
   addRule: () => void
   saveRules: () => void
   savingRules: boolean
+  /** A shared (all-locations) row shown inside a location's view: read-only. */
+  isShared?: (row: CappeRateRule) => boolean
 }
 
 export function RateRulesSection({
-  rules, setRules, setRule, types, hasHourly, addRule, saveRules, savingRules,
+  rules, setRules, setRule, types, hasHourly, addRule, saveRules, savingRules, isShared = () => false,
 }: RateRulesSectionProps) {
   return (
     <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
@@ -26,8 +28,10 @@ export function RateRulesSection({
         {!hasHourly && ' Add a per-hour appointment type above to use these.'}
       </p>
       <div className="space-y-2">
-        {rules.map((r, i) => (
-          <div key={r.id} className="flex flex-wrap items-center gap-2">
+        {rules.map((r, i) => {
+          const locked = isShared(r)
+          return (
+          <fieldset key={r.id} disabled={locked} className={`flex flex-wrap items-center gap-2 ${locked ? 'opacity-60' : ''}`}>
             <input value={r.label} onChange={(e) => setRule(i, { label: e.target.value })} placeholder="Label (e.g. After hours)" className={`w-40 ${inputCls}`} />
             <select value={r.weekday ?? ''} onChange={(e) => setRule(i, { weekday: e.target.value === '' ? null : parseInt(e.target.value, 10) })} className={inputCls}>
               <option value="">Every day</option>
@@ -44,9 +48,10 @@ export function RateRulesSection({
               <option value="">All types</option>
               {types.filter((t) => t.pricing_mode === 'hourly').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
-            <button type="button" onClick={() => setRules((rl) => rl.filter((_, idx) => idx !== i))} className="text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
-          </div>
-        ))}
+            {locked ? <span title="Shared by every location — change it in the All locations view" className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-semibold uppercase text-zinc-400">All locations</span> : <button type="button" aria-label="Remove rule" onClick={() => setRules((rl) => rl.filter((_, idx) => idx !== i))} className="text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>}
+          </fieldset>
+          )
+        })}
       </div>
       <div className="mt-3 flex gap-2">
         <button onClick={addRule} className="text-xs font-medium text-emerald-400 hover:underline">+ Add rule</button>

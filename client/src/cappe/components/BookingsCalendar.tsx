@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Check, X, Clock, ShieldCheck } from 'lucide-react'
 import { WEEKDAYS } from './SurfaceShell'
 import type { CappeBooking, CappeAvailabilitySlot, CappeBookingType, CappeStaff } from '../types'
 import { applicableSlotsForType } from '../utils/bookingAvailability'
 import { bookingDateKey, formatBookingTime } from '../utils/bookingTime'
+import { BOOKING_ACTION_LABEL, NEXT_BOOKING_STATUSES } from '../utils/bookingStatus'
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const money = (c: number | null | undefined) => (c == null ? '—' : `$${(c / 100).toFixed(2)}`)
@@ -60,11 +61,15 @@ export default function BookingsCalendar({
   const [selected, setSelected] = useState<string>(todayKey)
   const [selectedTypeId, setSelectedTypeId] = useState('')
 
-  useEffect(() => {
-    const next = dateParts(bookingDateKey(new Date().toISOString(), calendarTimezone))
-    setCursor({ y: next.y, m: next.m })
-    setSelected(bookingDateKey(new Date().toISOString(), calendarTimezone))
-  }, [calendarTimezone])
+  // Back to "today" when the calendar's timezone changes (switching location).
+  // Adjusted while rendering, not in an effect, so the stale month never
+  // paints first: https://react.dev/learn/you-might-not-need-an-effect
+  const [shownTimezone, setShownTimezone] = useState(calendarTimezone)
+  if (shownTimezone !== calendarTimezone) {
+    setShownTimezone(calendarTimezone)
+    setCursor({ y: todayParts.y, m: todayParts.m })
+    setSelected(todayKey)
+  }
 
   const typeName = useMemo(() => {
     const map: Record<string, string> = {}
@@ -228,11 +233,12 @@ export default function BookingsCalendar({
                       <button onClick={() => onAccept(b)} className="flex items-center gap-1 rounded-md bg-emerald-500 px-2.5 py-1 text-xs font-semibold text-zinc-950 hover:bg-emerald-400"><Check className="h-3 w-3" /> Accept</button>
                       <button onClick={() => onDecline(b)} className="flex items-center gap-1 rounded-md border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"><X className="h-3 w-3" /> Decline</button>
                     </div>
-                  ) : (
-                    <select value={b.status} onChange={(e) => onStatus(b, e.target.value)} className="mt-2 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100">
-                      {['pending', 'confirmed', 'cancelled', 'completed'].map((s) => <option key={s} value={s}>{s}</option>)}
+                  ) : (NEXT_BOOKING_STATUSES[b.status] || []).length > 0 ? (
+                    <select value="" aria-label="Change booking" onChange={(e) => onStatus(b, e.target.value)} className="mt-2 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100">
+                      <option value="">Change…</option>
+                      {NEXT_BOOKING_STATUSES[b.status].map((s) => <option key={s} value={s}>{BOOKING_ACTION_LABEL[s] || s}</option>)}
                     </select>
-                  )}
+                  ) : null}
                 </div>
               )
             })

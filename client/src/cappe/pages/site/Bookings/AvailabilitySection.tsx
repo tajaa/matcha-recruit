@@ -14,10 +14,12 @@ interface AvailabilitySectionProps {
   addSlot: () => void
   saveAvailability: () => void
   savingAvail: boolean
+  /** A shared (all-locations) row shown inside a location's view: read-only. */
+  isShared?: (row: CappeAvailabilitySlot) => boolean
 }
 
 export function AvailabilitySection({
-  slots, setSlots, setSlot, types, staff, addSlot, saveAvailability, savingAvail,
+  slots, setSlots, setSlot, types, staff, addSlot, saveAvailability, savingAvail, isShared = () => false,
 }: AvailabilitySectionProps) {
   const unavailableIndexes = unavailableStaffWindowIndexes(slots, types)
 
@@ -26,8 +28,10 @@ export function AvailabilitySection({
       <h2 className="mb-3 text-sm font-semibold text-zinc-100">Weekly availability</h2>
       <p className="mb-3 text-xs text-zinc-500">Staff-specific hours are public only for appointment types assigned to that staff member.</p>
       <div className="space-y-2">
-        {slots.map((s, i) => (
-          <div key={i} className="flex flex-wrap items-center gap-2">
+        {slots.map((s, i) => {
+          const locked = isShared(s)
+          return (
+          <fieldset key={i} disabled={locked} className={`flex flex-wrap items-center gap-2 ${locked ? 'opacity-60' : ''}`}>
             <select value={s.weekday} onChange={(e) => setSlot(i, { weekday: parseInt(e.target.value, 10) })} className={inputCls}>
               {WEEKDAYS.map((d, idx) => <option key={idx} value={idx}>{d}</option>)}
             </select>
@@ -44,14 +48,15 @@ export function AvailabilitySection({
                 {staff.map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
               </select>
             )}
-            <button type="button" onClick={() => setSlots((sl) => sl.filter((_, idx) => idx !== i))} className="text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+            {locked ? <span title="Shared by every location — change it in the All locations view" className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-semibold uppercase text-zinc-400">All locations</span> : <button type="button" aria-label="Remove window" onClick={() => setSlots((sl) => sl.filter((_, idx) => idx !== i))} className="text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>}
             {unavailableIndexes.has(i) && (
               <p className="basis-full text-xs text-amber-400">
                 This window is not connected to an active appointment type. Assign {staff.find((person) => person.id === s.staff_id)?.name ?? 'this staff member'} to a service, or change the window to Any staff.
               </p>
             )}
-          </div>
-        ))}
+          </fieldset>
+          )
+        })}
       </div>
       <div className="mt-3 flex gap-2">
         <button onClick={addSlot} className="text-xs font-medium text-emerald-400 hover:underline">+ Add window</button>

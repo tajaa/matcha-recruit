@@ -3,8 +3,11 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import CappeOnboardingWizard from './CappeOnboardingWizard'
 
-const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), categories: vi.fn() }))
+const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), categories: vi.fn() }))
 vi.mock('../api', () => ({ cappeApi: api, fetchCappeTemplateCategories: api.categories }))
+
+// Whatever zone the test machine is in — the wizard sends the browser's.
+const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
 
 const me = vi.hoisted(() => ({ account: { name: 'Pat Lee', account_type: 'business', plan: 'free' } }))
 vi.mock('../hooks/useCappeMe', () => ({ useCappeMe: () => ({ account: me.account }) }))
@@ -61,6 +64,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   api.get.mockReset().mockResolvedValue(TEMPLATES)
   api.post.mockReset().mockResolvedValue({ id: 'site-1' })
+  api.put.mockReset().mockResolvedValue({ id: 'site-1' })
   api.categories.mockReset().mockResolvedValue(CATEGORIES)
   me.account = { name: 'Pat Lee', account_type: 'business', plan: 'free' }
 })
@@ -110,6 +114,16 @@ describe('CappeOnboardingWizard', () => {
     expect(api.post).toHaveBeenCalledWith('/sites', {
       name: 'Corner Bakery', source_type: 'blank', is_multi_location: false, directory_category: 'food-drink',
     })
+    // The site takes the owner's timezone instead of staying on UTC.
+    expect(api.put).toHaveBeenCalledWith('/sites/site-1', { timezone: TZ })
+  })
+
+  it('still finishes when the timezone cannot be saved', async () => {
+    api.put.mockRejectedValueOnce(new Error('offline'))
+    renderWizard()
+    await toStartStep('One location', 'Corner Bakery')
+    fireEvent.click(screen.getByRole('button', { name: 'Start with a blank site' }))
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/cappe/sites/site-1'))
   })
 
   it('a blank site with the category skipped sends none', async () => {
@@ -182,7 +196,7 @@ describe('CappeOnboardingWizard', () => {
     expect(api.post).toHaveBeenNthCalledWith(1, '/sites/from-template', {
       template_slug: 'journal', name: 'Corner Bakery', is_multi_location: true, directory_category: 'other',
     })
-    expect(api.post).toHaveBeenNthCalledWith(2, '/sites/site-1/locations', { name: 'Mission', is_default: true })
+    expect(api.post).toHaveBeenNthCalledWith(2, '/sites/site-1/locations', { name: 'Mission', is_default: true, timezone: TZ })
   })
 
   it('shows why creation failed and lets the person try again', async () => {

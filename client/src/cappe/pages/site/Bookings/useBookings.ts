@@ -9,6 +9,7 @@ import type {
   CappePricingMode,
 } from '../../../types'
 import { parseMoneyCents } from '../../../utils/money'
+import { bookingStatusQuestion } from '../../../utils/bookingStatus'
 import { hhmm } from './constants'
 import type { TypeForm, StaffForm, LocForm } from './types'
 
@@ -44,7 +45,17 @@ export function useBookings() {
   const [savingDiscounts, setSavingDiscounts] = useState(false)
 
   const isCreator = account?.account_type === 'personal'
-  const riderUnlocked = isCreator && account?.plan === 'pro'
+  // Same plans the server grants `rider` to (services/entitlements.py). Paying
+  // Creator accounts used to see an upgrade notice for a feature they had.
+  const riderUnlocked = isCreator && ['pro', 'creator'].includes(account?.plan || '')
+
+  // In a location's view, the lists hold that location's own rows PLUS the
+  // shared (all-locations) rows. Saving used to send both back as the
+  // location's set, copying every shared row into the location — after which
+  // each shared window appeared twice on the storefront and could no longer be
+  // removed from here. Shared rows are now shown read-only and never sent.
+  // Rows added in this session have no `location_id` and are the location's.
+  const isShared = (row: { location_id?: string | null }) => selLoc !== '' && row.location_id === null
 
   // Config (types/availability/staff/rates/discounts) is scoped to the selected
   // location: a concrete location → its rows + shared (NULL); '' with locations
@@ -116,12 +127,23 @@ export function useBookings() {
     }
   }
   async function setLocationDefault(id: string) {
-    const updated = await cappeApi.put<CappeLocation>(`/sites/${siteId}/locations/${id}`, { is_default: true })
-    setLocations((ls) => ls.map((l) => ({ ...l, is_default: l.id === id })).map((l) => (l.id === id ? updated : l)))
+    setError(null)
+    try {
+      const updated = await cappeApi.put<CappeLocation>(`/sites/${siteId}/locations/${id}`, { is_default: true })
+      setLocations((ls) => ls.map((l) => ({ ...l, is_default: l.id === id })).map((l) => (l.id === id ? updated : l)))
+    } catch (e) {
+      fail(e, 'Could not make this the default location')
+    }
   }
   async function deactivateLocation(id: string) {
     if (!window.confirm('Deactivate this location? Its appointment history is kept.')) return
-    await cappeApi.delete(`/sites/${siteId}/locations/${id}`)
+    setError(null)
+    try {
+      await cappeApi.delete(`/sites/${siteId}/locations/${id}`)
+    } catch (e) {
+      fail(e, 'Could not deactivate this location')
+      return
+    }
     const next = locations.filter((l) => l.id !== id)
     setLocations(next)
     if (selLoc === id) switchLocation(next.find((l) => l.active)?.id || '')
@@ -158,18 +180,41 @@ export function useBookings() {
   async function addStaff(e: React.FormEvent) {
     e.preventDefault()
     if (!staffForm.name.trim()) return
-    const created = await cappeApi.post<CappeStaff>(`/sites/${siteId}/staff`, {
-      name: staffForm.name.trim(), bio: staffForm.bio.trim() || null, image_url: staffForm.image_url.trim() || null,
-      location_id: selLoc || null,
-    })
-    setStaff((s) => [...s, created])
-    setStaffForm({ name: '', bio: '', image_url: '' })
+    setError(null)
+    try {
+      const created = await cappeApi.post<CappeStaff>(`/sites/${siteId}/staff`, {
+        name: staffForm.name.trim(), bio: staffForm.bio.trim() || null, image_url: staffForm.image_url.trim() || null,
+        location_id: selLoc || null,
+      })
+      setStaff((s) => [...s, created])
+      setStaffForm({ name: '', bio: '', image_url: '' })
+    } catch (e) {
+      fail(e, 'Could not add this staff member')
+    }
   }
-  async function removeStaff(id: string) {
-    await cappeApi.delete(`/sites/${siteId}/staff/${id}`)
-    setStaff((s) => s.filter((x) => x.id !== id))
+  async function updateStaff(id: string, patch: Partial<Pick<CappeStaff, 'name' | 'bio' | 'image_url' | 'active'>>) {
+    setError(null)
+    try {
+      const updated = await cappeApi.put<CappeStaff>(`/sites/${siteId}/staff/${id}`, patch)
+      setStaff((s) => s.map((x) => (x.id === id ? updated : x)))
+      return true
+    } catch (e) {
+      fail(e, 'Could not update this staff member')
+      return false
+    }
+  }
+  async function removeStaff(person: CappeStaff) {
+    if (!window.confirm(`Remove ${person.name}? Customers can no longer book with them. Their past bookings are kept. To pause them instead, mark them inactive.`)) return
+    setError(null)
+    try {
+      await cappeApi.delete(`/sites/${siteId}/staff/${person.id}`)
+    } catch (e) {
+      fail(e, `Could not remove ${person.name}`)
+      return
+    }
+    setStaff((s) => s.filter((x) => x.id !== person.id))
     // Drop the removed staff from any service mapping in local state.
-    setTypes((ts) => ts.map((t) => ({ ...t, staff_ids: (t.staff_ids || []).filter((sid) => sid !== id) })))
+    setTypes((ts) => ts.map((t) => ({ ...t, staff_ids: (t.staff_ids || []).filter((sid) => sid !== person.id) })))
   }
   function toggleTypeStaff(t: CappeBookingType, staffId: string) {
     const has = (t.staff_ids || []).includes(staffId)
@@ -182,16 +227,19 @@ export function useBookings() {
     try {
       const updated = await cappeApi.put<CappeBookingType>(`/sites/${siteId}/booking-types/${id}`, patch)
       setTypes((t) => t.map((x) => (x.id === id ? updated : x)))
+      return true
     } catch (e) {
       fail(e, 'Could not update this appointment type')
+      return false
     }
   }
 
-  async function removeType(id: string) {
+  async function removeType(t: CappeBookingType) {
+    if (!window.confirm(`Delete "${t.name}"? Customers can no longer book it, and people already booked can't reschedule it online. To stop taking new bookings instead, archive it.`)) return
     setError(null)
     try {
-      await cappeApi.delete(`/sites/${siteId}/booking-types/${id}`)
-      setTypes((t) => t.filter((x) => x.id !== id))
+      await cappeApi.delete(`/sites/${siteId}/booking-types/${t.id}`)
+      setTypes((ts) => ts.filter((x) => x.id !== t.id))
     } catch (e) {
       fail(e, 'Could not remove this appointment type')
     }
@@ -208,10 +256,16 @@ export function useBookings() {
     setSavingAvail(true)
     setError(null)
     try {
-      const payload = { slots: slots.map((s) => ({ ...s, start_time: hhmm(s.start_time), end_time: hhmm(s.end_time) })) }
+      const own = slots.filter((s) => !isShared(s))
+      const payload = {
+        slots: own.map((s) => ({
+          weekday: s.weekday, start_time: hhmm(s.start_time), end_time: hhmm(s.end_time),
+          booking_type_id: s.booking_type_id, staff_id: s.staff_id ?? null,
+        })),
+      }
       const q = selLoc ? `?location_id=${selLoc}` : ''
       const saved = await cappeApi.put<CappeAvailabilitySlot[]>(`/sites/${siteId}/availability${q}`, payload)
-      setSlots(saved)
+      setSlots((current) => [...current.filter(isShared), ...saved])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save availability')
     } finally {
@@ -234,14 +288,14 @@ export function useBookings() {
     setError(null)
     try {
       const payload = {
-        rules: rules.map((r) => ({
+        rules: rules.filter((r) => !isShared(r)).map((r) => ({
           label: r.label || 'Rate', booking_type_id: r.booking_type_id, weekday: r.weekday,
           start_time: hhmm(r.start_time), end_time: hhmm(r.end_time), multiplier: r.multiplier,
         })),
       }
       const q = selLoc ? `?location_id=${selLoc}` : ''
       const saved = await cappeApi.put<CappeRateRule[]>(`/sites/${siteId}/rate-rules${q}`, payload)
-      setRules(saved)
+      setRules((current) => [...current.filter(isShared), ...saved])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save rate rules')
     } finally {
@@ -294,7 +348,7 @@ export function useBookings() {
     setError(null)
     try {
       const payload = {
-        discounts: discounts.map((d) => ({
+        discounts: discounts.filter((d) => !isShared(d)).map((d) => ({
           label: d.label || 'Discount',
           percent_off: Math.max(1, Math.min(90, Math.round(d.percent_off) || 1)),
           scope: d.scope,
@@ -306,7 +360,7 @@ export function useBookings() {
       }
       const q = selLoc ? `?location_id=${selLoc}` : ''
       const saved = await cappeApi.put<CappeDiscount[]>(`/sites/${siteId}/discounts${q}`, payload)
-      setDiscounts(saved)
+      setDiscounts((current) => [...current.filter(isShared), ...saved])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save discounts')
     } finally {
@@ -315,9 +369,15 @@ export function useBookings() {
   }
 
   // --- Booking actions ---
+  // The server answers with the full row (names, timezone, linked order); the
+  // fallbacks only matter for an older server mid-deploy.
   const mergeBooking = (b: CappeBooking, updated: CappeBooking) =>
     setBookings((list) => list.map((x) => (
-      x.id === b.id ? { ...updated, location_name: updated.location_name ?? x.location_name } : x
+      x.id === b.id ? {
+        ...updated,
+        location_name: updated.location_name ?? x.location_name,
+        staff_name: updated.staff_name ?? x.staff_name,
+      } : x
     )))
 
   async function acceptBooking(b: CappeBooking) {
@@ -342,6 +402,9 @@ export function useBookings() {
     }
   }
   async function setBookingStatus(b: CappeBooking, status: string) {
+    if (!status || status === b.status) return
+    const question = bookingStatusQuestion(b, status)
+    if (question && !window.confirm(question)) return
     setError(null)
     try {
       mergeBooking(b, await cappeApi.patch<CappeBooking>(`/sites/${siteId}/bookings/${b.id}`, { status }))
@@ -370,7 +433,7 @@ export function useBookings() {
     isCreator, riderUnlocked,
     loadConfig, switchLocation,
     addLocation, setLocationDefault, deactivateLocation,
-    addType, addStaff, removeStaff, toggleTypeStaff, patchType, removeType,
+    addType, addStaff, updateStaff, removeStaff, toggleTypeStaff, patchType, removeType, isShared,
     addSlot, setSlot, saveAvailability,
     addRule, setRule, saveRules,
     addRiderItem, setRiderItem, saveRider,

@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from ._validators import MAX_SNAPSHOT_BYTES, app_url_scheme, assert_json_size
+from ._validators import MAX_SNAPSHOT_BYTES, app_url_scheme, assert_json_size, iana_timezone
 
 # Apex-domain shape (labels 1-63 chars, alnum/hyphen, real-looking TLD).
 _DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")
@@ -135,6 +135,7 @@ class CappeSiteUpdate(_SnapshotSizeLimit):
     theme_config: Optional[dict[str, Any]] = None
     meta_config: Optional[dict[str, Any]] = None
     timezone: Optional[str] = Field(default=None, max_length=64)
+    _tz = field_validator("timezone")(iana_timezone)
     is_multi_location: Optional[bool] = None
     tax_rate_bps: Optional[int] = Field(default=None, ge=0, le=10000)
     tax_label: Optional[str] = Field(default=None, max_length=40)

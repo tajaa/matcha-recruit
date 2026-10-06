@@ -3,7 +3,6 @@ availability, slots, create)."""
 from uuid import UUID
 
 from fastapi import BackgroundTasks, Depends, HTTPException, Query, Request, status
-from fastapi.responses import Response
 
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
@@ -16,6 +15,7 @@ from ...models.cappe import (
     CappePublicStaff,
 )
 from ...services.commerce import (
+    OutsideAvailability,
     check_recipient_send_ok as _recipient_send_ok,
     create_booking_in_tx,
     fetch_rate_rules,
@@ -42,20 +42,29 @@ from ._common import _location_ctx, _published_site, _read_rate_limit, _reject_r
 
 router = limited_public_router()
 _SUGGESTION_SEARCH_DAYS = 14
+# Slots the public picker returns. It was 60 — about two days of a 15-minute
+# service — and it was applied to each stylist BEFORE the "any available"
+# merge, so the merged list was ragged as well as short.
+PUBLIC_SLOT_CAP = 300
 suggestions_router = limited_public_router()
 # Kept as a module alias for existing body-limit tests and downstream imports.
 _BookingSuggestionBodyLimitRoute = CappePublicJsonBodyLimitRoute
 
 
-async def _active_staff_for_type(conn, site_id, type_id) -> list:
+async def _active_staff_for_type(conn, site_id, type_id, location_id=None) -> list:
     """Active staff ids who perform this service, ordered. Empty = unstaffed
-    (legacy shared-calendar path)."""
+    (legacy shared-calendar path).
+
+    At a location, only staff who work there (or at every location) count —
+    "any available" used to hand a San Diego booking to someone in LA. With no
+    location (a single-location site) every active staff member counts."""
     rows = await conn.fetch(
         "SELECT ss.staff_id FROM cappe_staff_services ss "
         "JOIN cappe_staff s ON s.id = ss.staff_id "
         "WHERE ss.booking_type_id = $1 AND ss.site_id = $2 AND s.active = true "
+        "AND ($3::uuid IS NULL OR s.location_id IS NULL OR s.location_id = $3) "
         "ORDER BY s.sort_order, s.created_at",
-        type_id, site_id,
+        type_id, site_id, location_id,
     )
     return [r["staff_id"] for r in rows]
 
@@ -185,6 +194,7 @@ async def public_booking_slots(
         slots = await _load_live_booking_slots(
             conn, site=site, booking_type=btype, location_id=location_id,
             timezone_name=tz, days=days, staff_id=staff_id, discounts=discounts,
+            max_slots=PUBLIC_SLOT_CAP,
         )
         now_utc = await conn.fetchval("SELECT NOW()")
         pct = best_discount_percent(
@@ -206,22 +216,26 @@ async def _load_live_booking_slots(
     conn, *, site, booking_type, location_id: UUID | None,
     timezone_name: str, days: int, staff_id: UUID | None,
     discounts: list[dict] | None = None, include_staff_ids: bool = False,
-    max_slots: int | None = 60,
+    max_slots: int | None = PUBLIC_SLOT_CAP,
 ) -> list[dict]:
     """Generate live candidates shared by the normal picker and AI suggestions."""
     type_id = booking_type["id"]
+    # DISTINCT: a window saved both as shared and for a location (the location
+    # editor used to copy shared rows into the location on every save) must
+    # not produce every slot twice.
     avail = await conn.fetch(
-        "SELECT weekday, start_time, end_time, booking_type_id, staff_id "
+        "SELECT DISTINCT weekday, start_time, end_time, booking_type_id, staff_id "
         "FROM cappe_availability WHERE site_id = $1 AND (location_id IS NULL OR location_id = $2)",
         site["id"], location_id,
     )
-    offering_staff = await _active_staff_for_type(conn, site["id"], type_id)
+    offering_staff = await _active_staff_for_type(conn, site["id"], type_id, location_id)
     booked = await conn.fetch(
-        "SELECT starts_at, ends_at, staff_id FROM cappe_bookings "
-        "WHERE site_id = $1 AND status IN ('pending', 'confirmed') "
-        "AND (staff_id = ANY($4::uuid[]) "
-        "     OR (staff_id IS NULL AND booking_type_id = $2 "
-        "         AND location_id IS NOT DISTINCT FROM $3))",
+        "SELECT b.starts_at, b.ends_at, b.staff_id, COALESCE(obt.buffer_minutes, 0) AS buffer_minutes "
+        "FROM cappe_bookings b LEFT JOIN cappe_booking_types obt ON obt.id = b.booking_type_id "
+        "WHERE b.site_id = $1 AND b.status IN ('pending', 'confirmed') "
+        "AND (b.staff_id = ANY($4::uuid[]) "
+        "     OR (b.staff_id IS NULL AND b.booking_type_id = $2 "
+        "         AND b.location_id IS NOT DISTINCT FROM $3))",
         site["id"], type_id, location_id, list(offering_staff),
     )
     rules = await fetch_rate_rules(conn, site["id"], type_id, location_id)
@@ -242,7 +256,7 @@ async def _load_live_booking_slots(
     }
 
     def _busy_for(sid):
-        return [(b["starts_at"], b["ends_at"]) for b in booked
+        return [(b["starts_at"], b["ends_at"], b["buffer_minutes"]) for b in booked
                 if sid is None or (b["staff_id"] and str(b["staff_id"]) == sid)]
 
     if staff_id is not None:
@@ -255,14 +269,19 @@ async def _load_live_booking_slots(
             for slot in slots:
                 slot["available_staff_ids"] = [sid]
     elif offering_staff:
+        # Each stylist's list is generated uncapped (it is bounded by `days`)
+        # and the cap applied to the merged list: capping each one first cut
+        # every stylist off at the same count, not at the same date.
         per_staff = []
         for sid_value in offering_staff:
             sid = str(sid_value)
             per_staff.append((sid, generate_slots(
                 availability, btype, _busy_for(sid), timezone_name, now_utc, rules,
-                days_ahead=days, max_slots=max_slots, staff_id=sid,
+                days_ahead=days, max_slots=None, staff_id=sid,
             )))
         slots = merge_any_staff_slots(per_staff)
+        if max_slots is not None:
+            slots = slots[:max_slots]
     else:
         slots = generate_slots(
             availability, btype, _busy_for(None), timezone_name, now_utc, rules,
@@ -312,8 +331,9 @@ async def public_booking_suggestions(
             "SELECT s.id, s.name FROM cappe_staff_services ss "
             "JOIN cappe_staff s ON s.id = ss.staff_id "
             "WHERE ss.booking_type_id = $1 AND ss.site_id = $2 AND s.active = true "
+            "AND ($3::uuid IS NULL OR s.location_id IS NULL OR s.location_id = $3) "
             "ORDER BY s.sort_order, s.created_at",
-            body.booking_type_id, site["id"],
+            body.booking_type_id, site["id"], loc_id,
         )
         eligible_ids = {row["id"] for row in staff_rows}
         if body.staff_id is not None and body.staff_id not in eligible_ids:
@@ -356,6 +376,10 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
     """Request a booking. `ends_at` is computed from the type's duration; the
     slot must fall inside an availability window (in the site's timezone) and not
     overlap an existing booking."""
+    # The hidden field only a script fills in. Refused the same way the
+    # suggestions endpoint refuses it.
+    if body.website.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request")
     ip = client_ip(request)
     await check_rate_limit(ip, "cappe_booking", 5, 60)
     await check_rate_limit(ip, "cappe_booking_hr", 20, 3600)
@@ -383,7 +407,7 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
 
         # Resolve which staff to book. A staffed service must be booked with one
         # of its staff; an unstaffed service uses the legacy shared calendar.
-        offering = await _active_staff_for_type(conn, site["id"], body.booking_type_id)
+        offering = await _active_staff_for_type(conn, site["id"], body.booking_type_id, loc_id)
         if body.staff_id is not None:
             if not offering or body.staff_id not in offering:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That staff member isn't available for this service")
@@ -407,6 +431,12 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
                         location_id=loc_id, tz=loc_tz,
                     )
                 break
+            except OutsideAvailability:
+                # With "any available", this stylist simply doesn't work then —
+                # the slot the picker showed came from someone else. Try the next.
+                if len(candidates) > 1:
+                    continue
+                raise
             except HTTPException as exc:
                 # 409 = this staff is taken at that time; with "any available"
                 # fall through and try the next staff. Other 4xx (bad slot) abort.
@@ -415,10 +445,10 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
                     continue
                 raise
         if booking is None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="That time was just taken." if last_taken else "That slot is taken",
-            )
+            if not last_taken:
+                # Nobody who offers this service works at that time.
+                raise OutsideAvailability()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That time was just taken.")
         owner = await _site_owner(conn, site["id"])
 
     # Notifications (best-effort): confirmation → customer, alert → creator.
@@ -445,4 +475,8 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
         "ends_at": booking["ends_at"].isoformat(),
         "quoted_price_cents": booking["quoted_price_cents"],
         "requires_approval": booking["requires_approval"],
+        # What the times mean, and where the customer can change the booking.
+        # The token is the one emailed to the same person who just made it.
+        "timezone": loc_tz,
+        "manage_url": booking_manage_url(booking["access_token"]),
     }

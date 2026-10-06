@@ -3,7 +3,9 @@
 Runs on worker startup when the `cappe_booking_reminders` scheduler row is
 enabled (default off). Emails each customer a single reminder ~24h before a
 confirmed booking. Claim-before-send (stamp reminder_sent_at, only send if the
-claim won) so the 15-min re-dispatch never double-sends.
+claim won) so the 15-min re-dispatch never double-sends — and a send no
+provider accepted gives the claim back, so the next pass tries again instead
+of the reminder being recorded as sent when it never was.
 """
 import asyncio
 import logging
@@ -43,10 +45,12 @@ async def _run() -> dict:
         bookings = await conn.fetch(
             """SELECT b.id, b.access_token, b.status, b.starts_at, b.reminder_sent_at,
                       b.customer_email, b.customer_name,
-                      bt.name AS type_name, s.name AS site_name, s.timezone
+                      bt.name AS type_name, s.name AS site_name,
+                      COALESCE(loc.timezone, s.timezone) AS timezone
                FROM cappe_bookings b
                JOIN cappe_sites s ON s.id = b.site_id
                LEFT JOIN cappe_booking_types bt ON bt.id = b.booking_type_id
+               LEFT JOIN cappe_locations loc ON loc.id = b.location_id
                WHERE b.status = 'confirmed' AND b.reminder_sent_at IS NULL
                  AND b.customer_email IS NOT NULL
                  AND b.starts_at > NOW()
@@ -61,6 +65,7 @@ async def _run() -> dict:
         now_utc = datetime.now(timezone.utc)
         sent = 0
         skipped = 0
+        failed = 0
         for b in bookings:
             email = b["customer_email"]
             # Reserved/test domains never deliver — stamp so we stop re-scanning.
@@ -83,13 +88,22 @@ async def _run() -> dict:
             if not claimed:
                 skipped += 1
                 continue
-            await send_cappe_booking_reminder_email(
+            delivered = await send_cappe_booking_reminder_email(
                 email, b["customer_name"], b["site_name"], b["type_name"] or "Booking",
                 format_when(b["starts_at"], b["timezone"]), booking_manage_url(b["access_token"]),
             )
+            if not delivered:
+                # No provider took it. Release the claim — guarded on the
+                # stamp this pass wrote — so the next pass can try again.
+                await conn.execute(
+                    "UPDATE cappe_bookings SET reminder_sent_at = NULL WHERE id = $1 AND reminder_sent_at IS NOT NULL",
+                    b["id"],
+                )
+                failed += 1
+                continue
             sent += 1
 
-        return {"checked": len(bookings), "sent": sent, "skipped": skipped}
+        return {"checked": len(bookings), "sent": sent, "skipped": skipped, "failed": failed}
     finally:
         await conn.close()
 

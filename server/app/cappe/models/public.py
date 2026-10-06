@@ -49,6 +49,12 @@ class CappePublicBooking(BaseModel):
     quoted_price_cents: Optional[int] = None
     timezone: str
     can_modify: bool      # cancel/reschedule allowed (future + pending/confirmed)
+    # Who and where — the reschedule page asks for slots with these, so the
+    # times it offers are the ones the server will accept.
+    staff_id: Optional[UUID] = None
+    staff_name: Optional[str] = None
+    location_id: Optional[UUID] = None
+    location_name: Optional[str] = None
 
 
 # Public (token-resolved) thread view for the client.
