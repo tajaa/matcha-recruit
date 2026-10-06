@@ -8,12 +8,17 @@ certificate — see "How a custom domain goes live". Code:
 
 - `app/core/services/porkbun.py` — Porkbun v3 client (check / register / DNS). Shared: the Espresso assistant's `domains` ability uses it too.
 - `services/stripe_connect.py` — `create_platform_checkout_session`, `refund`,
-  `verify_platform_webhook` (domain charges hit OUR platform account, not Connect).
+  `charge_off_session`, `verify_platform_webhook` (domain charges hit OUR
+  platform account, not Connect).
 - `services/cloudfront_tenants.py` — distribution-tenant create / status / delete.
-- `services/domain_register.py` — `finalize_domain_registration`,
-  `provision_domain_edge` (claimed), `retry_domain_edge`.
+- `services/domain_register.py` — `begin_registration`,
+  `finalize_domain_registration`, `refund_failed_registration`,
+  `reap_abandoned_purchase`, `provision_domain_edge` (claimed), `retry_domain_edge`.
 - `routes/domains.py` — config / search / purchase / connect / verify / list /
-  DNS / auto-renew / transfer-request (+cancel) / edge retry / webhook.
+  DNS / auto-renew / **renew** / transfer-request (+cancel) / edge retry / webhook.
+- `workers/tasks/cappe_domain_renewals.py` — yearly charge, dunning, lapse.
+- `workers/tasks/cappe_domain_finalize.py` — stranded registrations, refunds
+  still owed, abandoned purchases.
 - `workers/tasks/cappe_edge_sync.py` — the only writer of `cappe_sites.custom_domain`.
 - `cappe_domains` table — `zzzzcappe19`/`20`; edge columns + `transfer_requested`
   in `zzzzcappe31`.
@@ -26,12 +31,25 @@ We are the **reseller / merchant of record**. The tenant pays us via Stripe; we
 register under our funded Porkbun account and keep the margin. Domains register
 under our account's default WHOIS-private contact (tenant can transfer out after
 the ICANN 60-day lock). Charge happens **before** registration; a failed
-registration auto-refunds (`finalize_domain_registration`).
+registration auto-refunds, and a refund that fails is recorded as
+`refund_status='owed'` and retried by `cappe_domain_finalize`
+(`refund_failed_registration`).
+
+**Renewals.** Porkbun auto-renews the registration on our account; the renewals
+task recoups it from the tenant's saved card (`stripe_payment_method_id`,
+captured at purchase). A refused card is retried every 3 days, the tenant is
+emailed once, and the domain lapses 7 days past expiry — or the tenant pays by
+hand with `POST /domains/{id}/renew`. Full behaviour and the test-mode checks:
+`docs/ops/CAPPE_PAYMENTS.md`.
+
+**A pending row does not hold a name.** Only `registering` / `active` /
+`transfer_requested` block a second claim. An unpaid checkout's row is removed
+after 2 hours (its Stripe session lives 1).
 
 ## Go-live checklist
 
-1. **Migrations** — `zzzzcappe31` + `zzzzcappe32` applied dev → prod (`migrate-dev.sh`, then
-   `migrate-prod.sh`).
+1. **Migrations** — `zzzzcappe31` + `zzzzcappe32` + `zzzzcappe38` applied dev → prod
+   (`migrate-dev.sh`, then `migrate-prod.sh`).
 
 2. **Porkbun account** — fund a balance, enable **API access**, generate keys:
    ```
@@ -41,11 +59,14 @@ registration auto-refunds (`finalize_domain_registration`).
    ```
 
 3. **Stripe — PLATFORM webhook** (separate from the storefront Connect webhook):
-   endpoint `https://<app>/api/cappe/domains/webhook`, events
-   `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
-   `checkout.session.async_payment_failed`. Signing secret →
+   endpoint `https://<app>/api/cappe/domains/webhook`. Signing secret →
    `CAPPE_PLATFORM_WEBHOOK_SECRET`. A domain is only registered once
-   `payment_status` says the money cleared.
+   `payment_status` says the money cleared. **The event list is in
+   `docs/ops/CAPPE_PAYMENTS.md` §1** — this endpoint also carries subscription
+   billing and refunds, and the three `checkout.session.*` events this step
+   used to list are not enough: without `customer.subscription.*` a
+   cancel-at-period-end never drops the plan, and without `charge.refunded` a
+   refunded domain keeps renewing.
 
 4. **Edge** — build the tenant distribution + connection group and set the
    `CAPPE_CF_*` env vars per `docs/ops/CAPPE_CUSTOM_DOMAINS.md`, ship

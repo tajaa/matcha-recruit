@@ -45,6 +45,29 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
   `routes/domains.py`); `async_payment_succeeded/failed` and `session.expired` are handled and the
   abandoned-order reaper (`cappe_order_reaper`) is the backstop for restocking.
 
+## Payments invariants (2026-10 review) — runbook: `docs/ops/CAPPE_PAYMENTS.md`
+
+- **`refunded` is reached only by `order_lifecycle.mark_order_refunded`** — called by
+  `POST /orders/{id}/refund` AFTER Stripe accepts the refund, and by the `charge.refunded` webhook.
+  The status PATCH refuses it. Never add a path that writes the status without the money moving.
+- **Order status changes go through `order_lifecycle.ALLOWED_TRANSITIONS`.** No cycle may pass
+  through a restock; `cancelled` / `refunded` / `declined` are terminal.
+- **Close the Stripe page before releasing or settling anything by hand** — storefront orders
+  (`_close_open_checkout`), collab installments (`_close_collab_sessions`), domain purchases
+  (`reap_abandoned_purchase`). A released row with a payable page is a customer charged for nothing.
+- **A collab session settles an installment only if it is the one WE created for it**
+  (`_collab_reject_reason`: stored session id + amount + currency). Session metadata is written by
+  whoever created the session, and the connected account is the creator's own. Anything else that
+  settles is refunded (`_refund_unapplied_collab_charge`).
+- **No Stripe call inside a DB transaction.** `sync_subscription` raises
+  `DuplicateLiveSubscription`; `sync_subscription_tx` resolves it after the connection is released.
+- **A refused CARD is `CappeStripeCardError`; anything else is ours.** Only the first may count
+  against a customer (dunning, lapse). `charge_off_session` must be given a payment method id.
+- **Discount rounding is integer half-up on both sides** (`discounts.apply_discount_cents` and
+  `render/assets/store.js`) — `test_cappe_checkout_failure.py` pins the two expressions together.
+- **A failed attempt to take a card is an error, never a fallback to the unpaid flow**
+  (`commerce.create_public_order` → `release_unpaid_order` + 502).
+
 ## Site templates (`services/site_templates/`)
 
 - **The catalog is code, not the `cappe_templates` table.** One `SiteTemplate` per entry, one module
