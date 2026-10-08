@@ -10,6 +10,7 @@ import {
   type BetaInvitation,
   type AutoPRBoardCapabilities,
 } from '../../api/admin/platformSettings'
+import { AgentModelSetting, DEFAULT_AGENT_MODEL } from '../../components/admin/AgentModelSetting'
 
 // Mirrors the backend's fallback when platform_settings has no row yet.
 const DEFAULT_RESEARCH_MODE = 'light'
@@ -158,7 +159,7 @@ export default function Settings() {
     setSaveError(null)
     try {
       await adminSettingsApi.setResearchModelMode(selectedMode)
-      settings.setData({ jurisdiction_research_model_mode: selectedMode })
+      settings.setData({ ...settings.data, jurisdiction_research_model_mode: selectedMode })
       setPendingMode(null)
     } catch (e) {
       // api/client.ts throws on non-2xx. Uncaught, this was an unhandled
@@ -305,6 +306,28 @@ export default function Settings() {
           </Button>
           {saveError && <p className="mt-2 text-xs text-red-400">{saveError}</p>}
         </div>
+      </div>
+
+      {/* ── Agent model ── */}
+      <div className="mt-12 max-w-xl">
+        <h2 className="text-sm font-medium text-zinc-300 mb-1">Agent model</h2>
+        <p className="text-xs text-zinc-500 mb-3">
+          Which model runs Huume, the Espresso agents, Ops channel @huume and the one-shot AI
+          helpers that use Luna. Managers can still pick a model per chat in the schedule assistant.
+        </p>
+        {settings.loading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading settings...
+          </div>
+        ) : settings.error ? (
+          <p className="py-4 text-sm text-red-400">{settings.error}</p>
+        ) : (
+          <AgentModelSetting
+            current={settings.data?.agent_model ?? DEFAULT_AGENT_MODEL}
+            anthropicConfigured={!!settings.data?.anthropic_configured}
+            onSaved={(model) => settings.setData({ ...settings.data, agent_model: model })}
+          />
+        )}
       </div>
 
       {/* ── AutoPR board capabilities ── */}

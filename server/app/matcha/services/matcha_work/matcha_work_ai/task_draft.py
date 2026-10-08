@@ -7,7 +7,9 @@ import re
 from typing import Optional
 
 
+from app.core.services import anthropic_messages
 from app.core.services.ai_usage import feature_scope
+from app.matcha.services.huume.claude_client import get_claude_client
 from app.matcha.services.huume.luna_client import get_luna_client, text_item
 from app.matcha.services.huume.routing import LUNA
 
@@ -136,11 +138,16 @@ Return ONLY a JSON object with these keys:
 Request:
 {prompt}"""
 
-    # Task drafting is intentionally provider-pinned: the thread model picker
-    # cannot route a draft back to Gemini, so this takes no model argument.
+    # Task drafting ignores the thread model picker (which cannot route a draft
+    # back to Gemini), so this takes no model argument: it runs on Luna, or on
+    # the Claude model the platform "Agent model" setting routes agent
+    # workloads to. Both sessions take the same call, JSON mode included.
+    claude_model = await anthropic_messages.claude_override()
+    model = claude_model or LUNA
+    client = get_claude_client() if claude_model else get_luna_client()
     with feature_scope(_AI_USAGE_FEATURE):
-        response = await get_luna_client().create_response(
-            model=LUNA,
+        response = await client.create_response(
+            model=model,
             input=[text_item("user", instruction)],
             instructions=(
                 "Return exactly one JSON object that satisfies the user's task-draft "
@@ -201,7 +208,7 @@ Request:
     # budget the same way the durable agent path does.
     meta = response.usage or {}
     token_usage = {
-        "model": LUNA,
+        "model": model,
         "prompt_tokens": int(meta.get("input_tokens") or 0),
         "completion_tokens": int(meta.get("output_tokens") or 0),
         "total_tokens": int(meta.get("total_tokens") or 0),

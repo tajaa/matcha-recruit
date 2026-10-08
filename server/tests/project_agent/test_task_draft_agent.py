@@ -242,3 +242,35 @@ def test_task_draft_citations_must_name_the_loaded_root_guide_exactly():
     assert not task_draft_agent._is_citation_for_loaded_guide(
         "See CLAUDE.md:12", files_read,
     )
+
+
+@pytest.mark.asyncio
+async def test_platform_setting_runs_the_task_draft_on_claude(monkeypatch):
+    models = _FakeModels([_response(_call("draft_ticket", {
+        "title": "Add filters", "description": "Add reusable filters.", "priority": "medium",
+        "category": "product", "board_column": "todo", "assignee_name": None, "element_name": None,
+        "subtasks": ["Update the board", "Add coverage"], "sources": ["CLAUDE.md:12-18"],
+    }))])
+    luna = Mock()
+    monkeypatch.setattr(task_draft_agent.anthropic_messages, "claude_override", AsyncMock(return_value="claude-haiku-5-5"))
+    monkeypatch.setattr(task_draft_agent, "get_claude_client", Mock(return_value=models))
+    monkeypatch.setattr(task_draft_agent, "get_luna_client", luna)
+    set_model = AsyncMock()
+    monkeypatch.setattr(task_draft_agent.store, "set_run_model", set_model)
+    monkeypatch.setattr(task_draft_agent.store, "read_repo_file", AsyncMock(return_value={
+        "path": "CLAUDE.md", "start_line": 1, "end_line": 20, "total_lines": 20,
+        "content": "12: Espresso lives under platforms/desktop/Espresso/",
+    }))
+    monkeypatch.setattr(task_draft_agent.store, "record_step", AsyncMock())
+    monkeypatch.setattr(task_draft_agent.store, "mark_run", AsyncMock())
+
+    run_id = uuid4()
+    result = await task_draft_agent.run_task_draft(
+        run_id=run_id, company_id=uuid4(), project_id=uuid4(), requested_by=uuid4(),
+        request="Save project filters.", project_title="MATCHA", repo="example/matcha",
+        base_branch="main", collaborators=[], elements=[], recent_done=[],
+    )
+    assert result["token_usage"]["model"] == "claude-haiku-5-5"
+    assert models.calls[0]["model"] == "claude-haiku-5-5"
+    luna.assert_not_called()
+    set_model.assert_awaited_once_with(run_id, "claude-haiku-5-5")

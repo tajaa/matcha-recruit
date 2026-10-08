@@ -1,4 +1,5 @@
-"""Grounded, optional Luna interpretation for inventory conclusions.
+"""Grounded, optional Luna interpretation for inventory conclusions — or
+Claude, when the platform "Agent model" setting routes agent workloads there.
 
 The model only sees server-formatted display tokens. It may choose wording and
 an allowed action, but never numbers, raw ids, or a diagnosis outside the
@@ -13,6 +14,7 @@ from typing import Any
 import httpx
 
 from app.config import get_settings
+from app.core.services import anthropic_messages
 from app.core.services.ai_usage import record_openai_response
 from app.core.services.redis_cache import cache_get, cache_set, get_redis_cache
 from app.core.services.openai_responses import response_text as _response_text
@@ -53,8 +55,24 @@ def deterministic_insight(*, diagnosis: str, tokens: dict[str, str]) -> dict:
     return {"headline": headline, "diagnosis": diagnosis, "action": action, "confidence": "deterministic", "detail": detail}
 
 
+def _validated(raw: Any, *, diagnosis: str, tokens: dict[str, str]) -> dict | None:
+    """The model's wording, if it obeys the veto table and token rules."""
+    if not isinstance(raw, dict) or raw.get("diagnosis") != diagnosis or raw.get("action") not in _ACTIONS or raw.get("action") != _ACTION_FOR_DIAGNOSIS.get(diagnosis, "none"):
+        return None
+    rendered = {field: _render(str(raw.get(field, "")), tokens) for field in ("headline", "detail")}
+    if not rendered["headline"] or not rendered["detail"]:
+        return None
+    confidence = raw.get("confidence")
+    return {
+        "headline": rendered["headline"], "detail": rendered["detail"],
+        "diagnosis": diagnosis, "action": raw["action"],
+        "confidence": confidence if isinstance(confidence, str) else "model",
+    }
+
+
 async def interpret(*, surface: str, diagnosis: str, tokens: dict[str, str]) -> dict:
-    """Return a validated Luna wording or a deterministic conclusion."""
+    """Return a validated Luna (or routed Claude) wording or a deterministic
+    conclusion."""
     fallback = deterministic_insight(diagnosis=diagnosis, tokens=tokens)
     fingerprint = hashlib.sha256(json.dumps([surface, diagnosis, tokens], sort_keys=True).encode()).hexdigest()
     redis = get_redis_cache()
@@ -63,16 +81,30 @@ async def interpret(*, surface: str, diagnosis: str, tokens: dict[str, str]) -> 
         cached = await cache_get(redis, key)
         if cached:
             return cached
-    settings = get_settings()
-    if not settings.openai_api_key or not settings.openai_luna_model:
-        return fallback
-    model = settings.openai_luna_model
     prompt = (
         "Write a concise inventory-manager conclusion as strict JSON with headline, diagnosis, action, confidence, and detail. "
         "Use only {token} placeholders for every numeric or date reference; never write a digit, dollar sign, or percent sign. "
         f"Diagnosis must be {diagnosis!r}. Action must be exactly {_ACTION_FOR_DIAGNOSIS.get(diagnosis, 'none')!r}. "
         f"Surface: {surface}. Available tokens: {json.dumps(tokens, separators=(',', ':'))}."
     )
+    claude_model = await anthropic_messages.claude_override()
+    if claude_model:
+        try:
+            text = await anthropic_messages.generate_text(
+                prompt, model=claude_model, json_output=True, effort="high", timeout_seconds=20,
+            )
+            result = _validated(anthropic_messages.parse_json_object(text), diagnosis=diagnosis, tokens=tokens)
+        except (RuntimeError, ValueError):
+            return fallback
+        if result is None:
+            return fallback
+        if redis:
+            await cache_set(redis, key, result, ttl=900)
+        return result
+    settings = get_settings()
+    if not settings.openai_api_key or not settings.openai_luna_model:
+        return fallback
+    model = settings.openai_luna_model
     started = time.monotonic()
     usage_recorded = False
     try:
@@ -93,17 +125,9 @@ async def interpret(*, surface: str, diagnosis: str, tokens: dict[str, str]) -> 
         )
         usage_recorded = True
         raw = json.loads(_response_text(payload))
-        if not isinstance(raw, dict) or raw.get("diagnosis") != diagnosis or raw.get("action") not in _ACTIONS or raw.get("action") != _ACTION_FOR_DIAGNOSIS.get(diagnosis, "none"):
+        result = _validated(raw, diagnosis=diagnosis, tokens=tokens)
+        if result is None:
             return fallback
-        rendered = {field: _render(str(raw.get(field, "")), tokens) for field in ("headline", "detail")}
-        if not rendered["headline"] or not rendered["detail"]:
-            return fallback
-        confidence = raw.get("confidence")
-        result = {
-            "headline": rendered["headline"], "detail": rendered["detail"],
-            "diagnosis": diagnosis, "action": raw["action"],
-            "confidence": confidence if isinstance(confidence, str) else "model",
-        }
         if redis: await cache_set(redis, key, result, ttl=900)
         return result
     except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError) as exc:

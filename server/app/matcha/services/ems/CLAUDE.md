@@ -4,6 +4,13 @@ Moved verbatim from root `CLAUDE.md`'s Feature Flags table. Root keeps a one-lin
 
 ## `ems` (default ❌)
 
+Model note (2026-10-08): everything below that says "Gemini" (classify, inventory extraction,
+schedule parse, receipt parse, the channel ask loop) runs on Claude instead when the platform
+*Agent model* setting picks one (`anthropic_messages.claude_override()`). Same prompts, parsers and
+fallbacks; the ask loop shares one tool dispatcher (`channel_agent._run_tool_call`) between the two
+providers and converts the Gemini declarations to JSON Schema rather than restating them. IR
+suggestions (`_ir_suggestions`) stay on Gemini.
+
 Implementation update: non-urgent reports now enter `ems_event_drafts` and
 require reporter/reviewer confirmation before becoming `ems_events`. OSHA and
 severe reports remain immediate-log exceptions. Ops authorization is resolved

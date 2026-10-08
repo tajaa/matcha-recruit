@@ -491,3 +491,23 @@ def test_the_claim_query_carries_who_asked():
 
     source = inspect.getsource(task)
     assert "AS requester_role" in source and "AS requester_email" in source
+
+
+@pytest.mark.asyncio
+async def test_platform_setting_runs_the_assistant_on_claude(wired, monkeypatch):
+    fake = FakeClient([response(call("finish", FINISH))])
+    fake.keeps_history = True
+    luna = Mock()
+    monkeypatch.setattr(assistant.anthropic_messages, "claude_override", AsyncMock(return_value="claude-sonnet-5-5"))
+    monkeypatch.setattr(assistant, "get_claude_client", Mock(return_value=fake))
+    monkeypatch.setattr(assistant, "get_luna_client", luna)
+    set_model = AsyncMock()
+    monkeypatch.setattr(assistant.store, "set_run_model", set_model)
+    run = _run()
+    out = await assistant.run_assistant(run)
+    assert out.kind == "result" and out.token_usage["model"] == "claude-sonnet-5-5"
+    assert fake.calls[0]["model"] == "claude-sonnet-5-5"
+    # Claude keeps the turn itself: no Responses store/chain flags, even private.
+    assert "store" not in fake.calls[0] and "chain" not in fake.calls[0]
+    luna.assert_not_called()
+    set_model.assert_awaited_once_with(run["id"], "claude-sonnet-5-5")

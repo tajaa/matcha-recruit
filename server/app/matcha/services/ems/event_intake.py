@@ -25,6 +25,7 @@ from uuid import UUID
 
 from google.genai import types
 
+from app.core.services import anthropic_messages
 from app.core.services.model_catalog import GEMINI_FLASH_LITE
 from app.core.services.model_json import clean_model_json
 from app.matcha.services._shared.gemini import genai_env_client as _get_client
@@ -44,6 +45,8 @@ _MAX_TITLE_CHARS = 300
 _MAX_NARRATIVE_CHARS = 4000  # matches the WS send guard on channel_messages.content
 
 FLASH_LITE_MODEL = GEMINI_FLASH_LITE
+# Claude path (platform "Agent model" setting): same prompt, same parser.
+_CLAUDE_TIMEOUT_SECONDS = 30.0
 
 
 async def gather_intake_context(conn, channel_id: UUID, before_message_id: UUID) -> list[dict]:
@@ -467,14 +470,22 @@ async def classify_event(
         prompt = _build_classify_prompt(
             narrative, context, protocol_text=protocol_text, location_name=location_name,
         )
-        resp = await _get_client().aio.models.generate_content(
-            model=FLASH_LITE_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.2, response_mime_type="application/json", max_output_tokens=800,
-            ),
-        )
-        parsed = _parse_model_json(resp.text)
+        claude_model = await anthropic_messages.claude_override()
+        if claude_model:
+            raw = await anthropic_messages.generate_text(
+                prompt, model=claude_model, json_output=True, effort="low",
+                max_tokens=800, timeout_seconds=_CLAUDE_TIMEOUT_SECONDS,
+            )
+        else:
+            resp = await _get_client().aio.models.generate_content(
+                model=FLASH_LITE_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.2, response_mime_type="application/json", max_output_tokens=800,
+                ),
+            )
+            raw = resp.text
+        parsed = _parse_model_json(raw)
         # A response that parses as valid JSON but carries none of the
         # expected keys (e.g. "{}") normalizes to category=FALLBACK_KEY via
         # categories.normalize_category — which the six-category few-shot

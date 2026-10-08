@@ -497,6 +497,15 @@ describe('useScheduleHuumeThread — model picker', () => {
     expect(window.localStorage.getItem('matcha.scheduleAssistant.model')).toBe('claude-haiku-5-5')
   })
 
+  it('starts on the server default when the manager never picked', async () => {
+    getSessionMock.mockResolvedValue({ ...session(), available_models: claudeModels, default_model: 'claude-haiku-5-5' })
+    const { result } = render()
+    await waitFor(() => expect(result.current.models).toHaveLength(2))
+    expect(result.current.model).toBe('claude-haiku-5-5')
+    act(() => result.current.setModel('gpt-5.6-luna'))
+    expect(result.current.model).toBe('gpt-5.6-luna')
+  })
+
   it('falls back to Luna when a remembered model is not offered', async () => {
     window.localStorage.setItem('matcha.scheduleAssistant.model', 'claude-haiku-5-5')
     const { result } = render()

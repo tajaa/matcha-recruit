@@ -20,6 +20,8 @@ import logging
 from uuid import UUID
 
 from app.core.services.safe_fetch import UnsafeURL, fetch_public
+from app.core.services import anthropic_messages
+from app.matcha.services.huume.claude_client import get_claude_client
 from app.matcha.services.huume.luna_client import get_luna_client, text_item
 from app.matcha.services.huume.routing import LUNA
 from app.matcha.services.matcha_work.agent_runtime import runner
@@ -144,6 +146,10 @@ async def run_card_agent(
                     provenance.add(pick[field].get("source_url"))
         provenance.discard(None)
 
+    # Luna unless the platform "Agent model" setting routes agents to Claude.
+    claude_model = await anthropic_messages.claude_override()
+    if claude_model:
+        await store.set_run_model(run_id, claude_model)
     ctx = RunContext(
         run_id=run_id,
         user_id=run_id,  # a card run acts for nobody: it has no commit tools
@@ -162,7 +168,7 @@ async def run_card_agent(
             max_tool_output_chars=_MAX_TOOL_OUTPUT_CHARS,
         ),
         usage_feature=_AI_USAGE_FEATURE,
-        model=CARD_AGENT_MODEL,
+        model=claude_model or CARD_AGENT_MODEL,
         project_id=project_id,
         task_id=task_id,
     )
@@ -197,7 +203,7 @@ async def run_card_agent(
     try:
         outcome = await runner.run_agent(
             ctx,
-            client=get_luna_client(),
+            client=get_claude_client() if claude_model else get_luna_client(),
             abilities=abilities,
             contract=contract,
             instructions=build_system_prompt(round, travel=travel, flight_search=bool(flight_token)),

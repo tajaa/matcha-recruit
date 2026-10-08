@@ -143,29 +143,57 @@ assistant voice endpoint; the old `/employee-schedule/chat` parser route and
 client are retired. The Huume loop remains bounded at eight model calls and a
 300-second wall-clock limit, with the existing per-company turn rate limit.
 
-## Schedule assistant model picker (2026-10-08)
+## Claude: the platform "Agent model" setting + the schedule picker (2026-10-08)
 
-The schedule panel has a model dropdown: **Luna** (default), **Claude Haiku 5.5**,
-**Claude Sonnet 5.5**. The registry is `routing.SCHEDULE_MODEL_CHOICES`; the
-client sends the id as `SendMessageRequest.huume_model` (a `Literal` kept in step
-by `tests/huume/test_schedule_model_picker.py`), `turn_pipeline` puts it on
-`HuumeSurfaceContext.model`, and `agent.run_huume_turn` resolves it — honored on
-the schedule surface only; everywhere else the field is ignored and Luna runs.
+**Platform-wide:** Admin → Settings → *Agent model* (`platform_settings.agent_model`:
+`default` | `claude-haiku-5-5` | `claude-sonnet-5-5`, `PUT /admin/platform-settings/agent-model`,
+refused for Claude while `ANTHROPIC_API_KEY` is unset). `default` keeps every surface on the
+provider it was built on. One function decides: `core/services/anthropic_messages.claude_override()`
+(never raises — no key, an unreadable setting or an unknown value all mean "default"). It routes:
+Huume on every surface, the Espresso repo/task-draft agents, agent cards + the Espresso assistant
+(`agent_runtime`), the single-shot Luna calls (credential templates, sym_chat, inventory insight +
+waste narration, AI ticket draft), and EMS channel `@huume` (classify, inventory extraction,
+schedule parse, receipt parse, the ask loop — those were Gemini). IR's analyzer, the Gemini skill
+engine and everything else stay where they were. Callers import the MODULE and call through it so
+tests patch `anthropic_messages.claude_override`; `tests/conftest.py` blanks `ANTHROPIC_API_KEY` so
+no test reaches the setting unless it opts in.
+
+**Schedule panel:** its dropdown (**Luna**, **Claude Haiku 5.5**, **Claude Sonnet 5.5**) overrides
+the platform setting per turn. The registry is `routing.SCHEDULE_MODEL_CHOICES`; the client sends
+the id as `SendMessageRequest.huume_model` (a `Literal` kept in step by
+`tests/huume/test_schedule_model_picker.py`), `turn_pipeline` puts it on `HuumeSurfaceContext.model`,
+and `agent.run_huume_turn` resolves explicit pick → platform setting → Luna. The pick is honored on
+the schedule surface only. The session endpoint returns `default_model` (the platform choice) so a
+manager who never picked starts there.
 
 - `claude_client.ClaudeSession` is the Anthropic SDK twin of `LunaSession`: same
-  `create_response` inputs (Responses items + function tools) and the same
-  `LunaResponse` out, so the loop does not branch on provider. Messages is
-  stateless, so the session keeps the turn's history itself, append-only
-  (`message.to_param()`, thinking blocks untouched — preserved thinking).
-- Adaptive thinking, `effort: medium` explicit (the two models default
-  differently). Sonnet sends `fallbacks: "default"` (server-side refusal
-  fallback beta); Haiku has none. SDK retries run inside the per-call deadline.
+  `create_response` kwargs (Responses items, function tools, hosted `web_search`,
+  `tool_choice`, JSON mode, `reasoning_effort`) and the same `LunaResponse` out, so
+  no loop branches on provider. Messages is stateless, so the session keeps the
+  turn's history itself, append-only, thinking blocks untouched (`keeps_history`;
+  the agent runtime then never replays a Responses transcript to it).
+- **Tools are pinned for the session**: the current models reject a resent thinking
+  block once `system`/`tools`/earlier messages changed, so a later call that offers
+  fewer tools keeps the first list and gets a "no longer available" note instead.
+- **Forced tools:** Haiku 5.5 takes `any`/a named tool; Sonnet 5.5 rejects both, so
+  it gets an instruction plus one nudge retry. **Web search:** `web_search_20250305`
+  on Haiku, `web_search_20260209` on Sonnet; results and citations are translated
+  back into Responses `web_search_call`/`url_citation` items so the agent-card
+  provenance gate reads them unchanged. `pause_turn` is resumed inside the call.
+- Adaptive thinking, `effort: medium` by default (mapped from `reasoning_effort`
+  when given). Sonnet sends `fallbacks: "default"` (server-side refusal fallback
+  beta); Haiku has none. SDK retries run inside the per-call deadline.
+- One-shots use `anthropic_messages.generate_text` (+ `parse_json_object`,
+  `image_block`/`pdf_block`); `max_tokens` is floored at 4096 because thinking
+  shares the cap.
 - Own rate-limit bucket (`ApiRateLimiter(provider="anthropic")`,
   `ANTHROPIC_HOURLY_LIMIT`/`ANTHROPIC_DAILY_LIMIT`) and own ledger rows
   (`ai_usage.record_anthropic_response`, priced in both pricing tables).
 - The session endpoint returns `available_models`; Claude is listed only when
-  `ANTHROPIC_API_KEY` is set, and the client falls back to Luna if a remembered
-  pick is no longer offered.
+  `ANTHROPIC_API_KEY` is set, and the client falls back to the default if a
+  remembered pick is no longer offered.
+- Agent runs re-stamp `mw_project_agent_runs.model` (`store.set_run_model`) when
+  the setting sent them to Claude; the row is written with Luna at enqueue.
 
 ## Write-ups / HR cases (2026-09-29)
 

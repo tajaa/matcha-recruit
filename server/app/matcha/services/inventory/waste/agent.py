@@ -1,4 +1,5 @@
-"""Read-only grounded waste analyst, narrated by the configured OpenAI Luna.
+"""Read-only grounded waste analyst, narrated by the configured OpenAI Luna
+(or Claude, when the platform "Agent model" setting routes agent workloads there).
 
 Tool results remain the source of truth. Luna receives only their bounded JSON
 and writes a qualitative lead-in; deterministic evidence records carry every
@@ -15,6 +16,7 @@ from uuid import UUID
 import httpx
 
 from app.config import get_settings
+from app.core.services import anthropic_messages
 from app.core.services.ai_usage import record_openai_response
 from app.core.services.openai_responses import response_text as _response_text
 
@@ -27,10 +29,6 @@ _NUMERIC_NARRATION = re.compile(r"[$%]|\d")
 
 async def _narrate_with_luna(*, question: str, sources: dict) -> Optional[str]:
     """Return a qualitative, non-numeric lead-in or None for safe fallback."""
-    settings = get_settings()
-    if not settings.openai_api_key or not settings.openai_luna_model:
-        return None
-    model = settings.openai_luna_model
     prompt = (
         "You are a concise inventory-waste analyst. Answer the manager's question "
         "qualitatively using only the supplied deterministic tool results. Do not "
@@ -40,6 +38,20 @@ async def _narrate_with_luna(*, question: str, sources: dict) -> Optional[str]:
         f"Question: {question[:1000]}\n\n"
         f"Tool results: {json.dumps(sources, default=str, separators=(',', ':'))}"
     )
+    claude_model = await anthropic_messages.claude_override()
+    if claude_model:
+        try:
+            text = await anthropic_messages.generate_text(
+                prompt, model=claude_model, effort="high", timeout_seconds=30,
+            )
+        except RuntimeError:
+            logger.warning("inventory waste Claude narration failed", exc_info=True)
+            return None
+        return text if text and not _NUMERIC_NARRATION.search(text) else None
+    settings = get_settings()
+    if not settings.openai_api_key or not settings.openai_luna_model:
+        return None
+    model = settings.openai_luna_model
     started = time.monotonic()
     usage_recorded = False
     try:

@@ -19,6 +19,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from app.config import get_settings
+from app.core.services import anthropic_messages
 from app.matcha.services.ir.ir_analysis import IRAnalyzer
 from app.matcha.services.inventory.waste import lots as lots_service
 
@@ -155,6 +156,14 @@ async def parse_receipt(file_bytes: bytes, mime_type: str, filename: str) -> dic
                        "invoice_date": None, "lines": [], "notes": None}
         return {**receipt, "available": bool(receipt["lines"])}
 
+    # Claude when the platform "Agent model" setting routes one-shots to it.
+    # An image type Messages can't take (HEIC, …) stays on Gemini below.
+    claude_model = await anthropic_messages.claude_override()
+    if claude_model:
+        mt = (mime_type or "").lower()
+        if not (mt.startswith("image/") and anthropic_messages.image_block(file_bytes, mt) is None):
+            return await _parse_receipt_with_claude(file_bytes, mt, name, filename, claude_model)
+
     analyzer = _get_analyzer()
     payload: dict[str, Any] = {}
     try:
@@ -180,6 +189,40 @@ async def parse_receipt(file_bytes: bytes, mime_type: str, filename: str) -> dic
             (getattr(response, "text", None) or "").strip()) or {}
     except Exception:  # never-raises contract
         logger.warning("receipt parse failed", exc_info=True)
+        payload = {}
+    receipt = _coerce_receipt(payload)
+    return {**receipt, "available": bool(receipt["lines"])}
+
+
+async def _parse_receipt_with_claude(
+    file_bytes: bytes, mime_type: str, name: str, filename: str, model: str,
+) -> dict:
+    """The Gemini branch of `parse_receipt`, on Claude: same prompt, same
+    coercion, same never-raises contract (any failure is an empty draft)."""
+    payload: dict[str, Any] = {}
+    try:
+        attachments: list[dict[str, Any]] = []
+        prompt = _PROMPT
+        if "pdf" in mime_type or name.endswith(".pdf"):
+            attachments.append(anthropic_messages.pdf_block(file_bytes))
+        elif mime_type.startswith("image/"):
+            attachments.append(anthropic_messages.image_block(file_bytes, mime_type))
+        else:
+            from app.matcha.services.er.er_document_parser import ERDocumentParser
+            text, _pages = await asyncio.to_thread(
+                ERDocumentParser().extract_text_from_bytes, file_bytes, filename,
+            )
+            prompt = f"{_PROMPT}\n\nInvoice text follows:\n\n{text[:100_000]}"
+        raw = await asyncio.wait_for(
+            anthropic_messages.generate_text(
+                prompt, model=model, attachments=attachments, json_output=True,
+                effort="low", max_tokens=16_000, timeout_seconds=RECEIPT_PARSE_TIMEOUT,
+            ),
+            timeout=RECEIPT_PARSE_TIMEOUT,
+        )
+        payload = anthropic_messages.parse_json_object(raw)
+    except Exception:  # never-raises contract
+        logger.warning("receipt parse (Claude) failed", exc_info=True)
         payload = {}
     receipt = _coerce_receipt(payload)
     return {**receipt, "available": bool(receipt["lines"])}

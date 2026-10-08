@@ -21,6 +21,9 @@ export interface ScheduleHuumeSession {
   current_state: Record<string, unknown>
   version: number
   available_models?: ScheduleHuumeModel[]
+  /** What a turn runs on when the manager never picked: the platform
+   *  "Agent model" setting, else Luna. */
+  default_model?: string
 }
 
 export interface ScheduleHuumeSessionSummary {

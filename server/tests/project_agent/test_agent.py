@@ -198,3 +198,35 @@ async def test_repo_question_refusal_streak_resets_after_a_successful_read(monke
     assert result["answer"] == answer
     assert len(models.calls) == 6
     post_answer.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_platform_setting_runs_the_repo_agent_on_claude(monkeypatch):
+    answer = "It is registered here (`client/src/App.tsx:42`)."
+    models = _FakeModels([
+        _response(_call("read_file", {"path": "client/src/App.tsx", "start_line": 35, "end_line": 50})),
+        _response(_call("answer_question", {"answer": answer})),
+    ])
+    luna = Mock()
+    monkeypatch.setattr(agent.anthropic_messages, "claude_override", AsyncMock(return_value="claude-sonnet-5-5"))
+    monkeypatch.setattr(agent, "get_claude_client", Mock(return_value=models))
+    monkeypatch.setattr(agent, "get_luna_client", luna)
+    set_model = AsyncMock()
+    monkeypatch.setattr(agent.store, "set_run_model", set_model)
+    monkeypatch.setattr(agent.store, "read_repo_file", AsyncMock(return_value={
+        "path": "client/src/App.tsx", "start_line": 35, "end_line": 50, "total_lines": 90,
+        "content": "42: registerProjectsRoute()",
+    }))
+    monkeypatch.setattr(agent.store, "record_step", AsyncMock())
+    monkeypatch.setattr(agent.store, "mark_run", AsyncMock())
+    monkeypatch.setattr(agent.chat, "post_as_espresso", AsyncMock())
+
+    run_id = uuid4()
+    result = await agent.run_repo_question(
+        run_id=run_id, company_id=uuid4(), project_id=uuid4(), channel_id=uuid4(),
+        question="Where?", project_title="MATCHA", repo="example/matcha", base_branch="main",
+    )
+    assert result["token_usage"]["model"] == "claude-sonnet-5-5"
+    assert all(call["model"] == "claude-sonnet-5-5" for call in models.calls)
+    luna.assert_not_called()
+    set_model.assert_awaited_once_with(run_id, "claude-sonnet-5-5")

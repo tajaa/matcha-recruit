@@ -48,12 +48,12 @@ const MODEL_STORAGE_KEY = 'matcha.scheduleAssistant.model'
 const LUNA_ONLY: ScheduleHuumeModel[] = [{ id: DEFAULT_SCHEDULE_HUUME_MODEL, label: 'Luna', provider: 'openai' }]
 
 /** The manager's last pick — a per-browser convenience, so storage that is
- *  blocked or empty just means Luna. */
-function readStoredModel(): string {
+ *  blocked or empty just means "no pick" (the server's default applies). */
+function readStoredModel(): string | null {
   try {
-    return window.localStorage.getItem(MODEL_STORAGE_KEY) || DEFAULT_SCHEDULE_HUUME_MODEL
+    return window.localStorage.getItem(MODEL_STORAGE_KEY) || null
   } catch {
-    return DEFAULT_SCHEDULE_HUUME_MODEL
+    return null
   }
 }
 
@@ -180,8 +180,11 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
   const [busy, setBusy] = useState(false)
   const [models, setModels] = useState<ScheduleHuumeModel[]>(LUNA_ONLY)
   const [pickedModel, setPickedModel] = useState(readStoredModel)
-  // A remembered pick the server no longer offers (no Anthropic key) runs Luna.
-  const model = models.some((option) => option.id === pickedModel) ? pickedModel : DEFAULT_SCHEDULE_HUUME_MODEL
+  const [defaultModel, setDefaultModel] = useState(DEFAULT_SCHEDULE_HUUME_MODEL)
+  // The manager's pick, else the server's default (the platform "Agent model"
+  // setting). Anything the server no longer offers (no Anthropic key) is Luna.
+  const offered = (id: string | null) => !!id && models.some((option) => option.id === id)
+  const model = offered(pickedModel) ? pickedModel as string : offered(defaultModel) ? defaultModel : DEFAULT_SCHEDULE_HUUME_MODEL
   const setModel = useCallback((next: string) => {
     setPickedModel(next)
     storeModel(next)
@@ -274,6 +277,7 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
         setMessages(session.messages)
         setCurrentState(session.current_state || {})
         setModels(session.available_models?.length ? session.available_models : LUNA_ONLY)
+        setDefaultModel(session.default_model || DEFAULT_SCHEDULE_HUUME_MODEL)
         setStatus('')
         refreshSessions()
       })

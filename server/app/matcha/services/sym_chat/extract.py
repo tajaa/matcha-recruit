@@ -24,6 +24,7 @@ from typing import Any
 import httpx
 
 from app.config import get_settings
+from app.core.services import anthropic_messages
 from app.core.services.ai_usage import feature_scope, record_openai_response
 from app.core.services.openai_responses import RESPONSES_URL, response_text
 
@@ -243,7 +244,19 @@ async def _record(model: str, started: float, **kwargs) -> None:
 
 
 async def _call_luna(prompt: str) -> dict:
-    """One Responses call in JSON mode → the parsed object. Raises on any failure."""
+    """One Responses call in JSON mode → the parsed object. Raises on any failure.
+
+    When the platform "Agent model" setting routes agent workloads to Claude,
+    the same prompt goes to that model instead, with the same contract.
+    """
+    claude_model = await anthropic_messages.claude_override()
+    if claude_model:
+        with feature_scope("sym_chat"):
+            text = await anthropic_messages.generate_text(
+                prompt, model=claude_model, json_output=True,
+                effort=REASONING_EFFORT, timeout_seconds=TURN_TIMEOUT,
+            )
+        return anthropic_messages.parse_json_object(text)
     settings = get_settings()
     if not settings.openai_api_key or not settings.openai_luna_model:
         raise RuntimeError("OpenAI Luna is not configured (OPENAI_API_KEY)")
