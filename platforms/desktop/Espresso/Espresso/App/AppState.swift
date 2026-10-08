@@ -158,6 +158,23 @@ class AppState {
     /// surface, and one that appears and then vanishes is worse than one that
     /// appears a moment late.
     var assistantEnabled: Bool { entitlements?.workspace?.espressoAssistant == true }
+    /// The chat model picker's rows. Claude rows appear only while the server
+    /// has Claude configured — closed while unknown, like `assistantEnabled`.
+    var modelOptions: [MWModelOption] {
+        let claude = entitlements?.workspace?.claudeModels == true
+        return mwModelOptions.filter { !$0.claude || claude }
+    }
+    /// The picker row for a stored `mw-model` id, or nil when that row is not
+    /// offered (Claude switched off server-side).
+    func modelOption(for id: String) -> MWModelOption? {
+        modelOptions.first { $0.id == id }
+    }
+    /// The model value to send for a stored pick. nil (the server's plan
+    /// model) when the row is not offered, or is locked behind the pro plan.
+    func modelValue(for id: String) -> String? {
+        guard let option = modelOption(for: id), !option.pro || canProModel else { return nil }
+        return option.value
+    }
 
     /// Raise the paywall for a specific locked feature.
     func presentPaywall(for feature: String?) {

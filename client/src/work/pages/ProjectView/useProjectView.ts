@@ -5,6 +5,7 @@ import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProjec
 import { getProjectDetail, getThread, sendMessageStream, createProjectChat, ensureDiscussionChannel, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, syncProjectInterviews, extractPlaceholderValue, fetchUsageSummary, fetchUsageSummary24h, updateTitle, pinThread, getPdfProxyUrl, notifyUsageChanged } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
 import { useProjectPresence } from '../../hooks/useProjectPresence'
+import { useModelPicker } from '../../hooks/useModelPicker'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
 import { useInbox } from './useInbox'
 import { TOUR_DISMISSED_KEY } from './tour'
@@ -25,7 +26,7 @@ export function useProjectView() {
   const [statusMessage, setStatusMessage] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('mw-model') || 'gemini-3.7-flash')
+  const { modelOptions, selectedModel, setSelectedModel } = useModelPicker()
   const [usageTotal, setUsageTotal] = useState<UsageSummary | null>(null)
   const [usage24h, setUsage24h] = useState<UsageSummary | null>(null)
 
@@ -465,6 +466,7 @@ export function useProjectView() {
     loading,
     error,
     setError,
+    modelOptions,
     selectedModel,
     setSelectedModel,
     usageTotal,

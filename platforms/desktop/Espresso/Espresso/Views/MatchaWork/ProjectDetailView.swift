@@ -73,7 +73,7 @@ struct ProjectDetailView: View {
     }
 
     var selectedModelValue: String? {
-        mwModelOptions.first { $0.id == selectedModelId }?.value
+        appState.modelValue(for: selectedModelId)
     }
 
     var body: some View {
@@ -231,12 +231,17 @@ struct ProjectDetailView: View {
                     collabPanelAction
                 }
                 Menu {
-                    ForEach(mwModelOptions) { option in
+                    ForEach(appState.modelOptions) { option in
+                        let locked = option.pro && !appState.canProModel
                         Button {
-                            selectedModelId = option.id
+                            if locked {
+                                appState.presentPaywall(for: "ai_model_pro")
+                            } else {
+                                selectedModelId = option.id
+                            }
                         } label: {
                             HStack {
-                                Text(option.label)
+                                Text(locked ? "\(option.label) 🔒" : option.label)
                                 if selectedModelId == option.id {
                                     Image(systemName: "checkmark")
                                 }
@@ -247,7 +252,7 @@ struct ProjectDetailView: View {
                     HStack(spacing: 3) {
                         Image(systemName: "cpu")
                             .font(.system(size: 10))
-                        Text(mwModelOptions.first { $0.id == selectedModelId }?.label ?? "Flash")
+                        Text(appState.modelOption(for: selectedModelId)?.label ?? "Flash")
                             .font(.system(size: 10, weight: .medium))
                     }
                     .foregroundColor(.secondary)

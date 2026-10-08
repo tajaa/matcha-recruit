@@ -2,6 +2,12 @@
 keyword heuristic that classifies a turn's thinking level.
 """
 import logging
+from app.core.services.anthropic_messages import (
+    CLAUDE_HAIKU,
+    CLAUDE_MODELS,
+    CLAUDE_SONNET,
+    anthropic_configured,
+)
 from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
 from app.core.services.platform_settings import get_matcha_work_model_mode
 
@@ -11,7 +17,15 @@ logger = logging.getLogger(__name__)
 FLASH = GEMINI_FLASH
 FLASH_LITE = GEMINI_FLASH_LITE
 
-SUPPORTED_MODELS = {FLASH_LITE, FLASH}
+# The picker's Claude entries run the same skill-engine call on Anthropic
+# (`_claude.py`). They are honored only while ANTHROPIC_API_KEY is set; Sonnet
+# is the premium pick and carries the same plan gate as PRO_MODEL.
+SUPPORTED_MODELS = {FLASH_LITE, FLASH, CLAUDE_HAIKU, CLAUDE_SONNET}
+PREMIUM_CLAUDE_MODELS = {CLAUDE_SONNET}
+
+
+def is_claude_model(model: str | None) -> bool:
+    return model in CLAUDE_MODELS
 
 # Pro-preview retired from matcha-work (product decision, 2026-07-31) — the
 # whole thread harness now runs a two-model fleet. PRO_MODEL kept as an alias
@@ -28,6 +42,10 @@ _MODEL_ALIASES = {
     "gemini-3.6-flash": FLASH,
     "gemini-3.1-flash-lite": FLASH_LITE,
     "gemini-3.1-pro-preview": FLASH,
+    # Both pickers shipped "Flash Lite 3.7" with this id, which the account
+    # does not serve and which was never in SUPPORTED_MODELS — so picking it
+    # silently ran Flash. Stored picks and old app builds still send it.
+    "gemini-3.7-flash-lite": FLASH_LITE,
 }
 
 
@@ -37,11 +55,15 @@ async def _get_model(
     company_id: str | None = None,
     user_id: str | None = None,
 ) -> str:
-    """Pick the Gemini model for a call, enforcing plan entitlements.
+    """Pick the model for a call, enforcing plan entitlements.
 
     The pro model is a paid entitlement (Pro/Business plans) — a client-sent
     `model_override` is clamped to the plan, never trusted (previously any
-    user could force the pro model via the header picker).
+    user could force the pro model via the header picker). Claude Sonnet is
+    gated the same way; Claude Haiku is open to every plan (it is cheaper
+    than Flash Lite). A Claude pick with no ANTHROPIC_API_KEY configured, or
+    a Sonnet pick without the entitlement, falls through to the Gemini plan
+    model below — never an error.
     """
     async def _pro_allowed() -> bool:
         try:
@@ -69,7 +91,13 @@ async def _get_model(
 
     model_override = _MODEL_ALIASES.get(model_override, model_override)
 
-    if model_override and model_override in SUPPORTED_MODELS:
+    if is_claude_model(model_override):
+        if anthropic_configured() and (
+            model_override not in PREMIUM_CLAUDE_MODELS or await _pro_allowed()
+        ):
+            return model_override
+        # Claude unavailable, or Sonnet without entitlement — plan selection.
+    elif model_override and model_override in SUPPORTED_MODELS:
         if model_override != PRO_MODEL or await _pro_allowed():
             return model_override
         # Pro override without entitlement — fall through to plan selection.
@@ -161,7 +189,12 @@ def resolve_turn_model(thinking_level: str, inferred_skill: str, plan_model: str
     the model for REAL turns; a trivial skill-less ack has no answer quality
     to protect, so it stays eligible for the cheap tier regardless of what
     the picker was set to.
+
+    The cheap tier stays on the picked PROVIDER: a Claude pick downgrades to
+    Claude Haiku, never to Gemini. Swapping providers on an "ok" would put a
+    different model's voice into a thread the person explicitly moved to
+    Claude, and Haiku is already cheaper than Flash Lite.
     """
     if thinking_level == "none" and inferred_skill == "chat":
-        return FLASH_LITE
+        return CLAUDE_HAIKU if is_claude_model(plan_model) else FLASH_LITE
     return plan_model

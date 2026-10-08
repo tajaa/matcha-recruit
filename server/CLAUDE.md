@@ -336,7 +336,7 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 
 - Backend routes → `server/app/matcha/routes/matcha_work/` (package, split 2026-07-03 — see its CLAUDE.md; 203 routes)
 - Project service → `server/app/matcha/services/matcha_work/project_service/`
-- AI directives → `server/app/matcha/services/matcha_work/matcha_work_ai/` (facade package since 2026-07-27: `provider.py` is the Gemini provider, `_prompts.py` the prompt literals, `_fields.py` the per-skill write whitelists, `_models.py` model selection, plus `compaction.py` / `task_draft.py` / `_images.py` / `_text.py`)
+- AI directives → `server/app/matcha/services/matcha_work/matcha_work_ai/` (facade package since 2026-07-27: `provider.py` is the Gemini provider, `_prompts.py` the prompt literals, `_fields.py` the per-skill write whitelists, `_models.py` model selection, plus `compaction.py` / `task_draft.py` / `_images.py` / `_text.py`). A Claude pick in the chat model picker (`claude-haiku-5-5` any plan, `claude-sonnet-5-5` behind `ai_model_pro`, both only while `ANTHROPIC_API_KEY` is set — `entitlements.workspace.claude_models`) runs the same structured-JSON call through `_claude.py` and the shared `provider._parse_engine_reply`; payer mode and image generation stay on Gemini, and a trivial-turn downgrade stays on the picked provider (Sonnet → Haiku)
 - Channels (WS) → `server/app/werk/routes/channels.py` + `channels_ws.py` (+ `channels` / `channel_members` tables)
 
 ### Database access

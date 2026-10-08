@@ -23,7 +23,8 @@ from google.genai import types
 from app.config import get_settings
 
 from ._fields import BLOG_FIELDS, HANDBOOK_FIELDS, HR_PILOT_FIELDS, OFFER_LETTER_FIELDS, ONBOARDING_FIELDS, POLICY_FIELDS, PRESENTATION_FIELDS, PROJECT_FIELDS, REVIEW_FIELDS, SUPPORTED_AI_MODES, SUPPORTED_AI_OPERATIONS, SUPPORTED_AI_SKILLS, WORKBOOK_FIELDS
-from ._models import FLASH_LITE, _get_model, classify_thinking_level, resolve_turn_model
+from ._claude import call_claude
+from ._models import FLASH_LITE, _get_model, classify_thinking_level, is_claude_model, resolve_turn_model
 from ._prompts import MATCHA_WORK_BLOG_DYNAMIC_PROMPT, MATCHA_WORK_BLOG_STATIC_PROMPT, MATCHA_WORK_DYNAMIC_PROMPT_TEMPLATE, MATCHA_WORK_STATIC_PROMPT_TEMPLATE
 from ._text import _clean_json_text, _extract_reply_field, _infer_skill_from_state
 from cachetools import TTLCache
@@ -309,6 +310,11 @@ class GeminiProvider(MatchaWorkAIProvider):
                 full_prompt += f"\n\nPrior conversation summary:\n{context_summary}"
 
             model = await _get_model(self.settings, model_override, company_id=company_id, user_id=user_id)
+            if is_claude_model(model):
+                # Payer answers depend on Gemini's google_search grounding,
+                # which has no Claude equivalent here: a Claude pick runs this
+                # mode on the Gemini plan model instead.
+                model = await _get_model(self.settings, None, company_id=company_id, user_id=user_id)
             try:
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
@@ -375,6 +381,11 @@ class GeminiProvider(MatchaWorkAIProvider):
         # "model is flash-lite" — a user who picks flash-lite in the header
         # picker runs real turns on it and should still get the cache.
         auto_downgraded = model != plan_model
+
+        if is_claude_model(model):
+            return await self._generate_claude(
+                static_prompt, dynamic_prompt, contents, valid_fields, model, inferred_skill, thinking_level,
+            )
 
         try:
             response = await asyncio.wait_for(
@@ -465,14 +476,56 @@ class GeminiProvider(MatchaWorkAIProvider):
                 ),
             )
         logger.info("[TIMING] generate_content %.2fs", _time.monotonic() - _tg0)
-        raw_text = response.text or ""
+        return self._parse_engine_reply(
+            response.text or "", valid_fields, inferred_skill, self._extract_usage_metadata(response, model),
+        )
+
+    async def _generate_claude(
+        self,
+        static_prompt: str,
+        dynamic_prompt: str,
+        contents: list,
+        valid_fields: list[str],
+        model: str,
+        inferred_skill: str,
+        thinking_level: str,
+    ) -> AIResponse:
+        """The skill-engine call on a Claude pick (`_claude.py`). Same reply
+        contract and the same failure replies as the Gemini path."""
+        try:
+            raw_text, usage = await asyncio.wait_for(
+                call_claude(
+                    static_prompt=static_prompt, dynamic_prompt=dynamic_prompt, contents=contents,
+                    model=model, thinking_level=thinking_level,
+                    timeout_seconds=GEMINI_CALL_TIMEOUT - 5,
+                ),
+                timeout=GEMINI_CALL_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.error("Claude call timed out after %s seconds", GEMINI_CALL_TIMEOUT)
+            return AIResponse(
+                assistant_reply="I'm taking too long to respond. Please try again.",
+                structured_update=None,
+            )
+        except Exception as e:
+            logger.error("Claude call failed: %s", e, exc_info=True)
+            return AIResponse(
+                assistant_reply="I encountered an error processing your request. Please try again.",
+                structured_update=None,
+            )
+        return self._parse_engine_reply(raw_text, valid_fields, inferred_skill, usage)
+
+    def _parse_engine_reply(
+        self, raw_text: str, valid_fields: list[str], inferred_skill: str, usage: Optional[dict],
+    ) -> AIResponse:
+        """The engine's JSON reply → AIResponse, whichever provider wrote it."""
         raw_text = _clean_json_text(raw_text)
 
         try:
             parsed = json.loads(raw_text)
         except json.JSONDecodeError as e:
             logger.warning(
-                "Failed to parse Gemini JSON response: %s | Raw: %s",
+                "Failed to parse model JSON response: %s | Raw: %s",
                 e,
                 raw_text[:300],
             )
@@ -485,10 +538,10 @@ class GeminiProvider(MatchaWorkAIProvider):
                 mode="general",
                 skill="none",
                 operation="none",
-                token_usage=self._extract_usage_metadata(response, model),
+                token_usage=usage,
             )
 
-        # Gemini sometimes returns a list-wrapped response (e.g. [{...}]) even
+        # The model sometimes returns a list-wrapped response (e.g. [{...}]) even
         # though the prompt asks for an object. Try to unwrap or salvage.
         if isinstance(parsed, list):
             # Case 1: single-item list containing the expected response object
@@ -512,7 +565,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                 }
             else:
                 logger.warning(
-                    "Gemini returned list response, cannot unwrap: %s",
+                    "Model returned list response, cannot unwrap: %s",
                     raw_text[:300],
                 )
                 return AIResponse(
@@ -521,12 +574,12 @@ class GeminiProvider(MatchaWorkAIProvider):
                     mode="general",
                     skill="none",
                     operation="none",
-                    token_usage=self._extract_usage_metadata(response, model),
+                    token_usage=usage,
                 )
 
         if not isinstance(parsed, dict):
             logger.warning(
-                "Gemini returned non-dict response (%s): %s",
+                "Model returned non-dict response (%s): %s",
                 type(parsed).__name__,
                 raw_text[:300],
             )
@@ -536,7 +589,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                 mode="general",
                 skill="none",
                 operation="none",
-                token_usage=self._extract_usage_metadata(response, model),
+                token_usage=usage,
             )
 
         reply = parsed.get("reply", "Done.")
@@ -607,7 +660,7 @@ class GeminiProvider(MatchaWorkAIProvider):
             operation=operation,
             confidence=confidence,
             missing_fields=missing_fields,
-            token_usage=self._extract_usage_metadata(response, model),
+            token_usage=usage,
             compliance_reasoning=compliance_reasoning,
             referenced_categories=referenced_categories,
             referenced_locations=referenced_locations,

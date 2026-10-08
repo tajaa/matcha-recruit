@@ -55,7 +55,7 @@ struct KanbanBoardView: View {
     /// Header model selector (shared with threads/blog via the same AppStorage key).
     @AppStorage("mw-model") private var selectedModelId = "flash"
     private var selectedModelValue: String? {
-        mwModelOptions.first { $0.id == selectedModelId }?.value
+        appState.modelValue(for: selectedModelId)
     }
     /// Template-compose sheet. `newTaskColumn` is the destination column;
     /// `composeTemplate` the picked template (scaffold + default priority +

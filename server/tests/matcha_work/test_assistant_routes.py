@@ -230,14 +230,14 @@ async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
     monkeypatch.setattr(enqueue, "workspace_enabled", enabled)
     company = uuid4()
     out = await entitlements_service.resolve_entitlements(uuid4(), company)
-    assert out["workspace"] == {"espresso_assistant": True}
+    assert out["workspace"] == {"espresso_assistant": True, "claude_models": False}
     assert out["features"]["assistant"] is True
     assert out["quotas"]["assistant_runs"] == {"limit": 30, "used": 2, "remaining": 28}
     enabled.assert_awaited_once_with(company)
 
     # No workspace, or a lookup that fails: off, and the read still answers.
     assert (await entitlements_service.resolve_entitlements(uuid4(), None))["workspace"] == {
-        "espresso_assistant": False}
+        "espresso_assistant": False, "claude_models": False}
     enabled.side_effect = RuntimeError("db down")
     assert (await entitlements_service.resolve_entitlements(uuid4(), company))["workspace"] == {
-        "espresso_assistant": False}
+        "espresso_assistant": False, "claude_models": False}

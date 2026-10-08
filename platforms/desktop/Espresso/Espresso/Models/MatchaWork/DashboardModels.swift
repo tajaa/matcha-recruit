@@ -88,13 +88,23 @@ struct MWModelOption: Identifiable {
     let id: String
     let label: String
     let value: String
+    /// Offered only while the server has Claude configured
+    /// (`entitlements.workspace.claude_models`).
+    var claude: Bool = false
+    /// Needs the `ai_model_pro` entitlement; shown locked (paywall) without it.
+    /// The server clamps the override to the plan regardless.
+    var pro: Bool = false
 }
 
 // Values must be in the server's SUPPORTED_MODELS (matcha_work_ai/_models.py)
-// or the override silently no-ops. Pro-preview retired from matcha-work
-// (2026-07-31) — two-model fleet now; server-side _MODEL_ALIASES still
-// accepts old picker ids from any not-yet-updated build.
+// or the override silently runs the plan model. Pro-preview retired from
+// matcha-work (2026-07-31). Flash Lite used to send "gemini-3.7-flash-lite",
+// which the server never served — it ran Flash; the server now aliases that
+// id for builds that still send it. @AppStorage("mw-model") stores the `id`,
+// not the value, so existing picks carry over.
 let mwModelOptions: [MWModelOption] = [
-    MWModelOption(id: "flash-lite", label: "Flash Lite 3.7", value: "gemini-3.7-flash-lite"),
+    MWModelOption(id: "flash-lite", label: "Flash Lite 3.5", value: "gemini-3.5-flash-lite"),
     MWModelOption(id: "flash", label: "Flash 3.7", value: "gemini-3.7-flash"),
+    MWModelOption(id: "claude-haiku", label: "Claude Haiku 5.5", value: "claude-haiku-5-5", claude: true),
+    MWModelOption(id: "claude-sonnet", label: "Claude Sonnet 5.5", value: "claude-sonnet-5-5", claude: true, pro: true),
 ]
