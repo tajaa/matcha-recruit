@@ -28,10 +28,13 @@ async def start(slug: str, body: ShopperStart, request: Request, background: Bac
     if _is_reserved_test_domain(email):
         raise HTTPException(422, "Reserved/test email domains are not accepted")
     async with get_connection() as conn:
-        site = await auth.published_shopper_site(conn, slug)
+        site, store_open = await auth.sign_in_site(conn, slug)
+        # A store that has closed to shoppers emails codes only to people it
+        # still bills, so they can cancel.
+        allowed = store_open or await auth.subscribes_here(conn, site["id"], email)
     # Its own budget per recipient (see check_recipient_send_ok). Still 204
     # either way, so the endpoint never says whether an address has an account.
-    if await check_recipient_send_ok(email, bucket="cappe_shopper_code_email", limit=8):
+    if allowed and await check_recipient_send_ok(email, bucket="cappe_shopper_code_email", limit=8):
         async with get_connection() as conn:
             code = await auth.issue_login_code(conn, site=site, email=email)
         background.add_task(send_cappe_shopper_code_email, email, site["name"], code)
@@ -42,8 +45,10 @@ async def start(slug: str, body: ShopperStart, request: Request, background: Bac
 async def verify(slug: str, body: ShopperVerify, request: Request):
     await check_rate_limit(client_ip(request), "cappe_shopper_verify", 30, 900)
     async with get_connection() as conn:
-        site = await auth.published_shopper_site(conn, slug)
-        result = await auth.verify_login_code(conn, site=site, email=str(body.email), code=body.code)
+        site, store_open = await auth.sign_in_site(conn, slug)
+        result = None
+        if store_open or await auth.subscribes_here(conn, site["id"], str(body.email)):
+            result = await auth.verify_login_code(conn, site=site, email=str(body.email), code=body.code)
     if result is None:
         raise HTTPException(401, "Invalid or expired code")
     return result
@@ -53,7 +58,9 @@ async def verify(slug: str, body: ShopperVerify, request: Request):
 async def refresh(slug: str, body: ShopperRefresh, request: Request):
     await check_rate_limit(client_ip(request), "cappe_shopper_refresh", 120, 3600)
     async with get_connection() as conn:
-        site = await auth.published_shopper_site(conn, slug)
+        # A store that has closed to shoppers keeps existing sessions alive for
+        # managing subscriptions (require_shopper_session); purchases still need it open.
+        site, _open = await auth.session_site(conn, slug)
         async with conn.transaction():
             shopper, payload = await auth.resolve_shopper(conn, site, body.refresh_token, "refresh", lock=True)
             return await auth.issue_session(conn, shopper, sid=UUID(payload["sid"]), started=payload["session_started_at"])

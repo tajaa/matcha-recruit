@@ -5,21 +5,38 @@
 // routes/public/shopper_web.py.
 var RT=window.__CAPPE_RT__,box=document.querySelector('[data-czaccount]');if(!RT||!box||!RT.slug)return;
 var base=RT.api+'/shopper',titleEl=box.querySelector('[data-title]'),bodyEl=box.querySelector('[data-body]');
-var token=null,me=null,params=new URLSearchParams(location.search);
+var token=null,me=null,storeOpen=true,params=new URLSearchParams(location.search);
 var wantSub=params.get('subscribe');
 function esc(s){return RT.esc(s);}
 function day(iso){try{return new Date(iso).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});}catch(e){return '';}}
 function msgOf(d){var x=d&&d.detail;if(typeof x==='string')return x;if(x&&x.message)return x.message;if(Array.isArray(x))return x.map(function(e){return e&&e.msg?String(e.msg).replace(/^Value error, /,''):'';}).filter(Boolean).join('. ')||'Please check and try again.';return 'Something went wrong. Please try again.';}
-function refresh(){return fetch(base+'/web/refresh',{method:'POST',headers:{'X-Cappe-Web':'1'},credentials:'same-origin'})
-.then(function(r){if(!r.ok)return false;return r.json().then(function(d){token=d.access_token;me=d.shopper;return true;});}).catch(function(){return false;});}
+function signedInAs(d){token=d.access_token;me=d.shopper;storeOpen=d.store_open!==false;}
+function wait(ms){return new Promise(function(done){setTimeout(done,ms);});}
+// true, false (no live session), or 'stale' (another request just rotated
+// the cookie; the browser now holds the newer one).
+function refreshOnce(){return fetch(base+'/web/refresh',{method:'POST',headers:{'X-Cappe-Web':'1'},credentials:'same-origin'})
+.then(function(r){if(r.ok)return r.json().then(function(d){signedInAs(d);return true;});
+return r.json().catch(function(){return null;}).then(function(d){return !!(d&&d.stale)&&'stale';});}).catch(function(){return false;});}
+// Each refresh rotates the cookie, and a request carrying the cookie another
+// one just replaced is refused — so one refresh at a time: shared by this
+// page's calls, and queued across tabs where the browser has Web Locks. One
+// refused as stale anyway is retried once with the cookie the browser holds.
+var refreshing=null;
+function refresh(){if(refreshing)return refreshing;
+var run=function(){return refreshOnce().then(function(ok){return ok!=='stale'?ok:wait(300).then(refreshOnce).then(function(again){return again===true;});});};
+var locks=navigator.locks&&navigator.locks.request?navigator.locks:null;
+refreshing=(locks?locks.request('cz-shopper-refresh:'+RT.slug,run):run()).catch(function(){return false;})
+.then(function(ok){refreshing=null;return ok;});
+return refreshing;}
 // Every call carries the access token; one that has expired is renewed from
-// the cookie once and retried.
+// the cookie once and retried. A call that set out with a token another call
+// has since renewed just retries with the new one.
 function call(method,path,data,retried){
-var h={'X-Cappe-Web':'1'};if(data!==undefined)h['Content-Type']='application/json';if(token)h.Authorization='Bearer '+token;
+var h={'X-Cappe-Web':'1'},sent=token;if(data!==undefined)h['Content-Type']='application/json';if(token)h.Authorization='Bearer '+token;
 return fetch(base+path,{method:method,headers:h,credentials:'same-origin',body:data===undefined?undefined:JSON.stringify(data)}).then(function(r){
 if(r.status===204)return null;
 return r.json().catch(function(){return null;}).then(function(d){
-if(r.status===401&&!retried&&token){return refresh().then(function(ok){if(!ok){signInView();throw new Error('Please sign in again.');}return call(method,path,data,true);});}
+if(r.status===401&&!retried&&sent){return (token&&token!==sent?Promise.resolve(true):refresh()).then(function(ok){if(!ok){signInView();throw new Error('Please sign in again.');}return call(method,path,data,true);});}
 if(!r.ok)throw new Error(msgOf(d));return d;});});}
 
 // ── signing in ──
@@ -45,10 +62,10 @@ bodyEl.querySelector('[data-back]').addEventListener('click',function(){signInVi
 bodyEl.querySelector('[data-verify]').addEventListener('submit',function(e){e.preventDefault();var code=bodyEl.querySelector('[data-code]').value.trim();
 msg.className='cz-msg';msg.textContent='Signing in…';
 fetch(base+'/web/verify',{method:'POST',headers:{'Content-Type':'application/json','X-Cappe-Web':'1'},credentials:'same-origin',body:JSON.stringify({email:email,code:code})})
-.then(function(r){return r.json().catch(function(){return null;}).then(function(d){if(!r.ok)throw new Error(msgOf(d));token=d.access_token;me=d.shopper;signedIn();});})
+.then(function(r){return r.json().catch(function(){return null;}).then(function(d){if(!r.ok)throw new Error(msgOf(d));signedInAs(d);signedIn();});})
 .catch(function(err){msg.className='cz-msg err';msg.textContent=err.message;});});}
 
-function signedIn(){if(wantSub)startSubscription();else accountView();}
+function signedIn(){if(wantSub&&storeOpen)startSubscription();else accountView();}
 
 // ── "Subscribe" from the product panel ──
 function startSubscription(){
@@ -60,31 +77,43 @@ call('POST','/me/subscriptions/checkout',{items:[item],interval:params.get('ever
 .catch(function(err){wantSub=null;history.replaceState(null,'','/account');accountView('Your subscription couldn’t be started: '+err.message,true);});}
 
 // ── the account ──
-var SUB_LABEL={active:'Active',trialing:'Active',past_due:'Payment failing',unpaid:'Unpaid',canceled:'Ended'};
+var SUB_LABEL={active:'Active',trialing:'Active',past_due:'Payment failing',unpaid:'Unpaid',paused:'Paused',canceled:'Ended'};
 function accountView(note,isError){
 if(params.get('subscribed')==='1'&&!note){note='Your subscription is set up. A confirmation is on its way to your email.';}
+if(!storeOpen&&!note){note='This store isn’t open right now. You can still see and cancel your subscriptions here.';}
 titleEl.textContent=me&&me.name?'Hi, '+me.name:'Your account';
 bodyEl.innerHTML=(note?'<p class="cz-msg'+(isError?' err':'')+'">'+esc(note)+'</p>':'')+
-'<p class="cz-order__lead">Signed in as '+esc(me?me.email:'')+'. <button type="button" class="cz-bag__rm" data-signout>Sign out</button></p>'+
+'<p class="cz-order__lead">Signed in as '+esc(me?me.email:'')+'. <button type="button" class="cz-bag__rm" data-signout>Sign out</button></p><p class="cz-msg" data-outmsg role="status"></p>'+
 '<section class="cz-account__section"><h2 class="cz-order__h">Subscriptions</h2><div data-subs><p class="cz-msg">Loading…</p></div></section>'+
-'<section class="cz-account__section"><h2 class="cz-order__h">Orders</h2><div data-orders><p class="cz-msg">Loading…</p></div></section>'+
-'<section class="cz-account__section"><h2 class="cz-order__h">Addresses</h2><div data-addrs><p class="cz-msg">Loading…</p></div></section>';
-bodyEl.querySelector('[data-signout]').addEventListener('click',function(){
-fetch(base+'/web/logout',{method:'POST',headers:{'X-Cappe-Web':'1'},credentials:'same-origin'}).finally(function(){signInView('You’re signed out.');});});
-loadSubs();loadOrders(null);loadAddrs();}
+(storeOpen?'<section class="cz-account__section"><h2 class="cz-order__h">Orders</h2><div data-orders><p class="cz-msg">Loading…</p></div></section>'+
+'<section class="cz-account__section"><h2 class="cz-order__h">Addresses</h2><div data-addrs><p class="cz-msg">Loading…</p></div></section>':'');
+var out=bodyEl.querySelector('[data-signout]'),outMsg=bodyEl.querySelector('[data-outmsg]');
+out.addEventListener('click',function(){out.disabled=true;outMsg.className='cz-msg';outMsg.textContent='Signing out…';
+// Only a confirmed sign-out says so: a failed one leaves the session (and
+// its cookie) alive, and a reload would show the account again.
+fetch(base+'/web/logout',{method:'POST',headers:{'X-Cappe-Web':'1'},credentials:'same-origin'})
+.then(function(r){if(!r.ok)throw new Error();signInView('You’re signed out.');})
+.catch(function(){out.disabled=false;outMsg.className='cz-msg err';outMsg.textContent='Couldn’t sign you out. Check your connection and try again.';});});
+loadSubs();if(storeOpen){loadOrders(null);loadAddrs();}}
 
+// Every subscription that isn't an abandoned checkout, page by page: the
+// server drops those before its limit, so an older one that still bills is
+// never pushed off the list by newer abandoned ones.
+var SUB_PAGE=100,SUB_PAGES=20;
+function allSubs(offset,acc){return call('GET','/me/subscriptions?include_abandoned=false&limit='+SUB_PAGE+'&offset='+offset).then(function(rows){
+acc=acc.concat(rows||[]);return (rows||[]).length<SUB_PAGE||offset/SUB_PAGE+1>=SUB_PAGES?acc:allSubs(offset+SUB_PAGE,acc);});}
 function loadSubs(){var el=bodyEl.querySelector('[data-subs]');
-call('GET','/me/subscriptions').then(function(rows){
-rows=(rows||[]).filter(function(s){return SUB_LABEL[s.status];});
+allSubs(0,[]).then(function(rows){
+rows=rows.filter(function(s){return SUB_LABEL[s.status];});
 if(!rows.length){el.innerHTML='<p class="cz-msg">No subscriptions.</p>';return;}
 var live=rows.some(function(s){return s.status!=='canceled';});
 el.innerHTML='<ul class="cz-order__items">'+rows.map(function(s){
 var what=(s.items||[]).map(function(i){return (i.quantity>1?i.quantity+' × ':'')+(i.title||'Item');}).join(', ');
 var ends=s.cancel_at_period_end&&s.current_period_end,when=s.current_period_end?day(s.current_period_end):'';
 var state=s.status==='canceled'?'Ended':(ends?'Ends '+when:(SUB_LABEL[s.status]+(when?' · renews '+when:'')));
-var btn=s.status==='canceled'?'':(ends?'<button type="button" class="cz-btn cz-btn--ghost" data-resume="'+esc(s.id)+'">Keep it</button>':'<button type="button" class="cz-btn cz-btn--ghost" data-cancel="'+esc(s.id)+'">Cancel</button>');
+var btn=s.status==='canceled'?'':(ends?(storeOpen?'<button type="button" class="cz-btn cz-btn--ghost" data-resume="'+esc(s.id)+'">Keep it</button>':''):'<button type="button" class="cz-btn cz-btn--ghost" data-cancel="'+esc(s.id)+'">Cancel</button>');
 return '<li class="cz-order__item"><div class="cz-order__line"><span>'+esc(what)+'<span class="cz-order__opts">'+esc(RT.money(s.total_cents,s.currency))+' every '+esc(s.interval)+' · '+esc(state)+'</span></span>'+btn+'</div></li>';}).join('')+'</ul>'+
-(live?'<p><button type="button" class="cz-btn cz-btn--ghost" data-card>Update the card it charges</button></p>':'')+'<p class="cz-msg" data-submsg role="status"></p>';
+(live&&storeOpen?'<p><button type="button" class="cz-btn cz-btn--ghost" data-card>Update the card it charges</button></p>':'')+'<p class="cz-msg" data-submsg role="status"></p>';
 var m=el.querySelector('[data-submsg]');
 el.querySelectorAll('[data-cancel]').forEach(function(b){b.addEventListener('click',function(){if(!confirm('Cancel this subscription? It stops before the next charge.'))return;
 b.disabled=true;call('POST','/me/subscriptions/'+encodeURIComponent(b.getAttribute('data-cancel'))+'/cancel').then(loadSubs).catch(function(err){b.disabled=false;m.className='cz-msg err';m.textContent=err.message;});});});

@@ -14,6 +14,10 @@ preflight this API never grants.
 Signing out on the web ends THIS session only. The app's `/auth/logout`
 revokes every session and device — which would sign a shopper out of the app
 on their phone for signing out of a laptop.
+
+A store that has closed to shoppers (unpublished, owner inactive, a plan
+without shopper accounts) still lets the people it bills sign in and refresh,
+to cancel; `store_open` tells the page to offer only that.
 """
 from uuid import UUID
 
@@ -59,9 +63,9 @@ def _web_only(request: Request) -> None:
         raise HTTPException(403, "Missing web client header")
 
 
-def _for_page(session: dict) -> dict:
+def _for_page(session: dict, store_open: bool) -> dict:
     """The session minus the refresh token, which stays in the cookie."""
-    return {k: v for k, v in session.items() if k != "refresh_token"}
+    return {**{k: v for k, v in session.items() if k != "refresh_token"}, "store_open": store_open}
 
 
 @router.post(PREFIX + "/web/verify")
@@ -71,18 +75,25 @@ async def web_verify(slug: str, body: ShopperVerify, request: Request, response:
     _web_only(request)
     await check_rate_limit(client_ip(request), "cappe_shopper_verify", 30, 900)
     async with get_connection() as conn:
-        site = await auth.published_shopper_site(conn, slug)
-        session = await auth.verify_login_code(conn, site=site, email=str(body.email), code=body.code)
+        site, store_open = await auth.sign_in_site(conn, slug)
+        session = None
+        if store_open or await auth.subscribes_here(conn, site["id"], str(body.email)):
+            session = await auth.verify_login_code(conn, site=site, email=str(body.email), code=body.code)
     if session is None:
         raise HTTPException(401, "That code is wrong or has expired")
     _set_refresh(response, session["refresh_token"])
-    return _for_page(session)
+    return _for_page(session, store_open)
 
 
 @router.post(PREFIX + "/web/refresh")
 async def web_refresh(slug: str, request: Request, response: Response):
     """A fresh access token from the cookie, rotating the refresh token.
-    401 (and the cookie cleared) when there is no live session."""
+    401 (and the cookie cleared) when there is no live session.
+
+    A cookie the session has already rotated past is 401 WITHOUT clearing: it
+    comes from a second request racing the one that rotated it, whose
+    response set the newer cookie this browser now holds — clearing would
+    delete that one. `stale: true` tells the page to retry with it."""
     _web_only(request)
     await check_rate_limit(client_ip(request), "cappe_shopper_refresh", 120, 3600)
     token = request.cookies.get(COOKIE)
@@ -90,12 +101,15 @@ async def web_refresh(slug: str, request: Request, response: Response):
         raise HTTPException(401, "Not signed in")
     try:
         async with get_connection() as conn:
-            site = await auth.published_shopper_site(conn, slug)
+            site, store_open = await auth.session_site(conn, slug)
             async with conn.transaction():
                 shopper, payload = await auth.resolve_shopper(conn, site, token, "refresh", lock=True)
                 session = await auth.issue_session(
                     conn, shopper, sid=UUID(payload["sid"]), started=payload["session_started_at"],
                 )
+    except auth.StaleRefresh as exc:
+        response.status_code = 401
+        return {"detail": exc.detail, "stale": True}
     except HTTPException as exc:
         if exc.status_code == 401:
             _clear_refresh(response)
@@ -105,12 +119,19 @@ async def web_refresh(slug: str, request: Request, response: Response):
             return {"detail": exc.detail}
         raise
     _set_refresh(response, session["refresh_token"])
-    return _for_page(session)
+    return _for_page(session, store_open)
 
 
 @router.post(PREFIX + "/web/logout", status_code=204)
 async def web_logout(slug: str, request: Request):
-    """End this browser's session — and only this one."""
+    """End this browser's session — and only this one.
+
+    Takes the shopper lock refresh takes (`resolve_shopper(lock=True)`): a
+    refresh already under way finishes first and its rotated session is the
+    one deleted; one that starts after finds no session. Without it a refresh
+    could re-create the session a successful sign-out had just deleted. A
+    failure here is a 500 with the cookie left in place — the session is
+    still live, so the page reports it and offers a retry."""
     _web_only(request)
     token = request.cookies.get(COOKIE)
     out = Response(status_code=204)
@@ -122,7 +143,8 @@ async def web_logout(slug: str, request: Request):
         sid, shopper_id = UUID(payload["sid"]), UUID(payload["sub"])
     except (KeyError, TypeError, ValueError):
         return out
-    async with get_connection() as conn:
+    async with get_connection() as conn, conn.transaction():
+        await conn.execute("SELECT 1 FROM cappe_shoppers WHERE id = $1 FOR UPDATE", shopper_id)
         await conn.execute(
             "DELETE FROM cappe_shopper_sessions WHERE id = $1 AND shopper_id = $2", sid, shopper_id,
         )
@@ -169,4 +191,3 @@ async def billing_portal(body: PortalRequest, request: Request, context=Depends(
     except CappeStripeError:
         raise HTTPException(502, "Couldn't reach Stripe. Try again in a moment.")
     return {"url": session["url"]}
-

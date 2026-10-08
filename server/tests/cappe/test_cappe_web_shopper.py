@@ -5,9 +5,13 @@ Sign-in and subscriptions existed only in the iOS app. What each block pins:
   * the web session: the refresh token only ever in a host-only, HttpOnly,
     Secure, SameSite=Strict `__Host-` cookie — never in a response body —
     and every cookie endpoint behind the `X-Cappe-Web` header;
-  * refresh rotates the cookie, and a dead session clears it;
+  * refresh rotates the cookie, and a dead session clears it — but a cookie
+    a racing request already rotated past does not clear the newer one;
   * signing out on the web ends THAT session only (the app's logout ends
-    every session and device);
+    every session and device), under the lock refresh takes, so an in-flight
+    refresh can't bring the session back;
+  * a store that closes to shoppers still lets the people it bills sign in
+    and refresh, to cancel — and nobody else;
   * the card-update portal on the store's own Stripe account, set up once;
   * the `/account` page, the "Subscribe" button and when the store offers it;
   * subscription emails link to the account page.
@@ -29,10 +33,17 @@ import pytest  # noqa: E402
 from fastapi import HTTPException, Response  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 
+from app.config import load_settings  # noqa: E402
+
+load_settings()  # real tokens are minted below, as in test_cappe_shopper_auth.py
+
 from app.cappe.models.shopper import ShopperVerify  # noqa: E402
 from app.cappe.routes import render as render_mod  # noqa: E402
 from app.cappe.routes.public import shop as public_shop  # noqa: E402
+from app.cappe.routes import shopper_subscriptions as sub_routes  # noqa: E402
+from app.cappe.routes.public import shopper as app_routes  # noqa: E402
 from app.cappe.routes.public import shopper_web as web  # noqa: E402
+from app.cappe.services import shopper_auth  # noqa: E402
 from app.cappe.services import email as mail  # noqa: E402
 from app.cappe.services import recurring  # noqa: E402
 from app.cappe.services.render import account_page  # noqa: E402
@@ -172,12 +183,187 @@ def test_a_dead_session_is_401_and_clears_the_cookie(monkeypatch):
     assert cookie.startswith('__Host-cz_shopper="";') and "Max-Age=0" in cookie
 
 
-def test_a_store_that_turned_accounts_off_is_not_a_signed_out_shopper(monkeypatch):
+def test_a_cookie_a_racing_request_already_rotated_is_refused_without_clearing(monkeypatch):
+    """Two tabs (or two calls) send the same cookie. The first rotates it and
+    its response sets the new one; the second must not delete that cookie."""
     _wire(monkeypatch)
-    monkeypatch.setattr(web.auth, "published_shopper_site", AsyncMock(side_effect=HTTPException(402, "off")))
+    monkeypatch.setattr(web.auth, "resolve_shopper", AsyncMock(side_effect=web.auth.StaleRefresh()))
+    response = Response()
+    out = asyncio.run(web.web_refresh("lumiere", _request(WEB, {web.COOKIE: "ref-1"}), response))
+    assert response.status_code == 401 and out == {"detail": "Shopper session expired", "stale": True}
+    assert not response.headers.getlist("set-cookie")
+
+
+def _closed(monkeypatch, conn, reason=402):
+    """A store that has closed to shoppers: the published lookup refuses."""
+    monkeypatch.setattr(web, "get_connection", lambda: Ctx(conn))
+    monkeypatch.setattr(web, "check_rate_limit", AsyncMock())
+    monkeypatch.setattr(web.auth, "published_shopper_site", AsyncMock(side_effect=HTTPException(reason, "closed")))
+
+
+def test_a_closed_store_keeps_an_existing_session_alive_for_cancelling(monkeypatch):
+    _closed(monkeypatch, Conn([("FROM cappe_sites WHERE slug", SITE)]))
+    shopper = {"id": SHOPPER_ID, "email": "b@example.com", "site_id": SITE["id"]}
+    monkeypatch.setattr(web.auth, "resolve_shopper",
+                        AsyncMock(return_value=(shopper, {"sid": str(SID), "session_started_at": 1})))
+    monkeypatch.setattr(web.auth, "issue_session", AsyncMock(return_value={**SESSION, "refresh_token": "ref-2"}))
+    response = Response()
+    out = asyncio.run(web.web_refresh("lumiere", _request(WEB, {web.COOKIE: "ref-1"}), response))
+    assert out["store_open"] is False and out["access_token"] == "acc"
+    assert _cookie(response).startswith("__Host-cz_shopper=ref-2;")
+
+
+def test_a_store_that_does_not_exist_is_still_404(monkeypatch):
+    _closed(monkeypatch, Conn(), reason=404)
     with pytest.raises(HTTPException) as exc:
         asyncio.run(web.web_refresh("lumiere", _request(WEB, {web.COOKIE: "ref"}), Response()))
+    assert exc.value.status_code == 404
+
+
+def test_a_closed_store_signs_in_the_people_it_still_bills(monkeypatch):
+    conn = Conn([("FROM cappe_sites WHERE slug", SITE), ("FROM cappe_shopper_subscriptions", 1)])
+    _closed(monkeypatch, conn)
+    monkeypatch.setattr(web.auth, "verify_login_code", AsyncMock(return_value=dict(SESSION)))
+    out = asyncio.run(web.web_verify("lumiere", ShopperVerify(email="B@example.com", code="123456"),
+                                     _request(WEB), Response()))
+    assert out["store_open"] is False
+    subscriber_check = [args for sql, args in conn.calls if "JOIN cappe_shoppers" in sql]
+    assert subscriber_check and subscriber_check[0][1] == "b@example.com"
+
+
+def test_a_closed_store_signs_in_nobody_else(monkeypatch):
+    # The store still bills someone, but not this email: the code isn't even checked.
+    conn = Conn([("FROM cappe_sites WHERE slug", SITE), ("SELECT 1 FROM cappe_shopper_subscriptions WHERE", 1)])
+    _closed(monkeypatch, conn)
+    verify = AsyncMock(return_value=dict(SESSION))
+    monkeypatch.setattr(web.auth, "verify_login_code", verify)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(web.web_verify("lumiere", ShopperVerify(email="b@example.com", code="123456"),
+                                   _request(WEB), Response()))
+    assert exc.value.status_code == 401 and verify.await_count == 0
+
+
+def test_a_closed_store_billing_nobody_refuses_sign_in_as_before(monkeypatch):
+    _closed(monkeypatch, Conn([("FROM cappe_sites WHERE slug", SITE)]), reason=402)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(web.web_verify("lumiere", ShopperVerify(email="b@example.com", code="123456"),
+                                   _request(WEB), Response()))
     assert exc.value.status_code == 402
+
+
+def _shopper():
+    return {"id": SHOPPER_ID, "site_id": SITE["id"], "email": "b@example.com", "name": None, "phone": None,
+            "push_order_updates": True, "tokens_valid_after": None}
+
+
+class RotateConn(Conn):
+    def __init__(self, kept):
+        super().__init__()
+        self.kept = kept
+
+    async def fetchval(self, sql, *args):
+        self.calls.append((sql, args))
+        return self.kept
+
+
+def test_rotating_a_session_never_recreates_one_that_was_deleted():
+    """Rotation updates the row it rotates; a session signed out in the
+    meantime is not upserted back into existence."""
+    conn = RotateConn(kept=None)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(shopper_auth.issue_session(conn, _shopper(), sid=SID, started=None))
+    assert exc.value.status_code == 401
+    ((sql, args),) = conn.calls
+    assert sql.startswith("UPDATE cappe_shopper_sessions") and "INSERT" not in sql and args[:2] == (SID, SHOPPER_ID)
+
+    conn = RotateConn(kept=SID)
+    session = asyncio.run(shopper_auth.issue_session(conn, _shopper(), sid=SID, started=None))
+    assert session["refresh_token"] and len(conn.calls) == 1
+
+
+def test_a_new_session_is_a_plain_insert():
+    conn = Conn()
+    asyncio.run(shopper_auth.issue_session(conn, _shopper()))
+    ((sql, _args),) = conn.calls
+    assert sql.startswith("INSERT INTO cappe_shopper_sessions") and "ON CONFLICT" not in sql
+
+
+class SessionConn(Conn):
+    def __init__(self, refresh_hash):
+        super().__init__([("FROM cappe_shoppers", _shopper()), ("FROM cappe_shopper_sessions", {"refresh_hash": refresh_hash})])
+
+
+def test_an_already_rotated_refresh_token_is_stale_not_dead():
+    pair = asyncio.run(shopper_auth.issue_session(Conn(), _shopper()))
+    current = shopper_auth.refresh_hash(pair["refresh_token"])
+    shopper, _payload = asyncio.run(shopper_auth.resolve_shopper(
+        SessionConn(current), SITE, pair["refresh_token"], "refresh", lock=True))
+    assert shopper["id"] == SHOPPER_ID
+    with pytest.raises(shopper_auth.StaleRefresh) as exc:
+        asyncio.run(shopper_auth.resolve_shopper(SessionConn("newer"), SITE, pair["refresh_token"], "refresh", lock=True))
+    assert exc.value.status_code == 401
+    # No session at all is dead, not stale: that one does clear the cookie.
+    gone = Conn([("FROM cappe_shoppers", _shopper())])
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(shopper_auth.resolve_shopper(gone, SITE, pair["refresh_token"], "refresh", lock=True))
+    assert not isinstance(exc.value, shopper_auth.StaleRefresh)
+
+
+class _Background:
+    def __init__(self):
+        self.tasks = []
+
+    def add_task(self, fn, *args):
+        self.tasks.append((fn, args))
+
+
+def _app_closed(monkeypatch, conn):
+    monkeypatch.setattr(app_routes, "get_connection", lambda: Ctx(conn))
+    monkeypatch.setattr(app_routes, "check_rate_limit", AsyncMock())
+    monkeypatch.setattr(app_routes, "check_recipient_send_ok", AsyncMock(return_value=True))
+    monkeypatch.setattr(app_routes, "_is_reserved_test_domain", lambda _email: False)  # test data stays on example.com
+    monkeypatch.setattr(app_routes.auth, "published_shopper_site", AsyncMock(side_effect=HTTPException(404, "closed")))
+    monkeypatch.setattr(app_routes.auth, "issue_login_code", AsyncMock(return_value="123456"))
+
+
+@pytest.mark.parametrize("subscriber,emailed", [(1, True), (None, False)])
+def test_a_closed_store_emails_codes_only_to_people_it_still_bills(monkeypatch, subscriber, emailed):
+    conn = Conn([("FROM cappe_sites WHERE slug", SITE), ("SELECT 1 FROM cappe_shopper_subscriptions WHERE", 1),
+                 ("JOIN cappe_shoppers", subscriber)])
+    _app_closed(monkeypatch, conn)
+    background = _Background()
+    out = asyncio.run(app_routes.start("lumiere", app_routes.ShopperStart(email="b@example.com"), _request(), background))
+    # 204 either way: the endpoint never says who subscribes.
+    assert out.status_code == 204 and bool(background.tasks) is emailed
+
+
+def test_the_app_can_refresh_and_verify_at_a_closed_store_too(monkeypatch):
+    conn = Conn([("FROM cappe_sites WHERE slug", SITE), ("FROM cappe_shopper_subscriptions", 1)])
+    _app_closed(monkeypatch, conn)
+    monkeypatch.setattr(app_routes.auth, "verify_login_code", AsyncMock(return_value={"access_token": "acc"}))
+    monkeypatch.setattr(app_routes.auth, "resolve_shopper",
+                        AsyncMock(return_value=(_shopper(), {"sid": str(SID), "session_started_at": 1})))
+    monkeypatch.setattr(app_routes.auth, "issue_session", AsyncMock(return_value={"access_token": "rotated"}))
+    verified = asyncio.run(app_routes.verify("lumiere", ShopperVerify(email="b@example.com", code="123456"), _request()))
+    refreshed = asyncio.run(app_routes.refresh("lumiere", app_routes.ShopperRefresh(refresh_token="r"), _request()))
+    assert verified == {"access_token": "acc"} and refreshed == {"access_token": "rotated"}
+
+
+def test_the_subscription_list_can_drop_abandoned_checkouts_before_its_limit(monkeypatch):
+    seen = []
+
+    class ListConn(Conn):
+        async def fetch(self, sql, *args):
+            seen.append((sql, args))
+            return []
+
+    monkeypatch.setattr(sub_routes, "get_connection", lambda: Ctx(ListConn()))
+    asyncio.run(sub_routes.list_mine(limit=100, offset=0, include_abandoned=False, context=(SITE, _shopper())))
+    asyncio.run(sub_routes.list_mine(limit=100, offset=0, include_abandoned=True, context=(SITE, _shopper())))
+    (web_sql, web_args), (app_sql, app_args) = seen
+    assert web_sql.index("status <> ALL($5") < web_sql.index("LIMIT $3")
+    assert set(web_args[4]) == set(sub_routes._ABANDONED)
+    assert "status <> ALL" not in app_sql and len(app_args) == 4     # the app's contract, unchanged
 
 
 # ── signing out ──────────────────────────────────────────────────────────────
@@ -188,7 +374,10 @@ def test_signing_out_on_the_web_ends_this_session_only(monkeypatch):
         decode_token=lambda token, kind: {"sid": str(SID), "sub": str(SHOPPER_ID)}))
     out = asyncio.run(web.web_logout("lumiere", _request(WEB, {web.COOKIE: "ref"})))
     assert out.status_code == 204 and "Max-Age=0" in out.headers["set-cookie"]
-    ((sql, args),) = conn.calls
+    (lock, lock_args), (sql, args) = conn.calls
+    # The lock refresh takes, first: a refresh under way finishes before the
+    # delete, and one after it finds nothing to rotate.
+    assert "FROM cappe_shoppers WHERE id = $1 FOR UPDATE" in lock and lock_args == (SHOPPER_ID,)
     assert sql.startswith("DELETE FROM cappe_shopper_sessions WHERE id = $1") and args == (SID, SHOPPER_ID)
     # Not the app's sign-out: no other session, no device, no token revocation.
     assert "tokens_valid_after" not in sql and "devices" not in sql
@@ -200,6 +389,27 @@ def test_signing_out_without_a_live_cookie_still_clears_it(monkeypatch, cookies,
     monkeypatch.setattr(web.auth, "token_helpers", lambda: SimpleNamespace(decode_token=lambda *a: payload))
     out = asyncio.run(web.web_logout("lumiere", _request(WEB, cookies)))
     assert out.status_code == 204 and conn.calls == []
+
+
+def test_the_page_says_signed_out_only_when_the_server_did_it():
+    js = (ASSETS / "account.js").read_text()
+    assert "/web/logout" in js and ".finally(" not in js
+    assert "if(!r.ok)throw new Error();signInView('You’re signed out.')" in js
+    assert "Couldn’t sign you out" in js
+
+
+def test_the_page_refreshes_one_at_a_time_and_retries_a_stale_cookie():
+    js = (ASSETS / "account.js").read_text()
+    assert "if(refreshing)return refreshing;" in js                     # one per page
+    assert "locks.request('cz-shopper-refresh:'" in js                 # one across tabs
+    assert "d.stale" in js and "wait(300).then(refreshOnce)" in js      # a stale refusal is retried
+
+
+def test_the_page_lists_every_live_subscription_and_offers_only_cancel_when_closed():
+    js = (ASSETS / "account.js").read_text()
+    assert "include_abandoned=false&limit='+SUB_PAGE+'&offset='" in js
+    assert "storeOpen=d.store_open!==false" in js
+    assert "if(storeOpen){loadOrders(null);loadAddrs();}" in js
 
 
 # ── updating the card ────────────────────────────────────────────────────────

@@ -37,6 +37,56 @@ async def published_shopper_site(conn, slug):
     return site
 
 
+# Subscriptions that can still charge a shopper. While one of them bills at a
+# store that has since closed to shoppers (unpublished, owner inactive, or a
+# plan without shopper accounts), its subscriber can still sign in — to see and
+# cancel it, nothing else: `require_shopper_session` serves those endpoints,
+# and every purchase still goes through `published_shopper_site`.
+BILLING_STATUSES = ("active", "trialing", "past_due", "unpaid", "paused")
+
+
+async def _store(conn, slug):
+    """(site, why_closed): the store in any state, and the error a purchase
+    there would get (None while it's open to shoppers). 404 when there's no
+    such store at all."""
+    try:
+        return await published_shopper_site(conn, slug), None
+    except HTTPException as closed:
+        site = await conn.fetchrow("SELECT * FROM cappe_sites WHERE slug=$1", slug)
+        if not site:
+            raise
+        return site, closed
+
+
+async def session_site(conn, slug):
+    """(site, open) for a shopper who already has a session. A closed store
+    keeps it usable for managing subscriptions."""
+    site, closed = await _store(conn, slug)
+    return site, closed is None
+
+
+async def sign_in_site(conn, slug):
+    """(site, open) for signing in. A closed store still takes sign-ins while a
+    subscription bills there (`subscribes_here` decides whose); otherwise it
+    refuses for the reason it's closed, as before."""
+    site, closed = await _store(conn, slug)
+    if closed is not None and not await conn.fetchval(
+        "SELECT 1 FROM cappe_shopper_subscriptions WHERE site_id=$1 AND status = ANY($2::text[]) LIMIT 1",
+        site["id"], list(BILLING_STATUSES),
+    ):
+        raise closed
+    return site, closed is None
+
+
+async def subscribes_here(conn, site_id, email) -> bool:
+    """Whether this email has a subscription still billing at this store."""
+    return bool(await conn.fetchval(
+        "SELECT 1 FROM cappe_shopper_subscriptions sub JOIN cappe_shoppers sh ON sh.id = sub.shopper_id "
+        "WHERE sub.site_id=$1 AND sh.site_id=$1 AND sh.email=$2 AND sub.status = ANY($3::text[]) LIMIT 1",
+        site_id, email.strip().lower(), list(BILLING_STATUSES),
+    ))
+
+
 def code_hash(site_id, email, code):
     return hmac.new(get_settings().jwt_secret_key.encode(),
                     f"cappe_shopper|{site_id}|{email}|{code}".encode(), hashlib.sha256).hexdigest()
@@ -95,18 +145,30 @@ def refresh_hash(token):
 
 
 async def issue_session(conn, shopper, *, sid=None, started=None):
+    """A new session, or — given `sid` — the next token of an existing one.
+    Rotation only ever updates the session row: one deleted in the meantime
+    (signed out) stays deleted, and the refresh is refused."""
+    rotating = sid is not None
     sid = sid or uuid4()
     helpers = token_helpers()
     claims = {"site_id": str(shopper["site_id"]), "sid": str(sid), "nonce": secrets.token_hex(16)}
     access = helpers.create_access_token(shopper["id"], shopper["email"], extra_claims=claims)
     refresh = helpers.create_refresh_token(shopper["id"], shopper["email"], started, extra_claims=claims)
     payload = helpers.decode_token(refresh, "refresh")
-    await conn.execute(
-        "INSERT INTO cappe_shopper_sessions(id,shopper_id,refresh_hash,expires_at) "
-        "VALUES($1,$2,$3,to_timestamp($4)) ON CONFLICT(id) DO UPDATE SET "
-        "refresh_hash=EXCLUDED.refresh_hash,expires_at=EXCLUDED.expires_at",
-        sid, shopper["id"], refresh_hash(refresh), payload["exp"],
-    )
+    if rotating:
+        kept = await conn.fetchval(
+            "UPDATE cappe_shopper_sessions SET refresh_hash=$3, expires_at=to_timestamp($4) "
+            "WHERE id=$1 AND shopper_id=$2 RETURNING id",
+            sid, shopper["id"], refresh_hash(refresh), payload["exp"],
+        )
+        if kept is None:
+            raise HTTPException(401, "Shopper session expired")
+    else:
+        await conn.execute(
+            "INSERT INTO cappe_shopper_sessions(id,shopper_id,refresh_hash,expires_at) "
+            "VALUES($1,$2,$3,to_timestamp($4))",
+            sid, shopper["id"], refresh_hash(refresh), payload["exp"],
+        )
     return {"access_token": access, "refresh_token": refresh, "token_type": "bearer",
             "expires_in": get_settings().jwt_access_token_expire_minutes * 60,
             "shopper": Shopper.model_validate(dict(shopper)).model_dump(mode="json")}
@@ -131,6 +193,18 @@ async def resolve_shopper(conn, site, token, kind="access", *, lock=False):
         "SELECT refresh_hash FROM cappe_shopper_sessions WHERE id=$1 AND shopper_id=$2 AND expires_at>NOW()",
         sid, shopper_id,
     )
-    if not session or (kind == "refresh" and not hmac.compare_digest(session["refresh_hash"], refresh_hash(token))):
+    if not session:
         raise HTTPException(401, "Shopper session expired")
+    if kind == "refresh" and not hmac.compare_digest(session["refresh_hash"], refresh_hash(token)):
+        raise StaleRefresh()
     return row, payload
+
+
+class StaleRefresh(HTTPException):
+    """A refresh token its session has already rotated past, while the session
+    itself lives on — typically a second tab, or a second request, presenting
+    the cookie the first one just replaced. Refused like any dead token, but
+    the web must not clear the cookie for it: that cookie is now the new one."""
+
+    def __init__(self):
+        super().__init__(401, "Shopper session expired")

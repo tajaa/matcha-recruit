@@ -29,10 +29,23 @@ async def checkout(body: SubscriptionCheckout, request: Request, context=Depends
 
 
 @router.get(PREFIX)
-async def list_mine(limit: int = Query(default=100, ge=1, le=100), offset: int = Query(default=0, ge=0, le=10000), context=Depends(require_shopper_session)):
+async def list_mine(
+    limit: int = Query(default=100, ge=1, le=100), offset: int = Query(default=0, ge=0, le=10000),
+    include_abandoned: bool = Query(default=True),
+    context=Depends(require_shopper_session),
+):
+    """The shopper's subscriptions, newest first. `include_abandoned=false`
+    drops checkouts that were opened and never finished BEFORE the limit
+    applies — filtered after it, a hundred abandoned checkouts could hide an
+    older subscription that still bills. The default keeps them (the app's
+    contract)."""
+    status_filter = "" if include_abandoned else "AND status <> ALL($5::text[])"
     async with get_connection() as conn:
-        rows = await conn.fetch(f"SELECT {COLS} FROM cappe_shopper_subscriptions WHERE shopper_id=$1 AND site_id=$2 ORDER BY created_at DESC,id DESC LIMIT $3 OFFSET $4",
-                                context[1]["id"], context[0]["id"], limit, offset)
+        rows = await conn.fetch(
+            f"SELECT {COLS} FROM cappe_shopper_subscriptions WHERE shopper_id=$1 AND site_id=$2 {status_filter} "
+            "ORDER BY created_at DESC,id DESC LIMIT $3 OFFSET $4",
+            context[1]["id"], context[0]["id"], limit, offset, *([] if include_abandoned else [list(_ABANDONED)]),
+        )
     return [{**dict(r), "items": loads_list(r["items"])} for r in rows]
 
 
