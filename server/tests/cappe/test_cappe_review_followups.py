@@ -63,6 +63,10 @@ class FetchConn:
     async def execute(self, sql, *args):
         self.executed.append((sql, args))
 
+    async def fetchval(self, sql, *args):
+        self.executed.append((sql, args))
+        return "code-1"
+
 
 def test_release_order_bookings_frees_only_live_holds():
     conn = FetchConn([{"id": "b-1"}, {"id": "b-2"}])
@@ -74,9 +78,13 @@ def test_release_order_bookings_frees_only_live_holds():
     assert "status = 'cancelled'" in conn.sql
     assert "booking_id IS NOT NULL" in conn.sql
     # ...and gives back the promo-code use the order was holding.
-    ((promo_sql, promo_args),) = conn.executed
-    assert "SET status = 'released'" in promo_sql and "redemption_count - 1" in promo_sql
-    assert promo_args == ("o-1",)
+    (find, find_args), (lock, lock_args), (promo_sql, promo_args) = conn.executed
+    assert "FROM cappe_promo_redemptions" in find and find_args == ("o-1", "active")
+    # The code row is locked before its redemption, the order checkout and a
+    # code delete take them in.
+    assert "FROM cappe_promo_codes WHERE id = $1 FOR UPDATE" in lock and lock_args == ("code-1",)
+    assert "SET status = $3" in promo_sql and "redemption_count + $4" in promo_sql
+    assert promo_args == ("o-1", "active", "released", -1)
 
 
 def test_owner_cancel_path_releases_bookings_too():

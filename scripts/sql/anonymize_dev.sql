@@ -320,6 +320,12 @@ BEGIN
             checkout_token=replace(gen_random_uuid()::text,'-',''),status='canceled';
         UPDATE cappe_orders SET stripe_invoice_id=NULL;
     END IF;
+    -- Promo-code uses keep the buyer's email (zzzzcappe45) for once-per-customer
+    -- codes; give each the scrubbed address of its order.
+    IF to_regclass('public.cappe_promo_redemptions') IS NOT NULL THEN
+        UPDATE cappe_promo_redemptions r SET customer_email = o.customer_email
+          FROM cappe_orders o WHERE o.id = r.order_id AND r.customer_email IS NOT NULL;
+    END IF;
 END $$;
 
 COMMIT;

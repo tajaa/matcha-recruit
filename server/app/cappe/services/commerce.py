@@ -947,12 +947,18 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 for (_pid, _title, unit, qty, fulfillment, *_rest), share in zip(line_rows, shares)
             ], cfg, destination)
             tax_cents, shipping_cents, total_cents = totals["tax_cents"], totals["shipping_cents"], totals["total_cents"]
+            # Nothing to pay (a code that takes it all off, or free items) and
+            # no approval to wait for: the order is settled now. Left pending,
+            # nothing would ever settle it — Pay now refuses a zero total — and
+            # its downloads would never be released.
+            settled = total_cents <= 0 and not order_requires_approval
             order = await conn.fetchrow(
                 """INSERT INTO cappe_orders
                        (site_id, customer_email, customer_name, status, subtotal_cents, tax_cents,
                         shipping_cents, total_cents, currency, note, requires_approval, shipping_address,
-                        ship_country, promo_code, discount_cents)
-                   VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14)
+                        ship_country, promo_code, discount_cents, paid_at)
+                   VALUES ($1, $2, $3, CASE WHEN $15 THEN 'paid' ELSE 'pending' END, $4, $5, $6, $7, $8, $9,
+                           $10, $11::jsonb, $12, $13, $14, CASE WHEN $15 THEN NOW() END)
                    RETURNING id, status, subtotal_cents, tax_cents, shipping_cents, total_cents,
                              currency, access_token, requires_approval, ship_country""",
                 site["id"], email, body.customer_name, subtotal, tax_cents, shipping_cents,
@@ -962,7 +968,7 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 # collects it otherwise, and the paid webhook fills it in).
                 # Stored in Stripe's shape so the dashboard reads one format.
                 json.dumps(address.as_stripe_shape(ship_country)) if address is not None else None,
-                ship_country, promo_code if promo else None, discount,
+                ship_country, promo_code if promo else None, discount, settled,
             )
             if promo:
                 await redeem_promo(

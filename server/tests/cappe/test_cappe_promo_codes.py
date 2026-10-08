@@ -36,7 +36,7 @@ from app.cappe.models.shop import CappeCartItem, CappeCheckoutRequest, CappeProm
 from app.cappe.models.shopper import CartQuoteRequest  # noqa: E402
 from app.cappe.routes import promo_codes as promo_routes  # noqa: E402
 from app.cappe.routes.public import shop as public_shop  # noqa: E402
-from app.cappe.services import cart, commerce, promos, recurring, receipt  # noqa: E402
+from app.cappe.services import cart, commerce, inventory, promos, recurring, receipt  # noqa: E402
 from app.cappe.services.render import order_page  # noqa: E402
 
 SITE, ORDER = uuid4(), uuid4()
@@ -272,7 +272,8 @@ class OrderConn:
         if "FROM cappe_sites" in sql:
             return {**SITE_CFG, "tax_rate_bps": 0, "tax_label": None, "shipping_label": None}
         if "INSERT INTO cappe_orders" in sql:
-            self.order = {"id": ORDER, "status": "pending", "access_token": TOKEN, "subtotal_cents": args[3],
+            self.order = {"id": ORDER, "status": "paid" if args[14] else "pending", "access_token": TOKEN,
+                          "subtotal_cents": args[3],
                           "tax_cents": args[4], "shipping_cents": args[5], "total_cents": args[6],
                           "currency": args[7], "requires_approval": args[9], "ship_country": args[11],
                           "promo_code": args[12], "discount_cents": args[13]}
@@ -488,3 +489,75 @@ def test_shares_are_stored_with_each_line():
     src = inspect.getsource(commerce.create_public_order)
     assert "stock_decremented, decremented_option_ids, promo_discount_cents)" in src
     assert json.dumps(0) == "0"
+
+
+# ── a code that takes it all off ─────────────────────────────────────────────
+
+def test_an_order_a_code_makes_free_is_settled_at_once(monkeypatch):
+    """Nothing to pay and nothing to approve: left pending, nothing would ever
+    settle it (Pay now refuses a zero total) and its download stays locked."""
+    site, body, conn, stripe = _wire_order(monkeypatch, promo=code(kind="fixed", percent_off=None, amount_off_cents=2000))
+    asyncio.run(commerce.create_public_order(site, body, BackgroundTasks()))
+    assert conn.order["total_cents"] == 0 and conn.order["status"] == "paid"
+    assert stripe.create_checkout_session.await_count == 0
+
+
+def test_an_order_with_something_to_pay_still_starts_pending(monkeypatch):
+    site, body, conn, _stripe = _wire_order(monkeypatch)
+    asyncio.run(commerce.create_public_order(site, body, BackgroundTasks()))
+    assert conn.order["total_cents"] > 0 and conn.order["status"] == "pending"
+
+
+# ── a released order that gets paid after all ────────────────────────────────
+
+class _UseConn:
+    def __init__(self, held_by):
+        self.held_by, self.calls = held_by, []
+
+    async def fetch(self, sql, *args):
+        return []
+
+    async def fetchval(self, sql, *args):
+        self.calls.append((sql, args))
+        return self.held_by if "FROM cappe_promo_redemptions" in sql else None
+
+    async def execute(self, sql, *args):
+        self.calls.append((sql, args))
+
+
+def test_paying_for_a_released_order_counts_its_code_again():
+    """The release gave the use back; the late payment means the buyer got the
+    discount after all, so it counts again (even past the cap — it's owed)."""
+    code_id = uuid4()
+    conn = _UseConn(code_id)
+    asyncio.run(inventory.retake_order_stock(conn, site_id=uuid4(), order_id=ORDER))
+    (find, find_args), (lock, lock_args), (move, move_args) = conn.calls
+    assert find_args == (ORDER, "released")
+    assert "cappe_promo_codes WHERE id = $1 FOR UPDATE" in lock and lock_args == (code_id,)
+    assert move_args == (ORDER, "released", "active", 1)
+
+
+def test_an_order_without_a_code_touches_no_code():
+    conn = _UseConn(None)
+    asyncio.run(inventory.retake_order_stock(conn, site_id=uuid4(), order_id=ORDER))
+    assert len(conn.calls) == 1
+
+
+def test_a_saved_code_the_server_refuses_is_dropped_not_kept():
+    assets = pathlib.Path(commerce.__file__).parent / "render" / "assets"
+    js = (assets / "cart.js").read_text()
+    assert ".toUpperCase().slice(0,40)" in js
+    # Only a refusal of the code field itself drops it — not a network error
+    # or a sold-out line, which used to wipe a perfectly good code.
+    assert "if(promoCode&&refusesCode(e)){setPromo(null);" in js
+    assert "e.status===422" in js and "x.loc.indexOf('promo_code')>=0" in js
+    runtime = (assets / "runtime.js").read_text()
+    assert "e.status=r.status;e.detail=d&&d.detail;throw e;" in runtime
+
+
+def test_dev_refreshes_scrub_redemption_emails():
+    root = pathlib.Path(__file__).resolve().parents[3]
+    assert "UPDATE cappe_promo_redemptions r SET customer_email = o.customer_email" in (
+        root / "scripts" / "sql" / "anonymize_dev.sql").read_text()
+    assert "FROM cappe_promo_redemptions WHERE customer_email IS NOT NULL" in (
+        root / "scripts" / "refresh-dev-from-prod.sh").read_text()

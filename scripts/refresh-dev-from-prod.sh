@@ -312,6 +312,11 @@ else
                 + (SELECT count(*) FROM cappe_shopper_addresses);")
             [[ "$SHOPPER_LEAK" == "0" ]] || { echo "PII LEAK DETECTED — shopper data remains."; exit 1; }
         fi
+        HAS_PROMOS=$(ddev -tA -d "$DB_NAME" -c "SELECT to_regclass('public.cappe_promo_redemptions') IS NOT NULL;")
+        if [[ "$HAS_PROMOS" == "t" ]]; then
+            PROMO_LEAK=$(ddev -tA -d "$DB_NAME" -c "SELECT count(*) FROM cappe_promo_redemptions WHERE customer_email IS NOT NULL AND customer_email NOT LIKE '%@example.com';")
+            [[ "$PROMO_LEAK" == "0" ]] || { echo "${RED}PII LEAK DETECTED — promo-code redemption emails remain.${NC}"; exit 1; }
+        fi
     else
         echo "      cappe tables absent in this dump — cappe leak check skipped."
     fi

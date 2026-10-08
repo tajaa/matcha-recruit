@@ -7,7 +7,7 @@ var KEY='cz-cart:'+RT.slug,OKEY='cz-cart-order:'+RT.slug,CKEY='cz-cart-country:'
 function load(){try{var v=JSON.parse(localStorage.getItem(KEY)||'[]');return Array.isArray(v)?v:[];}catch(e){return [];}}
 var items=load(),quote=null,qseq=0,busy=false,shipTo=null;
 try{shipTo=localStorage.getItem(CKEY)||null;}catch(e){}
-var promoCode=null;try{promoCode=localStorage.getItem(PKEY)||null;}catch(e){}
+var promoCode=null,promoNote='';try{promoCode=localStorage.getItem(PKEY)||null;}catch(e){}
 function setPromo(c){promoCode=c||null;try{if(promoCode)localStorage.setItem(PKEY,promoCode);else localStorage.removeItem(PKEY);}catch(e){}}
 // Country names in the buyer's language; the code if the browser can't.
 var names=null;try{names=new Intl.DisplayNames([navigator.language||'en'],{type:'region'});}catch(e){}
@@ -52,7 +52,7 @@ var linesEl=root.querySelector('[data-lines]'),totalsEl=root.querySelector('[dat
 addrEl=root.querySelector('[data-addr]'),goEl=root.querySelector('[data-go]'),msgEl=root.querySelector('[data-msg]'),footEl=root.querySelector('[data-foot]'),
 shipWrap=root.querySelector('[data-shipwrap]'),shipEl=root.querySelector('[data-ship]'),shipNote=root.querySelector('[data-shipnote]'),shipList='';
 var promoWrap=root.querySelector('[data-promowrap]'),promoEl=root.querySelector('[data-promo]'),promoMsg=root.querySelector('[data-promo-msg]');
-function applyPromo(){var c=promoEl.value.trim().toUpperCase();setPromo(c);quote=null;render();refreshQuote();}
+function applyPromo(){var c=promoEl.value.trim().toUpperCase().slice(0,40);promoNote='';setPromo(c);quote=null;render();refreshQuote();}
 root.querySelector('[data-promo-apply]').addEventListener('click',applyPromo);
 promoEl.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();applyPromo();}});
 promoMsg.addEventListener('click',function(e){if(e.target&&e.target.hasAttribute('data-promo-remove')){setPromo(null);promoEl.value='';quote=null;render();refreshQuote();}});
@@ -97,7 +97,7 @@ promoWrap.hidden=!(quote&&quote.promo_codes);
 if(promoCode&&!promoEl.value)promoEl.value=promoCode;
 if(promo&&promo.valid){promoMsg.className='cz-msg';promoMsg.innerHTML=RT.esc(promo.code)+' applied. <button type="button" class="cz-bag__rm" data-promo-remove>Remove</button>';}
 else if(promo){promoMsg.className='cz-msg err';promoMsg.textContent=promo.message||'That code can’t be used.';}
-else{promoMsg.textContent='';}
+else{promoMsg.className=promoNote?'cz-msg err':'cz-msg';promoMsg.textContent=promoNote;}
 var approval=items.some(function(i){return i.requires_approval;});
 var noShip=!!(quote&&quote.ships_to===false);
 paintShip();
@@ -111,6 +111,7 @@ goEl.disabled=busy||blocked;goEl.textContent=busy?'Placing order…':(approval?'
 function changed(){persist();quote=null;render();refreshQuote();}
 // The server prices the bag: options, promotions, tax and shipping. A slow
 // answer for an older bag can't overwrite a newer one.
+function refusesCode(e){return !!e&&e.status===422&&Array.isArray(e.detail)&&e.detail.some(function(x){return x&&Array.isArray(x.loc)&&x.loc.indexOf('promo_code')>=0;});}
 function refreshQuote(){if(!items.length){quote=null;render();return;}var seq=++qseq;
 var req={items:items.map(function(i){return {product_id:i.product_id,quantity:i.quantity,selected_option_ids:i.selected_option_ids||[]};})};
 if(shipTo)req.ship_country=shipTo;
@@ -119,6 +120,10 @@ RT.post('/quote',req)
 .then(function(q){if(seq!==qseq)return;quote=q;render();})
 .catch(function(e){if(seq!==qseq)return;
 if(shipTo){shipTo=null;try{localStorage.removeItem(CKEY);}catch(x){}refreshQuote();return;}
+// A saved code the server refuses outright (malformed) would otherwise fail
+// every quote and hide the promo box with it: drop it, say so, price again.
+// Only for that refusal — a network error or a sold-out line keeps the code.
+if(promoCode&&refusesCode(e)){setPromo(null);promoEl.value='';promoNote='That code can’t be used.';refreshQuote();return;}
 quote=null;render();msgEl.className='cz-msg err';msgEl.textContent=e.message||'Could not price your bag.';});}
 
 goEl.addEventListener('click',function(){
