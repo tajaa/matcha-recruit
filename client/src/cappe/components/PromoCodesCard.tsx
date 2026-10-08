@@ -22,7 +22,9 @@ function describe(c: CappePromoCode, currency: string) {
   return bits.join(' · ')
 }
 
-export default function PromoCodesCard({ siteId }: { siteId: string }) {
+// `currency` is the store's live currency from the page, once known: it can
+// change in the shipping card after this card loaded.
+export default function PromoCodesCard({ siteId, currency }: { siteId: string; currency?: string | null }) {
   const [data, setData] = useState<CappePromoCodes | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -78,7 +80,7 @@ export default function PromoCodesCard({ siteId }: { siteId: string }) {
     )
   }
   if (!data) return null
-  const cur = data.currency
+  const cur = currency || data.currency
 
   return (
     <div className="mb-5 rounded-xl border border-zinc-800 bg-zinc-900 p-4">

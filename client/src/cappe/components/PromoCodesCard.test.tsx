@@ -32,6 +32,15 @@ describe('PromoCodesCard', () => {
     expect(screen.getByText('Used 7 of 100')).toBeInTheDocument()
   })
 
+  it('follows a currency change made after it loaded', async () => {
+    api.get.mockResolvedValue({ enabled: true, currency: 'USD', codes: [CODE] })
+    const { rerender } = render(<MemoryRouter><PromoCodesCard siteId="s-1" /></MemoryRouter>)
+    expect(await screen.findByText('10% off · over $50.00 · once per customer')).toBeInTheDocument()
+    rerender(<MemoryRouter><PromoCodesCard siteId="s-1" currency="GBP" /></MemoryRouter>)
+    expect(screen.getByText('10% off · over £50.00 · once per customer')).toBeInTheDocument()
+    expect(api.get).toHaveBeenCalledTimes(1)
+  })
+
   it('creates a code', async () => {
     load({ enabled: true, currency: 'USD', codes: [] })
     fireEvent.click(await screen.findByRole('button', { name: /New code/ }))

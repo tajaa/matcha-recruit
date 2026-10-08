@@ -397,6 +397,8 @@ class StockConn:
         return [] if "FOR UPDATE" in sql else self.lines
 
     async def fetchval(self, sql, *args):
+        if "FROM cappe_promo_redemptions" in sql:
+            return None                                  # no promo-code use on these orders
         self.updates.append((sql, args))
         return self.balance
 

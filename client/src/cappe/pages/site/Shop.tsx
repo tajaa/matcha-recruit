@@ -51,6 +51,8 @@ export default function Shop() {
   const [products, setProducts] = useState<CappeProduct[] | null>(null)
   // The store's currency (Shipping & currency card); every product is priced in it.
   const [currency, setCurrency] = useState('USD')
+  // null until the shipping card reports the store's currency.
+  const [siteCurrency, setSiteCurrency] = useState<string | null>(null)
   const [bookingTypes, setBookingTypes] = useState<CappeBookingType[]>([])
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
@@ -331,11 +333,12 @@ export default function Shop() {
         siteId={siteId || ''}
         onCurrencyChange={(c) => {
           setCurrency(c)
+          setSiteCurrency(c)
           // The server moved every product to it in the same save.
           setProducts((ps) => (ps && ps.some((p) => p.currency !== c) ? ps.map((p) => ({ ...p, currency: c })) : ps))
         }}
       />
-      <PromoCodesCard siteId={siteId || ''} />
+      <PromoCodesCard siteId={siteId || ''} currency={siteCurrency} />
 
       <form onSubmit={saveProduct} className="mb-6 space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
         <div className="flex items-center justify-between gap-3">

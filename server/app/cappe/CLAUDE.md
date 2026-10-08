@@ -87,7 +87,11 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
   (`promos.allocate`, each line's `promo_discount_cents`). `cappe_orders.subtotal_cents` is AFTER
   the code (fees and refunds use it); a discounted line goes to Stripe as one item at its
   discounted total — never a negative line. Uses are counted under the code's row lock and given
-  back in `inventory.release_order_bookings`. Subscriptions refuse codes.
+  back in `inventory.release_order_bookings`, and taken again by `retake_order_stock` when a
+  released order is paid after all. Lock order: product rows, then the CODE row, then its
+  redemption (`_move_promo_use`) — a code delete cascades code→redemption, so never the
+  reverse. An order with nothing to pay and no approval is created `paid`. Subscriptions
+  refuse codes.
 
 ## Site templates (`services/site_templates/`)
 

@@ -157,17 +157,33 @@ async def release_order_bookings(conn, *, order_id: UUID) -> int:
         RETURNING id""",
         order_id,
     )
+    await _move_promo_use(conn, order_id, "active", "released", -1)
+    return len(rows)
+
+
+async def _move_promo_use(conn, order_id, from_status, to_status, delta) -> None:
+    """Move an order's promo-code use between `active` and `released`, keeping
+    the code's count in step. Locks the CODE row first, then the redemption —
+    the order checkout (`promos.find_code` then the insert) and a code delete
+    (cascading to its redemptions) take them in; the other way round deadlocks
+    against both."""
+    code_id = await conn.fetchval(
+        "SELECT promo_code_id FROM cappe_promo_redemptions WHERE order_id = $1 AND status = $2",
+        order_id, from_status,
+    )
+    if code_id is None:
+        return
+    await conn.execute("SELECT 1 FROM cappe_promo_codes WHERE id = $1 FOR UPDATE", code_id)
     await conn.execute(
-        """WITH freed AS (
-               UPDATE cappe_promo_redemptions SET status = 'released'
-                WHERE order_id = $1 AND status = 'active'
+        """WITH moved AS (
+               UPDATE cappe_promo_redemptions SET status = $3
+                WHERE order_id = $1 AND status = $2
             RETURNING promo_code_id)
            UPDATE cappe_promo_codes c
-              SET redemption_count = GREATEST(0, c.redemption_count - 1), updated_at = NOW()
-             FROM freed WHERE c.id = freed.promo_code_id""",
-        order_id,
+              SET redemption_count = GREATEST(0, c.redemption_count + $4), updated_at = NOW()
+             FROM moved WHERE c.id = moved.promo_code_id""",
+        order_id, from_status, to_status, delta,
     )
-    return len(rows)
 
 
 async def retake_order_stock(conn, *, site_id: UUID, order_id: UUID) -> None:
@@ -229,3 +245,6 @@ async def retake_order_stock(conn, *, site_id: UUID, order_id: UUID) -> None:
                 "WHERE id = $1",
                 it["id"], took_product, took_options,
             )
+    # Its promo-code use comes back too: the buyer paid the discounted price,
+    # so the use counts again (even past the cap — it's owed, like the stock).
+    await _move_promo_use(conn, order_id, "released", "active", 1)
