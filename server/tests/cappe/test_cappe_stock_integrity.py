@@ -887,7 +887,7 @@ def _asset(name):
 def test_a_validation_error_is_shown_as_text_not_object_object():
     js = _asset("runtime.js")
     # A 422's `detail` is a list of {msg}; it used to go straight into Error().
-    assert "Array.isArray(x)" in js and "throw new Error(errText(d))" in js
+    assert "Array.isArray(x)" in js and "new Error(errText(d))" in js
     assert "new Error((d&&d.detail)" not in js
 
 

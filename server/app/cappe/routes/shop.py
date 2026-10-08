@@ -1007,7 +1007,7 @@ async def accept_order(
     The buyer is emailed. If the store takes cards, the email carries a link
     to pay on the order page, open for `PAY_WINDOW_DAYS`; an approval order is
     never charged before this (it used to be charged at checkout, which made
-    the approval meaningless).
+    the approval meaningless). One with nothing to pay becomes `paid` here.
 
     Its booking lines are approved with it. A booking bought through the shop
     that needs approval lands `pending`; accepting the order used to leave it
@@ -1022,11 +1022,16 @@ async def accept_order(
         async with conn.transaction():
             # A store that takes cards gives the buyer a window to pay from the
             # emailed link; the reaper releases the order (and its stock) after.
+            # One with nothing to pay (a code took it all off, or free items)
+            # is settled here: there's no payment for it to wait for, and left
+            # pending its downloads would never be released.
             order = await conn.fetchrow(
                 f"""UPDATE cappe_orders
                     SET requires_approval = false, approved_at = NOW(), updated_at = NOW(),
                         pay_by = CASE WHEN $3 AND subtotal_cents > 0
-                                      THEN NOW() + interval '{PAY_WINDOW_DAYS} days' END
+                                      THEN NOW() + interval '{PAY_WINDOW_DAYS} days' END,
+                        status = CASE WHEN subtotal_cents <= 0 THEN 'paid' ELSE status END,
+                        paid_at = CASE WHEN subtotal_cents <= 0 THEN NOW() ELSE paid_at END
                     WHERE id = $1 AND site_id = $2 AND status = 'pending' AND requires_approval = true
                     RETURNING {_ORDER_COLS}""",
                 order_id, site_id, takes_cards,

@@ -111,6 +111,7 @@ goEl.disabled=busy||blocked;goEl.textContent=busy?'Placing order…':(approval?'
 function changed(){persist();quote=null;render();refreshQuote();}
 // The server prices the bag: options, promotions, tax and shipping. A slow
 // answer for an older bag can't overwrite a newer one.
+function refusesCode(e){return !!e&&e.status===422&&Array.isArray(e.detail)&&e.detail.some(function(x){return x&&Array.isArray(x.loc)&&x.loc.indexOf('promo_code')>=0;});}
 function refreshQuote(){if(!items.length){quote=null;render();return;}var seq=++qseq;
 var req={items:items.map(function(i){return {product_id:i.product_id,quantity:i.quantity,selected_option_ids:i.selected_option_ids||[]};})};
 if(shipTo)req.ship_country=shipTo;
@@ -121,7 +122,8 @@ RT.post('/quote',req)
 if(shipTo){shipTo=null;try{localStorage.removeItem(CKEY);}catch(x){}refreshQuote();return;}
 // A saved code the server refuses outright (malformed) would otherwise fail
 // every quote and hide the promo box with it: drop it, say so, price again.
-if(promoCode){setPromo(null);promoEl.value='';promoNote='That code can’t be used.';refreshQuote();return;}
+// Only for that refusal — a network error or a sold-out line keeps the code.
+if(promoCode&&refusesCode(e)){setPromo(null);promoEl.value='';promoNote='That code can’t be used.';refreshQuote();return;}
 quote=null;render();msgEl.className='cz-msg err';msgEl.textContent=e.message||'Could not price your bag.';});}
 
 goEl.addEventListener('click',function(){

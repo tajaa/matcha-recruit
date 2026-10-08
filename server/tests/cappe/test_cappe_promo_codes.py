@@ -544,9 +544,15 @@ def test_an_order_without_a_code_touches_no_code():
 
 
 def test_a_saved_code_the_server_refuses_is_dropped_not_kept():
-    js = (pathlib.Path(commerce.__file__).parent / "render" / "assets" / "cart.js").read_text()
+    assets = pathlib.Path(commerce.__file__).parent / "render" / "assets"
+    js = (assets / "cart.js").read_text()
     assert ".toUpperCase().slice(0,40)" in js
-    assert "if(promoCode){setPromo(null);" in js
+    # Only a refusal of the code field itself drops it — not a network error
+    # or a sold-out line, which used to wipe a perfectly good code.
+    assert "if(promoCode&&refusesCode(e)){setPromo(null);" in js
+    assert "e.status===422" in js and "x.loc.indexOf('promo_code')>=0" in js
+    runtime = (assets / "runtime.js").read_text()
+    assert "e.status=r.status;e.detail=d&&d.detail;throw e;" in runtime
 
 
 def test_dev_refreshes_scrub_redemption_emails():

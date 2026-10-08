@@ -419,6 +419,20 @@ def test_accepting_an_order_opens_a_pay_window_and_emails_the_buyer(monkeypatch,
     assert (eargs[7] is not None) is takes_cards       # a pay-by date only when the buyer pays by card
 
 
+def test_accepting_an_order_with_nothing_to_pay_settles_it(monkeypatch):
+    """No payment will ever come for a $0 order (a code took it all off, or
+    free items), so approval is the last step: it becomes paid, which also
+    releases any download."""
+    conn = _wire_owner(monkeypatch, updated=_order(status="paid", subtotal_cents=0, total_cents=0))
+    bg = Background()
+    asyncio.run(shop_mod.accept_order(SITE, ORDER, bg, account=ACCOUNT))
+    (_, sql, _args), = conn.sql("SET requires_approval = false")
+    assert "status = CASE WHEN subtotal_cents <= 0 THEN 'paid' ELSE status END" in sql
+    assert "paid_at = CASE WHEN subtotal_cents <= 0 THEN NOW() ELSE paid_at END" in sql
+    (_name, eargs), = [t for t in bg.tasks if t[0] == "send_cappe_order_approved_email"]
+    assert eargs[4] == 0 and eargs[7] is None          # nothing to pay, so no pay-by date
+
+
 def test_declining_an_order_tells_the_buyer(monkeypatch):
     _wire_owner(monkeypatch, updated=_order(status="declined"))
     monkeypatch.setattr(shop_mod, "_close_open_checkout", AsyncMock())
@@ -623,11 +637,15 @@ def test_an_unpaid_order_is_never_called_confirmed_by_mistake(monkeypatch, appro
         assert "Your order is confirmed" not in sent[0]["text"]
 
 
-@pytest.mark.parametrize("pay_by,fragment", [("Oct 9", "Pay $38.40 to complete it"), (None, "in touch about payment")])
-def test_the_approval_email(monkeypatch, pay_by, fragment):
+@pytest.mark.parametrize("pay_by,total,fragment", [
+    ("Oct 9", 3840, "Pay $38.40 to complete it"),
+    (None, 3840, "in touch about payment"),
+    (None, 0, "There's nothing to pay"),           # a code took it all off
+])
+def test_the_approval_email(monkeypatch, pay_by, total, fragment):
     sent = _capture(monkeypatch)
     asyncio.run(mail.send_cappe_order_approved_email(
-        "b@example.com", "B", "<Store>", "2× Beans", 3840, "USD", "https://x/order/t", pay_by,
+        "b@example.com", "B", "<Store>", "2× Beans", total, "USD", "https://x/order/t", pay_by,
     ))
     assert fragment in sent[0]["text"] and "&lt;Store&gt;" in sent[0]["html"]
     assert ("Pay now" in sent[0]["html"]) is bool(pay_by)

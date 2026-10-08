@@ -384,6 +384,10 @@ async def send_cappe_order_approved_email(
         lead = f"Good news — {e_site} accepted your order. Pay {escape(total)} to complete it."
         tail = f"The order is held for you until {escape(pay_by_label)}; after that it's released."
         cta, plain = "Pay now", f"Pay {total} to complete it, by {pay_by_label}"
+    elif total_cents <= 0:
+        lead = f"Good news — {e_site} accepted your order."
+        tail = "There's nothing to pay. Anything to download is on your order page."
+        cta, plain = "View your order", "There's nothing to pay"
     else:
         lead = f"Good news — {e_site} accepted your order."
         tail = "They'll be in touch about payment and delivery."

@@ -90,7 +90,8 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
   back in `inventory.release_order_bookings`, and taken again by `retake_order_stock` when a
   released order is paid after all. Lock order: product rows, then the CODE row, then its
   redemption (`_move_promo_use`) — a code delete cascades code→redemption, so never the
-  reverse. An order with nothing to pay and no approval is created `paid`. Subscriptions
+  reverse. An order with nothing to pay is created `paid`, or becomes `paid` when accepted if it
+  waited for approval — no payment will ever settle it. Subscriptions
   refuse codes.
 
 ## Site templates (`services/site_templates/`)
