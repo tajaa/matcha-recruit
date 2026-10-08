@@ -33,8 +33,7 @@ LUNA = "gpt-5.6-luna"
 # The schedule assistant's model picker. Luna stays the default everywhere;
 # the schedule panel may opt a turn into Claude instead. Ids are the exact
 # provider model ids, and they are what the client sends as `huume_model`.
-CLAUDE_HAIKU = "claude-haiku-5-5"
-CLAUDE_SONNET = "claude-sonnet-5-5"
+from app.core.services.anthropic_messages import CLAUDE_HAIKU, CLAUDE_SONNET  # noqa: E402
 
 
 @dataclass(frozen=True)

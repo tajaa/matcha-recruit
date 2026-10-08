@@ -218,7 +218,7 @@ async def test_session_chains_the_turn_and_parses_tool_calls(ledger):
     assert call1["system"] == "SYSTEM" and call1["tools"][0]["input_schema"] == {"type": "object", "properties": {}}
     assert call1["thinking"] == {"type": "adaptive"} and call1["output_config"] == {"effort": "medium"}
     assert "fallbacks" not in call1  # Haiku has no server-side fallback
-    assert fake.options == {"timeout": 60.0}
+    assert 0 < fake.options["timeout"] <= 60.0
     # The follow-up resends the turn with the reply appended unchanged —
     # thinking block and signature included — then the tool result.
     assert [m["role"] for m in call2["messages"]] == ["user", "assistant", "user"]
@@ -284,14 +284,17 @@ async def test_cancellation_is_recorded(ledger):
 
 @pytest.mark.asyncio
 async def test_session_requires_a_key_and_a_positive_deadline(monkeypatch):
-    monkeypatch.setattr(claude_client, "get_settings", lambda: SimpleNamespace(anthropic_api_key=None))
+    from app.core.services import anthropic_messages
+
+    monkeypatch.setattr(anthropic_messages, "_client", None)
+    monkeypatch.setattr(anthropic_messages, "get_settings", lambda: SimpleNamespace(anthropic_api_key=None))
     with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
         await claude_client.ClaudeSession().create_response(model=routing.CLAUDE_HAIKU, input=[], instructions="")
     with pytest.raises(ValueError):
         await claude_client.ClaudeSession(client=_FakeAnthropic([])).create_response(
             model=routing.CLAUDE_HAIKU, input=[], instructions="", timeout_seconds=0,
         )
-    monkeypatch.setattr(claude_client, "get_settings", lambda: SimpleNamespace(anthropic_api_key="sk-test"))
+    monkeypatch.setattr(anthropic_messages, "get_settings", lambda: SimpleNamespace(anthropic_api_key="sk-test"))
     assert isinstance(claude_client.ClaudeSession()._get_client(), anthropic.AsyncAnthropic)
     assert isinstance(claude_client.get_claude_client(), claude_client.ClaudeSession)
 

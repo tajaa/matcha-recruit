@@ -15,6 +15,7 @@ __all__ = [
     "JurisdictionProcessRequest",
     "PlatformSettingsResponse",
     "TenantCodifiedOnlyUpdate",
+    "AgentModelUpdate",
     "AutoPRBoardCapabilitiesUpdate",
     "SubscriptionSummary",
     "BusinessRegistrationResponse",
@@ -92,9 +93,17 @@ class PlatformSettingsResponse(BaseModel):
     visible_features: list[str]
     matcha_work_model_mode: str
     jurisdiction_research_model_mode: str
+    agent_model: str = "default"
+    # False when ANTHROPIC_API_KEY is unset: the Claude choices are then shown
+    # disabled, and the PUT refuses them.
+    anthropic_configured: bool = False
     er_similarity_weights: dict[str, float]
     autopr_board_capabilities: dict[str, list[str]] = {}
     tenant_codified_only: bool
+
+
+class AgentModelUpdate(BaseModel):
+    model: Literal["default", "claude-haiku-5-5", "claude-sonnet-5-5"]
 
 
 class TenantCodifiedOnlyUpdate(BaseModel):

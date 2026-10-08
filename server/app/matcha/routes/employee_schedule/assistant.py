@@ -12,7 +12,8 @@ from app.core.feature_flags import get_company_features
 from app.core.services.redis_cache import check_rate_limit
 from ...models.scheduling.employee_schedule import ScheduleVoiceTranscript
 from ...services._shared.uploads import read_wav_or_400
-from ...services.huume.routing import schedule_model_options
+from app.core.services.anthropic_messages import claude_override
+from ...services.huume.routing import LUNA, schedule_model_options
 from ...services.scheduling import schedule_voice
 from ...services.scheduling.schedule_chat_rules import parse_confirm_reply
 from ...services.scheduling.schedule_assistant_session import (
@@ -72,9 +73,12 @@ async def create_schedule_assistant_session(
     )
     # The panel's model dropdown. Claude is offered only when a key is
     # configured, so the picker never lists a model every turn would fail on.
+    # `default_model` is what a manager who never picked runs on: the
+    # platform "Agent model" setting, else Luna.
     session["available_models"] = schedule_model_options(
         anthropic_configured=bool(get_settings().anthropic_api_key),
     )
+    session["default_model"] = await claude_override() or LUNA
     return session
 
 

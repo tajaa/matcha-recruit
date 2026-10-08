@@ -43,6 +43,7 @@ from uuid import UUID, uuid4
 
 
 from app.core.services.ai_usage import feature_scope
+from app.core.services.anthropic_messages import claude_override
 from app.core.services.rate_limiter import ApiRateLimiter, RateLimitExceeded
 from app.matcha.services.matcha_work.work_permissions import WorkAccess, WorkCapability
 from app.matcha.services.scheduling.schedule_review import bounded_review_echo, compact_review
@@ -820,12 +821,12 @@ async def run_huume_turn(
         surface_context = HuumeSurfaceContext()
     allowed_tool_names = surface_context.allowed_tools
 
-    # Luna unless the schedule panel's picker chose Claude for this turn. The
-    # model picker is a schedule-surface feature only; anywhere else the
+    # The schedule panel's own pick wins; otherwise the platform "Agent model"
+    # setting decides (Luna unless an admin routed agents to Claude). The
+    # per-turn pick is a schedule-surface feature only; anywhere else the
     # field is ignored.
-    model_choice = routing.resolve_model_choice(
-        surface_context.model if surface_context.is_schedule else None
-    )
+    explicit_model = surface_context.model if surface_context.is_schedule else None
+    model_choice = routing.resolve_model_choice(explicit_model or await claude_override())
     # Each provider counts in its own bucket. Sharing Gemini's meant Huume
     # turns spent the Gemini allowance and a Gemini-heavy sweep could 429 a
     # Huume turn; the same holds between OpenAI and Anthropic.

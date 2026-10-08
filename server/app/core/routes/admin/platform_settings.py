@@ -56,6 +56,7 @@ from app.core.services.platform_settings import (
     get_er_similarity_weights, prime_er_similarity_weights_cache,
     get_tenant_codified_only, prime_tenant_codified_only_cache,
     get_autopr_board_capabilities, prime_autopr_board_capabilities_cache,
+    get_agent_model, prime_agent_model_cache,
     DEFAULT_ER_SIMILARITY_WEIGHTS, EXPECTED_WEIGHT_KEYS,
     AUTOPR_BOARD_CAPABILITIES,
 )
@@ -467,10 +468,13 @@ async def get_all_platform_settings():
     er_weights = await get_er_similarity_weights()
     codified_only = await get_tenant_codified_only()
     autopr_boards = await get_autopr_board_capabilities()
+    agent_model = await get_agent_model()
     return {
         "visible_features": visible,
         "matcha_work_model_mode": mw_mode,
         "jurisdiction_research_model_mode": jr_mode,
+        "agent_model": agent_model,
+        "anthropic_configured": bool(get_settings().anthropic_api_key),
         "er_similarity_weights": er_weights,
         "tenant_codified_only": codified_only,
         "autopr_board_capabilities": autopr_boards,
@@ -604,6 +608,31 @@ async def update_matcha_work_model_mode(
         )
     mode = prime_matcha_work_model_mode_cache(body.mode)
     return {"matcha_work_model_mode": mode}
+
+
+@router.put("/platform-settings/agent-model", dependencies=[Depends(require_admin)])
+async def update_agent_model(
+    body: AgentModelUpdate,
+    admin=Depends(require_admin)
+):
+    """Route every Luna/Gemini agent and one-shot workload to a Claude model,
+    or back to each surface's own default. Refuses a Claude choice while no
+    ANTHROPIC_API_KEY is configured — every call would fail."""
+    if body.model != "default" and not get_settings().anthropic_api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Claude is not configured on this server (ANTHROPIC_API_KEY is unset).",
+        )
+    async with get_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO platform_settings (key, value, updated_at)
+            VALUES ('agent_model', $1::jsonb, NOW())
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            json.dumps(body.model)
+        )
+    return {"agent_model": prime_agent_model_cache(body.model)}
 
 
 @router.put("/platform-settings/tenant-codified-only", dependencies=[Depends(require_admin)])

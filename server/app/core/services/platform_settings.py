@@ -29,6 +29,11 @@ DEFAULT_VISIBLE_FEATURES = [
 ]
 DEFAULT_MATCHA_WORK_MODEL_MODE = "light"
 DEFAULT_JURISDICTION_RESEARCH_MODEL_MODE = "light"
+# The platform "Agent model" switch (`anthropic_messages.claude_override`).
+# "default" keeps every agent/one-shot workload on the provider it was built
+# on (Luna, or Gemini for EMS); a Claude id routes them all to that model.
+DEFAULT_AGENT_MODEL = "default"
+AGENT_MODEL_CHOICES = ("default", "claude-haiku-5-5", "claude-sonnet-5-5")
 VISIBLE_FEATURES_CACHE_TTL_SECONDS = 30
 
 # Serve tenants ONLY requirements whose catalog row carries a verified statute
@@ -239,6 +244,44 @@ async def get_jurisdiction_research_model_mode(*, conn=None) -> str:
     _jurisdiction_research_model_mode_cache = mode
     _jurisdiction_research_model_mode_cached_at = now
     return mode
+
+
+_agent_model_cache: str | None = None
+_agent_model_cached_at: float = 0.0
+
+
+def prime_agent_model_cache(model: str) -> str:
+    global _agent_model_cache, _agent_model_cached_at
+    _agent_model_cache = model if model in AGENT_MODEL_CHOICES else DEFAULT_AGENT_MODEL
+    _agent_model_cached_at = time.monotonic()
+    return _agent_model_cache
+
+
+async def get_agent_model(*, conn=None) -> str:
+    """The stored Agent model choice. Unlike the mode getters above, the
+    default is cached too: this is read on every Huume turn and every EMS
+    message, so an unset row must not cost a query each time."""
+    now = time.monotonic()
+    if (
+        _agent_model_cache is not None
+        and now - _agent_model_cached_at < VISIBLE_FEATURES_CACHE_TTL_SECONDS
+    ):
+        return _agent_model_cache
+
+    query = "SELECT value FROM platform_settings WHERE key = 'agent_model'"
+    if conn is None:
+        async with get_connection() as managed_conn:
+            raw = await managed_conn.fetchval(query)
+    else:
+        raw = await conn.fetchval(query)
+
+    value = raw
+    if isinstance(raw, str):
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            value = raw
+    return prime_agent_model_cache(value if isinstance(value, str) else DEFAULT_AGENT_MODEL)
 
 
 def invalidate_tenant_codified_only_cache() -> None:
