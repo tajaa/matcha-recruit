@@ -610,7 +610,7 @@ section{position:relative}
   border-top:1px solid var(--line);padding-top:.35rem;margin-top:.2rem}
 .cz-bag__addr{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:.5rem}
 .cz-bag__addr[hidden]{display:none}
-.cz-bag__row{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}.cz-bag__ship{display:flex;flex-direction:column;gap:.3rem}.cz-bag__promo[hidden]{display:none}.cz-bag__promo .cz-bag__row{grid-template-columns:1fr auto}.cz-bag__promo .cz-msg{margin:.3rem 0 0}.cz-bag__ship[hidden],.cz-bag__shipnote[hidden]{display:none}.cz-bag__shipnote{margin:0;color:var(--muted);font-size:.85rem}
+.cz-bag__row{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}.cz-bag__ship{display:flex;flex-direction:column;gap:.3rem}.cz-bag__promo[hidden]{display:none}.cz-pd__sub{margin-top:1rem;padding-top:1rem;border-top:1px solid var(--line)}.cz-pd__sub .cz-bag__row{grid-template-columns:1fr auto}.cz-account__form{display:flex;flex-wrap:wrap;gap:.5rem;margin:.5rem 0}.cz-account__form .cz-field{flex:1 1 14rem}.cz-account__section{margin-top:2rem}.cz-account__addr{display:grid;gap:.5rem;margin:.75rem 0}.cz-account__addr[hidden]{display:none}.cz-account .cz-order__line .cz-btn{flex:none}.cz-bag__promo .cz-bag__row{grid-template-columns:1fr auto}.cz-bag__promo .cz-msg{margin:.3rem 0 0}.cz-bag__ship[hidden],.cz-bag__shipnote[hidden]{display:none}.cz-bag__shipnote{margin:0;color:var(--muted);font-size:.85rem}
 
 /* order page (order_page.py) */
 .cz-order{padding:3rem 0 4rem}

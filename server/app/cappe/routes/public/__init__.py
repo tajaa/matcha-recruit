@@ -25,6 +25,7 @@ from . import (
     reviews,
     shop,
     shopper,
+    shopper_web,
     site,
 )
 from ._common import _validate_intake  # noqa: F401  (test_cappe_offerings imports this)
@@ -38,6 +39,7 @@ router.include_router(creators.router)
 router.include_router(pricing.router)
 router.include_router(shop.router)
 router.include_router(shopper.router)
+router.include_router(shopper_web.router)
 router.include_router(newsletter.router)
 router.include_router(forms.router)
 router.include_router(reviews.router)

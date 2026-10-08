@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from app.database import get_connection
 from .cart import cart_totals, price_cart, priceable_products
-from .common import loads_list, site_origins, url_within_origins
+from .common import loads_list, site_origins, site_public_origin, url_within_origins
 from .discounts import fetch_active_discounts, site_today
 from .entitlements import resolve_entitlements, require_can_sell
 from .options import fetch_option_groups
@@ -482,7 +482,7 @@ async def _schedule_subscription_emails(background, row, invoice, *, order_id, s
 
     async with get_connection() as conn:
         info = await conn.fetchrow(
-            "SELECT s.name AS site_name, a.email AS owner_email, a.name AS owner_name, "
+            "SELECT s.name AS site_name, s.subdomain, s.custom_domain, a.email AS owner_email, a.name AS owner_name, "
             "sh.email AS shopper_email, sh.name AS shopper_name "
             "FROM cappe_sites s JOIN cappe_accounts a ON a.id=s.account_id "
             "LEFT JOIN cappe_shoppers sh ON sh.id=$2 AND sh.site_id=s.id WHERE s.id=$1",
@@ -501,14 +501,19 @@ async def _schedule_subscription_emails(background, row, invoice, *, order_id, s
     shopper = info["shopper_email"]
     if not shopper:
         return
+    # The storefront's account page, where the shopper manages it and updates
+    # the card (it used to say "contact the store").
+    origin = site_public_origin(info)
+    account_url = f"{origin}/account" if origin else None
     if started:
         background.add_task(
             mail.send_cappe_subscription_started_email, shopper, info["shopper_name"], info["site_name"],
-            items, row["total_cents"], row["currency"], row["interval"],
+            items, row["total_cents"], row["currency"], row["interval"], account_url,
         )
     if failed:
         background.add_task(
             mail.send_cappe_subscription_payment_failed_email, shopper, info["shopper_name"], info["site_name"], items,
+            account_url,
         )
     if cancelled:
         background.add_task(

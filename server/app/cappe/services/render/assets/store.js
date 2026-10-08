@@ -28,6 +28,13 @@ function reviewsHtml(){if(!REVIEWS.length)return '';
 var avg=REVIEWS.reduce(function(a,r){return a+(r.rating||0);},0)/REVIEWS.length;
 return '<h3 class="cz-pd__rtitle">What clients say <span class="cz-pd__rstars">'+stars(avg)+'</span><span class="cz-pd__rn">'+REVIEWS.length+' review'+(REVIEWS.length>1?'s':'')+'</span></h3>'+
 '<div class="cz-pd__rlist">'+REVIEWS.map(function(r){return '<figure class="cz-review"><div class="cz-review__stars">'+stars(r.rating)+'</div><blockquote>'+RT.esc(r.body)+'</blockquote><figcaption>'+RT.esc(r.author_name)+'</figcaption></figure>';}).join('')+'</div>';}
+// "Subscribe": the product on a schedule. Signing in and checking out happen
+// on the account page (/account), which opens the subscription checkout.
+function subHtml(p){var iv=(p.subscription_intervals||[]).filter(function(i){return i==='week'||i==='month';});
+if(!iv.length||RT.preview)return '';var save=p.subscription_discount_bps?(' and save '+(p.subscription_discount_bps/100)+'%'):'';
+return '<div class="cz-pd__sub"><label class="cz-label" for="cz-every">Or subscribe'+save+'</label><div class="cz-bag__row">'+
+'<select class="cz-field" id="cz-every" data-every>'+iv.map(function(i){return '<option value="'+i+'">Every '+i+'</option>';}).join('')+'</select>'+
+'<button type="button" class="cz-btn cz-btn--ghost" data-sub>Subscribe</button></div></div>';}
 function openDetail(p){
 var iu=RT.url(p.image_url);
 ov.querySelector('[data-media]').innerHTML=iu?'<img src="'+RT.esc(iu)+'" alt="" />':'<div class="cz-pd__noimg"></div>';
@@ -43,7 +50,8 @@ optsHtml(p)+(p.intake_fields||[]).map(field).join('')+
 (booking?'<div><label class="cz-label">Preferred time</label><input class="cz-field" type="datetime-local" data-when /></div>':'')+
 '<div class="cz-pd__buy"><label class="cz-label">Quantity</label><input class="cz-field cz-pd__qty" type="number" min="1" value="1"'+((p.fulfillment==='physical'&&p.inventory>0)?' max="'+p.inventory+'"':'')+' data-qty />'+
 (booking?'<input class="cz-field" type="email" data-email placeholder="Your email" /><input class="cz-field" type="text" data-name placeholder="Your name" />':'')+
-'<p class="cz-msg" data-quote></p><button class="cz-btn cz-btn--solid cz-btn--block" data-go></button><p class="cz-msg" data-status></p></div>';
+'<p class="cz-msg" data-quote></p><button class="cz-btn cz-btn--solid cz-btn--block" data-go></button><p class="cz-msg" data-status></p></div>'+
+subHtml(p);
 var sb=info.querySelector('[data-go]'),msg=info.querySelector('[data-status]'),gone=soldOut(p);
 // Local estimate only: same half-up integer math as the server's apply_discount_cents,
 // so it agrees to the cent. The authoritative figure is the server quote below.
@@ -87,6 +95,11 @@ if(booking){var w=info.querySelector('[data-when]').value;if(!w){msg.textContent
 sb.disabled=true;msg.textContent='Placing order…';msg.className='cz-msg';
 RT.post('/orders',{customer_email:email,customer_name:info.querySelector('[data-name]').value.trim(),items:[item],success_url:location.href,cancel_url:location.href}).then(function(res){if(res&&res.checkout_url){msg.textContent='Redirecting to secure checkout…';window.location=res.checkout_url;return;}window.location='/order/'+encodeURIComponent(res.order_token);
 }).catch(function(e){sb.disabled=false;refresh();msg.textContent=e.message;msg.className='cz-msg err';});});
+var subBtn=info.querySelector('[data-sub]');if(subBtn)subBtn.addEventListener('click',function(){
+var ok=true;info.querySelectorAll('.cz-opt-group').forEach(function(g){if(g.getAttribute('data-required')==='1'&&!g.querySelector('.cz-opt--on'))ok=false;});
+if(!ok){msg.textContent='Please choose the required options';msg.className='cz-msg err';return;}
+window.location='/account?subscribe='+encodeURIComponent(p.id)+'&every='+encodeURIComponent(info.querySelector('[data-every]').value)+
+'&qty='+qn()+'&opts='+encodeURIComponent(chosen().join(','));});
 ov.querySelector('[data-reviews]').innerHTML=reviewsHtml();
 ov.querySelector('.cz-pd__panel').scrollTop=0;ov.hidden=false;document.body.style.overflow='hidden';
 if(!(history.state&&history.state.czpd))history.pushState({czpd:1},'');

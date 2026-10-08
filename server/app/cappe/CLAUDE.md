@@ -94,6 +94,21 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
   waited for approval — no payment will ever settle it. Subscriptions
   refuse codes.
 
+- **Web shoppers keep the refresh token in the `__Host-cz_shopper` cookie only** (host-only,
+  HttpOnly, Secure, SameSite=Strict; `routes/public/shopper_web.py`). It is never in a response body
+  or page storage; cookie endpoints also require `X-Cappe-Web: 1`. Web sign-out deletes that one
+  session — the app's `/auth/logout` revokes every session and device, so never point the web at it.
+  Every session mutation takes the shopper row lock first (refresh, both logouts), and rotation
+  only UPDATEs its row — a refresh must never re-create a session a sign-out deleted. A refresh
+  token the session already rotated past raises `StaleRefresh`: 401 WITHOUT clearing the cookie
+  (it's a racing tab; the browser now holds the newer one). `account.js` runs one refresh at a
+  time (per page, and across tabs via Web Locks).
+- **A store that closes to shoppers still lets the people it bills in** (unpublished, owner
+  inactive, plan without shopper accounts): `shopper_auth.sign_in_site` / `session_site` let a
+  subscriber sign in and refresh, and only the `require_shopper_session` endpoints (list, cancel)
+  serve them. Purchases keep `published_shopper_site`. Codes go only to `subscribes_here` emails;
+  `/auth/start` stays 204 either way.
+
 ## Site templates (`services/site_templates/`)
 
 - **The catalog is code, not the `cappe_templates` table.** One `SiteTemplate` per entry, one module

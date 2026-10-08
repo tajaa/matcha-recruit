@@ -980,6 +980,46 @@ class CappeStripe:
             raise CappeStripeError(f"Failed to create portal session: {exc}") from exc
 
 
+    # ── Shopper card updates: the customer portal on a CONNECTED account ──
+    async def create_portal_configuration(self, account_id: str) -> str:
+        """A customer-portal configuration on a store's connected account:
+        update the card on file, see invoices. Cancelling isn't offered there
+        — it goes through our own endpoints so our records stay the source of
+        truth. Returns its id (stored, so this runs once per store)."""
+        self._ensure_key()
+
+        def _create():
+            return stripe.billing_portal.Configuration.create(
+                features={
+                    "payment_method_update": {"enabled": True},
+                    "invoice_history": {"enabled": True},
+                },
+                stripe_account=account_id,
+            )
+
+        try:
+            return (await asyncio.to_thread(_create))["id"]
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to set up the customer portal: {exc}") from exc
+
+    async def create_connected_portal_session(
+        self, *, account_id: str, customer_id: str, return_url: str, configuration_id: Optional[str],
+    ):
+        """A portal session for a shopper's customer on the store's account."""
+        self._ensure_key()
+
+        def _create():
+            kwargs: dict[str, Any] = {"customer": customer_id, "return_url": return_url, "stripe_account": account_id}
+            if configuration_id:
+                kwargs["configuration"] = configuration_id
+            return stripe.billing_portal.Session.create(**kwargs)
+
+        try:
+            return await asyncio.to_thread(_create)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to open the customer portal: {exc}") from exc
+
+
 _cappe_stripe: Optional[CappeStripe] = None
 
 
