@@ -25,6 +25,7 @@ external backstop and verifies the origin files, nginx config, and public TLS.
 | `matcha.conf` | `hey-matcha.com` | `matcha_frontend` / `matcha_backend` blue-green upstreams, WS, LiveKit |
 | `cappe.conf` | `gummfit.com` + `*.gummfit.com` (Cappe) | apex SPA `matcha_frontend`; tenant renderer + API `matcha_backend` |
 | `cappe-custom-domains.conf` | any other host (`default_server` on :443) — Cappe tenant-owned domains | renderer + API `matcha_backend` |
+| `01-cloudfront-realip.conf` | http-context `set_real_ip_from` for CloudFront's origin-facing ranges — makes every `limit_req`/`limit_conn` zone key per viewer instead of per POP. **Generated**, never hand-edited: `./gen-cloudfront-realip.sh` rewrites it from `ip-ranges.json`. Why/safety: `docs/ops/MATCHA_EDGE.md` §nginx limit_req | — |
 
 `cappe-custom-domains.conf` is the explicit `:443 default_server`. Without it
 nginx answers an unknown SNI with the first block on the port (cappe.conf's
