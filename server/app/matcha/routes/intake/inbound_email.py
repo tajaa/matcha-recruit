@@ -105,8 +105,9 @@ async def _read_public_chat_turn(request: Request) -> PublicChatIntakeTurnReques
     """Apply a bounded body ceiling to the public chat endpoint.
 
     FastAPI would otherwise parse the full body before Pydantic's per-field
-    limits run. These public token links do not sit behind the same edge WAF as
-    Cappe, so the application must own the body ceiling.
+    limits run. The edge WAF's body rules never fired and the ACL is detached
+    as of 2026-10-08 (docs/ops/MATCHA_EDGE.md), so the application owns the
+    body ceiling.
     """
     raw = await request.body()
     if len(raw) > MAX_PUBLIC_CHAT_BODY_BYTES:
