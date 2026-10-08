@@ -138,7 +138,9 @@ async def restock_order(conn, *, site_id: UUID, order_id: UUID, reason: str, onl
 
 
 async def release_order_bookings(conn, *, order_id: UUID) -> int:
-    """Free the appointment slots an order's booking lines were holding.
+    """Free the appointment slots an order's booking lines were holding — and
+    the promo-code use it was holding, so a cancelled, declined, abandoned or
+    fully refunded order doesn't count against a code's cap.
 
     A booking line reserves its slot when the order is created (the
     double-book index covers `pending` and `confirmed`), so an order that is
@@ -153,6 +155,16 @@ async def release_order_bookings(conn, *, order_id: UUID) -> int:
                           WHERE order_id = $1 AND booking_id IS NOT NULL)
               AND status IN ('pending', 'confirmed')
         RETURNING id""",
+        order_id,
+    )
+    await conn.execute(
+        """WITH freed AS (
+               UPDATE cappe_promo_redemptions SET status = 'released'
+                WHERE order_id = $1 AND status = 'active'
+            RETURNING promo_code_id)
+           UPDATE cappe_promo_codes c
+              SET redemption_count = GREATEST(0, c.redemption_count - 1), updated_at = NOW()
+             FROM freed WHERE c.id = freed.promo_code_id""",
         order_id,
     )
     return len(rows)

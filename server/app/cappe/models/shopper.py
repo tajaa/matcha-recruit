@@ -66,6 +66,8 @@ class CartQuoteRequest(BaseModel):
     # home country, which is all a quote priced before shipping zones.
     ship_country: str | None = Field(default=None, max_length=2)
     _ship_country = field_validator("ship_country")(country_code)
+    # A promo code typed into the bag (case-blind).
+    promo_code: str | None = Field(default=None, max_length=40)
 
 
 class SubscriptionCheckout(CartQuoteRequest):

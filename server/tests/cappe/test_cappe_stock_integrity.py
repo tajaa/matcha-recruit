@@ -572,7 +572,7 @@ async def test_a_physical_sale_locks_first_and_records_what_it_took(monkeypatch)
     # Every stock lock is taken up front: products, then options.
     assert conn.locks == [("products", [PRODUCT]), ("options", [option_id])]
     # The line remembers what came off the shelf.
-    assert conn.items[0][-2:] == (True, [option_id])
+    assert conn.items[0][-3:-1] == (True, [option_id])
     assert conn.option_updates == [(5, option_id)]
     assert [(e.get("option_id"), e["delta"], e["balance_after"]) for e in ledger] == [
         (None, -1, 4), (option_id, -1, 5),
@@ -587,7 +587,7 @@ async def test_a_physical_sale_locks_first_and_records_what_it_took(monkeypatch)
 async def test_an_untracked_product_is_recorded_as_not_decremented(monkeypatch):
     site, body, conn, ledger, _option_id = _wire_checkout(monkeypatch, tracked=False, option_stock=None)
     await commerce.create_public_order(site, body, BackgroundTasks())
-    assert conn.items[0][-2:] == (False, [])
+    assert conn.items[0][-3:-1] == (False, [])
     assert ledger == []
 
 

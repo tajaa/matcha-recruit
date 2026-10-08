@@ -478,6 +478,8 @@ export type CappeOrderItem = {
   booking_id: string | null
   /** Units already back on the shelf after a refund. */
   restocked_quantity?: number
+  /** This line's share of a promo code's discount. */
+  promo_discount_cents?: number
 }
 
 /** One refund in an order's ledger. */
@@ -529,6 +531,9 @@ export type CappeOrder = {
   ship_country?: string | null
   /** The refund ledger (detail view only). */
   refunds?: CappeOrderRefund[]
+  /** The promo code the buyer used and what it took off (subtotal is after it). */
+  promo_code?: string | null
+  discount_cents?: number
   carrier?: string | null
   tracking_number?: string | null
   total_cents: number | null
@@ -1339,3 +1344,22 @@ export type CappeBalance = {
   pending: { amount_cents: number; currency: string }[]
   payouts: { id: string; amount_cents: number; currency: string; status: string; arrival_date: number | null }[]
 }
+
+// --- Promo codes -----------------------------------------------------------------
+
+export type CappePromoCodeInput = {
+  code: string
+  kind: 'percent' | 'fixed'
+  percent_off: number | null
+  amount_off_cents: number | null
+  min_subtotal_cents: number | null
+  starts_on: string | null
+  ends_on: string | null
+  max_redemptions: number | null
+  once_per_customer: boolean
+  active: boolean
+}
+
+export type CappePromoCode = CappePromoCodeInput & { id: string; redemption_count: number; created_at: string }
+
+export type CappePromoCodes = { enabled: boolean; currency: string; codes: CappePromoCode[] }

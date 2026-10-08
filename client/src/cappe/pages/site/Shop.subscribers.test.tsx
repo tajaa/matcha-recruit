@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), post: vi.fn(), delet
 vi.mock('../../api', async (importOriginal) => ({ ...(await importOriginal<object>()), cappeApi: api }))
 vi.mock('../../components/TaxSettingsCard', () => ({ default: () => null }))
 vi.mock('../../components/ShippingSettingsCard', () => ({ default: () => null }))
+vi.mock('../../components/PromoCodesCard', () => ({ default: () => null }))
 vi.mock('../../components/ImageUpload', () => ({ default: () => null }))
 
 const product = {

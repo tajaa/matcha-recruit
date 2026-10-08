@@ -21,12 +21,14 @@ def cart_totals(lines, site, destination=None):
     and in a zone only when that zone says so.
     """
     from .commerce import compute_shipping_cents
+    from .promos import line_total
     from .shipping import home_destination
 
+    # A promo code's share of a line comes off before tax and shipping.
     dest = destination or home_destination(site)
-    subtotal = sum(line["unit_price_cents"] * line["quantity"] for line in lines)
+    subtotal = sum(line_total(line) for line in lines)
     physical = [line for line in lines if line["fulfillment"] == "physical"]
-    taxable = sum(line["unit_price_cents"] * line["quantity"] for line in physical)
+    taxable = sum(line_total(line) for line in physical)
     tax = taxable * int(site.get("tax_rate_bps") or 0) // 10000 if dest.charge_tax else 0
     shipping = compute_shipping_cents(
         has_physical=bool(physical), goods_subtotal_cents=taxable,
@@ -60,8 +62,11 @@ def priceable_products(rows, option_groups, discounts, on_date):
     }
 
 
-def price_cart(products_by_id, items, site, destination=None):
-    """Read-only quote; unavailable lines remain visible for cart repair."""
+def price_cart(products_by_id, items, site, destination=None, promo=None, on_date=None):
+    """Read-only quote; unavailable lines remain visible for cart repair.
+
+    `promo` (a code row, or None) is applied to the available lines that carry
+    no automatic discount; the result says whether it applied and why not."""
     quantities = Counter()
     option_quantities = Counter()
     for item in items:
@@ -95,4 +100,33 @@ def price_cart(products_by_id, items, site, destination=None):
         lines.append(line)
     if len(currencies) > 1:
         raise HTTPException(422, "Mixed currencies not supported")
-    return {"lines": lines, **cart_totals(lines, site, destination), "currency": next(iter(currencies), "USD")}
+    currency = next(iter(currencies), "USD")
+    extra = {}
+    if promo is not None:
+        extra["promo"] = apply_promo(lines, promo, products_by_id, items, on_date, currency)
+    return {"lines": lines, **cart_totals(lines, site, destination), "currency": currency, **extra}
+
+
+def promo_eligible(product, line) -> bool:
+    """A line a code can discount: priced, available, not already on sale."""
+    return bool(
+        product and line.get("available", True) and line["unit_price_cents"] > 0
+        and not int(product.get("discount_percent") or 0)
+    )
+
+
+def apply_promo(lines, promo, products_by_id, items, on_date, currency) -> dict:
+    """Write each line's share of a code's discount onto it. Returns what the
+    bag shows: {code, valid, discount_cents, message}."""
+    from .promos import allocate, evaluate
+
+    eligible = [promo_eligible(products_by_id.get(item.product_id), line) for item, line in zip(items, lines)]
+    totals = [line["unit_price_cents"] * line["quantity"] for line in lines]
+    discount, reason = evaluate(
+        promo.get("row"), eligible_cents=sum(t for t, ok in zip(totals, eligible) if ok),
+        on_date=on_date, currency=currency,
+    ) if not promo.get("reason") else (0, promo["reason"])
+    for line, share in zip(lines, allocate(discount, totals, eligible)):
+        if share:
+            line["promo_discount_cents"] = share
+    return {"code": promo["code"], "valid": reason is None, "discount_cents": discount, "message": reason}

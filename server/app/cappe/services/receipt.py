@@ -122,10 +122,11 @@ def build_receipt_html(order: dict, items: list[dict]) -> str:
     when_txt = when.strftime("%b %-d, %Y") if hasattr(when, "strftime") else escape(str(when))
     cust = escape(str(order.get("customer_name") or order.get("customer_email") or ""))
     cust_email = escape(str(order.get("customer_email") or ""))
-    subtotal = int(order.get("subtotal_cents") or 0)
+    discount = int(order.get("discount_cents") or 0)
+    subtotal = int(order.get("subtotal_cents") or 0) + discount   # before the promo code
     tax = int(order.get("tax_cents") or 0)
     shipping = int(order.get("shipping_cents") or 0)
-    total = int(order.get("total_cents") or (subtotal + tax + shipping))
+    total = int(order.get("total_cents") or (subtotal - discount + tax + shipping))
     tax_label = escape(str(order.get("tax_label") or "Tax"))
     shipping_label = escape(str(order.get("shipping_label") or "Shipping"))
     pay_ref = escape(str(order.get("stripe_payment_intent") or order.get("payment_ref") or ""))
@@ -139,6 +140,12 @@ def build_receipt_html(order: dict, items: list[dict]) -> str:
         f'<tr><td style="padding:4px 0;text-align:right;color:#71717a;">{shipping_label}</td>'
         f'<td style="padding:4px 0;text-align:right;width:120px;">{_fmt(shipping, cur)}</td></tr>'
         if shipping > 0 else ""
+    )
+    code = escape(str(order.get("promo_code") or ""))
+    discount_row = (
+        f'<tr><td style="padding:4px 0;text-align:right;color:#71717a;">Discount{f" ({code})" if code else ""}</td>'
+        f'<td style="padding:4px 0;text-align:right;width:120px;">−{_fmt(discount, cur)}</td></tr>'
+        if discount > 0 else ""
     )
     ship_to = _ship_to_html(order.get("shipping_address"))
     return f"""\
@@ -170,6 +177,7 @@ def build_receipt_html(order: dict, items: list[dict]) -> str:
   <table style="width:100%;margin-top:14px;font-size:14px;"><tbody>
     <tr><td style="padding:4px 0;text-align:right;color:#71717a;">Subtotal</td>
       <td style="padding:4px 0;text-align:right;width:120px;">{_fmt(subtotal, cur)}</td></tr>
+    {discount_row}
     {tax_row}
     {shipping_row}
     <tr><td style="padding:8px 0;text-align:right;font-weight:700;border-top:2px solid #18181b;">Total</td>
@@ -185,6 +193,7 @@ async def render_order_receipt_pdf(conn, order_id: UUID) -> tuple[dict, bytes] |
     Returns (order_dict, pdf_bytes) or None if the order is missing."""
     order = await conn.fetchrow(
         """SELECT o.id, o.customer_email, o.customer_name, o.currency, o.subtotal_cents,
+                  o.promo_code, o.discount_cents,
                   o.tax_cents, o.shipping_cents, o.shipping_address, o.total_cents,
                   o.receipt_number, o.payment_ref,
                   o.stripe_payment_intent, o.paid_at, o.created_at, o.site_id, o.access_token,

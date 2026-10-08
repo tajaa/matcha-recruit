@@ -185,6 +185,9 @@ async def _claim_checkout_cancellation(subscription_id):
 
 
 async def checkout(site, shopper, body):
+    if (getattr(body, "promo_code", None) or "").strip():
+        # A code's discount would be fixed into the recurring price for ever.
+        raise HTTPException(422, "Promo codes can't be used on subscriptions.")
     origins = site_origins(site)
     success, cancel = url_within_origins(body.success_url, origins), url_within_origins(body.cancel_url, origins)
     if not success or not cancel:

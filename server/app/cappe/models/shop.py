@@ -188,6 +188,9 @@ class CappeOrderItem(BaseModel):
     selected_options: list[dict[str, Any]] = Field(default_factory=list)
     deliverable_url: Optional[str] = None
     booking_id: Optional[UUID] = None
+    restocked_quantity: int = 0
+    # This line's share of a promo code's discount.
+    promo_discount_cents: int = 0
 
 
 class CappeOrderRefund(BaseModel):
@@ -216,6 +219,9 @@ class CappeOrder(BaseModel):
     shipping_cents: int = 0
     shipping_address: Optional[dict[str, Any]] = None
     # Where a physical order was priced to ship (two-letter code).
+    # The promo code the buyer used and what it took off (subtotal is after it).
+    promo_code: Optional[str] = None
+    discount_cents: int = 0
     ship_country: Optional[str] = None
     # The refund ledger (detail view and refund responses only).
     refunds: list[CappeOrderRefund] = Field(default_factory=list)
@@ -381,6 +387,8 @@ class CappeCheckoutRequest(BaseModel):
     # the shipping address's country, else the store's home country.
     ship_country: Optional[str] = Field(default=None, max_length=2)
     _ship_country = field_validator("ship_country")(country_code)
+    # A promo code (case-blind). Refused with the reason if it can't be used.
+    promo_code: Optional[str] = Field(default=None, max_length=40)
 
 
 # Buyer-facing receipt (resolved by the order's unguessable access_token).
@@ -403,6 +411,9 @@ class CappeOrderReceipt(BaseModel):
     customer_email: Optional[str] = None
     customer_name: Optional[str] = None
     subtotal_cents: int
+    # A promo code and what it took off (`subtotal_cents` is after it).
+    promo_code: Optional[str] = None
+    discount_cents: int = 0
     currency: str
     tax_cents: int = 0
     shipping_cents: int = 0
@@ -551,6 +562,57 @@ class CappeFinancials(BaseModel):
     export_enabled: bool = False
 
 
+# --- Promo codes (services/promos.py) ---------------------------------------------
+
+class CappePromoCodeInput(BaseModel):
+    """A code buyers type at checkout. Percent (1–90) or a fixed amount off."""
+    code: str = Field(min_length=3, max_length=40)
+    kind: Literal["percent", "fixed"] = "percent"
+    percent_off: Optional[int] = Field(default=None, ge=1, le=90)
+    amount_off_cents: Optional[int] = Field(default=None, ge=1, le=99_999_999)
+    min_subtotal_cents: Optional[int] = Field(default=None, ge=0, le=99_999_999)
+    starts_on: Optional[date] = None
+    ends_on: Optional[date] = None
+    max_redemptions: Optional[int] = Field(default=None, ge=1, le=1_000_000)
+    once_per_customer: bool = False
+    active: bool = True
+
+    @field_validator("code")
+    @classmethod
+    def _code(cls, v: str) -> str:
+        import re
+        code = v.strip().upper()
+        if not re.fullmatch(r"[A-Z0-9][A-Z0-9_-]{2,39}", code):
+            raise ValueError("Use 3–40 letters, numbers, dashes or underscores, e.g. SUMMER10")
+        return code
+
+    @model_validator(mode="after")
+    def _shape(self):
+        if self.kind == "percent" and self.percent_off is None:
+            raise ValueError("Say how many percent off")
+        if self.kind == "fixed" and self.amount_off_cents is None:
+            raise ValueError("Say how much off")
+        if self.starts_on and self.ends_on and self.ends_on < self.starts_on:
+            raise ValueError("The end date must be on or after the start date")
+        if self.kind == "percent":
+            self.amount_off_cents = None
+        else:
+            self.percent_off = None
+        return self
+
+
+class CappePromoCode(CappePromoCodeInput):
+    id: UUID
+    redemption_count: int = 0
+    created_at: datetime
+
+
+class CappePromoCodes(BaseModel):
+    enabled: bool                  # the plan includes promo codes
+    currency: str
+    codes: list[CappePromoCode] = Field(default_factory=list)
+
+
 __all__ = [
     "Fulfillment",
     "CappeProductOptionInput",
@@ -586,4 +648,7 @@ __all__ = [
     "CappeFinancialPeriod",
     "CappeTopProduct",
     "CappeFinancials",
+    "CappePromoCodeInput",
+    "CappePromoCode",
+    "CappePromoCodes",
 ]

@@ -420,6 +420,7 @@ async def order_page(token: str, request: Request):
         order = await conn.fetchrow(
             """SELECT o.id, o.status, o.requires_approval, o.approved_at, o.pay_by, o.decline_reason,
                       o.subtotal_cents, o.tax_cents, o.shipping_cents, o.total_cents, o.refunded_cents,
+                      o.promo_code, o.discount_cents,
                       o.currency, o.carrier, o.tracking_number, o.shipping_address, o.receipt_number,
                       o.stripe_session_id, s.tax_label, s.shipping_label
                  FROM cappe_orders o JOIN cappe_sites s ON s.id = o.site_id

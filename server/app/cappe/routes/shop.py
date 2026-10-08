@@ -152,12 +152,13 @@ _ORDER_COLS = (
     "shipping_address, carrier, tracking_number, "
     "currency, payment_ref, note, requires_approval, approved_at, decline_reason, "
     "refunded_at, refunded_cents, dispute_status, disputed_at, "
-    "pay_by, shipped_notified_at, platform_fee_cents, ship_country, "
+    "pay_by, shipped_notified_at, platform_fee_cents, ship_country, promo_code, discount_cents, "
     "metadata, created_at, updated_at"
 )
 _ITEM_COLS = (
     "id, product_id, title, unit_price_cents, quantity, fulfillment, "
-    "intake_answers, selected_options, deliverable_url, booking_id"
+    "intake_answers, selected_options, deliverable_url, booking_id, restocked_quantity, "
+    "promo_discount_cents"
 )
 
 

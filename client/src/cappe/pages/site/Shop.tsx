@@ -5,6 +5,7 @@ import { cappeApi, CappeApiError } from '../../api'
 import SurfaceShell, { centsToMoney } from '../../components/SurfaceShell'
 import TaxSettingsCard from '../../components/TaxSettingsCard'
 import ShippingSettingsCard from '../../components/ShippingSettingsCard'
+import PromoCodesCard from '../../components/PromoCodesCard'
 import StockAdjustModal from '../../components/StockAdjustModal'
 import ImageUpload from '../../components/ImageUpload'
 import type { CappeBookingType, CappeFulfillment, CappeProduct, CappeProductOptionGroupInput } from '../../types'
@@ -334,6 +335,7 @@ export default function Shop() {
           setProducts((ps) => (ps && ps.some((p) => p.currency !== c) ? ps.map((p) => ({ ...p, currency: c })) : ps))
         }}
       />
+      <PromoCodesCard siteId={siteId || ''} />
 
       <form onSubmit={saveProduct} className="mb-6 space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
         <div className="flex items-center justify-between gap-3">
