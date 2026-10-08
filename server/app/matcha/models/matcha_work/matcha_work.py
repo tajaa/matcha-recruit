@@ -329,6 +329,10 @@ class SendMessageRequest(BaseModel):
     content: str = Field("", max_length=4000)
     slide_index: Optional[int] = Field(None, ge=0, description="0-based index of slide to focus edits on")
     model: Optional[str] = Field(None, description="Model override — one of the current fleet ids (see model_catalog.py)")
+    # The schedule assistant's model picker — huume/routing.SCHEDULE_MODEL_CHOICES
+    # (tests/huume/test_schedule_model_picker.py keeps the two in step).
+    # Honored only on schedule_assistant threads; None runs Luna.
+    huume_model: Optional[Literal["gpt-5.6-luna", "claude-haiku-5-5", "claude-sonnet-5-5"]] = None
     image_urls: Optional[list[str]] = Field(
         None,
         description="Attachment image URLs (already uploaded). Stored on user message metadata and passed to the AI as multimodal parts.",

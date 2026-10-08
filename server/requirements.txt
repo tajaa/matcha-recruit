@@ -15,6 +15,8 @@ python-jose[cryptography]>=3.5.0
 passlib[bcrypt]>=1.7.4
 email-validator>=2.0.0
 httpx>=0.25.0
+# Claude option on the schedule assistant (services/huume/claude_client.py).
+anthropic>=1.12,<2
 # Remote MCP connector (app/matcha/routes/mcp_connector/). <3: 3.0 changes
 # AuthSettings.validate_token_resource defaults and the MCPServer API.
 mcp>=2.2.0,<3.0.0

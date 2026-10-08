@@ -70,6 +70,10 @@ server/
   `core/services/openai_responses.py`. Until 2026-09-10 that client impersonated a `google.genai`
   client, so OpenAI code READ as Gemini code — if a call site builds `types.Content`/`types.Part`,
   check which client it reaches before assuming the provider.
+- **Anthropic (opt-in, schedule assistant only)**: the schedule panel's model picker can run the
+  Huume loop on Claude Haiku 5.5 / Sonnet 5.5 through `services/huume/claude_client.py` (official
+  `anthropic` SDK, own `provider="anthropic"` rate-limit bucket, `ANTHROPIC_API_KEY`). Luna stays the
+  default everywhere. Spec: `services/huume/CLAUDE.md` §"Schedule assistant model picker".
 - Some Huume skills still call Gemini for real, and that is deliberate: `er_skill` owns its own call,
   and `discipline`/`handbook`/`legal`/`ir` delegate to Gemini-backed pilot services.
 - Per-feature analyzer singletons (e.g. `get_ir_analyzer`, `get_er_analyzer`) cache the model handle; don't instantiate per request.

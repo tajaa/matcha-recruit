@@ -215,6 +215,12 @@ class Settings:
     # could 429 a Huume turn. Same starting ceiling; tune independently.
     openai_hourly_limit: int = 200
     openai_daily_limit: int = 5000
+    # Anthropic Claude — an opt-in model for the schedule assistant's Huume
+    # loop (`services/huume/claude_client.py`). Luna stays the default, and
+    # Claude turns count in their own bucket.
+    anthropic_api_key: Optional[str] = None
+    anthropic_hourly_limit: int = 200
+    anthropic_daily_limit: int = 5000
 
     # Government APIs
     openstates_api_key: Optional[str] = None  # OpenStates legislative tracking (free key)
@@ -387,6 +393,7 @@ def load_settings() -> Settings:
         gemini_api_key=api_key if api_key else None,
         openai_api_key=os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_1"),
         openai_luna_model=os.getenv("OPENAI_LUNA_MODEL", "gpt-5.6-luna"),
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
         serp_api_key=os.getenv("SERP_API_KEY"),
         use_vertex_ai=os.getenv("USE_VERTEX_AI", "").strip().lower() in ("1", "true", "yes"),
         vertex_ai_project=os.getenv("VERTEX_AI_PROJECT"),
@@ -456,6 +463,8 @@ def load_settings() -> Settings:
         gemini_daily_limit=int(os.getenv("GEMINI_DAILY_LIMIT", "5000")),
         openai_hourly_limit=int(os.getenv("OPENAI_HOURLY_LIMIT", "200")),
         openai_daily_limit=int(os.getenv("OPENAI_DAILY_LIMIT", "5000")),
+        anthropic_hourly_limit=int(os.getenv("ANTHROPIC_HOURLY_LIMIT", "200")),
+        anthropic_daily_limit=int(os.getenv("ANTHROPIC_DAILY_LIMIT", "5000")),
         openstates_api_key=os.getenv("OPENSTATES_API_KEY"),
         courtlistener_api_token=os.getenv("COURTLISTENER_API_TOKEN"),
         saml_sp_entity_id=os.getenv("SAML_SP_ENTITY_ID", "https://hey-matcha.com/api/sso/metadata"),

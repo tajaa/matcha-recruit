@@ -32,6 +32,9 @@ function fakeThread(overrides: Partial<ScheduleHuumeThread> = {}): ScheduleHuume
     send: vi.fn().mockResolvedValue(undefined),
     openChat: vi.fn(),
     archiveChat: vi.fn().mockResolvedValue(undefined),
+    models: [{ id: 'gpt-5.6-luna', label: 'Luna', provider: 'openai' }],
+    model: 'gpt-5.6-luna',
+    setModel: vi.fn(),
     voice: {
       enabled: false, starting: false, transcribing: false, recording: false, error: null,
       begin: vi.fn().mockResolvedValue(undefined), finish: vi.fn().mockResolvedValue(undefined),
@@ -171,6 +174,29 @@ describe('ScheduleHuumePanel chrome', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove chat: Cover Friday close' }))
     expect(thread.archiveChat).toHaveBeenCalledWith(summary)
+  })
+
+  it('hides the model picker when Luna is the only choice', () => {
+    renderPanel(fakeThread())
+    expect(screen.queryByRole('combobox', { name: 'Assistant model' })).not.toBeInTheDocument()
+  })
+
+  it('lets the manager pick Claude, but not mid-turn', () => {
+    const models = [
+      { id: 'gpt-5.6-luna', label: 'Luna', provider: 'openai' as const },
+      { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', provider: 'anthropic' as const },
+      { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', provider: 'anthropic' as const },
+    ]
+    const thread = fakeThread({ models })
+    const { unmount } = renderPanel(thread)
+    const picker = screen.getByRole('combobox', { name: 'Assistant model' })
+    expect(picker).toHaveValue('gpt-5.6-luna')
+    fireEvent.change(picker, { target: { value: 'claude-sonnet-5-5' } })
+    expect(thread.setModel).toHaveBeenCalledWith('claude-sonnet-5-5')
+    unmount()
+
+    renderPanel(fakeThread({ models, busy: true }))
+    expect(screen.getByRole('combobox', { name: 'Assistant model' })).toBeDisabled()
   })
 
   it('shows a session error with a retry rather than a silent dead composer', () => {

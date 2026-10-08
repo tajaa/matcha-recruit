@@ -50,7 +50,7 @@ export function sendMessageStream(
   threadId: string,
   content: string,
   callbacks: UploadStreamCallbacks,
-  options?: { slide_index?: number; model?: string; attachments?: MWThreadAttachment[] },
+  options?: { slide_index?: number; model?: string; attachments?: MWThreadAttachment[]; huume_model?: string },
 ): AbortController {
   const endpoint = `/matcha-work/threads/${threadId}/messages/stream`
   const ctrl = new AbortController()

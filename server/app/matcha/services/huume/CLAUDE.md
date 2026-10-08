@@ -143,6 +143,30 @@ assistant voice endpoint; the old `/employee-schedule/chat` parser route and
 client are retired. The Huume loop remains bounded at eight model calls and a
 300-second wall-clock limit, with the existing per-company turn rate limit.
 
+## Schedule assistant model picker (2026-10-08)
+
+The schedule panel has a model dropdown: **Luna** (default), **Claude Haiku 5.5**,
+**Claude Sonnet 5.5**. The registry is `routing.SCHEDULE_MODEL_CHOICES`; the
+client sends the id as `SendMessageRequest.huume_model` (a `Literal` kept in step
+by `tests/huume/test_schedule_model_picker.py`), `turn_pipeline` puts it on
+`HuumeSurfaceContext.model`, and `agent.run_huume_turn` resolves it — honored on
+the schedule surface only; everywhere else the field is ignored and Luna runs.
+
+- `claude_client.ClaudeSession` is the Anthropic SDK twin of `LunaSession`: same
+  `create_response` inputs (Responses items + function tools) and the same
+  `LunaResponse` out, so the loop does not branch on provider. Messages is
+  stateless, so the session keeps the turn's history itself, append-only
+  (`message.to_param()`, thinking blocks untouched — preserved thinking).
+- Adaptive thinking, `effort: medium` explicit (the two models default
+  differently). Sonnet sends `fallbacks: "default"` (server-side refusal
+  fallback beta); Haiku has none. SDK retries run inside the per-call deadline.
+- Own rate-limit bucket (`ApiRateLimiter(provider="anthropic")`,
+  `ANTHROPIC_HOURLY_LIMIT`/`ANTHROPIC_DAILY_LIMIT`) and own ledger rows
+  (`ai_usage.record_anthropic_response`, priced in both pricing tables).
+- The session endpoint returns `available_models`; Claude is listed only when
+  `ANTHROPIC_API_KEY` is set, and the client falls back to Luna if a remembered
+  pick is no longer offered.
+
 ## Write-ups / HR cases (2026-09-29)
 
 `services/huume/hr_case_skill.py` carries the `hr_cases` write-up workflow into

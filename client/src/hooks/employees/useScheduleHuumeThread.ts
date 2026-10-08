@@ -6,6 +6,7 @@ import {
   getScheduleHuumeSession,
   listScheduleHuumeSessions,
   transcribeScheduleVoice,
+  type ScheduleHuumeModel,
   type ScheduleHuumeSessionSummary,
 } from '../../api/employees/scheduleAssistant'
 import { sendMessageStream } from '../../work/api/matchaWork/messaging'
@@ -39,6 +40,27 @@ export function relativeChatTime(value: string, now = Date.now()): string {
   if (hours < 24) return `${hours}h ago`
   const days = Math.floor(hours / 24)
   return days < 7 ? `${days}d ago` : new Date(at).toLocaleDateString()
+}
+
+/** Luna — what a turn runs on when nothing else was picked. */
+export const DEFAULT_SCHEDULE_HUUME_MODEL = 'gpt-5.6-luna'
+const MODEL_STORAGE_KEY = 'matcha.scheduleAssistant.model'
+const LUNA_ONLY: ScheduleHuumeModel[] = [{ id: DEFAULT_SCHEDULE_HUUME_MODEL, label: 'Luna', provider: 'openai' }]
+
+/** The manager's last pick — a per-browser convenience, so storage that is
+ *  blocked or empty just means Luna. */
+function readStoredModel(): string {
+  try {
+    return window.localStorage.getItem(MODEL_STORAGE_KEY) || DEFAULT_SCHEDULE_HUUME_MODEL
+  } catch {
+    return DEFAULT_SCHEDULE_HUUME_MODEL
+  }
+}
+
+function storeModel(model: string) {
+  try {
+    window.localStorage.setItem(MODEL_STORAGE_KEY, model)
+  } catch { /* storage unavailable: the pick lasts for this page only */ }
 }
 
 function optimisticUserMessage(threadId: string, content: string): MWMessage {
@@ -123,6 +145,10 @@ export interface ScheduleHuumeThread {
   busy: boolean
   composerDisabled: boolean
   send(contentOverride?: string): Promise<void>
+  /** The model picker: what the server offers, and the one turns run on. */
+  models: ScheduleHuumeModel[]
+  model: string
+  setModel(model: string): void
   openChat(sessionId: string | null): void
   archiveChat(summary: ScheduleHuumeSessionSummary): Promise<void>
   voice: ScheduleHuumeVoice
@@ -152,6 +178,14 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
   const [sessionAttempt, setSessionAttempt] = useState(0)
   const [steps, setSteps] = useState<HuumeStep[]>([])
   const [busy, setBusy] = useState(false)
+  const [models, setModels] = useState<ScheduleHuumeModel[]>(LUNA_ONLY)
+  const [pickedModel, setPickedModel] = useState(readStoredModel)
+  // A remembered pick the server no longer offers (no Anthropic key) runs Luna.
+  const model = models.some((option) => option.id === pickedModel) ? pickedModel : DEFAULT_SCHEDULE_HUUME_MODEL
+  const setModel = useCallback((next: string) => {
+    setPickedModel(next)
+    storeModel(next)
+  }, [])
   const [voiceEnabled, setVoiceEnabled] = useState(false)
   const [startingVoice, setStartingVoice] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
@@ -239,6 +273,7 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
         setSessionId(session.session_id)
         setMessages(session.messages)
         setCurrentState(session.current_state || {})
+        setModels(session.available_models?.length ? session.available_models : LUNA_ONLY)
         setStatus('')
         refreshSessions()
       })
@@ -340,8 +375,8 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
         setBusy(false)
         toast(message, 'error')
       },
-    })
-  }, [busy, input, refreshSessions, sessionError, threadId, toast])
+    }, { huume_model: model })
+  }, [busy, input, model, refreshSessions, sessionError, threadId, toast])
 
   async function beginVoiceTurn() {
     if (busy || transcribing || startingVoice) return
@@ -401,7 +436,7 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
     messages, currentState, setCurrentState, action, choice,
     input, setInput, status, sessionError,
     retry: () => setSessionAttempt((attempt) => attempt + 1),
-    steps, busy, composerDisabled, send, openChat, archiveChat,
+    steps, busy, composerDisabled, send, models, model, setModel, openChat, archiveChat,
     voice: {
       enabled: voiceEnabled, starting: startingVoice, transcribing, recording, error: voiceError,
       begin: beginVoiceTurn, finish: finishVoiceTurn,

@@ -980,6 +980,7 @@ async def _run_huume_dispatch(tc: TurnContext):
             week_end=schedule_scope.week_end,
             allowed_tools=SCHEDULE_TOOLS,
             allowed_lookup_topics=SCHEDULE_LOOKUP_TOPICS,
+            model=tc.body.huume_model,
         )
     else:
         async with get_connection() as conn:

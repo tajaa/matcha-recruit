@@ -56,6 +56,11 @@ PRICING: dict[tuple[str, str], tuple[float, float]] = {
     # payload also splits cached reads and cache writes out of input_tokens;
     # compute_cost applies their $0.02/M and 1.25x write rates respectively.
     ("openai", "gpt-5.6-luna"): (0.20, 1.20),
+    # Anthropic output_tokens already includes thinking. Haiku 5.5 bills a
+    # prompt above 100K input at 5x (see compute_cost). Schedule-assistant
+    # model picker only (services/huume/claude_client.py).
+    ("anthropic", "claude-haiku-5-5"): (0.10, 0.50),
+    ("anthropic", "claude-sonnet-5-5"): (2.00, 10.00),
     ("gemini", "gemini-3.7-flash"): (1.50, 7.50),  # fleet quality tier (rate mirrors 3.6-flash pending 3.7 GA)
     ("gemini", "gemini-3.6-flash"): (1.50, 7.50),  # kept for already-logged rows
     ("gemini", "gemini-3.5-flash"): (1.50, 9.00),
@@ -79,6 +84,14 @@ PRICING: dict[tuple[str, str], tuple[float, float]] = {
 
 _CACHED_INPUT_PRICING: dict[tuple[str, str], float] = {
     ("openai", "gpt-5.6-luna"): 0.02,
+    ("anthropic", "claude-haiku-5-5"): 0.01,
+    ("anthropic", "claude-sonnet-5-5"): 0.20,
+}
+
+# Anthropic models whose whole request reprices above an input threshold:
+# (threshold, input multiplier, output multiplier).
+_ANTHROPIC_LONG_CONTEXT: dict[str, tuple[int, float, float]] = {
+    "claude-haiku-5-5": (100_000, 5.0, 5.0),
 }
 
 # Overrides `_feature_label()`'s stack-derived label for every wrapped call
@@ -251,12 +264,17 @@ def compute_cost(provider: str, model: str, input_tokens: Optional[int],
         + write_total * in_price * 1.25
     )
     output_total = max(output_tokens or 0, 0)
-    if provider != "openai":
+    # Responses and Messages both count reasoning inside output_tokens.
+    if provider not in ("openai", "anthropic"):
         output_total += max(thinking_tokens or 0, 0)
 
     # GPT-5.6 applies long-context rates to the full request above 272K input.
     input_multiplier = 2.0 if provider == "openai" and input_total > 272_000 else 1.0
     output_multiplier = 1.5 if provider == "openai" and input_total > 272_000 else 1.0
+    if provider == "anthropic" and key[1] in _ANTHROPIC_LONG_CONTEXT:
+        threshold, in_mult, out_mult = _ANTHROPIC_LONG_CONTEXT[key[1]]
+        if input_total > threshold:
+            input_multiplier, output_multiplier = in_mult, out_mult
     return (
         input_cost * input_multiplier
         + output_total * out_price * output_multiplier
@@ -439,6 +457,46 @@ async def record_openai_response(
         provider_response_id=provider_response_id,
         provider_status=provider_status,
         service_tier=service_tier,
+    )
+    await _record_async(row)
+
+
+async def record_anthropic_response(
+    *, model: str, latency_ms: int, message: Optional[dict[str, Any]] = None,
+    error: Optional[str] = None, status: Optional[str] = None,
+) -> None:
+    """Record exact usage from one Anthropic Messages call.
+
+    Messages reports `input_tokens` EXCLUDING cache reads and cache writes;
+    the ledger's `input_tokens` is the whole prompt (as Responses reports it),
+    so the three are summed here and the cached/write split kept alongside.
+    """
+    if not LOGGING_ENABLED:
+        return
+    payload = message if isinstance(message, dict) else {}
+    usage = payload.get("usage")
+    usage = usage if isinstance(usage, dict) else {}
+    uncached = usage.get("input_tokens")
+    cache_read = usage.get("cache_read_input_tokens") or 0
+    cache_write = usage.get("cache_creation_input_tokens") or 0
+    input_total = None if uncached is None else uncached + cache_read + cache_write
+    actual_model = payload.get("model")
+    actual_model = actual_model if isinstance(actual_model, str) and actual_model else model
+    response_id = payload.get("id")
+    stop_reason = payload.get("stop_reason")
+    row = _build_row(
+        provider="anthropic", model=actual_model, method="messages.create",
+        feature=_feature_label(), latency_ms=latency_ms,
+        status=status if status in {"ok", "error", "timeout"} else ("error" if error else "ok"),
+        error=error,
+        usage=(
+            input_total, usage.get("output_tokens"), None,
+            cache_read if input_total is not None else None,
+            cache_write if input_total is not None else None,
+        ),
+        provider_response_id=response_id if isinstance(response_id, str) else None,
+        provider_status=stop_reason if isinstance(stop_reason, str) else None,
+        service_tier=usage.get("service_tier") if isinstance(usage.get("service_tier"), str) else None,
     )
     await _record_async(row)
 
