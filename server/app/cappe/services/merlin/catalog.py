@@ -14,6 +14,8 @@ consumed by prompt-building and validation, not request/response shapes.
 from dataclasses import dataclass
 from typing import Any
 
+from ....core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
+
 # type -> {field name: field kind}, for the block's top-level content fields
 # (excluding `type` itself and the structural `_design`/`_k`). Kinds use the
 # same vocabulary as `Field.kind` in the frontend's PageEditor/types.ts:
@@ -389,10 +391,19 @@ class ModelTier:
 # bill as output tokens, so a `max` turn costs a multiple of `regular` even
 # on an identical model+prompt; gated premium like `regular`, tracked under
 # its own rate-limiter key (`record_call("cappe_merlin", "max")`).
+#
+# The ids come from the shared fleet catalog. `lite` (and the Auto classifier
+# and directory inference) used to hard-code the 3.7 Flash Lite id, which
+# core/services/model_catalog.py records as not available for generateContent
+# on this account.
+#
+# With Admin → Settings → AI models routing Merlin to Claude, the tier no
+# longer picks the model: it sets the effort (`thinking_level` → Claude effort
+# in turn.py).
 MODEL_TIERS: dict[str, ModelTier] = {
-    "lite": ModelTier("gemini-3.7-flash-lite", "minimal", 45),
-    "regular": ModelTier("gemini-3.7-flash", "low", 45),
-    "max": ModelTier("gemini-3.7-flash", "high", 90),
+    "lite": ModelTier(GEMINI_FLASH_LITE, "minimal", 45),
+    "regular": ModelTier(GEMINI_FLASH, "low", 45),
+    "max": ModelTier(GEMINI_FLASH, "high", 90),
 }
 DEFAULT_MODEL_TIER = "lite"
 # Tiers a non-premium (free / hosting) plan may use.

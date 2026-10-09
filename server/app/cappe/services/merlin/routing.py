@@ -18,7 +18,6 @@ Two rules keep it honest:
     `lite` would silently give the cheap answer to the request that needed the
     expensive one — the exact failure `auto` exists to prevent.
 """
-import asyncio
 import json
 import logging
 import re
@@ -27,7 +26,10 @@ from typing import Any, Optional
 
 from google.genai import types
 
+from ....core.services import agent_surfaces
+from ....core.services.anthropic_messages import generate_content_routed, ran_on_claude
 from ....core.services.genai_client import get_genai_client
+from ....core.services.model_catalog import GEMINI_FLASH_LITE
 from ....core.services.rate_limiter import ApiRateLimiter, RateLimitExceeded
 from ..design_gate import is_premium_plan
 from .catalog import DEFAULT_MODEL_TIER, MODEL_TIERS
@@ -39,7 +41,7 @@ AUTO_TIER = "auto"
 _COMPLEXITY_TIERS = {"trivial": "lite", "standard": "regular", "complex": "max"}
 _FALLBACK_TIER = "regular"
 
-_CLASSIFIER_MODEL = "gemini-3.7-flash-lite"
+_CLASSIFIER_MODEL = GEMINI_FLASH_LITE
 _CLASSIFIER_TIMEOUT = 6.0
 
 # Heuristic pre-filter. A short, imperative edit against a section the user has
@@ -126,25 +128,30 @@ async def _classify(message: str, history_tail: Optional[str]) -> Optional[str]:
         # The budget is spent; don't burn the turn's own headroom on routing.
         return None
 
+    response = None
     try:
         client = get_genai_client()
-        response = await asyncio.wait_for(
-            client.aio.models.generate_content(
-                model=_CLASSIFIER_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    thinking_config=types.ThinkingConfig(thinking_level="minimal"),
-                ),
+        # Gemini unless Admin → Settings → AI models routes Merlin Auto to
+        # Claude; the same 6s budget applies either way.
+        response = await generate_content_routed(
+            client,
+            model=_CLASSIFIER_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                thinking_config=types.ThinkingConfig(thinking_level="minimal"),
             ),
-            timeout=_CLASSIFIER_TIMEOUT,
+            timeout_seconds=_CLASSIFIER_TIMEOUT,
+            surface=agent_surfaces.GUMMFIT_MERLIN_ROUTER,
+            rate_label=("cappe_merlin", "route"),
         )
     except Exception as exc:  # noqa: BLE001 — routing must never fail a turn
         logger.info("Merlin tier classification failed: %s", exc)
         return None
     finally:
         try:
-            await limiter.record_call("cappe_merlin", "lite")
+            if not ran_on_claude(response):  # a Claude call counted in its own bucket
+                await limiter.record_call("cappe_merlin", "lite")
         except Exception:  # noqa: BLE001
             pass
 

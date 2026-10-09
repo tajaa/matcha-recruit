@@ -47,10 +47,12 @@ class SurfaceDef:
 
 MATCHA = "matcha"
 ESPRESSO = "espresso"
+GUMMFIT = "gummfit"
 
 APPS: tuple[AppDef, ...] = (
     AppDef(MATCHA, "Matcha", "The HR and operations platform, including Huume and Matcha Work for businesses."),
     AppDef(ESPRESSO, "Espresso", "The personal workspace app (personal accounts on matcha-work)."),
+    AppDef(GUMMFIT, "Gummfit", "The website builder (Cappe) on gummfit.com."),
 )
 
 # ── Matcha ──
@@ -72,6 +74,12 @@ ESPRESSO_CHAT = "espresso.chat"
 ESPRESSO_AGENT_CARDS = "espresso.agent_cards"
 ESPRESSO_ASSISTANT = "espresso.assistant"
 ESPRESSO_PROJECTS = "espresso.projects"
+
+# ── Gummfit (Cappe) ──
+GUMMFIT_MERLIN = "gummfit.merlin"
+GUMMFIT_MERLIN_ROUTER = "gummfit.merlin_router"
+GUMMFIT_DIRECTORY = "gummfit.directory"
+GUMMFIT_BOOKING = "gummfit.booking"
 
 _LUNA = "OpenAI Luna"
 _GEMINI = "Gemini"
@@ -126,6 +134,23 @@ SURFACES: tuple[SurfaceDef, ...] = (
                "The assistant you start from chat: flights, browsing, purchases.", _LUNA),
     SurfaceDef(ESPRESSO_PROJECTS, ESPRESSO, "Projects",
                "@espresso repository questions and task drafts in personal projects.", _LUNA),
+    SurfaceDef(
+        GUMMFIT_MERLIN, GUMMFIT, "Merlin (single-step edits)",
+        "Every Lite turn and other one-shot edits. The tier still sets how hard it thinks "
+        "(Lite low, Regular medium, Max high). Merlin's multi-step agent (Regular/Max on a "
+        "premium plan) stays on Gemini for now.",
+        f"{_GEMINI} Flash Lite (Lite) · Flash",
+    ),
+    SurfaceDef(
+        GUMMFIT_MERLIN_ROUTER, GUMMFIT, "Merlin Auto",
+        "Picks Lite, Regular or Max for an Auto request. It has 6 seconds; past that the turn "
+        "runs on Regular.",
+        f"{_GEMINI} Flash Lite",
+    ),
+    SurfaceDef(GUMMFIT_DIRECTORY, GUMMFIT, "Directory listing",
+               "Suggests a published site's directory category, tags and blurb.", f"{_GEMINI} Flash Lite"),
+    SurfaceDef(GUMMFIT_BOOKING, GUMMFIT, "Booking suggestions",
+               "Reads the times and staff a visitor asks for when suggesting bookings.", f"{_GEMINI} Flash Lite"),
 )
 
 APP_KEYS: frozenset[str] = frozenset(app.key for app in APPS)

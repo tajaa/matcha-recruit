@@ -154,7 +154,8 @@ class _Conn:
 async def test_before_the_first_save_the_legacy_setting_seeds_matcha_and_espresso():
     conn = _Conn({"agent_model": '"claude-haiku-5-5"'})
     models = await platform_settings.get_agent_models(conn=conn)
-    assert models["apps"] == {"matcha": "claude-haiku-5-5", "espresso": "claude-haiku-5-5"}
+    # Gummfit never read the old setting, so it starts built-in.
+    assert models["apps"] == {"matcha": "claude-haiku-5-5", "espresso": "claude-haiku-5-5", "gummfit": "default"}
     assert set(models["surfaces"].values()) == {"inherit"}
     # Cached, the default included: no second query inside the TTL.
     await platform_settings.get_agent_models(conn=conn)
@@ -318,7 +319,7 @@ async def test_admin_saves_the_whole_map_and_primes_the_cache(monkeypatch):
     )
     saved = json.loads(executed[0][0])
     assert saved == out["agent_models"]
-    assert saved["apps"] == {"matcha": "claude-haiku-5-5", "espresso": "default"}
+    assert saved["apps"] == {"matcha": "claude-haiku-5-5", "espresso": "default", "gummfit": "default"}
     assert saved["surfaces"]["matcha.ir"] == "claude-sonnet-5-5"
     assert saved["surfaces"]["matcha.huume"] == "inherit"  # omitted → follows Matcha
     # The cache serves the write without a read.

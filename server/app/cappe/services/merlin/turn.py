@@ -26,6 +26,8 @@ from typing import Any, Optional
 from google.genai import types
 
 from ....config import get_settings
+from ....core.services import agent_surfaces
+from ....core.services.anthropic_messages import generate_content_routed, ran_on_claude
 from ....core.services.genai_client import get_genai_client
 from ....core.services.rate_limiter import ApiRateLimiter
 from ..design_gate import is_premium_plan
@@ -486,6 +488,10 @@ def _rejection_feedback(rejected: list[dict[str, Any]]) -> str:
     return f"{len(rejected)} op(s) were invalid — {reasons}"
 
 
+# A tier's Gemini thinking level → Claude effort, when Merlin is routed to Claude.
+_CLAUDE_EFFORT = {"minimal": "low", "low": "medium", "high": "high"}
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -556,21 +562,28 @@ async def run_merlin_turn(
         # try: a hallucinated payload shape must degrade to a retry or an
         # empty-ops response, never escape as a 500 (the never-raises contract).
         try:
+            response = None
             try:
-                response = await asyncio.wait_for(
-                    client.aio.models.generate_content(
-                        model=model,
-                        contents=contents,
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json", thinking_config=thinking_cfg,
-                        ),
+                # Gemini, unless Admin → Settings → AI models routes Merlin to
+                # Claude; the tier's thinking level becomes Claude's effort.
+                response = await generate_content_routed(
+                    client,
+                    model=model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json", thinking_config=thinking_cfg,
                     ),
-                    timeout=tier_cfg.timeout,
+                    timeout_seconds=tier_cfg.timeout,
+                    effort=_CLAUDE_EFFORT.get(tier_cfg.thinking_level, "medium"),
+                    surface=agent_surfaces.GUMMFIT_MERLIN,
+                    rate_label=("cappe_merlin", tier),
                 )
             finally:
                 # Record even on timeout — the request was issued and billed, so
-                # skipping it here lets a slow model burn quota invisibly.
-                await rate_limiter.record_call("cappe_merlin", tier)
+                # skipping it here lets a slow model burn quota invisibly. A
+                # Claude call already counted in the anthropic bucket.
+                if not ran_on_claude(response):
+                    await rate_limiter.record_call("cappe_merlin", tier)
             token_budget.record_response(response, fallback_prompt_tokens=estimated_prompt_tokens)
             payload = _parse_json_response(getattr(response, "text", None) or "")
             if not isinstance(payload, dict):

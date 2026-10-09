@@ -50,9 +50,11 @@ class TestNoFleetLiteralsOutsideCatalog:
         """A service that re-literals a fleet id silently keeps calling the
         retired model on the next bump — this is the structural backstop the
         four aliasing tests above can't give (they only cover the modules
-        someone remembered to pin). Only the catalog itself, the two pricing
-        ledgers (which must also price retired ids on historical rows), and
-        cappe (separate product, own catalog) may contain the raw strings."""
+        someone remembered to pin). Only the catalog itself and the two
+        pricing ledgers (which must also price retired ids on historical
+        rows) may contain the raw strings. Cappe was exempt until its Merlin
+        tiers, classifier and directory turned out to hard-code an id the
+        account doesn't serve."""
         app_root = Path(__file__).resolve().parents[1] / "app"
         allowed = {
             "core/services/model_catalog.py",
@@ -62,7 +64,7 @@ class TestNoFleetLiteralsOutsideCatalog:
         offenders = []
         for path in app_root.rglob("*.py"):
             rel = path.relative_to(app_root).as_posix()
-            if rel in allowed or rel.startswith("cappe/"):
+            if rel in allowed:
                 continue
             text = path.read_text(encoding="utf-8", errors="ignore")
             for model_id in (GEMINI_FLASH, GEMINI_FLASH_LITE):
@@ -84,3 +86,15 @@ class TestPricingParity:
             inp, outp = PRICING[("gemini", model)]
             assert MODEL_PRICING[model]["input_per_1m"] == Decimal(str(inp))
             assert MODEL_PRICING[model]["output_per_1m"] == Decimal(str(outp))
+
+
+def test_cappe_names_no_model_the_catalog_says_is_unavailable():
+    """`gemini-3.7-flash-lite` is not served for generateContent (see
+    model_catalog.py); Cappe hard-coded it in three places."""
+    app_root = Path(__file__).resolve().parents[1] / "app" / "cappe"
+    offenders = [
+        path.relative_to(app_root).as_posix()
+        for path in app_root.rglob("*.py")
+        if "gemini-3.7-flash-lite" in path.read_text(encoding="utf-8", errors="ignore")
+    ]
+    assert offenders == []

@@ -5,7 +5,6 @@ slot returned to the visitor is resolved against live Cappe data locally.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -16,6 +15,8 @@ from uuid import UUID
 
 from google.genai import types
 
+from ...core.services import agent_surfaces
+from ...core.services.anthropic_messages import generate_content_routed, ran_on_claude
 from ...core.services.genai_client import get_genai_client
 from ...core.services.model_catalog import GEMINI_FLASH_LITE
 from ...core.services.model_json import clean_model_json
@@ -326,9 +327,14 @@ async def extract_booking_preference(
         return None
 
     request_issued = False
+    response = None
     try:
         client = get_genai_client()
-        generation = client.aio.models.generate_content(
+        request_issued = True
+        # Gemini unless Admin → Settings → AI models routes booking
+        # suggestions to Claude (same 12s budget).
+        response = await generate_content_routed(
+            client,
             model=GEMINI_FLASH_LITE,
             contents=_build_prompt(request_text, today),
             config=types.GenerateContentConfig(
@@ -337,11 +343,9 @@ async def extract_booking_preference(
                 max_output_tokens=800,
                 thinking_config=types.ThinkingConfig(thinking_level="minimal"),
             ),
-        )
-        request_issued = True
-        response = await asyncio.wait_for(
-            generation,
-            timeout=_MODEL_TIMEOUT_SECONDS,
+            timeout_seconds=_MODEL_TIMEOUT_SECONDS,
+            surface=agent_surfaces.GUMMFIT_BOOKING,
+            rate_label=("cappe_booking_suggestions", "parse"),
         )
         payload = json.loads(clean_model_json(getattr(response, "text", None) or ""))
         return coerce_booking_preference(payload)
@@ -349,7 +353,7 @@ async def extract_booking_preference(
         logger.warning("Cappe booking preference extraction failed", exc_info=True)
         return None
     finally:
-        if request_issued:
+        if request_issued and not ran_on_claude(response):  # Claude counted in its own bucket
             try:
                 await limiter.record_call("cappe_booking_suggestions", "parse")
             except Exception:  # noqa: BLE001 - usage accounting is best effort
