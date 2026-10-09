@@ -12,9 +12,9 @@ clause must cite a bracketed corpus ID, and the shared
 before anything reaches the user. Proposed drafts persist as reviewable rows
 that the admin edits and PROMOTES into the real handbooks / policies tables.
 
-Derived from the Broker Pilot / Legal Pilot architecture
-(`services/broker/broker_pilot/`, `services/pilots/legal_defense/`) and reuses
-their pure gates directly. Never raises on the analysis path — failures degrade, not 500.
+Derived from the Legal Pilot architecture
+(`services/pilots/legal_defense/`) and reuses
+its pure gates directly. Never raises on the analysis path — failures degrade, not 500.
 
 Corpus cid scheme (one flat index; the citation gate keys on it):
 - ``profile``                        — the company handbook profile record

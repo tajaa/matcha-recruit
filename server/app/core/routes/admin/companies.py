@@ -83,7 +83,6 @@ from app.core.services.stripe_service import StripeService, StripeServiceError
 from app.core.feature_flags import DEFAULT_COMPANY_FEATURES
 from app.core.services.deal_pricing import DealInputs
 from app.core.services.deal_full import FullDealInputs
-from app.core.services.deal_broker import BrokerInputs
 from app.core.services.deal_book import BookInputs
 
 
@@ -269,7 +268,7 @@ async def company_feature_provenance(company_id: UUID):
     custom product, or which admin/webhook write explains each currently-
     enabled feature. See feature_provenance.feature_provenance for the
     classification rules — `admin_grant` is the fallback bucket for a feature
-    only an admin (or broker, at creation) could have turned on; `grants`
+    only an admin could have turned on; `grants`
     below is where that gets classified as comped/invoiced/trial/internal.
     """
     async with get_connection() as conn:
@@ -993,7 +992,7 @@ async def admin_change_tier(
       immediately. Otherwise the customer keeps getting charged for a tier
       they no longer have.
     - **non-paid → Lite/X/Compliance**: refused. Activating any of these
-      requires a Stripe checkout (or a broker-pays/comped referral) so
+      requires a Stripe checkout (or a comped invite) so
       payment is established; admin should not bypass that. Use the
       customer's signup link.
     - **Bespoke ↔ IR Cap**: no Stripe coupling, just preset rewrite.
@@ -1065,7 +1064,7 @@ async def admin_change_tier(
             _path = _meta.get("signup_path") or "/lite/signup"
             raise HTTPException(
                 status_code=400,
-                detail=f"Activating {_label} requires Stripe checkout. Send the customer to {_path} or use a broker referral token; admin cannot promote into a paid tier without payment.",
+                detail=f"Activating {_label} requires Stripe checkout. Send the customer to {_path} or use an invite token; admin cannot promote into a paid tier without payment.",
             )
 
         # Paid tier → anything else: cancel the active Stripe sub first. An

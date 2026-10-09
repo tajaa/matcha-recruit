@@ -13,7 +13,7 @@ Composite = weighted sum of attested sub-scores (0-100). Caller owns the conn.
 from typing import Any, Optional
 from uuid import UUID
 
-from ..broker.epl_readiness import (
+from .epl_readiness import (
     readiness_band, _factor_band, top_gap, _serialize_attestation,
     _ATTEST_SCORE, ATTESTATION_STATUSES,
 )

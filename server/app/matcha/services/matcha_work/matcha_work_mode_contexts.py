@@ -363,7 +363,7 @@ async def build_risk_context(company_id: UUID) -> str:
 
 
 async def _build_risk_context_uncached(company_id: UUID) -> str:
-    from app.matcha.services.broker.risk_index import compute_risk_index
+    from app.matcha.services.insurance.risk_index import compute_risk_index
     from app.matcha.services.insurance.limit_adequacy import build_review
 
     async with get_connection() as conn:

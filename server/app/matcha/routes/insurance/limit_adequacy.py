@@ -5,7 +5,7 @@ Gap-analysis #6/#28 (WTW "benchmarking + contractual-limit review = essential
 tool"). The company records what it carries + uploads its contracts (Gemini
 extracts the required limits); the engine diffs them → grounded gaps ("you carry
 $1M GL but a contract requires $2M") plus a directional size/venue baseline.
-Business-facing, tenant-isolated. Broker surfaces live in `broker_submission.py`.
+Business-facing, tenant-isolated.
 """
 
 import json

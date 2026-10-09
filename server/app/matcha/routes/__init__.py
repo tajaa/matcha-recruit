@@ -58,17 +58,6 @@ from ..dependencies import require_feature, require_any_feature, require_all_fea
 from ...core.dependencies import require_admin
 
 # Create main Matcha router
-from .broker import (
-    brokers_router,
-    broker_chat_router,
-    broker_chat_company_router,
-    broker_external_router,
-    broker_insurance_router,
-    broker_loss_runs_router,
-    broker_pilot_router,
-    broker_portfolio_router,
-    broker_submission_router,
-)
 from .insurance import (
     acord_router,
     coi_router,
@@ -95,7 +84,7 @@ from .onboarding import (
     matcha_x_onboarding_router,
     sc_onboarding_router,
 )
-from .intake import anonymous_report_router, external_intake_router, symlink_public_router
+from .intake import anonymous_report_router, symlink_public_router
 
 matcha_router = APIRouter()
 
@@ -209,26 +198,9 @@ matcha_router.include_router(symlink_router, prefix="/symlink", tags=["symlink"]
 matcha_router.include_router(ops_permissions_router, prefix="/ops/permissions", tags=["ops-permissions"],
                               dependencies=[Depends(require_all_features("matcha_ops"))])
 matcha_router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
-matcha_router.include_router(brokers_router, prefix="/brokers", tags=["brokers"])
 # Fractional HR — internal master-admin engagement tooling (admin-gated, not feature-flagged)
 matcha_router.include_router(fractional_hr_router, prefix="/fractional-hr", tags=["fractional-hr"],
                              dependencies=[Depends(require_admin)])
-matcha_router.include_router(broker_portfolio_router, prefix="/broker", tags=["broker-portfolio"])
-# Off-platform broker clients (Broker Pro) — each endpoint is require_broker_pro gated.
-matcha_router.include_router(broker_external_router, prefix="/broker", tags=["broker-external"])
-# Submission packet + AI coverage-gap (outward layer) — gated per-endpoint.
-matcha_router.include_router(broker_submission_router, prefix="/broker", tags=["broker-submission"])
-# Loss-run triangulation / development — gated per-endpoint (require_broker / _pro).
-matcha_router.include_router(broker_loss_runs_router, prefix="/broker", tags=["broker-loss-runs"])
-# Broker Pilot — grounded per-client analysis chat (every endpoint require_broker_pro).
-matcha_router.include_router(broker_pilot_router, prefix="/broker", tags=["broker-pilot"])
-# Broker carrier hub — quote/present/bind + claims bridge + risk-to-rate (per-endpoint
-# require_broker / _pro; carrier data features capability-gated in coterie_service).
-matcha_router.include_router(broker_insurance_router, prefix="/broker", tags=["broker-insurance"])
-# Broker↔company chat — broker side (require_broker per-endpoint, no feature gate,
-# matching the other broker surfaces). Company side is mounted at /broker-chat below.
-matcha_router.include_router(broker_chat_router, prefix="/broker", tags=["broker-chat"])
-matcha_router.include_router(broker_chat_company_router, prefix="/broker-chat", tags=["broker-chat-company"])
 # Workforce Compliance — business-first EPL risk trackers (pay transparency, AI-audit, biometric).
 matcha_router.include_router(workforce_compliance_router, prefix="/workforce-compliance",
                              tags=["workforce-compliance"],
@@ -379,8 +351,6 @@ matcha_router.include_router(
 # Public anonymous incident reporting — no auth, no feature gate (token-validated internally)
 matcha_router.include_router(anonymous_report_router, tags=["anonymous-reporting"])
 matcha_router.include_router(legal_defense_public_router, tags=["legal-pilot-public"])
-# Public off-platform client-intake — no auth, token-validated internally
-matcha_router.include_router(external_intake_router, prefix="/external-intake", tags=["external-intake-public"])
 # Public sym-link recipient endpoints (/sym/{token}/*) — no auth, no feature gate; token +
 # passcode validated internally (routes/intake/symlink_public.py)
 matcha_router.include_router(symlink_public_router, tags=["symlink-public"])

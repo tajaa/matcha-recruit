@@ -131,7 +131,7 @@ _LABEL_STOPWORDS = {"app", "services", "routes"}
 # organizational nesting like "services"/"routes" above and must strip the
 # same way, so a moved module's label is byte-identical to its pre-move label
 # and old ai_usage_log rows keep rolling up under it. Deliberately NOT folded
-# into _LABEL_STOPWORDS: several domain names (broker/insurance/pilots/
+# into _LABEL_STOPWORDS: several domain names (insurance/pilots/
 # onboarding) collide with routes/ grouping-folder names, and stripping those
 # generically would risk exactly the cross-branch collision the comment above
 # warns about. Matched positionally instead — only the segment right after
@@ -139,7 +139,7 @@ _LABEL_STOPWORDS = {"app", "services", "routes"}
 _SERVICES_DOMAINS = {
     "ir", "er", "discipline", "leave", "scheduling", "training", "onboarding",
     "hris", "benefits", "workforce", "risk_analytics", "matcha_work", "billing",
-    "pilots", "broker", "insurance", "property", "interviews",
+    "pilots", "insurance", "property", "interviews",
 }
 
 # A domain service occasionally splits further into its own subpackage
@@ -162,7 +162,6 @@ _SERVICES_DOMAINS = {
 _SPLIT_SERVICE_PACKAGES = {
     "analysis_packs",
     "autopilot",
-    "broker_pilot",
     "handbook_pilot",
     "hr_pilot_corpus",
     "legal_defense",

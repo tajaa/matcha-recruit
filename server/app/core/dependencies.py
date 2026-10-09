@@ -287,7 +287,6 @@ async def require_admin(current_user=Depends(get_current_user)):
         )
     return current_user
 require_candidate = require_roles("candidate")
-require_broker = require_roles("broker")
 
 
 async def get_optional_user(

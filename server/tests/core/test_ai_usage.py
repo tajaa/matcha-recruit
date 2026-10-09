@@ -65,7 +65,6 @@ def _call_feature_label_from(module_name: str) -> str:
     # while this test stayed green.
     ("app.matcha.services.matcha_work.matcha_work_ai.provider", "matcha.matcha_work_ai"),
     ("app.matcha.services.matcha_work.matcha_work_ai.compaction", "matcha.matcha_work_ai"),
-    ("app.matcha.services.broker.broker_pilot.chat", "matcha.broker_pilot"),
     ("app.matcha.services.pilots.handbook_pilot.chat", "matcha.handbook_pilot"),
     ("app.matcha.services.pilots.legal_defense.chat", "matcha.legal_defense"),
     ("app.matcha.services.risk_analytics.risk_assessment_service.recommendations",

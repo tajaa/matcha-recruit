@@ -84,27 +84,6 @@ def _serialize_state_rate(r) -> dict:
     }
 
 
-async def get_state_rates(conn, states: Iterable[str]) -> dict[str, dict]:
-    """Latest NCCI rate row per requested state → {state: serialized_row}.
-
-    "Latest" = most recent ``effective_date`` per state. Unknown states are
-    simply absent from the result.
-    """
-    wanted = sorted({s.upper() for s in states if s})
-    if not wanted:
-        return {}
-    rows = await conn.fetch(
-        """
-        SELECT DISTINCT ON (state) state, loss_cost_change_pct, effective_date, trend, source, note
-        FROM wc_state_rates
-        WHERE state = ANY($1::text[])
-        ORDER BY state, effective_date DESC
-        """,
-        wanted,
-    )
-    return {r["state"]: _serialize_state_rate(r) for r in rows}
-
-
 async def list_state_rates(conn) -> list[dict]:
     """All current (latest-per-state) NCCI rate rows for the reference panel."""
     rows = await conn.fetch(
@@ -134,21 +113,6 @@ def _serialize_mod(r) -> dict:
         "source": d.get("source") or "manual",  # 'manual' | 'worksheet'
         "created_at": r["created_at"].isoformat() if r["created_at"] else None,
     }
-
-
-async def mod_trajectory(conn, company_id: UUID) -> list[dict]:
-    """Full experience-mod history for a company, oldest period first."""
-    rows = await conn.fetch(
-        """
-        SELECT id, company_id, policy_period_start, policy_period_end,
-               experience_mod, carrier, annual_premium, note, source, created_at
-        FROM company_wc_mods
-        WHERE company_id = $1
-        ORDER BY policy_period_start ASC
-        """,
-        company_id,
-    )
-    return [_serialize_mod(r) for r in rows]
 
 
 async def latest_mods(conn, company_ids: Iterable[UUID]) -> dict[str, dict]:

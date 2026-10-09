@@ -1,7 +1,7 @@
 """Pure-logic tests for the composite risk index. compute_risk_index itself is
 DB-coupled (exercised by a dev integration smoke); these cover the pure pieces."""
 
-from app.matcha.services.broker import risk_index, epl_readiness
+from app.matcha.services.insurance import risk_index, epl_readiness
 
 
 def test_band_reexports_epl_thresholds():
@@ -179,23 +179,6 @@ def test_assemble_full_coverage_when_all_components_present():
     assert result["components_missing"] == []
 
 
-# --- external_risk_index (off-platform) ------------------------------------
-
-def test_external_risk_index_has_no_compliance_component():
-    wc = {"has_data": True, "severity_band": "good", "current_emr": 0.9, "recordable_cases": 1, "trir": 1.0}
-    epl = epl_readiness.assess_from_statuses({f["key"]: "in_place" for f in epl_readiness.FACTORS})
-    r = risk_index.external_risk_index(wc, epl)
-    assert {c["key"] for c in r["components"]} == {"wc", "epl"}  # off-platform = no locations
-    assert r["index"] is not None and r["band"]
-
-
-def test_external_risk_index_drops_wc_without_data():
-    epl = epl_readiness.assess_from_statuses({})
-    r = risk_index.external_risk_index({"has_data": False, "recordable_cases": 0}, epl)
-    assert [c["key"] for c in r["components"]] == ["epl"]
-    assert r["index"] == epl["score"]  # single component → index equals it
-
-
 # --- index_confidence --------------------------------------------------------
 
 def test_assemble_index_confidence_high_when_all_components_high():
@@ -224,29 +207,6 @@ def test_assemble_index_confidence_defaults_high_when_component_omits_it():
     epl = epl_readiness.assess_from_statuses({})
     result = risk_index._assemble(comps, epl, universe=("wc", "epl", "compliance", "property"))
     assert result["index_confidence"] == "high"
-
-
-# --- weighted_book_risk confidence_mix ---------------------------------------
-
-def test_weighted_book_risk_confidence_mix_sums_to_one():
-    clients = [
-        {"index": 80, "band": "strong", "headcount": 10, "confidence": "high"},
-        {"index": 60, "band": "adequate", "headcount": 10, "confidence": "moderate"},
-        {"index": 40, "band": "developing", "headcount": 20, "confidence": "low"},
-    ]
-    r = risk_index.weighted_book_risk(clients, "headcount")
-    assert abs(sum(r["confidence_mix"].values()) - 1.0) < 1e-6
-    assert r["confidence_mix"]["low"] == 0.5  # 20/40 weight
-
-
-def test_weighted_book_risk_confidence_mix_ignores_missing_confidence():
-    clients = [
-        {"index": 80, "band": "strong", "headcount": 10, "confidence": "high"},
-        {"index": 60, "band": "adequate", "headcount": 10},  # e.g. an off-platform book entry
-    ]
-    r = risk_index.weighted_book_risk(clients, "headcount")
-    assert r["confidence_mix"]["high"] == 0.5  # only the 10/20 with a confidence signal counts
-    assert sum(r["confidence_mix"].values()) == 0.5
 
 
 # --- precomputed-input injection ---------------------------------------------
@@ -289,3 +249,67 @@ def test_property_component_uses_an_injected_cat_rollup():
     # reached when the caller passes its own rollup
     asyncio.run(risk_index._property_component(_Conn(), "cid", cat={"worst_tier": "high"}))
     assert not any("property_building_perils" in s for s in seen)
+
+
+# --- loss-run reserve confidence (best-effort, never inflates) -----------------
+
+def _patch_snapshots(monkeypatch, result=None, raises=None):
+    from app.matcha.services.insurance import loss_development
+
+    async def _snaps(conn, company_id, line=None):
+        if raises is not None:
+            raise raises
+        return result
+
+    monkeypatch.setattr(loss_development, "list_company_snapshots", _snaps)
+
+
+def test_reserve_confidence_is_high_with_no_loss_runs(monkeypatch):
+    import asyncio
+    _patch_snapshots(monkeypatch, result=[])
+    assert asyncio.run(risk_index._wc_reserve_confidence(None, "cid")) == "high"
+
+
+def test_reserve_confidence_is_high_when_the_loss_run_table_is_missing(monkeypatch):
+    import asyncio
+    import asyncpg
+    _patch_snapshots(monkeypatch, raises=asyncpg.UndefinedTableError("wc_loss_runs"))
+    assert asyncio.run(risk_index._wc_reserve_confidence(None, "cid")) == "high"
+
+
+def test_reserve_confidence_degrades_to_low_on_an_unexpected_failure(monkeypatch):
+    import asyncio
+    _patch_snapshots(monkeypatch, raises=RuntimeError("boom"))
+    assert asyncio.run(risk_index._wc_reserve_confidence(None, "cid")) == "low"
+
+
+def test_property_component_scores_with_the_loss_signal_best_effort(monkeypatch):
+    import asyncio
+    from app.matcha.services.property import property_sov
+
+    async def _buildings(conn, company_id):
+        return [{"id": 1}]
+
+    monkeypatch.setattr(property_sov, "list_buildings", _buildings)
+    monkeypatch.setattr(property_sov, "rollup", lambda b, year: {
+        "building_count": 1, "avg_cope_score": 80,
+        "itv": {"portfolio_ratio": 1.0, "under_count": 0, "rated_count": 1}})
+    _patch_snapshots(monkeypatch, result=[])
+    scored = asyncio.run(risk_index._property_component(None, "cid", cat={"worst_tier": "low"}))
+    assert scored is not None and scored[0] == 80
+
+
+def test_property_component_ignores_a_failing_loss_lookup(monkeypatch):
+    import asyncio
+    from app.matcha.services.property import property_sov
+
+    async def _buildings(conn, company_id):
+        return [{"id": 1}]
+
+    monkeypatch.setattr(property_sov, "list_buildings", _buildings)
+    monkeypatch.setattr(property_sov, "rollup", lambda b, year: {
+        "building_count": 1, "avg_cope_score": 70,
+        "itv": {"portfolio_ratio": 1.0, "under_count": 0, "rated_count": 1}})
+    _patch_snapshots(monkeypatch, raises=RuntimeError("triangle failed"))
+    scored = asyncio.run(risk_index._property_component(None, "cid", cat={"worst_tier": "low"}))
+    assert scored is not None and scored[0] == 70

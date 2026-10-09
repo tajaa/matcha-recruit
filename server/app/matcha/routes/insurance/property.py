@@ -3,7 +3,7 @@
 Tenant-facing Statement of Values: the company records its buildings (COPE +
 values); the engine computes TIV, insurance-to-value, and a COPE grade. Property
 LIMITS ride the existing limit-adequacy engine (`line='property'`) and property
-LOSS RUNS ride the broker loss-development surface — this router owns the SOV.
+loss runs ride the loss-development engine — this router owns the SOV.
 Catastrophe enrichment (geocode + per-peril hazard) is layered on in Phase 3.
 Business-facing, tenant-isolated.
 """
@@ -23,7 +23,7 @@ from ...services.property import property_sov_parser as sov_parser
 from ...services.property import property_exposure as exposure
 from ...services.property import property_recommendations as recs
 from ...services.property import property_risk as prisk
-from ...services.broker import submission_readiness as sr
+from ...services.insurance import submission_readiness as sr
 from app.matcha.models.property.property import BuildingUpsert, BuildingBulkInsert, BulkUploadResult
 
 logger = logging.getLogger(__name__)

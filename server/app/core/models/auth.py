@@ -4,7 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field
 from decimal import Decimal
 
-UserRole = Literal["admin", "client", "candidate", "employee", "broker", "creator", "agency", "gumfit_admin", "individual"]
+UserRole = Literal["admin", "client", "candidate", "employee", "creator", "agency", "gumfit_admin", "individual"]
 
 
 class UserBase(BaseModel):
@@ -118,10 +118,6 @@ class BusinessRegister(BaseModel):
 
     # Optional invite token for auto-approval
     invite_token: Optional[str] = None
-    # Broker referral slug from ?via= link
-    broker_ref: Optional[str] = None
-    # Broker Lite referral token from ?ref= link on /lite/signup
-    lite_broker_token: Optional[str] = None
     # Admin-generated invite token — activates Matcha Lite immediately on signup
     lite_invite_token: Optional[str] = None
     # Signup-time choice on the SAME /lite/signup page/checkout as standard
@@ -226,30 +222,11 @@ class EmployeeProfile(BaseModel):
     created_at: datetime
 
 
-class BrokerProfile(BaseModel):
-    id: UUID  # broker_members.id
-    user_id: UUID
-    broker_id: UUID
-    broker_name: str
-    broker_slug: str
-    branding_mode: Literal["direct", "co_branded", "white_label"] = "direct"
-    brand_display_name: Optional[str] = None
-    member_role: str
-    broker_status: str
-    billing_mode: str
-    invoice_owner: str
-    support_routing: str
-    terms_required_version: str
-    terms_accepted: bool = False
-    terms_accepted_at: Optional[datetime] = None
-    created_at: datetime
-
-
 class CurrentUser(BaseModel):
     id: UUID
     email: str
     role: UserRole
-    profile: Optional[AdminProfile | ClientProfile | CandidateProfile | EmployeeProfile | BrokerProfile] = None
+    profile: Optional[AdminProfile | ClientProfile | CandidateProfile | EmployeeProfile] = None
     beta_features: dict = {}
     interview_prep_tokens: int = 0
     allowed_interview_roles: list[str] = []
@@ -271,58 +248,6 @@ class UpdateProfileRequest(BaseModel):
     phone: Optional[str] = None
 
 
-class BrokerTermsAcceptanceRequest(BaseModel):
-    terms_version: Optional[str] = None
-
-
-class BrokerTermsAcceptanceResponse(BaseModel):
-    status: str
-    broker_id: UUID
-    terms_version: str
-    accepted_at: datetime
-
-
-class BrokerClientInviteDetailsResponse(BaseModel):
-    valid: bool
-    broker_name: str
-    company_name: str
-    contact_email: EmailStr
-    invite_expires_at: datetime
-
-
-class BrokerClientInviteAcceptRequest(BaseModel):
-    password: str = Field(min_length=8)
-    name: Optional[str] = None
-    phone: Optional[str] = None
-    job_title: Optional[str] = None
-
-
-class BrokerBrandingRuntimeResponse(BaseModel):
-    broker_id: UUID
-    broker_slug: str
-    broker_name: str
-    branding_mode: Literal["direct", "co_branded", "white_label"]
-    brand_display_name: str
-    brand_legal_name: Optional[str] = None
-    logo_url: Optional[str] = None
-    favicon_url: Optional[str] = None
-    primary_color: Optional[str] = None
-    secondary_color: Optional[str] = None
-    login_subdomain: Optional[str] = None
-    custom_login_url: Optional[str] = None
-    support_email: Optional[EmailStr] = None
-    support_phone: Optional[str] = None
-    support_url: Optional[str] = None
-    email_from_name: Optional[str] = None
-    email_from_address: Optional[EmailStr] = None
-    powered_by_badge: bool = True
-    hide_matcha_identity: bool = False
-    mobile_branding_enabled: bool = False
-    theme: dict = Field(default_factory=dict)
-    resolved_by: Literal["slug", "subdomain"] = "slug"
-
-
-# Beta access management models
 class CandidateBetaInfo(BaseModel):
     user_id: UUID
     email: str

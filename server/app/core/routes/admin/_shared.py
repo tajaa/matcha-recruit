@@ -62,7 +62,6 @@ from app.core.services.stripe_service import StripeService, StripeServiceError
 from app.core.feature_flags import ALL_FEATURES, DEFAULT_COMPANY_FEATURES, TIER_SIGNUP_PRESETS
 from app.core.services.deal_pricing import DealInputs
 from app.core.services.deal_full import FullDealInputs
-from app.core.services.deal_broker import BrokerInputs
 from app.core.services.deal_book import BookInputs
 
 
@@ -77,10 +76,6 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "_row_to_registration",
     "_tier_filter_clause",
-    "_slugify_broker_name",
-    "_validate_broker_enums",
-    "_transition_state_for",
-    "_link_status_for",
     "_normalize_city_input",
     "_is_non_city_jurisdiction",
     "_city_display",
@@ -120,17 +115,6 @@ __all__ = [
     "KNOWN_FEATURES",
     "_business_registration_select",
     "is_test_column_exists",
-    "VALID_BROKER_STATUSES",
-    "VALID_BROKER_SUPPORT_ROUTING",
-    "VALID_BROKER_BILLING_MODES",
-    "VALID_INVOICE_OWNERS",
-    "VALID_BROKER_CONTRACT_STATUSES",
-    "VALID_BROKER_LINK_STATUSES",
-    "VALID_POST_TERMINATION_MODES",
-    "VALID_BROKER_BRANDING_MODES",
-    "VALID_TRANSITION_STATUSES",
-    "VALID_DATA_HANDOFF_STATUSES",
-    "VALID_LINK_TRANSITION_STATES",
     "_data_overview_cache",
     "_data_overview_cached_at",
     "_DATA_OVERVIEW_CACHE_TTL",
@@ -303,39 +287,6 @@ async def _business_registration_select(conn: asyncpg.Connection) -> str:
     return _BUSINESS_REGISTRATION_SELECT_TEMPLATE.format(is_test_col=is_test_col)
 
 
-VALID_BROKER_STATUSES = {"pending", "active", "suspended", "terminated"}
-
-
-VALID_BROKER_SUPPORT_ROUTING = {"broker_first", "matcha_first", "shared"}
-
-
-VALID_BROKER_BILLING_MODES = {"direct", "reseller", "hybrid"}
-
-
-VALID_INVOICE_OWNERS = {"matcha", "broker"}
-
-
-VALID_BROKER_CONTRACT_STATUSES = {"draft", "active", "suspended", "terminated"}
-
-
-VALID_BROKER_LINK_STATUSES = {"pending", "active", "suspending", "grace", "terminated", "transferred"}
-
-
-VALID_POST_TERMINATION_MODES = {"convert_to_direct", "transfer_to_broker", "sunset", "matcha_managed"}
-
-
-VALID_BROKER_BRANDING_MODES = {"direct", "co_branded", "white_label"}
-
-
-VALID_TRANSITION_STATUSES = {"planned", "in_progress", "completed", "cancelled"}
-
-
-VALID_DATA_HANDOFF_STATUSES = {"not_required", "pending", "in_progress", "completed"}
-
-
-VALID_LINK_TRANSITION_STATES = {"none", "planned", "in_progress", "matcha_managed", "completed"}
-
-
 _data_overview_cache: dict | None = None
 
 
@@ -500,11 +451,11 @@ _TIER_FEATURE_PRESETS = TIER_SIGNUP_PRESETS
 # ── Deal Flow — saved editor templates (DB-backed; admin-global, one row per tab) ──
 # The deal builder is otherwise stateless. These two endpoints let a master-admin
 # persist an editor tab's template — its prose blocks plus that tab's structured
-# config (book volume tiers, broker margin tiers, one-pager per-tier pricing). The
+# config (book volume tiers, one-pager per-tier pricing). The
 # payload is opaque JSONB whose shape the frontend tab owns; on load each tab layers
 # the saved payload over the hardcoded `*-defaults` (GET returns null when unsaved,
 # so the tab falls back to defaults and behaves exactly as before).
-_DEAL_TEMPLATE_KEYS = {"book", "full", "broker", "one_pager", "lite"}
+_DEAL_TEMPLATE_KEYS = {"book", "full", "one_pager", "lite"}
 
 
 _CAPPE_PAID_STATUSES = ("paid", "fulfilled")
@@ -567,79 +518,6 @@ def _tier_filter_clause(tier: Optional[str]) -> tuple[str, list]:
     if tier == "personal":
         return " AND comp.is_personal = TRUE", []
     return "", []
-
-
-def _slugify_broker_name(name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
-    return slug[:120] or "broker"
-
-
-def _validate_broker_enums(*, status_value: Optional[str] = None, support_routing: Optional[str] = None,
-                           billing_mode: Optional[str] = None, invoice_owner: Optional[str] = None,
-                           contract_status: Optional[str] = None, link_status: Optional[str] = None,
-                           post_termination_mode: Optional[str] = None, branding_mode: Optional[str] = None,
-                           transition_status: Optional[str] = None,
-                           data_handoff_status: Optional[str] = None,
-                           link_transition_state: Optional[str] = None):
-    if status_value is not None and status_value not in VALID_BROKER_STATUSES:
-        raise HTTPException(status_code=400, detail=f"Invalid broker status '{status_value}'")
-    if support_routing is not None and support_routing not in VALID_BROKER_SUPPORT_ROUTING:
-        raise HTTPException(status_code=400, detail=f"Invalid support_routing '{support_routing}'")
-    if billing_mode is not None and billing_mode not in VALID_BROKER_BILLING_MODES:
-        raise HTTPException(status_code=400, detail=f"Invalid billing_mode '{billing_mode}'")
-    if invoice_owner is not None and invoice_owner not in VALID_INVOICE_OWNERS:
-        raise HTTPException(status_code=400, detail=f"Invalid invoice_owner '{invoice_owner}'")
-    if contract_status is not None and contract_status not in VALID_BROKER_CONTRACT_STATUSES:
-        raise HTTPException(status_code=400, detail=f"Invalid contract status '{contract_status}'")
-    if link_status is not None and link_status not in VALID_BROKER_LINK_STATUSES:
-        raise HTTPException(status_code=400, detail=f"Invalid link status '{link_status}'")
-    if post_termination_mode is not None and post_termination_mode not in VALID_POST_TERMINATION_MODES:
-        raise HTTPException(status_code=400, detail=f"Invalid post_termination_mode '{post_termination_mode}'")
-    if branding_mode is not None and branding_mode not in VALID_BROKER_BRANDING_MODES:
-        raise HTTPException(status_code=400, detail=f"Invalid branding_mode '{branding_mode}'")
-    if transition_status is not None and transition_status not in VALID_TRANSITION_STATUSES:
-        raise HTTPException(status_code=400, detail=f"Invalid transition status '{transition_status}'")
-    if data_handoff_status is not None and data_handoff_status not in VALID_DATA_HANDOFF_STATUSES:
-        raise HTTPException(status_code=400, detail=f"Invalid data_handoff_status '{data_handoff_status}'")
-    if link_transition_state is not None and link_transition_state not in VALID_LINK_TRANSITION_STATES:
-        raise HTTPException(status_code=400, detail=f"Invalid link transition state '{link_transition_state}'")
-
-
-def _transition_state_for(mode: str, transition_status: str) -> str:
-    if transition_status == "cancelled":
-        return "none"
-    if mode == "matcha_managed":
-        return "matcha_managed"
-    if transition_status == "planned":
-        return "planned"
-    if transition_status == "in_progress":
-        return "in_progress"
-    if transition_status == "completed":
-        return "completed"
-    return "none"
-
-
-def _link_status_for(mode: str, transition_status: str, current_status: str) -> str:
-    if transition_status == "planned":
-        if mode in {"convert_to_direct", "matcha_managed"}:
-            return "grace"
-        if mode in {"transfer_to_broker", "sunset"}:
-            return "suspending"
-    if transition_status == "in_progress":
-        if mode in {"convert_to_direct", "matcha_managed"}:
-            return "grace"
-        if mode in {"transfer_to_broker", "sunset"}:
-            return "suspending"
-    if transition_status == "completed":
-        if mode == "transfer_to_broker":
-            return "transferred"
-        if mode in {"convert_to_direct", "sunset"}:
-            return "terminated"
-        if mode == "matcha_managed":
-            return "grace"
-    if transition_status == "cancelled":
-        return "active" if current_status in {"grace", "suspending"} else current_status
-    return current_status
 
 
 def _normalize_city_input(city: str) -> str:

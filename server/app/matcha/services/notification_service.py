@@ -47,8 +47,6 @@ TYPES = {
     # create_notification — it exists here so the bell renders a real label
     # rather than the raw key.
     "hr_proactive": "HR Pilot Alert",
-    # New message in a broker↔company chat (services/broker_chat_service.py).
-    "broker_chat_message": "Broker Message",
     # A candidate accepted/declined an offer letter that a Huume thread sent
     # (routes/employee_lifecycle/offer_letters.py candidate accept/decline).
     "huume_offer": "Offer Response",

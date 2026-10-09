@@ -9,8 +9,7 @@ is not found / not owned by the company (caller raises 404).
 
 Split out of the flat services/claims_readiness.py in refactor round 2 stage 6
 so each half sits in its own domain package. `services/claims_readiness.py`
-remains as a re-export shim — `broker/submission.py` imports it as `cr` and two
-route files import it by module.
+remains as a re-export shim — two route files import it by module.
 """
 import asyncio
 import json

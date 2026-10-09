@@ -21,9 +21,6 @@ from app.core.models.auth import (
     AdminRegister, ClientRegister, CandidateRegister,
     BusinessRegister, TestAccountRegister, TestAccountProvisionResponse,
     AdminProfile, ClientProfile, CandidateProfile, EmployeeProfile,
-    BrokerTermsAcceptanceRequest, BrokerTermsAcceptanceResponse,
-    BrokerClientInviteDetailsResponse, BrokerClientInviteAcceptRequest,
-    BrokerBrandingRuntimeResponse,
     CurrentUser, TokenPayload,
     ChangePasswordRequest, ChangeEmailRequest, UpdateProfileRequest,
     CandidateBetaInfo, CandidateBetaListResponse, BetaToggleRequest,
@@ -35,7 +32,7 @@ from app.core.services.auth import (
     create_email_verify_token, decode_email_verify_token,
 )
 from app.core.dependencies import (
-    get_current_user, require_admin, require_broker, get_token_payload,
+    get_current_user, require_admin, get_token_payload,
     session_revoked, revoke_user_sessions,
 )
 from app.core.feature_flags import (
@@ -131,38 +128,6 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 if not invitation:
                     raise HTTPException(status_code=400, detail="Invalid, expired, or already-used invite link")
 
-            # Resolve broker referral (slug lookup — ignore silently if invalid)
-            referring_broker_id = None
-            if request.broker_ref:
-                broker_row = await conn.fetchrow(
-                    "SELECT id FROM brokers WHERE slug = $1 AND status = 'active'",
-                    request.broker_ref.strip().lower(),
-                )
-                if broker_row:
-                    referring_broker_id = broker_row["id"]
-
-            # Resolve Lite referral token — non-blocking if invalid/expired
-            lite_broker_pays = False
-            broker_seat_count = None  # set when a company-pinned broker seat invite is redeemed
-            if request.lite_broker_token and request.tier in ("matcha_lite", "matcha_x", "matcha_compliance", "custom_product") and referring_broker_id is None:
-                lite_ref_row = await conn.fetchrow(
-                    """
-                    UPDATE broker_lite_referral_tokens
-                    SET use_count    = use_count + 1,
-                        last_used_at = NOW()
-                    WHERE token     = $1
-                      AND is_active  = true
-                      AND redeemed_company_id IS NULL
-                      AND (expires_at IS NULL OR expires_at > NOW())
-                    RETURNING broker_id, payer, seat_count, intended_company_name
-                    """,
-                    request.lite_broker_token.strip(),
-                )
-                if lite_ref_row:
-                    referring_broker_id = lite_ref_row["broker_id"]
-                    lite_broker_pays = lite_ref_row["payer"] == "broker"
-                    broker_seat_count = lite_ref_row["seat_count"]
-
             # Admin invite token — activates Matcha Lite immediately (no Stripe).
             # Atomic UPDATE-RETURNING so concurrent signups with the same link
             # can't both pass (matches business_invitations pattern above).
@@ -208,9 +173,9 @@ async def register_business(request: BusinessRegister, http_request: Request):
                         detail="Location count is required for per-location pricing",
                     )
 
-            # Broker seat invites carry their own allocation, so they bypass the
-            # self-serve headcount cap (same as an admin comp invite).
-            if not lite_invite_activated and broker_seat_count is None:
+            # Admin comp invites carry their own allocation, so they bypass the
+            # self-serve headcount cap.
+            if not lite_invite_activated:
                 if is_custom_product and custom_product.is_paid and request.headcount > custom_product.max_headcount:
                     raise HTTPException(
                         status_code=400,
@@ -253,8 +218,8 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 #
                 # Stripe-billed products start with EVERY flag off (the paid
                 # gate flips on checkout.session.completed, same as `incidents`
-                # for Lite). Free products and comped signups (broker-pays or
-                # admin invite) activate immediately. `contact_sales` also
+                # for Lite). Free products and comped signups (admin invite)
+                # activate immediately. `contact_sales` also
                 # starts off — it has no self-serve payment path, so an admin
                 # activates it via /admin/products/{id}/activate-tenant.
                 from app.core.services.product_definitions import (
@@ -263,7 +228,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 )
                 company_status = "approved"
                 signup_source = custom_product.signup_source
-                if custom_product.activates_on_signup or lite_broker_pays or lite_invite_activated:
+                if custom_product.activates_on_signup or lite_invite_activated:
                     enabled_features_json = json.dumps(_materialize_product_features(custom_product))
                 else:
                     enabled_features_json = json.dumps(_pending_product_features(custom_product))
@@ -305,7 +270,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 enabled_features_json = json.dumps(rf_features)
             elif is_matcha_lite:
                 # Matcha Lite is a paid bundle — IR + Resources.
-                # Broker-pays signups skip Stripe entirely → enable
+                # Comped (admin invite) signups skip Stripe entirely → enable
                 # incidents immediately. Business-pays signups must
                 # complete Stripe checkout first; the webhook flips
                 # `incidents=true` on `checkout.session.completed`.
@@ -339,7 +304,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 # flips regardless — the ir_incidents mount gates on that first.
                 lite_features["ir_magic_links"] = True
                 lite_features["ir_copilot"] = True
-                if lite_broker_pays or lite_invite_activated:
+                if lite_invite_activated:
                     lite_features["incidents"] = True
                     if not is_lite_essentials:
                         lite_features["employees"] = True
@@ -347,7 +312,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
             elif is_matcha_x:
                 # Matcha-X is the paid mid tier — a clone of Matcha Lite at
                 # Lite parity (extra modules layered later). Same payment
-                # model: broker-pays/invite signups activate immediately;
+                # model: invite signups activate immediately;
                 # business-pays signups complete Stripe checkout first and
                 # the webhook flips `incidents=true`. handbooks/training/
                 # employees/discipline are the always-on bundle (the latter
@@ -363,14 +328,14 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 # default True and must be re-asserted after the full stomp.
                 x_features["ir_magic_links"] = True
                 x_features["ir_copilot"] = True
-                if lite_broker_pays or lite_invite_activated:
+                if lite_invite_activated:
                     x_features["incidents"] = True
                     x_features["employees"] = True
                     x_features["discipline"] = True
                 enabled_features_json = json.dumps(x_features)
             elif is_matcha_compliance:
                 # Standalone self-serve Compliance product. Same payment model
-                # as Lite/X: broker-pays/invite signups activate immediately;
+                # as Lite/X: invite signups activate immediately;
                 # business-pays signups complete Stripe checkout first and the
                 # webhook flips the full `compliance` flag. Nothing else is
                 # bundled — every other default flag stays off. `compliance` is
@@ -379,22 +344,18 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 company_status = "approved"
                 signup_source = "matcha_compliance"
                 compliance_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
-                if lite_broker_pays or lite_invite_activated:
+                if lite_invite_activated:
                     compliance_features["compliance"] = True
                 enabled_features_json = json.dumps(compliance_features)
             else:
                 # Bespoke/platform tier from a PUBLIC endpoint. Only an
                 # admin-issued invite token may provision a full Pro company
-                # here. A broker referral (`broker_ref`) is a public marketing
-                # slug (no secret) — it attributes the lead but must NEVER grant
-                # approval or paid features. Previously `broker_ref` flipped
-                # status→approved AND the branch stored the full Pro feature set,
-                # which let anyone self-provision a free Pro platform tenant.
+                # here. A public request must NEVER grant approval or paid
+                # features, or anyone could self-provision a free Pro platform
+                # tenant.
                 company_status = "approved" if invitation else "pending"
                 if invitation:
                     signup_source = "invite"
-                elif referring_broker_id:
-                    signup_source = "broker"
                 else:
                     signup_source = "bespoke"
 
@@ -415,7 +376,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     bespoke_features["handbook_pilot"] = True
                     enabled_features_json = json.dumps(bespoke_features)
                 else:
-                    # Self-serve / broker-referred lead with no invite: stay
+                    # Self-serve lead with no invite: stay
                     # pending with NO paid features until an admin verifies/closes
                     # the sale. No tier escalation from a public request.
                     enabled_features_json = json.dumps(
@@ -534,38 +495,6 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     company_id, lite_invite_id,
                 )
 
-            # Step 6: Create broker referral link if the company came via a broker slug
-            if referring_broker_id:
-                await conn.execute(
-                    """
-                    INSERT INTO broker_company_links
-                        (broker_id, company_id, status, linked_at, activated_at, created_by, updated_at)
-                    VALUES ($1, $2, 'active', NOW(), NOW(), $3, NOW())
-                    ON CONFLICT (broker_id, company_id) DO UPDATE
-                        SET status = 'active',
-                            activated_at = COALESCE(broker_company_links.activated_at, NOW()),
-                            terminated_at = NULL,
-                            updated_at = NOW()
-                    """,
-                    referring_broker_id, company_id, user["id"],
-                )
-
-                # Redeem a company-pinned broker seat invite: record the granted seat
-                # count on the company (track/display) and single-use the token.
-                if broker_seat_count is not None:
-                    await conn.execute(
-                        "UPDATE companies SET seat_limit = $1 WHERE id = $2",
-                        broker_seat_count, company_id,
-                    )
-                    await conn.execute(
-                        """
-                        UPDATE broker_lite_referral_tokens
-                        SET redeemed_company_id = $1, is_active = false
-                        WHERE token = $2
-                        """,
-                        company_id, request.lite_broker_token.strip(),
-                    )
-
             # Generate tokens
             settings = get_settings()
             access_token = create_access_token(user["id"], user["email"], user["role"])
@@ -578,7 +507,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 # active accounts get the approved email, Stripe-pending ones
                 # the payment-required email. contact_sales lands in the
                 # pending copy too — an admin activates it by hand.
-                if custom_product.activates_on_signup or lite_broker_pays or lite_invite_activated:
+                if custom_product.activates_on_signup or lite_invite_activated:
                     await email_service.send_business_approved_email(
                         to_email=user["email"],
                         to_name=request.name,
@@ -594,8 +523,8 @@ async def register_business(request: BusinessRegister, http_request: Request):
             elif is_matcha_lite or is_matcha_x or is_matcha_compliance:
                 # matcha_x + matcha_compliance reuse the Lite transactional
                 # emails for now — swap in branded copy when each productizes.
-                if lite_broker_pays or lite_invite_activated:
-                    # Broker or admin invite — account is fully active.
+                if lite_invite_activated:
+                    # Admin invite — account is fully active.
                     await email_service.send_business_approved_email(
                         to_email=user["email"],
                         to_name=request.name,
@@ -618,7 +547,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     to_name=request.name,
                     company_name=request.company_name
                 )
-            elif is_ir_only or invitation or referring_broker_id:
+            elif is_ir_only or invitation:
                 await email_service.send_business_approved_email(
                     to_email=user["email"],
                     to_name=request.name,
@@ -632,7 +561,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 )
 
             if is_custom_product:
-                if custom_product.activates_on_signup or lite_broker_pays or lite_invite_activated:
+                if custom_product.activates_on_signup or lite_invite_activated:
                     next_route = "/app"
                     msg = f"Welcome to {custom_product.name}."
                 elif custom_product.is_paid:
@@ -643,7 +572,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 else:
                     next_route = None
                     msg = f"Account created. Our team will be in touch to activate {custom_product.name}."
-            elif is_matcha_compliance and (lite_broker_pays or lite_invite_activated):
+            elif is_matcha_compliance and lite_invite_activated:
                 next_route = "/compliance/onboarding"
                 msg = "Welcome to Matcha Compliance. Let's set up your locations."
             elif is_matcha_compliance:
@@ -651,18 +580,18 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 # any caller that doesn't.
                 next_route = "/checkout/compliance"
                 msg = "Account created. Complete payment to activate Matcha Compliance."
-            elif is_matcha_x and (lite_broker_pays or lite_invite_activated):
+            elif is_matcha_x and lite_invite_activated:
                 next_route = "/matcha-x/onboarding"
                 msg = "Welcome to Matcha-X. Let's set up your team."
             elif is_matcha_x:
                 next_route = "/checkout/x"
                 msg = "Account created. Complete payment to activate Matcha-X."
-            elif is_matcha_lite and (lite_broker_pays or lite_invite_activated):
+            elif is_matcha_lite and lite_invite_activated:
                 next_route = "/ir/onboarding"
                 msg = "Welcome to Matcha Lite. Let's set up your team."
             elif is_matcha_lite:
                 # Client SPA chains the Stripe call directly; this hint is
-                # for any caller that doesn't (e.g. broker portal preview).
+                # for any caller that doesn't.
                 next_route = "/checkout/lite"
                 msg = "Account created. Complete payment to activate Matcha Lite."
             elif is_ir_only:
@@ -671,7 +600,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
             elif is_resources_free:
                 next_route = "/app/resources"
                 msg = "Account created. Resources unlocked."
-            elif invitation or referring_broker_id:
+            elif invitation:
                 next_route = None
                 msg = "Welcome! Your business account is approved and ready to use."
             else:
@@ -694,7 +623,6 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 "signup_source": signup_source,
                 "next": next_route,
                 "message": msg,
-                "lite_broker_pays": lite_broker_pays,
                 "lite_invite_activated": lite_invite_activated,
             }
 
@@ -727,36 +655,3 @@ async def validate_business_invite(token: str):
             "expires_at": row["expires_at"].isoformat(),
             "note": row["note"],
         }
-
-
-
-@router.get("/client-invite-info")
-async def get_client_invite_info(ref: str):
-    """Public, non-consuming: resolve a broker client-seat invite so the signup page
-    can prefill the company name + seat count. Returns {valid:false} for unknown,
-    revoked, redeemed, or expired tokens (and for generic, non-pinned referral links)."""
-    async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT t.intended_company_name, t.seat_count, t.tier, t.is_active,
-                   t.redeemed_company_id, t.expires_at, b.name AS broker_name
-            FROM broker_lite_referral_tokens t
-            JOIN brokers b ON b.id = t.broker_id
-            WHERE t.token = $1 AND t.intended_company_name IS NOT NULL
-            """,
-            ref.strip(),
-        )
-    if not row:
-        return {"valid": False}
-    valid = bool(
-        row["is_active"]
-        and row["redeemed_company_id"] is None
-        and (row["expires_at"] is None or row["expires_at"] > datetime.utcnow())
-    )
-    return {
-        "valid": valid,
-        "company_name": row["intended_company_name"],
-        "seat_count": row["seat_count"],
-        "tier": row["tier"] or "matcha_lite",
-        "broker_name": row["broker_name"],
-    }

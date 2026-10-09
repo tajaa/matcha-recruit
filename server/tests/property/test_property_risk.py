@@ -4,8 +4,7 @@ No DB — only risk_index pure helpers. The DB-backed _property_component /
 compute_risk_index are exercised by manual integration on dev.
 """
 
-from app.matcha.services.broker import risk_index as ri
-from app.matcha.services.broker import epl_readiness as epl
+from app.matcha.services.insurance import risk_index as ri
 
 
 def _rollup(score, ratio=None, under=0, n=2):
@@ -115,47 +114,3 @@ def test_property_score_worst_confidence_wins_across_cat_and_loss():
     r = ri._property_score(_rollup(100, ratio=1.0), cat=_DOCUMENTED_SEVERE_CAT,
                            loss={"adverse_penalty": 5, "confidence": "low"})
     assert r[2] == "low"
-
-
-# --- external_risk_index back-compat + property wiring ---------------------
-
-def _wc():
-    return {"has_data": True, "severity_band": "good", "current_emr": 0.9,
-            "recordable_cases": 1, "trir": 2.0}
-
-
-def test_external_risk_index_backcompat_when_no_property():
-    e = epl.assess_from_statuses({})
-    assert ri.external_risk_index(_wc(), e) == ri.external_risk_index(_wc(), e, None)
-
-
-def test_external_risk_index_adds_property_component():
-    e = epl.assess_from_statuses({})
-    base = ri.external_risk_index(_wc(), e)
-    prop = {"rollup": _rollup(80, ratio=1.0), "cat": None}
-    withp = ri.external_risk_index(_wc(), e, prop)
-    assert len(withp["components"]) == len(base["components"]) + 1
-    assert any(c["key"] == "property" for c in withp["components"])
-
-
-def test_external_risk_index_property_absent_when_no_buildings():
-    e = epl.assess_from_statuses({})
-    prop = {"rollup": {"building_count": 0}, "cat": None}
-    withp = ri.external_risk_index(_wc(), e, prop)
-    assert not any(c["key"] == "property" for c in withp["components"])
-
-
-def test_external_risk_index_wc_reserve_confidence_flows_from_wc_dict():
-    # the broker's WC loss-run triangle confidence rides on the wc dict; a
-    # volatile/thin triangle must drag the WC component (and thus the composite)
-    # down, not read high. Default (no key) stays high.
-    e = epl.assess_from_statuses({})
-    default = ri.external_risk_index(_wc(), e)
-    wc_comp = next(c for c in default["components"] if c["key"] == "wc")
-    assert wc_comp["confidence"] == "high"
-
-    low = ri.external_risk_index({**_wc(), "reserve_confidence": "low"}, e)
-    wc_low = next(c for c in low["components"] if c["key"] == "wc")
-    assert wc_low["confidence"] == "low"
-    assert "reserves low confidence" in wc_low["detail"]
-    assert low["index_confidence"] == "low"  # worst-of propagates to the composite

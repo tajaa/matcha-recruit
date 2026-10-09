@@ -43,8 +43,8 @@ server/
 - Lazy imports inside function bodies are OK for circular-import avoidance.
 
 **Auth**:
-- JWT bearer token in `Authorization: Bearer …`. Roles: `admin`, `client`, `candidate`, `employee`, `broker`, `creator`, `agency`, `individual` (see root CLAUDE.md).
-- Per-endpoint deps: `require_admin`, `require_client`, `require_candidate`, `require_employee`, `require_admin_or_client`, `require_broker_or_admin`.
+- JWT bearer token in `Authorization: Bearer …`. Roles: `admin`, `client`, `candidate`, `employee`, `creator`, `agency`, `individual` (see root CLAUDE.md).
+- Per-endpoint deps: `require_admin`, `require_client`, `require_candidate`, `require_employee`, `require_admin_or_client`.
 - Feature-gated routers add `dependencies=[Depends(require_feature("flag"))]` at mount time (see `routes/__init__.py`).
 
 **Models**:
@@ -57,7 +57,7 @@ server/
 - Celery for anything that survives the request lifecycle, runs scheduled, or needs separate concurrency limits. Tasks live in `app/workers/tasks/`. The worker container restarts every 15 min via systemd; `@worker_ready` re-dispatches periodic tasks (no celery-beat).
 
 **Email**:
-- Gmail API via OAuth2 (`app/core/services/email/`) for transactional. MailerSend for broker invites + a few transactional flows. The send wrapper has a defense-in-depth guard that skips RFC 2606 reserved test domains — see root CLAUDE.md test-data rules.
+- Gmail API via OAuth2 (`app/core/services/email/`) for transactional. MailerSend for a few transactional flows. The send wrapper has a defense-in-depth guard that skips RFC 2606 reserved test domains — see root CLAUDE.md test-data rules.
 
 **AI**:
 - **Two providers, and which one you are in matters.** Gemini via the `google.genai` SDK with

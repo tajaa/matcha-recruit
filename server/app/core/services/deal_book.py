@@ -5,7 +5,7 @@ across those clients pick a volume discount %, applied off the Lite list PEPM. T
 gets that pooled rate, so enrolling many small clients unlocks the big-volume discount. The
 one-pager itemizes each enrolled client and foots to the book total.
 
-Distinct from `deal_broker.py` (the broker's *own* wholesale/margin packet) — this is the
+This is the
 client-facing Lite product one-pager with book-volume pricing. Pure / IO-free.
 """
 

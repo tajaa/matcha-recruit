@@ -3,8 +3,7 @@ feature flag).
 
 This is the direct-client surface — a company on Matcha-lite/platform that
 manages its own benefits roster (Finch-connected or CSV) and wants to see its
-own eligibility exceptions and renewal-risk posture. The broker-portfolio
-rollups across a whole book live separately under ``/broker/benefits/*``.
+own eligibility exceptions and renewal-risk posture.
 """
 import logging
 from uuid import UUID

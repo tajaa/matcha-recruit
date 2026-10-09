@@ -12,8 +12,8 @@ A split-router package is **one** router carved into submodules (`_shared.py` ow
 
 | Router | Prefix(es) | Owns |
 |---|---|---|
-| `auth/` | `/auth` | Login/refresh/logout, Google OAuth, all `/register/*` flows, broker branding + invites, `/me` + profile, password/email change, admin candidate tooling, beta invites — **split-router package** (12 submodules, split 2026-07-25 from the 3,699-line `auth.py` monolith; see below) |
-| `admin/` | `/admin` | Platform admin: brokers, companies, deal flow, invites, jurisdictions, platform settings, posters, products, research, schedule rules — **split-router package**. `jurisdictions` is itself a nested package (`admin/jurisdictions/`, 9 files, split from a 4,558-line monolith) — include order in its `__init__.py` is load-bearing (reproduces original route registration order). |
+| `auth/` | `/auth` | Login/refresh/logout, Google OAuth, all `/register/*` flows, `/me` + profile, password/email change, admin candidate tooling, beta invites — **split-router package** (11 submodules, split 2026-07-25 from the 3,699-line `auth.py` monolith; see below) |
+| `admin/` | `/admin` | Platform admin: companies, deal flow, invites, jurisdictions, platform settings, posters, products, research, schedule rules — **split-router package**. `jurisdictions` is itself a nested package (`admin/jurisdictions/`, 9 files, split from a 4,558-line monolith) — include order in its `__init__.py` is load-bearing (reproduces original route registration order). |
 | `chat/` | `/chat` (+ `/ws/chat`) | AI chat CRUD + WebSocket — **split-router package** |
 | `compliance/` | `/compliance` | Full compliance engine (3 gate tiers: `router`/`lite_router`/`shared_router`) — **split-router package** |
 | `resources/` | `/resources` | Free-tier resources hub: checkout, lead-gen, lite add-ons, pins, state guides, upgrade — **split-router package** |
@@ -36,14 +36,13 @@ Split from the pre-2026-07-25 `auth.py` monolith along route-group lines, not 1:
 | `register_business.py` | `/register/business` + business-invite validation |
 | `verify_email.py` | `/verify-email` (completes deferred business signup) |
 | `register_users.py` | `/register/{admin,client,candidate,individual}` |
-| `broker.py` | broker branding + broker-client invites + broker terms acceptance |
 | `test_accounts.py` | `/register/test-account` + the ~790-line demo-data seeder |
 | `profile.py` | `/me`, `/profile`, `/avatar`, `/work-onboarded` |
 | `credentials.py` | change password/email, forgot/reset password |
 | `admin_candidates.py` | `/admin/candidates/*` (beta toggle, tokens, roles, sessions) |
 | `beta.py` | `/beta-invite/{token}`, `/register/beta` |
 
-Tests import two symbols by path (re-exported from `auth/__init__.py`): `_upsert_business_headcount_profile` and `get_broker_branding_runtime`. `tests/auth/test_auth_broker_branding.py` monkeypatches `get_connection` on `auth_routes.broker` (the submodule), not the package `__init__` — the function's `get_connection` reference is a `broker.py` module global, patching the parent package does nothing.
+Tests import one symbol by path (re-exported from `auth/__init__.py`): `_upsert_business_headcount_profile`.
 
 ## Grouping folders (namespace only — not split-router packages)
 

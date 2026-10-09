@@ -144,7 +144,7 @@ async def test_access_and_edit_rights_are_the_rest_rules(env, role, access, mess
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role", ["broker", "creator", "agency", "candidate"])
+@pytest.mark.parametrize("role", ["creator", "agency", "candidate"])
 async def test_only_company_member_roles_can_add_cards_from_chat(env, role):
     # The REST route's `require_company_member` gate, applied before anything else.
     assert await _create(user=_user(role)) is None

@@ -18,7 +18,7 @@ CANONICAL_HOST = "hey-matcha.com"
 
 
 # ── Static public routes ────────────────────────────────────────────────────
-# Mirror App.tsx public routes. Auth-gated routes (/app/*, /admin/*, /broker/*,
+# Mirror App.tsx public routes. Auth-gated routes (/app/*, /admin/*,
 # /work/*, /resources/templates, /resources/states/*, /resources/audit) are
 # excluded — those go behind RequireBusinessAccount and shouldn't be indexed.
 
@@ -171,7 +171,6 @@ async def robots(request: Request):
         "Allow: /\n"
         "Disallow: /app/\n"
         "Disallow: /admin/\n"
-        "Disallow: /broker/\n"
         "Disallow: /work/\n"
         "Disallow: /api/\n"
         "Disallow: /auth/\n"

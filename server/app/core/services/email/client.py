@@ -34,7 +34,6 @@ from .candidate import CandidateEmailMixin
 from .compliance import ComplianceEmailMixin
 from .training import TrainingEmailMixin
 from .misc import MiscEmailMixin
-from .broker import BrokerEmailMixin
 from .symlink import SymlinkEmailMixin
 
 
@@ -45,7 +44,6 @@ class EmailService(
     ComplianceEmailMixin,
     TrainingEmailMixin,
     MiscEmailMixin,
-    BrokerEmailMixin,
     SymlinkEmailMixin,
 ):
     """Service for sending emails via Gmail API.
@@ -60,7 +58,7 @@ class EmailService(
         self.from_email = self.settings.gmail_from_email
         self.from_name = self.settings.gmail_from_name
         self._token_data: Optional[dict] = None
-        # MailerSend credentials (used by broker invite and other transactional emails)
+        # MailerSend credentials (used by transactional emails)
         self.api_key = os.getenv("MAILERSEND_API_KEY", "")
         self.base_url = os.getenv("MAILERSEND_BASE_URL", "https://api.mailersend.com/v1")
         self.mailersend_from_email = os.getenv("MAILERSEND_FROM_EMAIL", self.from_email)

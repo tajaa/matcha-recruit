@@ -20,7 +20,6 @@ Backend routes for matcha-lite's Incident Reporting product. Package was split f
 | `anonymous_reporting.py` | Token mgmt: company-wide `/report/:token` + per-location `/intake/:token` magic links | 11 |
 | `info_requests.py` | IR Copilot "Request More Info": admin-side token create/list/resend/revoke for the public `/request-info/:token` form (public GET/POST live in `inbound_email.py`) | 4 |
 | `audit_log.py` | Get audit trail for an incident | 1 |
-| `broker_sharing.py` | Broker visibility opt-in for an incident | 3 |
 | `claims_readiness.py` | Claims-readiness packet for an incident | 1 |
 | `voice.py` | `POST /voice/parse` — Gemini dictation intake (`ir_voice_intake`) | 1 |
 | `chat_intake.py` | `POST /chat/turn` — conversational chat intake (`ir_chat_intake`), stateless per-turn REST, backed by `services/ir/ir_chat_intake.py` | 1 |
@@ -55,7 +54,7 @@ When the AI emits a new action card type (currently `run_analysis`, `set_field`,
 
 Other routers consume these via `from .ir_incidents import …`. Keep the re-exports working when moving things around:
 
-- `compute_wc_metrics`, `compute_behavioral_friction` ← `services/ir/ir_wc_metrics.py` (used by `broker_portfolio.py` / `broker/risk_index.py` / `broker/submission_readiness.py` / the `broker_risk_alerts` and `broker_milestones` Celery tasks — all of which import these directly from `services.ir.ir_wc_metrics`, not through this package, specifically so they don't boot the router `__init__.py`). `compute_behavioral_friction` currently has no live caller — `_run_broker_risk_alerts` builds its metrics from `compute_wc_metrics` alone, so the fully-implemented "Behavioral Friction" alert branch can't fire; pre-existing gap, tracked in the function's own docstring.
+- `compute_wc_metrics`, `compute_behavioral_friction` ← `services/ir/ir_wc_metrics.py` (used by `insurance/risk_index.py` / `insurance/submission_readiness.py`, which import these directly from `services.ir.ir_wc_metrics`, not through this package, specifically so they don't boot the router `__init__.py`). `compute_behavioral_friction` currently has no live caller; pre-existing gap, tracked in the function's own docstring.
 - `_parse_occurred_at`, `generate_incident_number` ← `services/ir/ir_incident_parsing.py`, `create_incident_core` ← `services/ir/ir_incident_create.py`, `send_ir_notifications_task` ← `services/ir/ir_notifications.py` — all three aliased through `_shared.py`. `send_ir_info_request_notification_task`, `_location_label` are genuinely local to `_shared.py`. All (used by `inbound_email.py` — public `/report` + `/intake` + `/request-info` intake). `create_incident_core` is the shared INSERT→people-index→OSHA→bg-task tail used by both `crud.create_incident` and the public location magic-link submit; the caller owns the (tenant-scoped) connection and schedules the returned bg tasks. `_build_public_link` also lives in `_shared.py` (moved there from `anonymous_reporting.py` when `info_requests.py` needed it too) — any submodule minting a public token URL should import it from there, not redefine it.
 - `_close_incident_via_copilot`, `resume_copilot_after_info_request` ← `copilot.py`, which now re-exports them from `services/ir/ir_copilot_flow.py` (`resume_copilot_after_info_request` is used by `intake/inbound_email.py`; `ensure_case_chain` is lazily imported by `osha/recordability.py`)
 
@@ -77,7 +76,7 @@ The collection root uses `@router.post("")` (empty string), NOT `@router.post("/
 
 In a single `APIRouter`, FastAPI matches routes in registration order. Today:
 1. CRUD routes register first (because `crud.router` is the package router).
-2. Submodules append via `include_router` in this order: anonymous_reporting → info_requests → documents → osha → investigation_interviews → people → capa → ai_analysis → analytics → copilot → audit_log → claims_readiness → voice → chat_intake → broker_sharing.
+2. Submodules append via `include_router` in this order: anonymous_reporting → info_requests → documents → osha → investigation_interviews → people → capa → ai_analysis → analytics → copilot → audit_log → claims_readiness → voice → chat_intake.
 
 Safe because `/{incident_id}` (1-segment) cannot match any 2+segment submodule path. The only 1-segment static route is `/export`, which lives in `crud.py` ordered BEFORE `/{incident_id}` (preserved from the original file order).
 
