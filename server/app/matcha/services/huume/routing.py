@@ -11,7 +11,9 @@ tier" signal, so a new skill gets tiering by declaring its tool, with no
 changes here.
 
 The tiers describe turn complexity and UI behavior, not different providers:
-every Huume planner and tool-result follow-up is pinned to OpenAI Luna. A
+every Huume planner and tool-result follow-up is pinned to OpenAI Luna —
+except a schedule-assistant turn whose model picker chose Claude
+(`SCHEDULE_MODEL_CHOICES`), which runs that one model for every call. A
 short confirmation remains a distinct tier because its server-side action
 envelope is narrower, while analytical turns still surface "Thinking hard…".
 """
@@ -27,6 +29,42 @@ from .tools import TOOLS, HuumeTool
 # Public — agent.py's `_MODEL` alias reads this so every Huume turn has one
 # canonical, auditable model id.
 LUNA = "gpt-5.6-luna"
+
+# The schedule assistant's model picker. Luna stays the default everywhere;
+# the schedule panel may opt a turn into Claude instead. Ids are the exact
+# provider model ids, and they are what the client sends as `huume_model`.
+from app.core.services.anthropic_messages import CLAUDE_HAIKU, CLAUDE_SONNET  # noqa: E402
+
+
+@dataclass(frozen=True)
+class HuumeModelChoice:
+    id: str
+    label: str
+    provider: str  # "openai" | "anthropic" — also the rate-limit bucket
+
+
+SCHEDULE_MODEL_CHOICES: tuple[HuumeModelChoice, ...] = (
+    HuumeModelChoice(LUNA, "Luna", "openai"),
+    HuumeModelChoice(CLAUDE_HAIKU, "Claude Haiku 5.5", "anthropic"),
+    HuumeModelChoice(CLAUDE_SONNET, "Claude Sonnet 5.5", "anthropic"),
+)
+_CHOICES_BY_ID = {choice.id: choice for choice in SCHEDULE_MODEL_CHOICES}
+
+
+def resolve_model_choice(model: Optional[str]) -> HuumeModelChoice:
+    """The picker entry for `model`; anything unknown or empty is Luna."""
+    return _CHOICES_BY_ID.get(model or "", _CHOICES_BY_ID[LUNA])
+
+
+def schedule_model_options(*, anthropic_configured: bool) -> list[dict[str, Any]]:
+    """What the schedule panel's dropdown offers. Claude entries are listed
+    only when an Anthropic key is configured, so the picker can never offer a
+    model every turn would fail on."""
+    return [
+        {"id": choice.id, "label": choice.label, "provider": choice.provider}
+        for choice in SCHEDULE_MODEL_CHOICES
+        if choice.provider != "anthropic" or anthropic_configured
+    ]
 
 
 @dataclass(frozen=True)

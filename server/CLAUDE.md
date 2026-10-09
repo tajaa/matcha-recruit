@@ -70,6 +70,12 @@ server/
   `core/services/openai_responses.py`. Until 2026-09-10 that client impersonated a `google.genai`
   client, so OpenAI code READ as Gemini code — if a call site builds `types.Content`/`types.Part`,
   check which client it reaches before assuming the provider.
+- **Anthropic (opt-in)**: Admin → Settings → *Agent model* routes every Luna workload and EMS
+  channel `@huume` (Gemini) to Claude Haiku 5.5 / Sonnet 5.5; the schedule assistant also has a
+  per-chat dropdown. One decision point (`core/services/anthropic_messages.claude_override()`), the
+  official `anthropic` SDK, `services/huume/claude_client.ClaudeSession` for tool loops,
+  `anthropic_messages.generate_text` for one-shots, own `provider="anthropic"` rate-limit bucket,
+  `ANTHROPIC_API_KEY`. `default` changes nothing. Spec: `services/huume/CLAUDE.md` §"Claude".
 - Some Huume skills still call Gemini for real, and that is deliberate: `er_skill` owns its own call,
   and `discipline`/`handbook`/`legal`/`ir` delegate to Gemini-backed pilot services.
 - Per-feature analyzer singletons (e.g. `get_ir_analyzer`, `get_er_analyzer`) cache the model handle; don't instantiate per request.
@@ -332,7 +338,7 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 
 - Backend routes → `server/app/matcha/routes/matcha_work/` (package, split 2026-07-03 — see its CLAUDE.md; 203 routes)
 - Project service → `server/app/matcha/services/matcha_work/project_service/`
-- AI directives → `server/app/matcha/services/matcha_work/matcha_work_ai/` (facade package since 2026-07-27: `provider.py` is the Gemini provider, `_prompts.py` the prompt literals, `_fields.py` the per-skill write whitelists, `_models.py` model selection, plus `compaction.py` / `task_draft.py` / `_images.py` / `_text.py`)
+- AI directives → `server/app/matcha/services/matcha_work/matcha_work_ai/` (facade package since 2026-07-27: `provider.py` is the Gemini provider, `_prompts.py` the prompt literals, `_fields.py` the per-skill write whitelists, `_models.py` model selection, plus `compaction.py` / `task_draft.py` / `_images.py` / `_text.py`). A Claude pick in the chat model picker (`claude-haiku-5-5` any plan, `claude-sonnet-5-5` behind `ai_model_pro`, both only while `ANTHROPIC_API_KEY` is set — `entitlements.workspace.claude_models`) runs the same structured-JSON call through `_claude.py` and the shared `provider._parse_engine_reply`; payer mode and image generation stay on Gemini, and a trivial-turn downgrade stays on the picked provider (Sonnet → Haiku)
 - Channels (WS) → `server/app/werk/routes/channels.py` + `channels_ws.py` (+ `channels` / `channel_members` tables)
 
 ### Database access

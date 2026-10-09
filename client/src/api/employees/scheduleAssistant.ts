@@ -2,6 +2,14 @@ import { api } from '../client'
 import type { MWMessage } from '../../work/types'
 import type { ScheduleVoiceTranscript } from '../../types/scheduleAssistant'
 
+/** One entry of the schedule assistant's model picker. The server lists
+ *  Claude only when it has an Anthropic key, so every entry is runnable. */
+export interface ScheduleHuumeModel {
+  id: string
+  label: string
+  provider: 'openai' | 'anthropic'
+}
+
 export interface ScheduleHuumeSession {
   session_id: string
   thread_id: string
@@ -12,6 +20,10 @@ export interface ScheduleHuumeSession {
   messages: MWMessage[]
   current_state: Record<string, unknown>
   version: number
+  available_models?: ScheduleHuumeModel[]
+  /** What a turn runs on when the manager never picked: the platform
+   *  "Agent model" setting, else Luna. */
+  default_model?: string
 }
 
 export interface ScheduleHuumeSessionSummary {

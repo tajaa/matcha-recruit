@@ -251,7 +251,13 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
     # What the WORKSPACE gets, as opposed to what the plan allows. The
     # assistant is for personal accounts only (agent_runtime/eligibility.py);
     # both apps read this instead of guessing.
-    workspace = {"espresso_assistant": False}
+    # `claude_models`: whether the chat model picker may offer Claude — true
+    # only while the server has an Anthropic key. Which Claude models a user
+    # may pick follows the plan (`ai_model_pro` unlocks Sonnet), the same
+    # rule `matcha_work_ai._get_model` enforces server-side.
+    from app.core.services.anthropic_messages import anthropic_configured
+
+    workspace = {"espresso_assistant": False, "claude_models": anthropic_configured()}
     if company_id is not None:
         try:
             from ..matcha_work.agent_runtime.enqueue import workspace_enabled

@@ -19,6 +19,20 @@ MODEL_PRICING: dict[str, dict[str, Decimal]] = {
         "cached_input_per_1m": Decimal("0.02"),
         "output_per_1m": Decimal("1.20"),
     },
+    # Anthropic Claude — the schedule assistant's opt-in models
+    # (services/huume/claude_client.py). Must match ai_usage.PRICING's rows.
+    # Haiku 5.5's >100K-prompt rate is not modelled here; the admin ledger
+    # (ai_usage.compute_cost) applies it.
+    "claude-haiku-5-5": {
+        "input_per_1m": Decimal("0.10"),
+        "cached_input_per_1m": Decimal("0.01"),
+        "output_per_1m": Decimal("0.50"),
+    },
+    "claude-sonnet-5-5": {
+        "input_per_1m": Decimal("2.00"),
+        "cached_input_per_1m": Decimal("0.20"),
+        "output_per_1m": Decimal("10.00"),
+    },
     # Gemini 3.5 Flash — pricing TBD (placeholder = prior 3-flash-preview
     # tier of $0.50 in / $3.00 out; revisit when Google publishes 3.5 GA pricing).
     "gemini-3-flash-preview": {
@@ -116,11 +130,11 @@ def calculate_call_cost(
         Decimal(prompt_count - cached_count) * pricing["input_per_1m"]
         + Decimal(cached_count) * cached_price
     ) / Decimal("1000000")
-    # Responses output_tokens already includes its reasoning-token breakdown.
+    # Responses and Anthropic Messages output_tokens already include reasoning.
     # Gemini candidates_token_count excludes thoughts_token_count, so only the
     # Gemini-shaped rows need the separate thinking counter added.
     output_count = completion_tokens or 0
-    if model != "gpt-5.6-luna":
+    if model != "gpt-5.6-luna" and not model.startswith("claude-"):
         output_count += thinking_tokens or 0
     output_cost = Decimal(output_count) * pricing["output_per_1m"] / Decimal("1000000")
 

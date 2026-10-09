@@ -315,3 +315,16 @@ async def test_the_wall_clock_ends_the_run(monkeypatch):
     with pytest.raises(runner.AgentRunError, match="ran out of time"):
         await run(client, [], ctx=context(limits=RunLimits(wall_seconds=0.0)))
     assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_session_that_keeps_its_own_history_is_sent_only_what_is_new(monkeypatch):
+    # Claude's session keeps the turn itself; replaying a Responses transcript
+    # (encrypted reasoning and all) would be meaningless to it.
+    wire_store(monkeypatch)
+    client = FakeClient([response(call("lookup")), response(call("finish", {"answer": "ok"}))])
+    client.keeps_history = True
+    await run(client, [ability(read_tool("lookup"))], ctx=context(store_responses=False))
+    assert all("chain" not in c and "store" not in c for c in client.calls)
+    assert [item.get("type") for item in client.calls[1]["input"]] == ["function_call_output"]
+    assert "reasoning.encrypted_content" not in (client.calls[0]["include"] or [])

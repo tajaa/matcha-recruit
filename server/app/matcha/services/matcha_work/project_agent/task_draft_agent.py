@@ -11,6 +11,8 @@ from uuid import UUID
 
 
 from app.core.services.ai_usage import feature_scope
+from app.core.services import anthropic_messages
+from app.matcha.services.huume.claude_client import get_claude_client
 from app.matcha.services.huume.luna_client import get_luna_client, text_item, tool_output_item
 from app.matcha.services.huume.routing import LUNA
 
@@ -173,14 +175,19 @@ async def run_task_draft(
 ) -> dict:
     """Draft one ticket from the repository's root architecture guide."""
     started = time.monotonic()
-    client = get_luna_client()
+    # Luna unless the platform "Agent model" setting routes agents to Claude.
+    claude_model = await anthropic_messages.claude_override()
+    client = get_claude_client() if claude_model else get_luna_client()
     files_read: set[str] = set()
     model_calls = 0
     seq = 0
     draft: dict | None = None
-    # Task drafts are pinned to Luna server-side; the run row records the same
-    # constant purely as audit of what actually ran.
-    selected_model = TASK_DRAFT_MODEL
+    # The thread model picker never reaches a task draft. The run row is
+    # written with TASK_DRAFT_MODEL at enqueue and re-stamped here when the
+    # platform setting sent this run to Claude, so it records what ran.
+    selected_model = claude_model or TASK_DRAFT_MODEL
+    if claude_model:
+        await store.set_run_model(run_id, claude_model)
     usage: dict[str, Any] = {"model": selected_model}
 
     async def step(

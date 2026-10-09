@@ -359,7 +359,10 @@ async def run_agent(
 
     pending: list[dict[str, Any]] = []
     # Chained runs send only what is new; unstored runs send everything so far.
-    transcript: list[dict[str, Any]] | None = None if ctx.store_responses else list(input_items)
+    # A session that keeps the conversation itself (Claude: the Messages API
+    # has no server-side chain to opt out of) is always sent only what is new.
+    replay = not ctx.store_responses and not getattr(client, "keeps_history", False)
+    transcript: list[dict[str, Any]] | None = list(input_items) if replay else None
     includes = _includes(abilities)
     if transcript is not None:
         includes = [*(includes or []), REASONING_INCLUDE]
@@ -391,7 +394,7 @@ async def run_agent(
                     ),
                     include=includes,
                     timeout_seconds=call_timeout,
-                    **({} if ctx.store_responses else {"store": False, "chain": False}),
+                    **({"store": False, "chain": False} if replay else {}),
                 ),
                 timeout=call_timeout,
             )

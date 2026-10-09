@@ -58,6 +58,18 @@ export default function ScheduleHuumePanel({ thread, firstName, weekStart, locat
         <Sparkles className="h-4 w-4 text-emerald-300" />
         <span className="text-xs font-medium text-zinc-200">Huume · Schedule assistant</span>
         <span className="ml-auto truncate text-[10px] text-zinc-600">{locationName || 'Location'} · {weekStart}</span>
+        {thread.models.length > 1 && (
+          <select
+            value={thread.model}
+            onChange={(event) => thread.setModel(event.target.value)}
+            disabled={busy}
+            aria-label="Assistant model"
+            title="Which model answers in this chat"
+            className="rounded border border-white/[0.08] bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-300 outline-none hover:border-emerald-500/40 disabled:opacity-40"
+          >
+            {thread.models.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+          </select>
+        )}
         <button
           type="button"
           onClick={() => thread.openChat(null)}

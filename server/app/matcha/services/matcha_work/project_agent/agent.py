@@ -11,6 +11,8 @@ from uuid import UUID
 
 
 from app.core.services.ai_usage import feature_scope
+from app.core.services import anthropic_messages
+from app.matcha.services.huume.claude_client import get_claude_client
 from app.matcha.services.huume.luna_client import get_luna_client, text_item, tool_output_item
 from app.matcha.services.huume.routing import LUNA
 
@@ -77,7 +79,12 @@ async def run_repo_question(
 ) -> dict:
     """Answer one question with bounded repo reads and no mutation tools."""
     started = time.monotonic()
-    client = get_luna_client()
+    # Luna unless the platform "Agent model" setting routes agents to Claude.
+    claude_model = await anthropic_messages.claude_override()
+    model = claude_model or LUNA
+    client = get_claude_client() if claude_model else get_luna_client()
+    if claude_model:
+        await store.set_run_model(run_id, claude_model)
     tree: list[dict] | None = None
     files_read: set[str] = set()
     model_calls = 0
@@ -85,7 +92,7 @@ async def run_repo_question(
     finish_refusals = 0
     seq = 0
     answer: str | None = None
-    usage: dict[str, Any] = {"model": LUNA}
+    usage: dict[str, Any] = {"model": model}
 
     async def step(
         name: str,
@@ -198,7 +205,7 @@ async def run_repo_question(
         with feature_scope(_AI_USAGE_FEATURE):
             response = await asyncio.wait_for(
                 client.create_response(
-                    model=LUNA,
+                    model=model,
                     # The first call sends the question; follow-ups send only
                     # tool outputs, with previous_response_id carrying the rest.
                     input=input_items if model_calls == 1 else pending_outputs,

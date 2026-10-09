@@ -39,16 +39,20 @@ version used, same instinct as `event_intake.classify_event`'s fallback.
 import asyncio
 import logging
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
 from google.genai import types
 
+from app.core.services import anthropic_messages
 from app.core.services.model_catalog import GEMINI_FLASH
 from app.matcha.services._shared.gemini import genai_env_client
 from app.matcha.services._shared.pill_text import sanitize_pill_text
 from app.matcha.services.ems import ask, channel_grounding
+from app.matcha.services.huume import claude_client
+from app.matcha.services.huume.luna_client import text_item, tool_output_item
 
 logger = logging.getLogger(__name__)
 
@@ -331,6 +335,240 @@ async def _stage_inventory_order(
     return {"text": f"Staged — told the channel: {pill_text}", "order_id": order["id"], "pill_text": pill_text}
 
 
+def _schema_json(schema: types.Schema) -> dict[str, Any]:
+    """A genai `Schema` as JSON Schema, for the Claude path. Converted from
+    the Gemini declarations rather than written twice, so the two surfaces
+    can never offer the model different arguments."""
+    out: dict[str, Any] = {}
+    if schema.type is not None:
+        out["type"] = str(getattr(schema.type, "value", schema.type)).lower()
+    if schema.description:
+        out["description"] = schema.description
+    if schema.enum:
+        out["enum"] = list(schema.enum)
+    if schema.properties:
+        out["properties"] = {name: _schema_json(prop) for name, prop in schema.properties.items()}
+    if schema.required:
+        out["required"] = list(schema.required)
+    if schema.items is not None:
+        out["items"] = _schema_json(schema.items)
+    return out
+
+
+def _function_tool(declaration: types.FunctionDeclaration) -> dict[str, Any]:
+    """A genai `FunctionDeclaration` as a Responses function tool."""
+    return {
+        "type": "function",
+        "name": declaration.name,
+        "description": declaration.description or "",
+        "parameters": _schema_json(declaration.parameters),
+    }
+
+
+@dataclass
+class _ToolEnv:
+    """What every tool call in one ASK is checked against — fixed per turn."""
+
+    company_id: UUID
+    channel_id: UUID
+    asker_user_id: UUID
+    asker_role: Optional[str]
+    features: Optional[dict[str, Any]]
+    is_admin: bool
+    location_id: Optional[UUID]
+    location_unavailable: bool
+    stage_inventory_available: bool
+    schedule_change_available: bool
+
+
+@dataclass
+class _LoopState:
+    """What the loop has produced so far. `staged_this_round` is reset by
+    the caller at the start of each batch of tool calls."""
+
+    final_text: Optional[str] = None
+    pending_order_id: Optional[UUID] = None
+    pending_proposal_id: Optional[UUID] = None
+    coverage_shift_links: list[dict[str, str]] = field(default_factory=list)
+    staged_this_round: bool = False
+
+
+async def _run_tool_call(conn, name: str, args: dict[str, Any], *, env: _ToolEnv, state: _LoopState) -> str:
+    """One model tool call → the result text the model is shown. Shared by
+    the Gemini and Claude loops so the enforcement can't drift between them:
+    every arm re-checks server-side, and only ONE thing can be staged per
+    batch — the caller stamps confirm_message_id onto the LAST staged row
+    only (channels_ws._bg_ems_ask), so a second stage in the same round
+    would orphan the first (unconfirmable, uncancellable, still queued)."""
+    if name == _LOOKUP_TOOL:
+        result = await channel_grounding.run_topic_lookup(
+            conn, topic=str(args.get("topic") or ""), company_id=env.company_id,
+            features=env.features, is_admin=env.is_admin, location_id=env.location_id,
+            location_unavailable=env.location_unavailable,
+            query=args.get("query"), days=args.get("days"),
+        )
+        return result["text"]
+    if name == _COVERAGE_TOOL:
+        coverage_result = await channel_grounding.run_coverage_lookup(
+            conn, company_id=env.company_id, features=env.features, is_admin=env.is_admin,
+            location_id=env.location_id, location_unavailable=env.location_unavailable,
+            date_str=str(args.get("date") or ""), role=args.get("role"),
+        )
+        # Kept OUT of what the model sees — it rewrites tool results into its
+        # own prose, so a [[shift:id:date]] token embedded there wouldn't
+        # reliably survive. Stapled onto the answer after the loop instead.
+        state.coverage_shift_links.extend(coverage_result.get("shift_links") or [])
+        return coverage_result["text"]
+    if name == _STAGE_INVENTORY_TOOL and env.stage_inventory_available:
+        if state.staged_this_round:
+            return "Only one order can be staged per message — ask again to stage the next item."
+        outcome = await _stage_inventory_order(
+            conn, company_id=env.company_id, channel_id=env.channel_id,
+            asker_user_id=env.asker_user_id, asker_role=env.asker_role,
+            features=env.features, location_id=env.location_id,
+            item_name=str(args.get("item_name") or "").strip(),
+            quantity=args.get("quantity"),
+        )
+        if outcome.get("order_id"):
+            state.pending_order_id = outcome["order_id"]
+            state.final_text = outcome["pill_text"]
+            state.staged_this_round = True
+        return outcome["text"]
+    if name == _SCHEDULE_CHANGE_TOOL and env.schedule_change_available:
+        if state.staged_this_round:
+            return "Only one change can be staged per message — ask again for the next one."
+        change_result = await channel_grounding.run_schedule_change(
+            conn, company_id=env.company_id, features=env.features, is_admin=env.is_admin,
+            asker_user_id=env.asker_user_id, asker_role=env.asker_role, channel_id=env.channel_id,
+            location_unavailable=env.location_unavailable, args=args,
+        )
+        if change_result.get("proposal_id"):
+            state.pending_proposal_id = change_result["proposal_id"]
+            state.final_text = change_result["text"]
+            state.staged_this_round = True
+        return change_result["text"]
+    return "That's not available here."
+
+
+def _time_left(started: float) -> bool:
+    return (time.monotonic() - started) < _WALL_CLOCK_SECONDS
+
+
+async def _gemini_loop(
+    *, env: _ToolEnv, state: _LoopState, started: float, declarations: list,
+    system_prompt: str, user_text: str,
+) -> None:
+    from app.database import get_connection
+
+    tools_arg = [types.Tool(function_declarations=declarations)] if declarations else None
+    config = types.GenerateContentConfig(
+        temperature=0.4, max_output_tokens=2000,
+        thinking_config=types.ThinkingConfig(thinking_level="low"),
+        tools=tools_arg,
+        system_instruction=system_prompt,
+    )
+    contents = [types.Content(role="user", parts=[types.Part(text=user_text)])]
+    client = genai_env_client()
+    model_calls = 0
+    while model_calls < _MAX_MODEL_CALLS and _time_left(started):
+        model_calls += 1
+        resp = await asyncio.wait_for(
+            client.aio.models.generate_content(model=GEMINI_FLASH, contents=contents, config=config),
+            timeout=_CALL_TIMEOUT,
+        )
+        all_parts = [
+            part for cand in (resp.candidates or [])
+            for part in (cand.content.parts or [] if cand.content else [])
+        ]
+        calls = [p.function_call for p in all_parts if getattr(p, "function_call", None)]
+        if not calls:
+            state.final_text = (getattr(resp, "text", None) or "").strip() or None
+            break
+
+        contents.append(types.Content(role="model", parts=all_parts))
+        response_parts: list[types.Part] = []
+        state.staged_this_round = False
+        async with get_connection() as conn:
+            for call in calls:
+                result_text = await _run_tool_call(conn, call.name, dict(call.args or {}), env=env, state=state)
+                response_parts.append(types.Part.from_function_response(
+                    name=call.name, response={"result": result_text},
+                ))
+        if state.staged_this_round:
+            break
+        contents.append(types.Content(role="user", parts=response_parts))
+
+    if state.final_text is None and state.pending_order_id is None and _time_left(started):
+        # The call bound (or wall clock) was hit while the model still had a
+        # function call queued, so the loop above never gave it a text turn —
+        # every prior lookup in `contents` already succeeded. One tool-free
+        # call to write those up beats discarding them behind _FALLBACK_TEXT
+        # (mirrors huume/agent.py's force-finish-with-partial-work on a bound hit).
+        finish_config = types.GenerateContentConfig(
+            temperature=0.4, max_output_tokens=2000,
+            thinking_config=types.ThinkingConfig(thinking_level="low"),
+            system_instruction=system_prompt,
+        )
+        resp = await asyncio.wait_for(
+            client.aio.models.generate_content(model=GEMINI_FLASH, contents=contents, config=finish_config),
+            timeout=_CALL_TIMEOUT,
+        )
+        state.final_text = (getattr(resp, "text", None) or "").strip() or None
+
+
+async def _claude_loop(
+    model: str, *, env: _ToolEnv, state: _LoopState, started: float, declarations: list,
+    system_prompt: str, user_text: str,
+) -> None:
+    """The same loop on Claude (platform "Agent model" setting): same bounds,
+    same prompts, same tool dispatch. The session keeps the turn's history,
+    so each call sends only what is new."""
+    from app.database import get_connection
+
+    tools = [_function_tool(declaration) for declaration in declarations]
+    session = claude_client.get_claude_client()
+    pending: list[dict[str, Any]] = [text_item("user", user_text)]
+    model_calls = 0
+    while model_calls < _MAX_MODEL_CALLS and _time_left(started):
+        model_calls += 1
+        resp = await asyncio.wait_for(
+            session.create_response(
+                model=model, input=pending, instructions=system_prompt, tools=tools or None,
+                effort="low", timeout_seconds=_CALL_TIMEOUT,
+            ),
+            timeout=_CALL_TIMEOUT,
+        )
+        pending = []
+        if not resp.function_calls:
+            state.final_text = (resp.text or "").strip() or None
+            break
+
+        outputs: list[dict[str, Any]] = []
+        state.staged_this_round = False
+        async with get_connection() as conn:
+            for call in resp.function_calls:
+                result_text = await _run_tool_call(
+                    conn, call["name"], dict(call["arguments"] or {}), env=env, state=state,
+                )
+                outputs.append(tool_output_item(call["call_id"], {"result": result_text}))
+        if state.staged_this_round:
+            break
+        pending = outputs
+
+    if state.final_text is None and state.pending_order_id is None and _time_left(started):
+        # Force-finish, as on Gemini — but the tools stay declared: the
+        # history holds tool calls, and the session keeps one tool list per
+        # turn. `tool_choice="none"` is what makes this call text-only.
+        resp = await asyncio.wait_for(
+            session.create_response(
+                model=model, input=pending, instructions=system_prompt, tools=tools or None,
+                tool_choice="none" if tools else None, effort="low", timeout_seconds=_CALL_TIMEOUT,
+            ),
+            timeout=_CALL_TIMEOUT,
+        )
+        state.final_text = (resp.text or "").strip() or None
+
+
 async def answer_channel_question(
     *, question: str, events: list[dict], is_admin: bool, filtered: bool,
     company_id: UUID, channel_id: UUID, asker_user_id: UUID, asker_role: Optional[str],
@@ -340,6 +578,10 @@ async def answer_channel_question(
     """Answer one channel ASK. Never raises — any failure degrades to the
     deterministic fallback line, same contract the pre-fetch version had.
 
+    Runs on Gemini, or on Claude when the platform "Agent model" setting
+    routes agents there (`anthropic_messages.claude_override`) — one loop
+    shape, one tool dispatcher (`_run_tool_call`), two providers.
+
     Returns `{"message": str, "pending_order_id": Optional[UUID],
     "pending_proposal_id": Optional[UUID]}`. `pending_order_id`/
     `pending_proposal_id` are set only when the loop staged something this
@@ -347,8 +589,6 @@ async def answer_channel_question(
     `confirm_message_id` onto the pill it inserts — the same two-step dance
     `_bg_inventory_request`/`_bg_schedule_request` already do for their own
     deterministic staging paths."""
-    from app.database import get_connection
-
     started = time.monotonic()
     events_block = ask.render_events_block(events, is_admin=is_admin, filtered=filtered)
     allowed_topics = [
@@ -372,17 +612,10 @@ async def answer_channel_question(
         declarations.append(_COVERAGE_DECLARATION)
     if schedule_change_available:
         declarations.append(_SCHEDULE_CHANGE_DECLARATION)
-    tools_arg = [types.Tool(function_declarations=declarations)] if declarations else None
 
-    prompt_kwargs = dict(
+    system_prompt = _build_system_prompt(
         is_admin=is_admin, events_block=events_block, today_line=today_line,
         coverage_available=coverage_available, schedule_change_available=schedule_change_available,
-    )
-    config = types.GenerateContentConfig(
-        temperature=0.4, max_output_tokens=2000,
-        thinking_config=types.ThinkingConfig(thinking_level="low"),
-        tools=tools_arg,
-        system_instruction=_build_system_prompt(**prompt_kwargs),
     )
     # Untrusted channel content lives in the USER turn, never the system
     # instruction — the system prompt holds the admin-only propose_
@@ -395,161 +628,42 @@ async def answer_channel_question(
         f"{recent_block}\n\n## QUESTION\n{question_text}"
         if recent_block else question_text
     )
-    contents = [types.Content(role="user", parts=[types.Part(text=user_text)])]
+    env = _ToolEnv(
+        company_id=company_id, channel_id=channel_id, asker_user_id=asker_user_id,
+        asker_role=asker_role, features=features, is_admin=is_admin, location_id=location_id,
+        location_unavailable=location_unavailable,
+        stage_inventory_available=stage_inventory_available,
+        schedule_change_available=schedule_change_available,
+    )
+    state = _LoopState()
+    loop_kwargs = dict(
+        env=env, state=state, started=started, declarations=declarations,
+        system_prompt=system_prompt, user_text=user_text,
+    )
 
-    pending_order_id: Optional[UUID] = None
-    pending_proposal_id: Optional[UUID] = None
-    final_text: Optional[str] = None
-    coverage_shift_links: list[dict[str, str]] = []
-
+    claude_model = await anthropic_messages.claude_override()
     try:
-        client = genai_env_client()
-        model_calls = 0
-        while model_calls < _MAX_MODEL_CALLS and (time.monotonic() - started) < _WALL_CLOCK_SECONDS:
-            model_calls += 1
-            resp = await asyncio.wait_for(
-                client.aio.models.generate_content(model=GEMINI_FLASH, contents=contents, config=config),
-                timeout=_CALL_TIMEOUT,
-            )
-            all_parts = [
-                part for cand in (resp.candidates or [])
-                for part in (cand.content.parts or [] if cand.content else [])
-            ]
-            calls = [p.function_call for p in all_parts if getattr(p, "function_call", None)]
-            if not calls:
-                final_text = (getattr(resp, "text", None) or "").strip() or None
-                break
-
-            contents.append(types.Content(role="model", parts=all_parts))
-            response_parts: list[types.Part] = []
-            staged_this_round = False
-
-            async with get_connection() as conn:
-                for call in calls:
-                    name, args = call.name, dict(call.args or {})
-                    if name == _LOOKUP_TOOL:
-                        result = await channel_grounding.run_topic_lookup(
-                            conn, topic=str(args.get("topic") or ""), company_id=company_id,
-                            features=features, is_admin=is_admin, location_id=location_id,
-                            location_unavailable=location_unavailable,
-                            query=args.get("query"), days=args.get("days"),
-                        )
-                        response_parts.append(types.Part.from_function_response(
-                            name=name, response={"result": result["text"]},
-                        ))
-                    elif name == _COVERAGE_TOOL:
-                        coverage_result = await channel_grounding.run_coverage_lookup(
-                            conn, company_id=company_id, features=features, is_admin=is_admin,
-                            location_id=location_id, location_unavailable=location_unavailable,
-                            date_str=str(args.get("date") or ""), role=args.get("role"),
-                        )
-                        response_parts.append(types.Part.from_function_response(
-                            name=name, response={"result": coverage_result["text"]},
-                        ))
-                        # Kept OUT of what the model sees — it rewrites tool
-                        # results into its own prose, so a [[shift:id:date]]
-                        # token embedded there wouldn't reliably survive.
-                        # Stapled onto the answer after the loop instead.
-                        coverage_shift_links.extend(coverage_result.get("shift_links") or [])
-                    elif name == _STAGE_INVENTORY_TOOL and stage_inventory_available:
-                        if staged_this_round:
-                            # Only one order can be committed per turn — the
-                            # caller only stamps confirm_message_id onto the
-                            # LAST staged row (channels_ws._bg_ems_ask), so a
-                            # second stage call in the same round would
-                            # silently orphan an earlier one (unconfirmable,
-                            # uncancellable, still sitting in the queue).
-                            response_parts.append(types.Part.from_function_response(
-                                name=name, response={"result": (
-                                    "Only one order can be staged per message — ask again "
-                                    "to stage the next item."
-                                )},
-                            ))
-                            continue
-                        outcome = await _stage_inventory_order(
-                            conn, company_id=company_id, channel_id=channel_id,
-                            asker_user_id=asker_user_id, asker_role=asker_role,
-                            features=features, location_id=location_id,
-                            item_name=str(args.get("item_name") or "").strip(),
-                            quantity=args.get("quantity"),
-                        )
-                        response_parts.append(types.Part.from_function_response(
-                            name=name, response={"result": outcome["text"]},
-                        ))
-                        if outcome.get("order_id"):
-                            pending_order_id = outcome["order_id"]
-                            final_text = outcome["pill_text"]
-                            staged_this_round = True
-                    elif name == _SCHEDULE_CHANGE_TOOL and schedule_change_available:
-                        if staged_this_round:
-                            # Same one-staged-thing-per-turn guard as the
-                            # inventory arm above — the caller only stamps
-                            # confirm_message_id onto the LAST staged row.
-                            response_parts.append(types.Part.from_function_response(
-                                name=name, response={"result": (
-                                    "Only one change can be staged per message — ask again "
-                                    "for the next one."
-                                )},
-                            ))
-                            continue
-                        change_result = await channel_grounding.run_schedule_change(
-                            conn, company_id=company_id, features=features, is_admin=is_admin,
-                            asker_user_id=asker_user_id, asker_role=asker_role, channel_id=channel_id,
-                            location_unavailable=location_unavailable, args=args,
-                        )
-                        response_parts.append(types.Part.from_function_response(
-                            name=name, response={"result": change_result["text"]},
-                        ))
-                        if change_result.get("proposal_id"):
-                            pending_proposal_id = change_result["proposal_id"]
-                            final_text = change_result["text"]
-                            staged_this_round = True
-                    else:
-                        response_parts.append(types.Part.from_function_response(
-                            name=name, response={"result": "That's not available here."},
-                        ))
-
-            if staged_this_round:
-                break
-            contents.append(types.Content(role="user", parts=response_parts))
-
-        if final_text is None and pending_order_id is None and (time.monotonic() - started) < _WALL_CLOCK_SECONDS:
-            # The call bound (or wall clock) was hit while the model still
-            # had a function call queued, so the loop above never gave it a
-            # text turn — every prior lookup in `contents` already
-            # succeeded. One tool-free call to write those up beats
-            # discarding them behind _FALLBACK_TEXT (mirrors
-            # huume/agent.py's force-finish-with-partial-work on a bound hit).
-            finish_config = types.GenerateContentConfig(
-                temperature=0.4, max_output_tokens=2000,
-                thinking_config=types.ThinkingConfig(thinking_level="low"),
-                system_instruction=_build_system_prompt(**prompt_kwargs),
-            )
-            resp = await asyncio.wait_for(
-                client.aio.models.generate_content(model=GEMINI_FLASH, contents=contents, config=finish_config),
-                timeout=_CALL_TIMEOUT,
-            )
-            final_text = (getattr(resp, "text", None) or "").strip() or None
+        if claude_model:
+            await _claude_loop(claude_model, **loop_kwargs)
+        else:
+            await _gemini_loop(**loop_kwargs)
     except Exception:
         logger.warning("EMS: channel agent loop failed for channel %s", channel_id, exc_info=True)
-        final_text = None
-        pending_order_id = None
-        pending_proposal_id = None
-        coverage_shift_links = []
+        state = _LoopState()
 
-    if pending_order_id is not None and final_text:
-        return {"message": final_text, "pending_order_id": pending_order_id, "pending_proposal_id": None}
-    if pending_proposal_id is not None and final_text:
-        return {"message": final_text, "pending_order_id": None, "pending_proposal_id": pending_proposal_id}
+    if state.pending_order_id is not None and state.final_text:
+        return {"message": state.final_text, "pending_order_id": state.pending_order_id, "pending_proposal_id": None}
+    if state.pending_proposal_id is not None and state.final_text:
+        return {"message": state.final_text, "pending_order_id": None, "pending_proposal_id": state.pending_proposal_id}
 
-    answer = sanitize_pill_text(final_text, _MAX_ANSWER_CHARS, keep_newlines=True)
+    answer = sanitize_pill_text(state.final_text, _MAX_ANSWER_CHARS, keep_newlines=True)
     if answer:
         # Dedupe (a role-hint retry can look up the same day twice) while
         # keeping first-seen order, then append the ONE link vocabulary
         # client/.../ChannelView/systemContent.tsx parses — same token
         # schedule_chat.result_text uses for a just-created shift.
         seen: dict[str, str] = {}
-        for link in coverage_shift_links:
+        for link in state.coverage_shift_links:
             seen.setdefault(link["id"], link["date"])
         tokens = " ".join(f"[[shift:{sid}:{sdate}]]" for sid, sdate in seen.items())
         if tokens:

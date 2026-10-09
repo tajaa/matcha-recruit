@@ -57,6 +57,8 @@ from ._models import (  # noqa: F401
     FLASH,
     FLASH_LITE,
     SUPPORTED_MODELS,
+    PREMIUM_CLAUDE_MODELS,
+    is_claude_model,
     PRO_MODEL,
     _MODEL_ALIASES,
     _get_model,

@@ -9,12 +9,15 @@ import re
 
 from google.genai import types
 
+from app.core.services import anthropic_messages
 from app.core.services.model_catalog import GEMINI_FLASH_LITE
 from app.matcha.services._shared.gemini import genai_env_client as _get_client
 
 logger = logging.getLogger(__name__)
 
 FLASH_LITE_MODEL = GEMINI_FLASH_LITE
+# Claude path (platform "Agent model" setting): same prompt, same parser.
+_CLAUDE_TIMEOUT_SECONDS = 30.0
 
 
 _PROMPT_TEMPLATE = """You extract structured inventory data from a short channel message.
@@ -106,14 +109,22 @@ async def extract_inventory(content: str, item_names: list[str]) -> dict:
     _bg_ems_intake wholesale in that case, same as EMS's own outage rule."""
     try:
         prompt = _build_prompt(content, item_names)
-        resp = await _get_client().aio.models.generate_content(
-            model=FLASH_LITE_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.2, response_mime_type="application/json", max_output_tokens=500,
-            ),
-        )
-        parsed = _parse_model_json(resp.text)
+        claude_model = await anthropic_messages.claude_override()
+        if claude_model:
+            raw = await anthropic_messages.generate_text(
+                prompt, model=claude_model, json_output=True, effort="low",
+                max_tokens=500, timeout_seconds=_CLAUDE_TIMEOUT_SECONDS,
+            )
+        else:
+            resp = await _get_client().aio.models.generate_content(
+                model=FLASH_LITE_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.2, response_mime_type="application/json", max_output_tokens=500,
+                ),
+            )
+            raw = resp.text
+        parsed = _parse_model_json(raw)
         return _coerce_result(parsed)
     except Exception:
         logger.warning("inventory: extraction failed, falling back", exc_info=True)

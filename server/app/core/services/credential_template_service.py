@@ -4,7 +4,8 @@ Resolves jurisdiction + role-specific credential requirements using a tiered str
 1. Company-specific templates
 2. System-wide templates
 3. Static fallback (credential_inference.py)
-4. OpenAI Luna research (creates templates for future reuse)
+4. OpenAI Luna research (creates templates for future reuse) — or Claude, when
+   the platform "Agent model" setting routes agent workloads there
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from uuid import UUID
 import httpx
 
 from app.config import get_settings
+from app.core.services import anthropic_messages
 from app.core.services.ai_usage import record_openai_response
 from app.core.services.openai_responses import (
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
@@ -42,6 +44,19 @@ def _luna_credentials() -> tuple[str, str] | None:
     return settings.openai_api_key, settings.openai_luna_model
 
 
+async def _text_model() -> tuple[str, str] | None:
+    """`(api_key, model)` for one research/classification call.
+
+    The Claude model the platform "Agent model" setting routes to wins (its
+    key lives in the shared Anthropic client, so `api_key` is empty); else the
+    configured Luna key and model, or None when neither is available.
+    """
+    claude_model = await anthropic_messages.claude_override()
+    if claude_model:
+        return "", claude_model
+    return _luna_credentials()
+
+
 async def _generate_luna_text(
     prompt: str,
     *,
@@ -50,7 +65,17 @@ async def _generate_luna_text(
     max_output_tokens: int,
     json_output: bool,
 ) -> str:
-    """Run one high-reasoning Luna request and record exact provider usage."""
+    """Run one high-reasoning Luna (or routed Claude) request and record exact
+    provider usage. Raises on any provider failure, for both providers."""
+    if model in anthropic_messages.CLAUDE_MODELS:
+        return await anthropic_messages.generate_text(
+            prompt,
+            model=model,
+            json_output=json_output,
+            effort="high",
+            max_tokens=max_output_tokens,
+            timeout_seconds=_OPENAI_REQUEST_TIMEOUT_SECONDS,
+        )
     request_payload: dict[str, Any] = {
         "model": model,
         "input": prompt,
@@ -147,9 +172,10 @@ async def match_job_title_to_role_category(
 async def _classify_role_via_luna(
     conn, job_title: str, role_rows: list
 ) -> Optional[dict[str, Any]]:
-    """Use OpenAI Luna to classify an unrecognized title into a role category."""
+    """Use OpenAI Luna (or routed Claude) to classify an unrecognized title
+    into a role category."""
     try:
-        credentials = _luna_credentials()
+        credentials = await _text_model()
         if credentials is None:
             return None
         api_key, model = credentials
@@ -468,13 +494,14 @@ async def research_credential_requirements(
     company_id: UUID | None = None,
     triggered_by: UUID | None = None,
 ) -> list[dict[str, Any]]:
-    """Call OpenAI Luna to research jurisdiction-specific requirements.
+    """Call OpenAI Luna (or routed Claude) to research jurisdiction-specific
+    requirements.
 
     Creates credential_requirement_templates and returns the raw result list.
     """
-    credentials = _luna_credentials()
+    credentials = await _text_model()
     if credentials is None:
-        logger.warning("OpenAI Luna is not configured; cannot research credentials")
+        logger.warning("No research model is configured (OpenAI Luna or Claude); cannot research credentials")
         return []
     api_key, model = credentials
 

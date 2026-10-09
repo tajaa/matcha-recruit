@@ -27,8 +27,15 @@ Neither branch performs network I/O: constructing types is inert, and no test
 builds a real ``Client``.
 """
 
+import os
 import sys
 from types import ModuleType
+
+# Claude is opt-in and routed by `anthropic_messages.claude_override`, which
+# reads a DB setting only when a key is present. A developer's server/.env
+# carries a real key (load_dotenv never overrides an existing variable), so
+# blank it here: no test reaches the setting or Anthropic unless it opts in.
+os.environ["ANTHROPIC_API_KEY"] = ""
 
 
 class _Permissive:

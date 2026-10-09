@@ -25,8 +25,8 @@ def _no_db(monkeypatch):
 
 
 class TestModelFleet:
-    def test_two_models_supported(self):
-        assert SUPPORTED_MODELS == {FLASH_LITE, FLASH}
+    def test_two_gemini_models_plus_the_claude_picks_supported(self):
+        assert SUPPORTED_MODELS == {FLASH_LITE, FLASH, "claude-haiku-5-5", "claude-sonnet-5-5"}
 
     def test_pro_preview_retired(self):
         # Product decision 2026-07-31: matcha-work's paid tier now runs the

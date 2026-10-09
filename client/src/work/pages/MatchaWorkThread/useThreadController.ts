@@ -6,6 +6,7 @@ import type { UsageSummary } from '../../api/matchaWork'
 import { fetchLocations } from '../../../api/compliance'
 import type { BusinessLocation } from '../../../types/compliance'
 import { useMe } from '../../../hooks/useMe'
+import { useModelPicker } from '../../hooks/useModelPicker'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
 import { RESUME_EXTENSIONS, RESUME_MAX_SIZE, INVENTORY_EXTENSIONS, THREAD_FILE_EXTENSIONS } from './constants'
 import { useThreadCollaboration } from './useThreadCollaboration'
@@ -54,7 +55,7 @@ export function useThreadController() {
   const [mobileView, setMobileView] = useState<'chat' | 'panel'>('chat')
 
   // Model selector
-  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('mw-model') || 'gemini-3.7-flash')
+  const { modelOptions, selectedModel, setSelectedModel } = useModelPicker()
 
   // Token usage
   const [usageTotal, setUsageTotal] = useState<UsageSummary | null>(null)
@@ -111,6 +112,7 @@ export function useThreadController() {
     if (!hasComplianceLocationAccess) {
       // Company lost/never had compliance access — don't attempt the fetch (403),
       // just show the unavailable hint below the toggle.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot, guarded by locationsLoaded
       setLocationsUnavailable(true)
       setLocationsLoaded(true)
       return
@@ -151,6 +153,8 @@ export function useThreadController() {
 
   useEffect(() => {
     if (!threadId) return
+    // Reset the previous thread's view before the next one loads.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     setError('')
     // Switching threads mid-stream: the abort below fires no onComplete/onError
@@ -545,7 +549,7 @@ export function useThreadController() {
       setThread((prev) => (prev ? { ...prev, title: updated.title } : prev))
       setEditingTitle(false)
       notifyThreadsChanged()
-    } catch {}
+    } catch { /* the title stays in edit mode with the draft, so the person can retry */ }
   }
 
   async function handleArchiveThread() {
@@ -609,7 +613,7 @@ export function useThreadController() {
     showTutorSetup, setShowTutorSetup,
     tutorDismissed, setTutorDismissed,
     mobileView, setMobileView,
-    selectedModel, setSelectedModel,
+    modelOptions, selectedModel, setSelectedModel,
     usageTotal, usage24h,
     isDragOver, setIsDragOver,
     fileInputRef,

@@ -43,6 +43,7 @@ from uuid import UUID, uuid4
 
 
 from app.core.services.ai_usage import feature_scope
+from app.core.services.anthropic_messages import claude_override
 from app.core.services.rate_limiter import ApiRateLimiter, RateLimitExceeded
 from app.matcha.services.matcha_work.work_permissions import WorkAccess, WorkCapability
 from app.matcha.services.scheduling.schedule_review import bounded_review_echo, compact_review
@@ -51,6 +52,7 @@ from . import (
     actions, assets, discipline_skill, er_skill, handbook_skill, inventory_skill, ir_skill,
     legal_skill, onboarding_skill, record_view, routing, store,
 )
+from .claude_client import get_claude_client
 from .luna_client import get_luna_client, image_item, text_item, tool_output_item
 from .prompt import build_state_block, build_system_prompt
 from .scope import HuumeSurfaceContext
@@ -786,10 +788,6 @@ async def run_huume_turn(
     is an unchanged key then). Optional so existing test callers with no run
     row don't need updating; `opened_at` is simply absent in that case.
     """
-    # This loop runs on OpenAI Luna (since 488d928), so it counts in the
-    # OpenAI bucket. Sharing Gemini's meant Huume turns spent the Gemini
-    # allowance and a Gemini-heavy sweep could 429 a Huume turn.
-    rate_limiter = ApiRateLimiter(provider="openai")
     recorder = _StepRecorder()
     state_updates: dict[str, Any] = {}
     final_message: Optional[str] = None
@@ -822,6 +820,18 @@ async def run_huume_turn(
     if surface_context is None:
         surface_context = HuumeSurfaceContext()
     allowed_tool_names = surface_context.allowed_tools
+
+    # The schedule panel's own pick wins; otherwise the platform "Agent model"
+    # setting decides (Luna unless an admin routed agents to Claude). The
+    # per-turn pick is a schedule-surface feature only; anywhere else the
+    # field is ignored.
+    explicit_model = surface_context.model if surface_context.is_schedule else None
+    model_choice = routing.resolve_model_choice(explicit_model or await claude_override())
+    # Each provider counts in its own bucket. Sharing Gemini's meant Huume
+    # turns spent the Gemini allowance and a Gemini-heavy sweep could 429 a
+    # Huume turn; the same holds between OpenAI and Anthropic.
+    rate_limiter = ApiRateLimiter(provider=model_choice.provider)
+    use_claude = model_choice.provider == "anthropic"
 
     # Production callers provide target-company access. Direct skill-engine
     # tests and legacy callers may omit it temporarily and retain the old role
@@ -2299,7 +2309,7 @@ async def run_huume_turn(
     tier_name = routing.resolve_tier(_last_user_text(history), current_state=current_state)
     tier = routing.TIERS[tier_name]
 
-    client = get_luna_client()
+    client = get_claude_client() if use_claude else get_luna_client()
     # The schedule surface has no per-turn context builder (Huume's dispatch
     # replaces _inject_mode_contexts wholesale), so the location's saved setup
     # is rendered into the system prompt itself — without it the model has to
@@ -2349,7 +2359,10 @@ async def run_huume_turn(
 
             is_first_call = model_calls == 0
             model_calls += 1
-            call_model = tier.planner_model if is_first_call else tier.executor_model
+            if use_claude:
+                call_model = model_choice.id
+            else:
+                call_model = tier.planner_model if is_first_call else tier.executor_model
             call_timeout = min(_CALL_TIMEOUT, max(1.0, _WALL_CLOCK_SECONDS - elapsed()))
             with feature_scope("matcha.huume.loop"):
                 response = await asyncio.wait_for(
@@ -2618,7 +2631,7 @@ async def run_huume_turn(
             "I wasn't able to finish that — nothing was changed." if not recorder.steps else "Done for now — see the steps above."
         )
 
-    total_usage["model"] = tier.planner_model
+    total_usage["model"] = model_choice.id if use_claude else tier.planner_model
     total_usage["tier"] = tier_name
     total_usage["estimated"] = False
     if stop_reason:

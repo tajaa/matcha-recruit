@@ -14,6 +14,9 @@ class HuumeSurfaceContext:
     week_end: date | None = None
     allowed_tools: frozenset[str] | None = None
     allowed_lookup_topics: frozenset[str] | None = None
+    # The schedule panel's model picker (`routing.SCHEDULE_MODEL_CHOICES`).
+    # None is Luna; honored on the schedule surface only.
+    model: str | None = None
 
     @property
     def is_schedule(self) -> bool:

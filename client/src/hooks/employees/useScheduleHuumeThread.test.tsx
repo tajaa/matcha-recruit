@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { selectedShiftContext, useScheduleHuumeThread } from './useScheduleHuumeThread'
 
 const {
@@ -457,6 +457,71 @@ describe('useScheduleHuumeThread — taking a turn', () => {
     // Busy: a second turn cannot start while the first is streaming.
     await act(async () => { await result.current.send('And a closer') })
     expect(sendMessageStreamMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useScheduleHuumeThread — model picker', () => {
+  const claudeModels = [
+    { id: 'gpt-5.6-luna', label: 'Luna', provider: 'openai' },
+    { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', provider: 'anthropic' },
+  ]
+
+  function memoryStorage(): Storage {
+    const values = new Map<string, string>()
+    return {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => { values.set(key, value) },
+      removeItem: (key) => { values.delete(key) },
+      clear: () => values.clear(),
+      key: () => null,
+      get length() { return values.size },
+    }
+  }
+
+  beforeEach(() => { vi.stubGlobal('localStorage', memoryStorage()) })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('runs Luna until the manager picks another model, then sends and remembers it', async () => {
+    getSessionMock.mockResolvedValue({ ...session(), available_models: claudeModels })
+    const { result } = render()
+    await waitFor(() => expect(result.current.models).toHaveLength(2))
+    expect(result.current.model).toBe('gpt-5.6-luna')
+
+    await act(async () => { await result.current.send('What is open?') })
+    expect(sendMessageStreamMock.mock.calls[0][3]).toEqual({ huume_model: 'gpt-5.6-luna' })
+    act(() => streamCallbacks().onError('stop'))
+
+    act(() => result.current.setModel('claude-haiku-5-5'))
+    await act(async () => { await result.current.send('And now?') })
+    expect(sendMessageStreamMock.mock.calls[1][3]).toEqual({ huume_model: 'claude-haiku-5-5' })
+    expect(window.localStorage.getItem('matcha.scheduleAssistant.model')).toBe('claude-haiku-5-5')
+  })
+
+  it('starts on the server default when the manager never picked', async () => {
+    getSessionMock.mockResolvedValue({ ...session(), available_models: claudeModels, default_model: 'claude-haiku-5-5' })
+    const { result } = render()
+    await waitFor(() => expect(result.current.models).toHaveLength(2))
+    expect(result.current.model).toBe('claude-haiku-5-5')
+    act(() => result.current.setModel('gpt-5.6-luna'))
+    expect(result.current.model).toBe('gpt-5.6-luna')
+  })
+
+  it('falls back to Luna when a remembered model is not offered', async () => {
+    window.localStorage.setItem('matcha.scheduleAssistant.model', 'claude-haiku-5-5')
+    const { result } = render()
+    await waitFor(() => expect(result.current.threadId).toBeTruthy())
+    expect(result.current.models.map((option) => option.id)).toEqual(['gpt-5.6-luna'])
+    expect(result.current.model).toBe('gpt-5.6-luna')
+  })
+
+  it('keeps working when storage is unavailable', async () => {
+    const blocked = () => { throw new Error('blocked') }
+    vi.stubGlobal('localStorage', { getItem: blocked, setItem: blocked })
+    getSessionMock.mockResolvedValue({ ...session(), available_models: claudeModels })
+    const { result } = render()
+    await waitFor(() => expect(result.current.models).toHaveLength(2))
+    act(() => result.current.setModel('claude-haiku-5-5'))
+    expect(result.current.model).toBe('claude-haiku-5-5')
   })
 })
 

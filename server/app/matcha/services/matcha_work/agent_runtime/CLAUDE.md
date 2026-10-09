@@ -136,6 +136,12 @@ it otherwise), and should declare `resolve`.
   every call: the request, each response's output items as returned (reasoning
   comes back as `reasoning.encrypted_content` and goes back as is), and the
   tool outputs. A stored run sends only what is new.
+- **Claude runs keep the turn in-process.** When the platform *Agent model*
+  setting picks Claude, `ClaudeSession.keeps_history` makes the runner send only
+  what is new even on a private run: Messages has no stored-response chain to
+  opt out of, so `store=False`/`chain=False` and the encrypted-reasoning replay
+  do not apply. Web search becomes Anthropic's server tool; its results reach
+  the provenance gate as the same Responses items (`claude_client.output_items`).
 - **Card runs store `agent_result.v1`, byte for byte.** `agent_card/agent.py`
   keeps its limits and collaborators as module attributes read at call time,
   because its tests patch them there. Do not move them behind a re-export.

@@ -36,7 +36,7 @@ struct ThreadDetailView: View {
     @AppStorage("mw-preview-collapsed") private var previewCollapsed = false
 
     private var selectedModelValue: String? {
-        mwModelOptions.first { $0.id == selectedModelId }?.value
+        appState.modelValue(for: selectedModelId)
     }
 
     private var isBusinessAccount: Bool {
@@ -220,8 +220,8 @@ struct ThreadDetailView: View {
                 // locked rows open the paywall (server clamps the override
                 // regardless, so this is purely honest UI).
                 Menu {
-                    ForEach(mwModelOptions) { option in
-                        let locked = option.id == "pro" && !appState.canProModel
+                    ForEach(appState.modelOptions) { option in
+                        let locked = option.pro && !appState.canProModel
                         Button {
                             if locked {
                                 appState.presentPaywall(for: "ai_model_pro")
@@ -241,7 +241,7 @@ struct ThreadDetailView: View {
                     HStack(spacing: 3) {
                         Image(systemName: "cpu")
                             .font(.system(size: 10))
-                        Text(mwModelOptions.first { $0.id == selectedModelId }?.label ?? "Flash")
+                        Text(appState.modelOption(for: selectedModelId)?.label ?? "Flash")
                             .font(.system(size: 10, weight: .medium))
                     }
                     .padding(.horizontal, 7)

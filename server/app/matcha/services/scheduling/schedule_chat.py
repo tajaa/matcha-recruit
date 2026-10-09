@@ -39,6 +39,7 @@ from uuid import UUID
 from google.genai import types
 
 from app.core.feature_flags import get_company_features
+from app.core.services import anthropic_messages
 from app.core.services.model_json import clean_model_json
 from app.core.services.model_catalog import GEMINI_FLASH_LITE as FLASH_LITE_MODEL
 from app.matcha.services._shared.gemini import genai_env_client as _get_client
@@ -576,15 +577,26 @@ async def parse_schedule_request(
     `parsed["action"]` discriminates create vs edit; `build_proposal`/
     `build_edit_proposal` are the two downstream builders."""
     try:
-        resp = await _get_client().aio.models.generate_content(
-            model=FLASH_LITE_MODEL,
-            contents=_build_parse_prompt(content, today, week_start=week_start),
-            config=types.GenerateContentConfig(
-                temperature=0.2, response_mime_type="application/json",
-                max_output_tokens=800,
-            ),
-        )
-        parsed = _parse_schedule_json(resp.text or "")
+        prompt = _build_parse_prompt(content, today, week_start=week_start)
+        # Claude when the platform "Agent model" setting routes one-shots to
+        # it — same prompt, same parser, same None-on-failure contract.
+        claude_model = await anthropic_messages.claude_override()
+        if claude_model:
+            raw = await anthropic_messages.generate_text(
+                prompt, model=claude_model, json_output=True, effort="low",
+                max_tokens=800, timeout_seconds=30.0,
+            )
+        else:
+            resp = await _get_client().aio.models.generate_content(
+                model=FLASH_LITE_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.2, response_mime_type="application/json",
+                    max_output_tokens=800,
+                ),
+            )
+            raw = resp.text
+        parsed = _parse_schedule_json(raw or "")
     except Exception:
         logger.warning("schedule chat: parse failed", exc_info=True)
         return None

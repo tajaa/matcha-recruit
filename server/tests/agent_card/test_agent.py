@@ -250,3 +250,21 @@ async def test_a_hung_page_fetch_times_out_and_the_run_continues(monkeypatch, wi
     out = await agent.run_card_agent(**_kwargs())
     assert out["result"]["headline"] == "Organic Balm wins"
     assert "took too long" in client.calls[1]["input"][0]["output"]
+
+
+@pytest.mark.asyncio
+async def test_platform_setting_runs_the_card_agent_on_claude(monkeypatch, wired):
+    client = _FakeClient([_response(_call("finish", {"result": {**RESULT, "top_pick": None, "sources": []}}))])
+    client.keeps_history = True
+    luna = Mock()
+    monkeypatch.setattr(agent.anthropic_messages, "claude_override", AsyncMock(return_value="claude-haiku-5-5"))
+    monkeypatch.setattr(agent, "get_claude_client", Mock(return_value=client))
+    monkeypatch.setattr(agent, "get_luna_client", luna)
+    set_model = AsyncMock()
+    monkeypatch.setattr(agent.store, "set_run_model", set_model)
+    kwargs = _kwargs()
+    out = await agent.run_card_agent(**kwargs)
+    assert out["token_usage"]["model"] == "claude-haiku-5-5"
+    assert client.calls[0]["model"] == "claude-haiku-5-5"
+    luna.assert_not_called()
+    set_model.assert_awaited_once_with(kwargs["run_id"], "claude-haiku-5-5")

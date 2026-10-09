@@ -53,6 +53,9 @@ class ApiRateLimiter:
         if provider == "openai":
             self.hourly_limit = settings.openai_hourly_limit
             self.daily_limit = settings.openai_daily_limit
+        elif provider == "anthropic":
+            self.hourly_limit = settings.anthropic_hourly_limit
+            self.daily_limit = settings.anthropic_daily_limit
         else:
             self.hourly_limit = settings.gemini_hourly_limit
             self.daily_limit = settings.gemini_daily_limit

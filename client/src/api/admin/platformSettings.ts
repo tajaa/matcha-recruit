@@ -38,6 +38,9 @@ export type BetaInvitation = {
 
 export type PlatformSettings = {
   jurisdiction_research_model_mode?: string | null
+  /** 'default' (each feature on its own provider) or a Claude model id. */
+  agent_model?: string | null
+  anthropic_configured?: boolean
 }
 
 /** Per-board AutoPR grants. `capabilities` is keyed by Espresso project id;
@@ -63,6 +66,9 @@ export const adminSettingsApi = {
 
   setResearchModelMode: (mode: string) =>
     api.put<void>('/admin/platform-settings/jurisdiction-research-model-mode', { mode }),
+
+  setAgentModel: (model: string) =>
+    api.put<{ agent_model: string }>('/admin/platform-settings/agent-model', { model }),
 
   getAutoPRBoardCapabilities: () =>
     api.get<AutoPRBoardCapabilities>('/admin/platform-settings/autopr-board-capabilities'),

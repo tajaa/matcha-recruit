@@ -134,9 +134,12 @@ struct MWEntitlements: Codable {
 
 struct MWWorkspaceFlags: Codable {
     let espressoAssistant: Bool?
+    /// Whether the server offers Claude in the chat model picker.
+    let claudeModels: Bool?
 
     enum CodingKeys: String, CodingKey {
         case espressoAssistant = "espresso_assistant"
+        case claudeModels = "claude_models"
     }
 }
 
