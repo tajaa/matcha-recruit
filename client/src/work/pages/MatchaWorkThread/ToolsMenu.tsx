@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Wrench, Bot, Check } from 'lucide-react'
-import { MODEL_OPTIONS, THREAD_MODE_TOGGLES } from '../../components/panels/constants'
+import { THREAD_MODE_TOGGLES } from '../../components/panels/constants'
 import type { ThreadController } from './useThreadController'
 
 interface ToolsMenuProps {
@@ -15,7 +15,7 @@ interface ToolsMenuProps {
 export default function ToolsMenu({ c }: ToolsMenuProps) {
   const {
     isIndividual, hasFeature, modeValue, handleModeToggle, togglingMode,
-    agentMode, setAgentMode, selectedModel, setSelectedModel,
+    agentMode, setAgentMode, modelOptions, selectedModel, setSelectedModel,
   } = c
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -138,13 +138,10 @@ export default function ToolsMenu({ c }: ToolsMenuProps) {
 
           <div className="border-t border-w-line">
             <div className="px-3 py-2 text-w-dim font-medium">Model</div>
-            {MODEL_OPTIONS.map((m) => (
+            {modelOptions.map((m) => (
               <button
                 key={m.id}
-                onClick={() => {
-                  setSelectedModel(m.id)
-                  localStorage.setItem('mw-model', m.id)
-                }}
+                onClick={() => setSelectedModel(m.id)}
                 className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-w-surface2/60"
               >
                 <span className="w-3.5 shrink-0">{selectedModel === m.id && <Check size={14} className="text-w-accent" />}</span>

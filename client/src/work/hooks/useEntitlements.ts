@@ -86,6 +86,10 @@ export function useEntitlements() {
     can: (feature: string) => entitlements == null || entitlements.features[feature] === true,
     atLeast: (minimum: WorkPlan) => entitlements == null || ranks[entitlements.plan] >= ranks[minimum],
     quotas: entitlements?.quotas ?? null,
+    /** Whether the server offers Claude in the model picker. Defaults closed
+     *  while unknown: an option that appears then vanishes is worse than one
+     *  that appears a moment late. */
+    claudeModels: entitlements?.workspace?.claude_models === true,
     refetch,
   }
 }

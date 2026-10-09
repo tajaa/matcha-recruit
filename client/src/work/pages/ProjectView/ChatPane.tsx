@@ -4,7 +4,7 @@ import type { MWProject } from '../../types'
 import MessageBubble from '../../components/panels/MessageBubble'
 import RecruitingWizard from '../../components/panels/RecruitingWizard'
 import CollaboratorPanel from '../../components/panels/CollaboratorPanel'
-import { MODEL_OPTIONS, formatTokens } from '../../components/panels/constants'
+import { formatTokens } from '../../components/panels/constants'
 import type { ProjectViewModel } from './useProjectView'
 
 interface Props {
@@ -23,6 +23,7 @@ export function ChatPane({ vm, project, isRecruiting, hasPanelTab }: Props) {
     projectId,
     showCollaborators,
     setShowCollaborators,
+    modelOptions,
     selectedModel,
     setSelectedModel,
     usage24h,
@@ -97,14 +98,11 @@ export function ChatPane({ vm, project, isRecruiting, hasPanelTab }: Props) {
           {/* Model selector */}
           <select
             value={selectedModel}
-            onChange={(e) => {
-              setSelectedModel(e.target.value)
-              localStorage.setItem('mw-model', e.target.value)
-            }}
+            onChange={(e) => setSelectedModel(e.target.value)}
             className="shrink-0 text-[11px] font-medium rounded-full px-2.5 py-1 appearance-none cursor-pointer border-0"
             style={{ background: 'var(--color-w-surface2)', color: 'var(--color-w-dim)' }}
           >
-            {MODEL_OPTIONS.map((m) => (
+            {modelOptions.map((m) => (
               <option key={m.id} value={m.id}>{m.label}</option>
             ))}
           </select>

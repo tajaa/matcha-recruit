@@ -9,6 +9,7 @@ every catalog model must be priced identically in BOTH billing ledgers (an
 absent row falls to DEFAULT_PRICING / cost_usd=NULL).
 """
 from decimal import Decimal
+import re
 from pathlib import Path
 
 from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
@@ -65,7 +66,10 @@ class TestNoFleetLiteralsOutsideCatalog:
                 continue
             text = path.read_text(encoding="utf-8", errors="ignore")
             for model_id in (GEMINI_FLASH, GEMINI_FLASH_LITE):
-                if model_id in text:
+                # A whole id, not a substring: "gemini-3.7-flash-lite" (a
+                # retired picker id aliased in matcha_work_ai/_models.py) is a
+                # different model, not a re-literaled "gemini-3.7-flash".
+                if re.search(rf"(?<![\w.-]){re.escape(model_id)}(?![\w.-])", text):
                     offenders.append(f"{rel}: {model_id}")
         assert not offenders, f"fleet ids re-literaled outside the catalog: {offenders}"
 

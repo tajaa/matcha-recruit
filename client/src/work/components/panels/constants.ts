@@ -29,10 +29,37 @@ export const THREAD_MODE_TOGGLES: {
   { key: 'huume', label: 'Huume', icon: Bot, desc: 'Agentic assistant: drafts offers, stages hiring plans, runs Legal & Handbook Pilot from chat', badgeClass: 'bg-orange-700 text-orange-200', tipOn: 'Huume ON — agentic assistant: drafts offers, stages hiring plans, and (when enabled) runs Legal Pilot and Handbook Pilot from chat — waits for your approval before it acts. Handles the whole turn itself, so every other mode below is inert while this is on', tipOff: 'Huume OFF', feature: 'huume' },
 ]
 
-export const MODEL_OPTIONS = [
-  { id: 'gemini-3.7-flash-lite', label: 'Flash Lite 3.7' },
-  { id: 'gemini-3.7-flash', label: 'Flash 3.7' },
-] as const
+export type ModelOption = {
+  id: string
+  label: string
+  /** Needs the server's Anthropic key (`workspace.claude_models`). */
+  claude?: boolean
+  /** Needs the `ai_model_pro` entitlement — the server clamps it regardless. */
+  pro?: boolean
+}
+
+export const DEFAULT_MODEL = 'gemini-3.7-flash'
+
+// Ids must be in the server's SUPPORTED_MODELS (matcha_work_ai/_models.py) or
+// the pick silently runs the plan model. Flash Lite shipped as
+// 'gemini-3.7-flash-lite', which the server never supported — LEGACY_MODEL_IDS
+// maps a stored pick of it, and the server aliases it for older builds.
+export const MODEL_OPTIONS: readonly ModelOption[] = [
+  { id: 'gemini-3.5-flash-lite', label: 'Flash Lite 3.5' },
+  { id: DEFAULT_MODEL, label: 'Flash 3.7' },
+  { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', claude: true },
+  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', claude: true, pro: true },
+]
+
+export const LEGACY_MODEL_IDS: Record<string, string> = {
+  'gemini-3.7-flash-lite': 'gemini-3.5-flash-lite',
+}
+
+/** What the picker offers this person: Claude only while the server has it,
+ *  and Sonnet only on a plan with the pro model. */
+export function modelOptionsFor({ claude, pro }: { claude: boolean; pro: boolean }): ModelOption[] {
+  return MODEL_OPTIONS.filter((option) => (!option.claude || claude) && (!option.pro || pro))
+}
 
 export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
