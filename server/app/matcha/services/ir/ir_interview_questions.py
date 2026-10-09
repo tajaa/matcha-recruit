@@ -9,7 +9,7 @@ from typing import Optional, Any
 
 from app.core.services.genai_client import get_genai_client
 from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
-from app.core.services.anthropic_messages import generate_content_routed
+from app.core.services.anthropic_messages import RoutedClaudeError, generate_content_routed
 
 logger = logging.getLogger(__name__)
 
@@ -109,11 +109,13 @@ async def generate_investigation_questions(
         try:
             response = await generate_content_routed(
                 client, model=candidate, contents=prompt,
-                timeout_seconds=120, json_output=True,
+                timeout_seconds=120, json_output=True, rate_label=("ir_interview", "questions"),
             )
             break
         except Exception as exc:
-            if "404" in str(exc) or "NOT_FOUND" in str(exc):
+            # A Claude failure is not a missing Gemini model: the next
+            # candidate would resend the same Claude call.
+            if not isinstance(exc, RoutedClaudeError) and ("404" in str(exc) or "NOT_FOUND" in str(exc)):
                 logger.warning("Model %s unavailable, trying next: %s", candidate, exc)
                 continue
             raise

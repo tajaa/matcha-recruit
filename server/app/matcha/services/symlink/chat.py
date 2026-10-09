@@ -276,7 +276,7 @@ async def next_turn(
     try:
         response = await generate_content_routed(
             client, model=GEMINI_FLASH_LITE, contents=[prompt], config=config,
-            timeout_seconds=CHAT_TURN_TIMEOUT,
+            timeout_seconds=CHAT_TURN_TIMEOUT, rate_label=("symlink", "chat_turn"),
         )
         payload = json.loads((getattr(response, "text", None) or "").strip())
     except Exception as exc:

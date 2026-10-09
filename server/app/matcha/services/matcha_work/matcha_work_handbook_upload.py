@@ -264,6 +264,7 @@ async def check_handbook_relevance(text: str, client: Any = None) -> tuple[bool,
                 ),
                 timeout_seconds=RELEVANCE_TIMEOUT,
                 json_output=True,
+                rate_label=("handbook_upload", "relevance"),
             )
             raw = (response.text or "").strip()
             # Strip markdown code fences if present

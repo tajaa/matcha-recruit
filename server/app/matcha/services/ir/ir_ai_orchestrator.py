@@ -582,6 +582,7 @@ async def generate_guidance(
         response = await generate_content_routed(
             analyzer.client, model=analyzer.model, contents=prompt,
             timeout_seconds=60, json_output=True, effort="medium",
+            rate_label=("ir_copilot", "guidance"),
         )
         raw_text = (getattr(response, "text", None) or "").strip()
         payload = analyzer._parse_json_response(raw_text)

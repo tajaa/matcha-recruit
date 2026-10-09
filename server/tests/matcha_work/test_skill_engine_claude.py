@@ -103,7 +103,8 @@ def test_contents_translate_to_messages():
     assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant", "user"]
     user = messages[2]["content"]
     assert user[0]["type"] == "image" and user[0]["source"]["media_type"] == "image/png"
-    assert user[1] == {"type": "text", "text": "Draft the offer"}  # PDF + blank text dropped
+    assert user[1]["type"] == "document"  # a PDF goes along, as it did to Gemini
+    assert user[2] == {"type": "text", "text": "Draft the offer"}  # blank text dropped
     assert messages[-1]["content"][0]["text"] == "Continue."
 
 

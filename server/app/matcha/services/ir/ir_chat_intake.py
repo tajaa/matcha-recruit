@@ -180,7 +180,7 @@ async def next_turn(transcript: list[dict], known_fields: dict, *, location_opti
     try:
         response = await generate_content_routed(
             client, model=GEMINI_FLASH_LITE, contents=[prompt], config=config,
-            timeout_seconds=CHAT_TURN_TIMEOUT,
+            timeout_seconds=CHAT_TURN_TIMEOUT, rate_label=("ir_chat_intake", "turn"),
         )
         raw_text = (getattr(response, "text", None) or "").strip()
         payload = json.loads(raw_text)
@@ -328,6 +328,7 @@ async def next_public_turn(
             contents=[_build_public_turn_prompt(transcript, known_fields, intake_kind=intake_kind)],
             config=config,
             timeout_seconds=CHAT_TURN_TIMEOUT,
+            rate_label=("ir_chat_intake", "public_turn"),
         )
         payload = json.loads((getattr(response, "text", None) or "").strip())
     except Exception as exc:

@@ -183,6 +183,7 @@ async def _generate(session: dict, history: list[dict], corpus: dict, latest: st
     resp = await generate_content_routed(
         _genai(), model=MODEL, contents=prompt,
         timeout_seconds=_GEMINI_TIMEOUT, json_output=True, effort="medium",
+        rate_label=("handbook_pilot", "chat"),
     )
     data = _parse_json(getattr(resp, "text", "") or "")
     drafts, dropped = _coerce_drafts(data.get("proposed_drafts"), corpus.get("index", {}))

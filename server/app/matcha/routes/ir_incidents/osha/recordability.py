@@ -153,9 +153,11 @@ async def osha_ai_determination(
         if not row:
             raise HTTPException(status_code=404, detail="Incident not found")
 
-        category_data = _safe_json_loads(row.get("category_data"), {})
+    # The connection is released before the model call, which can take up
+    # to two minutes; holding it would starve the pool under a few requests.
+    category_data = _safe_json_loads(row.get("category_data"), {})
 
-        prompt = f"""Analyze this workplace incident for OSHA recordability.
+    prompt = f"""Analyze this workplace incident for OSHA recordability.
 
 Incident: {row['title']}
 Description: {row['description']}
@@ -178,24 +180,24 @@ Respond in JSON:
 {{"recordable": true/false, "classification": "death|days_away|restricted_duty|medical_treatment|loss_of_consciousness|significant_injury|not_recordable", "reasoning": "brief explanation"}}
 """
 
-        settings = get_settings()
-        try:
-            client = get_genai_client()
-            response = await generate_content_routed(
-                client, model=settings.analysis_model, contents=prompt,
-                timeout_seconds=120, json_output=True,
-            )
-            text = (response.text or "").strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-            result = json.loads(text)
-        except Exception as e:
-            logger.error("OSHA AI determination failed: %s", e)
-            raise HTTPException(status_code=500, detail="AI determination failed")
+    settings = get_settings()
+    try:
+        client = get_genai_client()
+        response = await generate_content_routed(
+            client, model=settings.analysis_model, contents=prompt,
+            timeout_seconds=120, json_output=True, rate_label=("ir_osha", "determine"),
+        )
+        text = (response.text or "").strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        result = json.loads(text)
+    except Exception as e:
+        logger.error("OSHA AI determination failed: %s", e)
+        raise HTTPException(status_code=500, detail="AI determination failed")
 
-        return {
-            "incident_id": str(incident_id),
-            "recordable": result.get("recordable", False),
-            "classification": result.get("classification", "not_recordable"),
-            "reasoning": result.get("reasoning", ""),
-        }
+    return {
+        "incident_id": str(incident_id),
+        "recordable": result.get("recordable", False),
+        "classification": result.get("classification", "not_recordable"),
+        "reasoning": result.get("reasoning", ""),
+    }
