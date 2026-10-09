@@ -220,6 +220,13 @@ async def test_connect_asks_google_for_the_named_abilities_incrementally(monkeyp
     assert parse_qs(urlsplit(plain["auth_url"]).query)["scope"][0].split() == GMAIL_SCOPES
 
 
+# No Anthropic key in tests (conftest), so the picker is the two Gemini rows.
+_GEMINI_PICKER = {
+    "chat_models": [{"id": "gemini-3.5-flash-lite", "locked": False}, {"id": "gemini-3.7-flash", "locked": False}],
+    "default_chat_model": "gemini-3.7-flash",
+}
+
+
 @pytest.mark.asyncio
 async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
     from app.matcha.services.matcha_work.agent_runtime import enqueue, quota
@@ -230,14 +237,14 @@ async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
     monkeypatch.setattr(enqueue, "workspace_enabled", enabled)
     company = uuid4()
     out = await entitlements_service.resolve_entitlements(uuid4(), company)
-    assert out["workspace"] == {"espresso_assistant": True, "claude_models": False}
+    assert out["workspace"] == {"espresso_assistant": True, "claude_models": False, **_GEMINI_PICKER}
     assert out["features"]["assistant"] is True
     assert out["quotas"]["assistant_runs"] == {"limit": 30, "used": 2, "remaining": 28}
     enabled.assert_awaited_once_with(company)
 
     # No workspace, or a lookup that fails: off, and the read still answers.
     assert (await entitlements_service.resolve_entitlements(uuid4(), None))["workspace"] == {
-        "espresso_assistant": False, "claude_models": False}
+        "espresso_assistant": False, "claude_models": False, **_GEMINI_PICKER}
     enabled.side_effect = RuntimeError("db down")
     assert (await entitlements_service.resolve_entitlements(uuid4(), company))["workspace"] == {
-        "espresso_assistant": False, "claude_models": False}
+        "espresso_assistant": False, "claude_models": False, **_GEMINI_PICKER}

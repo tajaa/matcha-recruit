@@ -1308,6 +1308,7 @@ async def _generate_turn(tc: TurnContext):
         slide_index=body.slide_index, dynamic_context=tc.dyn_ctx,
         model_override=body.model,
         company_id=str(company_id), user_id=str(current_user.id),
+        payer_mode=bool(tc.stream_payer_prompt),
     )
     yield _sse_data(
         {

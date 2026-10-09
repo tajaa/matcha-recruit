@@ -271,6 +271,7 @@
 		BC01DD22EE33FF44551100C2 /* APIErrorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B2 /* APIErrorTests.swift */; };
 		BC01DD22EE33FF44551100C3 /* CacheKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B3 /* CacheKeyTests.swift */; };
 		BC01DD22EE33FF44551100C4 /* ChannelMergeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B4 /* ChannelMergeTests.swift */; };
+		BC01DD22EE33FF44551100C5 /* ModelPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B5 /* ModelPickerTests.swift */; };
 		BC01DD22EE33FF445566AA01 /* BroadcastModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF445566BB01 /* BroadcastModels.swift */; };
 		BC01DD22EE33FF445566AA02 /* BroadcastService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF445566BB02 /* BroadcastService.swift */; };
 		BC01DD22EE33FF445566AA03 /* BroadcastPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF445566BB03 /* BroadcastPanelView.swift */; };
@@ -606,6 +607,7 @@
 		BC01DD22EE33FF44551100B2 /* APIErrorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIErrorTests.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF44551100B3 /* CacheKeyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheKeyTests.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF44551100B4 /* ChannelMergeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelMergeTests.swift; sourceTree = "<group>"; };
+		BC01DD22EE33FF44551100B5 /* ModelPickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPickerTests.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF445566BB01 /* BroadcastModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BroadcastModels.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF445566BB02 /* BroadcastService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BroadcastService.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF445566BB03 /* BroadcastPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BroadcastPanelView.swift; sourceTree = "<group>"; };
@@ -1179,6 +1181,7 @@
 				BC01DD22EE33FF44551100B2 /* APIErrorTests.swift */,
 				BC01DD22EE33FF44551100B3 /* CacheKeyTests.swift */,
 				BC01DD22EE33FF44551100B4 /* ChannelMergeTests.swift */,
+				BC01DD22EE33FF44551100B5 /* ModelPickerTests.swift */,
 			);
 			path = MatchaTests;
 			sourceTree = "<group>";
@@ -1657,6 +1660,7 @@
 				BC01DD22EE33FF44551100C2 /* APIErrorTests.swift in Sources */,
 				BC01DD22EE33FF44551100C3 /* CacheKeyTests.swift in Sources */,
 				BC01DD22EE33FF44551100C4 /* ChannelMergeTests.swift in Sources */,
+				BC01DD22EE33FF44551100C5 /* ModelPickerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

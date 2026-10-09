@@ -33,9 +33,34 @@ def _settings():
     load_settings()
 
 
+class _Limiter:
+    """Stands in for the anthropic rate-limit bucket (the real one opens a
+    direct DB connection when no pool exists)."""
+
+    def __init__(self, exc=None):
+        self.exc = exc
+        self.checked = 0
+        self.recorded = 0
+
+    async def check_limit(self, *_a):
+        self.checked += 1
+        if self.exc:
+            raise self.exc
+
+    async def record_call(self, *_a):
+        self.recorded += 1
+
+
 @pytest.fixture(autouse=True)
 def _no_db(monkeypatch):
     monkeypatch.setattr(_models, "get_matcha_work_model_mode", AsyncMock(return_value="normal"))
+
+
+@pytest.fixture(autouse=True)
+def limiter(monkeypatch):
+    fake = _Limiter()
+    monkeypatch.setattr(_claude, "get_rate_limiter", lambda provider="gemini": fake)
+    return fake
 
 
 @pytest.fixture
@@ -76,6 +101,43 @@ async def test_claude_pick_without_a_key_runs_gemini():
 async def test_stored_flash_lite_37_pick_finally_runs_flash_lite():
     # Both pickers shipped this id; it was never supported, so it ran Flash.
     assert await _models._get_model(SETTINGS, "gemini-3.7-flash-lite") == FLASH_LITE
+
+
+@pytest.mark.asyncio
+async def test_admin_agent_model_replaces_gemini_picks_and_the_plan_default(monkeypatch):
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_SONNET))
+    _plan(monkeypatch, "free")  # the admin's pick is not plan-gated
+    uid = str(uuid4())
+    assert await _models._get_model(SETTINGS, FLASH, user_id=uid) == CLAUDE_SONNET
+    assert await _models._get_model(SETTINGS, "gemini-3.7-flash-lite", user_id=uid) == CLAUDE_SONNET
+    assert await _models._get_model(SETTINGS, None, user_id=uid) == CLAUDE_SONNET
+
+
+@pytest.mark.asyncio
+async def test_explicit_claude_pick_still_wins_over_the_admin_model(monkeypatch, claude_on):
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_SONNET))
+    _plan(monkeypatch, "free")
+    assert await _models._get_model(SETTINGS, CLAUDE_HAIKU, user_id=str(uuid4())) == CLAUDE_HAIKU
+
+
+@pytest.mark.asyncio
+async def test_a_locked_claude_pick_runs_the_admin_model_not_gemini(monkeypatch, claude_on):
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_HAIKU))
+    _plan(monkeypatch, "lite")
+    assert await _models._get_model(SETTINGS, CLAUDE_SONNET, user_id=str(uuid4())) == CLAUDE_HAIKU
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_SONNET))
+    assert await _models._get_model(SETTINGS, CLAUDE_SONNET, user_id=str(uuid4())) == CLAUDE_SONNET
+
+
+@pytest.mark.asyncio
+async def test_gemini_only_ignores_the_admin_model_and_claude_picks(monkeypatch, claude_on):
+    override = AsyncMock(return_value=CLAUDE_SONNET)
+    monkeypatch.setattr(anthropic_messages, "claude_override", override)
+    _plan(monkeypatch, "free")
+    uid = str(uuid4())
+    assert await _models._get_model(SETTINGS, CLAUDE_HAIKU, user_id=uid, gemini_only=True) == FLASH
+    assert await _models._get_model(SETTINGS, FLASH_LITE, user_id=uid, gemini_only=True) == FLASH_LITE
+    override.assert_not_awaited()
 
 
 def test_trivial_turn_downgrade_stays_on_the_picked_provider():
@@ -243,7 +305,7 @@ async def test_generate_claude_timeout_is_the_usual_slow_reply(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_payer_mode_keeps_gemini_search_on_a_claude_pick(monkeypatch):
-    get_model = AsyncMock(side_effect=[CLAUDE_HAIKU, FLASH])
+    get_model = AsyncMock(return_value=FLASH)
     monkeypatch.setattr(provider_module, "_get_model", get_model)
     seen = {}
 
@@ -258,7 +320,7 @@ async def test_payer_mode_keeps_gemini_search_on_a_claude_pick(monkeypatch):
                                   current_state={}, payer_mode_prompt="PAYER", model_override=CLAUDE_HAIKU)
     assert seen["model"] == FLASH
     assert out.assistant_reply == "Covered under LCD L1234."
-    assert get_model.await_args_list[1].args[1] is None  # re-picked with no override
+    assert get_model.await_args.kwargs["gemini_only"] is True
 
 
 # --- The picker flag ------------------------------------------------------------
@@ -268,7 +330,228 @@ async def test_entitlements_say_whether_claude_is_available(monkeypatch):
     _plan(monkeypatch, "pro")
     out = await entitlements_service.resolve_entitlements(uuid4(), None)
     assert out["workspace"]["claude_models"] is False
+    assert [m["id"] for m in out["workspace"]["chat_models"]] == [FLASH_LITE, FLASH]
     monkeypatch.setattr(anthropic_messages, "anthropic_configured", lambda: True)
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_HAIKU))
     out = await entitlements_service.resolve_entitlements(uuid4(), None)
     assert out["workspace"]["claude_models"] is True
+    assert out["workspace"]["default_chat_model"] == CLAUDE_HAIKU
     assert out["features"]["ai_model_pro"] is True
+
+
+def _rows(rows):
+    return {row["id"]: row["locked"] for row in rows}
+
+
+@pytest.mark.asyncio
+async def test_picker_without_a_key_is_the_gemini_rows():
+    rows, default = await _models.picker_models(pro_allowed=True)
+    assert _rows(rows) == {FLASH_LITE: False, FLASH: False} and default == FLASH
+
+
+@pytest.mark.asyncio
+async def test_picker_locks_sonnet_without_the_pro_entitlement(claude_on):
+    rows, default = await _models.picker_models(pro_allowed=False)
+    assert _rows(rows) == {FLASH_LITE: False, FLASH: False, CLAUDE_HAIKU: False, CLAUDE_SONNET: True}
+    rows, _ = await _models.picker_models(pro_allowed=True)
+    assert _rows(rows)[CLAUDE_SONNET] is False
+    assert default == FLASH
+
+
+@pytest.mark.asyncio
+async def test_picker_under_an_admin_model_is_claude_only(monkeypatch, claude_on):
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_HAIKU))
+    rows, default = await _models.picker_models(pro_allowed=False)
+    assert _rows(rows) == {CLAUDE_HAIKU: False, CLAUDE_SONNET: True} and default == CLAUDE_HAIKU
+    # The admin's own model is never locked, whatever the plan.
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_SONNET))
+    rows, default = await _models.picker_models(pro_allowed=False)
+    assert _rows(rows) == {CLAUDE_HAIKU: False, CLAUDE_SONNET: False} and default == CLAUDE_SONNET
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("admin", [None, CLAUDE_HAIKU, CLAUDE_SONNET])
+@pytest.mark.parametrize("plan", ["free", "pro"])
+async def test_every_unlocked_picker_row_is_what_the_turn_runs(monkeypatch, claude_on, admin, plan):
+    """The rows the apps show and the model a turn runs come from one rule:
+    pick an unlocked row and that model runs; pick a locked one and the
+    default runs, never something the menu didn't show."""
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=admin))
+    _plan(monkeypatch, plan)
+    rows, default = await _models.picker_models(pro_allowed=plan == "pro")
+    uid = str(uuid4())
+    for row in rows:
+        ran = await _models._get_model(SETTINGS, row["id"], user_id=uid)
+        assert ran == (default if row["locked"] else row["id"])
+
+
+@pytest.mark.asyncio
+async def test_payer_estimate_prices_the_gemini_model_it_runs_on(monkeypatch):
+    get_model = AsyncMock(return_value=FLASH)
+    monkeypatch.setattr(provider_module, "_get_model", get_model)
+    await GeminiProvider().estimate_usage([{"role": "user", "content": "Is CPT 99213 covered?"}], {},
+                                          model_override=CLAUDE_HAIKU, payer_mode=True)
+    assert get_model.await_args.kwargs["gemini_only"] is True
+    await GeminiProvider().estimate_usage([{"role": "user", "content": "hi"}], {}, model_override=CLAUDE_HAIKU)
+    assert get_model.await_args.kwargs["gemini_only"] is False
+
+
+# --- Images and the anthropic bucket ------------------------------------------
+
+def _image(fmt: str, size=(64, 48), mode="RGB", noise=False) -> bytes:
+    import io
+    import os
+
+    from PIL import Image
+
+    if noise:
+        img = Image.frombytes(mode, size, os.urandom(size[0] * size[1] * len(mode)))
+    else:
+        img = Image.new(mode, size, (200, 30, 30, 128) if mode == "RGBA" else (200, 30, 30))
+    out = io.BytesIO()
+    img.save(out, format=fmt)
+    return out.getvalue()
+
+
+def _dims(data: bytes) -> tuple[int, int]:
+    import io
+
+    from PIL import Image
+
+    with Image.open(io.BytesIO(data)) as img:
+        return img.size
+
+
+def _turn(*images: tuple[bytes, str]) -> list:
+    parts = [types.Part.from_bytes(data=d, mime_type=m) for d, m in images]
+    return [types.Content(role="user", parts=[*parts, types.Part(text="What is this?")])]
+
+
+def test_small_supported_image_passes_through_with_the_real_media_type():
+    png = _image("PNG")
+    assert _claude.normalize_image(png) == (png, "image/png")  # untouched, even if declared jpeg
+
+
+def test_bmp_and_tiff_are_converted_not_dropped():
+    for fmt in ("BMP", "TIFF"):
+        data, mime = _claude.normalize_image(_image(fmt))
+        assert mime == "image/jpeg"
+        assert _dims(data) == (64, 48)
+
+
+def test_large_image_shrinks_to_claudes_long_edge():
+    data, mime = _claude.normalize_image(_image("PNG", size=(4000, 3000)))
+    assert max(_dims(data)) == 2576
+
+
+def test_oversized_file_is_reencoded_under_the_size_cap():
+    noisy = _image("PNG", size=(2400, 1800), noise=True)  # ~13 MB, inside 2576 px
+    assert len(noisy) > _claude._MAX_IMAGE_B64
+    data, mime = _claude.normalize_image(noisy)
+    assert mime == "image/jpeg"
+    assert _claude._b64_len(len(data)) <= _claude._MAX_IMAGE_B64
+
+
+def test_transparent_image_stays_png():
+    data, mime = _claude.normalize_image(_image("PNG", size=(3000, 1000), mode="RGBA"))
+    assert mime == "image/png"
+    assert max(_dims(data)) == 2576
+
+
+def test_exif_rotated_photo_is_turned_upright():
+    import io
+
+    from PIL import Image
+
+    img = Image.new("RGB", (80, 40), (10, 120, 200))
+    exif = img.getexif()
+    exif[0x0112] = 6  # stored sideways; display rotated 90°
+    out = io.BytesIO()
+    img.save(out, format="JPEG", exif=exif.tobytes())
+    data, mime = _claude.normalize_image(out.getvalue())
+    assert mime == "image/jpeg"
+    assert _dims(data) == (40, 80)
+
+
+def test_unreadable_image_is_none():
+    assert _claude.normalize_image(b"ftypheic not really an image") is None
+
+
+def test_many_images_drop_to_2000px():
+    big = _image("PNG", size=(2400, 1200))
+    out = _claude._normalize_contents(_turn(*[(big, "image/png")] * 21))
+    sizes = [_dims(p.inline_data.data) for p in out[0].parts if p.inline_data]
+    assert len(sizes) == 21 and all(max(s) == 2000 for s in sizes)
+
+
+def test_text_only_turn_is_returned_as_is():
+    contents = [types.Content(role="user", parts=[types.Part(text="hi")])]
+    assert _claude._normalize_contents(contents) is contents
+
+
+@pytest.mark.asyncio
+async def test_turn_contents_none_when_the_bucket_is_full(limiter):
+    from app.core.services.rate_limiter import RateLimitExceeded
+
+    limiter.exc = RateLimitExceeded("anthropic API hourly limit exceeded", "hourly", 200, 200)
+    assert await _claude.claude_turn_contents(_turn((_image("PNG"), "image/png"))) is None
+
+
+@pytest.mark.asyncio
+async def test_turn_contents_allowed_when_the_limiter_itself_fails(limiter):
+    limiter.exc = OSError("db down")
+    contents = [types.Content(role="user", parts=[types.Part(text="hi")])]
+    assert await _claude.claude_turn_contents(contents) is contents
+
+
+@pytest.mark.asyncio
+async def test_record_claude_call_never_raises(monkeypatch):
+    class _Broken:
+        async def record_call(self, *_a):
+            raise OSError("db down")
+
+    monkeypatch.setattr(_claude, "get_rate_limiter", lambda provider="gemini": _Broken())
+    await _claude.record_claude_call()
+
+
+@pytest.mark.asyncio
+async def test_claude_turn_counts_in_the_anthropic_bucket(monkeypatch, limiter):
+    monkeypatch.setattr(provider_module, "_get_model", AsyncMock(return_value=CLAUDE_HAIKU))
+    monkeypatch.setattr(provider_module, "call_claude", AsyncMock(return_value=('{"reply": "ok"}', None)))
+    await GeminiProvider().generate(messages=[{"role": "user", "content": "Summarize this"}], current_state={})
+    assert (limiter.checked, limiter.recorded) == (1, 1)
+
+
+@pytest.mark.asyncio
+async def test_turn_with_an_unreadable_image_runs_on_gemini(monkeypatch):
+    get_model = AsyncMock(side_effect=[CLAUDE_HAIKU, FLASH])
+    monkeypatch.setattr(provider_module, "_get_model", get_model)
+    claude = AsyncMock()
+    monkeypatch.setattr(provider_module, "call_claude", claude)
+    provider = GeminiProvider()
+    gemini_reply = provider_module.AIResponse(assistant_reply="Looks like a receipt.", structured_update=None)
+    with patch.object(provider, "_call_gemini", return_value=gemini_reply) as gemini:
+        out = await provider.generate(
+            messages=[{"role": "user", "content": "What is this photo of?",
+                       "image_parts": [(b"not decodable heic bytes", "image/heic")]}],
+            current_state={},
+        )
+    claude.assert_not_awaited()
+    assert out.assistant_reply == "Looks like a receipt."
+    assert gemini.call_args.args[4] == FLASH  # the model argument
+    assert get_model.await_args_list[1].kwargs["gemini_only"] is True
+
+
+@pytest.mark.asyncio
+async def test_claude_turn_sends_the_converted_image(monkeypatch):
+    monkeypatch.setattr(provider_module, "_get_model", AsyncMock(return_value=CLAUDE_HAIKU))
+    claude = AsyncMock(return_value=('{"reply": "A red square."}', None))
+    monkeypatch.setattr(provider_module, "call_claude", claude)
+    await GeminiProvider().generate(
+        messages=[{"role": "user", "content": "What is this?",
+                   "image_parts": [(_image("BMP"), "image/bmp")]}],
+        current_state={},
+    )
+    sent = claude.await_args.kwargs["contents"]
+    image = next(p for c in sent for p in c.parts if p.inline_data)
+    assert image.inline_data.mime_type == "image/jpeg"

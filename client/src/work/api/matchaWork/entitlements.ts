@@ -6,7 +6,14 @@ export type WorkEntitlements = {
   plan: WorkPlan
   features: Record<string, boolean>
   /** What the workspace has switched on, as opposed to what the plan allows. */
-  workspace?: { espresso_assistant?: boolean; claude_models?: boolean }
+  workspace?: {
+    espresso_assistant?: boolean
+    claude_models?: boolean
+    /** The chat model picker's rows and the row it starts on — the server's
+     *  rule (`matcha_work_ai._models.picker_models`), not re-derived here. */
+    chat_models?: { id: string; locked: boolean }[]
+    default_chat_model?: string
+  }
   quotas: {
     token_limit: number
     window_hours: number
