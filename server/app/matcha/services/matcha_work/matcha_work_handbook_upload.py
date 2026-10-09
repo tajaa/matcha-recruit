@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import math
@@ -27,6 +26,7 @@ from ....core.services.handbook_service import (
 from app.core.services.model_catalog import GEMINI_FLASH
 from ....core.services.storage import get_storage
 from ..er.er_document_parser import ERDocumentParser
+from app.core.services.anthropic_messages import generate_content_routed
 from . import matcha_work_document as doc_svc
 from .matcha_work_ai import _infer_skill_from_state, get_ai_provider
 
@@ -251,20 +251,20 @@ async def check_handbook_relevance(text: str, client: Any = None) -> tuple[bool,
     if client is not None:
         try:
             sample = text[:RELEVANCE_SAMPLE_CHARS]
-            response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    client.models.generate_content,
-                    model=RELEVANCE_MODEL,
-                    contents=[types.Content(
-                        role="user",
-                        parts=[types.Part(text=sample)],
-                    )],
-                    config=types.GenerateContentConfig(
-                        system_instruction=RELEVANCE_SYSTEM_PROMPT,
-                        temperature=0.0,
-                    ),
+            response = await generate_content_routed(
+                client,
+                model=RELEVANCE_MODEL,
+                contents=[types.Content(
+                    role="user",
+                    parts=[types.Part(text=sample)],
+                )],
+                config=types.GenerateContentConfig(
+                    system_instruction=RELEVANCE_SYSTEM_PROMPT,
+                    temperature=0.0,
                 ),
-                timeout=RELEVANCE_TIMEOUT,
+                timeout_seconds=RELEVANCE_TIMEOUT,
+                json_output=True,
+                rate_label=("handbook_upload", "relevance"),
             )
             raw = (response.text or "").strip()
             # Strip markdown code fences if present

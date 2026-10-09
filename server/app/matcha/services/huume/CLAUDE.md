@@ -153,11 +153,13 @@ provider it was built on. One function decides: `core/services/anthropic_message
 Huume on every surface, the Espresso repo/task-draft agents, agent cards + the Espresso assistant
 (`agent_runtime`), the single-shot Luna calls (credential templates, sym_chat, inventory insight +
 waste narration, AI ticket draft), and EMS channel `@huume` (classify, inventory extraction,
-schedule parse, receipt parse, the ask loop — those were Gemini), and the matcha-work / Espresso
+schedule parse, receipt parse, the ask loop — those were Gemini), the matcha-work / Espresso
 chat skill engine (`matcha_work_ai._models._get_model`: a Gemini pick or the plan default runs the
 admin model, an explicit Claude pick still wins, payer mode stays Gemini; `picker_models` is the
-picker rule both apps render from `entitlements.workspace.chat_models`). IR's analyzer and
-everything else stay where they were. Callers import the MODULE and call through it so
+picker rule both apps render from `entitlements.workspace.chat_models`), and the Gemini one-shots
+behind Sym-link chat, IR analysis (analyzer, copilot guidance, chat intake, consistency, OSHA,
+interview questions, IR precedent) and handbooks (audit, guided draft, Handbook Pilot, upload
+check). Voice dictation, ER and everything else stay where they were. Callers import the MODULE and call through it so
 tests patch `anthropic_messages.claude_override`; `tests/conftest.py` blanks `ANTHROPIC_API_KEY` so
 no test reaches the setting unless it opts in.
 
@@ -189,6 +191,17 @@ manager who never picked starts there.
 - One-shots use `anthropic_messages.generate_text` (+ `parse_json_object`,
   `image_block`/`pdf_block`); `max_tokens` is floored at 4096 because thinking
   shares the cap.
+- Gemini `generate_content` sites go through `generate_content_routed`, a
+  drop-in that keeps the site's own timeout (retries included) and returns an
+  object with `.text`. It checks and counts the anthropic bucket under the
+  site's `rate_label`, and runs the call on Gemini when that bucket is full or
+  an attachment is past Claude's limits (32 MB request, 600 PDF pages). JSON
+  replies are reduced to the bare value (object or array), a reply cut off at
+  `max_tokens` is an error, and a Claude failure is a `RoutedClaudeError` so a
+  Gemini model-fallback loop doesn't resend it. A site that counts its own
+  calls in the Gemini bucket skips that when `ran_on_claude(response)`.
+  `gemini_contents_to_messages` is the one Gemini → Messages translator (the
+  skill engine's `_claude.to_messages` uses it too).
 - Own rate-limit bucket (`ApiRateLimiter(provider="anthropic")`,
   `ANTHROPIC_HOURLY_LIMIT`/`ANTHROPIC_DAILY_LIMIT`) and own ledger rows
   (`ai_usage.record_anthropic_response`, priced in both pricing tables).

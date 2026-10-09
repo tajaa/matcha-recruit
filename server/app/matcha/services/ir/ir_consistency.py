@@ -5,12 +5,12 @@ resolution stats, and a consistency insight from precedent data.
 """
 
 import json
-import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Optional
 
 from app.core.services.model_catalog import GEMINI_FLASH
+from app.core.services.anthropic_messages import generate_content_routed, ran_on_claude
 
 logger = logging.getLogger(__name__)
 
@@ -98,15 +98,14 @@ async def _categorize_actions(
         precedents_text="\n\n".join(lines),
     )
 
-    response = await asyncio.wait_for(
-        client.aio.models.generate_content(
-            model=GEMINI_FLASH,
-            contents=prompt,
-        ),
-        timeout=GEMINI_CALL_TIMEOUT,
+    response = await generate_content_routed(
+        client, model=GEMINI_FLASH, contents=prompt,
+        timeout_seconds=GEMINI_CALL_TIMEOUT, json_output=True,
+        rate_label=("ir_analysis", "consistency_categorize"),
     )
 
-    await rate_limiter.record_call("ir_analysis", "consistency_categorize")
+    if not ran_on_claude(response):  # a Claude call counted in its own bucket
+        await rate_limiter.record_call("ir_analysis", "consistency_categorize")
 
     text = response.text.strip()
     if text.startswith("```json"):
@@ -155,15 +154,13 @@ async def _generate_insight(
         confidence=confidence,
     )
 
-    response = await asyncio.wait_for(
-        client.aio.models.generate_content(
-            model=GEMINI_FLASH,
-            contents=prompt,
-        ),
-        timeout=GEMINI_CALL_TIMEOUT,
+    response = await generate_content_routed(
+        client, model=GEMINI_FLASH, contents=prompt, timeout_seconds=GEMINI_CALL_TIMEOUT,
+        rate_label=("ir_analysis", "consistency_insight"),
     )
 
-    await rate_limiter.record_call("ir_analysis", "consistency_insight")
+    if not ran_on_claude(response):  # a Claude call counted in its own bucket
+        await rate_limiter.record_call("ir_analysis", "consistency_insight")
 
     return response.text.strip()
 

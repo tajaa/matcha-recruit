@@ -7,7 +7,6 @@ anything. Best-effort, never raises — a failed turn returns the known fields
 unchanged with error=True so the UI can offer "finish in the form".
 """
 
-import asyncio
 import json
 import logging
 from typing import Literal, Optional
@@ -17,6 +16,7 @@ from google.genai import types
 from app.core.services.model_catalog import GEMINI_FLASH_LITE
 from app.matcha.services._shared.gemini import genai_env_client
 from app.matcha.services.ir.ir_voice_parser import _VOICE_PARSE_SAFETY_SETTINGS
+from app.core.services.anthropic_messages import generate_content_routed
 
 logger = logging.getLogger(__name__)
 
@@ -178,11 +178,9 @@ async def next_turn(transcript: list[dict], known_fields: dict, *, location_opti
     prompt = _build_turn_prompt(transcript, known_fields, location_options)
 
     try:
-        response = await asyncio.wait_for(
-            client.aio.models.generate_content(
-                model=GEMINI_FLASH_LITE, contents=[prompt], config=config,
-            ),
-            timeout=CHAT_TURN_TIMEOUT,
+        response = await generate_content_routed(
+            client, model=GEMINI_FLASH_LITE, contents=[prompt], config=config,
+            timeout_seconds=CHAT_TURN_TIMEOUT, rate_label=("ir_chat_intake", "turn"),
         )
         raw_text = (getattr(response, "text", None) or "").strip()
         payload = json.loads(raw_text)
@@ -324,13 +322,13 @@ async def next_public_turn(
         safety_settings=_VOICE_PARSE_SAFETY_SETTINGS,
     )
     try:
-        response = await asyncio.wait_for(
-            client.aio.models.generate_content(
-                model=GEMINI_FLASH_LITE,
-                contents=[_build_public_turn_prompt(transcript, known_fields, intake_kind=intake_kind)],
-                config=config,
-            ),
-            timeout=CHAT_TURN_TIMEOUT,
+        response = await generate_content_routed(
+            client,
+            model=GEMINI_FLASH_LITE,
+            contents=[_build_public_turn_prompt(transcript, known_fields, intake_kind=intake_kind)],
+            config=config,
+            timeout_seconds=CHAT_TURN_TIMEOUT,
+            rate_label=("ir_chat_intake", "public_turn"),
         )
         payload = json.loads((getattr(response, "text", None) or "").strip())
     except Exception as exc:

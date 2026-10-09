@@ -41,7 +41,7 @@ from google.genai import types
 from PIL import Image, ImageOps
 
 from app.core.services.ai_usage import record_anthropic_response
-from app.core.services.anthropic_messages import get_async_client, image_block, request_extras
+from app.core.services.anthropic_messages import gemini_contents_to_messages, get_async_client, request_extras
 from app.core.services.rate_limiter import RateLimitExceeded, get_rate_limiter
 
 logger = logging.getLogger(__name__)
@@ -187,37 +187,9 @@ async def record_claude_call() -> None:
 
 
 def to_messages(contents: list[Any]) -> list[dict[str, Any]]:
-    """The provider's Gemini `contents` → Messages turns.
-
-    Text parts and inline images map one to one; empty text and image types
-    Messages rejects are dropped; adjacent same-role turns merge. A thread
-    that opens or ends on the assistant is padded so it opens and ends on
-    the user (assistant prefill is a 400 on these models).
-    """
-    messages: list[dict[str, Any]] = []
-    for content in contents:
-        role = "assistant" if getattr(content, "role", "user") == "model" else "user"
-        blocks: list[dict[str, Any]] = []
-        for part in getattr(content, "parts", None) or []:
-            text = getattr(part, "text", None)
-            inline = getattr(part, "inline_data", None)
-            if text and text.strip():
-                blocks.append({"type": "text", "text": text})
-            elif inline is not None and role == "user":
-                block = image_block(getattr(inline, "data", None) or b"", getattr(inline, "mime_type", None))
-                if block:
-                    blocks.append(block)
-        if not blocks:
-            continue
-        if messages and messages[-1]["role"] == role:
-            messages[-1]["content"].extend(blocks)
-        else:
-            messages.append({"role": role, "content": blocks})
-    if not messages or messages[0]["role"] != "user":
-        messages.insert(0, {"role": "user", "content": [{"type": "text", "text": "(conversation start)"}]})
-    if messages[-1]["role"] != "user":
-        messages.append({"role": "user", "content": [{"type": "text", "text": "Continue."}]})
-    return messages
+    """The provider's Gemini `contents` → Messages turns, via the one shared
+    translator (`anthropic_messages.gemini_contents_to_messages`)."""
+    return gemini_contents_to_messages(contents)
 
 
 def _usage(message: Any, model: str) -> dict[str, Any] | None:

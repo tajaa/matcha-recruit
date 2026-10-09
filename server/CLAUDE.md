@@ -73,7 +73,12 @@ server/
 - **Anthropic (opt-in)**: Admin → Settings → *Agent model* routes every Luna workload and EMS
   channel `@huume` (Gemini) to Claude Haiku 5.5 / Sonnet 5.5, plus the matcha-work chat skill
   engine (a Gemini pick or the plan default runs the admin model; an explicit Claude pick still
-  wins; payer mode stays Gemini via `_get_model(gemini_only=True)`); the schedule assistant also
+  wins; payer mode stays Gemini via `_get_model(gemini_only=True)`) and the Gemini one-shots behind
+  Sym-link chat, IR analysis (analyzer runners, copilot guidance, chat intake, consistency, OSHA
+  recordability, interview questions, IR precedent enrichment) and handbooks (audit, guided draft,
+  Handbook Pilot, upload relevance check) via `anthropic_messages.generate_content_routed` — a
+  drop-in for `client.aio.models.generate_content` that returns an object with `.text`. Voice
+  dictation, Google-Search-grounded research and ER stay on Gemini. The schedule assistant also
   has a per-chat dropdown. One decision point (`core/services/anthropic_messages.claude_override()`), the
   official `anthropic` SDK, `services/huume/claude_client.ClaudeSession` for tool loops,
   `anthropic_messages.generate_text` for one-shots, own `provider="anthropic"` rate-limit bucket,
