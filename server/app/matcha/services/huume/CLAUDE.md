@@ -147,7 +147,7 @@ client are retired. The Huume loop remains bounded at eight model calls and a
 
 **Admin → Settings → AI models** (`platform_settings.agent_models`, PUT
 `/admin/platform-settings/agent-models`, refused for Claude while `ANTHROPIC_API_KEY` is unset). One
-choice per app (Matcha, Espresso, Gummfit; Tell-Us next), each product row following its app
+choice per app (Matcha, Espresso, Gummfit, Tell-Us), each product row following its app
 ("inherit") or overriding it. A choice is `default` (the product's built-in provider) or a Claude
 id. The registry of apps and products is `core/services/agent_surfaces.py` — the admin page renders
 it from the GET payload, and `tests/core/test_agent_surfaces.py` fails if a call site names a key
