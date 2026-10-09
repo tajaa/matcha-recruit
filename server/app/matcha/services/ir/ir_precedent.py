@@ -13,6 +13,7 @@ import logging
 import re
 from datetime import datetime, timedelta
 from typing import Any, Optional
+from app.core.services import agent_surfaces
 
 logger = logging.getLogger(__name__)
 
@@ -329,7 +330,7 @@ async def enrich_with_semantics(
     # JSON extraction that it previously lacked — same scoring, more resilient call.
     return await run_semantic_enrichment(
         prompt, domain="ir_analysis", api_key=api_key, timeout=GEMINI_CALL_TIMEOUT,
-        agent_model=True,
+        surface=agent_surfaces.MATCHA_IR,
     )
 
 

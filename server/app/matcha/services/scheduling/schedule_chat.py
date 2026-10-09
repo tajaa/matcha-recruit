@@ -39,7 +39,7 @@ from uuid import UUID
 from google.genai import types
 
 from app.core.feature_flags import get_company_features
-from app.core.services import anthropic_messages
+from app.core.services import agent_surfaces, anthropic_messages
 from app.core.services.model_json import clean_model_json
 from app.core.services.model_catalog import GEMINI_FLASH_LITE as FLASH_LITE_MODEL
 from app.matcha.services._shared.gemini import genai_env_client as _get_client
@@ -578,9 +578,9 @@ async def parse_schedule_request(
     `build_edit_proposal` are the two downstream builders."""
     try:
         prompt = _build_parse_prompt(content, today, week_start=week_start)
-        # Claude when the platform "Agent model" setting routes one-shots to
+        # Claude when the admin "AI models" setting routes one-shots to
         # it — same prompt, same parser, same None-on-failure contract.
-        claude_model = await anthropic_messages.claude_override()
+        claude_model = await anthropic_messages.claude_override(agent_surfaces.MATCHA_SCHEDULING)
         if claude_model:
             raw = await anthropic_messages.generate_text(
                 prompt, model=claude_model, json_output=True, effort="low",

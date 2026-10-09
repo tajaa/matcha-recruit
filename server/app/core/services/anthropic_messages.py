@@ -1,12 +1,13 @@
-"""Anthropic Claude: the shared client, the platform "Agent model" switch, and
+"""Anthropic Claude: the shared client, the per-app "AI models" switch, and
 a one-shot text/JSON call.
 
 Claude is an opt-in alternative for the workloads that run on OpenAI Luna or
 on Gemini's one-shot JSON calls. Which model runs is decided in ONE place —
-`claude_override()` — from the admin setting `platform_settings.agent_model`
-(Admin → Settings). "default" keeps every surface on the provider it was
-built on; a Claude id routes them all to that model. The schedule assistant's
-own dropdown is the one per-turn override on top of it.
+`claude_override(surface)` — from the admin setting `agent_models` (Admin →
+Settings → AI models): one choice per app, overridable per product, keyed by
+the surfaces in `agent_surfaces.py`. "default" keeps a surface on the
+provider it was built on; a Claude id routes it to that model. The schedule
+assistant's own dropdown is the one per-turn override on top of it.
 
 The multi-turn tool loops use `services/huume/claude_client.ClaudeSession`;
 this module is the single-shot half plus the pieces both share.
@@ -74,21 +75,21 @@ def request_extras(model: str) -> dict[str, Any]:
     return {}
 
 
-async def claude_override() -> Optional[str]:
-    """The Claude model the platform "Agent model" setting routes agent and
-    one-shot workloads to, or None to keep each surface on its own provider.
+async def claude_override(surface: str) -> Optional[str]:
+    """The Claude model the admin "AI models" setting routes this surface to
+    (an `agent_surfaces` key), or None to keep it on its own provider.
 
-    Never raises: a missing key, an unreadable setting or an unknown value all
-    mean "default", so a settings outage can never take a surface down.
+    Never raises: a missing key, an unreadable setting or a non-Claude value
+    all mean "default", so a settings outage can never take a surface down.
     """
     if not anthropic_configured():
         return None
     try:
         from app.core.services.platform_settings import get_agent_model
 
-        choice = await get_agent_model()
+        choice = await get_agent_model(surface)
     except Exception:
-        logger.warning("agent model setting unreadable; using each surface's default", exc_info=True)
+        logger.warning("agent model setting unreadable; using %s's default", surface, exc_info=True)
         return None
     return choice if choice in CLAUDE_MODELS else None
 
@@ -352,11 +353,11 @@ async def generate_content_routed(
     json_output: bool | None = None,
     max_tokens: int = 16_000,
     effort: str = "low",
+    surface: str | None,
     rate_label: tuple[str, str] = ("agent_model", "routed"),
-    allow_claude: bool = True,
 ) -> Any:
-    """`client.aio.models.generate_content`, unless the admin Agent model names
-    a Claude model, in which case the same request runs there.
+    """`client.aio.models.generate_content`, unless the admin AI-model setting
+    routes `surface` to Claude, in which case the same request runs there.
 
     Returns the Gemini response, or an object with the same `.text` the call
     sites read (and `provider="anthropic"`, see `ran_on_claude`). Raises like
@@ -367,8 +368,9 @@ async def generate_content_routed(
 
     The call runs on Gemini instead when the `anthropic` rate-limit bucket is
     full (`rate_label` names it there) or an attachment is past Claude's
-    limits. `allow_claude=False` pins Gemini for a caller that shares this
-    path with a surface the setting doesn't route.
+    limits. `surface` is the `agent_surfaces` key whose setting decides; None
+    pins Gemini, for a caller that shares this path with a surface the
+    setting doesn't route.
 
     `json_output` defaults to the config's `response_mime_type`; pass True
     where the prompt asks for JSON in prose. The reply is then reduced to the
@@ -377,7 +379,7 @@ async def generate_content_routed(
     shares the cap) is an error rather than broken JSON. Gemini-only knobs
     (temperature, safety settings) are dropped on the Claude path.
     """
-    claude_model = await claude_override() if allow_claude else None
+    claude_model = await claude_override(surface) if surface else None
     if claude_model and not _claude_can_carry(contents):
         logger.info("routed %s/%s: attachments past Claude's limits; running on Gemini", *rate_label)
         claude_model = None

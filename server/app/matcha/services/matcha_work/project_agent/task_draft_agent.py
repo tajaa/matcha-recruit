@@ -12,6 +12,7 @@ from uuid import UUID
 
 from app.core.services.ai_usage import feature_scope
 from app.core.services import anthropic_messages
+from app.matcha.services.matcha_work.app_surface import work_surface
 from app.matcha.services.huume.claude_client import get_claude_client
 from app.matcha.services.huume.luna_client import get_luna_client, text_item, tool_output_item
 from app.matcha.services.huume.routing import LUNA
@@ -175,8 +176,9 @@ async def run_task_draft(
 ) -> dict:
     """Draft one ticket from the repository's root architecture guide."""
     started = time.monotonic()
-    # Luna unless the platform "Agent model" setting routes agents to Claude.
-    claude_model = await anthropic_messages.claude_override()
+    # Luna unless the admin "AI models" setting routes projects to Claude
+    # (Matcha Work for a business account, Espresso for a personal one).
+    claude_model = await anthropic_messages.claude_override(await work_surface(company_id, "projects"))
     client = get_claude_client() if claude_model else get_luna_client()
     files_read: set[str] = set()
     model_calls = 0

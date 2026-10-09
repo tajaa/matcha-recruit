@@ -26,6 +26,7 @@ from ....core.services.handbook_service import (
 from app.core.services.model_catalog import GEMINI_FLASH
 from ....core.services.storage import get_storage
 from ..er.er_document_parser import ERDocumentParser
+from app.core.services import agent_surfaces
 from app.core.services.anthropic_messages import generate_content_routed
 from . import matcha_work_document as doc_svc
 from .matcha_work_ai import _infer_skill_from_state, get_ai_provider
@@ -264,7 +265,7 @@ async def check_handbook_relevance(text: str, client: Any = None) -> tuple[bool,
                 ),
                 timeout_seconds=RELEVANCE_TIMEOUT,
                 json_output=True,
-                rate_label=("handbook_upload", "relevance"),
+                surface=agent_surfaces.MATCHA_HANDBOOKS, rate_label=("handbook_upload", "relevance"),
             )
             raw = (response.text or "").strip()
             # Strip markdown code fences if present

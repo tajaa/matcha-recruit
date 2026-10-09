@@ -19,7 +19,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from app.config import get_settings
-from app.core.services import anthropic_messages
+from app.core.services import agent_surfaces, anthropic_messages
 from app.matcha.services.ir.ir_analysis import IRAnalyzer
 from app.matcha.services.inventory.waste import lots as lots_service
 
@@ -156,9 +156,9 @@ async def parse_receipt(file_bytes: bytes, mime_type: str, filename: str) -> dic
                        "invoice_date": None, "lines": [], "notes": None}
         return {**receipt, "available": bool(receipt["lines"])}
 
-    # Claude when the platform "Agent model" setting routes one-shots to it.
+    # Claude when the admin "AI models" setting routes one-shots to it.
     # An image type Messages can't take (HEIC, …) stays on Gemini below.
-    claude_model = await anthropic_messages.claude_override()
+    claude_model = await anthropic_messages.claude_override(agent_surfaces.MATCHA_INVENTORY)
     if claude_model:
         mt = (mime_type or "").lower()
         if not (mt.startswith("image/") and anthropic_messages.image_block(file_bytes, mt) is None):

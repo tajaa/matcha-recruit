@@ -261,7 +261,7 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
     from ..matcha_work.matcha_work_ai._models import picker_models
 
     chat_models, default_chat_model = await picker_models(
-        pro_allowed=features_for_plan(plan)["ai_model_pro"],
+        pro_allowed=features_for_plan(plan)["ai_model_pro"], company_id=company_id,
     )
     workspace = {
         "espresso_assistant": False,

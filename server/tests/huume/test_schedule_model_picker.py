@@ -22,6 +22,7 @@ from anthropic.types.beta import BetaMessage
 from app.core.services import ai_usage, rate_limiter
 from app.matcha.models.matcha_work.matcha_work import SendMessageRequest
 from app.matcha.services.billing.model_pricing import calculate_call_cost
+from app.core.services import agent_surfaces, anthropic_messages
 from app.matcha.services.huume import agent, claude_client, routing, schedule_profile_skill
 from app.matcha.services.huume.luna_client import LunaResponse, image_item, text_item, tool_output_item
 from app.matcha.services.huume.scope import HuumeSurfaceContext, SCHEDULE_LOOKUP_TOPICS, SCHEDULE_TOOLS
@@ -382,7 +383,7 @@ async def test_session_endpoint_lists_available_models(monkeypatch, key, ids):
     monkeypatch.setattr(route, "require_company_id", AsyncMock(return_value=uuid4()))
     monkeypatch.setattr(route, "_require_schedule_huume", AsyncMock())
     monkeypatch.setattr(route, "get_or_create_schedule_assistant_session", AsyncMock(return_value={"session_id": "s"}))
-    monkeypatch.setattr(route, "anthropic_configured", lambda: bool(key))
+    monkeypatch.setattr(anthropic_messages, "anthropic_configured", lambda: bool(key))
     body = route.ScheduleAssistantSessionRequest(location_id=uuid4(), week_start=date(2026, 8, 23))
     result = await route.create_schedule_assistant_session(body, current_user=SimpleNamespace(id=uuid4(), role="client"))
     assert [m["id"] for m in result["available_models"]] == ids
@@ -392,8 +393,10 @@ async def test_session_endpoint_lists_available_models(monkeypatch, key, ids):
 
 @pytest.mark.asyncio
 async def test_platform_setting_routes_every_surface_to_claude(monkeypatch):
-    monkeypatch.setattr(agent, "claude_override", AsyncMock(return_value=routing.CLAUDE_HAIKU))
+    override = AsyncMock(return_value=routing.CLAUDE_HAIKU)
+    monkeypatch.setattr(anthropic_messages, "claude_override", override)
     result, luna, claude = await _run(monkeypatch, HuumeSurfaceContext())
+    override.assert_awaited_once_with(agent_surfaces.MATCHA_HUUME)
     luna.create_response.assert_not_awaited()
     assert claude.create_response.await_args.kwargs["model"] == routing.CLAUDE_HAIKU
     assert _RecordingLimiter.providers == ["anthropic"]
@@ -403,7 +406,7 @@ async def test_platform_setting_routes_every_surface_to_claude(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_schedule_pick_beats_the_platform_setting(monkeypatch):
     override = AsyncMock(return_value=routing.CLAUDE_SONNET)
-    monkeypatch.setattr(agent, "claude_override", override)
+    monkeypatch.setattr(anthropic_messages, "claude_override", override)
     _result, luna, claude = await _run(monkeypatch, _schedule_context(routing.LUNA))
     claude.create_response.assert_not_awaited()
     luna.create_response.assert_awaited()
@@ -417,8 +420,11 @@ async def test_session_endpoint_defaults_to_the_platform_setting(monkeypatch):
     monkeypatch.setattr(route, "require_company_id", AsyncMock(return_value=uuid4()))
     monkeypatch.setattr(route, "_require_schedule_huume", AsyncMock())
     monkeypatch.setattr(route, "get_or_create_schedule_assistant_session", AsyncMock(return_value={"session_id": "s"}))
-    monkeypatch.setattr(route, "anthropic_configured", lambda: True)
-    monkeypatch.setattr(route, "claude_override", AsyncMock(return_value=routing.CLAUDE_HAIKU))
+    monkeypatch.setattr(anthropic_messages, "anthropic_configured", lambda: True)
+    override = AsyncMock(return_value=routing.CLAUDE_HAIKU)
+    monkeypatch.setattr(anthropic_messages, "claude_override", override)
     body = route.ScheduleAssistantSessionRequest(location_id=uuid4(), week_start=date(2026, 8, 23))
     result = await route.create_schedule_assistant_session(body, current_user=SimpleNamespace(id=uuid4(), role="client"))
     assert result["default_model"] == routing.CLAUDE_HAIKU
+    # The same key `run_huume_turn` resolves on the schedule surface.
+    override.assert_awaited_once_with(agent_surfaces.MATCHA_SCHEDULING)

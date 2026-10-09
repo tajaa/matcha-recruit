@@ -16,6 +16,7 @@ from google.genai import types
 from app.core.services.model_catalog import GEMINI_FLASH_LITE
 from app.matcha.services._shared.gemini import genai_env_client
 from app.matcha.services.ir.ir_voice_parser import _VOICE_PARSE_SAFETY_SETTINGS
+from app.core.services import agent_surfaces
 from app.core.services.anthropic_messages import generate_content_routed
 
 logger = logging.getLogger(__name__)
@@ -180,7 +181,7 @@ async def next_turn(transcript: list[dict], known_fields: dict, *, location_opti
     try:
         response = await generate_content_routed(
             client, model=GEMINI_FLASH_LITE, contents=[prompt], config=config,
-            timeout_seconds=CHAT_TURN_TIMEOUT, rate_label=("ir_chat_intake", "turn"),
+            timeout_seconds=CHAT_TURN_TIMEOUT, surface=agent_surfaces.MATCHA_IR, rate_label=("ir_chat_intake", "turn"),
         )
         raw_text = (getattr(response, "text", None) or "").strip()
         payload = json.loads(raw_text)
@@ -328,7 +329,7 @@ async def next_public_turn(
             contents=[_build_public_turn_prompt(transcript, known_fields, intake_kind=intake_kind)],
             config=config,
             timeout_seconds=CHAT_TURN_TIMEOUT,
-            rate_label=("ir_chat_intake", "public_turn"),
+            surface=agent_surfaces.MATCHA_IR, rate_label=("ir_chat_intake", "public_turn"),
         )
         payload = json.loads((getattr(response, "text", None) or "").strip())
     except Exception as exc:

@@ -136,8 +136,8 @@ it otherwise), and should declare `resolve`.
   every call: the request, each response's output items as returned (reasoning
   comes back as `reasoning.encrypted_content` and goes back as is), and the
   tool outputs. A stored run sends only what is new.
-- **Claude runs keep the turn in-process.** When the platform *Agent model*
-  setting picks Claude, `ClaudeSession.keeps_history` makes the runner send only
+- **Claude runs keep the turn in-process.** When Admin → Settings → *AI models*
+  picks Claude for the assistant (`espresso.assistant`), `ClaudeSession.keeps_history` makes the runner send only
   what is new even on a private run: Messages has no stored-response chain to
   opt out of, so `store=False`/`chain=False` and the encrypted-reasoning replay
   do not apply. Web search becomes Anthropic's server tool; its results reach

@@ -1,5 +1,5 @@
 """Read-only grounded waste analyst, narrated by the configured OpenAI Luna
-(or Claude, when the platform "Agent model" setting routes agent workloads there).
+(or Claude, when the admin "AI models" setting routes agent workloads there).
 
 Tool results remain the source of truth. Luna receives only their bounded JSON
 and writes a qualitative lead-in; deterministic evidence records carry every
@@ -16,7 +16,7 @@ from uuid import UUID
 import httpx
 
 from app.config import get_settings
-from app.core.services import anthropic_messages
+from app.core.services import agent_surfaces, anthropic_messages
 from app.core.services.ai_usage import record_openai_response
 from app.core.services.openai_responses import response_text as _response_text
 
@@ -38,7 +38,7 @@ async def _narrate_with_luna(*, question: str, sources: dict) -> Optional[str]:
         f"Question: {question[:1000]}\n\n"
         f"Tool results: {json.dumps(sources, default=str, separators=(',', ':'))}"
     )
-    claude_model = await anthropic_messages.claude_override()
+    claude_model = await anthropic_messages.claude_override(agent_surfaces.MATCHA_INVENTORY)
     if claude_model:
         try:
             text = await anthropic_messages.generate_text(

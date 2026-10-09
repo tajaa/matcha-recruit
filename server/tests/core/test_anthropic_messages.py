@@ -1,5 +1,5 @@
-"""The shared Claude pieces: the platform "Agent model" switch, the one-shot
-call, and the admin endpoint that sets it. No network, no database.
+"""The shared Claude pieces: the per-app/per-product "AI models" switch, the
+one-shot call, and the admin endpoint that sets it. No network, no database.
 
     cd server && ./venv/bin/python -m pytest tests/core/test_anthropic_messages.py -q
 """
@@ -57,8 +57,8 @@ def ledger(monkeypatch):
 @pytest.fixture(autouse=True)
 def _reset_caches(monkeypatch):
     monkeypatch.setattr(anthropic_messages, "_client", None)
-    monkeypatch.setattr(platform_settings, "_agent_model_cache", None)
-    monkeypatch.setattr(platform_settings, "_agent_model_cached_at", 0.0)
+    monkeypatch.setattr(platform_settings, "_agent_models_cache", None)
+    monkeypatch.setattr(platform_settings, "_agent_models_cached_at", 0.0)
 
 
 def _settings(key):
@@ -112,7 +112,7 @@ async def test_no_key_means_default_without_reading_the_setting(monkeypatch):
     monkeypatch.setattr(anthropic_messages, "get_settings", _settings(None))
     reader = AsyncMock(return_value="claude-haiku-5-5")
     monkeypatch.setattr(platform_settings, "get_agent_model", reader)
-    assert await anthropic_messages.claude_override() is None
+    assert await anthropic_messages.claude_override("matcha.ir") is None
     reader.assert_not_awaited()
 
 
@@ -123,58 +123,85 @@ async def test_no_key_means_default_without_reading_the_setting(monkeypatch):
     ("default", None),
     ("gpt-4o", None),
 ])
-async def test_override_follows_the_setting(monkeypatch, stored, expected):
+async def test_override_follows_the_surfaces_setting(monkeypatch, stored, expected):
     monkeypatch.setattr(anthropic_messages, "get_settings", _settings("sk-test"))
-    monkeypatch.setattr(platform_settings, "get_agent_model", AsyncMock(return_value=stored))
-    assert await anthropic_messages.claude_override() == expected
+    reader = AsyncMock(return_value=stored)
+    monkeypatch.setattr(platform_settings, "get_agent_model", reader)
+    assert await anthropic_messages.claude_override("matcha.ir") == expected
+    reader.assert_awaited_once_with("matcha.ir")
 
 
 @pytest.mark.asyncio
 async def test_an_unreadable_setting_is_default_not_an_outage(monkeypatch):
     monkeypatch.setattr(anthropic_messages, "get_settings", _settings("sk-test"))
     monkeypatch.setattr(platform_settings, "get_agent_model", AsyncMock(side_effect=OSError("db down")))
-    assert await anthropic_messages.claude_override() is None
+    assert await anthropic_messages.claude_override("matcha.ir") is None
 
 
 class _Conn:
-    def __init__(self, value):
-        self.value = value
+    """platform_settings rows for `get_agent_models` (key → stored JSON text)."""
+
+    def __init__(self, rows: dict):
+        self.rows = rows
         self.reads = 0
 
-    async def fetchval(self, query):
+    async def fetch(self, query):
         self.reads += 1
-        return self.value
+        return [{"key": k, "value": v} for k, v in self.rows.items()]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("raw, expected", [
-    ('"claude-haiku-5-5"', "claude-haiku-5-5"),
-    ("claude-sonnet-5-5", "claude-sonnet-5-5"),
-    ('"something-else"', "default"),
-    (None, "default"),
-])
-async def test_get_agent_model_normalizes_and_caches(raw, expected):
-    conn = _Conn(raw)
-    assert await platform_settings.get_agent_model(conn=conn) == expected
-    # The default is cached too: no second query inside the TTL.
-    assert await platform_settings.get_agent_model(conn=conn) == expected
+async def test_before_the_first_save_the_legacy_setting_seeds_matcha_and_espresso():
+    conn = _Conn({"agent_model": '"claude-haiku-5-5"'})
+    models = await platform_settings.get_agent_models(conn=conn)
+    assert models["apps"] == {"matcha": "claude-haiku-5-5", "espresso": "claude-haiku-5-5"}
+    assert set(models["surfaces"].values()) == {"inherit"}
+    # Cached, the default included: no second query inside the TTL.
+    await platform_settings.get_agent_models(conn=conn)
     assert conn.reads == 1
 
 
 @pytest.mark.asyncio
-async def test_get_agent_model_opens_its_own_connection(monkeypatch):
-    conn = _Conn('"claude-haiku-5-5"')
+async def test_saved_map_wins_over_the_legacy_row_and_resolves_per_surface():
+    conn = _Conn({
+        "agent_model": '"claude-haiku-5-5"',
+        "agent_models": '{"apps": {"matcha": "claude-sonnet-5-5"}, '
+                        '"surfaces": {"matcha.ir": "default", "matcha.huume": "claude-haiku-5-5", "bogus": "x"}}',
+    })
+    assert await platform_settings.get_agent_model("matcha.ir", conn=conn) == "default"
+    assert await platform_settings.get_agent_model("matcha.huume", conn=conn) == "claude-haiku-5-5"
+    assert await platform_settings.get_agent_model("matcha.handbooks", conn=conn) == "claude-sonnet-5-5"
+    assert await platform_settings.get_agent_model("espresso.chat", conn=conn) == "default"  # app unset
+    models = await platform_settings.get_agent_models(conn=conn)
+    assert "bogus" not in models["surfaces"]
+
+
+@pytest.mark.asyncio
+async def test_nothing_stored_is_built_in_everywhere():
+    assert await platform_settings.get_agent_model("matcha.ir", conn=_Conn({})) == "default"
+
+
+def test_an_unregistered_surface_follows_its_app_and_never_crashes():
+    models = platform_settings.normalize_agent_models({"apps": {"matcha": "claude-haiku-5-5"}})
+    assert platform_settings.resolve_agent_model(models, "matcha.not_a_surface") == "claude-haiku-5-5"
+    assert platform_settings.resolve_agent_model(models, "nowhere.at_all") == "default"
+
+
+@pytest.mark.asyncio
+async def test_get_agent_models_opens_its_own_connection(monkeypatch):
+    conn = _Conn({"agent_models": '{"apps": {"espresso": "claude-haiku-5-5"}}'})
 
     @asynccontextmanager
     async def managed():
         yield conn
 
     monkeypatch.setattr(platform_settings, "get_connection", managed)
-    assert await platform_settings.get_agent_model() == "claude-haiku-5-5"
+    assert await platform_settings.get_agent_model("espresso.chat") == "claude-haiku-5-5"
 
 
-def test_prime_rejects_unknown_values():
-    assert platform_settings.prime_agent_model_cache("nonsense") == "default"
+def test_prime_normalizes_unknown_values():
+    models = platform_settings.prime_agent_models_cache({"apps": {"matcha": "nonsense"}})
+    assert models["apps"]["matcha"] == "default"
 
 
 # --- One-shot call -------------------------------------------------------------
@@ -242,18 +269,35 @@ def test_client_needs_a_key_and_is_cached(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_admin_refuses_claude_without_a_key(monkeypatch):
-    from app.core.models.admin import AgentModelUpdate
+    from app.core.models.admin import AgentModelsUpdate
     from app.core.routes.admin import platform_settings as route
 
     monkeypatch.setattr(route, "get_settings", _settings(None))
     with pytest.raises(HTTPException) as err:
-        await route.update_agent_model(AgentModelUpdate(model="claude-haiku-5-5"), admin=None)
+        await route.update_agent_models(
+            AgentModelsUpdate(surfaces={"matcha.ir": "claude-haiku-5-5"}), admin=None,
+        )
     assert err.value.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_admin_saves_and_primes_the_cache(monkeypatch):
-    from app.core.models.admin import AgentModelUpdate
+async def test_admin_refuses_an_unknown_app_or_product(monkeypatch):
+    from app.core.models.admin import AgentModelsUpdate
+    from app.core.routes.admin import platform_settings as route
+
+    monkeypatch.setattr(route, "get_settings", _settings("sk-test"))
+    with pytest.raises(HTTPException) as err:
+        await route.update_agent_models(
+            AgentModelsUpdate(apps={"nope": "default"}, surfaces={"matcha.typo": "default"}), admin=None,
+        )
+    assert err.value.status_code == 400 and "matcha.typo" in err.value.detail and "nope" in err.value.detail
+
+
+@pytest.mark.asyncio
+async def test_admin_saves_the_whole_map_and_primes_the_cache(monkeypatch):
+    import json
+
+    from app.core.models.admin import AgentModelsUpdate
     from app.core.routes.admin import platform_settings as route
 
     executed = []
@@ -268,28 +312,39 @@ async def test_admin_saves_and_primes_the_cache(monkeypatch):
 
     monkeypatch.setattr(route, "get_settings", _settings("sk-test"))
     monkeypatch.setattr(route, "get_connection", connection)
-    out = await route.update_agent_model(AgentModelUpdate(model="claude-sonnet-5-5"), admin=None)
-    assert out == {"agent_model": "claude-sonnet-5-5"}
-    assert executed == [('"claude-sonnet-5-5"',)]
-    assert await platform_settings.get_agent_model(conn=_Conn(None)) == "claude-sonnet-5-5"
+    out = await route.update_agent_models(
+        AgentModelsUpdate(apps={"matcha": "claude-haiku-5-5"}, surfaces={"matcha.ir": "claude-sonnet-5-5"}),
+        admin=None,
+    )
+    saved = json.loads(executed[0][0])
+    assert saved == out["agent_models"]
+    assert saved["apps"] == {"matcha": "claude-haiku-5-5", "espresso": "default"}
+    assert saved["surfaces"]["matcha.ir"] == "claude-sonnet-5-5"
+    assert saved["surfaces"]["matcha.huume"] == "inherit"  # omitted → follows Matcha
+    # The cache serves the write without a read.
+    assert await platform_settings.get_agent_model("matcha.huume", conn=_Conn({})) == "claude-haiku-5-5"
 
-    # Back to default never needs a key.
+    # Back to built-in never needs a key.
     monkeypatch.setattr(route, "get_settings", _settings(None))
-    assert (await route.update_agent_model(AgentModelUpdate(model="default"), admin=None)) == {"agent_model": "default"}
+    out = await route.update_agent_models(AgentModelsUpdate(), admin=None)
+    assert set(out["agent_models"]["apps"].values()) == {"default"}
 
 
 @pytest.mark.asyncio
-async def test_settings_page_reports_the_choice_and_key_state(monkeypatch):
+async def test_settings_page_reports_the_map_registry_and_key_state(monkeypatch):
     from app.core.routes.admin import platform_settings as route
 
+    models = platform_settings.normalize_agent_models({"apps": {"matcha": "claude-haiku-5-5"}})
     for name, value in {
         "get_visible_features": [], "get_matcha_work_model_mode": "light",
         "get_jurisdiction_research_model_mode": "light", "get_er_similarity_weights": {},
         "get_tenant_codified_only": True, "get_autopr_board_capabilities": {},
-        "get_agent_model": "claude-haiku-5-5",
+        "get_agent_models": models,
     }.items():
         monkeypatch.setattr(route, name, AsyncMock(return_value=value))
     monkeypatch.setattr(route, "get_settings", _settings("sk-test"))
     out = await route.get_all_platform_settings()
-    assert out["agent_model"] == "claude-haiku-5-5" and out["anthropic_configured"] is True
-
+    assert out["agent_models"]["apps"]["matcha"] == "claude-haiku-5-5" and out["anthropic_configured"] is True
+    apps = {app["key"]: app for app in out["agent_model_registry"]}
+    assert [s["key"] for s in apps["matcha"]["surfaces"]][:2] == ["matcha.huume", "matcha.scheduling"]
+    assert apps["espresso"]["surfaces"] == []  # Espresso's rows ship in the Espresso PR

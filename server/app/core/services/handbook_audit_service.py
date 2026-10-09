@@ -31,6 +31,7 @@ from typing import Any, Optional
 from app.database import get_connection
 from app.core.services.model_json import strip_json_fence as _strip_json_fence
 from app.core.services.model_catalog import GEMINI_FLASH
+from app.core.services import agent_surfaces
 from app.core.services.anthropic_messages import generate_content_routed
 
 logger = logging.getLogger(__name__)
@@ -437,7 +438,7 @@ async def _extract_sections_from_pdf(pdf_bytes: bytes) -> list[dict[str, Any]]:
         response = await generate_content_routed(
             client, model=model_name, contents=[pdf_part, prompt],
             timeout_seconds=SECTION_EXTRACT_TIMEOUT, json_output=True, effort="medium",
-            max_tokens=32_000, rate_label=("handbook_audit", "sections"),
+            max_tokens=32_000, surface=agent_surfaces.MATCHA_HANDBOOKS, rate_label=("handbook_audit", "sections"),
         )
     except Exception as exc:
         logger.exception("Section-extract Gemini call failed: %s", exc)
@@ -527,7 +528,7 @@ async def _grade_state_coverage(
         response = await generate_content_routed(
             client, model=model_name, contents=prompt,
             timeout_seconds=GAP_CHECK_TIMEOUT, json_output=True, effort="medium",
-            max_tokens=32_000, rate_label=("handbook_audit", "gap_check"),
+            max_tokens=32_000, surface=agent_surfaces.MATCHA_HANDBOOKS, rate_label=("handbook_audit", "gap_check"),
         )
     except Exception as exc:
         logger.exception("Gap-grading Gemini call failed for %s: %s", state, exc)
