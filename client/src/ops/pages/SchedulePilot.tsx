@@ -105,6 +105,9 @@ export default function SchedulePilot() {
   const [railOpen, setRailOpen] = useState(false)
   const [threadOpen, setThreadOpen] = useState(true)
   const [mobileTab, setMobileTab] = useState<MobileTab>('board')
+  // Huume-first on a phone too: once we know the plan has Huume, open on it
+  // (only if the manager hasn't already picked a tab).
+  const mobileTabPickedRef = useRef(false)
   const [reviewSource, setReviewSource] = useState<ReviewSource>({ kind: 'staged' })
   const [automaticSuggestion, setAutomaticSuggestion] = useState<ScheduleSuggestionStatus | null>(null)
   const [weekRules, setWeekRules] = useState<LocationScheduleProfile['week_rules'] | null>(null)
@@ -215,6 +218,10 @@ export default function SchedulePilot() {
     onApplied: () => afterAppliedRef.current(),
     onAutomaticActionSettled: () => setAutomaticSuggestion(null),
   })
+
+  useEffect(() => {
+    if (huumeEnabled && !mobileTabPickedRef.current) setMobileTab('huume')
+  }, [huumeEnabled])
 
   // A new location or week is a new workspace: drop every selection and pane
   // that belonged to the old one.
@@ -577,17 +584,21 @@ export default function SchedulePilot() {
   ) : (
     <div className="flex h-full min-h-0 flex-col">
       {previewVerdict && (
-        <div role="status" className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-2 text-xs text-emerald-100">
+        <div role="status" className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-1.5 text-xs text-emerald-100 sm:px-4 sm:py-2">
           <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-300" />
-          <span className="min-w-0">
-            {review?.kind === 'week_draft'
-              ? 'Previewing the generated week — dashed shifts are not written until you approve.'
-              : `Huume's proposal is on the board — outlined shifts${previewShifts.length ? ' and dashed new ones' : ''} change only when you approve.`}
-            <span className="ml-2 font-mono text-[11px] text-emerald-200/80">{previewVerdict.facts[0]}</span>
+          <span className="min-w-0 flex-1 sm:flex-none">
+            {/* A phone gets the short version: every line above the shifts costs a card. */}
+            <span className="sm:hidden">{review?.kind === 'week_draft' ? 'Generated week shown dashed.' : 'Huume\'s change is outlined below.'}</span>
+            <span className="hidden sm:inline">
+              {review?.kind === 'week_draft'
+                ? 'Previewing the generated week — dashed shifts are not written until you approve.'
+                : `Huume's proposal is on the board — outlined shifts${previewShifts.length ? ' and dashed new ones' : ''} change only when you approve.`}
+              <span className="ml-2 font-mono text-[11px] text-emerald-200/80">{previewVerdict.facts[0]}</span>
+            </span>
           </span>
           <span className="ml-auto flex items-center gap-1.5">
             <button type="button" onClick={openReview} className="rounded border border-emerald-400/30 px-2 py-1 text-[11px] hover:bg-emerald-400/10">Full review</button>
-            <button type="button" onClick={() => setShowProposal(false)} className="rounded border border-white/[0.1] px-2 py-1 text-[11px] text-zinc-300 hover:bg-white/[0.06]">Hide preview</button>
+            <button type="button" onClick={() => setShowProposal(false)} className="hidden rounded border border-white/[0.1] px-2 py-1 text-[11px] text-zinc-300 hover:bg-white/[0.06] sm:inline-block">Hide preview</button>
             {canDecide && (
               <button type="button" disabled={thread.busy} onClick={() => decide('confirm')} className={`rounded px-2 py-1 text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${previewVerdict.tone === 'bad' ? 'border border-amber-400/50 text-amber-100 hover:bg-amber-400/10' : 'bg-emerald-500 text-zinc-950 hover:bg-emerald-400'}`}>
                 {previewVerdict.approveLabel}
@@ -765,9 +776,12 @@ export default function SchedulePilot() {
               disabled={editor.loading}
             />
             {/* Mobile: one pane at a time. */}
-            <div className="flex shrink-0 gap-1 border-b border-white/[0.06] px-3 py-1.5 lg:hidden" role="tablist" aria-label="Workspace panes">
+            <div className="flex shrink-0 gap-1 border-b border-white/[0.06] bg-zinc-950 p-1.5 lg:hidden" role="tablist" aria-label="Workspace panes">
               {mobileTabs.map(([tab, label]) => (
-                <button key={tab} role="tab" aria-selected={mobileTab === tab} onClick={() => { setMobileTab(tab); if (tab === 'board' || tab === 'review') setCenterView(tab) }} className={`rounded px-2 py-1 font-mono text-[10px] uppercase tracking-[0.15em] ${mobileTab === tab ? 'bg-white/[0.06] text-zinc-100' : 'text-zinc-500'}`}>{label}</button>
+                <button key={tab} role="tab" aria-selected={mobileTab === tab} onClick={() => { mobileTabPickedRef.current = true; setMobileTab(tab); if (tab === 'board' || tab === 'review') setCenterView(tab) }} className={`relative flex-1 rounded-lg py-2 text-xs font-medium ${mobileTab === tab ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 active:bg-white/[0.04]'}`}>
+                  {label}
+                  {tab === 'review' && stagedReview && <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden />}
+                </button>
               ))}
             </div>
             <div className="relative flex min-h-0 flex-1">

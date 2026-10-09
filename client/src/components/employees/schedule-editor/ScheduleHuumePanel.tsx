@@ -56,8 +56,9 @@ export default function ScheduleHuumePanel({ thread, firstName, weekStart, locat
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-white/[0.08] px-3 py-2">
         <Sparkles className="h-4 w-4 text-emerald-300" />
-        <span className="text-xs font-medium text-zinc-200">Huume · Schedule assistant</span>
-        <span className="ml-auto truncate text-[10px] text-zinc-600">{locationName || 'Location'} · {weekStart}</span>
+        <span className="text-xs font-medium text-zinc-200">Huume<span className="hidden sm:inline"> · Schedule assistant</span></span>
+        <span className="ml-auto hidden truncate text-[10px] text-zinc-600 sm:inline">{locationName || 'Location'} · {weekStart}</span>
+        <span className="ml-auto sm:hidden" />
         {thread.models.length > 1 && (
           <select
             value={thread.model}
@@ -216,7 +217,7 @@ export default function ScheduleHuumePanel({ thread, firstName, weekStart, locat
       </div>
       <form onSubmit={(event) => { event.preventDefault(); void thread.send() }} className="flex shrink-0 items-center gap-2 border-t border-white/[0.08] p-2">
         <label htmlFor="schedule-huume-input" className="sr-only">Ask Huume about this schedule</label>
-        <input id="schedule-huume-input" value={thread.input} onChange={(event) => thread.setInput(event.target.value)} disabled={composerDisabled} placeholder="Try: add an opener Monday" className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-xs text-zinc-100 outline-none placeholder:text-zinc-600" />
+        <input id="schedule-huume-input" value={thread.input} onChange={(event) => thread.setInput(event.target.value)} disabled={composerDisabled} placeholder="Try: add an opener Monday" className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-base text-zinc-100 sm:text-xs outline-none placeholder:text-zinc-600" />
         <button type="button" onClick={() => { void (voice.recording ? voice.finish() : voice.begin()) }} disabled={!thread.threadId || busy || voice.starting || voice.transcribing || !!sessionError} className={'rounded-lg border p-2 disabled:opacity-40 ' + (voice.recording ? 'border-red-400/50 bg-red-500/15 text-red-300' : 'border-zinc-700 text-zinc-300 hover:border-emerald-500/50 hover:text-emerald-300')} aria-label={voice.recording ? 'Stop voice recording' : 'Talk to Huume'} title={voice.recording ? 'Stop recording' : 'Talk to Huume'}>
           {voice.starting || voice.transcribing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : voice.recording ? <Square className="h-3.5 w-3.5 fill-current" /> : <Mic className="h-3.5 w-3.5" />}
         </button>

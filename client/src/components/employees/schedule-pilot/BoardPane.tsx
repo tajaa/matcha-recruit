@@ -7,6 +7,8 @@ import WeekTimeGrid from '../schedule-editor/WeekTimeGrid'
 import type { DemandSegment, PreviewShift } from './reviewVerdict'
 import type { ShiftMark } from './boardMarks'
 import WeekRosterGrid from './WeekRosterGrid'
+import DayAgenda from './DayAgenda'
+import { useMediaQuery } from '../../../hooks/useMediaQuery'
 
 type BoardView = 'week' | 'timeline'
 const VIEW_STORAGE_KEY = 'schedulePilot.boardView'
@@ -61,6 +63,8 @@ function BoardPane({
   onToggleHuumeSelection,
 }: BoardPaneProps) {
   const [view, setView] = useState<BoardView>(readView)
+  // A phone gets the Week view one day at a time (see DayAgenda).
+  const phone = useMediaQuery('(max-width: 767px)')
   const chooseView = (next: BoardView) => {
     setView(next)
     try { window.localStorage.setItem(VIEW_STORAGE_KEY, next) } catch { /* the choice lasts for this page only */ }
@@ -86,7 +90,20 @@ function BoardPane({
         {viewButton('timeline', 'Timeline', CalendarRange, 'Hours of the day — drag and resize shifts')}
       </div>
     <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
-      {view === 'week' ? (
+      {view === 'week' && phone ? (
+        <DayAgenda
+          days={days}
+          shifts={editor.shifts}
+          review={review}
+          previewShifts={previewShifts}
+          marks={marks}
+          recentShiftIds={recentShiftIds}
+          huumeSelectedShiftIds={huumeSelectedShiftIds}
+          onOpenShift={onOpenShift}
+          onToggleHuumeSelection={onToggleHuumeSelection}
+          onCreateOn={(date) => onOpenNew({ date, minute: 9 * 60 })}
+        />
+      ) : view === 'week' ? (
         <WeekRosterGrid
           days={days}
           shifts={editor.shifts}
@@ -124,6 +141,14 @@ function BoardPane({
       />
       )}
       {(inspectorShift || newDefaults) && (
+        // Below lg the editor is a bottom sheet: in the stacked layout it would
+        // otherwise land under the whole board, off screen. `lg:contents` drops
+        // the wrapper's box on desktop so the side column is unchanged.
+        <div
+          className="fixed inset-0 z-40 flex items-end bg-black/50 lg:contents"
+          onClick={(event) => { if (event.target === event.currentTarget) onCloseInspector() }}
+        >
+        <div role="dialog" aria-label="Shift editor" className="max-h-[85vh] w-full overflow-y-auto rounded-t-2xl bg-zinc-950 lg:contents">
         <ShiftInspector
           key={inspectorShift?.id ?? `${newDefaults?.date}-${newDefaults?.minute}`}
           shift={inspectorShift}
@@ -141,6 +166,8 @@ function BoardPane({
           onAssignmentUpdated={editor.reload}
           onClose={onCloseInspector}
         />
+        </div>
+        </div>
       )}
     </div>
     </div>

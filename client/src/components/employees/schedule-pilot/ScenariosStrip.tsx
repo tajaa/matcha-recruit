@@ -178,7 +178,9 @@ export default function ScenariosStrip({
   const primary = selectedIds.length === 1 ? scenarios.find((item) => item.proposal_id === selectedIds[0]) ?? null : null
 
   return (
-    <div className="shrink-0 border-b border-white/[0.06] bg-zinc-950/90">
+    // Fill simulations are a desktop planning tool; on a phone the staged
+    // change is already on the Review tab and the board banner.
+    <div className="hidden shrink-0 border-b border-white/[0.06] bg-zinc-950/90 md:block">
       <div className="flex items-center gap-2 overflow-x-auto px-4 py-2">
         <span className={`${LABEL} shrink-0`}>Scenarios</span>
         {staged && (

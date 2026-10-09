@@ -351,7 +351,10 @@ html[data-theme="light"] :is(
 ) {
   color: #b91c1c;
 }
-html[data-theme="light"] [class~="text-sky-200/90"] {
+html[data-theme="light"] :is(
+  [class~="text-sky-100"], [class~="text-sky-200"], [class~="text-sky-200/90"], [class~="text-sky-200/80"],
+  [class~="text-sky-300"]
+) {
   color: #0369a1;
 }
 

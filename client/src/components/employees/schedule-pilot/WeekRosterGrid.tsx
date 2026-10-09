@@ -151,7 +151,7 @@ export default function WeekRosterGrid({
         aria-pressed={selected}
         aria-label={`${selected ? 'Remove' : 'Select'} ${shift.role || 'shift'} for Huume`}
         title={selected ? 'Remove from Huume context' : 'Select for Huume'}
-        className={`absolute right-0.5 top-0.5 rounded p-0.5 ${selected ? 'bg-emerald-400 text-zinc-950' : 'text-zinc-500 opacity-0 hover:text-emerald-300 focus:opacity-100 group-hover:opacity-100'}`}
+        className={`absolute right-0.5 top-0.5 rounded p-0.5 ${selected ? 'bg-emerald-400 text-zinc-950' : 'text-zinc-500 opacity-0 hover:text-emerald-300 focus:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100'}`}
       >
         {selected ? <Check className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
       </button>
@@ -264,7 +264,7 @@ export default function WeekRosterGrid({
                         type="button"
                         onClick={() => onCreateFor(date, row.id)}
                         aria-label={`Add a shift for ${row.name} on ${fmtDayLabel(date)}`}
-                        className="flex h-full min-h-[36px] w-full items-center justify-center rounded text-zinc-700 opacity-0 hover:bg-white/[0.03] hover:text-zinc-300 focus:opacity-100 group-hover/cell:opacity-100"
+                        className="flex h-full min-h-[36px] w-full items-center justify-center rounded text-zinc-700 opacity-0 hover:bg-white/[0.03] hover:text-zinc-300 focus:opacity-100 group-hover/cell:opacity-100 [@media(hover:none)]:opacity-100"
                       >
                         <Plus className="h-3.5 w-3.5" />
                       </button>

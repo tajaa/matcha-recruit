@@ -30,6 +30,12 @@ regions to tabs.
   Week view adds dashed chips in the person's row / strikes removed ones. After an apply, the shifts whose
   signature changed (`changedShiftIds` against a pre-reload snapshot) are tagged "Just changed" until the
   next turn.
+- **Phones (< 768px).** The Week view becomes `DayAgenda` (a day strip + that day's shifts as cards; it
+  opens on the first day a pending proposal touches, marked with a blue dot) — picked with the shared
+  `hooks/useMediaQuery` so the two layouts are never both mounted. The shift editor is a bottom sheet
+  below `lg`; the pane tabs (Huume first, open by default) are a full-width segmented control; the
+  scenarios strip and the long banner copy are desktop-only; inputs on the page use 16px text on phones
+  so iOS does not zoom on focus; hover-revealed controls stay visible on `hover: none` devices.
 - **`ReviewPane` is pure over a `ScheduleReview`**, so one component renders a Huume-staged
   `schedule_change`, a `schedule_week_draft` and a REST fill scenario: per-person load before→after on
   the same bar the rail draws, Staged / Not staged (with the server's reason) / Unfilled (with the full

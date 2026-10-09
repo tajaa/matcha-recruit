@@ -27,14 +27,15 @@ export default function LocationPicker({
     ? `${location.name}${location.is_active ? '' : ' (inactive)'}`
     : locationLabel(location))
   return (
-    <label className={`inline-flex items-center gap-1.5 text-xs text-zinc-500 ${className ?? ''}`}>
+    <label className={`inline-flex min-w-0 items-center gap-1.5 text-xs text-zinc-500 ${className ?? ''}`}>
       <MapPin className="h-3.5 w-3.5" />
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
         title={selected ? locationLabel(selected) : undefined}
         aria-label="Location"
-        className="max-w-[16rem] truncate rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none focus:border-zinc-500"
+        // compact: fills a phone toolbar row, and 16px text there keeps iOS from zooming on focus.
+        className={`truncate rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-zinc-200 outline-none focus:border-zinc-500 ${compact ? 'w-full min-w-0 text-base sm:w-auto sm:max-w-[16rem] sm:text-xs' : 'max-w-[16rem] text-xs'}`}
       >
         {allowAll ? <option value="">{allLabel}</option> : <option value="" disabled>{placeholder}</option>}
         {locations.map((location) => (
