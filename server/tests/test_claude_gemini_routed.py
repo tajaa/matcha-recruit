@@ -19,7 +19,7 @@ from google.genai import types
 
 from app.core.services import anthropic_messages
 from app.matcha.services import precedent_common
-from app.matcha.services.ir import ir_analysis
+from app.matcha.services.ir import ir_analysis, ir_chat_intake
 from app.matcha.services.symlink import chat as symlink_chat
 from app.matcha.services.symlink.kinds import materialize_spec
 
@@ -99,7 +99,7 @@ def test_claude_gets_the_text_pdf_and_system_instruction(setting):
     assert call["system"] == "Be terse."
     assert [block["type"] for block in call["attachments"]] == ["document"]
     assert call["json_output"] is False
-    assert call["timeout_seconds"] >= 45  # never the flash-tuned 5s
+    assert call["timeout_seconds"] == 5  # the site's own budget, not a longer one
 
 
 def test_json_mode_follows_the_config_and_normalizes_the_reply(setting):
@@ -118,6 +118,25 @@ def test_unparseable_json_reply_is_passed_through_for_the_site_to_report(setting
         _Gemini(), model="m", contents="p", timeout_seconds=5, json_output=True,
     ))
     assert out.text == "no json here"
+
+
+def test_claude_is_held_to_the_sites_timeout(setting, monkeypatch):
+    """A 20s chat turn stays 20s on Claude: past the budget the call raises
+    asyncio.TimeoutError, which every site already turns into its retry reply."""
+    started = asyncio.Event()
+
+    async def slow(prompt, **kwargs):
+        started.set()
+        await asyncio.sleep(10)
+        return "{}"
+
+    setting(CLAUDE)
+    monkeypatch.setattr(anthropic_messages, "generate_text", slow)
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(anthropic_messages.generate_content_routed(
+            _Gemini(), model="m", contents="p", timeout_seconds=0.05,
+        ))
+    assert started.is_set()
 
 
 def test_claude_failure_raises_like_gemini(setting):
@@ -152,6 +171,23 @@ def test_symlink_chat_turn_runs_on_claude(setting, monkeypatch):
     assert result["assistant_message"] == "When does it expire?"
     assert gemini.calls == []
     assert claude.calls[0]["json_output"] is True
+
+
+def test_symlink_chat_keeps_its_20s_budget_on_claude(setting, monkeypatch):
+    assert symlink_chat.CHAT_TURN_TIMEOUT == 20
+    claude = setting(CLAUDE, json.dumps({"assistant_message": "ok"}))
+    monkeypatch.setattr(symlink_chat, "genai_env_client", lambda: _Gemini())
+    asyncio.run(symlink_chat.next_turn([], {}, CRED, []))
+    assert claude.calls[0]["timeout_seconds"] == 20
+
+
+def test_ir_chat_intake_keeps_its_20s_budget_on_claude(setting, monkeypatch):
+    assert ir_chat_intake.CHAT_TURN_TIMEOUT == 20
+    claude = setting(CLAUDE, json.dumps({"assistant_message": "Where did it happen?"}))
+    monkeypatch.setattr(ir_chat_intake, "genai_env_client", lambda: _Gemini())
+    result = asyncio.run(ir_chat_intake.next_turn([], {}, location_options=[]))
+    assert result["error"] is False
+    assert claude.calls[0]["timeout_seconds"] == 20
 
 
 def test_ir_analysis_retry_loop_runs_on_claude(setting, monkeypatch):

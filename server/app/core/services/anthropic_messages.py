@@ -179,11 +179,6 @@ async def generate_text(
     return "\n".join(block.text for block in message.content if block.type == "text").strip()
 
 
-# Gemini one-shots were tuned for flash-class latency; Claude with adaptive
-# thinking needs more room, so a routed call never gets less than this.
-_ROUTED_MIN_TIMEOUT = 45.0
-
-
 def _gemini_contents_to_claude(contents: Any) -> tuple[str, list[dict[str, Any]]]:
     """Gemini `contents` (a string, or a list of strings / Parts / Contents)
     → (prompt text, attachment blocks). Text joins in order; inline PDFs and
@@ -239,7 +234,10 @@ async def generate_content_routed(
     Returns the Gemini response, or an object with the same `.text` the call
     sites read. Raises like Gemini does (`asyncio.TimeoutError` past the
     timeout, `RuntimeError` on an API failure), so each site's existing
-    error handling stays as is. `json_output` defaults to the config's
+    error handling stays as is. Claude gets the SAME `timeout_seconds` as
+    Gemini, retries included: a chat turn budgeted at 20s stays 20s, and a
+    slower model surfaces as that site's usual timeout reply rather than a
+    longer wait. `json_output` defaults to the config's
     `response_mime_type`; pass True where the prompt asks for JSON in prose.
     In JSON mode the reply is normalized to the bare object, so a site that
     `json.loads` the text strictly keeps working. Gemini-only knobs
@@ -255,7 +253,6 @@ async def generate_content_routed(
         json_output = getattr(config, "response_mime_type", None) == "application/json"
     system = getattr(config, "system_instruction", None)
     prompt, attachments = _gemini_contents_to_claude(contents)
-    timeout = max(timeout_seconds, _ROUTED_MIN_TIMEOUT)
     text = await asyncio.wait_for(
         generate_text(
             prompt,
@@ -265,9 +262,9 @@ async def generate_content_routed(
             json_output=json_output,
             max_tokens=max_tokens,
             effort=effort,
-            timeout_seconds=timeout,
+            timeout_seconds=timeout_seconds,
         ),
-        timeout=timeout + 5,
+        timeout=timeout_seconds,
     )
     if json_output:
         try:
