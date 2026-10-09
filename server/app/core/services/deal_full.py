@@ -2,7 +2,7 @@
 
 Distinct from the tier one-pager (`deal_pricing.py`). This is the model used by the
 ~10-page LA_NonProfit_Proposal_v1: a standard PEPM rack rate with stacked discounts
-(volume + broker + partner), a flat platform fee, jurisdiction fees, and a one-time
+(volume + partner), a flat platform fee, jurisdiction fees, and a one-time
 implementation fee. Pure / IO-free.
 
 The document is a list of ordered **blocks**. Prose blocks (headings, paragraphs, notes,
@@ -11,8 +11,8 @@ tables, signatures, disclaimer) are rendered server-side from the pricing inputs
 edited as text. `DEFAULT_FULL_BLOCKS` is the standard proposal; the UI loads it, lets the
 user edit prose, and sends it back at render time.
 
-Verified against the LA proposal: rack $15 → volume −10% → $13.50 → broker+partner −15%
-→ $11.48; platform fee $5,000 → $4,250; implementation $8,000 → $6,800; Year-1 $79,930.
+Verified against the LA proposal: rack $15 → volume −10% → $13.50 → partner −5%
+→ $12.83; platform fee $5,000 → $4,750; implementation $8,000 → $7,600.
 """
 
 from __future__ import annotations
@@ -41,7 +41,6 @@ DEFAULT_RACK_PEPM = 15.00
 DEFAULT_PLATFORM_FEE = 5_000
 DEFAULT_IMPLEMENTATION = 8_000
 VOLUME_RATE = 0.10          # PEPM only, auto at 500+ employees
-BROKER_RATE = 0.10
 PARTNER_RATE = 0.05
 DEFAULT_ROI_HARD_SAVINGS = 223_000
 DEFAULT_ROI_RISK_REDUCTION = 60_000
@@ -106,7 +105,6 @@ DEFAULT_FULL_BLOCKS: list[dict] = [
     _b("sav_note", "note", "The table below compares the full standard list price to your final price, line by line."),
     _b("t_savings", "t_savings"),
     _b("sav_n1", "note", "Volume Discount (10% off PEPM) — Applied automatically for organizations with 500 or more employees."),
-    _b("sav_n2", "note", "Broker Pricing (10% off) — Applied when purchasing through an authorized Matcha broker partner."),
     _b("sav_n3", "note",
        "Partner Program (additional 5% off) — Requires quarterly business reviews, anonymized benchmarking participation, "
        "logo rights, one public platform review within 90 days of go-live, and annual prepayment or 2-year term commitment."),
@@ -285,9 +283,6 @@ class FullDealInputs(BaseModel):
     jurisdictions_extra: int = Field(default=0, ge=0, le=1_000)
 
     volume_discount: Optional[bool] = None   # None → auto (headcount >= 500)
-    broker: bool = False
-    broker_name: Optional[str] = Field(default=None, max_length=120)
-    broker_pct: int = Field(default=10, ge=0, le=100)
     partner: bool = False
     partner_pct: int = Field(default=5, ge=0, le=100)
 
@@ -307,8 +302,8 @@ class FullQuote(BaseModel):
     volume_applied: bool
     volume_pepm_cut: float
     subtotal_pepm: float
-    bp_rate_pct: int
-    bp_pepm_cut: float
+    partner_rate_pct: int
+    partner_pepm_cut: float
     your_pepm: float
     annual_employee_standard: int
     annual_employee_your: int
@@ -356,17 +351,17 @@ def compute_full_pricing(inp: FullDealInputs) -> FullQuote:
     volume_cut = _r2(rack * VOLUME_RATE) if volume_applied else 0.0
     subtotal_pepm = _r2(rack - volume_cut)
 
-    bp_rate = (inp.broker_pct / 100 if inp.broker else 0.0) + (inp.partner_pct / 100 if inp.partner else 0.0)
-    bp_rate_pct = int(round(bp_rate * 100))
-    your_pepm = _r2(subtotal_pepm * (1 - bp_rate))
-    bp_pepm_cut = _r2(subtotal_pepm - your_pepm)
+    partner_rate = inp.partner_pct / 100 if inp.partner else 0.0
+    partner_rate_pct = int(round(partner_rate * 100))
+    your_pepm = _r2(subtotal_pepm * (1 - partner_rate))
+    partner_pepm_cut = _r2(subtotal_pepm - your_pepm)
 
     annual_emp_std = _r0(rack * H * 12)
     annual_emp_your = _r0(your_pepm * H * 12)
     pf_std = inp.platform_fee
-    pf_your = _r0(pf_std * (1 - bp_rate))
+    pf_your = _r0(pf_std * (1 - partner_rate))
     impl_std = inp.implementation
-    impl_your = _r0(impl_std * (1 - bp_rate))
+    impl_your = _r0(impl_std * (1 - partner_rate))
 
     juris_tier, juris_fee = _juris_tier(H)
     extra_juris_cost = inp.jurisdictions_extra * juris_fee
@@ -389,8 +384,8 @@ def compute_full_pricing(inp: FullDealInputs) -> FullQuote:
         volume_applied=volume_applied,
         volume_pepm_cut=volume_cut,
         subtotal_pepm=subtotal_pepm,
-        bp_rate_pct=bp_rate_pct,
-        bp_pepm_cut=bp_pepm_cut,
+        partner_rate_pct=partner_rate_pct,
+        partner_pepm_cut=partner_pepm_cut,
         your_pepm=your_pepm,
         annual_employee_standard=annual_emp_std,
         annual_employee_your=annual_emp_your,

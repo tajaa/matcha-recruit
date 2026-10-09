@@ -31,69 +31,70 @@ def test_lite_volume_applied_in_quote():
     assert q2.pepm == 5
 
 
-def test_lite_80_broker_partner():
+def test_lite_80_partner():
     # ≤100 employees → base $5 PEPM.
-    q = compute_quote("lite", 80, broker=True, partner=True)
+    q = compute_quote("lite", 80, partner=True)
     assert q.pepm == 5
     assert q.subscription_yr == 4_800
     assert q.onboarding == 0
     assert q.subtotal == 4_800
-    assert q.your_price_yr == 4_800 - 480 - 240
+    assert q.your_price_yr == 4_800 - 240
 
 
-def test_lite_500_broker_partner_volume():
+def test_lite_500_partner_volume():
     # 500 employees → over 100 → $4 PEPM (not over 500, so not $3).
-    q = compute_quote("lite", 500, broker=True, partner=True)
+    q = compute_quote("lite", 500, partner=True)
     assert q.pepm == 4
     assert q.subscription_yr == 24_000
     assert q.subtotal == 24_000
-    assert q.broker_disc == 2_400
     assert q.partner_disc == 1_200
-    assert q.your_price_yr == 20_400
-    assert q.you_save_yr == 3_600
+    assert q.your_price_yr == 22_800
+    assert q.you_save_yr == 1_200
 
 
-def test_mid_500_broker_partner():
-    q = compute_quote("mid", 500, broker=True, partner=True)
+def test_mid_500_partner():
+    q = compute_quote("mid", 500, partner=True)
     assert q.subscription_yr == 60_000
     assert q.onboarding == 4_000
     assert q.subtotal == 64_000
-    assert q.broker_disc == 6_400
     assert q.partner_disc == 3_200
-    assert q.your_price_yr == 54_400
-    assert q.you_save_yr == 9_600
-    assert q.discount_pct == 15
+    assert q.your_price_yr == 60_800
+    assert q.you_save_yr == 3_200
+    assert q.discount_pct == 5
 
 
-def test_max_500_broker_partner():
-    q = compute_quote("max", 500, broker=True, partner=True)
+def test_max_500_partner():
+    q = compute_quote("max", 500, partner=True)
     assert q.subscription_yr == 78_000
     assert q.onboarding == 10_000
     assert q.subtotal == 88_000
-    assert q.your_price_yr == 74_800
-    assert q.you_save_yr == 13_200
+    assert q.your_price_yr == 83_600
+    assert q.you_save_yr == 4_400
 
 
 def test_no_discount_mid_500():
     q = compute_quote("mid", 500)
     assert q.subtotal == 64_000
-    assert q.broker_disc == 0
     assert q.partner_disc == 0
     assert q.your_price_yr == 64_000
     assert q.you_save_yr == 0
     assert q.discount_pct == 0
 
 
-def test_broker_only():
-    q = compute_quote("max", 500, broker=True, partner=False)
-    assert q.broker_disc == 8_800
-    assert q.partner_disc == 0
+def test_partner_rate_is_editable_per_deal():
+    q = compute_quote("max", 500, partner=True, partner_rate=0.10)
+    assert q.partner_disc == 8_800
     assert q.your_price_yr == 88_000 - 8_800
     assert q.discount_pct == 10
 
 
+def test_the_quote_has_no_broker_fields():
+    assert not any("broker" in name for name in compute_quote("max", 500).model_fields)
+    assert not any("broker" in name for name in DealInputs.model_fields)
+
+
 def test_compute_all_uses_same_inputs():
-    inp = DealInputs(company_name="Acme Test", headcount=200, tier="max", broker=True, partner=True)
+    inp = DealInputs(company_name="Acme Test", headcount=200, tier="max", partner=True)
     quotes = compute_all(inp)
     assert set(quotes) == {"lite", "mid", "max"}
     # Lite 200ee: over 100 → $4 PEPM → 4*200*12=9600 + 0 = 9600 subtotal
@@ -103,7 +104,7 @@ def test_compute_all_uses_same_inputs():
     assert quotes["mid"].subtotal == 28_000
     # Max 200ee: 13*200*12=31200 + 10000 = 41200 subtotal
     assert quotes["max"].subtotal == 41_200
-    assert quotes["max"].your_price_yr == 41_200 - 4_120 - 2_060  # -10% -5%
+    assert quotes["max"].your_price_yr == 41_200 - 2_060  # -5% partner
 
 
 def test_per_tier_overrides():
@@ -111,7 +112,6 @@ def test_per_tier_overrides():
         company_name="Custom Co",
         headcount=500,
         tier="mid",
-        broker=False,
         partner=False,
         overrides={
             "mid": TierOverride(pepm=20, onboarding=5_000),

@@ -62,7 +62,6 @@ from app.core.services.stripe_service import StripeService, StripeServiceError
 from app.core.feature_flags import ALL_FEATURES, DEFAULT_COMPANY_FEATURES, TIER_SIGNUP_PRESETS
 from app.core.services.deal_pricing import DealInputs
 from app.core.services.deal_full import FullDealInputs
-from app.core.services.deal_book import BookInputs
 
 
 from app.core.services.scope_registry.jurisdiction_chain import (  # noqa: E402
@@ -451,11 +450,11 @@ _TIER_FEATURE_PRESETS = TIER_SIGNUP_PRESETS
 # ── Deal Flow — saved editor templates (DB-backed; admin-global, one row per tab) ──
 # The deal builder is otherwise stateless. These two endpoints let a master-admin
 # persist an editor tab's template — its prose blocks plus that tab's structured
-# config (book volume tiers, one-pager per-tier pricing). The
+# config (one-pager per-tier pricing). The
 # payload is opaque JSONB whose shape the frontend tab owns; on load each tab layers
 # the saved payload over the hardcoded `*-defaults` (GET returns null when unsaved,
 # so the tab falls back to defaults and behaves exactly as before).
-_DEAL_TEMPLATE_KEYS = {"book", "full", "one_pager", "lite"}
+_DEAL_TEMPLATE_KEYS = {"full", "one_pager", "lite"}
 
 
 _CAPPE_PAID_STATUSES = ("paid", "fulfilled")

@@ -62,7 +62,6 @@ from app.core.services.stripe_service import StripeService, StripeServiceError
 from app.core.feature_flags import DEFAULT_COMPANY_FEATURES
 from app.core.services.deal_pricing import DealInputs
 from app.core.services.deal_full import FullDealInputs
-from app.core.services.deal_book import BookInputs
 
 
 from app.core.services.scope_registry.jurisdiction_chain import (  # noqa: E402
@@ -122,50 +121,6 @@ async def deal_flow_proposal(inp: DealInputs):
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@router.get("/deal-flow/book-defaults", dependencies=[Depends(require_admin)])
-async def deal_flow_book_defaults():
-    """Default editable blocks + volume-discount tiers for the broker book one-pager."""
-    from app.core.services.deal_book import DEFAULT_BOOK_BLOCKS, DEFAULT_DISCOUNT_TIERS
-
-    return {"blocks": DEFAULT_BOOK_BLOCKS, "discount_tiers": DEFAULT_DISCOUNT_TIERS}
-
-
-@router.post("/deal-flow/book-proposal/preview", dependencies=[Depends(require_admin)])
-async def deal_flow_book_preview(inp: BookInputs):
-    """Styled HTML preview of the broker book one-pager (for in-app iframe)."""
-    from app.core.services.deal_book import compute_book_quote
-    from app.core.services.deal_book_template import render_book_proposal_html
-
-    return {"html": render_book_proposal_html(inp, compute_book_quote(inp))}
-
-
-@router.post("/deal-flow/book-proposal", dependencies=[Depends(require_admin)])
-async def deal_flow_book_proposal(inp: BookInputs):
-    """Render the broker Matcha-Lite book one-pager (pooled-volume pricing) to PDF."""
-    from app.core.services.deal_book import compute_book_quote
-    from app.core.services.deal_book_template import render_book_proposal_html
-
-    html_str = render_book_proposal_html(inp, compute_book_quote(inp))
-    try:
-        from app.core.services.pdf import render_pdf
-    except ImportError as ie:
-        logger.error("weasyprint import failed: %s", ie)
-        raise HTTPException(status_code=501, detail="PDF generation not available — install weasyprint on the server.")
-    try:
-        pdf_bytes = await asyncio.wait_for(
-            asyncio.to_thread(lambda: render_pdf(html_str)), timeout=60,
-        )
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="PDF render timed out.")
-
-    safe_name = re.sub(r"[^A-Za-z0-9]+", "_", inp.broker_name).strip("_") or "Broker"
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}_Matcha_Lite_Book_Pricing.pdf"'},
     )
 
 
