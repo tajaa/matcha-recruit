@@ -251,20 +251,23 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
     # What the WORKSPACE gets, as opposed to what the plan allows. The
     # assistant is for personal accounts only (agent_runtime/eligibility.py);
     # both apps read this instead of guessing.
-    # `claude_models`: whether the chat model picker may offer Claude — true
-    # only while the server has an Anthropic key. Which Claude models a user
-    # may pick follows the plan (`ai_model_pro` unlocks Sonnet), the same
-    # rule `matcha_work_ai._get_model` enforces server-side.
-    # `agent_model`: the Claude model the admin "Agent model" setting runs
-    # every chat turn on (null = the picker decides). While it is set, the
-    # pickers show it as the default and drop the Gemini rows, since a Gemini
-    # pick would run it anyway.
-    from app.core.services.anthropic_messages import anthropic_configured, claude_override
+    # `chat_models` / `default_chat_model`: the chat model picker's rows
+    # (`[{"id", "locked"}]`) and the row it starts on, from
+    # `matcha_work_ai.picker_models` — the one rule both apps render and
+    # `_get_model` enforces, so no client re-derives it. `claude_models`
+    # (whether the server has an Anthropic key) stays for app builds that
+    # predate `chat_models`.
+    from app.core.services.anthropic_messages import anthropic_configured
+    from ..matcha_work.matcha_work_ai._models import picker_models
 
+    chat_models, default_chat_model = await picker_models(
+        pro_allowed=features_for_plan(plan)["ai_model_pro"],
+    )
     workspace = {
         "espresso_assistant": False,
         "claude_models": anthropic_configured(),
-        "agent_model": await claude_override(),
+        "chat_models": chat_models,
+        "default_chat_model": default_chat_model,
     }
     if company_id is not None:
         try:

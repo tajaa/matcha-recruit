@@ -221,7 +221,7 @@ struct ThreadDetailView: View {
                 // regardless, so this is purely honest UI).
                 Menu {
                     ForEach(appState.modelOptions) { option in
-                        let locked = option.pro && !appState.canProModel
+                        let locked = appState.isModelLocked(option)
                         Button {
                             if locked {
                                 appState.presentPaywall(for: "ai_model_pro")
@@ -231,7 +231,7 @@ struct ThreadDetailView: View {
                         } label: {
                             HStack {
                                 Text(locked ? "\(option.label) 🔒" : option.label)
-                                if selectedModelId == option.id {
+                                if appState.modelOption(for: selectedModelId)?.id == option.id {
                                     Image(systemName: "checkmark")
                                 }
                             }

@@ -32,42 +32,41 @@ export const THREAD_MODE_TOGGLES: {
 export type ModelOption = {
   id: string
   label: string
-  /** Needs the server's Anthropic key (`workspace.claude_models`). */
-  claude?: boolean
-  /** Needs the `ai_model_pro` entitlement — the server clamps it regardless. */
-  pro?: boolean
 }
+
+/** One row of the server's picker (`entitlements.workspace.chat_models`). */
+export type ChatModelRow = { id: string; locked: boolean }
 
 export const DEFAULT_MODEL = 'gemini-3.7-flash'
 
-// Ids must be in the server's SUPPORTED_MODELS (matcha_work_ai/_models.py) or
-// the pick silently runs the plan model. Flash Lite shipped as
+// Labels only. WHICH rows a person gets, which are locked, and where the
+// picker starts are the server's call (`matcha_work_ai._models.picker_models`);
+// ids must be in its SUPPORTED_MODELS. Flash Lite shipped as
 // 'gemini-3.7-flash-lite', which the server never supported — LEGACY_MODEL_IDS
 // maps a stored pick of it, and the server aliases it for older builds.
 export const MODEL_OPTIONS: readonly ModelOption[] = [
   { id: 'gemini-3.5-flash-lite', label: 'Flash Lite 3.5' },
   { id: DEFAULT_MODEL, label: 'Flash 3.7' },
-  { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', claude: true },
-  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', claude: true, pro: true },
+  { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5' },
+  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
 ]
 
 export const LEGACY_MODEL_IDS: Record<string, string> = {
   'gemini-3.7-flash-lite': 'gemini-3.5-flash-lite',
 }
 
-/** What the picker offers this person: Claude only while the server has it,
- *  Sonnet only on a plan with the pro model, and only Claude while the admin
- *  "Agent model" setting names one. */
-export function modelOptionsFor(
-  { claude, pro, agentModel = null }: { claude: boolean; pro: boolean; agentModel?: string | null },
-): ModelOption[] {
-  // An admin-set agent model runs every Gemini pick on Claude anyway, so the
-  // menu offers only Claude rows, always including the admin's own model
-  // (it is not plan-gated).
-  if (agentModel) {
-    return MODEL_OPTIONS.filter((option) => option.claude && (option.id === agentModel || !option.pro || pro))
-  }
-  return MODEL_OPTIONS.filter((option) => (!option.claude || claude) && (!option.pro || pro))
+// Until entitlements load: the two Gemini rows every plan has. A Claude row
+// that appears and then vanishes is worse than one that appears a moment late.
+const UNKNOWN_ROWS: readonly ChatModelRow[] = [
+  { id: 'gemini-3.5-flash-lite', locked: false },
+  { id: DEFAULT_MODEL, locked: false },
+]
+
+/** The menu for this person: the server's unlocked rows, in menu order.
+ *  Locked rows are left out here; the web picker has no upsell row. */
+export function modelOptionsFor(rows: readonly ChatModelRow[] | null): ModelOption[] {
+  const offered = new Set((rows ?? UNKNOWN_ROWS).filter((row) => !row.locked).map((row) => row.id))
+  return MODEL_OPTIONS.filter((option) => offered.has(option.id))
 }
 
 export function formatTokens(n: number): string {

@@ -688,6 +688,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         model_override: Optional[str] = None,
         company_id: str = "",
         user_id: str = "",
+        payer_mode: bool = False,
     ) -> dict:
         static_prompt, dynamic_prompt, _, _, _ = self._build_prompt_and_contents(
             messages, current_state, company_context=company_context,
@@ -695,9 +696,10 @@ class GeminiProvider(MatchaWorkAIProvider):
         )
         # Resolve the SAME model the actual turn will use — estimating against
         # the default flash model billed Pro-tier fallback turns at flash prices.
+        # `payer_mode` mirrors generate()'s payer branch, which stays on Gemini.
         model = await _get_model(
             self.settings, model_override,
-            company_id=company_id or None, user_id=user_id or None,
+            company_id=company_id or None, user_id=user_id or None, gemini_only=payer_mode,
         )
         windowed = messages[-20:]
         char_count = len(static_prompt) + len(dynamic_prompt) + sum(len(str(msg.get("content", ""))) for msg in windowed)

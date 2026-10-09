@@ -105,7 +105,7 @@ async def test_stored_flash_lite_37_pick_finally_runs_flash_lite():
 
 @pytest.mark.asyncio
 async def test_admin_agent_model_replaces_gemini_picks_and_the_plan_default(monkeypatch):
-    monkeypatch.setattr(_models, "claude_override", AsyncMock(return_value=CLAUDE_SONNET))
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_SONNET))
     _plan(monkeypatch, "free")  # the admin's pick is not plan-gated
     uid = str(uuid4())
     assert await _models._get_model(SETTINGS, FLASH, user_id=uid) == CLAUDE_SONNET
@@ -115,24 +115,24 @@ async def test_admin_agent_model_replaces_gemini_picks_and_the_plan_default(monk
 
 @pytest.mark.asyncio
 async def test_explicit_claude_pick_still_wins_over_the_admin_model(monkeypatch, claude_on):
-    monkeypatch.setattr(_models, "claude_override", AsyncMock(return_value=CLAUDE_SONNET))
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_SONNET))
     _plan(monkeypatch, "free")
     assert await _models._get_model(SETTINGS, CLAUDE_HAIKU, user_id=str(uuid4())) == CLAUDE_HAIKU
 
 
 @pytest.mark.asyncio
 async def test_a_locked_claude_pick_runs_the_admin_model_not_gemini(monkeypatch, claude_on):
-    monkeypatch.setattr(_models, "claude_override", AsyncMock(return_value=CLAUDE_HAIKU))
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_HAIKU))
     _plan(monkeypatch, "lite")
     assert await _models._get_model(SETTINGS, CLAUDE_SONNET, user_id=str(uuid4())) == CLAUDE_HAIKU
-    monkeypatch.setattr(_models, "claude_override", AsyncMock(return_value=CLAUDE_SONNET))
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_SONNET))
     assert await _models._get_model(SETTINGS, CLAUDE_SONNET, user_id=str(uuid4())) == CLAUDE_SONNET
 
 
 @pytest.mark.asyncio
 async def test_gemini_only_ignores_the_admin_model_and_claude_picks(monkeypatch, claude_on):
     override = AsyncMock(return_value=CLAUDE_SONNET)
-    monkeypatch.setattr(_models, "claude_override", override)
+    monkeypatch.setattr(anthropic_messages, "claude_override", override)
     _plan(monkeypatch, "free")
     uid = str(uuid4())
     assert await _models._get_model(SETTINGS, CLAUDE_HAIKU, user_id=uid, gemini_only=True) == FLASH
@@ -330,13 +330,70 @@ async def test_entitlements_say_whether_claude_is_available(monkeypatch):
     _plan(monkeypatch, "pro")
     out = await entitlements_service.resolve_entitlements(uuid4(), None)
     assert out["workspace"]["claude_models"] is False
-    assert out["workspace"]["agent_model"] is None
+    assert [m["id"] for m in out["workspace"]["chat_models"]] == [FLASH_LITE, FLASH]
     monkeypatch.setattr(anthropic_messages, "anthropic_configured", lambda: True)
     monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_HAIKU))
     out = await entitlements_service.resolve_entitlements(uuid4(), None)
     assert out["workspace"]["claude_models"] is True
-    assert out["workspace"]["agent_model"] == CLAUDE_HAIKU
+    assert out["workspace"]["default_chat_model"] == CLAUDE_HAIKU
     assert out["features"]["ai_model_pro"] is True
+
+
+def _rows(rows):
+    return {row["id"]: row["locked"] for row in rows}
+
+
+@pytest.mark.asyncio
+async def test_picker_without_a_key_is_the_gemini_rows():
+    rows, default = await _models.picker_models(pro_allowed=True)
+    assert _rows(rows) == {FLASH_LITE: False, FLASH: False} and default == FLASH
+
+
+@pytest.mark.asyncio
+async def test_picker_locks_sonnet_without_the_pro_entitlement(claude_on):
+    rows, default = await _models.picker_models(pro_allowed=False)
+    assert _rows(rows) == {FLASH_LITE: False, FLASH: False, CLAUDE_HAIKU: False, CLAUDE_SONNET: True}
+    rows, _ = await _models.picker_models(pro_allowed=True)
+    assert _rows(rows)[CLAUDE_SONNET] is False
+    assert default == FLASH
+
+
+@pytest.mark.asyncio
+async def test_picker_under_an_admin_model_is_claude_only(monkeypatch, claude_on):
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_HAIKU))
+    rows, default = await _models.picker_models(pro_allowed=False)
+    assert _rows(rows) == {CLAUDE_HAIKU: False, CLAUDE_SONNET: True} and default == CLAUDE_HAIKU
+    # The admin's own model is never locked, whatever the plan.
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_SONNET))
+    rows, default = await _models.picker_models(pro_allowed=False)
+    assert _rows(rows) == {CLAUDE_HAIKU: False, CLAUDE_SONNET: False} and default == CLAUDE_SONNET
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("admin", [None, CLAUDE_HAIKU, CLAUDE_SONNET])
+@pytest.mark.parametrize("plan", ["free", "pro"])
+async def test_every_unlocked_picker_row_is_what_the_turn_runs(monkeypatch, claude_on, admin, plan):
+    """The rows the apps show and the model a turn runs come from one rule:
+    pick an unlocked row and that model runs; pick a locked one and the
+    default runs, never something the menu didn't show."""
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=admin))
+    _plan(monkeypatch, plan)
+    rows, default = await _models.picker_models(pro_allowed=plan == "pro")
+    uid = str(uuid4())
+    for row in rows:
+        ran = await _models._get_model(SETTINGS, row["id"], user_id=uid)
+        assert ran == (default if row["locked"] else row["id"])
+
+
+@pytest.mark.asyncio
+async def test_payer_estimate_prices_the_gemini_model_it_runs_on(monkeypatch):
+    get_model = AsyncMock(return_value=FLASH)
+    monkeypatch.setattr(provider_module, "_get_model", get_model)
+    await GeminiProvider().estimate_usage([{"role": "user", "content": "Is CPT 99213 covered?"}], {},
+                                          model_override=CLAUDE_HAIKU, payer_mode=True)
+    assert get_model.await_args.kwargs["gemini_only"] is True
+    await GeminiProvider().estimate_usage([{"role": "user", "content": "hi"}], {}, model_override=CLAUDE_HAIKU)
+    assert get_model.await_args.kwargs["gemini_only"] is False
 
 
 # --- Images and the anthropic bucket ------------------------------------------

@@ -153,8 +153,11 @@ provider it was built on. One function decides: `core/services/anthropic_message
 Huume on every surface, the Espresso repo/task-draft agents, agent cards + the Espresso assistant
 (`agent_runtime`), the single-shot Luna calls (credential templates, sym_chat, inventory insight +
 waste narration, AI ticket draft), and EMS channel `@huume` (classify, inventory extraction,
-schedule parse, receipt parse, the ask loop — those were Gemini). IR's analyzer, the Gemini skill
-engine and everything else stay where they were. Callers import the MODULE and call through it so
+schedule parse, receipt parse, the ask loop — those were Gemini), and the matcha-work / Espresso
+chat skill engine (`matcha_work_ai._models._get_model`: a Gemini pick or the plan default runs the
+admin model, an explicit Claude pick still wins, payer mode stays Gemini; `picker_models` is the
+picker rule both apps render from `entitlements.workspace.chat_models`). IR's analyzer and
+everything else stay where they were. Callers import the MODULE and call through it so
 tests patch `anthropic_messages.claude_override`; `tests/conftest.py` blanks `ANTHROPIC_API_KEY` so
 no test reaches the setting unless it opts in.
 

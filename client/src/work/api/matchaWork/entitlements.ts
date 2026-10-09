@@ -9,9 +9,10 @@ export type WorkEntitlements = {
   workspace?: {
     espresso_assistant?: boolean
     claude_models?: boolean
-    /** The admin "Agent model" setting's Claude model, which every chat turn
-     *  runs on while set (null = the picker decides). */
-    agent_model?: string | null
+    /** The chat model picker's rows and the row it starts on — the server's
+     *  rule (`matcha_work_ai._models.picker_models`), not re-derived here. */
+    chat_models?: { id: string; locked: boolean }[]
+    default_chat_model?: string
   }
   quotas: {
     token_limit: number
