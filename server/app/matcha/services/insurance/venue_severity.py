@@ -98,20 +98,3 @@ async def company_venue_exposure(conn, company_id: UUID) -> dict:
     return {"locations": locations, "summary": summarize(locations)}
 
 
-async def state_venue(conn, state) -> dict:
-    """State-baseline severity for off-platform clients (primary_state only, no counties)."""
-    st = (state or "").upper()
-    if not st:
-        return {"locations": [], "summary": summarize([])}
-    rows = await conn.fetch(
-        "SELECT state, county, tier, score, source, note FROM venue_severity WHERE state = $1", st
-    )
-    hit = resolve_tier([dict(r) for r in rows], None)
-    loc = {
-        "city": None, "state": st, "county": None,
-        "tier": hit["tier"] if hit else "unknown",
-        "score": hit["score"] if hit else None,
-        "source": hit["source"] if hit else None,
-        "note": hit["note"] if hit else None,
-    }
-    return {"locations": [loc], "summary": summarize([loc])}

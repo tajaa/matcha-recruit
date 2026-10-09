@@ -2,7 +2,7 @@
 
 Periodic (re-dispatched on every ~15-min worker startup, gated by the
 `benefit_eligibility_sync` row in scheduler_settings — seeded DISABLED). For
-each company with the benefits feature on (or linked to a broker), it:
+each company with the benefits feature on, it:
 
   1. Ingests the latest roster from Finch (if connected; CSV uploads land
      out-of-band via the upload endpoints).
@@ -33,10 +33,6 @@ async def _run() -> dict:
             SELECT DISTINCT c.id
             FROM companies c
             WHERE COALESCE(c.enabled_features->>'benefits_admin', 'false') = 'true'
-               OR EXISTS (
-                   SELECT 1 FROM broker_company_links l
-                   WHERE l.company_id = c.id AND l.status IN ('active', 'grace')
-               )
             """
         )
         for r in rows:

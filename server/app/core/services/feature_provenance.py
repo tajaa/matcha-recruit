@@ -178,8 +178,8 @@ async def feature_provenance(
     that reads as enabled via `merge_company_features`. Buckets, in match
     order: tier_forced, addon, custom_product, paid_gate, tier_preset, audit,
     admin_grant. `admin_grant` is the fallback — nothing else explains the
-    flag, and the only way that happens in this codebase is an admin (or
-    broker, at company creation) turning it on directly: comped, invoiced
+    flag, and the only way that happens in this codebase is an admin
+    turning it on directly: comped, invoiced
     separately, or a pre-audit-log toggle. It is NOT "unknown" in the sense of
     unexplainable — it just predates `company_feature_audit_log` or a write
     path this function doesn't (yet) resolve, so the specific actor/timestamp

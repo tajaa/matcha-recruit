@@ -4,8 +4,7 @@ Universal "proof of controls" register + underwriter packet (WTW p.85
 "mitigation-evidence systems of record"). Auto-fills from existing HR / safety /
 compliance data (reusing the EPL-readiness engine + IR/OSHA + credentialing +
 safety-program queries); companies verify/annotate each control and export the
-packet. Business-facing; tenant-isolated by company. The broker-facing surfaces
-live in `broker_submission.py`.
+packet. Business-facing; tenant-isolated by company.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Response

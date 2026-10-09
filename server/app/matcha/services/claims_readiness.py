@@ -3,8 +3,7 @@
 The implementation split by domain in refactor round 2 stage 6:
 `services/ir/ir_claims_packet.py` (incident packet) and
 `services/er/er_claims_packet.py` (ER-case packet). This module stays so the
-three existing importers are unchanged — `routes/broker/submission.py` imports
-it as `cr`, and `routes/ir_incidents/claims_readiness.py` /
+existing importers are unchanged — `routes/ir_incidents/claims_readiness.py` /
 `routes/er_copilot/case_views.py` import it by module and call through it.
 
 

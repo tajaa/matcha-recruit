@@ -4,7 +4,7 @@ External callers continue to do:
 
     from app.matcha.routes.ir_incidents import router as ir_incidents_router
 
-Symbols imported by other routers (`broker_portfolio.py`, `inbound_email.py`)
+Symbols imported by other routers (`inbound_email.py`)
 are re-exported here so those callers never need to know whether a helper
 currently lives in `_legacy.py` or its eventual submodule home. As helpers
 migrate out of `_legacy.py`, flip the corresponding `from ._legacy import`
@@ -85,12 +85,9 @@ router.include_router(_voice_router)
 from .chat_intake import router as _chat_intake_router
 router.include_router(_chat_intake_router)
 
-from .broker_sharing import router as _broker_sharing_router
-router.include_router(_broker_sharing_router)
-
 # External re-exports. Keep `# noqa: F401` — these are package-level
 # re-exports, not local usages.
-from app.matcha.services.ir.ir_wc_metrics import compute_wc_metrics  # noqa: F401  (used by broker_portfolio.py)
+from app.matcha.services.ir.ir_wc_metrics import compute_wc_metrics  # noqa: F401
 from app.matcha.services.ir.ir_wc_metrics import compute_behavioral_friction  # noqa: F401  (no live caller — see docstring)
 from ._shared import (  # noqa: F401  (used by inbound_email.py)
     MAX_INTAKE_FILES,

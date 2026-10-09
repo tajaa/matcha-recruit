@@ -1,7 +1,6 @@
 """Carrier quote/bind request + response models (Coterie)."""
 
 from typing import Literal, Optional
-from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -39,26 +38,3 @@ class QuoteResponse(BaseModel):
     created_at: Optional[str] = None
 
 
-# --- broker-placed quoting (Broker Quoting Desk) -------------------------------
-
-class BrokerQuoteRequest(QuoteRequest):
-    """A broker requesting a quote on behalf of a client in their book. Same
-    prefill/override fields as a client self-serve quote, plus placement metadata
-    the broker sets (commission + a private note)."""
-
-    commission_bps: Optional[int] = Field(None, ge=0, le=10_000)
-    broker_note: Optional[str] = Field(None, max_length=2_000)
-
-
-class PresentRequest(BaseModel):
-    """Broker presents a quoted policy to the on-platform client for acceptance."""
-
-    commission_bps: Optional[int] = Field(None, ge=0, le=10_000)
-    broker_note: Optional[str] = Field(None, max_length=2_000)
-
-
-class FnolRequest(BaseModel):
-    """File a First Notice of Loss to the carrier from a logged IR incident."""
-
-    incident_id: UUID
-    description: Optional[str] = Field(None, max_length=4_000)

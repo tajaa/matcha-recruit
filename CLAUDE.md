@@ -47,7 +47,7 @@ Full mechanics (routers, endpoints, migrations, invariants) for every product ab
 
 ### Auxiliary surfaces (share codebase, not products)
 - **Admin** — `AdminSidebar`, `/admin/*` routes; internal tooling (companies, jurisdiction data, payer data).
-- **Broker** — web UI removed (`/broker/*`, `BrokerSidebar`, admin Brokers, company↔broker chat, IR broker-share, broker seat-invite signup). The backend (`/api/broker/*`, `broker_*` tables, `broker` role) is still present pending a separate removal.
+- **Broker** — removed (web UI in #718, backend + schema in the follow-up; migration `brokerdrop01`). No `/broker/*` routes, `broker_*` tables or `broker` role remain. Tenant tables brokers used to write into (`insurance_quotes`, `company_epl_attestations`, `company_wc_mods`, `company_wc_class_exposures`, `wc_loss_runs`) keep their dangling `broker_id` columns.
 - **Candidate / Employee portals** — public-token routes (`/candidate-interview/:token`, `/s/:token`); employee self-service through `employee_portal_router`.
 - **Public anonymous report** — `/report/:token` (`server/app/matcha/routes/intake/inbound_email.py`); per-company token-gated, reusable form (poster-friendly — not single-use; `/request-info` stays single-use).
 
@@ -57,7 +57,7 @@ Which frontend pairs with which backend package (don't re-derive this):
 
 | Product | Frontend | Backend | Identity / tables | Domain |
 |---|---|---|---|---|
-| **Matcha** (Free / Lite / Essentials / X / Compliance / Pro) | `client/` — main SPA (hey-matcha.com) | `server/app/core/` + `server/app/matcha/` at `/api` | `users` + `companies` (`signup_source`, `enabled_features`) | HR compliance, IR/OSHA, ER, employees, broker risk tooling |
+| **Matcha** (Free / Lite / Essentials / X / Compliance / Pro) | `client/` — main SPA (hey-matcha.com) | `server/app/core/` + `server/app/matcha/` at `/api` | `users` + `companies` (`signup_source`, `enabled_features`) | HR compliance, IR/OSHA, ER, employees, insurance-risk tooling |
 | **Matcha-work** (web) | `client/src/work/*` at `/work/*` (+ `/espresso`, `/werk-lite` route trees over the same pages; `/werk` redirects to `/espresso`) | `server/app/matcha/routes/matcha_work/` | `mw_*` tables | Collaborative AI workspace |
 | **Espresso** (macOS, formerly Werk) | `platforms/desktop/Espresso/` (SwiftUI; project still `Matcha.xcodeproj`) | same matcha-work backend | `mw_*` tables | Desktop surface of matcha-work — confirm which surface (web vs desktop) before editing |
 | **Cappe** | inside `client/` — host-routed on gummfit.com (`client/src/cappe/host.ts`, pages in `client/src/cappe/pages/`) | `server/app/cappe/` at `/api/cappe` (+ unprefixed tenant renderer on `*.gummfit.com`) | `cappe_accounts`, JWT `scope=cappe`, `cappe_*` tables (no matcha tenant model) | Website builder + domain reselling |
@@ -141,11 +141,11 @@ server/
 │   │   │   ├── matcha_work/        # Package (split 2026-07-03) — see matcha_work/CLAUDE.md
 │   │   │   ├── employee_portal/    # Package (split 2026-07-26) — see employee_portal/CLAUDE.md
 │   │   │   ├── dashboard/          # Package (split 2026-07-26) — see dashboard/CLAUDE.md
-│   │   │   └── … grouping folders: broker/ insurance/ pilots/ onboarding/ intake/ employee_lifecycle/
+│   │   │   └── … grouping folders: insurance/ pilots/ onboarding/ intake/ employee_lifecycle/
 │   │   │                             work/ integrations/ employee_schedule/ labor_relations/
 │   │   └── services/               # domain subdirs + _shared/ leaves (pdf, citations, gemini, text).
 │   │                               #   FACADE PACKAGES: matcha_work/matcha_work_ai/, matcha_work/
-│   │                               #   project_service/, broker/broker_pilot/, pilots/handbook_pilot/,
+│   │                               #   project_service/, pilots/handbook_pilot/,
 │   │                               #   pilots/hr_pilot_corpus/, risk_analytics/risk_assessment_service/
 │   ├── cappe/                      # Cappe (website builder) at /api/cappe — see repo-layout table
 │   ├── tellus/                     # Tell-Us (rewards-for-feedback) at /api/tellus
@@ -167,7 +167,7 @@ client/src/                         # app-first: cappe/ and work/ are self-conta
 │   ├── ui/                         # Generic primitives (Button, Input, …)
 │   ├── shared/                     # App-wide infra chrome (FeatureGate, ErrorBoundary, …)
 │   ├── widgets/                    # Reusable content widgets (AiSuggest, NoteThread, …)
-│   ├── sidebars/                   # ClientSidebar, TenantSidebar (tier dispatcher), Admin, Broker
+│   ├── sidebars/                   # ClientSidebar, TenantSidebar (tier dispatcher), Admin
 │   ├── tier-sidebars/              # Ir / MatchaLitePending / ResourcesFree / Compliance shells
 │   └── <domain>/                   # ir/, er/, compliance/, employees/, discipline/, matcha-x/, …
 │                                   # onboarding flows live in <domain>/onboarding/
@@ -176,7 +176,7 @@ client/src/                         # app-first: cappe/ and work/ are self-conta
 ├── layouts/                        # AppLayout
 ├── pages/
 │   ├── app/<domain>/               # /app/* grouped by domain; AppRoutes.tsx is sole importer
-│   ├── admin/, broker/             # still flat — deferred on purpose
+│   ├── admin/                      # still flat — deferred on purpose
 │   └── auth/, home/, landing/, portal/, shared/, simpler-pages/
 ├── types/                          # Shared TypeScript types — <domain>.ts
 ├── utils/                          # Pure utilities (incl. tier.ts)
@@ -210,7 +210,6 @@ Defined in `server/app/core/models/auth.py:7`:
 | `client` | Business user (linked to a company) — "business admin" |
 | `candidate` | Job seeker |
 | `employee` | Company employee (HR portal) |
-| `broker` | HR broker managing multiple client companies |
 | `creator` | Matcha-work creator role (channel ownership) |
 | `agency` | Agency tenant role |
 | `individual` | Personal Matcha-work user (no company) |
@@ -249,11 +248,11 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 | `hris_deductions` | ❌ | Deductions/benefits **write**-back via Finch — requests the `benefits` product at connect; gates `/provisioning/hris/benefits` (provider must support it) |
 | `paid_channel_creator` | ❌ | Stripe-gated paid channels |
 | `channel_job_postings` | ❌ | Stripe-gated job postings in channels |
-| `benefits_admin` | ❌ | Employee-benefits broker tooling — roster ingest (Finch+CSV), eligibility-exception detection, renewal-risk radar. Gates `/benefits/*` + `/broker/benefits/*`. → `server/app/matcha/services/benefits/CLAUDE.md` |
+| `benefits_admin` | ❌ | Employee-benefits tooling — roster ingest (Finch+CSV), eligibility-exception detection, renewal-risk radar. Gates `/benefits/*`. → `server/app/matcha/services/benefits/CLAUDE.md` |
 | `werk_lite` | ❌ | Standalone business work-chat at `/werk-lite` (own login) — channels + calls + kanban, whole-company. Needs `matcha_work` too. → `server/app/werk/CLAUDE.md` |
 | `werk_lite_calls_all_members` | ❌ | Werk Lite call-start policy — false=admins only, true=any member starts; joining always open. → `server/app/werk/CLAUDE.md` |
-| `workforce_compliance` | ❌ | Employment-practices risk trackers (pay-transparency, AI-hiring bias audit, BIPA, pay-equity). Feeds broker EPL factors. In `matcha_x` overlay. → `server/app/matcha/services/workforce/CLAUDE.md` |
-| `risk_profile` | ❌ | Client-facing composite risk index + submission-readiness score, same engine as the broker view. NOT bundled. → `server/app/matcha/services/broker/CLAUDE.md` |
+| `workforce_compliance` | ❌ | Employment-practices risk trackers (pay-transparency, AI-hiring bias audit, BIPA, pay-equity). Feeds the EPL readiness factors. In `matcha_x` overlay. → `server/app/matcha/services/workforce/CLAUDE.md` |
+| `risk_profile` | ❌ | Client-facing composite risk index + submission-readiness score. NOT bundled. → `server/app/matcha/services/insurance/CLAUDE.md` |
 | `resident_care` | ❌ | Healthcare/senior-living resident-care risk asset — safety-program register, MVR review tracking, credentialing currency, insurer PDF. NOT bundled. → `server/app/matcha/services/insurance/CLAUDE.md` |
 | `controls_evidence` | ❌ | Proof-of-Controls register + underwriter PDF, auto-compiled from 8 existing risk controls. Generalizes `resident_care`. NOT bundled. → `server/app/matcha/services/insurance/CLAUDE.md` |
 | `limit_adequacy` | ❌ | Limit-adequacy + contract review — carried limits vs Gemini-extracted requirements + deterministic risk-transfer verdicts. Own S3 bucket for source PDFs. NOT bundled. → `server/app/matcha/services/insurance/CLAUDE.md` |
@@ -295,7 +294,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 - **Lite** (`matcha_lite`) = `incidents` (paid) + `employees` + `handbooks` (generation). `training`/`discipline` force-asserted **off** here; no `handbook_audit`/`credential_templates`.
 - **Lite Essentials** (`matcha_lite_essentials`) = a checkbox on the *same* `/lite/signup` page as standard Lite (not a separate product/route) — `incidents` (paid) + `handbooks`, but `employees`/`osha_logs` force-asserted **off** (no roster: no CSV/HRIS import, no OSHA 300 logs; reporter/witness capture still works via the no-roster `ir_people` index). Own cheaper row in `matcha_lite_pricing` (`product_code='matcha_lite_essentials'`).
 - **Matcha-X** (`matcha_x`) = Lite + `training` + `discipline` + `handbook_audit` + `credential_templates` + `compliance_lite` (read-only Compliance taste) + `handbook_pilot` + `workforce_compliance` (employment-practices trackers + real pay-equity gap) — all forced on via overlay.
-- **Pro** (`bespoke`/`invite`/`broker`) = full `DEFAULT_COMPANY_FEATURES` + `incidents` + `handbook_audit` + `credential_templates`, stored at signup (toggleable per-company; not an overlay, so it doesn't leak to personal Espresso/matcha-work which shares `signup_source='bespoke'`).
+- **Pro** (`bespoke`/`invite`) = full `DEFAULT_COMPANY_FEATURES` + `incidents` + `handbook_audit` + `credential_templates`, stored at signup (toggleable per-company; not an overlay, so it doesn't leak to personal Espresso/matcha-work which shares `signup_source='bespoke'`).
 - **Matcha Compliance** (`matcha_compliance`) = full `compliance` only, nothing else bundled. `compliance` is **not** in any overlay — it's the Stripe-gated paid flag (flipped by `checkout.session.completed`), exactly like `incidents` gates Lite/X. Onboarding reuses `MatchaXOnboardingWizard`.
 
 ## Key Modules
@@ -420,7 +419,7 @@ cd server && python3 -m pytest tests/ -v
 ## Code Modification Rules
 
 - Before modifying any function, component, or class, you MUST identify and read all files that import or depend on it.
-- **When a new analytics/risk engine lands under `services/`, the same PR wires its records into whichever grounded pilots ground on that domain** (Legal / Broker / Handbook / HR / Analysis). Three of the four gaps the 2026-07-20 pilot-grounding review found were exactly this omission: a service computed something real and the pilot that should cite it never learned it existed. A corpus record is part of shipping the engine, not a follow-up.
+- **When a new analytics/risk engine lands under `services/`, the same PR wires its records into whichever grounded pilots ground on that domain** (Legal / Handbook / HR / Analysis). Three of the four gaps the 2026-07-20 pilot-grounding review found were exactly this omission: a service computed something real and the pilot that should cite it never learned it existed. A corpus record is part of shipping the engine, not a follow-up.
 - If a task involves data fetching, database schemas, or global state, you are required to load the entire schema and all relevant model files into your context *before* proposing or executing changes.
 - When a Feature Flags row or Key Modules bullet carries a "→ full spec" pointer, read that file before working on the feature — its invariants live there now.
 - **After applying fixes from a review (`/code-review --fix`, `/simplify`, or by hand), run `cd server && ./venv/bin/python -m pytest tests -q` before reporting** — the whole suite, not just the file you touched (~8,900 tests, ~25s, no DB). A failure is a blocking finding, not a footnote. CI also gates diff coverage at 80% of changed lines, so a fix that adds a branch ships with its test. Client equivalent and the reasoning: `server/CLAUDE.md` §Tests.
@@ -496,7 +495,6 @@ This repo is configured for Claude Code with subtree docs, hooks, and project sl
 | `server/app/matcha/services/property/CLAUDE.md` | property feature spec |
 | `server/app/matcha/services/scheduling/CLAUDE.md` | employee_schedule/schedule_intelligence specs |
 | `server/app/matcha/services/workforce/CLAUDE.md` | workforce_compliance feature spec |
-| `server/app/matcha/services/broker/CLAUDE.md` | risk_profile feature spec |
 | `server/app/matcha/services/discipline/CLAUDE.md` | discipline module deep detail |
 | `server/app/core/services/CLAUDE.md` | compliance_lite spec + vertical coverage + compliance evals |
 | `server/app/workers/CLAUDE.md` | handbook_watch spec + pool-free rule + task deep detail |

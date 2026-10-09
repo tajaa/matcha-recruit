@@ -1,8 +1,8 @@
 """Workforce Compliance routes (`/workforce-compliance`, feature `workforce_compliance`).
 
 Business-facing trackers — AI hiring-tool audit register, biometric/BIPA consent
-inventory, and per-state pay-transparency status. Same data flips the broker EPL
-factors attested → derived (see services/epl_readiness.py).
+inventory, and per-state pay-transparency status. Same data flips the EPL
+readiness factors attested → derived (see services/insurance/epl_readiness.py).
 """
 
 import logging

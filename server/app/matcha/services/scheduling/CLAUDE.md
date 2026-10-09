@@ -1307,8 +1307,6 @@ access is missing, because a caller must never mistake "no access" for "free".
 - **Analysis Pilot.** Its platform sources gate on `analysis_pilot`, so a labor-cost
   series there would hand payroll to a tenant who bought analysis and not
   `labor_cost` — a gate bypass, not a convenience.
-- **Broker Pilot.** Payroll cost is not an EPL/WC underwriting factor; pushing
-  wages across the broker boundary buys nothing.
 - **Employer burden** (taxes, workers' comp, benefits). A per-location burden
   multiplier is the obvious next step; guessing one now would make the figure
   wrong in a way nobody could see.

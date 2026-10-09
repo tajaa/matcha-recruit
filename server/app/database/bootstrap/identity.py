@@ -9,7 +9,7 @@ async def create_identity(conn):
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 email VARCHAR(255) NOT NULL UNIQUE,
                 password_hash VARCHAR(255) NOT NULL,
-                role VARCHAR(20) NOT NULL CHECK (role IN ('admin', 'client', 'candidate', 'broker')),
+                role VARCHAR(20) NOT NULL CHECK (role IN ('admin', 'client', 'candidate')),
                 is_active BOOLEAN DEFAULT true,
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW(),
@@ -132,7 +132,7 @@ async def create_identity(conn):
                 -- Fail closed: unknown roles are downgraded to least-privileged default.
                 UPDATE users
                 SET role = 'candidate'
-                WHERE role NOT IN ('admin', 'client', 'candidate', 'employee', 'broker', 'creator', 'agency', 'gumfit_admin');
+                WHERE role NOT IN ('admin', 'client', 'candidate', 'employee', 'creator', 'agency', 'gumfit_admin');
                 GET DIAGNOSTICS downgraded_count = ROW_COUNT;
 
                 IF normalized_count > 0 OR downgraded_count > 0 THEN
@@ -150,7 +150,7 @@ async def create_identity(conn):
                 END IF;
 
                 ALTER TABLE users ADD CONSTRAINT users_role_check
-                    CHECK (role IN ('admin', 'client', 'candidate', 'employee', 'broker', 'creator', 'agency', 'gumfit_admin'));
+                    CHECK (role IN ('admin', 'client', 'candidate', 'employee', 'creator', 'agency', 'gumfit_admin'));
             EXCEPTION WHEN duplicate_object THEN
                 NULL;
             END $$;

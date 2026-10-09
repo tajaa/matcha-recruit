@@ -21,9 +21,6 @@ from app.core.models.auth import (
     AdminRegister, ClientRegister, CandidateRegister,
     BusinessRegister, TestAccountRegister, TestAccountProvisionResponse,
     AdminProfile, ClientProfile, CandidateProfile, EmployeeProfile,
-    BrokerTermsAcceptanceRequest, BrokerTermsAcceptanceResponse,
-    BrokerClientInviteDetailsResponse, BrokerClientInviteAcceptRequest,
-    BrokerBrandingRuntimeResponse,
     CurrentUser, TokenPayload,
     ChangePasswordRequest, ChangeEmailRequest, UpdateProfileRequest,
     CandidateBetaInfo, CandidateBetaListResponse, BetaToggleRequest,
@@ -35,7 +32,7 @@ from app.core.services.auth import (
     create_email_verify_token, decode_email_verify_token,
 )
 from app.core.dependencies import (
-    get_current_user, require_admin, require_broker, get_token_payload,
+    get_current_user, require_admin, get_token_payload,
     session_revoked, revoke_user_sessions,
 )
 from app.core.feature_flags import (

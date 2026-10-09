@@ -12,15 +12,12 @@ raises) + a deterministic PDF. Directional — labelled as such; a company's own
 triangle from its own loss runs, no licensed benchmark data needed.
 """
 
-import asyncio
-import html
 import logging
 import math
 import re
 from datetime import date
 from typing import Optional
 
-from app.core.services.pdf import render_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -331,28 +328,10 @@ def build_triangle(snapshots: list[dict]) -> dict:
 
 # --- DB wrapper (never raises) ---------------------------------------------
 
-async def list_snapshots(conn, broker_id, subject_kind: str, subject_id) -> list[dict]:
-    rows = await conn.fetch(
-        """SELECT id, line, policy_period_label, policy_period_start, valuation_date,
-                  claim_count, open_count, paid, reserved, source, note, created_at
-           FROM wc_loss_runs
-           WHERE broker_id = $1 AND subject_kind = $2 AND subject_id = $3
-           ORDER BY line, policy_period_label, valuation_date""",
-        broker_id, subject_kind, subject_id,
-    )
-    out = []
-    for r in rows:
-        d = dict(r)
-        d["id"] = str(d["id"])
-        out.append(d)
-    return out
-
-
 async def list_company_snapshots(conn, company_id, line: str | None = None) -> list[dict]:
-    """Broker-agnostic snapshot fetch for the tenant risk-profile path, which has
-    no ``broker_id`` (a company's loss runs may have been entered by more than one
-    broker over time) — scopes solely by ``subject_id``, unlike ``list_snapshots``'
-    broker-keyed read for the broker surface."""
+    """Snapshot fetch for the tenant risk-profile path. Scopes solely by
+    ``subject_id``: a company's loss runs may have been entered by more than one
+    party over time, so ``broker_id`` is deliberately not part of the key."""
     if line:
         rows = await conn.fetch(
             """SELECT id, line, policy_period_label, policy_period_start, valuation_date,
@@ -407,205 +386,3 @@ def property_loss_signal(tri: dict) -> Optional[dict]:
             "detail": f"{adverse_pct}% adverse development",
             "confidence": summary.get("reserve_confidence", "low"),
             "ci_width_pct": ci_width_pct}
-
-
-async def build_development(conn, broker_id, subject_kind: str, subject_id, *,
-                            subject_name: str = "Client") -> dict:
-    """Fetch loss-run snapshots for a subject → triangle. Never raises."""
-    snapshots: list[dict] = []
-    try:
-        snapshots = await list_snapshots(conn, broker_id, subject_kind, subject_id)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("loss_development.build_development fetch failed: %s", exc)
-    tri = build_triangle(snapshots)
-    tri["subject_kind"] = subject_kind
-    tri["subject_id"] = str(subject_id)
-    tri["subject_name"] = subject_name
-    tri["snapshots"] = snapshots
-    return tri
-
-
-# --- loss ratio (projected ultimate ÷ paid premium) -------------------------
-#
-# Underwriters price on the loss ratio and target < 60% for profitability. The
-# projected ultimate already comes out of build_development per (line, policy
-# year); the broker enters the premium the client paid the carrier (per line per
-# year) and we divide. Status: favorable (< target) / adverse (>= target) / na
-# (no premium entered yet).
-
-LOSS_RATIO_TARGET = 60  # percent — underwriter profitability threshold
-
-
-def _ratio_status(ratio) -> str:
-    if ratio is None:
-        return "na"
-    return "favorable" if ratio < LOSS_RATIO_TARGET else "adverse"
-
-
-def _ratio(ultimate: float, premium) -> float | None:
-    if not premium or premium <= 0:
-        return None
-    return round(ultimate / premium * 100, 1)
-
-
-def _merge_loss_ratio(dev: dict, premiums: dict) -> dict:
-    """Pure merge of a build_development() result + a {(line, period_label):
-    paid_premium} map → per-(line, year) rows + per-year account rollups."""
-    rows: list[dict] = []
-    year_acc: dict[str, dict] = {}
-    for ln in dev.get("lines", []):
-        for p in ln.get("periods", []):
-            ult = float(p.get("ultimate") or 0)
-            prem = premiums.get((ln["line"], p["period_label"]))
-            ratio = _ratio(ult, prem)
-            rows.append({
-                "line": ln["line"],
-                "label": ln.get("label", ln["line"]),
-                "period_label": p["period_label"],
-                "period_start": p.get("period_start"),
-                "projected_ultimate": round(ult, 2),
-                "paid_premium": prem,
-                "loss_ratio": ratio,
-                "status": _ratio_status(ratio),
-            })
-            acc = year_acc.setdefault(p["period_label"], {
-                "ultimate": 0.0, "premium": 0.0, "has_premium": False,
-                "period_start": p.get("period_start"),
-            })
-            acc["ultimate"] += ult
-            if prem and prem > 0:
-                acc["premium"] += prem
-                acc["has_premium"] = True
-
-    years = []
-    for label, a in year_acc.items():
-        ratio = _ratio(a["ultimate"], a["premium"]) if a["has_premium"] else None
-        years.append({
-            "period_label": label,
-            "period_start": a["period_start"],
-            "total_ultimate": round(a["ultimate"], 2),
-            "total_premium": round(a["premium"], 2) if a["has_premium"] else None,
-            "loss_ratio": ratio,
-            "status": _ratio_status(ratio),
-        })
-    years.sort(key=lambda y: y["period_label"])
-    rows.sort(key=lambda r: (r["line"], r["period_label"]))
-    return {"rows": rows, "years": years}
-
-
-async def _list_premiums(conn, broker_id, subject_kind: str, subject_id) -> dict:
-    rows = await conn.fetch(
-        """SELECT line, policy_period_label, paid_premium FROM broker_loss_premiums
-           WHERE broker_id = $1 AND subject_kind = $2 AND subject_id = $3""",
-        broker_id, subject_kind, subject_id,
-    )
-    out: dict = {}
-    for r in rows:
-        prem = r["paid_premium"]
-        out[(r["line"], r["policy_period_label"])] = float(prem) if prem is not None else None
-    return out
-
-
-async def compute_loss_ratio(conn, broker_id, subject_kind: str, subject_id, *,
-                             subject_name: str = "Client") -> dict:
-    """build_development + broker-entered premiums → loss-ratio table. Never raises."""
-    dev = await build_development(conn, broker_id, subject_kind, subject_id, subject_name=subject_name)
-    premiums: dict = {}
-    try:
-        premiums = await _list_premiums(conn, broker_id, subject_kind, subject_id)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("loss_development.compute_loss_ratio premium fetch failed: %s", exc)
-    merged = _merge_loss_ratio(dev, premiums)
-    return {
-        **merged,
-        "target": LOSS_RATIO_TARGET,
-        "has_data": dev["has_data"],
-        "subject_kind": subject_kind,
-        "subject_id": str(subject_id),
-        "subject_name": subject_name,
-    }
-
-
-# --- deterministic PDF ------------------------------------------------------
-
-def _esc(v) -> str:
-    return html.escape(str(v)) if v is not None else "—"
-
-
-def _money(v) -> str:
-    if v is None:
-        return "—"
-    try:
-        v = float(v)
-    except (TypeError, ValueError):
-        return "—"
-    if abs(v) >= 1_000_000:
-        n = v / 1_000_000
-        return f"${n:.0f}M" if n == int(n) else f"${n:.2f}M"
-    if abs(v) >= 1_000:
-        return f"${v / 1_000:.0f}K"
-    return f"${v:.0f}"
-
-
-def _line_section_html(ln: dict) -> str:
-    s = ln["summary"]
-    # maturity columns present across periods
-    mats = sorted({pt["maturity"] for p in ln["periods"] for pt in p["points"]})
-    head = "".join(f"<th class='r'>{m}mo</th>" for m in mats)
-    body = ""
-    for p in ln["periods"]:
-        by_mat = {pt["maturity"]: pt for pt in p["points"]}
-        cells = "".join(
-            f"<td class='r'>{_money(by_mat[m]['incurred']) if m in by_mat else ''}</td>" for m in mats
-        )
-        adv = p["adverse_development"]
-        body += (f"<tr><td>{_esc(p['period_label'])}</td>{cells}"
-                 f"<td class='r'>{_money(p['ultimate'])}</td>"
-                 f"<td class='r {'bad' if adv > 0 else 'good'}'>{('+' if adv > 0 else '')}{_money(adv)}</td></tr>")
-    factors = ", ".join(f"{f['from_maturity']}→{f['to_maturity']}mo: {f['factor']}" for f in ln["factors"]) or "—"
-    gap_note = (
-        " Note: some policy periods are missing an intermediate valuation "
-        "(non-consecutive maturities), so those development steps can't be measured "
-        "and default to a 1.0 tail — read the projected ultimate as a floor."
-        if s.get("has_maturity_gap") else ""
-    )
-    return (
-        f"<h2>{_esc(ln['label'])} — incurred development triangle</h2>"
-        f"<table><thead><tr><th>Policy period</th>{head}<th class='r'>Ultimate</th><th class='r'>Adverse dev.</th></tr></thead>"
-        f"<tbody>{body}</tbody></table>"
-        f"<p class='fac'>Age-to-age factors (simple avg): {_esc(factors)}. "
-        f"Total latest incurred {_money(s['total_latest_incurred'])} → projected ultimate {_money(s['total_ultimate'])} "
-        f"({'+' if s['total_adverse_development'] > 0 else ''}{_money(s['total_adverse_development'])}, {s['adverse_pct']}%).{gap_note}</p>"
-    )
-
-
-def _triangle_html(subject_name: str, tri: dict) -> str:
-    sections = "".join(_line_section_html(ln) for ln in tri["lines"] if ln["periods"]) or "<p>No loss-run history on file.</p>"
-    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-      body {{ font-family: -apple-system, Helvetica, sans-serif; color:#1a1a2e; padding:30px; font-size:11px; }}
-      h1 {{ color:#1f8a5b; margin:0 0 2px; font-size:22px; }}
-      .sub {{ color:#666; margin:0 0 16px; }}
-      h2 {{ font-size:13px; border-bottom:2px solid #1f8a5b; padding-bottom:4px; margin:18px 0 8px; }}
-      table {{ width:100%; border-collapse:collapse; margin-top:4px; }}
-      th {{ text-align:left; font-size:8px; text-transform:uppercase; color:#888; border-bottom:1px solid #ddd; padding:4px 6px; }}
-      td {{ padding:4px 6px; border-bottom:1px solid #f0f0f0; }}
-      td.r, th.r {{ text-align:right; font-family:monospace; }}
-      td.bad {{ color:#b23b3b; font-weight:700; }} td.good {{ color:#1f8a5b; }}
-      .fac {{ color:#555; font-size:9px; margin:6px 0 0; }}
-      .foot {{ margin-top:24px; color:#999; font-size:8px; border-top:1px solid #eee; padding-top:6px; }}
-    </style></head><body>
-      <h1>Loss Development Triangle</h1>
-      <p class="sub">{_esc(subject_name)} — incurred losses by policy period &amp; valuation age</p>
-      {sections}
-      <div class="foot">Prepared by Matcha. Built by basic chain-ladder (simple-average link ratios, 1.0 tail) from the
-      carrier loss runs on file — directional, not an actuarial reserve opinion. Ultimate = latest reported incurred ×
-      cumulative development factor. Present alongside the current loss run.</div>
-    </body></html>"""
-
-
-async def render_triangle_pdf(subject_name: str, tri: dict) -> bytes:
-    def _render() -> bytes:
-
-        return render_pdf(_triangle_html(subject_name, tri))
-
-    return await asyncio.to_thread(_render)

@@ -3,7 +3,7 @@
 The report's "Risk Intelligence Central" (WTW p.10) for Matcha tenants: the
 business's own composite risk index + WC/EPL/compliance component breakdown +
 top fixes — "your insurability at a glance, and how to improve your terms."
-The same `risk_index` engine the broker sees, scoped to the caller's own company.
+Runs the `risk_index` engine scoped to the caller's own company.
 """
 
 import logging
@@ -12,9 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
-from ...services.broker import risk_index
-from ...services.broker import risk_narrative
-from ...services.broker import submission_readiness
+from ...services.insurance import risk_index
+from ...services.insurance import risk_narrative
+from ...services.insurance import submission_readiness
 from ...services.insurance import venue_severity
 from ...services.insurance import exclusion_gap
 

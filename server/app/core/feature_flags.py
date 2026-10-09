@@ -84,11 +84,10 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "hris_deductions": False,
     "paid_channel_creator": False,
     "channel_job_postings": False,
-    # Employee-benefits broker tooling. When on, exposes the benefits roster
+    # Employee-benefits tooling. When on, exposes the benefits roster
     # ingestion (Finch + CSV), eligibility-exception detection (new-hire
     # enrollment gaps + terminated-but-still-deducted "premium leaks"), and the
-    # renewal-risk radar. Gates the company-facing /benefits/* router; the
-    # broker-portal rollups live under /broker/benefits/* (broker-role gated).
+    # renewal-risk radar. Gates the company-facing /benefits/* router.
     "benefits_admin": False,
     # Labor Relations — union / collective-bargaining-agreement admin (CBA
     # document store + clause library, grievance workflow with contractual
@@ -104,7 +103,7 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # pay-transparency (per-state posting compliance), AI hiring-tool bias-audit
     # register (cadence/overdue), and biometric/BIPA consent inventory. Each is a
     # legal obligation the business tracks for itself; together they flip the
-    # corresponding broker EPL factors from attested → derived. Gates the
+    # corresponding EPL readiness factors from attested → derived. Gates the
     # /workforce-compliance router + the /app/workforce-compliance surface.
     # Default off; admin-toggle per company. NOT in any tier overlay.
     "workforce_compliance": False,
@@ -120,15 +119,15 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # contractual-limit review"). Company records carried limits + uploads
     # contracts (Gemini extracts required limits); the engine diffs them →
     # grounded shortfalls + a directional size/venue baseline. Gates
-    # /limit-adequacy + /app/limit-adequacy + the broker limits surfaces.
+    # /limit-adequacy + /app/limit-adequacy.
     # Default off; admin-toggle. Not bundled.
     "limit_adequacy": False,
     # Commercial property (P-side). Tenant Statement of Values (per-building COPE +
     # values), insurance-to-value + COPE grade, property limits via the limit-adequacy
     # engine (line='property') and property loss runs via loss-development, a property
     # component in the composite risk index, geocoded catastrophe exposure
-    # (flood/quake/wildfire/wind), and broker property-portfolio + submission section.
-    # Gates /property + /app/property + the broker property surfaces. Default off;
+    # (flood/quake/wildfire/wind).
+    # Gates /property + /app/property. Default off;
     # admin-toggle. Not bundled.
     "property": False,
     # Total Cost of Risk + aggregate retention/SIR optimizer. Assembles premiums +
@@ -747,7 +746,7 @@ async def get_company_features(company_id: UUID, *, conn=None) -> dict:
 #
 # Enforcement is therefore write-time only, at the handful of endpoints where
 # a caller chooses an arbitrary feature key to write into enabled_features
-# (admin company-features toggle, product definitions, broker client setups)
+# (admin company-features toggle, product definitions)
 # — never inside merge_company_features itself, and never blocking turning a
 # beta feature OFF (that is the remediation path, not something to strand).
 #
@@ -881,7 +880,7 @@ def assert_feature_dependencies(features: dict[str, bool]) -> None:
     flag without its prerequisite, or disables a prerequisite while a
     dependent flag is still on. Takes the whole dict rather than a single
     (feature, enabled) pair — a caller writing several flags at once (a tier
-    preset, a broker's preconfigured_features) must not spuriously fail on
+    preset) must not spuriously fail on
     intra-batch ordering, e.g. enabling huume and matcha_work in the same
     request.
     """

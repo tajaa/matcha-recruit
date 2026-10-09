@@ -13,9 +13,7 @@ from ..database import get_connection, set_tenant_id
 require_client = require_roles("client")
 require_employee = require_roles("employee")
 require_admin_or_client = require_roles("admin", "client", "individual")
-require_admin_or_client_or_broker = require_roles("admin", "client", "broker")
 require_admin_or_employee = require_roles("admin", "employee")
-require_broker = require_roles("broker")
 # Whole-company access (werk-lite): admits employees alongside admins/clients so
 # the entire company — not just admins — can reach company-scoped surfaces
 # (channels + boards). Tenant scoping is enforced downstream by
@@ -23,30 +21,6 @@ require_broker = require_roles("broker")
 # employee still only ever sees/touches their own company's rows.
 COMPANY_MEMBER_ROLES = ("admin", "client", "individual", "employee")
 require_company_member = require_roles(*COMPANY_MEMBER_ROLES)
-
-
-async def require_broker_pro(current_user=Depends(require_broker)):
-    """Gate a route to Broker Pro brokers (off-platform features). 403 otherwise.
-
-    The Pro entitlement lives on ``brokers.plan`` (admin-toggleable), not on
-    company feature flags — brokers aren't tenants.
-    """
-    async with get_connection() as conn:
-        plan = await conn.fetchval(
-            """
-            SELECT b.plan FROM brokers b
-            JOIN broker_members bm ON bm.broker_id = b.id
-            WHERE bm.user_id = $1 AND bm.is_active = true
-            ORDER BY bm.created_at ASC LIMIT 1
-            """,
-            current_user.id,
-        )
-    if plan != "pro":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Broker Pro plan required")
-    return current_user
-
-BROKER_ACTIVE_LINK_STATUSES = ("active", "grace")
 
 
 def _ensure_company_is_accessible(company_status: Optional[str], rejection_reason: Optional[str]) -> None:
@@ -93,10 +67,6 @@ async def resolve_accessible_company_scope(
                 "company_id": selected_company_id,
                 "company_ids": company_ids,
                 "actor_role": "admin",
-                "broker_id": None,
-                "broker_member_role": None,
-                "link_permissions": {},
-                "terms_accepted": True,
             }
 
         if current_user.role in ("client", "individual"):
@@ -114,10 +84,6 @@ async def resolve_accessible_company_scope(
                     "company_id": None,
                     "company_ids": [],
                     "actor_role": "client",
-                    "broker_id": None,
-                    "broker_member_role": None,
-                    "link_permissions": {},
-                    "terms_accepted": True,
                 }
 
             _ensure_company_is_accessible(company["status"], company["rejection_reason"])
@@ -130,10 +96,6 @@ async def resolve_accessible_company_scope(
                 "company_id": company_id,
                 "company_ids": [company_id],
                 "actor_role": "client",
-                "broker_id": None,
-                "broker_member_role": None,
-                "link_permissions": {},
-                "terms_accepted": True,
             }
 
         if current_user.role == "employee":
@@ -151,10 +113,6 @@ async def resolve_accessible_company_scope(
                     "company_id": None,
                     "company_ids": [],
                     "actor_role": "employee",
-                    "broker_id": None,
-                    "broker_member_role": None,
-                    "link_permissions": {},
-                    "terms_accepted": True,
                 }
 
             _ensure_company_is_accessible(company["status"], company["rejection_reason"])
@@ -167,146 +125,12 @@ async def resolve_accessible_company_scope(
                 "company_id": company_id,
                 "company_ids": [company_id],
                 "actor_role": "employee",
-                "broker_id": None,
-                "broker_member_role": None,
-                "link_permissions": {},
-                "terms_accepted": True,
-            }
-
-        if current_user.role == "broker":
-            membership = await conn.fetchrow(
-                """
-                SELECT
-                    bm.broker_id,
-                    bm.role as member_role,
-                    bm.is_active as member_active,
-                    b.status as broker_status,
-                    COALESCE(b.terms_required_version, 'v1') as terms_required_version
-                FROM broker_members bm
-                JOIN brokers b ON b.id = bm.broker_id
-                WHERE bm.user_id = $1
-                ORDER BY bm.created_at ASC
-                LIMIT 1
-                """,
-                current_user.id,
-            )
-            if not membership or not membership["member_active"]:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="No active broker membership found for this account",
-                )
-
-            if membership["broker_status"] != "active":
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Broker account is not active",
-                )
-
-            required_terms = membership["terms_required_version"]
-            terms_accepted = await conn.fetchval(
-                """
-                SELECT EXISTS(
-                    SELECT 1
-                    FROM broker_terms_acceptances
-                    WHERE broker_id = $1
-                      AND user_id = $2
-                      AND terms_version = $3
-                )
-                """,
-                membership["broker_id"],
-                current_user.id,
-                required_terms,
-            )
-            if not terms_accepted:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Broker partner terms must be accepted before accessing client companies",
-                )
-
-            if requested_company_id:
-                row = await conn.fetchrow(
-                    """
-                    SELECT
-                        l.company_id,
-                        l.permissions,
-                        comp.status as company_status,
-                        comp.rejection_reason
-                    FROM broker_company_links l
-                    JOIN companies comp ON comp.id = l.company_id
-                    WHERE l.broker_id = $1
-                      AND l.company_id = $2
-                      AND l.status = ANY($3::text[])
-                    """,
-                    membership["broker_id"],
-                    requested_company_id,
-                    list(BROKER_ACTIVE_LINK_STATUSES),
-                )
-                if not row:
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Broker does not have access to the requested company",
-                    )
-                _ensure_company_is_accessible(row["company_status"], row["rejection_reason"])
-                link_permissions = row["permissions"] if isinstance(row["permissions"], dict) else {}
-                set_tenant_id(str(row["company_id"]))
-                return {
-                    "company_id": row["company_id"],
-                    "company_ids": [row["company_id"]],
-                    "actor_role": "broker",
-                    "broker_id": membership["broker_id"],
-                    "broker_member_role": membership["member_role"],
-                    "link_permissions": link_permissions,
-                    "terms_accepted": True,
-                }
-
-            rows = await conn.fetch(
-                """
-                SELECT
-                    l.company_id,
-                    l.permissions,
-                    comp.status as company_status,
-                    comp.rejection_reason
-                FROM broker_company_links l
-                JOIN companies comp ON comp.id = l.company_id
-                WHERE l.broker_id = $1
-                  AND l.status = ANY($2::text[])
-                ORDER BY l.activated_at NULLS LAST, l.created_at
-                """,
-                membership["broker_id"],
-                list(BROKER_ACTIVE_LINK_STATUSES),
-            )
-
-            valid_company_ids: list[UUID] = []
-            selected_permissions: dict = {}
-            for row in rows:
-                # Pending/rejected client registrations are not accessible
-                if (row["company_status"] or "approved") in {"pending", "rejected"}:
-                    continue
-                valid_company_ids.append(row["company_id"])
-                if not selected_permissions:
-                    selected_permissions = row["permissions"] if isinstance(row["permissions"], dict) else {}
-
-            selected_company_id = valid_company_ids[0] if valid_company_ids else None
-            if selected_company_id:
-                set_tenant_id(str(selected_company_id))
-            return {
-                "company_id": selected_company_id,
-                "company_ids": valid_company_ids,
-                "actor_role": "broker",
-                "broker_id": membership["broker_id"],
-                "broker_member_role": membership["member_role"],
-                "link_permissions": selected_permissions,
-                "terms_accepted": True,
             }
 
     return {
         "company_id": None,
         "company_ids": [],
         "actor_role": current_user.role,
-        "broker_id": None,
-        "broker_member_role": None,
-        "link_permissions": {},
-        "terms_accepted": True,
     }
 
 

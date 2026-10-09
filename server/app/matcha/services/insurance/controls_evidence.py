@@ -17,7 +17,7 @@ from app.core.feature_flags import merge_company_features
 from app.core.services.pdf import render_pdf
 
 from . import resident_care
-from ..broker import epl_readiness
+from . import epl_readiness
 
 logger = logging.getLogger(__name__)
 

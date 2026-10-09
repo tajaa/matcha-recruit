@@ -27,13 +27,6 @@ __all__ = [
     "FeatureToggleRequest",
     "CompanyCreditsAdjustRequest",
     "SchedulerUpdateRequest",
-    "BrokerCreateRequest",
-    "BrokerUpdateRequest",
-    "BrokerContractRequest",
-    "BrokerCompanyLinkRequest",
-    "BrokerBrandingRequest",
-    "BrokerCompanyTransitionRequest",
-    "BrokerCompanyTransitionUpdateRequest",
     "JurisdictionCreateRequest",
     "RequirementUpdate",
     "SpecializationDiscoverRequest",
@@ -212,92 +205,6 @@ class SchedulerUpdateRequest(BaseModel):
     """Request model for updating scheduler settings."""
     enabled: Optional[bool] = None
     max_per_cycle: Optional[int] = None
-
-
-class BrokerCreateRequest(BaseModel):
-    broker_name: str = Field(..., min_length=2, max_length=255)
-    owner_email: EmailStr
-    owner_name: str = Field(..., min_length=2, max_length=255)
-    owner_password: Optional[str] = Field(default=None, min_length=8)
-    slug: Optional[str] = Field(default=None, min_length=2, max_length=120)
-    support_routing: str = Field(default="shared")
-    billing_mode: str = Field(default="direct")
-    invoice_owner: str = Field(default="matcha")
-    terms_required_version: str = Field(default="v1", min_length=1, max_length=50)
-    allocated_seats: int = Field(default=0, ge=0, le=1_000_000)
-    plan: str = Field(default="standard", pattern="^(standard|pro)$")
-
-
-class BrokerUpdateRequest(BaseModel):
-    status: Optional[str] = None
-    support_routing: Optional[str] = None
-    terms_required_version: Optional[str] = Field(default=None, min_length=1, max_length=50)
-    terminated_at: Optional[datetime] = None
-    grace_until: Optional[datetime] = None
-    post_termination_mode: Optional[str] = None
-    allocated_seats: Optional[int] = Field(default=None, ge=0, le=1_000_000)
-    plan: Optional[str] = Field(default=None, pattern="^(standard|pro)$")
-
-
-class BrokerContractRequest(BaseModel):
-    status: str = Field(default="active")
-    billing_mode: str
-    invoice_owner: str
-    currency: str = Field(default="USD", min_length=3, max_length=3)
-    base_platform_fee: float = 0.0
-    pepm_rate: float = 0.0
-    minimum_monthly_commit: float = 0.0
-    pricing_rules: dict = {}
-
-
-class BrokerCompanyLinkRequest(BaseModel):
-    status: str = Field(default="active")
-    permissions: dict = Field(default_factory=dict)
-    post_termination_mode: Optional[str] = None
-    grace_until: Optional[datetime] = None
-
-
-class BrokerBrandingRequest(BaseModel):
-    branding_mode: str = Field(default="direct")
-    brand_display_name: Optional[str] = Field(default=None, max_length=255)
-    brand_legal_name: Optional[str] = Field(default=None, max_length=255)
-    logo_url: Optional[str] = None
-    favicon_url: Optional[str] = None
-    primary_color: Optional[str] = Field(default=None, max_length=20)
-    secondary_color: Optional[str] = Field(default=None, max_length=20)
-    login_subdomain: Optional[str] = Field(default=None, max_length=120)
-    custom_login_url: Optional[str] = None
-    support_email: Optional[EmailStr] = None
-    support_phone: Optional[str] = Field(default=None, max_length=50)
-    support_url: Optional[str] = None
-    email_from_name: Optional[str] = Field(default=None, max_length=255)
-    email_from_address: Optional[EmailStr] = None
-    powered_by_badge: bool = True
-    hide_matcha_identity: bool = False
-    mobile_branding_enabled: bool = False
-    theme: dict = Field(default_factory=dict)
-    metadata: dict = Field(default_factory=dict)
-
-
-class BrokerCompanyTransitionRequest(BaseModel):
-    mode: str
-    status: str = Field(default="planned")
-    transfer_target_broker_id: Optional[UUID] = None
-    grace_until: Optional[datetime] = None
-    matcha_managed_until: Optional[datetime] = None
-    data_handoff_status: str = Field(default="pending")
-    data_handoff_notes: Optional[str] = None
-    metadata: dict = Field(default_factory=dict)
-
-
-class BrokerCompanyTransitionUpdateRequest(BaseModel):
-    status: Optional[str] = None
-    grace_until: Optional[datetime] = None
-    matcha_managed_until: Optional[datetime] = None
-    data_handoff_status: Optional[str] = None
-    data_handoff_notes: Optional[str] = None
-    completed_at: Optional[datetime] = None
-    metadata: Optional[dict] = None
 
 
 class JurisdictionCreateRequest(BaseModel):

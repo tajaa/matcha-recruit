@@ -21,9 +21,6 @@ from app.core.models.auth import (
     AdminRegister, ClientRegister, CandidateRegister,
     BusinessRegister, TestAccountRegister, TestAccountProvisionResponse,
     AdminProfile, ClientProfile, CandidateProfile, EmployeeProfile,
-    BrokerTermsAcceptanceRequest, BrokerTermsAcceptanceResponse,
-    BrokerClientInviteDetailsResponse, BrokerClientInviteAcceptRequest,
-    BrokerBrandingRuntimeResponse,
     CurrentUser, TokenPayload,
     ChangePasswordRequest, ChangeEmailRequest, UpdateProfileRequest,
     CandidateBetaInfo, CandidateBetaListResponse, BetaToggleRequest,
@@ -35,7 +32,7 @@ from app.core.services.auth import (
     create_email_verify_token, decode_email_verify_token,
 )
 from app.core.dependencies import (
-    get_current_user, require_admin, require_broker, get_token_payload,
+    get_current_user, require_admin, get_token_payload,
     session_revoked, revoke_user_sessions,
 )
 from app.core.feature_flags import (
@@ -400,57 +397,6 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 "visible_features": visible_features,
                 "work_access": work_access,
                 "ops_access": ops_access,
-            }
-
-        elif current_user.role == "broker":
-            profile = await conn.fetchrow(
-                """
-                SELECT
-                    bm.id, bm.user_id, bm.broker_id, bm.role as member_role, bm.created_at,
-                    b.name as broker_name, b.slug as broker_slug, b.status as broker_status,
-                    b.billing_mode, b.invoice_owner, b.support_routing,
-                    COALESCE(b.plan, 'standard') as plan,
-                    COALESCE(bb.branding_mode, 'direct') as branding_mode,
-                    COALESCE(NULLIF(bb.brand_display_name, ''), b.name) as brand_display_name,
-                    COALESCE(b.terms_required_version, 'v1') as terms_required_version,
-                    ta.accepted_at as terms_accepted_at
-                FROM broker_members bm
-                JOIN brokers b ON bm.broker_id = b.id
-                LEFT JOIN broker_branding_configs bb ON bb.broker_id = bm.broker_id
-                LEFT JOIN broker_terms_acceptances ta
-                    ON ta.broker_id = bm.broker_id
-                    AND ta.user_id = bm.user_id
-                    AND ta.terms_version = COALESCE(b.terms_required_version, 'v1')
-                WHERE bm.user_id = $1 AND bm.is_active = true
-                ORDER BY bm.created_at ASC
-                LIMIT 1
-                """,
-                current_user.id
-            )
-            terms_accepted = bool(profile and profile["terms_accepted_at"] is not None)
-            return {
-                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar, "work_onboarded": bool(current_user.beta_features.get("work_onboarded"))},
-                "profile": {
-                    "id": str(profile["id"]),
-                    "user_id": str(profile["user_id"]),
-                    "broker_id": str(profile["broker_id"]),
-                    "broker_name": profile["broker_name"],
-                    "broker_slug": profile["broker_slug"],
-                    "branding_mode": profile["branding_mode"],
-                    "brand_display_name": profile["brand_display_name"],
-                    "member_role": profile["member_role"],
-                    "broker_status": profile["broker_status"],
-                    "plan": profile["plan"],
-                    "billing_mode": profile["billing_mode"],
-                    "invoice_owner": profile["invoice_owner"],
-                    "support_routing": profile["support_routing"],
-                    "terms_required_version": profile["terms_required_version"],
-                    "terms_accepted": terms_accepted,
-                    "terms_accepted_at": profile["terms_accepted_at"].isoformat() if profile["terms_accepted_at"] else None,
-                    "created_at": profile["created_at"].isoformat(),
-                } if profile else None,
-                "onboarding_needed": {"broker_terms": not terms_accepted} if profile else {},
-                "visible_features": visible_features,
             }
 
     return {"user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar, "work_onboarded": bool(current_user.beta_features.get("work_onboarded"))}, "profile": None, "visible_features": visible_features}

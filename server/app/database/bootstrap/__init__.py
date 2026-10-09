@@ -20,7 +20,7 @@ from app.database.bootstrap.compliance import create_compliance
 from app.database.bootstrap.jurisdictions import create_jurisdictions
 from app.database.bootstrap.portal_chat import create_portal_chat
 from app.database.bootstrap.data_sources import create_data_sources
-from app.database.bootstrap.broker import create_broker
+from app.database.bootstrap.fractional import create_fractional
 from app.database.bootstrap.provisioning import create_provisioning
 from app.database.bootstrap.seeds_platform import create_seeds_platform
 from app.database.bootstrap.matcha_work import create_matcha_work
@@ -59,7 +59,7 @@ async def init_db():
         await create_jurisdictions(conn)
         await create_portal_chat(conn)
         await create_data_sources(conn)
-        await create_broker(conn)
+        await create_fractional(conn)
         await create_provisioning(conn)
         await create_seeds_platform(conn)
         await create_matcha_work(conn)

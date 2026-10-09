@@ -43,8 +43,8 @@ HOW A TENANT IS COLLECTED
                INSERT would otherwise fail a foreign key on prod (a client row
                needs its users row). Ascended rows are NEVER descended from —
                that is the rule that bounds the walk. Without it, one tenant
-               reaches its broker, and the broker reaches every other client
-               that broker has.
+               reaches a shared parent row, and that row reaches every other
+               tenant that hangs off it.
 
     Shared catalogs (jurisdictions, compliance categories, …) are assumed to
     exist on prod already and are not exported; anything skipped is reported so
