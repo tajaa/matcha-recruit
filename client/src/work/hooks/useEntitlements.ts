@@ -86,10 +86,10 @@ export function useEntitlements() {
     can: (feature: string) => entitlements == null || entitlements.features[feature] === true,
     atLeast: (minimum: WorkPlan) => entitlements == null || ranks[entitlements.plan] >= ranks[minimum],
     quotas: entitlements?.quotas ?? null,
-    /** Whether the server offers Claude in the model picker. Defaults closed
-     *  while unknown: an option that appears then vanishes is worse than one
-     *  that appears a moment late. */
-    claudeModels: entitlements?.workspace?.claude_models === true,
+    /** The chat model picker's rows, or null until the server says. */
+    chatModels: entitlements?.workspace?.chat_models ?? null,
+    /** Where the picker starts (the admin's agent model when one is set). */
+    defaultChatModel: entitlements?.workspace?.default_chat_model ?? null,
     refetch,
   }
 }

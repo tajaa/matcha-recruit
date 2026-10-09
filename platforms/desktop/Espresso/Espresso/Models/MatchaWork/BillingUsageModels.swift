@@ -134,13 +134,23 @@ struct MWEntitlements: Codable {
 
 struct MWWorkspaceFlags: Codable {
     let espressoAssistant: Bool?
-    /// Whether the server offers Claude in the chat model picker.
-    let claudeModels: Bool?
+    /// The chat model picker's rows and the row it starts on — the server's
+    /// rule (`matcha_work_ai._models.picker_models`), not re-derived here.
+    let chatModels: [MWChatModelRow]?
+    let defaultChatModel: String?
 
     enum CodingKeys: String, CodingKey {
         case espressoAssistant = "espresso_assistant"
-        case claudeModels = "claude_models"
+        case chatModels = "chat_models"
+        case defaultChatModel = "default_chat_model"
     }
+}
+
+/// One picker row from the server: a model id, and whether this plan has it
+/// (a locked row shows with a lock and opens the paywall).
+struct MWChatModelRow: Codable, Hashable {
+    let id: String
+    let locked: Bool
 }
 
 /// A counted allowance (agent-card runs this month, assistant requests today).

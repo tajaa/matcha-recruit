@@ -40,7 +40,7 @@ struct BlogEditorView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 Menu {
                     ForEach(appState.modelOptions) { option in
-                        let locked = option.pro && !appState.canProModel
+                        let locked = appState.isModelLocked(option)
                         Button {
                             if locked {
                                 appState.presentPaywall(for: "ai_model_pro")
@@ -50,7 +50,7 @@ struct BlogEditorView: View {
                         } label: {
                             HStack {
                                 Text(locked ? "\(option.label) 🔒" : option.label)
-                                if selectedModelId == option.id {
+                                if appState.modelOption(for: selectedModelId)?.id == option.id {
                                     Image(systemName: "checkmark")
                                 }
                             }

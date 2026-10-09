@@ -2,6 +2,7 @@
 keyword heuristic that classifies a turn's thinking level.
 """
 import logging
+from app.core.services import anthropic_messages
 from app.core.services.anthropic_messages import (
     CLAUDE_HAIKU,
     CLAUDE_MODELS,
@@ -54,8 +55,19 @@ async def _get_model(
     model_override: str | None = None,
     company_id: str | None = None,
     user_id: str | None = None,
+    *,
+    gemini_only: bool = False,
 ) -> str:
     """Pick the model for a call, enforcing plan entitlements.
+
+    The platform "Agent model" setting (Admin → Settings, read through
+    `anthropic_messages.claude_override`) wins over every Gemini outcome: while it names a Claude
+    model, a Gemini pick or the plan default runs that model instead. Both
+    apps always send their stored pick (Flash unless changed), so "only when
+    no pick was sent" would never fire. An explicit Claude pick is still
+    honored, so a person can choose Haiku vs Sonnet; the admin's choice is not
+    plan-gated, matching every other surface it routes. `gemini_only` is for
+    the modes that need Gemini's own tools (payer search) and skips both.
 
     The pro model is a paid entitlement (Pro/Business plans) — a client-sent
     `model_override` is clamped to the plan, never trusted (previously any
@@ -90,14 +102,20 @@ async def _get_model(
         return False
 
     model_override = _MODEL_ALIASES.get(model_override, model_override)
+    admin_model = None
+    if gemini_only:
+        model_override = None if is_claude_model(model_override) else model_override
+    else:
+        admin_model = await anthropic_messages.claude_override()
 
-    if is_claude_model(model_override):
-        if anthropic_configured() and (
-            model_override not in PREMIUM_CLAUDE_MODELS or await _pro_allowed()
-        ):
-            return model_override
-        # Claude unavailable, or Sonnet without entitlement — plan selection.
-    elif model_override and model_override in SUPPORTED_MODELS:
+    if is_claude_model(model_override) and (model_override == admin_model or (
+        anthropic_configured() and (model_override not in PREMIUM_CLAUDE_MODELS or await _pro_allowed())
+    )):
+        return model_override
+    if admin_model:
+        # A Gemini pick, or a Claude pick this plan can't have.
+        return admin_model
+    if model_override in SUPPORTED_MODELS and not is_claude_model(model_override):
         if model_override != PRO_MODEL or await _pro_allowed():
             return model_override
         # Pro override without entitlement — fall through to plan selection.
@@ -110,6 +128,30 @@ async def _get_model(
         return PRO_MODEL
 
     return FLASH
+
+
+async def picker_models(*, pro_allowed: bool) -> tuple[list[dict], str]:
+    """The chat model picker for one person: `[{"id", "locked"}]` in menu
+    order, plus the id it starts on. THE rule both apps render (sent as
+    `entitlements.workspace.chat_models` / `default_chat_model`), so neither
+    client re-derives it; `_get_model` enforces the same rule per turn and
+    `test_skill_engine_claude` holds the two together.
+
+    While the admin Agent model names a Claude model, only Claude rows: a
+    Gemini pick would run it anyway. The admin's own model is never locked;
+    Sonnet otherwise needs the pro entitlement.
+    """
+    admin_model = await anthropic_messages.claude_override()
+    if admin_model:
+        rows = [
+            {"id": m, "locked": m in PREMIUM_CLAUDE_MODELS and not pro_allowed and m != admin_model}
+            for m in (CLAUDE_HAIKU, CLAUDE_SONNET)
+        ]
+        return rows, admin_model
+    rows = [{"id": FLASH_LITE, "locked": False}, {"id": FLASH, "locked": False}]
+    if anthropic_configured():
+        rows += [{"id": CLAUDE_HAIKU, "locked": False}, {"id": CLAUDE_SONNET, "locked": not pro_allowed}]
+    return rows, FLASH
 
 
 # ── Auto-thinking heuristic ──

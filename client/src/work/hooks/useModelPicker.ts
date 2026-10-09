@@ -14,14 +14,16 @@ function readStoredModel(): string {
 }
 
 /** The chat model picker shared by thread and project chat: the options this
- *  person may pick, the remembered pick, and its setter. A remembered pick
- *  that is no longer offered (Claude switched off, plan downgraded) reads as
- *  the default, so the request never carries a model the menu doesn't show. */
+ *  person may pick, the remembered pick, and its setter. Rows and default are
+ *  the server's (`workspace.chat_models`); a remembered pick it no longer
+ *  offers reads as that default, so a request never carries a model the menu
+ *  doesn't show. */
 export function useModelPicker() {
-  const { can, claudeModels } = useEntitlements()
+  const { chatModels, defaultChatModel } = useEntitlements()
   const [stored, setStored] = useState(readStoredModel)
-  const modelOptions = modelOptionsFor({ claude: claudeModels, pro: can('ai_model_pro') })
-  const selectedModel = modelOptions.some((option) => option.id === stored) ? stored : DEFAULT_MODEL
+  const modelOptions = modelOptionsFor(chatModels)
+  const fallback = defaultChatModel ?? DEFAULT_MODEL
+  const selectedModel = modelOptions.some((option) => option.id === stored) ? stored : fallback
   const setSelectedModel = useCallback((model: string) => {
     setStored(model)
     try {
