@@ -33,9 +33,34 @@ def _settings():
     load_settings()
 
 
+class _Limiter:
+    """Stands in for the anthropic rate-limit bucket (the real one opens a
+    direct DB connection when no pool exists)."""
+
+    def __init__(self, exc=None):
+        self.exc = exc
+        self.checked = 0
+        self.recorded = 0
+
+    async def check_limit(self, *_a):
+        self.checked += 1
+        if self.exc:
+            raise self.exc
+
+    async def record_call(self, *_a):
+        self.recorded += 1
+
+
 @pytest.fixture(autouse=True)
 def _no_db(monkeypatch):
     monkeypatch.setattr(_models, "get_matcha_work_model_mode", AsyncMock(return_value="normal"))
+
+
+@pytest.fixture(autouse=True)
+def limiter(monkeypatch):
+    fake = _Limiter()
+    monkeypatch.setattr(_claude, "get_rate_limiter", lambda provider="gemini": fake)
+    return fake
 
 
 @pytest.fixture
@@ -312,3 +337,164 @@ async def test_entitlements_say_whether_claude_is_available(monkeypatch):
     assert out["workspace"]["claude_models"] is True
     assert out["workspace"]["agent_model"] == CLAUDE_HAIKU
     assert out["features"]["ai_model_pro"] is True
+
+
+# --- Images and the anthropic bucket ------------------------------------------
+
+def _image(fmt: str, size=(64, 48), mode="RGB", noise=False) -> bytes:
+    import io
+    import os
+
+    from PIL import Image
+
+    if noise:
+        img = Image.frombytes(mode, size, os.urandom(size[0] * size[1] * len(mode)))
+    else:
+        img = Image.new(mode, size, (200, 30, 30, 128) if mode == "RGBA" else (200, 30, 30))
+    out = io.BytesIO()
+    img.save(out, format=fmt)
+    return out.getvalue()
+
+
+def _dims(data: bytes) -> tuple[int, int]:
+    import io
+
+    from PIL import Image
+
+    with Image.open(io.BytesIO(data)) as img:
+        return img.size
+
+
+def _turn(*images: tuple[bytes, str]) -> list:
+    parts = [types.Part.from_bytes(data=d, mime_type=m) for d, m in images]
+    return [types.Content(role="user", parts=[*parts, types.Part(text="What is this?")])]
+
+
+def test_small_supported_image_passes_through_with_the_real_media_type():
+    png = _image("PNG")
+    assert _claude.normalize_image(png) == (png, "image/png")  # untouched, even if declared jpeg
+
+
+def test_bmp_and_tiff_are_converted_not_dropped():
+    for fmt in ("BMP", "TIFF"):
+        data, mime = _claude.normalize_image(_image(fmt))
+        assert mime == "image/jpeg"
+        assert _dims(data) == (64, 48)
+
+
+def test_large_image_shrinks_to_claudes_long_edge():
+    data, mime = _claude.normalize_image(_image("PNG", size=(4000, 3000)))
+    assert max(_dims(data)) == 2576
+
+
+def test_oversized_file_is_reencoded_under_the_size_cap():
+    noisy = _image("PNG", size=(2400, 1800), noise=True)  # ~13 MB, inside 2576 px
+    assert len(noisy) > _claude._MAX_IMAGE_B64
+    data, mime = _claude.normalize_image(noisy)
+    assert mime == "image/jpeg"
+    assert _claude._b64_len(len(data)) <= _claude._MAX_IMAGE_B64
+
+
+def test_transparent_image_stays_png():
+    data, mime = _claude.normalize_image(_image("PNG", size=(3000, 1000), mode="RGBA"))
+    assert mime == "image/png"
+    assert max(_dims(data)) == 2576
+
+
+def test_exif_rotated_photo_is_turned_upright():
+    import io
+
+    from PIL import Image
+
+    img = Image.new("RGB", (80, 40), (10, 120, 200))
+    exif = img.getexif()
+    exif[0x0112] = 6  # stored sideways; display rotated 90°
+    out = io.BytesIO()
+    img.save(out, format="JPEG", exif=exif.tobytes())
+    data, mime = _claude.normalize_image(out.getvalue())
+    assert mime == "image/jpeg"
+    assert _dims(data) == (40, 80)
+
+
+def test_unreadable_image_is_none():
+    assert _claude.normalize_image(b"ftypheic not really an image") is None
+
+
+def test_many_images_drop_to_2000px():
+    big = _image("PNG", size=(2400, 1200))
+    out = _claude._normalize_contents(_turn(*[(big, "image/png")] * 21))
+    sizes = [_dims(p.inline_data.data) for p in out[0].parts if p.inline_data]
+    assert len(sizes) == 21 and all(max(s) == 2000 for s in sizes)
+
+
+def test_text_only_turn_is_returned_as_is():
+    contents = [types.Content(role="user", parts=[types.Part(text="hi")])]
+    assert _claude._normalize_contents(contents) is contents
+
+
+@pytest.mark.asyncio
+async def test_turn_contents_none_when_the_bucket_is_full(limiter):
+    from app.core.services.rate_limiter import RateLimitExceeded
+
+    limiter.exc = RateLimitExceeded("anthropic API hourly limit exceeded", "hourly", 200, 200)
+    assert await _claude.claude_turn_contents(_turn((_image("PNG"), "image/png"))) is None
+
+
+@pytest.mark.asyncio
+async def test_turn_contents_allowed_when_the_limiter_itself_fails(limiter):
+    limiter.exc = OSError("db down")
+    contents = [types.Content(role="user", parts=[types.Part(text="hi")])]
+    assert await _claude.claude_turn_contents(contents) is contents
+
+
+@pytest.mark.asyncio
+async def test_record_claude_call_never_raises(monkeypatch):
+    class _Broken:
+        async def record_call(self, *_a):
+            raise OSError("db down")
+
+    monkeypatch.setattr(_claude, "get_rate_limiter", lambda provider="gemini": _Broken())
+    await _claude.record_claude_call()
+
+
+@pytest.mark.asyncio
+async def test_claude_turn_counts_in_the_anthropic_bucket(monkeypatch, limiter):
+    monkeypatch.setattr(provider_module, "_get_model", AsyncMock(return_value=CLAUDE_HAIKU))
+    monkeypatch.setattr(provider_module, "call_claude", AsyncMock(return_value=('{"reply": "ok"}', None)))
+    await GeminiProvider().generate(messages=[{"role": "user", "content": "Summarize this"}], current_state={})
+    assert (limiter.checked, limiter.recorded) == (1, 1)
+
+
+@pytest.mark.asyncio
+async def test_turn_with_an_unreadable_image_runs_on_gemini(monkeypatch):
+    get_model = AsyncMock(side_effect=[CLAUDE_HAIKU, FLASH])
+    monkeypatch.setattr(provider_module, "_get_model", get_model)
+    claude = AsyncMock()
+    monkeypatch.setattr(provider_module, "call_claude", claude)
+    provider = GeminiProvider()
+    gemini_reply = provider_module.AIResponse(assistant_reply="Looks like a receipt.", structured_update=None)
+    with patch.object(provider, "_call_gemini", return_value=gemini_reply) as gemini:
+        out = await provider.generate(
+            messages=[{"role": "user", "content": "What is this photo of?",
+                       "image_parts": [(b"not decodable heic bytes", "image/heic")]}],
+            current_state={},
+        )
+    claude.assert_not_awaited()
+    assert out.assistant_reply == "Looks like a receipt."
+    assert gemini.call_args.args[4] == FLASH  # the model argument
+    assert get_model.await_args_list[1].kwargs["gemini_only"] is True
+
+
+@pytest.mark.asyncio
+async def test_claude_turn_sends_the_converted_image(monkeypatch):
+    monkeypatch.setattr(provider_module, "_get_model", AsyncMock(return_value=CLAUDE_HAIKU))
+    claude = AsyncMock(return_value=('{"reply": "A red square."}', None))
+    monkeypatch.setattr(provider_module, "call_claude", claude)
+    await GeminiProvider().generate(
+        messages=[{"role": "user", "content": "What is this?",
+                   "image_parts": [(_image("BMP"), "image/bmp")]}],
+        current_state={},
+    )
+    sent = claude.await_args.kwargs["contents"]
+    image = next(p for c in sent for p in c.parts if p.inline_data)
+    assert image.inline_data.mime_type == "image/jpeg"

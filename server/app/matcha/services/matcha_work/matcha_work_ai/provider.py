@@ -23,7 +23,7 @@ from google.genai import types
 from app.config import get_settings
 
 from ._fields import BLOG_FIELDS, HANDBOOK_FIELDS, HR_PILOT_FIELDS, OFFER_LETTER_FIELDS, ONBOARDING_FIELDS, POLICY_FIELDS, PRESENTATION_FIELDS, PROJECT_FIELDS, REVIEW_FIELDS, SUPPORTED_AI_MODES, SUPPORTED_AI_OPERATIONS, SUPPORTED_AI_SKILLS, WORKBOOK_FIELDS
-from ._claude import call_claude
+from ._claude import call_claude, claude_turn_contents, record_claude_call
 from ._models import FLASH_LITE, _get_model, classify_thinking_level, is_claude_model, resolve_turn_model
 from ._prompts import MATCHA_WORK_BLOG_DYNAMIC_PROMPT, MATCHA_WORK_BLOG_STATIC_PROMPT, MATCHA_WORK_DYNAMIC_PROMPT_TEMPLATE, MATCHA_WORK_STATIC_PROMPT_TEMPLATE
 from ._text import _clean_json_text, _extract_reply_field, _infer_skill_from_state
@@ -355,6 +355,16 @@ class GeminiProvider(MatchaWorkAIProvider):
             dynamic_context=dynamic_context, hr_pilot_mode=hr_pilot_mode,
         )
         model = await _get_model(self.settings, model_override, company_id=company_id, user_id=user_id)
+        if is_claude_model(model):
+            # A full anthropic bucket, or an image Claude can't take, runs
+            # this turn on Gemini rather than failing it or dropping the image.
+            claude_contents = await claude_turn_contents(contents)
+            if claude_contents is None:
+                model = await _get_model(
+                    self.settings, model_override, company_id=company_id, user_id=user_id, gemini_only=True,
+                )
+            else:
+                contents = claude_contents
 
         # Auto-pick thinking level based on the latest user message + thread mode.
         latest_user_msg = next(
@@ -491,7 +501,9 @@ class GeminiProvider(MatchaWorkAIProvider):
         thinking_level: str,
     ) -> AIResponse:
         """The skill-engine call on a Claude pick (`_claude.py`). Same reply
-        contract and the same failure replies as the Gemini path."""
+        contract and the same failure replies as the Gemini path. Every
+        attempt counts in the anthropic bucket, failed or not."""
+        await record_claude_call()
         try:
             raw_text, usage = await asyncio.wait_for(
                 call_claude(
