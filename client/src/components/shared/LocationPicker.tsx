@@ -13,24 +13,33 @@ interface LocationPickerProps {
   allLabel?: string
   placeholder?: string
   className?: string
+  /** Options read by store name only (the full address stays in the tooltip),
+   *  for a toolbar where a whole address crowds out everything beside it. */
+  compact?: boolean
 }
 
 export default function LocationPicker({
   locations, value, onChange, allowAll = false,
-  allLabel = 'All locations', placeholder = 'Select a location…', className,
+  allLabel = 'All locations', placeholder = 'Select a location…', className, compact = false,
 }: LocationPickerProps) {
+  const selected = locations.find((location) => location.id === value)
+  const optionLabel = (location: CompanyLocation) => (compact && location.name
+    ? `${location.name}${location.is_active ? '' : ' (inactive)'}`
+    : locationLabel(location))
   return (
     <label className={`inline-flex items-center gap-1.5 text-xs text-zinc-500 ${className ?? ''}`}>
       <MapPin className="h-3.5 w-3.5" />
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none focus:border-zinc-500"
+        title={selected ? locationLabel(selected) : undefined}
+        aria-label="Location"
+        className="max-w-[16rem] truncate rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none focus:border-zinc-500"
       >
         {allowAll ? <option value="">{allLabel}</option> : <option value="" disabled>{placeholder}</option>}
         {locations.map((location) => (
           <option key={location.id} value={location.id} disabled={!location.is_active}>
-            {locationLabel(location)}
+            {optionLabel(location)}
           </option>
         ))}
       </select>

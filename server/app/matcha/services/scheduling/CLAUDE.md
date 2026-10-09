@@ -17,6 +17,19 @@ toggle in the center, the **Huume thread** mounted as a column, and a **scenario
 and Week setup are drawers OVER the board rather than modes that replace it. Mobile collapses the
 regions to tabs.
 
+- **Huume-first layout (2026-10-08).** The Huume thread is the wide LEFT column, open by default; the
+  inputs rail is a drawer over the board's left edge (closed by default, still the drag source); mobile
+  tabs lead with Huume. The board opens on a **Week** view (`WeekRosterGrid`: one row per person, one
+  column per day, an Open seats row, weekly hours with the proposed total) and keeps the time grid as
+  **Timeline** (choice remembered per browser). The Timeline crops to the hours in use
+  (`calendarMath.visibleWindow`: every shift/preview/demand run ± 1h, ≥ 8h, a `24h` toggle reaches the
+  rest). A staged proposal is drawn ON the board and no longer auto-flips the center to Review:
+  `boardMarks.proposalMarks` outlines each existing shift it touches with what it does
+  (`+ Sam`, `− Dana`, `↻ 9a–5p`, `✕ cancel`, refused/open seats), `proposalPreviewShifts(review,
+  boardShiftIds)` draws only the shifts an edit/batch would CREATE (a week draft still draws all), and the
+  Week view adds dashed chips in the person's row / strikes removed ones. After an apply, the shifts whose
+  signature changed (`changedShiftIds` against a pre-reload snapshot) are tagged "Just changed" until the
+  next turn.
 - **`ReviewPane` is pure over a `ScheduleReview`**, so one component renders a Huume-staged
   `schedule_change`, a `schedule_week_draft` and a REST fill scenario: per-person load before→after on
   the same bar the rail draws, Staged / Not staged (with the server's reason) / Unfilled (with the full

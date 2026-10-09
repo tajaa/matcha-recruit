@@ -145,6 +145,21 @@ describe('proposalPreviewShifts', () => {
     expect(proposalPreviewShifts(null)).toEqual([])
   })
 
+  it('draws only the NEW shifts of an edit or batch, given what the board already shows', () => {
+    const shifts = proposalPreviewShifts(review({
+      kind: 'batch',
+      assignments: [
+        { shift_id: 'on-board', role: 'Opener', starts_at: '2026-09-14T09:00:00Z', ends_at: '2026-09-14T17:00:00Z', employee_id: 'e1', employee_name: 'Sam', op: 'assign', verdict: 'ok', reasons: [] },
+        { shift_id: 'new-1', role: 'Closer', starts_at: '2026-09-14T15:00:00Z', ends_at: '2026-09-14T22:00:00Z', employee_id: 'e2', employee_name: 'Dana', op: 'create', verdict: 'ok', reasons: [] },
+      ],
+      unfilled: [
+        { shift_id: 'new-2', role: 'Barista', starts_at: '2026-09-15T09:00:00Z', ends_at: '2026-09-15T17:00:00Z', reason: 'Nobody free', exclusions: {} },
+        { shift_id: 'on-board', role: 'Opener', starts_at: null, ends_at: null, reason: 'x', exclusions: {} },
+      ],
+    }), new Set(['on-board']))
+    expect(shifts.map((shift) => [shift.id, shift.names, shift.open])).toEqual([['new-1', ['Dana'], 0], ['new-2', [], 1]])
+  })
+
   it('groups seats per shift with names, open seats, warnings and reasons', () => {
     const shifts = proposalPreviewShifts(review({
       assignments: [

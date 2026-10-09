@@ -37,6 +37,7 @@ import ScenariosStrip, { type StagedChip } from '../../components/employees/sche
 import SchedulePilotToolbar, { type CenterView } from '../../components/employees/schedule-pilot/SchedulePilotToolbar'
 import { asScheduleReview } from '../../components/employees/schedule-pilot/reviewShape'
 import { approvalVerdict, demandCoverage, proposalPreviewShifts } from '../../components/employees/schedule-pilot/reviewVerdict'
+import { changedShiftIds, proposalMarks, shiftSignature } from '../../components/employees/schedule-pilot/boardMarks'
 
 // Bump when guide content materially changes so existing managers see the new
 // workspace walkthrough instead of staying pinned to the old editor's.
@@ -99,7 +100,9 @@ export default function SchedulePilot() {
   const [guideOpen, setGuideOpen] = useState(() => shouldAutoOpenScheduleTour(GUIDE_STORAGE_KEY))
   const [centerView, setCenterView] = useState<CenterView>('board')
   const [drawer, setDrawer] = useState<Drawer>(null)
-  const [railOpen, setRailOpen] = useState(true)
+  // The people/inputs rail is a drawer over the board now; the board and the
+  // Huume thread are what stay on screen.
+  const [railOpen, setRailOpen] = useState(false)
   const [threadOpen, setThreadOpen] = useState(true)
   const [mobileTab, setMobileTab] = useState<MobileTab>('board')
   const [reviewSource, setReviewSource] = useState<ReviewSource>({ kind: 'staged' })
@@ -115,6 +118,10 @@ export default function SchedulePilot() {
   /** Draw a generated week on the board before it exists. On by default: the
    *  board is where a manager judges a week, and it is empty until approval. */
   const [showProposal, setShowProposal] = useState(true)
+  /** Shifts the last applied Huume change touched — outlined until the next
+   *  turn, so a manager sees what moved without hunting for it. */
+  const [recentShiftIds, setRecentShiftIds] = useState<Set<string>>(() => new Set())
+  const beforeApplyRef = useRef<Map<string, string> | null>(null)
   const { jobs, reloadJobs } = useScheduleJobs(locationId)
   const openBreakPlanner = useCallback((shift: Shift, _employeeId: string, message: string) => {
     setNewDefaults(null)
@@ -185,6 +192,9 @@ export default function SchedulePilot() {
   }, [refreshAutopilotReadiness, planning.inputs])
 
   const afterApplied = useCallback(() => {
+    // The board still holds the pre-apply week until the reload lands; what
+    // differs afterwards is what this apply changed.
+    beforeApplyRef.current = new Map(editor.shifts.map((shift) => [shift.id, shiftSignature(shift)]))
     setAutomaticSuggestion(null)
     reloadWeekRules()
     void editor.reload()
@@ -217,7 +227,24 @@ export default function SchedulePilot() {
     setReturnToAutopilot(false)
     setInspectorShiftId(null)
     setNewDefaults(null)
+    setRecentShiftIds(new Set())
+    beforeApplyRef.current = null
   }, [locationId, weekStart])
+
+  // The next turn starts a new conversation about the week; the old outline
+  // would read as part of it.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (thread.busy) setRecentShiftIds((current) => (current.size ? new Set() : current))
+  }, [thread.busy])
+
+  // Once the post-apply reload lands, outline what changed.
+  useEffect(() => {
+    const before = beforeApplyRef.current
+    if (!before || editor.loading) return
+    beforeApplyRef.current = null
+    setRecentShiftIds(changedShiftIds(before, editor.shifts))
+  }, [editor.shifts, editor.loading])
 
   useEffect(() => {
     if (!locationsLoading && requestedLocationId && !locationId) setLocationId('')
@@ -255,8 +282,10 @@ export default function SchedulePilot() {
     const key = 'confirm_id' in stagedAction ? stagedAction.confirm_id : null
     if (!key || autoOpenedRef.current === key) return
     autoOpenedRef.current = key
+    // Stay on the board: the proposal is drawn there (previews + outlined
+    // shifts), and the banner above it opens the full review on demand.
     setReviewSource({ kind: 'staged' })
-    setCenterView('review')
+    setShowProposal(true)
   }, [stagedAction, stagedReview])
 
   const selectedScenarios = scenarios.selectedIds
@@ -295,11 +324,13 @@ export default function SchedulePilot() {
   const policyMinutes = planning.inputs?.policy.default_weekly_cap_minutes
   // The proposal layer: only a generated week has shifts the board cannot
   // already show (see `proposalPreviewShifts`).
-  const previewShifts = useMemo(() => (showProposal ? proposalPreviewShifts(review) : []), [review, showProposal])
+  const boardShiftIds = useMemo(() => new Set(editor.shifts.map((shift) => shift.id)), [editor.shifts])
+  const previewShifts = useMemo(() => (showProposal ? proposalPreviewShifts(review, boardShiftIds) : []), [review, showProposal, boardShiftIds])
+  const boardMarks = useMemo(() => (showProposal ? proposalMarks(review, boardShiftIds) : new Map()), [review, showProposal, boardShiftIds])
   const previewDemand = useMemo(() => (showProposal ? demandCoverage(review) : {}), [review, showProposal])
   const previewVerdict = useMemo(
-    () => (review && previewShifts.length ? approvalVerdict(review, caps, policyMinutes) : null),
-    [review, previewShifts.length, caps, policyMinutes],
+    () => (review && (previewShifts.length || boardMarks.size) ? approvalVerdict(review, caps, policyMinutes) : null),
+    [review, previewShifts.length, boardMarks.size, caps, policyMinutes],
   )
   // Approve/Cancel send the literal turn the chat strip's buttons send, so the
   // server's two-turn confirm and the executor's row lock still decide.
@@ -516,8 +547,8 @@ export default function SchedulePilot() {
   }
 
   const mobileTabs: Array<[MobileTab, string]> = [
-    ['inputs', 'Inputs'], ['board', 'Board'], ['review', 'Review'],
     ...(huumeEnabled ? [['huume', 'Huume'] as [MobileTab, string]] : []),
+    ['board', 'Board'], ['review', 'Review'], ['inputs', 'Inputs'],
   ]
   const showRail = railOpen
   const showThread = threadOpen && huumeEnabled
@@ -549,11 +580,13 @@ export default function SchedulePilot() {
         <div role="status" className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-2 text-xs text-emerald-100">
           <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-300" />
           <span className="min-w-0">
-            Previewing the generated week — dashed shifts are not written until you approve.
+            {review?.kind === 'week_draft'
+              ? 'Previewing the generated week — dashed shifts are not written until you approve.'
+              : `Huume's proposal is on the board — outlined shifts${previewShifts.length ? ' and dashed new ones' : ''} change only when you approve.`}
             <span className="ml-2 font-mono text-[11px] text-emerald-200/80">{previewVerdict.facts[0]}</span>
           </span>
           <span className="ml-auto flex items-center gap-1.5">
-            <button type="button" onClick={openReview} className="rounded border border-emerald-400/30 px-2 py-1 text-[11px] hover:bg-emerald-400/10">Back to review</button>
+            <button type="button" onClick={openReview} className="rounded border border-emerald-400/30 px-2 py-1 text-[11px] hover:bg-emerald-400/10">Full review</button>
             <button type="button" onClick={() => setShowProposal(false)} className="rounded border border-white/[0.1] px-2 py-1 text-[11px] text-zinc-300 hover:bg-white/[0.06]">Hide preview</button>
             {canDecide && (
               <button type="button" disabled={thread.busy} onClick={() => decide('confirm')} className={`rounded px-2 py-1 text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${previewVerdict.tone === 'bad' ? 'border border-amber-400/50 text-amber-100 hover:bg-amber-400/10' : 'bg-emerald-500 text-zinc-950 hover:bg-emerald-400'}`}>
@@ -580,6 +613,10 @@ export default function SchedulePilot() {
       unpricedDays={unpricedDays}
       previewShifts={previewShifts}
       demand={previewDemand}
+      marks={boardMarks}
+      recentShiftIds={recentShiftIds}
+      review={showProposal ? review : null}
+      onSelectEmployee={setSelectedEmployeeId}
       canMutate={canMutate}
       onOpenNew={openNew}
       onOpenShift={openShift}
@@ -661,7 +698,7 @@ export default function SchedulePilot() {
           onToggleThread={() => setThreadOpen((open) => !open)}
           huumeSelectionCount={huumeSelectedShifts.length}
           huumeEnabled={huumeEnabled}
-          storeActions={canManageStores ? <StoreActions setup={stores} canEdit={!!currentLocation} /> : undefined}
+          storeActions={canManageStores ? <StoreActions compact setup={stores} canEdit={!!currentLocation} /> : undefined}
           autopilot={{
             visible: autopilotEnabled && !!locationId,
             running: autopilotRunning,
@@ -734,7 +771,18 @@ export default function SchedulePilot() {
               ))}
             </div>
             <div className="relative flex min-h-0 flex-1">
-              <div className={`min-h-0 w-full shrink-0 border-r border-white/[0.06] lg:w-72 ${mobileTab === 'inputs' ? 'block' : 'hidden'} ${showRail ? 'lg:block' : 'lg:hidden'}`}>
+              {/* Huume-first: the conversation is the main column on the left,
+                  open by default; the board beside it shows what it proposes. */}
+              {huumeEnabled && (
+                <div className={`min-h-0 w-full shrink-0 border-r border-white/[0.06] lg:w-[440px] xl:w-[480px] ${mobileTab === 'huume' ? 'block' : 'hidden'} ${showThread ? 'lg:block' : 'lg:hidden'}`}>
+                  {threadContent}
+                </div>
+              )}
+              <div className={`relative min-h-0 min-w-0 flex-1 ${mobileTab === 'huume' ? 'hidden' : 'flex'} lg:flex`}>
+              {/* People + inputs: a full tab on mobile, a drawer over the board's
+                  left edge on desktop (drag a person straight onto the board). */}
+              <div className={`min-h-0 w-full shrink-0 ${mobileTab === 'inputs' ? 'block' : 'hidden'} ${showRail ? 'lg:block' : 'lg:hidden'} lg:absolute lg:inset-y-0 lg:left-0 lg:z-30 lg:w-80 lg:border-r lg:border-white/[0.06] lg:bg-zinc-950 lg:shadow-2xl`}>
+                <button type="button" onClick={() => setRailOpen(false)} className="absolute right-2 top-2 z-10 hidden rounded p-1 text-zinc-500 hover:text-zinc-100 lg:block" aria-label="Close people and inputs"><X className="h-4 w-4" /></button>
                 {railContent}
               </div>
               <div className={`relative min-h-0 min-w-0 flex-1 ${mobileTab === 'board' || mobileTab === 'review' ? 'block' : 'hidden'} lg:block`}>
@@ -753,11 +801,7 @@ export default function SchedulePilot() {
                   </div>
                 )}
               </div>
-              {huumeEnabled && (
-                <div className={`min-h-0 w-full shrink-0 border-l border-white/[0.06] lg:w-[380px] ${mobileTab === 'huume' ? 'block' : 'hidden'} ${showThread ? 'lg:block' : 'lg:hidden'}`}>
-                  {threadContent}
-                </div>
-              )}
+              </div>
             </div>
           </>
         )}
