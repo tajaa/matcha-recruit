@@ -10,15 +10,19 @@ own dropdown is the one per-turn override on top of it.
 
 The multi-turn tool loops use `services/huume/claude_client.ClaudeSession`;
 this module is the single-shot half plus the pieces both share.
+`generate_content_routed` lets a plain Gemini `generate_content` call site
+follow the switch without being rewritten.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
 import re
 import time
+from types import SimpleNamespace
 from typing import Any, Optional
 
 import anthropic
@@ -173,3 +177,101 @@ async def generate_text(
     if message.stop_reason == "refusal":
         raise RuntimeError("Anthropic Messages declined the request")
     return "\n".join(block.text for block in message.content if block.type == "text").strip()
+
+
+# Gemini one-shots were tuned for flash-class latency; Claude with adaptive
+# thinking needs more room, so a routed call never gets less than this.
+_ROUTED_MIN_TIMEOUT = 45.0
+
+
+def _gemini_contents_to_claude(contents: Any) -> tuple[str, list[dict[str, Any]]]:
+    """Gemini `contents` (a string, or a list of strings / Parts / Contents)
+    → (prompt text, attachment blocks). Text joins in order; inline PDFs and
+    images become `pdf_block` / `image_block`. These call sites send one user
+    turn, so roles are not preserved."""
+    texts: list[str] = []
+    attachments: list[dict[str, Any]] = []
+
+    def take(item: Any) -> None:
+        if item is None:
+            return
+        if isinstance(item, str):
+            if item.strip():
+                texts.append(item)
+            return
+        parts = getattr(item, "parts", None)
+        if parts is not None:  # a types.Content
+            for part in parts:
+                take(part)
+            return
+        text = getattr(item, "text", None)
+        if isinstance(text, str):
+            if text.strip():
+                texts.append(text)
+            return
+        inline = getattr(item, "inline_data", None)
+        if inline is not None:
+            data = getattr(inline, "data", None) or b""
+            mime = (getattr(inline, "mime_type", None) or "").lower()
+            block = pdf_block(data) if mime == "application/pdf" and data else image_block(data, mime)
+            if block:
+                attachments.append(block)
+
+    for item in contents if isinstance(contents, (list, tuple)) else [contents]:
+        take(item)
+    return "\n\n".join(texts), attachments
+
+
+async def generate_content_routed(
+    client: Any,
+    *,
+    model: str,
+    contents: Any,
+    config: Any = None,
+    timeout_seconds: float,
+    json_output: bool | None = None,
+    max_tokens: int = 16_000,
+    effort: str = "low",
+) -> Any:
+    """`client.aio.models.generate_content`, unless the admin Agent model names
+    a Claude model, in which case the same request runs there.
+
+    Returns the Gemini response, or an object with the same `.text` the call
+    sites read. Raises like Gemini does (`asyncio.TimeoutError` past the
+    timeout, `RuntimeError` on an API failure), so each site's existing
+    error handling stays as is. `json_output` defaults to the config's
+    `response_mime_type`; pass True where the prompt asks for JSON in prose.
+    In JSON mode the reply is normalized to the bare object, so a site that
+    `json.loads` the text strictly keeps working. Gemini-only knobs
+    (temperature, safety settings) are dropped on the Claude path.
+    """
+    claude_model = await claude_override()
+    if not claude_model:
+        return await asyncio.wait_for(
+            client.aio.models.generate_content(model=model, contents=contents, config=config),
+            timeout=timeout_seconds,
+        )
+    if json_output is None:
+        json_output = getattr(config, "response_mime_type", None) == "application/json"
+    system = getattr(config, "system_instruction", None)
+    prompt, attachments = _gemini_contents_to_claude(contents)
+    timeout = max(timeout_seconds, _ROUTED_MIN_TIMEOUT)
+    text = await asyncio.wait_for(
+        generate_text(
+            prompt,
+            model=claude_model,
+            system=system if isinstance(system, str) else None,
+            attachments=attachments,
+            json_output=json_output,
+            max_tokens=max_tokens,
+            effort=effort,
+            timeout_seconds=timeout,
+        ),
+        timeout=timeout + 5,
+    )
+    if json_output:
+        try:
+            text = json.dumps(parse_json_object(text))
+        except ValueError:
+            pass  # the site's own parser reports it
+    return SimpleNamespace(text=text, usage_metadata=None)

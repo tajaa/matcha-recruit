@@ -23,7 +23,6 @@ Stalled audits (uvicorn restart mid-run, OOM, unhandled exception) leave
 "Audit appears stalled — Retry" banner after 5 minutes of no progress.
 """
 
-import asyncio
 import json
 import logging
 import os
@@ -32,6 +31,7 @@ from typing import Any, Optional
 from app.database import get_connection
 from app.core.services.model_json import strip_json_fence as _strip_json_fence
 from app.core.services.model_catalog import GEMINI_FLASH
+from app.core.services.anthropic_messages import generate_content_routed
 
 logger = logging.getLogger(__name__)
 
@@ -433,12 +433,9 @@ async def _extract_sections_from_pdf(pdf_bytes: bytes) -> list[dict[str, Any]]:
 
     model_name = os.getenv("HANDBOOK_AUDIT_MODEL", GEMINI_FLASH)
     try:
-        response = await asyncio.wait_for(
-            client.aio.models.generate_content(
-                model=model_name,
-                contents=[pdf_part, prompt],
-            ),
-            timeout=SECTION_EXTRACT_TIMEOUT,
+        response = await generate_content_routed(
+            client, model=model_name, contents=[pdf_part, prompt],
+            timeout_seconds=SECTION_EXTRACT_TIMEOUT, json_output=True, effort="medium",
         )
     except Exception as exc:
         logger.exception("Section-extract Gemini call failed: %s", exc)
@@ -525,12 +522,9 @@ async def _grade_state_coverage(
 
     model_name = os.getenv("HANDBOOK_AUDIT_MODEL", GEMINI_FLASH)
     try:
-        response = await asyncio.wait_for(
-            client.aio.models.generate_content(
-                model=model_name,
-                contents=prompt,
-            ),
-            timeout=GAP_CHECK_TIMEOUT,
+        response = await generate_content_routed(
+            client, model=model_name, contents=prompt,
+            timeout_seconds=GAP_CHECK_TIMEOUT, json_output=True, effort="medium",
         )
     except Exception as exc:
         logger.exception("Gap-grading Gemini call failed for %s: %s", state, exc)

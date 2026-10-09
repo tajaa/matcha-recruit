@@ -12,6 +12,7 @@ from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id, require_feature
 from app.matcha.models.ir.osha import OshaRecordabilityUpdate
 from app.core.services.genai_client import get_genai_client
+from app.core.services.anthropic_messages import generate_content_routed
 from ._shared import _safe_json_loads, log_audit
 
 logger = logging.getLogger(__name__)
@@ -180,9 +181,9 @@ Respond in JSON:
         settings = get_settings()
         try:
             client = get_genai_client()
-            response = await client.aio.models.generate_content(
-                model=settings.analysis_model,
-                contents=prompt,
+            response = await generate_content_routed(
+                client, model=settings.analysis_model, contents=prompt,
+                timeout_seconds=120, json_output=True,
             )
             text = (response.text or "").strip()
             if text.startswith("```"):

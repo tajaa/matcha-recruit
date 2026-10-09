@@ -21,7 +21,6 @@ good" with the slot still empty).
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -32,6 +31,7 @@ from google.genai import types
 from app.core.services.model_catalog import GEMINI_FLASH_LITE
 from app.matcha.services._shared.gemini import genai_env_client
 from app.matcha.services.ir.ir_voice_parser import _VOICE_PARSE_SAFETY_SETTINGS
+from app.core.services.anthropic_messages import generate_content_routed
 
 logger = logging.getLogger(__name__)
 
@@ -274,11 +274,9 @@ async def next_turn(
         company_name=company_name, instructions=instructions,
     )
     try:
-        response = await asyncio.wait_for(
-            client.aio.models.generate_content(
-                model=GEMINI_FLASH_LITE, contents=[prompt], config=config,
-            ),
-            timeout=CHAT_TURN_TIMEOUT,
+        response = await generate_content_routed(
+            client, model=GEMINI_FLASH_LITE, contents=[prompt], config=config,
+            timeout_seconds=CHAT_TURN_TIMEOUT,
         )
         payload = json.loads((getattr(response, "text", None) or "").strip())
     except Exception as exc:

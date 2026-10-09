@@ -9,6 +9,7 @@ from typing import Optional, Any
 
 from app.core.services.genai_client import get_genai_client
 from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
+from app.core.services.anthropic_messages import generate_content_routed
 
 logger = logging.getLogger(__name__)
 
@@ -106,9 +107,9 @@ async def generate_investigation_questions(
     response = None
     for candidate in candidates:
         try:
-            response = await client.aio.models.generate_content(
-                model=candidate,
-                contents=prompt,
+            response = await generate_content_routed(
+                client, model=candidate, contents=prompt,
+                timeout_seconds=120, json_output=True,
             )
             break
         except Exception as exc:

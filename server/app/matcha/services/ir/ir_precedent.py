@@ -328,7 +328,8 @@ async def enrich_with_semantics(
     # Shared plumbing (precedent_common): IR gains ER's model-candidate fallback + robust
     # JSON extraction that it previously lacked — same scoring, more resilient call.
     return await run_semantic_enrichment(
-        prompt, domain="ir_analysis", api_key=api_key, timeout=GEMINI_CALL_TIMEOUT
+        prompt, domain="ir_analysis", api_key=api_key, timeout=GEMINI_CALL_TIMEOUT,
+        agent_model=True,
     )
 
 

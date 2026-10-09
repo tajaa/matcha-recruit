@@ -71,8 +71,13 @@ server/
   client, so OpenAI code READ as Gemini code — if a call site builds `types.Content`/`types.Part`,
   check which client it reaches before assuming the provider.
 - **Anthropic (opt-in)**: Admin → Settings → *Agent model* routes every Luna workload and EMS
-  channel `@huume` (Gemini) to Claude Haiku 5.5 / Sonnet 5.5; the schedule assistant also has a
-  per-chat dropdown. One decision point (`core/services/anthropic_messages.claude_override()`), the
+  channel `@huume` (Gemini) to Claude Haiku 5.5 / Sonnet 5.5, plus the Gemini one-shots behind
+  Sym-link chat, IR analysis (analyzer runners, copilot guidance, chat intake, consistency, OSHA
+  recordability, interview questions, IR precedent enrichment) and handbooks (audit, guided draft,
+  Handbook Pilot, upload relevance check) via `anthropic_messages.generate_content_routed` — a
+  drop-in for `client.aio.models.generate_content` that returns an object with `.text`. Voice
+  dictation, Google-Search-grounded research and ER stay on Gemini. The schedule assistant also
+  has a per-chat dropdown. One decision point (`core/services/anthropic_messages.claude_override()`), the
   official `anthropic` SDK, `services/huume/claude_client.ClaudeSession` for tool loops,
   `anthropic_messages.generate_text` for one-shots, own `provider="anthropic"` rate-limit bucket,
   `ANTHROPIC_API_KEY`. `default` changes nothing. Spec: `services/huume/CLAUDE.md` §"Claude".

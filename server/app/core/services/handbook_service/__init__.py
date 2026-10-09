@@ -1,4 +1,3 @@
-import asyncio
 from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 import json
@@ -53,6 +52,7 @@ logger = logging.getLogger(__name__)
 # external `from ...handbook_service import ...` callers keep working.
 from app.core.services.handbook_service._constants import *  # noqa: F401,F403
 from app.core.services.handbook_service._helpers import *  # noqa: F401,F403
+from app.core.services.anthropic_messages import generate_content_routed
 
 
 
@@ -580,12 +580,9 @@ class HandbookService:
 
         model_name = settings.analysis_model or GEMINI_FLASH
         try:
-            response = await asyncio.wait_for(
-                client.aio.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                ),
-                timeout=45,
+            response = await generate_content_routed(
+                client, model=model_name, contents=prompt,
+                timeout_seconds=45, json_output=True, effort="medium",
             )
             raw_text = (getattr(response, "text", None) or "").strip()
             parsed = _extract_json_payload(raw_text)

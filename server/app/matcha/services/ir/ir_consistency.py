@@ -5,12 +5,12 @@ resolution stats, and a consistency insight from precedent data.
 """
 
 import json
-import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Optional
 
 from app.core.services.model_catalog import GEMINI_FLASH
+from app.core.services.anthropic_messages import generate_content_routed
 
 logger = logging.getLogger(__name__)
 
@@ -98,12 +98,9 @@ async def _categorize_actions(
         precedents_text="\n\n".join(lines),
     )
 
-    response = await asyncio.wait_for(
-        client.aio.models.generate_content(
-            model=GEMINI_FLASH,
-            contents=prompt,
-        ),
-        timeout=GEMINI_CALL_TIMEOUT,
+    response = await generate_content_routed(
+        client, model=GEMINI_FLASH, contents=prompt,
+        timeout_seconds=GEMINI_CALL_TIMEOUT, json_output=True,
     )
 
     await rate_limiter.record_call("ir_analysis", "consistency_categorize")
@@ -155,12 +152,8 @@ async def _generate_insight(
         confidence=confidence,
     )
 
-    response = await asyncio.wait_for(
-        client.aio.models.generate_content(
-            model=GEMINI_FLASH,
-            contents=prompt,
-        ),
-        timeout=GEMINI_CALL_TIMEOUT,
+    response = await generate_content_routed(
+        client, model=GEMINI_FLASH, contents=prompt, timeout_seconds=GEMINI_CALL_TIMEOUT,
     )
 
     await rate_limiter.record_call("ir_analysis", "consistency_insight")

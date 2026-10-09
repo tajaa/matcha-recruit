@@ -20,6 +20,7 @@ from typing import Any, Optional
 
 from ._shared.gemini import is_model_unavailable_error  # noqa: F401 — re-export
 from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
+from app.core.services.anthropic_messages import generate_content_routed
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +38,13 @@ async def run_semantic_enrichment(
     domain: str,
     api_key: Optional[str] = None,
     timeout: int = GEMINI_CALL_TIMEOUT,
+    agent_model: bool = False,
 ) -> dict[str, Any]:
     """Run one precedent Phase-2 Gemini call and parse its JSON result.
 
     `prompt` is the fully-built, domain-specific prompt; `domain` is the rate-limiter
-    bucket (`"er_analysis"` / `"ir_analysis"`). Returns the parsed dict, or
+    bucket (`"er_analysis"` / `"ir_analysis"`). `agent_model` lets the admin
+    Agent model run it on Claude (IR opts in; ER stays on Gemini). Returns the parsed dict, or
     `{"scores": [], "pattern_summary": None}` on any failure (unavailable model exhausted,
     timeout, no JSON, parse error) — the structural Phase-1 scores still stand on their own.
     """
@@ -66,13 +69,19 @@ async def run_semantic_enrichment(
         response = None
         for model_name in model_candidates:
             try:
-                response = await asyncio.wait_for(
-                    client.aio.models.generate_content(
-                        model=model_name,
-                        contents=prompt,
-                    ),
-                    timeout=timeout,
-                )
+                if agent_model:
+                    response = await generate_content_routed(
+                        client, model=model_name, contents=prompt,
+                        timeout_seconds=timeout, json_output=True, effort="medium",
+                    )
+                else:
+                    response = await asyncio.wait_for(
+                        client.aio.models.generate_content(
+                            model=model_name,
+                            contents=prompt,
+                        ),
+                        timeout=timeout,
+                    )
                 if model_name != primary_model:
                     logger.warning(
                         "Precedent semantic model '%s' unavailable; fell back to '%s'",

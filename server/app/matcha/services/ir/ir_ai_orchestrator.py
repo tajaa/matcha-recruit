@@ -22,6 +22,7 @@ from ...services.ir.ir_analysis import get_ir_analyzer
 from ...services.ir.ir_cards import build_log_root_cause_query_card
 from ....core.services.rate_limiter import get_rate_limiter
 from ....database import get_connection
+from app.core.services.anthropic_messages import generate_content_routed
 
 logger = logging.getLogger(__name__)
 
@@ -578,12 +579,9 @@ async def generate_guidance(
 
     analyzer = get_ir_analyzer()
     try:
-        response = await asyncio.wait_for(
-            analyzer.client.aio.models.generate_content(
-                model=analyzer.model,
-                contents=prompt,
-            ),
-            timeout=60,
+        response = await generate_content_routed(
+            analyzer.client, model=analyzer.model, contents=prompt,
+            timeout_seconds=60, json_output=True, effort="medium",
         )
         raw_text = (getattr(response, "text", None) or "").strip()
         payload = analyzer._parse_json_response(raw_text)

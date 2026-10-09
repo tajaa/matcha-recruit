@@ -15,6 +15,7 @@ from ._config import DRAFT_KINDS, MODEL, _CONTENT_CAP, _GEMINI_TIMEOUT, _HISTORY
 from app.matcha.services._shared.gemini import _genai
 from app.matcha.services._shared.text import history_text
 from app.matcha.services._shared.text import _slug
+from app.core.services.anthropic_messages import generate_content_routed
 
 logger = logging.getLogger(__name__)
 
@@ -179,9 +180,9 @@ def _coerce_drafts(raw, index: dict) -> tuple[list[dict], list[str]]:
 
 async def _generate(session: dict, history: list[dict], corpus: dict, latest: str) -> dict:
     prompt = _build_prompt(session, history, corpus, latest)
-    resp = await asyncio.wait_for(
-        _genai().aio.models.generate_content(model=MODEL, contents=prompt),
-        timeout=_GEMINI_TIMEOUT,
+    resp = await generate_content_routed(
+        _genai(), model=MODEL, contents=prompt,
+        timeout_seconds=_GEMINI_TIMEOUT, json_output=True, effort="medium",
     )
     data = _parse_json(getattr(resp, "text", "") or "")
     drafts, dropped = _coerce_drafts(data.get("proposed_drafts"), corpus.get("index", {}))

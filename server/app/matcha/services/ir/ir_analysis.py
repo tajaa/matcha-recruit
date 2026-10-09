@@ -16,6 +16,7 @@ from typing import Optional, Any, Callable
 from ....core.services.genai_client import get_genai_client
 from ....core.services.rate_limiter import get_rate_limiter, RateLimitExceeded
 from ....core.services.model_catalog import GEMINI_FLASH
+from app.core.services.anthropic_messages import generate_content_routed
 
 
 # ===========================================
@@ -727,12 +728,9 @@ class IRAnalyzer:
             prompt = build_prompt_fn(feedback=last_error if attempt > 0 else None)
 
             try:
-                response = await asyncio.wait_for(
-                    self.client.aio.models.generate_content(
-                        model=self.model,
-                        contents=prompt,
-                    ),
-                    timeout=GEMINI_CALL_TIMEOUT,
+                response = await generate_content_routed(
+                    self.client, model=self.model, contents=prompt,
+                    timeout_seconds=GEMINI_CALL_TIMEOUT, json_output=True, effort="medium",
                 )
 
                 # Record the actual API call
