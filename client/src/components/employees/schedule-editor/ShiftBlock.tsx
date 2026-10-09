@@ -3,6 +3,16 @@ import { useDraggable, useDroppable } from '@dnd-kit/core'
 import type { Shift } from '../../../types/employeeSchedule'
 import { fmtTime } from '../../../types/employeeSchedule'
 import { shiftDurationMinutes } from './calendarMath'
+import type { ChangeTone, ShiftMark } from '../schedule-pilot/boardMarks'
+
+const CHIP_TONE: Record<ChangeTone, string> = {
+  add: 'bg-emerald-500/15 text-emerald-200',
+  remove: 'bg-red-500/15 text-red-200',
+  move: 'bg-sky-500/15 text-sky-200',
+  cancel: 'bg-red-500/20 text-red-200',
+  blocked: 'bg-zinc-800 text-zinc-400 line-through decoration-zinc-600',
+  open: 'bg-amber-500/15 text-amber-200',
+}
 
 interface ShiftBlockProps {
   shift: Shift
@@ -13,6 +23,10 @@ interface ShiftBlockProps {
   /** A person is selected in the rail and this shift neither has them nor
    *  room for them — fade it so their week and the open seats stand out. */
   dimmed?: boolean
+  /** A pending Huume proposal changes this shift: ring it and say how. */
+  mark?: ShiftMark
+  /** An applied Huume change just touched this shift. */
+  recent?: boolean
   style: React.CSSProperties
   onOpen(): void
   onToggleHuumeSelection(): void
@@ -35,7 +49,7 @@ function AssignmentChip({ employeeId, name, shiftId, editable, availabilityOverr
   return <button ref={setNodeRef} {...listeners} {...attributes} className="flex w-full items-center gap-1 truncate rounded bg-zinc-800 px-1.5 py-0.5 text-left text-[10px] text-zinc-300 hover:bg-zinc-700"><Users className="h-2.5 w-2.5 shrink-0 text-zinc-500" /><span className="truncate">{name}</span>{availabilityOverridden && <span className="ml-auto shrink-0 text-orange-400" title="Availability override">!</span>}</button>
 }
 
-export default function ShiftBlock({ shift, pending, editable, selectedEmployeeId, huumeSelected, dimmed = false, style, onOpen, onToggleHuumeSelection, onAssignSelected, onResize }: ShiftBlockProps) {
+export default function ShiftBlock({ shift, pending, editable, selectedEmployeeId, huumeSelected, dimmed = false, mark, recent = false, style, onOpen, onToggleHuumeSelection, onAssignSelected, onResize }: ShiftBlockProps) {
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: `shift-drop-${shift.id}`, data: { kind: 'shift', shiftId: shift.id } })
   const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({
     id: `shift-${shift.id}`,
@@ -67,7 +81,9 @@ export default function ShiftBlock({ shift, pending, editable, selectedEmployeeI
     <div
       ref={setDropRef}
       style={style}
-      className={`absolute z-10 min-w-0 overflow-hidden rounded-md border p-1.5 shadow-lg transition-colors ${shift.status === 'cancelled' ? 'border-red-500/30 bg-red-950/80 opacity-60' : huumeSelected ? 'border-emerald-400 bg-emerald-950/70 ring-1 ring-emerald-400/30' : isOver ? 'border-emerald-400 bg-emerald-950/90' : 'border-zinc-700 bg-zinc-900/95'} ${pending ? 'animate-pulse' : ''} ${isDragging ? 'opacity-30' : dimmed ? 'opacity-40 saturate-50' : ''}`}
+      data-proposed={mark ? 'true' : undefined}
+      data-recent={recent ? 'true' : undefined}
+      className={`absolute z-10 min-w-0 overflow-hidden rounded-md border p-1.5 shadow-lg transition-colors ${shift.status === 'cancelled' ? 'border-red-500/30 bg-red-950/80 opacity-60' : huumeSelected ? 'border-emerald-400 bg-emerald-950/70 ring-1 ring-emerald-400/30' : isOver ? 'border-emerald-400 bg-emerald-950/90' : mark ? `bg-zinc-900/95 ring-2 ${mark.warn ? 'border-amber-400 ring-amber-400/40' : 'border-sky-400 ring-sky-400/40'}` : recent ? 'border-emerald-400/70 bg-zinc-900/95 ring-2 ring-emerald-400/30' : 'border-zinc-700 bg-zinc-900/95'} ${pending ? 'animate-pulse' : ''} ${isDragging ? 'opacity-30' : dimmed && !mark ? 'opacity-40 saturate-50' : ''}`}
     >
       <div className="flex items-start gap-1">
         {editable ? <button ref={setDragRef} {...listeners} {...attributes} className="mt-0.5 shrink-0 cursor-grab text-zinc-600 hover:text-zinc-200" aria-label={`Move ${shift.role || 'shift'}`}><GripVertical className="h-3 w-3" /></button> : <Lock className="mt-0.5 h-3 w-3 shrink-0 text-zinc-700" />}
@@ -86,6 +102,14 @@ export default function ShiftBlock({ shift, pending, editable, selectedEmployeeI
           {huumeSelected ? <Check className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
         </button>
       </div>
+      {mark && mark.chips.length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-0.5" aria-label="Proposed by Huume">
+          {mark.chips.map((chip, index) => (
+            <span key={`${chip.label}-${index}`} title={chip.title} className={`max-w-full truncate rounded px-1 py-px text-[9px] font-medium ${CHIP_TONE[chip.tone]}`}>{chip.label}</span>
+          ))}
+        </div>
+      )}
+      {recent && !mark && <span className="mt-1 block text-[9px] font-medium text-emerald-300">Just changed</span>}
       <div className="mt-1 space-y-0.5">
         {shift.assignments.map((assignment) => <AssignmentChip key={assignment.employee_id} employeeId={assignment.employee_id} name={assignment.name} shiftId={shift.id} editable={editable} availabilityOverridden={assignment.availability_overridden} />)}
       </div>

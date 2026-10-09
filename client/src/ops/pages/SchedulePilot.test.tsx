@@ -210,8 +210,9 @@ describe('SchedulePilot — the workspace', () => {
     renderPilot()
 
     expect(screen.getByLabelText('Planning inputs')).toBeInTheDocument()
-    expect(screen.getByText('Aisha Rivera')).toBeInTheDocument()
-    expect(screen.getByText('Opener')).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Planning inputs')).getByText('Aisha Rivera')).toBeInTheDocument()
+    // The board opens on the Week view: people down the side, days across.
+    expect(within(screen.getByRole('table', { name: 'Week schedule by person' })).getByText(/Opener · 1 open/)).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Huume schedule assistant' })).toBeInTheDocument()
     expect(screen.getByText('Week of 2026-08-09')).toBeInTheDocument()
     await waitFor(() => expect(planningInputsMock).toHaveBeenCalledWith('loc1', '2026-08-09'))
@@ -477,7 +478,7 @@ describe('SchedulePilot — Huume', () => {
     await waitFor(() => expect(planningInputsMock).toHaveBeenCalledTimes(2))
   })
 
-  it('opens the review pane on its own when Huume stages something', async () => {
+  it('keeps the board up and outlines what Huume staged; the full review is one click away', async () => {
     getSessionMock.mockResolvedValue({
       session_id: 'session-1', thread_id: 'thread-1', location_id: 'loc1',
       week_start: '2026-08-09', week_end: '2026-08-16', messages: [], version: 2,
@@ -491,6 +492,14 @@ describe('SchedulePilot — Huume', () => {
 
     renderPilot()
 
+    // The change is drawn where it happens: the shift it touches is outlined
+    // with what it does to it, and the board stays the center view.
+    expect(await screen.findByText(/Huume's proposal is on the board/)).toBeInTheDocument()
+    expect(centerTab(/Board/)).toHaveAttribute('aria-selected', 'true')
+    const chips = screen.getByLabelText('Proposed by Huume')
+    expect(within(chips).getByText('+ Aisha')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Full review' }))
     expect(await screen.findByText('Law on file · no statutory advisories.')).toBeInTheDocument()
     expect(within(reviewPane()).getByText(/Aisha Rivera/)).toBeInTheDocument()
     expect(centerTab(/Review/)).toHaveAttribute('aria-selected', 'true')
@@ -509,6 +518,7 @@ describe('SchedulePilot — Huume', () => {
     })
     renderPilot()
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Full review' }))
     const verdict = await screen.findByLabelText('Approval verdict')
     expect(reviewPane()).toContainElement(verdict)
     expect(within(verdict).getByText('Ready to approve')).toBeInTheDocument()
@@ -538,13 +548,16 @@ describe('SchedulePilot — Huume', () => {
     })
     renderPilot()
 
+    // The board stays up and draws the generated week before it exists.
+    expect(await screen.findAllByRole('img', { name: /^Proposed Opener .+: Aisha Rivera$/ })).toHaveLength(count)
+    expect(centerTab(/Board/)).toHaveAttribute('aria-selected', 'true')
+    expect(sendMessageStreamMock).not.toHaveBeenCalled()
+    expect(screen.getByText(/dashed shifts are not written until you approve/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Full review' }))
     await screen.findByLabelText('Approval verdict')
     expect(screen.getByText(`${count} staged`)).toBeInTheDocument()
     fireEvent.click(within(reviewPane()).getByRole('button', { name: /See the week on the board/ }))
-    expect(centerTab(/Board/)).toHaveAttribute('aria-selected', 'true')
     expect(await screen.findAllByRole('img', { name: /^Proposed Opener .+: Aisha Rivera$/ })).toHaveLength(count)
-    expect(sendMessageStreamMock).not.toHaveBeenCalled()
-    expect(screen.getByText(/dashed shifts are not written until you approve/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Hide preview' }))
     expect(screen.queryByRole('img', { name: /^Proposed Opener/ })).not.toBeInTheDocument()
     fireEvent.click(centerTab(/Review/))

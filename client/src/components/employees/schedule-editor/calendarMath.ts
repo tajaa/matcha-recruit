@@ -84,3 +84,34 @@ export function layoutOverlappingShifts<T extends Pick<Shift, 'starts_at' | 'end
   })
   return placed.map((item) => ({ ...item, laneCount: lanes.length || 1 }))
 }
+
+/** The default board window for a week with nothing on it yet. */
+export const DEFAULT_VISIBLE_WINDOW = { start: 6 * 60, end: 22 * 60 }
+const MIN_VISIBLE_MINUTES = 8 * 60
+const VISIBLE_PADDING_MINUTES = 60
+
+/** The slice of the day the board draws: every shift (and proposal, and
+ *  demand run) with an hour either side, on whole hours, at least eight hours
+ *  tall — so a 6:30a–10p store doesn't open on seven empty overnight hours.
+ *  A shift that runs past midnight keeps the window open to the end of the day. */
+export function visibleWindow(
+  items: Array<Pick<Shift, 'starts_at' | 'ends_at'>>,
+  extraRanges: Array<{ start: number; end: number }> = [],
+): { start: number; end: number } {
+  const ranges = [
+    ...items.map((item) => {
+      const start = new Date(item.starts_at)
+      const startMinute = start.getUTCHours() * 60 + start.getUTCMinutes()
+      return { start: startMinute, end: Math.min(1440, startMinute + shiftDurationMinutes(item)) }
+    }),
+    ...extraRanges,
+  ]
+  if (!ranges.length) return { ...DEFAULT_VISIBLE_WINDOW }
+  let start = Math.max(0, Math.floor((Math.min(...ranges.map((range) => range.start)) - VISIBLE_PADDING_MINUTES) / 60) * 60)
+  let end = Math.min(1440, Math.ceil((Math.max(...ranges.map((range) => range.end)) + VISIBLE_PADDING_MINUTES) / 60) * 60)
+  if (end - start < MIN_VISIBLE_MINUTES) {
+    end = Math.min(1440, start + MIN_VISIBLE_MINUTES)
+    start = Math.max(0, end - MIN_VISIBLE_MINUTES)
+  }
+  return { start, end }
+}

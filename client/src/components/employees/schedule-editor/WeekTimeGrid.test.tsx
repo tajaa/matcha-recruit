@@ -1,5 +1,5 @@
 import { DndContext } from '@dnd-kit/core'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import WeekTimeGrid from './WeekTimeGrid'
 
@@ -98,7 +98,40 @@ describe('WeekTimeGrid proposal layer', () => {
     const ok = screen.getByRole('img', { name: '08:00–09:00: demand 2, covered 2' })
     expect(short.className).toContain('bg-red-400')
     expect(ok.className).toContain('bg-emerald-400')
-    expect(short.style.top).toBe('420px')
+    // The board opens an hour before the first demand (06:00), not at midnight.
+    expect(short.style.top).toBe('60px')
     expect(short.style.height).toBe('60px')
+  })
+})
+
+describe('WeekTimeGrid visible hours', () => {
+  const shift = (starts: string, ends: string, overrides: Record<string, unknown> = {}) => ({
+    id: 'shift-1', starts_at: starts, ends_at: ends, role: 'Barista', status: 'draft',
+    required_staff: 1, assignments: [], kind: 'work', ...overrides,
+  } as unknown as React.ComponentProps<typeof WeekTimeGrid>['shifts'][number])
+
+  it('opens an hour before the first shift instead of at midnight, and can show the whole day', () => {
+    renderGrid({ shifts: [shift('2026-09-14T06:30:00Z', '2026-09-14T13:30:00Z')] })
+    expect(screen.queryByText('00:00')).not.toBeInTheDocument()
+    expect(screen.getByText('05:00')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Create shift on 2026-09-14 at 0 minutes')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '24h' }))
+    expect(screen.getByText('00:00')).toBeInTheDocument()
+    expect(screen.getByLabelText('Create shift on 2026-09-14 at 0 minutes')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'fit' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('outlines a shift a proposal changes, with what it does, and tags one an apply just changed', () => {
+    renderGrid({
+      shifts: [
+        shift('2026-09-14T08:00:00Z', '2026-09-14T12:00:00Z'),
+        shift('2026-09-15T08:00:00Z', '2026-09-15T12:00:00Z', { id: 'shift-2', role: 'Opener' }),
+      ],
+      marks: new Map([['shift-1', { warn: true, chips: [{ tone: 'add', label: '+ Sam' }] }]]),
+      recentShiftIds: new Set(['shift-2']),
+    })
+    expect(screen.getByText('+ Sam').closest('[data-proposed]')).toHaveClass('ring-amber-400/40')
+    expect(screen.getByText('Just changed').closest('[data-recent]')).toBeInTheDocument()
   })
 })

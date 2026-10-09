@@ -198,11 +198,24 @@ export interface PreviewShift {
 
 /** The proposed week as blocks the board can draw before anything is written.
  *
- *  Only a generated week: its `shift_id`s are demand keys with no row on the
- *  board yet. An edit or fill scenario names shifts the board already shows,
- *  so overlaying them would draw every shift twice. */
-export function proposalPreviewShifts(review: ScheduleReview | null): PreviewShift[] {
-  if (!review || review.kind !== 'week_draft') return []
+ *  A generated week: every `shift_id` is a demand key with no row on the board
+ *  yet. Any other review (an edit, a batch, a fill scenario) names shifts the
+ *  board already shows — drawing those again would show every shift twice, so
+ *  with `boardShiftIds` only the shifts it would CREATE are drawn (their ids
+ *  are on no board row), and without it nothing is. `boardMarks` marks the
+ *  existing shifts instead. */
+export function proposalPreviewShifts(review: ScheduleReview | null, boardShiftIds?: ReadonlySet<string>): PreviewShift[] {
+  if (!review) return []
+  if (review.kind !== 'week_draft') {
+    if (!boardShiftIds) return []
+    const isNew = (id: string | null) => !!id && !boardShiftIds.has(id)
+    return proposalPreviewShifts({
+      ...review,
+      kind: 'week_draft',
+      assignments: review.assignments.filter((item) => item.op === 'create' && isNew(item.shift_id)),
+      unfilled: review.unfilled.filter((item) => isNew(item.shift_id)),
+    })
+  }
   const byId = new Map<string, PreviewShift>()
   const entry = (id: string, role: string | null, startsAt: string | null, endsAt: string | null) => {
     if (!startsAt || !endsAt) return null
