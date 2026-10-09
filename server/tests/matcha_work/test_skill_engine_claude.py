@@ -359,6 +359,41 @@ async def test_picker_locks_sonnet_without_the_pro_entitlement(claude_on):
     assert default == FLASH
 
 
+def _per_app(monkeypatch, *, personal: bool, settings: dict):
+    """Route `claude_override` by surface key, and say whether the company is
+    a personal (Espresso) account."""
+    from app.matcha.services.matcha_work import app_surface
+
+    async def override(surface):
+        return settings.get(surface)
+
+    monkeypatch.setattr(anthropic_messages, "claude_override", override)
+    monkeypatch.setattr(app_surface, "is_personal_company", AsyncMock(return_value=personal))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("personal, expected", [(True, CLAUDE_SONNET), (False, FLASH)])
+async def test_espresso_chat_follows_its_own_row_not_matcha_works(monkeypatch, claude_on, personal, expected):
+    """Admin sets Espresso → Chat to Sonnet and leaves Matcha Work chat built-in:
+    a personal account's picker and turn run Sonnet, a business one's stay on Flash."""
+    _per_app(monkeypatch, personal=personal, settings={"espresso.chat": CLAUDE_SONNET})
+    _plan(monkeypatch, "free")
+    company = str(uuid4())
+    rows, default = await _models.picker_models(pro_allowed=False, company_id=company)
+    assert default == expected
+    assert await _models._get_model(SETTINGS, FLASH, company_id=company, user_id=str(uuid4())) == expected
+    if personal:
+        assert {r["id"] for r in rows} == {CLAUDE_HAIKU, CLAUDE_SONNET}
+
+
+@pytest.mark.asyncio
+async def test_personal_entitlements_carry_the_espresso_chat_picker(monkeypatch, claude_on):
+    _per_app(monkeypatch, personal=True, settings={"espresso.chat": CLAUDE_HAIKU})
+    _plan(monkeypatch, "pro")
+    out = await entitlements_service.resolve_entitlements(uuid4(), uuid4())
+    assert out["workspace"]["default_chat_model"] == CLAUDE_HAIKU
+
+
 @pytest.mark.asyncio
 async def test_picker_under_an_admin_model_is_claude_only(monkeypatch, claude_on):
     monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_HAIKU))

@@ -57,11 +57,16 @@ def test_choices_line_up_with_the_claude_models():
     assert reg.INHERIT not in reg.MODEL_CHOICES
 
 
-def test_registry_payload_lists_only_visible_rows_in_order():
+def test_registry_payload_lists_every_app_and_its_rows_in_order():
     payload = {app["key"]: app for app in reg.registry_payload()}
     assert list(payload) == [app.key for app in reg.APPS]
-    visible = [s.key for s in reg.SURFACES if s.app == reg.MATCHA and s.visible]
-    assert [s["key"] for s in payload[reg.MATCHA]["surfaces"]] == visible
+    for app in reg.APPS:
+        rows = [s.key for s in reg.SURFACES if s.app == app.key]
+        assert [s["key"] for s in payload[app.key]["surfaces"]] == rows
+        assert rows, f"{app.key} has no product rows"
+    assert [s["key"] for s in payload[reg.ESPRESSO]["surfaces"]] == [
+        reg.ESPRESSO_CHAT, reg.ESPRESSO_AGENT_CARDS, reg.ESPRESSO_ASSISTANT, reg.ESPRESSO_PROJECTS,
+    ]
     assert all({"key", "label", "description", "builtin"} <= set(s) for s in payload[reg.MATCHA]["surfaces"])
 
 

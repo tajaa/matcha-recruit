@@ -158,7 +158,8 @@ One function decides: `core/services/anthropic_messages.claude_override(surface)
 key, an unreadable setting or a non-Claude value all mean "default"). Matcha's products: Huume
 (`matcha.huume`), Scheduler (Schedule Pilot, channel shift edits, state rule extraction), IR,
 Handbooks, Ops channels (classify + the ask loop), Inventory, Sym-link, Credentials, and Matcha Work
-chat / agent cards / projects / Sym-chat. Matcha Work and Espresso share the matcha-work backend,
+chat / agent cards / projects / Sym-chat. Espresso's: Chat (the personal picker follows it, web and
+Mac), Purchase agent (agent cards), Assistant, Projects. Matcha Work and Espresso share the matcha-work backend,
 so those call sites pick `matcha.work_*` or `espresso.*` per account
 (`matcha_work/app_surface.work_surface`, from `companies.is_personal`). Voice dictation, ER and
 Google-Search-grounded research stay on Gemini. Callers import the MODULE and call through it so

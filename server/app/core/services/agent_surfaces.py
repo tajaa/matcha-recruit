@@ -43,9 +43,6 @@ class SurfaceDef:
     label: str
     description: str
     builtin: str  # what `default` runs on, shown in the admin page
-    # Listed on the admin page. A hidden surface still resolves (it inherits
-    # its app default) — used while an app's per-product rows are not out yet.
-    visible: bool = True
 
 
 MATCHA = "matcha"
@@ -117,16 +114,18 @@ SURFACES: tuple[SurfaceDef, ...] = (
     SurfaceDef(MATCHA_WORK_PROJECTS, MATCHA, "Matcha Work projects",
                "@espresso repository questions and task drafts in business projects.", _LUNA),
     SurfaceDef(MATCHA_SYM_CHAT, MATCHA, "Sym-chat", "Scheduling and decision micro-chats.", _LUNA),
-    # Espresso's per-product rows ship in the Espresso PR; until then they
-    # follow the Espresso app default.
-    SurfaceDef(ESPRESSO_CHAT, ESPRESSO, "Chat", "Personal thread chat.", f"{_GEMINI} (the picker)",
-               visible=False),
+    SurfaceDef(
+        ESPRESSO_CHAT, ESPRESSO, "Chat",
+        "Personal thread chat, on web and the Mac app. A Gemini pick in the chat picker runs this "
+        "model; an explicit Claude pick still wins.",
+        f"{_GEMINI} (the picker)",
+    ),
     SurfaceDef(ESPRESSO_AGENT_CARDS, ESPRESSO, "Purchase agent",
-               "Agent cards: product research and the purchase flow.", _LUNA, visible=False),
-    SurfaceDef(ESPRESSO_ASSISTANT, ESPRESSO, "Assistant", "The chat-invoked assistant (flights, browsing).",
-               _LUNA, visible=False),
+               "Agent cards: finding the product. The purchase itself uses no AI.", _LUNA),
+    SurfaceDef(ESPRESSO_ASSISTANT, ESPRESSO, "Assistant",
+               "The assistant you start from chat: flights, browsing, purchases.", _LUNA),
     SurfaceDef(ESPRESSO_PROJECTS, ESPRESSO, "Projects",
-               "@espresso repository questions and task drafts.", _LUNA, visible=False),
+               "@espresso repository questions and task drafts in personal projects.", _LUNA),
 )
 
 APP_KEYS: frozenset[str] = frozenset(app.key for app in APPS)
@@ -143,7 +142,7 @@ def app_of(surface: str) -> str | None:
 
 
 def registry_payload() -> list[dict]:
-    """The admin page's layout: each app with its visible surfaces."""
+    """The admin page's layout: each app with its surfaces, in order."""
     return [
         {
             "key": app.key,
@@ -152,7 +151,7 @@ def registry_payload() -> list[dict]:
             "surfaces": [
                 {"key": s.key, "label": s.label, "description": s.description, "builtin": s.builtin}
                 for s in SURFACES
-                if s.app == app.key and s.visible
+                if s.app == app.key
             ],
         }
         for app in APPS
