@@ -1,5 +1,9 @@
 """Pure-logic tests for schedule-rule catalog extraction (no DB, no network)."""
 
+from unittest.mock import AsyncMock
+
+import pytest
+
 from app.core.services import schedule_rule_extraction as sre
 
 
@@ -197,3 +201,70 @@ def test_sick_leave_not_in_extraction_categories():
 
 def test_code_curated_states_are_skipped():
     assert set(sre.CODE_CURATED_STATES) == {"US", "CA", "NY"}
+
+
+# --- Model routing (platform "Agent model" setting) ---------------------------
+
+class _ExtractionConn:
+    """Answers the run-row insert, returns one catalog row, records writes."""
+
+    def __init__(self):
+        self.inserted_model = None
+        self.executed = []
+
+    async def fetchval(self, query, *args):
+        self.inserted_model = args[1]
+        return "run-1"
+
+    async def fetch(self, query, *args):
+        return [{"id": "req-1", "requirement_key": "meal_break", "category": "meal_breaks",
+                 "title": "Meal break", "description": "30 min after 5h", "current_value": "30",
+                 "numeric_value": 30, "statute_citation": "Example Code 1"}]
+
+    async def execute(self, query, *args):
+        self.executed.append((query, args))
+
+
+@pytest.mark.asyncio
+async def test_extraction_runs_on_claude_when_the_setting_picks_it(monkeypatch):
+    generate = AsyncMock(return_value='```json\n{"rules": []}\n```')
+    monkeypatch.setattr(sre.anthropic_messages, "claude_override", AsyncMock(return_value="claude-sonnet-5-5"))
+    monkeypatch.setattr(sre.anthropic_messages, "generate_text", generate)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    conn = _ExtractionConn()
+
+    out = await sre.extract_state_rules(conn, "wa")
+
+    assert out == {"status": "complete", "requirement_count": 1, "extracted_count": 0, "rejected_count": 0}
+    assert conn.inserted_model == "claude-sonnet-5-5"  # the run row records what ran
+    assert generate.await_args.kwargs["model"] == "claude-sonnet-5-5"
+    assert generate.await_args.kwargs["json_output"] is True
+    assert "WA" in generate.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_a_claude_failure_marks_the_run_failed(monkeypatch):
+    monkeypatch.setattr(sre.anthropic_messages, "claude_override", AsyncMock(return_value="claude-haiku-5-5"))
+    monkeypatch.setattr(sre.anthropic_messages, "generate_text", AsyncMock(side_effect=RuntimeError("boom")))
+    conn = _ExtractionConn()
+
+    out = await sre.extract_state_rules(conn, "WA")
+
+    assert out["status"] == "failed"
+    assert any("status = 'failed'" in query for query, _ in conn.executed)
+
+
+@pytest.mark.asyncio
+async def test_default_setting_keeps_gemini(monkeypatch):
+    generate = AsyncMock()
+    monkeypatch.setattr(sre.anthropic_messages, "claude_override", AsyncMock(return_value=None))
+    monkeypatch.setattr(sre.anthropic_messages, "generate_text", generate)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    conn = _ExtractionConn()
+
+    out = await sre.extract_state_rules(conn, "WA")
+
+    # No Gemini key in the test process: the Gemini path fails as before, and
+    # Claude was never asked.
+    assert out["status"] == "failed" and conn.inserted_model == sre._MODEL
+    generate.assert_not_awaited()

@@ -45,6 +45,7 @@ from decimal import Decimal
 from typing import Any, Optional
 from uuid import UUID
 
+from app.core.services import anthropic_messages
 from app.core.services.model_catalog import GEMINI_FLASH
 
 logger = logging.getLogger(__name__)
@@ -316,13 +317,16 @@ async def extract_state_rules(
         return {"status": "skipped_curated", "requirement_count": 0,
                 "extracted_count": 0, "rejected_count": 0}
 
+    # Gemini unless the platform "Agent model" setting routes AI work to
+    # Claude. Resolved before the run row so `ai_model` records what ran.
+    claude_model = await anthropic_messages.claude_override()
     run_id = await conn.fetchval(
         """
         INSERT INTO schedule_rule_extraction_runs (state, status, ai_model, triggered_by)
         VALUES ($1, 'running', $2, $3)
         RETURNING id
         """,
-        state, _MODEL, triggered_by,
+        state, claude_model or _MODEL, triggered_by,
     )
 
     try:
@@ -356,25 +360,33 @@ async def extract_state_rules(
             return {"status": "empty", "requirement_count": 0,
                     "extracted_count": 0, "rejected_count": 0}
 
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise RuntimeError("GEMINI_API_KEY not set")
+        if claude_model:
+            # Same prompt, same validation below: every emitted rule must
+            # still cite a catalog row this query returned.
+            payload = anthropic_messages.parse_json_object(await anthropic_messages.generate_text(
+                _build_prompt(state, rows), model=claude_model, json_output=True,
+                effort="medium", max_tokens=16_000, timeout_seconds=120,
+            ))
+        else:
+            api_key = os.getenv("GEMINI_API_KEY")
+            if not api_key:
+                raise RuntimeError("GEMINI_API_KEY not set")
 
-        from google.genai import types
-        from app.core.services.genai_client import get_genai_client
+            from google.genai import types
+            from app.core.services.genai_client import get_genai_client
 
-        client = get_genai_client(api_key=api_key)
-        response = client.models.generate_content(
-            model=_MODEL,
-            contents=[types.Content(parts=[types.Part.from_text(text=_build_prompt(state, rows))])],
-            config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=4096),
-        )
-        text = response.text.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-        if text.endswith("```"):
-            text = text[: text.rfind("```")]
-        payload = json.loads(text.strip())
+            client = get_genai_client(api_key=api_key)
+            response = client.models.generate_content(
+                model=_MODEL,
+                contents=[types.Content(parts=[types.Part.from_text(text=_build_prompt(state, rows))])],
+                config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=4096),
+            )
+            text = response.text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[: text.rfind("```")]
+            payload = json.loads(text.strip())
 
         allowed_ids = {str(r["id"]) for r in rows}
         valid, rejected = validate_extraction(payload, allowed_ids)
