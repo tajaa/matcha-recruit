@@ -6,7 +6,13 @@ export type WorkEntitlements = {
   plan: WorkPlan
   features: Record<string, boolean>
   /** What the workspace has switched on, as opposed to what the plan allows. */
-  workspace?: { espresso_assistant?: boolean; claude_models?: boolean }
+  workspace?: {
+    espresso_assistant?: boolean
+    claude_models?: boolean
+    /** The admin "Agent model" setting's Claude model, which every chat turn
+     *  runs on while set (null = the picker decides). */
+    agent_model?: string | null
+  }
   quotas: {
     token_limit: number
     window_hours: number

@@ -7,6 +7,7 @@ from app.core.services.anthropic_messages import (
     CLAUDE_MODELS,
     CLAUDE_SONNET,
     anthropic_configured,
+    claude_override,
 )
 from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
 from app.core.services.platform_settings import get_matcha_work_model_mode
@@ -54,8 +55,19 @@ async def _get_model(
     model_override: str | None = None,
     company_id: str | None = None,
     user_id: str | None = None,
+    *,
+    gemini_only: bool = False,
 ) -> str:
     """Pick the model for a call, enforcing plan entitlements.
+
+    The platform "Agent model" setting (Admin → Settings, read through
+    `claude_override`) wins over every Gemini outcome: while it names a Claude
+    model, a Gemini pick or the plan default runs that model instead. Both
+    apps always send their stored pick (Flash unless changed), so "only when
+    no pick was sent" would never fire. An explicit Claude pick is still
+    honored, so a person can choose Haiku vs Sonnet; the admin's choice is not
+    plan-gated, matching every other surface it routes. `gemini_only` is for
+    the modes that need Gemini's own tools (payer search) and skips both.
 
     The pro model is a paid entitlement (Pro/Business plans) — a client-sent
     `model_override` is clamped to the plan, never trusted (previously any
@@ -90,17 +102,28 @@ async def _get_model(
         return False
 
     model_override = _MODEL_ALIASES.get(model_override, model_override)
+    admin_model = None
+    if gemini_only:
+        model_override = None if is_claude_model(model_override) else model_override
+    else:
+        admin_model = await claude_override()
 
     if is_claude_model(model_override):
-        if anthropic_configured() and (
+        if model_override == admin_model or (anthropic_configured() and (
             model_override not in PREMIUM_CLAUDE_MODELS or await _pro_allowed()
-        ):
+        )):
             return model_override
-        # Claude unavailable, or Sonnet without entitlement — plan selection.
+        # Claude unavailable, or Sonnet without entitlement — the admin's
+        # model, else plan selection.
+    elif admin_model:
+        pass  # A Gemini pick runs the admin's Claude model (below).
     elif model_override and model_override in SUPPORTED_MODELS:
         if model_override != PRO_MODEL or await _pro_allowed():
             return model_override
         # Pro override without entitlement — fall through to plan selection.
+
+    if admin_model:
+        return admin_model
 
     mode = await get_matcha_work_model_mode()
     if mode == "heavy":

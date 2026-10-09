@@ -78,6 +78,43 @@ async def test_stored_flash_lite_37_pick_finally_runs_flash_lite():
     assert await _models._get_model(SETTINGS, "gemini-3.7-flash-lite") == FLASH_LITE
 
 
+@pytest.mark.asyncio
+async def test_admin_agent_model_replaces_gemini_picks_and_the_plan_default(monkeypatch):
+    monkeypatch.setattr(_models, "claude_override", AsyncMock(return_value=CLAUDE_SONNET))
+    _plan(monkeypatch, "free")  # the admin's pick is not plan-gated
+    uid = str(uuid4())
+    assert await _models._get_model(SETTINGS, FLASH, user_id=uid) == CLAUDE_SONNET
+    assert await _models._get_model(SETTINGS, "gemini-3.7-flash-lite", user_id=uid) == CLAUDE_SONNET
+    assert await _models._get_model(SETTINGS, None, user_id=uid) == CLAUDE_SONNET
+
+
+@pytest.mark.asyncio
+async def test_explicit_claude_pick_still_wins_over_the_admin_model(monkeypatch, claude_on):
+    monkeypatch.setattr(_models, "claude_override", AsyncMock(return_value=CLAUDE_SONNET))
+    _plan(monkeypatch, "free")
+    assert await _models._get_model(SETTINGS, CLAUDE_HAIKU, user_id=str(uuid4())) == CLAUDE_HAIKU
+
+
+@pytest.mark.asyncio
+async def test_a_locked_claude_pick_runs_the_admin_model_not_gemini(monkeypatch, claude_on):
+    monkeypatch.setattr(_models, "claude_override", AsyncMock(return_value=CLAUDE_HAIKU))
+    _plan(monkeypatch, "lite")
+    assert await _models._get_model(SETTINGS, CLAUDE_SONNET, user_id=str(uuid4())) == CLAUDE_HAIKU
+    monkeypatch.setattr(_models, "claude_override", AsyncMock(return_value=CLAUDE_SONNET))
+    assert await _models._get_model(SETTINGS, CLAUDE_SONNET, user_id=str(uuid4())) == CLAUDE_SONNET
+
+
+@pytest.mark.asyncio
+async def test_gemini_only_ignores_the_admin_model_and_claude_picks(monkeypatch, claude_on):
+    override = AsyncMock(return_value=CLAUDE_SONNET)
+    monkeypatch.setattr(_models, "claude_override", override)
+    _plan(monkeypatch, "free")
+    uid = str(uuid4())
+    assert await _models._get_model(SETTINGS, CLAUDE_HAIKU, user_id=uid, gemini_only=True) == FLASH
+    assert await _models._get_model(SETTINGS, FLASH_LITE, user_id=uid, gemini_only=True) == FLASH_LITE
+    override.assert_not_awaited()
+
+
 def test_trivial_turn_downgrade_stays_on_the_picked_provider():
     assert _models.resolve_turn_model("none", "chat", CLAUDE_SONNET) == CLAUDE_HAIKU
     assert _models.resolve_turn_model("none", "chat", CLAUDE_HAIKU) == CLAUDE_HAIKU
@@ -243,7 +280,7 @@ async def test_generate_claude_timeout_is_the_usual_slow_reply(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_payer_mode_keeps_gemini_search_on_a_claude_pick(monkeypatch):
-    get_model = AsyncMock(side_effect=[CLAUDE_HAIKU, FLASH])
+    get_model = AsyncMock(return_value=FLASH)
     monkeypatch.setattr(provider_module, "_get_model", get_model)
     seen = {}
 
@@ -258,7 +295,7 @@ async def test_payer_mode_keeps_gemini_search_on_a_claude_pick(monkeypatch):
                                   current_state={}, payer_mode_prompt="PAYER", model_override=CLAUDE_HAIKU)
     assert seen["model"] == FLASH
     assert out.assistant_reply == "Covered under LCD L1234."
-    assert get_model.await_args_list[1].args[1] is None  # re-picked with no override
+    assert get_model.await_args.kwargs["gemini_only"] is True
 
 
 # --- The picker flag ------------------------------------------------------------
@@ -268,7 +305,10 @@ async def test_entitlements_say_whether_claude_is_available(monkeypatch):
     _plan(monkeypatch, "pro")
     out = await entitlements_service.resolve_entitlements(uuid4(), None)
     assert out["workspace"]["claude_models"] is False
+    assert out["workspace"]["agent_model"] is None
     monkeypatch.setattr(anthropic_messages, "anthropic_configured", lambda: True)
+    monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=CLAUDE_HAIKU))
     out = await entitlements_service.resolve_entitlements(uuid4(), None)
     assert out["workspace"]["claude_models"] is True
+    assert out["workspace"]["agent_model"] == CLAUDE_HAIKU
     assert out["features"]["ai_model_pro"] is True

@@ -136,10 +136,14 @@ struct MWWorkspaceFlags: Codable {
     let espressoAssistant: Bool?
     /// Whether the server offers Claude in the chat model picker.
     let claudeModels: Bool?
+    /// The admin "Agent model" setting's Claude model, which every chat turn
+    /// runs on while set (nil = the picker decides).
+    let agentModel: String?
 
     enum CodingKeys: String, CodingKey {
         case espressoAssistant = "espresso_assistant"
         case claudeModels = "claude_models"
+        case agentModel = "agent_model"
     }
 }
 

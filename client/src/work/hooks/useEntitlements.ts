@@ -90,6 +90,8 @@ export function useEntitlements() {
      *  while unknown: an option that appears then vanishes is worse than one
      *  that appears a moment late. */
     claudeModels: entitlements?.workspace?.claude_models === true,
+    /** The admin-set Claude model chat runs on, or null when the picker decides. */
+    agentModel: entitlements?.workspace?.agent_model ?? null,
     refetch,
   }
 }

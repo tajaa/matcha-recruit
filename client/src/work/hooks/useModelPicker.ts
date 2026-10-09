@@ -15,13 +15,15 @@ function readStoredModel(): string {
 
 /** The chat model picker shared by thread and project chat: the options this
  *  person may pick, the remembered pick, and its setter. A remembered pick
- *  that is no longer offered (Claude switched off, plan downgraded) reads as
- *  the default, so the request never carries a model the menu doesn't show. */
+ *  that is no longer offered (Claude switched off, plan downgraded, or a
+ *  Gemini pick while the admin set a Claude agent model) reads as the
+ *  default, which is the admin's model when one is set, so the request never carries a model the menu doesn't show. */
 export function useModelPicker() {
-  const { can, claudeModels } = useEntitlements()
+  const { can, claudeModels, agentModel } = useEntitlements()
   const [stored, setStored] = useState(readStoredModel)
-  const modelOptions = modelOptionsFor({ claude: claudeModels, pro: can('ai_model_pro') })
-  const selectedModel = modelOptions.some((option) => option.id === stored) ? stored : DEFAULT_MODEL
+  const modelOptions = modelOptionsFor({ claude: claudeModels, pro: can('ai_model_pro'), agentModel })
+  const fallback = agentModel ?? DEFAULT_MODEL
+  const selectedModel = modelOptions.some((option) => option.id === stored) ? stored : fallback
   const setSelectedModel = useCallback((model: string) => {
     setStored(model)
     try {

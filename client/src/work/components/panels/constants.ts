@@ -56,8 +56,17 @@ export const LEGACY_MODEL_IDS: Record<string, string> = {
 }
 
 /** What the picker offers this person: Claude only while the server has it,
- *  and Sonnet only on a plan with the pro model. */
-export function modelOptionsFor({ claude, pro }: { claude: boolean; pro: boolean }): ModelOption[] {
+ *  Sonnet only on a plan with the pro model, and only Claude while the admin
+ *  "Agent model" setting names one. */
+export function modelOptionsFor(
+  { claude, pro, agentModel = null }: { claude: boolean; pro: boolean; agentModel?: string | null },
+): ModelOption[] {
+  // An admin-set agent model runs every Gemini pick on Claude anyway, so the
+  // menu offers only Claude rows, always including the admin's own model
+  // (it is not plan-gated).
+  if (agentModel) {
+    return MODEL_OPTIONS.filter((option) => option.claude && (option.id === agentModel || !option.pro || pro))
+  }
   return MODEL_OPTIONS.filter((option) => (!option.claude || claude) && (!option.pro || pro))
 }
 

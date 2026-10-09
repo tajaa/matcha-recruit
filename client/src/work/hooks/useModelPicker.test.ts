@@ -3,11 +3,12 @@ import { act, renderHook } from '@testing-library/react'
 import { modelOptionsFor } from '../components/panels/constants'
 import { useModelPicker } from './useModelPicker'
 
-const mock = vi.hoisted(() => ({ claudeModels: false, pro: false }))
+const mock = vi.hoisted(() => ({ claudeModels: false, pro: false, agentModel: null as string | null }))
 
 vi.mock('./useEntitlements', () => ({
   useEntitlements: () => ({
     claudeModels: mock.claudeModels,
+    agentModel: mock.agentModel,
     can: (feature: string) => feature === 'ai_model_pro' && mock.pro,
   }),
 }))
@@ -29,6 +30,7 @@ const ids = (options: { id: string }[]) => options.map((option) => option.id)
 beforeEach(() => {
   mock.claudeModels = false
   mock.pro = false
+  mock.agentModel = null
   vi.stubGlobal('localStorage', memoryStorage())
 })
 afterEach(() => vi.unstubAllGlobals())
@@ -45,7 +47,27 @@ describe('modelOptionsFor', () => {
   })
 })
 
+describe('modelOptionsFor with an admin agent model', () => {
+  it('offers only Claude, always including the admin model', () => {
+    expect(ids(modelOptionsFor({ claude: true, pro: false, agentModel: 'claude-haiku-5-5' }))).toEqual(['claude-haiku-5-5'])
+    expect(ids(modelOptionsFor({ claude: true, pro: false, agentModel: 'claude-sonnet-5-5' }))).toEqual(
+      ['claude-haiku-5-5', 'claude-sonnet-5-5'],
+    )
+  })
+})
+
 describe('useModelPicker', () => {
+  it('defaults to the admin agent model over a stored Gemini pick', () => {
+    localStorage.setItem('mw-model', 'gemini-3.7-flash')
+    mock.claudeModels = true
+    mock.agentModel = 'claude-sonnet-5-5'
+    const { result } = renderHook(() => useModelPicker())
+    expect(result.current.selectedModel).toBe('claude-sonnet-5-5')
+    act(() => result.current.setSelectedModel('claude-haiku-5-5'))
+    expect(result.current.selectedModel).toBe('claude-haiku-5-5')
+  })
+
+
   it('defaults to Flash, then remembers a pick', () => {
     mock.claudeModels = true
     const { result } = renderHook(() => useModelPicker())

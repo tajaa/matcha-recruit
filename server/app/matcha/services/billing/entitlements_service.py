@@ -255,9 +255,17 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
     # only while the server has an Anthropic key. Which Claude models a user
     # may pick follows the plan (`ai_model_pro` unlocks Sonnet), the same
     # rule `matcha_work_ai._get_model` enforces server-side.
-    from app.core.services.anthropic_messages import anthropic_configured
+    # `agent_model`: the Claude model the admin "Agent model" setting runs
+    # every chat turn on (null = the picker decides). While it is set, the
+    # pickers show it as the default and drop the Gemini rows, since a Gemini
+    # pick would run it anyway.
+    from app.core.services.anthropic_messages import anthropic_configured, claude_override
 
-    workspace = {"espresso_assistant": False, "claude_models": anthropic_configured()}
+    workspace = {
+        "espresso_assistant": False,
+        "claude_models": anthropic_configured(),
+        "agent_model": await claude_override(),
+    }
     if company_id is not None:
         try:
             from ..matcha_work.agent_runtime.enqueue import workspace_enabled

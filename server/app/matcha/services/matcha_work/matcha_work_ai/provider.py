@@ -309,12 +309,12 @@ class GeminiProvider(MatchaWorkAIProvider):
             if context_summary:
                 full_prompt += f"\n\nPrior conversation summary:\n{context_summary}"
 
-            model = await _get_model(self.settings, model_override, company_id=company_id, user_id=user_id)
-            if is_claude_model(model):
-                # Payer answers depend on Gemini's google_search grounding,
-                # which has no Claude equivalent here: a Claude pick runs this
-                # mode on the Gemini plan model instead.
-                model = await _get_model(self.settings, None, company_id=company_id, user_id=user_id)
+            # Payer answers depend on Gemini's google_search grounding, which
+            # has no Claude equivalent here: a Claude pick (or the admin's
+            # Claude agent model) runs this mode on the Gemini plan model.
+            model = await _get_model(
+                self.settings, model_override, company_id=company_id, user_id=user_id, gemini_only=True,
+            )
             try:
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
