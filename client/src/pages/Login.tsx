@@ -22,7 +22,6 @@ const roleRoutes: Record<string, string> = {
   client: '/app',
   employee: '/portal',
   candidate: '/candidate',
-  broker: '/broker',
   individual: '/espresso',
 }
 

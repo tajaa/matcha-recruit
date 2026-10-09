@@ -21,7 +21,7 @@ import { useMe, invalidateMeCache } from './useMe'
 const mockGet = vi.mocked(api.get)
 
 // The distinction under test is load-bearing for route guards: AppLayout wraps
-// the whole tenant surface and RequireRole wraps /admin and /broker. Both used
+// the whole tenant surface and RequireRole wraps /admin. Both used
 // to redirect on `!me`, which collapses "no session" into "the lookup failed" —
 // so a single 502 on /auth/me logged the user out and discarded their location.
 describe('useMe — authFailed distinguishes no-session from lookup-failure', () => {

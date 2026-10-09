@@ -8,7 +8,7 @@ interface Props {
 }
 
 /**
- * Client-side role gate for whole route trees (/admin, /broker). Not a
+ * Client-side role gate for whole route trees (/admin). Not a
  * security boundary — the backend enforces authz — but it stops other roles
  * from mounting the shell and probing every endpoint with their token.
  * Fail-closed: missing user or missing role never renders children.

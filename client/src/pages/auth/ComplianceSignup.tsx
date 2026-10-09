@@ -1,5 +1,5 @@
 import { externalRedirect } from '../../utils/externalRedirect'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
@@ -10,7 +10,6 @@ import { API_BASE } from '../../api/client'
 import { setAuthTokens } from '../../api/authStorage'
 export default function ComplianceSignup() {
   const [searchParams] = useSearchParams()
-  const brokerRef = searchParams.get('ref')
   const inviteToken = searchParams.get('invite_token')
   // Seeded from the landing page's pricing calculator (?headcount=&jurisdictions=),
   // e.g. hey-matcha.com/matcha-compliance → "Start now". Sanitized to a positive
@@ -31,31 +30,12 @@ export default function ComplianceSignup() {
   const [industryOther, setIndustryOther] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [inviteInfo, setInviteInfo] = useState<
-    { valid: boolean; company_name: string; seat_count: number | null; broker_name: string } | null
-  >(null)
-
-  // Broker seat invites pin the company name + seats; prefill + lock them.
-  useEffect(() => {
-    if (!brokerRef) return
-    fetch(`${API_BASE}/auth/client-invite-info?ref=${encodeURIComponent(brokerRef)}`)
-      .then((r) => r.json())
-      .then((info) => {
-        if (info?.valid) {
-          setInviteInfo(info)
-          setCompanyName(info.company_name ?? '')
-          if (info.seat_count) setHeadcount(String(info.seat_count))
-        }
-      })
-      .catch(() => {})
-  }, [brokerRef])
 
   const pricing = useMatchaLitePricing('matcha_compliance')
   const maxHeadcount = pricing?.max_headcount ?? 300
   const minHeadcount = pricing?.min_headcount ?? 1
 
-  const seatInvite = inviteInfo?.valid === true
-  const comped = !!inviteToken || seatInvite
+  const comped = !!inviteToken
   const hc = parseInt(headcount, 10)
   const jc = parseInt(jurisdictions, 10)
   // Was `hc >= 1` — checkout 400s below pricing.min_headcount (server-side),
@@ -95,7 +75,6 @@ export default function ComplianceSignup() {
           headcount: hc,
           jurisdiction_count: jurisdictionCount,
           industry: resolvedIndustry,
-          ...(brokerRef ? { lite_broker_token: brokerRef } : {}),
           ...(inviteToken ? { lite_invite_token: inviteToken } : {}),
         }),
       })
@@ -110,8 +89,8 @@ export default function ComplianceSignup() {
       setAuthTokens(accessToken, refreshToken)
       invalidateMeCache()
 
-      // Broker-pays or admin invite: account is already active, skip Stripe
-      if (regData.lite_broker_pays || regData.lite_invite_activated) {
+      // Admin invite: account is already active, skip Stripe
+      if (regData.lite_invite_activated) {
         window.location.href = '/compliance/onboarding?compliance=1'
         return
       }
@@ -151,14 +130,8 @@ export default function ComplianceSignup() {
           </p>
         </div>
 
-        {seatInvite && (
-          <div className="mb-5 p-3 rounded-lg bg-emerald-950/40 border border-emerald-900/50 text-xs text-emerald-200 text-center">
-            Invited by <span className="font-medium">{inviteInfo?.broker_name}</span> · {inviteInfo?.seat_count} seats included
-          </div>
-        )}
-
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Field label="Company name" value={companyName} onChange={setCompanyName} readOnly={seatInvite} />
+          <Field label="Company name" value={companyName} onChange={setCompanyName} />
           <Field label="Your name" value={name} onChange={setName} />
           <Field label="Work email" type="email" value={email} onChange={setEmail} />
           <Field
@@ -177,9 +150,9 @@ export default function ComplianceSignup() {
                 min={1}
                 value={headcount}
                 onChange={(e) => setHeadcount(e.target.value)}
-                readOnly={seatInvite}
+               
                 placeholder="e.g. 25"
-                className={`mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700 ${seatInvite ? 'opacity-60 cursor-not-allowed' : ''}`}
+                className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
               />
             </label>
           </div>
@@ -243,7 +216,7 @@ export default function ComplianceSignup() {
                 <Loader2 className="w-4 h-4 animate-spin" />
                 Setting up…
               </>
-            ) : (brokerRef || inviteToken) ? (
+            ) : inviteToken ? (
               'Create account'
             ) : (
               'Create account & subscribe'

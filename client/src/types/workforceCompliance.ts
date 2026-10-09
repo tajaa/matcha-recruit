@@ -82,8 +82,8 @@ export interface PayEquityRole {
 }
 
 // One person paid under their role's band, with the dollars to lift them to it.
-// Live analysis only — names never reach the persisted study row or the broker
-// surfaces that read it (see pay_equity_analysis.review_row).
+// Live analysis only — names never reach the persisted study row or the surfaces
+// that read it (see pay_equity_analysis.review_row).
 export interface PayEquityBelowBandEmployee {
   name: string
   pay: number

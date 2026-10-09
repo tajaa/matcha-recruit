@@ -341,7 +341,6 @@ export interface MeClientProfile {
   headcount?: number
   jurisdiction_count?: number
   location_count?: number
-  // Broker profile rides on this same `profile` slot; Pro entitlement gates off-platform.
   plan?: 'standard' | 'pro'
   /** Set only for tenants on an admin-composed product (signup_source
    *  'product:<slug>' — see /admin/products). Drives the pending/active

@@ -81,7 +81,7 @@ const PROVENANCE_META: Record<ProvenanceBucket, { label: string; hint: string }>
   audit: { label: 'Admin', hint: 'Traced to a specific write — see the audit log.' },
   admin_grant: {
     label: 'Admin',
-    hint: 'No plan, add-on, or product explains this — an admin (or broker, at creation) granted it directly. Actor is unrecorded (predates the write audit log). Use Manage to classify why.',
+    hint: 'No plan, add-on, or product explains this — an admin granted it directly. Actor is unrecorded (predates the write audit log). Use Manage to classify why.',
   },
 }
 

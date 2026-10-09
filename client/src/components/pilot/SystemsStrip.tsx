@@ -3,19 +3,16 @@ import type { LucideIcon } from 'lucide-react'
 import { LABEL } from '../ui'
 
 /** The minimum shape a source-meta row needs to render in the strip. Each pilot's
- *  SOURCE_META may carry extra fields (e.g. Broker's `darkHint`) — the generic
+ *  SOURCE_META may carry extra fields — the generic
  *  keeps those visible to the pilot's own `titleFor` closure. */
 export type PilotSourceMeta = { key: string; label: string; icon: LucideIcon }
 
 /** The docket "systems strip": an "In scope / N / records" cell followed by one
  *  cell per grounding subsystem, each with a staggered fade-in reveal, an
- *  active/dark icon+label, and a live record count. Shared by Broker Pilot and
- *  Legal Pilot — the two Mastheads' inner strips were structurally identical.
+ *  active/dark icon+label, and a live record count. Shared by the pilots' Mastheads.
  *
  *  Parameterized by the source-meta list, a `countFor` accessor (each pilot
- *  buckets its own corpus), the total, and a `titleFor` tooltip builder (the one
- *  place the two diverge — Broker keys off `darkHint`/native systems, Legal off
- *  its research/subject-filter wording). `total === null` renders the loading dot. */
+ *  buckets its own corpus), the total, and a `titleFor` tooltip builder (each pilot's own tooltip wording). `total === null` renders the loading dot. */
 export function SystemsStrip<SM extends PilotSourceMeta>({ sourceMeta, total, countFor, titleFor }: {
   sourceMeta: readonly SM[]
   total: number | null

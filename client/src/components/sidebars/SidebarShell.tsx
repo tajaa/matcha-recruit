@@ -72,7 +72,7 @@ function isGroup(item: NavItem | NavGroup): item is NavGroup {
 // match, so only Risk Insights is active there — Incidents still wins on its
 // own sub-routes (e.g. an incident detail page) since nothing else matches.
 function matchLength(pathname: string, to: string): number {
-  const isExact = to === '/app' || to === '/admin' || to === '/broker' || to === '/ops'
+  const isExact = to === '/app' || to === '/admin' || to === '/ops'
   if (isExact) return pathname === to ? to.length : -1
   return pathname === to || pathname.startsWith(`${to}/`) ? to.length : -1
 }

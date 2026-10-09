@@ -8,7 +8,7 @@ import {
 } from '../../api/admin/wcRates'
 
 // Admin tool to load a licensed NCCI / state-bureau WC rate feed via CSV,
-// replacing the illustrative demo seed used by the broker WC surfaces.
+// replacing the illustrative demo seed used by the WC surfaces.
 export default function WcRateData() {
   const [summary, setSummary] = useState<WcRateSummary | null>(null)
   const [stateRows, setStateRows] = useState<WcStateRateRow[]>([])
@@ -36,7 +36,7 @@ export default function WcRateData() {
         <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">
           <Database className="h-5 w-5 text-zinc-400" /> WC Rate Data
         </h1>
-        <p className="text-sm text-zinc-500 mt-1">State loss-cost trends + class-code base rates the broker Workers'-Comp surfaces read. View what's loaded by state, and import a licensed NCCI / state-bureau feed via CSV to replace the demo seed.</p>
+        <p className="text-sm text-zinc-500 mt-1">State loss-cost trends + class-code base rates the Workers'-Comp surfaces read. View what's loaded by state, and import a licensed NCCI / state-bureau feed via CSV to replace the demo seed.</p>
       </div>
 
       {loading ? (

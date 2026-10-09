@@ -14,7 +14,6 @@ import { IRConsistencyGuidancePanel } from '../../../components/ir/IRConsistency
 import { IRDocumentPanel } from '../../../components/ir/IRDocumentPanel'
 import { IRCorrectiveActionsPanel } from '../../../components/ir/IRCorrectiveActionsPanel'
 import { IRAssignTrainingPanel } from '../../../components/ir/IRAssignTrainingPanel'
-import { ShareWithBrokerButton } from '../../../components/ir/ShareWithBrokerButton'
 import { IRInterviewScheduler } from '../../../components/ir/IRInterviewScheduler'
 import { IREscalationForm } from '../../../components/ir/IREscalationForm'
 import { IRCategoryDataDisplay } from '../../../components/ir/IRCategoryDataDisplay'
@@ -81,7 +80,7 @@ export default function IRDetail() {
   const [savingEmployees, setSavingEmployees] = useState(false)
   const [initialized, setInitialized] = useState(false)
 
-  // WC classification (wcdeep01) — feeds the broker WC analytics.
+  // WC classification (wcdeep01) — feeds the WC analytics.
   const [wcClaimType, setWcClaimType] = useState('')
   const [wcPostTerm, setWcPostTerm] = useState(false)
   const [wcRtwDate, setWcRtwDate] = useState('')
@@ -344,12 +343,12 @@ export default function IRDetail() {
                   </div>
                 </details>
 
-                {/* WC Classification — only for OSHA-recordable injuries; feeds broker WC analytics. */}
+                {/* WC Classification — only for OSHA-recordable injuries; feeds WC analytics. */}
                 {incident.osha_recordable && (
                   <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
                     <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1">WC Classification</h3>
                     <p className="text-[11px] text-zinc-600 mb-3">
-                      Feeds your broker&rsquo;s Workers&rsquo; Comp analytics &mdash; claim mix, post-termination, and return-to-work.
+                      Feeds your Workers&rsquo; Comp analytics &mdash; claim mix, post-termination, and return-to-work.
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div>
@@ -470,8 +469,6 @@ export default function IRDetail() {
               onClick={() => api.download(`/ir/incidents/${incidentId}/claims-readiness.pdf`, `claims-readiness-${incident?.incident_number}.pdf`)}>
               <Download size={12} className="mr-1.5" /> Claims-readiness packet
             </Button>
-            {/* Renders nothing unless the company has a linked broker. */}
-            <ShareWithBrokerButton incidentId={incidentId!} />
             {showERFeatures && (
               <IREscalationForm incidentId={incidentId!} incident={incident} onEscalated={(id) => navigate(`/app/er-copilot/${id}`)} />
             )}

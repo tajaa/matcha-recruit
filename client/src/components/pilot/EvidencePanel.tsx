@@ -4,22 +4,20 @@ import { HelpHint } from '../ui/HelpHint'
 import { LABEL } from '../ui'
 import type { PilotSourceMeta } from './SystemsStrip'
 
-/** The record shape both pilots' corpora expose (Broker `CorpusRecord`, Legal
- *  `EvidenceRecord` — both structurally this). */
+/** The record shape a pilot's corpus exposes (Legal `EvidenceRecord`). */
 export type PilotEvidenceRecord = { cid: string; ref: string | null; summary: string; when: string }
 
 /** Evidence browser: an "Evidence · N records" header, loading/empty/populated
  *  branches, and a per-subsystem accordion (ChevronRight rotate + icon + label +
  *  count) whose expanded rows show ref / when / summary, closed by a notes
- *  footer. Shared by Broker Pilot and Legal Pilot.
+ *  footer.
  *
  *  Parameterized by `recordsFor` (each pilot buckets its own corpus), `labelFor`,
  *  the source-meta list, `total` (`null` = still loading), the empty-state copy,
  *  and the notes. `onRecordClick` is the one behavioural divergence: Legal rows
  *  are buttons opening a RecordViewer, so when it is supplied rows render as
- *  clickable (and truncated) buttons; Broker omits it and rows render as
- *  read-only divs. `footer` lets Legal mount its RecordViewer inside the panel
- *  exactly where it sat before; `className` carries Broker's extra `border-b`. */
+ *  clickable (and truncated) buttons; without it rows render as read-only divs. `footer` lets Legal mount its RecordViewer inside the panel
+ *  exactly where it sat before; `className` carries any extra border classes. */
 export function EvidencePanel<SM extends PilotSourceMeta>({
   className,
   helpText,

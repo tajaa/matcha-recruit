@@ -17,12 +17,11 @@ import { setAuthTokens } from '../../api/authStorage'
  * features, price) is fetched from the public GET /products/:slug, so
  * publishing a package in the admin builder makes its signup link live with no
  * frontend change. Mirrors ComplianceSignup's register → Stripe chain,
- * including the broker (?ref=) and admin-invite (?invite_token=) comp paths.
+ * including the admin-invite (?invite_token=) comp path.
  */
 export default function ProductSignup() {
   const { slug = '' } = useParams()
   const [searchParams] = useSearchParams()
-  const brokerRef = searchParams.get('ref')
   const inviteToken = searchParams.get('invite_token')
 
   const [product, setProduct] = useState<ProductDefinition | null>(null)
@@ -53,7 +52,7 @@ export default function ProductSignup() {
     return () => { cancelled = true }
   }, [slug])
 
-  const comped = !!inviteToken || !!brokerRef
+  const comped = !!inviteToken
   const isPaid = product ? ['per_seat', 'per_location', 'block', 'flat'].includes(product.pricing_model) : false
   const hc = parseInt(headcount, 10)
   const headcountValid = !isNaN(hc) && hc >= 1
@@ -99,7 +98,6 @@ export default function ProductSignup() {
           headcount: hc,
           ...(product.pricing_model === 'per_location' ? { location_count: locations } : {}),
           industry: resolvedIndustry,
-          ...(brokerRef ? { lite_broker_token: brokerRef } : {}),
           ...(inviteToken ? { lite_invite_token: inviteToken } : {}),
         }),
       })
@@ -116,8 +114,8 @@ export default function ProductSignup() {
       setAuthTokens(regData.access_token, regData.refresh_token)
       invalidateMeCache()
 
-      // Free product, broker-pays or admin invite: already active.
-      if (!isPaid || regData.lite_broker_pays || regData.lite_invite_activated) {
+      // Free product or admin invite: already active.
+      if (!isPaid || regData.lite_invite_activated) {
         if (product.pricing_model === 'contact_sales') {
           setDone(`Thanks — your account is created. Our team will activate ${product.name} and be in touch.`)
           return

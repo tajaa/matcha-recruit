@@ -10,7 +10,7 @@ export type SavedTemplate<T> = {
   updated_by: string | null
 }
 
-export type DealTemplateKey = 'book' | 'full' | 'broker' | 'one_pager' | 'lite'
+export type DealTemplateKey = 'book' | 'full' | 'one_pager' | 'lite'
 
 export function getTemplate<T>(key: DealTemplateKey) {
   return api.get<SavedTemplate<T>>(`/admin/deal-flow/templates/${key}`)

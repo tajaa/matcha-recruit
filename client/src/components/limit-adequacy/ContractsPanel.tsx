@@ -13,9 +13,8 @@ import {
 } from '../../types/limitAdequacy'
 import type { ContractPayload } from '../../api/limit-adequacy/limitAdequacy'
 
-/** The tenant page and the broker client tab drive the same contract review
- *  against different endpoints. Injecting the calls keeps one UI. `create` and
- *  `remove` are optional — the broker has no manual-entry or delete path. */
+/** The contract review UI takes its API calls by injection. `create` and
+ *  `remove` are optional so a caller can leave out manual entry or delete. */
 export type ContractsApi = {
   upload: (file: File) => Promise<ContractRecord>
   update: (id: string, payload: ContractPayload) => Promise<ContractRecord>
