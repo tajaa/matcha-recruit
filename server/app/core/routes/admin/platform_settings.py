@@ -65,7 +65,6 @@ from app.core.services.stripe_service import StripeService, StripeServiceError
 from app.core.feature_flags import DEFAULT_COMPANY_FEATURES
 from app.core.services.deal_pricing import DealInputs
 from app.core.services.deal_full import FullDealInputs
-from app.core.services.deal_book import BookInputs
 
 
 from app.core.services.scope_registry.jurisdiction_chain import (  # noqa: E402

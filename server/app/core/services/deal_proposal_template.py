@@ -49,23 +49,16 @@ def _fmt_date(d: date) -> str:
     return d.strftime("%B %-d, %Y")
 
 
-def _build_up_rows(q: DealQuote, broker_label: str) -> str:
+def _build_up_rows(q: DealQuote) -> str:
     """The per-tier price build-up (subscription → onboarding → discounts → net)."""
     onb_val = "None" if q.onboarding == 0 else f"+{_fmt(q.onboarding)}"
     rows = [
         f'<div class="r std"><span>Subscription / yr</span><span>{_fmt(q.subscription_yr)}</span></div>',
         f'<div class="r"><span>Onboarding</span><span>{onb_val}</span></div>',
     ]
-    has_discount = q.broker_disc or q.partner_disc
-    if has_discount:
+    if q.partner_disc:
         rows.append(f'<div class="r sub"><span>Subtotal</span><span>{_fmt(q.subtotal)}</span></div>')
-        if q.broker_disc:
-            rows.append(
-                f'<div class="r"><span>&minus;{q.broker_pct}% {escape(broker_label)}</span>'
-                f'<span>&minus;{_fmt(q.broker_disc)}</span></div>'
-            )
-        if q.partner_disc:
-            rows.append(
+        rows.append(
                 f'<div class="r"><span>&minus;{q.partner_pct}% partner</span>'
                 f'<span>&minus;{_fmt(q.partner_disc)}</span></div>'
             )
@@ -90,7 +83,6 @@ def _tier_card(
     pepm_note: str,
     div_label: str,
     bullets_html: str,
-    broker_label: str,
     inc_line: str = "",
     why: str = "",
     tag: str = "",
@@ -106,7 +98,7 @@ def _tier_card(
         <div class="name">{q.tier_label}</div>
         <div class="pepm"><b>${q.pepm}</b> PEPM &middot; {note}</div>
         <div class="rb">
-          {_build_up_rows(q, broker_label)}
+          {_build_up_rows(q)}
         </div>
         <div class="div">{div_label}</div>
         <ul>
@@ -120,19 +112,13 @@ def _tier_card(
 def render_proposal_html(inp: DealInputs, quotes: dict[str, DealQuote]) -> str:
     proposal_date = inp.proposal_date or date.today()
     date_str = _fmt_date(proposal_date)
-    broker_label = (inp.broker_name or "Broker").strip() if inp.broker else "Broker"
     company = escape(inp.company_name)
     quote_lite, quote_mid, quote_max = quotes["lite"], quotes["mid"], quotes["max"]
 
     # Savings banner (only when a discount applies; uses Max as the discount reference).
     ref = quote_max
     if ref.discount_pct:
-        parts = []
-        if ref.broker_disc:
-            parts.append(f"{escape(broker_label)} <b>(&minus;{ref.broker_pct}%)</b>")
-        if ref.partner_disc:
-            parts.append(f"Partner <b>(&minus;{ref.partner_pct}%)</b>")
-        detail = " + ".join(parts) + ", applied to subscription &amp; onboarding and locked for the term."
+        detail = f"Partner <b>(&minus;{ref.partner_pct}%)</b>, applied to subscription &amp; onboarding and locked for the term."
         svband = f"""
     <div class="svband">
       <div class="t">Your pricing &mdash; {ref.discount_pct}% below list</div>
@@ -147,7 +133,6 @@ def render_proposal_html(inp: DealInputs, quotes: dict[str, DealQuote]) -> str:
         pepm_note="guided onboarding",
         div_label="Includes",
         bullets_html=_bullets(_LITE_BULLETS),
-        broker_label=broker_label,
         tag="Recommended &mdash; best fit" if inp.tier == "lite" else "",
     )
     mid_card = _tier_card(
@@ -157,7 +142,6 @@ def render_proposal_html(inp: DealInputs, quotes: dict[str, DealQuote]) -> str:
         div_label="Everything in Lite, plus",
         bullets_html=_bullets(_MID_BULLETS),
         inc_line="Incident Reporting, IR Analysis, OSHA logs",
-        broker_label=broker_label,
         tag="Recommended &mdash; best fit" if inp.tier == "mid" else "",
     )
     max_card = _tier_card(
@@ -166,7 +150,6 @@ def render_proposal_html(inp: DealInputs, quotes: dict[str, DealQuote]) -> str:
         pepm_note="white-glove implementation",
         div_label="Everything in Mid, plus",
         bullets_html=_bullets(_MAX_BULLETS),
-        broker_label=broker_label,
         why=_MAX_WHY if inp.tier == "max" else "",
         tag="Recommended &mdash; best fit" if inp.tier == "max" else "",
     )
@@ -298,12 +281,10 @@ def render_proposal_html(inp: DealInputs, quotes: dict[str, DealQuote]) -> str:
 # one-pager). Used when the recommended tier is "lite".
 
 
-def _lite_buildup(q: DealQuote, broker_label: str) -> str:
+def _lite_buildup(q: DealQuote) -> str:
     rows = [f'<div class="ln"><span>Standard / yr</span><span>{_fmt(q.subscription_yr)}</span></div>']
     if q.onboarding:
         rows.append(f'<div class="ln"><span>Setup</span><span>+{_fmt(q.onboarding)}</span></div>')
-    if q.broker_disc:
-        rows.append(f'<div class="ln disc"><span>&minus;{q.broker_pct}% {escape(broker_label)}</span><span>&minus;{_fmt(q.broker_disc)}</span></div>')
     if q.partner_disc:
         rows.append(f'<div class="ln disc"><span>&minus;{q.partner_pct}% partner</span><span>&minus;{_fmt(q.partner_disc)}</span></div>')
     save = ""
@@ -357,13 +338,13 @@ DEFAULT_LITE_BLOCKS: list[dict] = [
 ]
 
 
-def _lite_card_html(quote_lite: DealQuote, broker_label: str) -> str:
+def _lite_card_html(quote_lite: DealQuote) -> str:
     setup_note = "no setup fees" if quote_lite.onboarding == 0 else "setup included"
     return f"""<div class="card">
           <div class="tag">Your Tier &middot; Locked for the Term</div>
           <div class="name">{escape(quote_lite.tier_label)}</div>
           <div class="pepm">${quote_lite.pepm}.00 PEPM &middot; {setup_note}</div>
-          {_lite_buildup(quote_lite, broker_label)}
+          {_lite_buildup(quote_lite)}
           <div class="net"><span class="lbl">Your Price</span><span class="amt">{_fmt(quote_lite.your_price_yr)}<span class="yr">/yr</span></span></div>
         </div>"""
 
@@ -379,7 +360,7 @@ def _lite_bullets(items: list[str]) -> str:
     return f"<ul>{''.join(lis)}</ul>"
 
 
-def _lite_block_html(b, quote_lite: DealQuote, broker_label: str) -> str:
+def _lite_block_html(b, quote_lite: DealQuote) -> str:
     k = b.kind
     if k == "h3":
         return f"<h3>{escape(b.text)}</h3>"
@@ -394,7 +375,7 @@ def _lite_block_html(b, quote_lite: DealQuote, broker_label: str) -> str:
     if k == "bullets":
         return _lite_bullets(b.items)
     if k == "card":
-        return _lite_card_html(quote_lite, broker_label)
+        return _lite_card_html(quote_lite)
     return ""
 
 
@@ -403,14 +384,13 @@ def render_lite_proposal_html(inp: DealInputs, quote_lite: DealQuote) -> str:
 
     proposal_date = inp.proposal_date or date.today()
     date_str = _fmt_date(proposal_date)
-    broker_label = (inp.broker_name or "Broker").strip() if inp.broker else "Broker"
     company = escape(inp.company_name).upper()
 
     blocks = inp.lite_blocks if inp.lite_blocks is not None else [Block(**b) for b in DEFAULT_LITE_BLOCKS]
     lead = next((b for b in blocks if b.kind == "lead"), None)
     lead_html = f'<p class="lead">{escape(lead.text)}</p>' if lead else ""
-    left_html = "".join(_lite_block_html(b, quote_lite, broker_label) for b in blocks if b.column == "left")
-    right_html = "".join(_lite_block_html(b, quote_lite, broker_label) for b in blocks if b.column == "right")
+    left_html = "".join(_lite_block_html(b, quote_lite) for b in blocks if b.column == "left")
+    right_html = "".join(_lite_block_html(b, quote_lite) for b in blocks if b.column == "right")
 
     return f"""<!DOCTYPE html>
 <html lang="en">
