@@ -10,16 +10,19 @@ import StoreFormModal from './StoreFormModal'
 const actionCls = 'inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 hover:text-zinc-100'
 
 /** "+ Add store" / "Edit store", beside a location picker. */
-export function StoreActions({ setup, canEdit }: { setup: StoreSetup; canEdit: boolean }) {
+/** `compact` draws icon-only buttons (names kept for screen readers and the
+ *  tooltip) for a toolbar where the labels crowd out the week controls. */
+export function StoreActions({ setup, canEdit, compact = false }: { setup: StoreSetup; canEdit: boolean; compact?: boolean }) {
+  const cls = compact ? 'rounded-lg border border-zinc-800 p-1.5 text-zinc-400 hover:text-zinc-100' : actionCls
   return (
     <div className="inline-flex items-center gap-1.5">
       {canEdit && (
-        <button type="button" className={actionCls} onClick={() => setup.setModal('edit')} aria-label="Edit store details">
-          <Pencil className="h-3.5 w-3.5" /> Edit store
+        <button type="button" className={cls} onClick={() => setup.setModal('edit')} aria-label="Edit store details" title="Edit store details">
+          <Pencil className="h-3.5 w-3.5" />{!compact && ' Edit store'}
         </button>
       )}
-      <button type="button" className={actionCls} onClick={() => setup.setModal('add')}>
-        <Plus className="h-3.5 w-3.5" /> Add store
+      <button type="button" className={cls} onClick={() => setup.setModal('add')} aria-label="Add store" title="Add store">
+        <Plus className="h-3.5 w-3.5" />{!compact && ' Add store'}
       </button>
     </div>
   )

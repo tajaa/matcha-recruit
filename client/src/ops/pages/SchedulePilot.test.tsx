@@ -214,7 +214,7 @@ describe('SchedulePilot — the workspace', () => {
     // The board opens on the Week view: people down the side, days across.
     expect(within(screen.getByRole('table', { name: 'Week schedule by person' })).getByText(/Opener · 1 open/)).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Huume schedule assistant' })).toBeInTheDocument()
-    expect(screen.getByText('Week of 2026-08-09')).toBeInTheDocument()
+    expect(screen.getByText('Aug 9 – 15, 2026')).toBeInTheDocument()
     await waitFor(() => expect(planningInputsMock).toHaveBeenCalledWith('loc1', '2026-08-09'))
   })
 
@@ -259,7 +259,7 @@ describe('SchedulePilot — the workspace', () => {
     renderPilot()
 
     // 2026-08-09 is a Sunday; this store's weeks start Monday.
-    expect(screen.getByText('Week of 2026-08-03')).toBeInTheDocument()
+    expect(screen.getByText('Aug 3 – 9, 2026')).toBeInTheDocument()
     expect(useEditorMock).toHaveBeenCalledWith('2026-08-03', 'loc1', expect.any(Object))
   })
 

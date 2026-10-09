@@ -698,7 +698,7 @@ export default function SchedulePilot() {
           onToggleThread={() => setThreadOpen((open) => !open)}
           huumeSelectionCount={huumeSelectedShifts.length}
           huumeEnabled={huumeEnabled}
-          storeActions={canManageStores ? <StoreActions setup={stores} canEdit={!!currentLocation} /> : undefined}
+          storeActions={canManageStores ? <StoreActions compact setup={stores} canEdit={!!currentLocation} /> : undefined}
           autopilot={{
             visible: autopilotEnabled && !!locationId,
             running: autopilotRunning,
