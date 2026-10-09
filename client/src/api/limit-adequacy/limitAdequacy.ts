@@ -75,37 +75,3 @@ export function fetchContractSourceUrl(id: string) {
 export function downloadReviewPdf() {
   return api.download('/limit-adequacy/review.pdf', 'limit-adequacy.pdf')
 }
-
-// --- broker-driven contract review (writes into the client's own records) ----
-
-const brokerBase = (companyId: string) => `/broker/clients/${companyId}/contracts`
-
-export function fetchBrokerContracts(companyId: string) {
-  return api.get<{ contracts: ContractRecord[] }>(brokerBase(companyId))
-}
-
-export function uploadBrokerContract(companyId: string, file: File) {
-  const fd = new FormData()
-  fd.append('file', file)
-  return api.upload<ContractRecord>(`${brokerBase(companyId)}/upload`, fd)
-}
-
-export function updateBrokerContract(companyId: string, id: string, payload: ContractPayload) {
-  return api.put<ContractRecord>(`${brokerBase(companyId)}/${id}`, payload)
-}
-
-export function confirmBrokerContract(companyId: string, id: string) {
-  return api.post<ContractRecord>(`${brokerBase(companyId)}/${id}/confirm`, {})
-}
-
-export function fetchBrokerContractReview(companyId: string, id: string) {
-  return api.get<ContractReview>(`${brokerBase(companyId)}/${id}/review`)
-}
-
-export function downloadBrokerContractReviewPdf(companyId: string, id: string, name: string) {
-  return api.download(`${brokerBase(companyId)}/${id}/review.pdf`, `contract-review-${name}.pdf`)
-}
-
-export function fetchBrokerContractSourceUrl(companyId: string, id: string) {
-  return api.get<{ url: string }>(`${brokerBase(companyId)}/${id}/file`)
-}

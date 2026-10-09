@@ -22,7 +22,7 @@ import { authStreamHeaders, API_BASE, ApiError } from './client'
 // ---------------------------------------------------------------------------
 // Shared pilot types (E1) — these were redeclared verbatim across the five
 // pilot api modules. PilotSession is deliberately NOT here: its shape really
-// does differ per pilot (company_id vs broker_id, per-pilot counters).
+// does differ per pilot (per-pilot ids and counters).
 // ---------------------------------------------------------------------------
 
 export type SessionStatus = 'active' | 'closed'
@@ -124,7 +124,7 @@ export type PostSSEOptions = {
 }
 
 /** Non-ok response from postSSE, carrying the parsed body for callers that
- *  need it (e.g. the broker document gate's 409 payload). Extends ApiError so
+ *  need it (e.g. a pilot document gate's 409 payload). Extends ApiError so
  *  `instanceof ApiError` covers both transports.
  *
  *  CRITICAL: no `status`/`body` field declarations here — with
@@ -206,7 +206,7 @@ export type PilotChatOptions = {
   signal?: AbortSignal
   /**
    * Inspect a non-ok response before the default onError fires. Return true to
-   * claim the error (suppressing onError) — the broker document gate uses this
+   * claim the error (suppressing onError) — a pilot document gate can use this
    * for its 409 `missing_required_documents` payload.
    */
   onHttpError?: (err: SSEHttpError) => boolean | void

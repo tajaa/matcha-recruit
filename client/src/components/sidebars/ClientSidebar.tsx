@@ -5,12 +5,10 @@ import {
   GraduationCap, TrendingUp, ClipboardList, ShieldAlert, MessagesSquare, Handshake, ShieldCheck, Gauge, HeartPulse, FileCheck, Link2, Activity,
   Coins, FileSignature, CalendarClock, Radio, HardHat,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
 import SidebarShell from './SidebarShell'
 import type { NavGroup, NavItem } from './SidebarShell'
 import { useMe } from '../../hooks/useMe'
 import { useSidebarBadges } from '../../hooks/useSidebarBadges'
-import { fetchCompanyBrokerChatSummary } from '../../api/broker-chat/companyBrokerChat'
 
 const nav: (NavItem | NavGroup)[] = [
   { to: '/app', icon: LayoutDashboard, label: 'Dashboard' },
@@ -111,43 +109,6 @@ const personalNav: (NavItem | NavGroup)[] = [
 export default function ClientSidebar() {
   const { me, loading, isPersonal, hasFeature } = useMe()
   const { badges, markSeen } = useSidebarBadges()
-  // Broker chat is offered only when this company is actively linked to a broker
-  // (not a feature flag). Fetched once; the entry is injected into Communication.
-  const [brokerChat, setBrokerChat] = useState<{ show: boolean; unread: number }>({
-    show: false,
-    unread: 0,
-  })
-
-  useEffect(() => {
-    if (isPersonal) return
-    fetchCompanyBrokerChatSummary()
-      .then((s) => setBrokerChat({ show: s.has_active_broker, unread: s.unread }))
-      .catch(() => {})
-  }, [isPersonal])
-
-  // Keyed on `key`, not the group's display label: matching on copy meant a
-  // rename (or the group being filtered away) silently dropped the entry for a
-  // company that does have a broker. If the group isn't there, append the item
-  // at top level rather than losing it.
-  function withBrokerChat(items: (NavItem | NavGroup)[]): (NavItem | NavGroup)[] {
-    if (!brokerChat.show) return items
-    const entry: NavItem = {
-      to: '/app/broker-chat',
-      icon: Handshake,
-      label: 'Broker Chat',
-      badge: brokerChat.unread || undefined,
-    }
-    let placed = false
-    const out = items.map((item) => {
-      if ('items' in item && item.key === 'communication') {
-        placed = true
-        return { ...item, items: [...item.items, entry] }
-      }
-      return item
-    })
-    return placed ? out : [...out, entry]
-  }
-
   function filterByFeatures(items: (NavItem | NavGroup)[]): (NavItem | NavGroup)[] {
     const out: (NavItem | NavGroup)[] = []
     for (const item of items) {
@@ -195,7 +156,7 @@ export default function ClientSidebar() {
       workspaceSwitch
       logoTo={isPersonal ? '/espresso' : '/app'}
       logoLabel="Matcha"
-      nav={loading ? [] : isPersonal ? personalNav : withBadges(withBrokerChat(filterByFeatures(nav)))}
+      nav={loading ? [] : isPersonal ? personalNav : withBadges(filterByFeatures(nav))}
       user={footerName ? {
         name: footerName,
         avatarUrl: me?.user?.avatar_url,

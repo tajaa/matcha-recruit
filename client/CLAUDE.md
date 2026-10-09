@@ -44,12 +44,12 @@ client/src/
 │   │                        sse.ts (+ sse.test.ts, client.test.ts), profileResume (shared w/
 │   │                        work); domain subfolders — one per domain, named to match
 │   │                        components/ and pages/app/:
-│   └── admin/ analysis-pilot/ benefits/ billing/ broker/ broker-chat/ compliance/ dashboard/
+│   └── admin/ analysis-pilot/ benefits/ billing/ compliance/ dashboard/
 │       discipline/ employees/ handbook/ handbook-pilot/ labor/ legal-defense/
 │       limit-adequacy/ matcha-x/ portal/ property/ resources/ risk/ settings/ training/
 ├── components/
 │   ├── ui/                  Generic primitives (Button, Input, Modal, …) — the shared design system
-│   ├── sidebars/            AdminSidebar, BrokerSidebar, ClientSidebar (full platform),
+│   ├── sidebars/            AdminSidebar, ClientSidebar (full platform),
 │   │                        TenantSidebar (tier dispatcher), SidebarShell, nav-icons
 │   ├── tier-sidebars/       Below-full-platform tiers: IrSidebar/MatchaXSidebar/ComplianceSidebar + panels
 │   ├── shared/              App-wide infra chrome — wraps or decorates the whole app, one
@@ -58,13 +58,13 @@ client/src/
 │   ├── widgets/             Content widgets a page drops into its own body:
 │   │                        AiSuggest, NoteThread, PinButton
 │   ├── marketing/           Public widgets: BlogComments, NewsletterSignup, PricingContactModal
-│   ├── ir/ compliance/ employees/ dashboard/ handbook/ broker/ er/ discipline/
+│   ├── ir/ compliance/ employees/ dashboard/ handbook/ er/ discipline/
 │   │   matcha-x/ …          domain modules; onboarding flows live in <domain>/onboarding/
 │   └── auth/                RequireBusinessAccount, RequireRole, login forms
 ├── hooks/                  useMe (THE auth state) + shared hooks at root; domain subdirs
 │   │                        (ir/ er/ compliance/ discipline/ employees/ risk-assessment/ training/ admin/)
 ├── layouts/                AppLayout (Cappe/Work layouts live in their own app folders now)
-├── pages/                  app/ admin/ broker/ portal/ auth/ shared/ landing/ home/ simpler-pages/
+├── pages/                  app/ admin/ portal/ auth/ shared/ landing/ home/ simpler-pages/
 │   │                        + loose: BetaRegister, Login, ResetPassword, SSOCallback
 │   │                        (page DIRS are lowercase-kebab; component FILES stay PascalCase)
 │   ├── app/<domain>/        /app/* grouped by domain — analysis-pilot, ask-expert, billing,
@@ -72,11 +72,11 @@ client/src/
 │   │                        handbook-pilot, ir, labor, legal-defense, limit-adequacy,
 │   │                        property, risk, risk-assessment, settings, training.
 │   │                        routes/AppRoutes.tsx is the ONLY importer of this tree.
-│   └── admin/ broker/       still flat (76 + 40 files) — deferred on purpose, not an
+│   └── admin/               still flat (76 files) — deferred on purpose, not an
 │                            oversight. Leave alone unless doing that pass deliberately.
 ├── types/                  Shared TS types (camelCase filenames)
 ├── utils/                  Pure utilities: tier.ts, theme, dateFormat, staleChunk, usageTracker,
-│   │                        pcmToWav, + broker/ subdir
+│   │                        pcmToWav
 ├── data/                   Static / seed data
 └── generated/              Auto-generated types (DO NOT EDIT)
 ```
@@ -116,8 +116,6 @@ client/src/
   `api/` root is cross-cutting infra only. Domain folder names match `components/`. Dir-name-
   repeats-filename (`api/discipline/discipline.ts`) is the convention, not an accident.
   `api/compliance/index.ts` is the one intentional barrel (import path `api/compliance`).
-  `api/broker-chat/companyBrokerChat.ts` is a named exception to dir-name-repeats-filename —
-  disambiguates from the unrelated `api/broker/brokerChat.ts` (broker portal vs. company side).
 - **New page** goes in `pages/app/<domain>/` and is registered in `routes/AppRoutes.tsx`.
 
 ## Conventions

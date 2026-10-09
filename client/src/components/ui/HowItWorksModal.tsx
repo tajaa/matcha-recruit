@@ -15,9 +15,7 @@ export type HowItWorksStep = {
  * LegalDefense `index.tsx` for usage + the auto-show-once-on-first-visit
  * localStorage pattern each of them wires around it).
  *
- * Visual language mirrors BrokerPilot/HowItWorksModal.tsx (the original,
- * feature-specific version this generalizes) so all Pilot features feel the
- * same — that one is left as-is, not migrated onto this shell.
+ * Shared visual language so all Pilot features feel the same.
  */
 export function HowItWorksModal({ title, steps, onClose }: {
   title: string

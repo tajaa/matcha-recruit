@@ -32,7 +32,7 @@ export default function AppLayout({ sidebar, variant }: { sidebar: ReactNode; lo
     localStorage.setItem('sidebar_collapsed', String(sidebarCollapsed))
   }, [sidebarCollapsed])
 
-  // Fail closed, matching RequireRole (/admin, /broker) and PortalLayout. Without
+  // Fail closed, matching RequireRole (/admin) and PortalLayout. Without
   // this, a /app/* route with no <FeatureGate> mounts its whole shell for a
   // logged-out visitor and only blanks once a fetch 401s. The backend is still
   // the authz boundary — this is consistency, not the lock.

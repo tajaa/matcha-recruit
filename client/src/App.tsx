@@ -10,7 +10,6 @@ const AdminRoutes = lazy(() => import("./routes/AdminRoutes"));
 import RequireScOnboardingComplete from "./components/auth/RequireScOnboardingComplete";
 
 const AppRoutes = lazy(() => import("./routes/AppRoutes"));
-const BrokerRoutes = lazy(() => import("./routes/BrokerRoutes"));
 const WorkRoutes = lazy(() => import("./work/routes/WorkRoutes"));
 const EspressoRoutes = lazy(() => import("./work/routes/EspressoRoutes"));
 const LegacySurfacePrefixRedirect = lazy(() =>
@@ -36,7 +35,6 @@ const SimpleCompliancePage = lazy(
   () => import("./pages/simpler-pages/Compliance"),
 );
 const SimplePlatformPage = lazy(() => import("./pages/simpler-pages/Platform"));
-const SimpleBrokersPage = lazy(() => import("./pages/simpler-pages/Brokers"));
 const SimpleLitePage = lazy(() => import("./pages/simpler-pages/Lite"));
 const Subscribe = lazy(() => import("./pages/landing/Subscribe"));
 const TermsPage = lazy(() => import("./pages/landing/TermsPage"));
@@ -120,7 +118,6 @@ const ScOnboardingWizard = lazy(
 const AnonymousReport = lazy(() => import("./pages/shared/AnonymousReport"));
 const OfferSign = lazy(() => import("./pages/shared/OfferSign"));
 const LocationIntake = lazy(() => import("./pages/shared/LocationIntake"));
-const ExternalIntake = lazy(() => import("./pages/shared/ExternalIntake"));
 const RequestInfoForm = lazy(() => import("./pages/shared/RequestInfoForm"));
 const SymLink = lazy(() => import("./pages/shared/SymLink"));
 const SignPolicy = lazy(() => import("./pages/shared/SignPolicy"));
@@ -165,7 +162,6 @@ export default function App() {
         <Route path="/matcha-lite" element={<SimpleLitePage />} />
         <Route path="/matcha-compliance" element={<SimpleCompliancePage />} />
         <Route path="/matcha-platform" element={<SimplePlatformPage />} />
-        <Route path="/matcha-brokers" element={<SimpleBrokersPage />} />
         <Route path="/services" element={<ServicesPage />} />
         <Route path="/subscribe" element={<Subscribe />} />
         <Route path="/terms" element={<TermsPage />} />
@@ -275,7 +271,6 @@ export default function App() {
         <Route path="/offer/:token" element={<OfferSign />} />
         <Route path="/invite/:token" element={<EmployeeInviteAccept />} />
         <Route path="/intake/:token" element={<LocationIntake />} />
-        <Route path="/intake/external/:token" element={<ExternalIntake />} />
         <Route path="/request-info/:token" element={<RequestInfoForm />} />
         <Route path="/sym/:token" element={<SymLink />} />
         <Route path="/sign/:token" element={<SignPolicy />} />
@@ -300,7 +295,6 @@ export default function App() {
         <Route path="/werk-lite/*" element={<WerkLiteRoutes />} />
         <Route path="/ops/*" element={<RequireScOnboardingComplete><OpsRoutes /></RequireScOnboardingComplete>} />
         <Route path="/admin/*" element={<AdminRoutes />} />
-        <Route path="/broker/*" element={<BrokerRoutes />} />
         <Route path="/portal/*" element={<PortalRoutes />} />
         <Route path="/app/*" element={<RequireScOnboardingComplete><AppRoutes /></RequireScOnboardingComplete>} />
         <Route path="*" element={<NotFound />} />

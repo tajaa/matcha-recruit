@@ -2,17 +2,13 @@ import { MemoryRouter } from 'react-router-dom'
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { useMeMock, useSidebarBadgesMock, fetchCompanyBrokerChatSummaryMock } = vi.hoisted(() => ({
+const { useMeMock, useSidebarBadgesMock } = vi.hoisted(() => ({
   useMeMock: vi.fn(),
   useSidebarBadgesMock: vi.fn(),
-  fetchCompanyBrokerChatSummaryMock: vi.fn(),
 }))
 
 vi.mock('../../hooks/useMe', () => ({ useMe: useMeMock }))
 vi.mock('../../hooks/useSidebarBadges', () => ({ useSidebarBadges: useSidebarBadgesMock }))
-vi.mock('../../api/broker-chat/companyBrokerChat', () => ({
-  fetchCompanyBrokerChatSummary: fetchCompanyBrokerChatSummaryMock,
-}))
 
 import ClientSidebar from './ClientSidebar'
 
@@ -42,7 +38,6 @@ describe('ClientSidebar credential templates navigation', () => {
       badges: { ir: 0, er: 0, escalations: 0, inbox: 0, notifications: 0 },
       markSeen: vi.fn(),
     })
-    fetchCompanyBrokerChatSummaryMock.mockReturnValue(new Promise(() => {}))
   })
 
   it('shows a clearly labeled active link when the feature is enabled', () => {

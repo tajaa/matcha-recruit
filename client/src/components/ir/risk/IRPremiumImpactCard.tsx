@@ -1,10 +1,8 @@
 import { DollarSign, TrendingDown, TrendingUp } from 'lucide-react'
 import type { WcPremiumImpact } from './IRWcMetricsCard'
 
-// Only the fields this card actually reads. Both the client-side WcMetrics
-// (IRWcMetricsCard.tsx) and the broker-side WcMetrics (types/broker.ts) are
-// structurally assignable to this, so the same card renders on the IR Risk
-// Insights page and the broker Book-of-Business client drill-down.
+// Only the fields this card actually reads. The client-side WcMetrics
+// (IRWcMetricsCard.tsx) is structurally assignable to this.
 export type PremiumImpactMetrics = {
   premium_impact: WcPremiumImpact | null
   benchmark: { trir: number } | null

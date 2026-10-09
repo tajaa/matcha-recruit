@@ -12,7 +12,6 @@ import WcRateData from '../pages/admin/WcRateData'
 import PayerData from '../pages/admin/PayerData'
 import ComplianceStudio from '../pages/admin/studio/ComplianceStudio'
 import Automation from '../pages/admin/Automation'
-import Brokers from '../pages/admin/Brokers'
 import FractionalHR from '../pages/admin/FractionalHR'
 import FractionalClientDetail from '../pages/admin/FractionalClientDetail'
 import DealFlow from '../pages/admin/DealFlow'
@@ -89,7 +88,6 @@ export default function AdminRoutes() {
         <Route path="automation" element={<Automation />} />
         <Route path="jurisdictions" element={<StudioRedirect view="pipeline" />} />
         <Route path="scope-studio" element={<StudioRedirect view="coverage" />} />
-        <Route path="brokers" element={<Brokers />} />
         <Route path="fractional-hr" element={<FractionalHR />} />
         <Route path="fractional-hr/:clientId" element={<FractionalClientDetail />} />
         <Route path="deal-flow" element={<DealFlow />} />

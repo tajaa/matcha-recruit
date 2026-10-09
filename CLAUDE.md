@@ -46,8 +46,8 @@ Full mechanics (routers, endpoints, migrations, invariants) for every product ab
 
 
 ### Auxiliary surfaces (share codebase, not products)
-- **Admin** — `AdminSidebar`, `/admin/*` routes; internal tooling (companies, jurisdiction data, payer data, broker mgmt).
-- **Broker** — `BrokerSidebar`, `/broker/*` routes; HR brokers managing multiple client companies.
+- **Admin** — `AdminSidebar`, `/admin/*` routes; internal tooling (companies, jurisdiction data, payer data).
+- **Broker** — web UI removed (`/broker/*`, `BrokerSidebar`, admin Brokers, company↔broker chat, IR broker-share, broker seat-invite signup). The backend (`/api/broker/*`, `broker_*` tables, `broker` role) is still present pending a separate removal.
 - **Candidate / Employee portals** — public-token routes (`/candidate-interview/:token`, `/s/:token`); employee self-service through `employee_portal_router`.
 - **Public anonymous report** — `/report/:token` (`server/app/matcha/routes/intake/inbound_email.py`); per-company token-gated, reusable form (poster-friendly — not single-use; `/request-info` stays single-use).
 
