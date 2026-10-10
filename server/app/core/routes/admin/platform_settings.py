@@ -57,7 +57,8 @@ from app.core.services.platform_settings import (
     get_er_similarity_weights, prime_er_similarity_weights_cache,
     get_tenant_codified_only, prime_tenant_codified_only_cache,
     get_autopr_board_capabilities, prime_autopr_board_capabilities_cache,
-    get_agent_models, normalize_agent_models, prime_agent_models_cache,
+    AGENT_MODELS_QUERY, agent_models_from_rows, get_agent_models, normalize_agent_models,
+    prime_agent_models_cache,
     DEFAULT_ER_SIMILARITY_WEIGHTS, EXPECTED_WEIGHT_KEYS,
     AUTOPR_BOARD_CAPABILITIES,
 )
@@ -469,12 +470,16 @@ async def get_all_platform_settings():
     codified_only = await get_tenant_codified_only()
     autopr_boards = await get_autopr_board_capabilities()
     agent_models = await get_agent_models()
+    async with get_connection() as conn:
+        _stored, agent_models_version = agent_models_from_rows(await conn.fetch(AGENT_MODELS_QUERY))
     return {
         "visible_features": visible,
         "matcha_work_model_mode": mw_mode,
         "jurisdiction_research_model_mode": jr_mode,
         "agent_models": agent_models,
         "agent_model_registry": agent_surfaces.registry_payload(),
+        "agent_model_choices": agent_surfaces.model_choices_payload(),
+        "agent_models_version": agent_models_version,
         "anthropic_configured": bool(get_settings().anthropic_api_key),
         "er_similarity_weights": er_weights,
         "tenant_codified_only": codified_only,
@@ -617,31 +622,70 @@ async def update_agent_models(
     admin=Depends(require_admin)
 ):
     """Set the AI model per app and per product (Admin → Settings → AI
-    models). The whole map is replaced. Refuses an unknown app or product key,
-    and any Claude choice while no ANTHROPIC_API_KEY is configured — every
-    call would fail."""
+    models). The whole map is replaced.
+
+    Refuses an unknown app, product or model (400), a save from a page that
+    loaded an older map (409, `version`), and a NEWLY chosen Claude model
+    while no ANTHROPIC_API_KEY is configured (400) — every call would fail.
+    A Claude value already stored is let through, so removing the key never
+    locks the page: the admin can still save other rows, and set those back.
+
+    Also writes the legacy single `agent_model` row (the Matcha default), so
+    a container still on the old code — a blue/green overlap or a revert —
+    routes by the current choice rather than a stale one.
+    """
     unknown = sorted(set(body.apps) - agent_surfaces.APP_KEYS) + sorted(
         set(body.surfaces) - set(agent_surfaces.SURFACE_BY_KEY)
     )
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unknown app or product: {', '.join(unknown)}")
-    chosen = [*body.apps.values(), *body.surfaces.values()]
-    if any(choice in agent_surfaces.CLAUDE_CHOICES for choice in chosen) and not get_settings().anthropic_api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="Claude is not configured on this server (ANTHROPIC_API_KEY is unset).",
-        )
+    bad_values = sorted(
+        {v for v in body.apps.values() if v not in agent_surfaces.MODEL_CHOICES}
+        | {v for v in body.surfaces.values() if v not in agent_surfaces.SURFACE_CHOICES}
+    )
+    if bad_values:
+        raise HTTPException(status_code=400, detail=f"Unknown model: {', '.join(bad_values)}")
+
     models = normalize_agent_models({"apps": body.apps, "surfaces": body.surfaces})
     async with get_connection() as conn:
-        await conn.execute(
-            """
-            INSERT INTO platform_settings (key, value, updated_at)
-            VALUES ('agent_models', $1::jsonb, NOW())
-            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-            """,
-            json.dumps(models)
-        )
-    return {"agent_models": prime_agent_models_cache(models)}
+        async with conn.transaction():
+            rows = await conn.fetch(AGENT_MODELS_QUERY + " FOR UPDATE")
+            stored, version = agent_models_from_rows(rows)
+            if body.version != version:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Someone else changed the AI models since this page loaded. Reload and try again.",
+                )
+            if not get_settings().anthropic_api_key:
+                newly_claude = [
+                    key
+                    for section in ("apps", "surfaces")
+                    for key, value in models[section].items()
+                    if value in agent_surfaces.CLAUDE_CHOICES and value != stored[section].get(key)
+                ]
+                if newly_claude:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Claude is not configured on this server (ANTHROPIC_API_KEY is unset).",
+                    )
+            new_version = await conn.fetchval(
+                """
+                INSERT INTO platform_settings (key, value, updated_at)
+                VALUES ('agent_models', $1::jsonb, NOW())
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+                RETURNING updated_at
+                """,
+                json.dumps(models),
+            )
+            await conn.execute(
+                """
+                INSERT INTO platform_settings (key, value, updated_at)
+                VALUES ('agent_model', $1::jsonb, NOW())
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+                """,
+                json.dumps(models["apps"][agent_surfaces.MATCHA]),
+            )
+    return {"agent_models": prime_agent_models_cache(models), "version": new_version.isoformat()}
 
 
 @router.put("/platform-settings/tenant-codified-only", dependencies=[Depends(require_admin)])

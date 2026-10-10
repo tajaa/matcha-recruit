@@ -175,3 +175,44 @@ async def test_no_company_or_an_unreadable_flag_is_matcha_work(companies):
     assert conn.reads == 0
     companies(OSError("db down"))
     assert await app_surface.work_surface(uuid4(), "chat") == reg.MATCHA_WORK_CHAT
+
+
+@pytest.mark.asyncio
+async def test_an_entry_expiring_mid_read_cannot_fail_the_turn(companies, monkeypatch):
+    """`in` then `[]` straddling a TTL expiry used to raise KeyError outside the
+    try; one `.get` read falls through to the lookup instead."""
+
+    class _Expiring(dict):
+        def __contains__(self, key):
+            return True  # looks cached…
+
+        def __getitem__(self, key):
+            raise KeyError(key)  # …but expired by the time it is read
+
+    conn = companies(True)
+    monkeypatch.setattr(app_surface, "_personal", _Expiring())
+    assert await app_surface.work_surface(uuid4(), "chat") == reg.ESPRESSO_CHAT
+    assert conn.reads == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("personal, surface", [(True, reg.ESPRESSO_CHAT), (False, reg.MATCHA_HANDBOOKS)])
+async def test_handbook_upload_check_follows_the_account(monkeypatch, personal, surface):
+    from types import SimpleNamespace
+
+    from app.matcha.services.matcha_work import matcha_work_handbook_upload as upload
+
+    seen = {}
+
+    async def routed(client, **kwargs):
+        seen["surface"] = kwargs["surface"]
+        return SimpleNamespace(text='{"is_handbook": true}')
+
+    async def is_personal(company_id):
+        return personal
+
+    monkeypatch.setattr(upload, "_keyword_relevance_check", lambda text: (None, None))
+    monkeypatch.setattr(upload, "generate_content_routed", routed)
+    monkeypatch.setattr(app_surface, "is_personal_company", is_personal)
+    assert await upload.check_handbook_relevance("Our policies", object(), company_id=uuid4()) == (True, None)
+    assert seen["surface"] == surface

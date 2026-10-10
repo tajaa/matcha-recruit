@@ -3,34 +3,29 @@ import { Button, Card, Select } from '../ui'
 import {
   adminSettingsApi,
   type AgentModelApp,
+  type AgentModelChoice,
   type AgentModels,
 } from '../../api/admin/platformSettings'
 
 const INHERIT = 'inherit'
 const BUILTIN = 'default'
-const CLAUDE = ['claude-haiku-5-5', 'claude-sonnet-5-5'] as const
-
-const CHOICE_LABEL: Record<string, string> = {
-  [BUILTIN]: 'Built-in',
-  'claude-haiku-5-5': 'Claude Haiku 5.5',
-  'claude-sonnet-5-5': 'Claude Sonnet 5.5',
-}
-// For "Same as Matcha: Haiku 5.5" — short enough for the select.
-const SHORT_LABEL: Record<string, string> = {
-  [BUILTIN]: 'Built-in',
-  'claude-haiku-5-5': 'Haiku 5.5',
-  'claude-sonnet-5-5': 'Sonnet 5.5',
-}
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
+/** The label for a stored choice; `short` drops "Claude " so "Same as Matcha:
+ *  Haiku 5.5" fits the select. The Claude labels come from the server. */
+function choiceLabel(choices: AgentModelChoice[], value: string, short = false) {
+  if (value === BUILTIN) return 'Built-in'
+  const label = choices.find((c) => c.id === value)?.label ?? value
+  return short ? label.replace(/^Claude /, '') : label
+}
+
 /** Claude rows only while the server has a key; a value already stored stays
  *  listed so the menu never hides what is saved. */
-function claudeOptions(anthropicConfigured: boolean, current: string) {
-  return CLAUDE.filter((id) => anthropicConfigured || id === current).map((id) => ({
-    value: id,
-    label: CHOICE_LABEL[id],
-  }))
+function claudeOptions(choices: AgentModelChoice[], anthropicConfigured: boolean, current: string) {
+  return choices
+    .filter((c) => anthropicConfigured || c.id === current)
+    .map((c) => ({ value: c.id, label: c.label }))
 }
 
 interface AgentModelsSettingProps {
@@ -38,15 +33,21 @@ interface AgentModelsSettingProps {
   models: AgentModels
   /** The apps and products to list — the server's registry, not hard-coded here. */
   registry: AgentModelApp[]
-  /** False while ANTHROPIC_API_KEY is unset: Claude cannot be picked. */
+  /** The Claude models on offer, with labels — also the server's. */
+  choices: AgentModelChoice[]
+  /** The loaded map's version; a save from an outdated page is refused (409). */
+  version: string | null
+  /** False while ANTHROPIC_API_KEY is unset: Claude cannot be newly picked. */
   anthropicConfigured: boolean
-  onSaved(models: AgentModels): void
+  onSaved(models: AgentModels, version: string): void
 }
 
 /** Admin → Settings → AI models: one model per app, which each product can
  *  follow ("Same as …") or override. The schedule assistant's own dropdown
  *  still lets a manager pick per chat. */
-export function AgentModelsSetting({ models, registry, anthropicConfigured, onSaved }: AgentModelsSettingProps) {
+export function AgentModelsSetting({
+  models, registry, choices, version, anthropicConfigured, onSaved,
+}: AgentModelsSettingProps) {
   const [pending, setPending] = useState<AgentModels | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -62,8 +63,8 @@ export function AgentModelsSetting({ models, registry, anthropicConfigured, onSa
     setSaving(true)
     setError(null)
     try {
-      const saved = await adminSettingsApi.setAgentModels(draft)
-      onSaved(saved.agent_models)
+      const saved = await adminSettingsApi.setAgentModels({ ...draft, version })
+      onSaved(saved.agent_models, saved.version)
       setPending(null)
     } catch (e) {
       setError(errText(e))
@@ -90,7 +91,7 @@ export function AgentModelsSetting({ models, registry, anthropicConfigured, onSa
                 onChange={(e) => setApp(app.key, e.target.value)}
                 options={[
                   { value: BUILTIN, label: 'Built-in (each product\'s own)' },
-                  ...claudeOptions(anthropicConfigured, appValue),
+                  ...claudeOptions(choices, anthropicConfigured, appValue),
                 ]}
               />
             </div>
@@ -102,6 +103,7 @@ export function AgentModelsSetting({ models, registry, anthropicConfigured, onSa
                     surface={surface}
                     appLabel={app.label}
                     appValue={appValue}
+                    choices={choices}
                     value={draft.surfaces[surface.key] ?? INHERIT}
                     anthropicConfigured={anthropicConfigured}
                     onChange={(value) => setSurface(surface.key, value)}
@@ -132,6 +134,7 @@ interface SurfaceRowProps {
   surface: AgentModelApp['surfaces'][number]
   appLabel: string
   appValue: string
+  choices: AgentModelChoice[]
   value: string
   anthropicConfigured: boolean
   onChange(value: string): void
@@ -139,7 +142,7 @@ interface SurfaceRowProps {
 
 /** One product: its name labels the select (no repeated caption), and the
  *  built-in model sits under the description rather than in the option. */
-function SurfaceRow({ surface, appLabel, appValue, value, anthropicConfigured, onChange }: SurfaceRowProps) {
+function SurfaceRow({ surface, appLabel, appValue, choices, value, anthropicConfigured, onChange }: SurfaceRowProps) {
   const selectId = useId()
   return (
     <li className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
@@ -154,9 +157,9 @@ function SurfaceRow({ surface, appLabel, appValue, value, anthropicConfigured, o
         value={value}
         onChange={(e) => onChange(e.target.value)}
         options={[
-          { value: INHERIT, label: `Same as ${appLabel}: ${SHORT_LABEL[appValue] ?? appValue}` },
+          { value: INHERIT, label: `Same as ${appLabel}: ${choiceLabel(choices, appValue, true)}` },
           { value: BUILTIN, label: 'Built-in' },
-          ...claudeOptions(anthropicConfigured, value),
+          ...claudeOptions(choices, anthropicConfigured, value),
         ]}
       />
     </li>

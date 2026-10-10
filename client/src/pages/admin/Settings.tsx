@@ -325,8 +325,11 @@ export default function Settings() {
           <AgentModelsSetting
             models={settings.data?.agent_models ?? { apps: {}, surfaces: {} }}
             registry={settings.data?.agent_model_registry ?? []}
+            choices={settings.data?.agent_model_choices ?? []}
+            version={settings.data?.agent_models_version ?? null}
             anthropicConfigured={!!settings.data?.anthropic_configured}
-            onSaved={(models) => settings.setData({ ...settings.data, agent_models: models })}
+            onSaved={(models, version) =>
+              settings.setData({ ...settings.data, agent_models: models, agent_models_version: version })}
           />
         )}
       </div>
