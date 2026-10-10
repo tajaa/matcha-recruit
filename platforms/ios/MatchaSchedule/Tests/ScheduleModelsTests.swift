@@ -208,7 +208,7 @@ final class ScheduleModelsTests: XCTestCase {
         AppDelegate.pendingNotification = ["type": "schedule_published"]
         state.handlePush(["type": "schedule_published"])
         XCTAssertNil(AppDelegate.pendingNotification)
-        XCTAssertEqual(state.selectedTab, 0)
+        XCTAssertEqual(state.selectedTab, .schedule)
 
         // While a session is still being restored it is kept for loadProfile.
         state.phase = .restoring

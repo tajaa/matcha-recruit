@@ -8,9 +8,13 @@ enum APIError: Error, LocalizedError {
     case invalidURL
     case noData
     case networkUnavailable(URLError)
+    /// A 409 a manager may override by sending the write again with force.
+    case scheduleConflict(ScheduleConflict)
 
     var errorDescription: String? {
         switch self {
+        case .scheduleConflict(let conflict):
+            return conflict.message
         case .httpError(let code, let message):
             // Belt-and-suspenders: if a 5xx slipped through with an HTML body
             // and we didn't catch it via Content-Type, still collapse here.
@@ -176,13 +180,16 @@ class APIClient {
     /// "wrong email or password", not "your session ended" — it must surface the
     /// server's message and must not fire `onUnauthorized` (which would wipe a
     /// session that never existed and show "please log in again" for a typo).
+    /// `fresh`: skip the HTTP cache on a GET. Manager screens read state they
+    /// just changed, and a cached week would show the edit undone.
     func request<T: Decodable>(
         method: String,
         path: String,
         body: (any Encodable)? = nil,
         retryOnUnauthorized: Bool = true,
         retryOnMaintenance: Bool = true,
-        credentialExchange: Bool = false
+        credentialExchange: Bool = false,
+        fresh: Bool = false
     ) async throws -> T {
         guard let url = URL(string: baseURL + path) else {
             throw APIError.invalidURL
@@ -193,7 +200,7 @@ class APIClient {
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         // Honor Cache-Control / ETag headers on GETs. Mutations bypass the cache.
-        if method.uppercased() == "GET" {
+        if method.uppercased() == "GET" && !fresh {
             urlRequest.cachePolicy = .useProtocolCachePolicy
         } else {
             urlRequest.cachePolicy = .reloadIgnoringLocalCacheData
@@ -220,7 +227,7 @@ class APIClient {
                 // the maintenance path below is GET-gated for the same reason.
                 if retryOnMaintenance && _isIdempotentMethod(method) {
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    return try await request(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
+                    return try await request(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false, fresh: fresh)
                 }
                 throw APIError.networkUnavailable(urlError)
             }
@@ -240,7 +247,7 @@ class APIClient {
                 do {
                     _ = try await AuthService.shared.refresh()
                     // Retry with new token
-                    return try await request(method: method, path: path, body: body, retryOnUnauthorized: false)
+                    return try await request(method: method, path: path, body: body, retryOnUnauthorized: false, fresh: fresh)
                 } catch {
                     try await failAfterRefreshFailure(error)
                 }
@@ -254,9 +261,12 @@ class APIClient {
             if _isTransientMaintenance(httpResponse, data: data) {
                 if retryOnMaintenance && method.uppercased() == "GET" {
                     try? await Task.sleep(nanoseconds: 5_000_000_000)
-                    return try await request(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
+                    return try await request(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false, fresh: fresh)
                 }
                 throw APIError.serviceUnavailable(httpResponse.statusCode)
+            }
+            if let conflict = ScheduleConflict.parse(status: httpResponse.statusCode, data: data) {
+                throw APIError.scheduleConflict(conflict)
             }
             // Same unwrapping as `requestData`. Using the raw body here handed
             // callers `{"detail":"Connect your Gmail…"}` verbatim, so every
@@ -359,6 +369,9 @@ class APIClient {
                     return try await requestData(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
                 }
                 throw APIError.serviceUnavailable(httpResponse.statusCode)
+            }
+            if let conflict = ScheduleConflict.parse(status: httpResponse.statusCode, data: data) {
+                throw APIError.scheduleConflict(conflict)
             }
             let message = extractErrorMessage(from: data) ?? "HTTP \(httpResponse.statusCode)"
             throw APIError.httpError(httpResponse.statusCode, message)

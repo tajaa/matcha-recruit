@@ -13,14 +13,14 @@ struct RootView: View {
             case .signedOut:
                 LoginView()
                     .transition(.opacity)
-            case .ready(let profile):
-                MainTabs(profile: profile)
+            case .ready(let session):
+                MainTabs(session: session)
                     .transition(.opacity)
             case .needsWeb:
                 StatusView(
                     symbol: "person.crop.circle.badge.questionmark",
-                    title: "This app is for crew accounts",
-                    message: "Managers use Matcha on the web at hey-matcha.com.",
+                    title: "Use Matcha on the web",
+                    message: "Matcha Schedule is for crew, store managers and business admins. This account works at hey-matcha.com.",
                     actionTitle: "Sign out",
                     action: { await appState.signOut() },
                     link: URL(string: "https://hey-matcha.com")
@@ -29,7 +29,7 @@ struct RootView: View {
                 StatusView(
                     symbol: "calendar.badge.exclamationmark",
                     title: "Scheduling is turned off",
-                    message: "Ask your manager to turn on employee scheduling for your company.",
+                    message: "Employee scheduling is off for your company. A business admin can turn it on at hey-matcha.com.",
                     actionTitle: "Sign out",
                     action: { await appState.signOut() }
                 )
@@ -381,26 +381,47 @@ private struct LoginView: View {
 
 private struct MainTabs: View {
     @Environment(AppState.self) private var appState
-    let profile: EmployeeProfile
+    let session: Session
 
     var body: some View {
         @Bindable var state = appState
         TabView(selection: $state.selectedTab) {
-            NavigationStack { ScheduleView(profile: profile) }
-                .tabItem { Label("Schedule", systemImage: "calendar") }.tag(0)
-            NavigationStack { RequestsView(profile: profile) }
-                .tabItem { Label("Requests", systemImage: "arrow.left.arrow.right") }.tag(1)
-            InboxListView()
-                .tabItem { Label("Messages", systemImage: "bubble.left.and.bubble.right.fill") }
-                .badge(appState.unreadMessages)
-                .tag(2)
-            NavigationStack { MeView(profile: profile) }
-                .tabItem { Label("Me", systemImage: "person.crop.circle.fill") }
-                .badge(appState.unreadNotifications)
-                .tag(3)
+            ForEach(AppTab.tabs(for: session), id: \.self) { tab in
+                content(for: tab).tag(tab)
+            }
         }
         .tabBarMinimizesOnScroll()
         .sensoryFeedback(.selection, trigger: appState.selectedTab)
+    }
+
+    @ViewBuilder
+    private func content(for tab: AppTab) -> some View {
+        switch tab {
+        case .schedule:
+            if let profile = session.employee {
+                NavigationStack { ScheduleView(profile: profile) }
+                    .tabItem { Label("Schedule", systemImage: "calendar") }
+            }
+        case .requests:
+            if let profile = session.employee {
+                NavigationStack { RequestsView(profile: profile) }
+                    .tabItem { Label("Requests", systemImage: "arrow.left.arrow.right") }
+            }
+        case .manage:
+            if let scope = session.manager {
+                ManageView(scope: scope)
+                    .tabItem { Label("Manage", systemImage: "rectangle.stack.badge.person.crop") }
+                    .badge(appState.pendingApprovals)
+            }
+        case .inbox:
+            InboxListView()
+                .tabItem { Label("Messages", systemImage: "bubble.left.and.bubble.right.fill") }
+                .badge(appState.unreadMessages)
+        case .me:
+            NavigationStack { MeView(session: session) }
+                .tabItem { Label("Me", systemImage: "person.crop.circle.fill") }
+                .badge(appState.unreadNotifications)
+        }
     }
 }
 
@@ -408,7 +429,7 @@ private struct MainTabs: View {
 
 private struct MeView: View {
     @Environment(AppState.self) private var appState
-    let profile: EmployeeProfile
+    let session: Session
     @AppStorage(AppearancePreference.storageKey) private var appearance = AppearancePreference.system
     @State private var signingOut = false
     @State private var permission: UNAuthorizationStatus?
@@ -417,10 +438,13 @@ private struct MeView: View {
         List {
             GlassHero {
                 HStack(spacing: 14) {
-                    Avatar(name: profile.displayName, size: 56)
+                    Avatar(name: session.displayName, size: 56)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(profile.displayName).font(.app(.title3, .semibold))
-                        Text(profile.company_name).font(.app(.subheadline)).foregroundStyle(Color.secondary)
+                        Text(session.displayName).font(.app(.title3, .semibold))
+                        Text(session.companyName).font(.app(.subheadline)).foregroundStyle(Color.secondary)
+                        if session.canManage {
+                            Text(managerLine).font(.app(.caption)).foregroundStyle(Color.secondary)
+                        }
                     }
                 }
             }
@@ -517,6 +541,13 @@ private struct MeView: View {
         .appBackdrop()
         .navigationTitle("Me")
         .task { permission = await PushService.shared.authorizationStatus() }
+    }
+
+    private var managerLine: String {
+        guard let scope = session.manager else { return "" }
+        if scope.company_wide { return "Business admin · every store" }
+        let stores = scope.locations.map(\.displayName)
+        return "Manager · " + (stores.isEmpty ? "your store" : ListFormatter.localizedString(byJoining: stores))
     }
 
     private var versionLine: String {

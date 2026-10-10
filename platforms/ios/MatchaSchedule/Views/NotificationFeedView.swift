@@ -48,7 +48,7 @@ struct NotificationFeedView: View {
 
     private func load() async {
         do {
-            notifications = try await NotificationService.list().notifications
+            notifications = try await NotificationService.list(typePrefix: appState.notificationPrefix).notifications
             error = nil
         } catch {
             if !error.isCancellation { self.error = error.localizedDescription }
@@ -65,9 +65,10 @@ struct NotificationFeedView: View {
             await load()
             var payload: [AnyHashable: Any] = ["type": notice.type]
             if let link = notice.link { payload["link"] = link }
-            if let id = notice.metadata?.conversation_id {
-                payload["metadata"] = ["conversation_id": id]
-            }
+            var metadata: [String: Any] = [:]
+            if let id = notice.metadata?.conversation_id { metadata["conversation_id"] = id }
+            if let id = notice.metadata?.request_id { metadata["request_id"] = id }
+            if !metadata.isEmpty { payload["metadata"] = metadata }
             appState.handlePush(payload)
         } catch { self.error = error.localizedDescription }
     }
@@ -76,7 +77,13 @@ struct NotificationFeedView: View {
         busy = true
         defer { busy = false }
         do {
-            try await NotificationService.markAllRead()
+            if appState.notificationPrefix == nil {
+                try await NotificationService.markAllRead()
+            } else {
+                // Only what this screen shows: "all" would also clear a
+                // business admin's web notifications.
+                try await NotificationService.markRead(notifications.filter { !$0.is_read }.map(\.id))
+            }
             await load()
         } catch { self.error = error.localizedDescription }
     }
@@ -93,6 +100,7 @@ private struct NoticeRow: View {
         case "schedule_request_accepted": "hand.thumbsup"
         case "schedule_request_withdrawn": "arrow.uturn.backward"
         case "schedule_request_decided": "checkmark.seal"
+        case "schedule_request_pending": "tray.full"
         case "inbox_message": "bubble.left"
         default: "bell"
         }

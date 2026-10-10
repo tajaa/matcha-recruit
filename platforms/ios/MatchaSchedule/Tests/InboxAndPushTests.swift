@@ -75,7 +75,12 @@ final class InboxAndPushTests: XCTestCase {
             KeychainHelper.delete(key: KeychainHelper.Keys.refreshToken)
             KeychainHelper.delete(key: KeychainHelper.Keys.pendingRevoke)
         }
-        XCTAssertTrue(KeychainHelper.save(key: KeychainHelper.Keys.refreshToken, value: "stored-refresh"))
+        // CI runs the tests unsigned, and an unsigned test host has no
+        // Keychain (errSecMissingEntitlement, -34018): nothing to sign out of.
+        try XCTSkipUnless(
+            KeychainHelper.save(key: KeychainHelper.Keys.refreshToken, value: "stored-refresh"),
+            "Keychain unavailable in this test host"
+        )
         APIClient.shared.accessToken = nil
 
         let state = AppState()

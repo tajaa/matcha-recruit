@@ -6,7 +6,13 @@ private struct LoginBody: Encodable {
     let password: String
     let client = "ios_schedule"
     let device_name: String
+    /// This build can run a store, so the server lets business admins in.
+    let capabilities = ["manage"]
 }
+
+/// Roles that can hold a Matcha Schedule session: crew and store managers sign
+/// in as employees, business admins as clients.
+let scheduleAppRoles: Set<String> = ["employee", "client"]
 
 private struct RefreshBody: Encodable {
     let refresh_token: String
@@ -27,7 +33,7 @@ enum SessionError: LocalizedError {
         switch self {
         case .noStoredSession: "Please sign in again."
         case .storageFailed: "Could not save the session securely. Please try again."
-        case .employeeOnly: "This app is for employees. Use Matcha on the web for other roles."
+        case .employeeOnly: "Matcha Schedule is for employees and business admins. Use Matcha on the web for this account."
         case .invalidCredentials(let message): message
         }
     }
@@ -56,7 +62,7 @@ final class AuthService {
             // session-expired copy.
             throw SessionError.invalidCredentials(message)
         }
-        guard response.user.role == "employee" else { throw SessionError.employeeOnly }
+        guard scheduleAppRoles.contains(response.user.role) else { throw SessionError.employeeOnly }
         try store(response)
         return response.user
     }
@@ -70,7 +76,7 @@ final class AuthService {
                 method: "POST", path: "/auth/refresh",
                 body: RefreshBody(refresh_token: stored), retryOnUnauthorized: false
             )
-            guard response.user.role == "employee" else { throw SessionError.employeeOnly }
+            guard scheduleAppRoles.contains(response.user.role) else { throw SessionError.employeeOnly }
             try self.store(response)
             return response
         }
