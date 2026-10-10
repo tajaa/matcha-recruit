@@ -39,6 +39,9 @@ THREAD = str(uuid4())
 @pytest.mark.parametrize(("method", "path", "allowed"), [
     ("GET", "/api/auth/me", True),
     ("POST", "/api/auth/logout", False),
+    ("POST", "/api/auth/refresh", True),
+    ("POST", "/api/auth/mobile/logout", True),
+    ("GET", "/api/auth/mobile/logout", False),
     ("POST", "/api/push/register", True),
     ("POST", "/api/push/unregister", True),
     ("GET", "/api/locations", True),
@@ -85,6 +88,10 @@ def client():
     async def week():
         return {"ok": True}
 
+    @app.post("/api/auth/mobile/logout")
+    async def mobile_logout():
+        return {"ok": True}
+
     with TestClient(app) as test_client:
         yield test_client
 
@@ -103,6 +110,13 @@ def test_middleware(client, authorization, path, status):
     assert response.status_code == status
     if status == 403:
         assert response.json() == {"detail": mobile_scope.REFUSAL}
+
+
+def test_a_business_phone_can_always_sign_out(client):
+    # The app sends its bearer on logout; refusing it would leave the device
+    # session live and the signed-out phone still getting the admin's pushes.
+    response = client.post("/api/auth/mobile/logout", headers={"Authorization": _token("client")})
+    assert response.status_code == 200
 
 
 def test_preflight_is_never_held(client):

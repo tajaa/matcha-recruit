@@ -28,6 +28,10 @@ _ALLOWED: tuple[tuple[frozenset[str], re.Pattern[str]], ...] = tuple(
     (frozenset(methods), re.compile(pattern))
     for methods, pattern in (
         ({"GET"}, r"^/api/auth/me$"),
+        # Both authenticate by the refresh token in the body, not the bearer;
+        # the app still sends its bearer when it has one. Refusing logout
+        # would leave the device session live and the phone getting pushes.
+        ({"POST"}, r"^/api/auth/(refresh|mobile/logout)$"),
         ({"POST"}, r"^/api/push/(register|unregister)$"),
         ({"GET"}, r"^/api/locations$"),
         ({"GET", "POST", "PUT", "PATCH", "DELETE"}, r"^/api/employee-schedule/.+$"),
