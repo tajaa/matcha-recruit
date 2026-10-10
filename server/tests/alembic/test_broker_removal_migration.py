@@ -37,12 +37,16 @@ def _outside_dollar_quotes(sql: str) -> str:
     return re.sub(r"'(?:[^']|'')*'", "''", sql)
 
 
-def test_guard_runs_first_and_the_role_constraint_loses_broker():
+def test_broker_users_are_deleted_after_the_drops_then_the_role_constraint_loses_broker():
     statements = _upgrade_statements(_load())
-    assert statements[0].lstrip().startswith("DO $$")
-    assert "role = 'broker'" in statements[0]
-    assert "RAISE EXCEPTION" in statements[0]
+    delete_users = statements.index("DELETE FROM users WHERE role = 'broker'")
+    last_drop = max(i for i, s in enumerate(statements) if s.startswith("DROP TABLE"))
+    # broker_client_setups / broker_company_links reference users with no
+    # delete rule, so the users can only go once those tables are gone.
+    assert delete_users > last_drop
+    assert not any("RAISE EXCEPTION" in s for s in statements)  # no longer refuses to run
     assert statements[-2].strip() == "ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check"
+    assert delete_users == len(statements) - 3
     assert "'broker'" not in statements[-1]
     assert "'individual'" in statements[-1]
 

@@ -47,7 +47,7 @@ Full mechanics (routers, endpoints, migrations, invariants) for every product ab
 
 ### Auxiliary surfaces (share codebase, not products)
 - **Admin** — `AdminSidebar`, `/admin/*` routes; internal tooling (companies, jurisdiction data, payer data).
-- **Broker** — removed (web UI in #718, backend + schema in the follow-up; migration `brokerdrop01`). No `/broker/*` routes, `broker_*` tables or `broker` role remain. Tenant tables brokers used to write into (`insurance_quotes`, `company_epl_attestations`, `company_wc_mods`, `company_wc_class_exposures`, `wc_loss_runs`) keep their dangling `broker_id` columns.
+- **Broker** — removed (web UI in #718, backend + schema in the follow-up; migration `brokerdrop01`). No `/broker/*` routes, `broker_*` tables or `broker` role remain; the migration deletes the leftover `broker` test accounts. Tenant tables brokers used to write into (`insurance_quotes`, `company_epl_attestations`, `company_wc_mods`, `company_wc_class_exposures`, `wc_loss_runs`) keep their dangling `broker_id` columns.
 - **Candidate / Employee portals** — public-token routes (`/candidate-interview/:token`, `/s/:token`); employee self-service through `employee_portal_router`.
 - **Public anonymous report** — `/report/:token` (`server/app/matcha/routes/intake/inbound_email.py`); per-company token-gated, reusable form (poster-friendly — not single-use; `/request-info` stays single-use).
 

@@ -10,7 +10,7 @@ This drops what they owned:
 - `brokers` and the 27 `broker_*` tables (members, company links, contracts,
   branding, chat, incident shares, external clients, pilot, risk alerts,
   milestones, lite referral tokens, ...).
-- the `broker` value from `users_role_check`.
+- the `broker` value from `users_role_check`, and the users still on that role.
 - the two `scheduler_settings` rows (`broker_risk_alerts`, `broker_milestones`) that
   gated the removed Celery tasks, so they stop showing in the admin scheduler list.
 
@@ -21,10 +21,17 @@ their foreign keys to `brokers` / `broker_external_clients`, but the rows and
 the (now dangling, nullable) `broker_id` columns stay. Tenant code still reads
 them.
 
-Safety: the upgrade refuses to run while any user still has role='broker', so a
-forgotten account fails the migration loudly instead of being locked out by the
-new role constraint. Resolve those users first (reassign or delete), then
-re-run.
+Broker logins: every remaining `role='broker'` user is deleted, after the
+drops. They were all test and demo accounts (10 on dev, which is a clone of
+prod), and the new role check would reject the rows anyway. An earlier draft
+refused to run while any existed, which stopped the first dev upgrade; deleting
+them by hand first doesn't work either, because `broker_client_setups` and
+`broker_company_links` reference users with no delete rule until they are
+dropped. Every other reference to a user is ON DELETE SET NULL or CASCADE: rows
+a broker wrote into tenant tables keep their data with `created_by` /
+`updated_by` cleared, error reports lose the user link, and the account's own
+notifications go. A reference added later without a rule fails the delete, and
+with it the whole migration, in `migrate-prod.sh`'s rehearsal.
 
 Irreversible: dropped data cannot be restored by `downgrade()`. Take a backup
 first (`deploy/backup-prod.sh`).
@@ -77,20 +84,11 @@ ROLES_AFTER = (
 
 
 def upgrade():
-    op.execute(
-        """
-        DO $$
-        BEGIN
-            IF EXISTS (SELECT 1 FROM users WHERE role = 'broker') THEN
-                RAISE EXCEPTION 'users with role=broker still exist - reassign or delete them before removing the broker product';
-            END IF;
-        END
-        $$
-        """
-    )
     op.execute("DELETE FROM scheduler_settings WHERE task_key IN ('broker_risk_alerts', 'broker_milestones')")
     for table in BROKER_TABLES:
         op.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+    # After the drops: two broker tables referenced users with no delete rule.
+    op.execute("DELETE FROM users WHERE role = 'broker'")
     op.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check")
     roles = ", ".join(f"'{r}'" for r in ROLES_AFTER)
     op.execute(f"ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ({roles}))")
