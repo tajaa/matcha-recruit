@@ -17,6 +17,17 @@ struct HuumeMessage: Decodable, Identifiable, Equatable {
     let created_at: String?
 
     var isUser: Bool { role == "user" }
+
+    /// The content without the schedule markup the web draws as widgets
+    /// (`[[shift:<id>:<date>]]` links, `[[bar:<start>:<end>:<color>]]` bars and
+    /// the `[[barruler]]` line, client/src/work/pages/ChannelView/systemContent.tsx).
+    /// The words beside each token already say the day, times and people.
+    var displayText: String {
+        content
+            .replacingOccurrences(of: #"(?m)^[ \t]*\[\[barruler\]\][ \t]*\n?"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\[\[bar:\d{1,4}:\d{1,4}:\d\]\][ \t]*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"[ \t]*\[\[shift:[0-9a-fA-F-]{36}:\d{4}-\d{2}-\d{2}\]\]"#, with: "", options: .regularExpression)
+    }
 }
 
 /// The parts of the thread's `current_state` the phone acts on. Everything

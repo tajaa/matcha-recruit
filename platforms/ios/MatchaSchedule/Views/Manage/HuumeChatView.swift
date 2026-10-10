@@ -217,7 +217,8 @@ private struct Bubble: View {
 
     private var text: AttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return (try? AttributedString(markdown: message.content, options: options)) ?? AttributedString(message.content)
+        let content = message.displayText
+        return (try? AttributedString(markdown: content, options: options)) ?? AttributedString(content)
     }
 
     var body: some View {

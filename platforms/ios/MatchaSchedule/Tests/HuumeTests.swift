@@ -59,4 +59,19 @@ final class HuumeTests: XCTestCase {
         XCTAssertEqual(session.thread_id, "t")
         XCTAssertNil(session.current_state.action)
     }
+
+    func testScheduleMarkupIsLeftOutOfTheBubble() {
+        // Verbatim from a dev "confirm" reply.
+        let message = HuumeMessage(
+            id: "m", role: "assistant",
+            content: "✅ Done — 1 change is live (**Barista** added Nadia Hassan [[shift:00387d21-926a-4f3a-b7a8-9164cbc481a9:2026-12-08]]).\nTue Dec 8\n[[barruler]]\n[[bar:480:750:0]] 08:00–12:30 Barista · Nadia Hassan",
+            created_at: nil
+        )
+        XCTAssertEqual(
+            message.displayText,
+            "✅ Done — 1 change is live (**Barista** added Nadia Hassan).\nTue Dec 8\n08:00–12:30 Barista · Nadia Hassan"
+        )
+        let plain = HuumeMessage(id: "p", role: "assistant", content: "Who has [[brackets]] open?", created_at: nil)
+        XCTAssertEqual(plain.displayText, plain.content)
+    }
 }
