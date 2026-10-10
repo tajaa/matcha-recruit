@@ -20,17 +20,21 @@ from app.database import connection_or_direct
 
 logger = logging.getLogger(__name__)
 
-WorkProduct = Literal["chat", "agent_cards", "projects"]
+WorkProduct = Literal["chat", "agent_cards", "projects", "handbooks"]
 
 _BUSINESS: dict[str, str] = {
     "chat": reg.MATCHA_WORK_CHAT,
     "agent_cards": reg.MATCHA_WORK_AGENT_CARDS,
     "projects": reg.MATCHA_WORK_PROJECTS,
+    "handbooks": reg.MATCHA_HANDBOOKS,
 }
 _PERSONAL: dict[str, str] = {
     "chat": reg.ESPRESSO_CHAT,
     "agent_cards": reg.ESPRESSO_AGENT_CARDS,
     "projects": reg.ESPRESSO_PROJECTS,
+    # Espresso has no Handbooks row: a personal handbook upload happens in a
+    # chat thread, so it follows Espresso → Chat.
+    "handbooks": reg.ESPRESSO_CHAT,
 }
 
 # A company never changes between personal and business, so the answer can
@@ -45,8 +49,11 @@ async def is_personal_company(company_id: UUID | str | None) -> bool:
     if not company_id:
         return False
     key = str(company_id)
-    if key in _personal:
-        return _personal[key]
+    # One read: `in` then `[]` can straddle a TTL expiry and KeyError outside
+    # the try below, failing the turn it was only meant to label.
+    cached = _personal.get(key)
+    if cached is not None:
+        return cached
     try:
         async with connection_or_direct() as conn:
             value = await conn.fetchval(
@@ -55,8 +62,9 @@ async def is_personal_company(company_id: UUID | str | None) -> bool:
     except Exception:
         logger.warning("work_surface: could not read is_personal for %s; using Matcha", key, exc_info=True)
         return False
-    _personal[key] = bool(value)
-    return _personal[key]
+    personal = bool(value)
+    _personal[key] = personal
+    return personal
 
 
 async def work_surface(company_id: UUID | str | None, product: WorkProduct) -> str:

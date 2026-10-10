@@ -29,10 +29,6 @@ DEFAULT_VISIBLE_FEATURES = [
 ]
 DEFAULT_MATCHA_WORK_MODEL_MODE = "light"
 DEFAULT_JURISDICTION_RESEARCH_MODEL_MODE = "light"
-# The legacy single "Agent model" row. It now only seeds the per-app map
-# (`agent_models`, below) until an admin first saves that map.
-DEFAULT_AGENT_MODEL = "default"
-AGENT_MODEL_CHOICES = ("default", "claude-haiku-5-5", "claude-sonnet-5-5")
 VISIBLE_FEATURES_CACHE_TTL_SECONDS = 30
 
 # Serve tenants ONLY requirements whose catalog row carries a verified statute
@@ -312,6 +308,24 @@ def _json_value(raw: object) -> object:
     return raw
 
 
+# Both rows: `agent_models` once saved, else the legacy `agent_model` seed.
+AGENT_MODELS_QUERY = (
+    "SELECT key, value, updated_at FROM platform_settings WHERE key IN ('agent_models', 'agent_model')"
+)
+
+
+def agent_models_from_rows(rows) -> tuple[dict, str | None]:
+    """(full map, version) from AGENT_MODELS_QUERY rows. The version is the
+    saved map's `updated_at` (None before the first save): the admin PUT
+    compares it so a stale tab can't overwrite a newer save."""
+    by_key = {row["key"]: row for row in rows}
+    saved = by_key.get("agent_models")
+    if saved is not None:
+        return normalize_agent_models(_json_value(saved["value"])), saved["updated_at"].isoformat()
+    legacy = by_key.get("agent_model")
+    return _agent_models_from_legacy(_json_value(legacy["value"]) if legacy else None), None
+
+
 async def get_agent_models(*, conn=None) -> dict:
     """The full per-app/per-surface map, from `agent_models`, or seeded from
     the legacy `agent_model` row while `agent_models` has never been saved."""
@@ -320,31 +334,33 @@ async def get_agent_models(*, conn=None) -> dict:
     if _agent_models_cache is not None and now - _agent_models_cached_at < VISIBLE_FEATURES_CACHE_TTL_SECONDS:
         return _copy_agent_models(_agent_models_cache)
 
-    query = "SELECT key, value FROM platform_settings WHERE key IN ('agent_models', 'agent_model')"
     if conn is None:
         async with get_connection() as managed_conn:
-            rows = await managed_conn.fetch(query)
+            rows = await managed_conn.fetch(AGENT_MODELS_QUERY)
     else:
-        rows = await conn.fetch(query)
-    stored = {row["key"]: _json_value(row["value"]) for row in rows}
-
-    if "agent_models" in stored:
-        models = normalize_agent_models(stored["agent_models"])
-    else:
-        models = _agent_models_from_legacy(stored.get("agent_model"))
+        rows = await conn.fetch(AGENT_MODELS_QUERY)
+    models, _version = agent_models_from_rows(rows)
     _agent_models_cache = models
     _agent_models_cached_at = now
     return _copy_agent_models(models)
 
 
+_warned_unregistered_surfaces: set[str] = set()
+
+
 def resolve_agent_model(models: dict, surface: str) -> str:
     """One surface's effective choice: its own value unless `inherit`, else
-    its app default, else "default". An unknown surface follows the app its
-    key prefix names (and is logged), so a typo never routes to Claude by
-    surprise and never crashes a turn."""
+    its app default, else "default".
+
+    An unregistered key never crashes a turn: it has no row of its own, so it
+    follows the app its prefix names — which may be a Claude default — or
+    "default" when the prefix is no app. It is logged once per key (this runs
+    on every model call). `test_agent_surfaces` keeps call sites to
+    registered keys, so this is a backstop, not a path."""
     from app.core.services import agent_surfaces as reg
 
-    if surface not in reg.SURFACE_BY_KEY:
+    if surface not in reg.SURFACE_BY_KEY and surface not in _warned_unregistered_surfaces:
+        _warned_unregistered_surfaces.add(surface)
         logger.warning("agent model: unregistered surface %r; using its app default", surface)
     own = models.get("surfaces", {}).get(surface, reg.INHERIT)
     if own in reg.MODEL_CHOICES:
