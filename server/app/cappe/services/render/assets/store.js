@@ -13,7 +13,7 @@ return '<button type="button" class="cz-opt" data-opt="'+RT.esc(o.id)+'" data-de
 function out(v){return v!=null&&v<=0;}
 function soldOut(p){return p.fulfillment==='physical'&&out(p.inventory);}
 function stars(n){n=Math.round(n||0);var s='';for(var i=1;i<=5;i++)s+=(i<=n?'★':'☆');return s;}
-var REVIEWS=[];
+var REVIEWS=[],rseq=0;
 // One shared product-detail overlay (acts like a product page).
 var ov=document.createElement('div');ov.className='cz-pd';ov.hidden=true;
 ov.innerHTML='<div class="cz-pd__panel"><button class="cz-pd__x" aria-label="Close">×</button><div class="cz-pd__grid"><div class="cz-pd__media" data-media></div><div class="cz-pd__info" data-info></div></div><div class="cz-pd__reviews" data-reviews></div></div>';
@@ -27,13 +27,14 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!ov.hidden)
 // A product's own reviews when it has any; otherwise what clients say about the store.
 function reviewHtml(r){return '<figure class="cz-review"><div class="cz-review__stars">'+stars(r.rating)+(r.verified?' <span class="cz-review__verified">Verified purchase</span>':'')+'</div><blockquote>'+RT.esc(r.body)+'</blockquote><figcaption>'+RT.esc(r.author_name)+'</figcaption>'+
 (r.owner_reply?'<div class="cz-review__reply"><b>Reply from the store</b> '+RT.esc(r.owner_reply)+'</div>':'')+'</figure>';}
-function productReviewsHtml(list){var avg=list.reduce(function(a,r){return a+(r.rating||0);},0)/list.length;
-return '<h3 class="cz-pd__rtitle">Reviews <span class="cz-pd__rstars">'+stars(avg)+'</span><span class="cz-pd__rn">'+list.length+' review'+(list.length>1?'s':'')+'</span></h3>'+
+function rlistHtml(title,avg,n,list){return '<h3 class="cz-pd__rtitle">'+title+' <span class="cz-pd__rstars">'+stars(avg)+'</span><span class="cz-pd__rn">'+n+' review'+(n>1?'s':'')+'</span></h3>'+
 '<div class="cz-pd__rlist">'+list.map(reviewHtml).join('')+'</div>';}
+// The summary is the product's rating over every approved review — what its card
+// and structured data say — not the first 50 (verified first) that the list shows.
+function productReviewsHtml(p,list){return rlistHtml('Reviews',p.rating_avg,p.rating_count||list.length,list);}
 function reviewsHtml(){if(!REVIEWS.length)return '';
 var avg=REVIEWS.reduce(function(a,r){return a+(r.rating||0);},0)/REVIEWS.length;
-return '<h3 class="cz-pd__rtitle">What clients say <span class="cz-pd__rstars">'+stars(avg)+'</span><span class="cz-pd__rn">'+REVIEWS.length+' review'+(REVIEWS.length>1?'s':'')+'</span></h3>'+
-'<div class="cz-pd__rlist">'+REVIEWS.map(function(r){return '<figure class="cz-review"><div class="cz-review__stars">'+stars(r.rating)+'</div><blockquote>'+RT.esc(r.body)+'</blockquote><figcaption>'+RT.esc(r.author_name)+'</figcaption></figure>';}).join('')+'</div>';}
+return rlistHtml('What clients say',avg,REVIEWS.length,REVIEWS);}
 // "Subscribe": the product on a schedule. Signing in and checking out happen
 // on the account page (/account), which opens the subscription checkout.
 function subHtml(p){var iv=(p.subscription_intervals||[]).filter(function(i){return i==='week'||i==='month';});
@@ -106,8 +107,9 @@ var ok=true;info.querySelectorAll('.cz-opt-group').forEach(function(g){if(g.getA
 if(!ok){msg.textContent='Please choose the required options';msg.className='cz-msg err';return;}
 window.location='/account?subscribe='+encodeURIComponent(p.id)+'&every='+encodeURIComponent(info.querySelector('[data-every]').value)+
 '&qty='+qn()+'&opts='+encodeURIComponent(chosen().join(','));});
-var rv=ov.querySelector('[data-reviews]');rv.innerHTML=reviewsHtml();
-if(p.rating_count)RT.get('/reviews?product_id='+encodeURIComponent(p.id)).then(function(list){if(list&&list.length)rv.innerHTML=productReviewsHtml(list);}).catch(function(){});
+// The overlay is shared: a slow answer for a product opened earlier must not land under this one.
+var rv=ov.querySelector('[data-reviews]'),seq=++rseq;rv.innerHTML=reviewsHtml();
+if(p.rating_count)RT.get('/reviews?product_id='+encodeURIComponent(p.id)).then(function(list){if(seq===rseq&&list&&list.length)rv.innerHTML=productReviewsHtml(p,list);}).catch(function(){});
 ov.querySelector('.cz-pd__panel').scrollTop=0;ov.hidden=false;document.body.style.overflow='hidden';
 if(!(history.state&&history.state.czpd))history.pushState({czpd:1},'');
 }

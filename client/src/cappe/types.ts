@@ -902,6 +902,9 @@ export type CappeReview = {
 /** Who may post reviews: anyone, only buyers (from their order page), or nobody. */
 export type CappeReviewSubmissions = 'anyone' | 'buyers' | 'off'
 
+/** How many reviews each moderation tab holds. */
+export type CappeReviewCounts = Record<CappeReview['status'], number>
+
 export type CappeClient = {
   email: string
   name: string | null

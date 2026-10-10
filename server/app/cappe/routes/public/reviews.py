@@ -72,46 +72,54 @@ async def public_submit_review(slug: str, body: CappeReviewCreate, request: Requ
         return {"ok": True}  # a bot filled the hidden field: say yes, keep nothing
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
-        who = await conn.fetchval("SELECT review_submissions FROM cappe_sites WHERE id = $1", site["id"]) or "anyone"
-        if who == "off":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This store isn't taking reviews right now.")
-        order_id = None
-        if body.order_token:
-            order = await conn.fetchrow(
-                "SELECT id, status FROM cappe_orders WHERE access_token = $1 AND site_id = $2",
-                body.order_token, site["id"],
-            )
-            if order is None or order["status"] not in ("paid", "fulfilled"):
+        async with conn.transaction():
+            # One admission at a time per store: the pending count and the
+            # insert below must see each other, or two submissions that both
+            # count 499 both get in. NO KEY UPDATE serialises admissions (and
+            # a concurrent change of who may post) without blocking the
+            # foreign-key checks of other writes against the store.
+            who = await conn.fetchval(
+                "SELECT review_submissions FROM cappe_sites WHERE id = $1 FOR NO KEY UPDATE", site["id"],
+            ) or "anyone"
+            if who == "off":
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This store isn't taking reviews right now.")
+            order_id = None
+            if body.order_token:
+                order = await conn.fetchrow(
+                    "SELECT id, status FROM cappe_orders WHERE access_token = $1 AND site_id = $2",
+                    body.order_token, site["id"],
+                )
+                if order is None or order["status"] not in ("paid", "fulfilled"):
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                        detail="Reviews open once your order is paid.")
+                if body.product_id is None or not await conn.fetchval(
+                    "SELECT 1 FROM cappe_order_items WHERE order_id = $1 AND product_id = $2",
+                    order["id"], body.product_id,
+                ):
+                    raise HTTPException(status_code=422, detail="That isn't something in this order.")
+                order_id = order["id"]
+            elif who == "buyers":
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                                    detail="Reviews open once your order is paid.")
-            if body.product_id is None or not await conn.fetchval(
-                "SELECT 1 FROM cappe_order_items WHERE order_id = $1 AND product_id = $2",
-                order["id"], body.product_id,
+                                    detail="This store takes reviews from customers' order pages.")
+            elif body.product_id is not None and not await conn.fetchval(
+                "SELECT 1 FROM cappe_products WHERE id = $1 AND site_id = $2 AND status = 'active'",
+                body.product_id, site["id"],
             ):
-                raise HTTPException(status_code=422, detail="That isn't something in this order.")
-            order_id = order["id"]
-        elif who == "buyers":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                                detail="This store takes reviews from customers' order pages.")
-        elif body.product_id is not None and not await conn.fetchval(
-            "SELECT 1 FROM cappe_products WHERE id = $1 AND site_id = $2 AND status = 'active'",
-            body.product_id, site["id"],
-        ):
-            raise HTTPException(status_code=422, detail="That product isn't available.")
-        pending = await conn.fetchval(
-            "SELECT COUNT(*) FROM cappe_reviews WHERE site_id = $1 AND status = 'pending'", site["id"],
-        )
-        if pending >= MAX_PENDING:
-            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                                detail="This store isn't taking more reviews right now. Try again later.")
-        inserted = await conn.fetchval(
-            """INSERT INTO cappe_reviews (site_id, author_name, rating, body, status, product_id, order_id, verified)
-               VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7)
-               ON CONFLICT (order_id, product_id) WHERE order_id IS NOT NULL DO NOTHING
-               RETURNING id""",
-            site["id"], body.author_name.strip(), body.rating, body.body.strip(),
-            body.product_id, order_id, order_id is not None,
-        )
+                raise HTTPException(status_code=422, detail="That product isn't available.")
+            pending = await conn.fetchval(
+                "SELECT COUNT(*) FROM cappe_reviews WHERE site_id = $1 AND status = 'pending'", site["id"],
+            )
+            if pending >= MAX_PENDING:
+                raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                                    detail="This store isn't taking more reviews right now. Try again later.")
+            inserted = await conn.fetchval(
+                """INSERT INTO cappe_reviews (site_id, author_name, rating, body, status, product_id, order_id, verified)
+                   VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7)
+                   ON CONFLICT (order_id, product_id) WHERE order_id IS NOT NULL DO NOTHING
+                   RETURNING id""",
+                site["id"], body.author_name.strip(), body.rating, body.body.strip(),
+                body.product_id, order_id, order_id is not None,
+            )
     if inserted is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="You've already reviewed this from this order.")
     return {"ok": True}

@@ -5,14 +5,15 @@ A review lands `pending` and only renders on the site once the creator
 approves it. The owner can answer one publicly, and decides who may post at
 all (`review_submissions`: anyone / buyers / off).
 """
+from typing import Annotated, Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import (
-    CappeAccount, CappeReview, CappeReviewModerate, CappeReviewReply, CappeReviewSettings,
+    CappeAccount, CappeReview, CappeReviewCounts, CappeReviewModerate, CappeReviewReply, CappeReviewSettings,
 )
 from ._shared import get_owned_site
 
@@ -31,14 +32,45 @@ async def _review(conn, site_id: UUID, review_id: UUID):
 
 
 @router.get("/sites/{site_id}/reviews", response_model=list[CappeReview])
-async def list_reviews(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+async def list_reviews(
+    site_id: UUID,
+    account: CappeAccount = Depends(require_cappe_account),
+    review_status: Annotated[Optional[Literal["pending", "approved", "hidden"]], Query(alias="status")] = None,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 1000,
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    """A page of reviews, newest first, optionally one status (the dashboard
+    asks per tab and pages with `offset`, so every review stays reachable).
+    Unfiltered, pending reviews come first: public submissions stop at
+    MAX_PENDING (500) waiting, so a caller that reads one page — the iOS app —
+    still gets the whole queue. Cut by date alone, one pending review sat
+    behind 1,000 newer approved ones and the Pending tab said zero."""
+    where, args = ["r.site_id = $1"], [site_id]
+    if review_status:
+        args.append(review_status)
+        where.append(f"r.status = ${len(args)}")
+    args.extend([limit, offset])
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         rows = await conn.fetch(
-            f"SELECT {_COLS} FROM {_FROM} WHERE r.site_id = $1 ORDER BY r.created_at DESC LIMIT 1000",
-            site_id,
+            f"SELECT {_COLS} FROM {_FROM} WHERE {' AND '.join(where)} "
+            f"ORDER BY (r.status = 'pending') DESC, r.created_at DESC, r.id DESC "
+            f"LIMIT ${len(args) - 1} OFFSET ${len(args)}",
+            *args,
         )
     return [dict(r) for r in rows]
+
+
+@router.get("/sites/{site_id}/reviews/counts", response_model=CappeReviewCounts)
+async def review_counts(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    """How many reviews each tab holds — the tabs can't count a list that
+    arrives a page at a time."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        rows = await conn.fetch(
+            "SELECT status, COUNT(*) AS n FROM cappe_reviews WHERE site_id = $1 GROUP BY status", site_id,
+        )
+    return {r["status"]: int(r["n"]) for r in rows if r["status"] in CappeReviewCounts.model_fields}
 
 
 @router.patch("/sites/{site_id}/reviews/{review_id}", response_model=CappeReview)

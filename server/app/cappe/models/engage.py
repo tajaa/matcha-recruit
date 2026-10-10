@@ -297,6 +297,13 @@ class CappeReview(BaseModel):
     owner_replied_at: Optional[datetime] = None
 
 
+class CappeReviewCounts(BaseModel):
+    """How many reviews sit in each moderation tab (the list comes a page at a time)."""
+    pending: int = 0
+    approved: int = 0
+    hidden: int = 0
+
+
 __all__ = [
     "CappeSubscriberCreate",
     "CappeSubscriber",
@@ -327,4 +334,5 @@ __all__ = [
     "CappeReviewSettings",
     "CappeReviewModerate",
     "CappeReview",
+    "CappeReviewCounts",
 ]

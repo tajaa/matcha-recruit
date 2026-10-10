@@ -7,9 +7,10 @@ What each block pins:
   * a review from a paid order's page is a verified purchase, once per
     product per order, and only for something in that order;
   * bots that fill the hidden field are told yes and stored nowhere; a
-    per-store cap keeps a flood out of the moderation queue;
+    per-store cap keeps a flood out of the moderation queue, and holds when
+    two submissions arrive at once;
   * a product's own reviews, its rating on the listing, and the owner's
-    public reply;
+    public reply; the owner reaches every review, a tab and a page at a time;
   * the order page offers a form per product once paid.
 
 Run from server/:  ./venv/bin/python -m pytest tests/cappe/test_cappe_product_reviews.py -q
@@ -75,6 +76,19 @@ class Conn:
     async def execute(self, sql, *args):
         self._answer(sql, args)
 
+    def transaction(self):
+        conn = self
+
+        class Tx:
+            async def __aenter__(self):
+                conn.calls.append(("BEGIN", ()))
+
+            async def __aexit__(self, exc_type, *exc):
+                conn.calls.append(("ROLLBACK" if exc_type else "COMMIT", ()))
+                return False
+
+        return Tx()
+
     def sql(self, needle):
         return [c for c in self.calls if needle in c[0]]
 
@@ -138,6 +152,66 @@ def test_a_flooded_queue_takes_no_more(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         _post()
     assert exc.value.status_code == 429 and not conn.sql("INSERT")
+
+
+def test_admission_locks_the_store_before_counting_the_queue(monkeypatch):
+    conn = _wire(monkeypatch, ("COUNT(*)", 0), ("INSERT INTO cappe_reviews", uuid4()))
+    _post()
+    steps = [sql for sql, _ in conn.calls]
+    lock = next(i for i, sql in enumerate(steps) if "FOR NO KEY UPDATE" in sql)
+    count = next(i for i, sql in enumerate(steps) if "COUNT(*)" in sql)
+    insert = next(i for i, sql in enumerate(steps) if "INSERT INTO cappe_reviews" in sql)
+    assert steps[0] == "BEGIN" and lock < count < insert and steps[-1] == "COMMIT"
+    assert "FROM cappe_sites" in steps[lock]
+
+
+def test_two_submissions_at_once_cannot_both_take_the_last_place(monkeypatch):
+    """Both used to count 499 and both insert: 501 pending past a cap of 500.
+    Here each connection models the store row lock, and yields between every
+    statement so the two handlers interleave."""
+    store = {"pending": public_reviews.MAX_PENDING - 1}
+    row_lock = asyncio.Lock()
+
+    class Racing(Conn):
+        def transaction(self):
+            conn = self
+
+            class Tx:
+                async def __aenter__(self):
+                    conn.holds = False
+
+                async def __aexit__(self, *exc):
+                    if conn.holds:
+                        row_lock.release()
+                    return False
+
+            return Tx()
+
+        async def fetchval(self, sql, *args):
+            if "FOR NO KEY UPDATE" in sql:
+                await row_lock.acquire()
+                self.holds = True
+            await asyncio.sleep(0)
+            if "COUNT(*)" in sql:
+                return store["pending"]
+            if "INSERT INTO cappe_reviews" in sql:
+                store["pending"] += 1
+                return uuid4()
+            return "anyone" if "review_submissions" in sql else None
+
+    _wire(monkeypatch)
+    monkeypatch.setattr(public_reviews, "get_connection", lambda: Ctx(Racing()))
+    body = CappeReviewCreate(author_name="Ana", rating=5, body="Lovely mug")
+
+    async def both():
+        return await asyncio.gather(*(public_reviews.public_submit_review("shop", body, _request()) for _ in range(2)),
+                                    return_exceptions=True)
+
+    first, second = asyncio.run(both())
+    assert store["pending"] == public_reviews.MAX_PENDING
+    assert [first, second].count({"ok": True}) == 1
+    refused = first if isinstance(first, HTTPException) else second
+    assert refused.status_code == 429
 
 
 # ── verified purchases ───────────────────────────────────────────────────────
@@ -237,6 +311,36 @@ def test_the_owner_sees_which_product_and_whether_verified(monkeypatch):
     assert "LEFT JOIN cappe_products p" in conn.sql("FROM cappe_reviews r")[0][0]
 
 
+def test_one_unfiltered_page_still_holds_the_whole_queue(monkeypatch):
+    """The iOS app reads one page with no filter. Pending reviews come first,
+    and the queue stops taking submissions well before a page is full — so
+    an old pending review can't hide behind 1,000 newer approved ones."""
+    conn = Conn([("FROM cappe_reviews r", [])])
+    asyncio.run(owner_reviews.list_reviews(SITE, _owner(monkeypatch, conn)))
+    sql, args = conn.sql("FROM cappe_reviews r")[0]
+    assert "ORDER BY (r.status = 'pending') DESC, r.created_at DESC" in sql
+    assert "r.status = $" not in sql and args == (SITE, 1000, 0)
+    assert public_reviews.MAX_PENDING < args[1]
+
+
+def test_the_dashboard_pages_through_one_tab_at_a_time(monkeypatch):
+    conn = Conn([("FROM cappe_reviews r", [])])
+    account = _owner(monkeypatch, conn)
+    asyncio.run(owner_reviews.list_reviews(SITE, account, review_status="approved", limit=100, offset=1000))
+    sql, args = conn.sql("FROM cappe_reviews r")[0]
+    assert "r.status = $2" in sql and "LIMIT $3 OFFSET $4" in sql
+    assert args == (SITE, "approved", 100, 1000)
+
+
+def test_the_tabs_count_every_review_not_just_a_page(monkeypatch):
+    conn = Conn([("GROUP BY status", [{"status": "pending", "n": 3}, {"status": "approved", "n": 1200}])])
+    out = asyncio.run(owner_reviews.review_counts(SITE, _owner(monkeypatch, conn)))
+    assert out == {"pending": 3, "approved": 1200}
+    from app.cappe.models.cappe import CappeReviewCounts
+    assert CappeReviewCounts(**out).hidden == 0
+    assert conn.sql("GROUP BY status")[0][1] == (SITE,)
+
+
 def test_the_owner_sets_who_may_post(monkeypatch):
     conn = Conn([])
     account = _owner(monkeypatch, conn)
@@ -296,6 +400,17 @@ def test_the_scripts_send_the_order_token_honour_the_setting_and_trap_bots():
     assert "RT.get('/reviews?product_id='" in store and "Verified purchase" in store
     # Product structured data, with `<` escaped so a product name can't close the script.
     assert "'@type':'Product'" in store and "aggregateRating" in store and "replace(/</g,'\\\\u003c')" in store
+
+
+def test_the_product_panel_shows_its_own_reviews_and_rating():
+    store = (ASSETS / "store.js").read_text()
+    # The overlay is shared: an answer for the product opened before this one is dropped.
+    assert "seq=++rseq" in store and "if(seq===rseq&&" in store
+    # Its summary is the product's full rating (the card's), not the 50 the list holds.
+    assert "productReviewsHtml(p,list)" in store and "rlistHtml('Reviews',p.rating_avg,p.rating_count" in store
+    # The store-review fallback uses the same renderer, so replies and badges survive it.
+    assert "rlistHtml('What clients say',avg,REVIEWS.length,REVIEWS)" in store
+    assert store.count("<figure class=\"cz-review\">") == 1
 
 
 def test_the_migration_chains():
