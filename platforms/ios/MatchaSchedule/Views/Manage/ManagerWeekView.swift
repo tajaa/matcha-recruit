@@ -132,6 +132,7 @@ struct ManagerWeekView: View {
                             location: location,
                             weekStart: weekStart,
                             canEdit: canEdit(shift),
+                            companyWide: scope.company_wide,
                             onChanged: { await reload() }
                         )
                     } else {
