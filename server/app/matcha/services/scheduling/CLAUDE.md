@@ -789,6 +789,18 @@ Matcha Schedule app (iOS) is the surface this was built for.
   No wage field rides on it.
 - **Forcing.** A store manager can force through the same advisories a business
   admin can; it is audit-logged as theirs. There is no per-company switch.
+- **They are told about requests** (migration `empsched29`).
+  `send_manager_ready_notifications` adds `STORE_MANAGER_RECIPIENTS_SQL`
+  (`schedule_manager_scope.store_manager_recipients_sql`: the queue rule, never
+  the requester or coworker) to the unchanged business-admin recipients. Store
+  managers get the bell row only, never the email. Every FRESH bell claim (admin
+  or store manager) also pushes `schedule_request_pending` to the Matcha Schedule
+  app (`matchaschedule://manage/requests/{id}`); Werk/Espresso never gets the kind.
+  The push is best-effort: the bell row is the durable record and the app's
+  approvals badge is read from `/manager/scope`. The recovery sweep chases store
+  managers through the same fragment (outer request aliased `pending`).
+  `empsched29` floors the requests already waiting as delivered, so the first
+  sweep after deploy does not push the backlog; run it BEFORE the code ships.
 
 ## Stores from the schedule screens (2026-10-01) — what a week needs before it can publish
 
@@ -1165,7 +1177,8 @@ plus Matcha Schedule APNs.
   each one fans out to every manager, so a repeat click must not re-send.
 - **Manager-ready recovery sweep anti-joins delivered rows** on both channels;
   `empsched25` backfilled deliveries for requests already waiting when the sweep
-  was widened, so the first run does not replay the backlog.
+  was widened, so the first run does not replay the backlog. Store managers
+  (in-app only) joined the sweep with the same kind of floor in `empsched29`.
 - **Employee dedupe keys name the transition, not the target state**
   (`{request_id}:accepted:<counterparty_confirmed_at>`,
   `{request_id}:withdrawn:<updated_at>`). `ON CONFLICT DO NOTHING` on a

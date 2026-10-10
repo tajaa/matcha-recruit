@@ -119,3 +119,37 @@ async def resolve_schedule_manager_scope(conn, *, company_id: UUID, user) -> Sch
                 actor_employee_ids=frozenset(row["id"] for row in rows),
             )
     raise HTTPException(status_code=403, detail="You are not a manager for any store")
+
+
+def store_manager_recipients_sql(request_id: str) -> str:
+    """User ids of the store managers who handle one request, by the same rule
+    as their queue (`request_scope_sql`), never the requester or the coworker.
+
+    ``request_id`` is the SQL expression naming the request (``"$1"``, or an
+    outer query's column). The notification sender and its recovery sweep both
+    build on this, so who gets told and who the sweep chases cannot disagree.
+    Uses the aliases r, e, te, s, cs internally: an outer query must not call
+    its own request ``r``.
+    """
+    return f"""
+        SELECT DISTINCT mgr.user_id AS id
+          FROM schedule_requests r
+          JOIN employees e ON e.id = r.employee_id
+          LEFT JOIN employees te ON te.id = r.target_employee_id
+          LEFT JOIN schedule_shifts s ON s.id = r.shift_id
+          LEFT JOIN schedule_shifts cs ON cs.id = r.counter_shift_id
+          JOIN LATERAL (
+                SELECT m.user_id, array_agg(m.work_location_id) AS locs
+                  FROM employees m
+                  JOIN users mu ON mu.id = m.user_id
+                 WHERE m.org_id = r.company_id
+                   AND mu.role = 'employee' AND mu.is_active
+                   AND COALESCE(m.employment_status, 'active') = 'active'
+                   AND (COALESCE(m.is_manager, false) OR COALESCE(m.is_supervisor, false))
+                   AND m.work_location_id IS NOT NULL
+                 GROUP BY m.user_id
+          ) mgr ON {request_scope_sql("mgr.locs")}
+         WHERE r.id = {request_id}
+           AND mgr.user_id IS DISTINCT FROM e.user_id
+           AND mgr.user_id IS DISTINCT FROM te.user_id
+    """
