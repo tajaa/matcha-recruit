@@ -160,8 +160,10 @@ class _Conn:
 async def test_before_the_first_save_the_legacy_setting_seeds_matcha_and_espresso():
     conn = _Conn({"agent_model": '"claude-haiku-5-5"'})
     models = await platform_settings.get_agent_models(conn=conn)
-    # Gummfit never read the old setting, so it starts built-in.
-    assert models["apps"] == {"matcha": "claude-haiku-5-5", "espresso": "claude-haiku-5-5", "gummfit": "default"}
+    # Gummfit and Tell-Us never read the old setting, so they start built-in.
+    assert models["apps"] == {
+        "matcha": "claude-haiku-5-5", "espresso": "claude-haiku-5-5", "gummfit": "default", "tellus": "default",
+    }
     assert set(models["surfaces"].values()) == {"inherit"}
     # Cached, the default included: no second query inside the TTL.
     await platform_settings.get_agent_models(conn=conn)
@@ -388,7 +390,9 @@ async def test_admin_saves_the_map_and_the_legacy_row_and_primes_the_cache(admin
     )
     saved = json.loads(db.writes["agent_models"])
     assert saved == out["agent_models"]
-    assert saved["apps"] == {"matcha": "claude-sonnet-5-5", "espresso": "default", "gummfit": "default"}
+    assert saved["apps"] == {
+        "matcha": "claude-sonnet-5-5", "espresso": "default", "gummfit": "default", "tellus": "default",
+    }
     assert saved["surfaces"]["matcha.huume"] == "inherit"  # omitted → follows Matcha
     # A container still on the old code reads the legacy row: keep it current.
     assert json.loads(db.writes["agent_model"]) == "claude-sonnet-5-5"

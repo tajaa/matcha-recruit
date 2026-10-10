@@ -50,11 +50,13 @@ class SurfaceDef:
 MATCHA = "matcha"
 ESPRESSO = "espresso"
 GUMMFIT = "gummfit"
+TELLUS = "tellus"
 
 APPS: tuple[AppDef, ...] = (
     AppDef(MATCHA, "Matcha", "The HR and operations platform, including Huume and Matcha Work for businesses."),
     AppDef(ESPRESSO, "Espresso", "The personal workspace app (personal accounts on matcha-work)."),
     AppDef(GUMMFIT, "Gummfit", "The website builder (Cappe) on gummfit.com."),
+    AppDef(TELLUS, "Tell-Us", "Rewards-for-feedback: the brand side's flyer designer."),
 )
 
 # ── Matcha ──
@@ -82,6 +84,9 @@ GUMMFIT_MERLIN = "gummfit.merlin"
 GUMMFIT_MERLIN_ROUTER = "gummfit.merlin_router"
 GUMMFIT_DIRECTORY = "gummfit.directory"
 GUMMFIT_BOOKING = "gummfit.booking"
+
+# ── Tell-Us ──
+TELLUS_FLYER_AI = "tellus.flyer_ai"
 
 _LUNA = "OpenAI Luna"
 _GEMINI = "Gemini"
@@ -153,6 +158,9 @@ SURFACES: tuple[SurfaceDef, ...] = (
                "Suggests a published site's directory category, tags and blurb.", f"{_GEMINI} Flash Lite"),
     SurfaceDef(GUMMFIT_BOOKING, GUMMFIT, "Booking suggestions",
                "Reads the times and staff a visitor asks for when suggesting bookings.", f"{_GEMINI} Flash Lite"),
+    SurfaceDef(TELLUS_FLYER_AI, TELLUS, "Flyer AI",
+               "The flyer designer's assistant (edits a design from chat) and its idea generator.",
+               f"{_GEMINI} Flash"),
 )
 
 APP_KEYS: frozenset[str] = frozenset(app.key for app in APPS)

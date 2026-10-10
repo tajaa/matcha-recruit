@@ -243,6 +243,19 @@ still resolves.
   stops a stampede. The per-IP hourly cap is 100, not 20, because the flyer's whole point is a
   shared-WiFi/CGNAT crowd — a cafe, an event — claiming from one egress IP.
 
+## AI model (Admin → Settings → AI models)
+
+The flyer AI (`services/flyer_ai/turn.py:_generate`, behind both the design
+assistant and `generate_ideas`) is Tell-Us's one model call. It goes through
+`core.anthropic_messages.generate_content_routed` with surface
+`tellus.flyer_ai` (registry `app/core/services/agent_surfaces.py`), so the
+Matcha platform admin's *AI models* page can move it from Gemini Flash to
+Claude: same prompt, JSON reply and 60s timeout, effort medium. A Claude call
+counts in the `anthropic` rate-limit bucket under `tellus_flyer_ai`, and the
+Gemini `record_call` is skipped when `ran_on_claude(response)`. Ideas now
+record under their own `ideas` label (they used to record as `assist`).
+Shoutout radar uses SerpApi, not a model.
+
 ## Frontend pairing
 
 Paired frontend is a separate Vite app at `client/tellus/` (React 19), served by the same nginx at `/tellus/`. No dedicated CLAUDE.md there yet — see root CLAUDE.md's repo-layout table.

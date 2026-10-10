@@ -17,6 +17,8 @@ from typing import Any, Optional
 
 from google.genai import types
 
+from ....core.services import agent_surfaces
+from ....core.services.anthropic_messages import generate_content_routed, ran_on_claude
 from ....core.services.genai_client import get_genai_client
 from ....core.services.model_catalog import GEMINI_FLASH
 from ....core.services.model_json import parse_model_json
@@ -165,27 +167,35 @@ def _rejection_feedback(rejected: list[dict[str, Any]]) -> str:
     return f"{len(rejected)} op(s) were invalid — {reasons}"
 
 
-async def _generate(prompt: str) -> Any:
-    """One Gemini call. `thinking_config` carries a LEVEL, never a budget — the
-    3.x models reject `thinking_budget` outright with a 400."""
+async def _generate(prompt: str, *, endpoint: str = "assist") -> Any:
+    """One model call: Gemini, unless Admin → Settings → AI models routes the
+    flyer AI to Claude (same prompt, JSON reply and timeout). `thinking_config`
+    carries a LEVEL, never a budget — the 3.x models reject `thinking_budget`
+    outright with a 400."""
     client = get_genai_client()
     limiter = _get_rate_limiter()
+    response = None
     try:
-        return await asyncio.wait_for(
-            client.aio.models.generate_content(
-                model=GEMINI_FLASH,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    thinking_config=types.ThinkingConfig(thinking_level="low"),
-                ),
+        response = await generate_content_routed(
+            client,
+            model=GEMINI_FLASH,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                thinking_config=types.ThinkingConfig(thinking_level="low"),
             ),
-            timeout=_TURN_TIMEOUT_SECONDS,
+            timeout_seconds=_TURN_TIMEOUT_SECONDS,
+            effort="medium",
+            surface=agent_surfaces.TELLUS_FLYER_AI,
+            rate_label=(_SERVICE, endpoint),
         )
+        return response
     finally:
         # Recorded even on timeout: the request was issued and billed, so
-        # skipping it here lets a slow model burn quota invisibly.
-        await limiter.record_call(_SERVICE, "assist")
+        # skipping it here lets a slow model burn quota invisibly. A Claude
+        # call already counted in the anthropic bucket.
+        if not ran_on_claude(response):
+            await limiter.record_call(_SERVICE, endpoint)
 
 
 async def run_flyer_turn(
@@ -298,7 +308,7 @@ async def generate_ideas(*, campaign: dict[str, Any], count: int = 3) -> list[di
     )
 
     try:
-        response = await _generate(prompt)
+        response = await _generate(prompt, endpoint="ideas")
         payload = parse_model_json(getattr(response, "text", None) or "", default=None)
         raw = payload.get("ideas") if isinstance(payload, dict) else None
     except Exception as exc:  # noqa: BLE001 — fall through to the deterministic set
