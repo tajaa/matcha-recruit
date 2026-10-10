@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import MatchaSchedule
 
@@ -197,12 +198,31 @@ final class ManagerTests: XCTestCase {
         XCTAssertNil(ScheduleConflict.parse(status: 409, data: detail(#""Plain message""#)))
     }
 
-    func testTheEditorSendsAMealBreakToTheShiftInsteadOfForcingIt() throws {
+    func testAMealBreakAdvisoryIsFixedRatherThanForcedWhenItCanBe() throws {
         let meal = try XCTUnwrap(ScheduleConflict.parse(status: 409, data: detail(
             #"{"code":"schedule_compliance","violations":[{"check":"meal_break","message":"Needs a meal"}]}"#
         )))
-        XCTAssertFalse(ForcePrompt(conflict: meal, refusesMealBreak: true, retry: {}).forceable)
-        XCTAssertTrue(ForcePrompt(conflict: meal, refusesMealBreak: false, retry: {}).forceable)
+        XCTAssertEqual(ForcePrompt(conflict: meal, fixBreak: {}, retry: {}).choice, .fixBreak)
+        XCTAssertEqual(ForcePrompt(conflict: meal, fixBreak: nil, retry: {}).choice, .force)
+        let full = try XCTUnwrap(ScheduleConflict.parse(status: 409, data: detail(#"{"code":"shift_full","message":"Full"}"#)))
+        XCTAssertEqual(ForcePrompt(conflict: full, fixBreak: {}, retry: {}).choice, .force)
+    }
+
+    @MainActor
+    func testFixingTheBreakThenCarriesOnWithTheWrite() async throws {
+        let meal = Data(#"{"detail":{"code":"schedule_compliance","violations":[{"check":"meal_break","message":"Needs a meal"}]}}"#.utf8)
+        var prompt: ForcePrompt?
+        let binding = Binding(get: { prompt }, set: { prompt = $0 })
+        var writes: [Bool] = []
+        var fixed = false
+        try await ForcePrompt.run(binding, fixBreak: { fixed = true }) { force in
+            writes.append(force)
+            if !force { throw APIError.scheduleConflict(try XCTUnwrap(ScheduleConflict.parse(status: 409, data: meal))) }
+        }
+        XCTAssertEqual(writes, [false])
+        try await XCTUnwrap(prompt?.fixBreak)()
+        XCTAssertTrue(fixed)
+        XCTAssertEqual(writes, [false, true])
     }
 
     func testTheClientThrowsAForceableConflictAndKeepsOtherErrorsPlain() async throws {

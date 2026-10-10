@@ -74,8 +74,18 @@ struct ScheduleShift: Decodable, Identifiable {
     let status: String
     let assignments: [ShiftAssignment]
     let has_conflict: Bool?
+    // Manager reads only (`/employee-schedule/week`); absent on crew feeds.
+    let job_id: String?
+    let required_staff: Int?
+    let published_at: String?
 
     var title: String { role?.isEmpty == false ? role! : "Shift" }
+
+    /// Seats nobody fills yet; never negative, and none on a cancelled shift.
+    var openSeats: Int {
+        guard status != "cancelled", let required_staff else { return 0 }
+        return max(0, required_staff - assignments.count)
+    }
 }
 
 struct ShiftAssignment: Decodable, Identifiable {

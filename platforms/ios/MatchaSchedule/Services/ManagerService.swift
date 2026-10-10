@@ -27,6 +27,84 @@ enum ManagerService {
         )
     }
 
+    // MARK: The week
+
+    /// One store's week, drafts and all, with its roster.
+    static func week(location: String, starting week: Date) async throws -> ManagerWeek {
+        let start = WallClock.format(week, "yyyy-MM-dd")
+        return try await APIClient.shared.request(
+            method: "GET", path: "\(root)/week?start=\(start)&location=\(location)", fresh: true
+        )
+    }
+
+    static func jobs(location: String) async throws -> [ScheduleJob] {
+        let response: JobsResponse = try await APIClient.shared.request(
+            method: "GET", path: "\(root)/jobs?location=\(location)", fresh: true
+        )
+        return response.jobs
+    }
+
+    static func readiness(location: String) async throws -> StoreReadiness {
+        try await APIClient.shared.request(method: "GET", path: "\(root)/locations/\(location)/readiness", fresh: true)
+    }
+
+    static func planningInputs(location: String, weekStart: Date) async throws -> PlanningInputs {
+        let start = WallClock.format(weekStart, "yyyy-MM-dd")
+        return try await APIClient.shared.request(
+            method: "GET", path: "\(root)/locations/\(location)/planning-inputs?week_start=\(start)", fresh: true
+        )
+    }
+
+    // MARK: Shifts
+
+    static func createShift(_ body: ShiftCreateBody, force: Bool) async throws {
+        _ = try await APIClient.shared.requestData(method: "POST", path: "\(root)/shifts?force=\(force)", body: body)
+    }
+
+    static func updateShift(_ id: String, _ patch: ShiftPatch, force: Bool) async throws {
+        _ = try await APIClient.shared.requestData(method: "PUT", path: "\(root)/shifts/\(id)?force=\(force)", body: patch)
+    }
+
+    static func deleteShift(_ id: String, force: Bool) async throws {
+        _ = try await APIClient.shared.requestData(method: "DELETE", path: "\(root)/shifts/\(id)?force=\(force)")
+    }
+
+    static func publishShift(_ id: String) async throws {
+        _ = try await APIClient.shared.requestData(method: "POST", path: "\(root)/shifts/\(id)/publish")
+    }
+
+    /// Publishes the store's drafts that start this week.
+    static func publishWeek(location: String, starting week: Date) async throws -> Int {
+        let (start, end) = WallClock.range(starting: week)
+        let result: PublishWeekResult = try await APIClient.shared.request(
+            method: "POST", path: "\(root)/shifts/publish",
+            body: PublishWeekBody(start: start, end: end, location_id: location)
+        )
+        return result.published
+    }
+
+    // MARK: Assignments
+
+    static func assign(_ employeeID: String, to shiftID: String, force: Bool) async throws {
+        _ = try await APIClient.shared.requestData(
+            method: "POST", path: "\(root)/shifts/\(shiftID)/assignments?force=\(force)",
+            body: AssignBody(employee_id: employeeID)
+        )
+    }
+
+    static func unassign(_ employeeID: String, from shiftID: String, force: Bool) async throws {
+        _ = try await APIClient.shared.requestData(
+            method: "DELETE", path: "\(root)/shifts/\(shiftID)/assignments/\(employeeID)?force=\(force)"
+        )
+    }
+
+    static func move(_ employeeID: String, from: String, to: String, force: Bool) async throws {
+        _ = try await APIClient.shared.requestData(
+            method: "POST", path: "\(root)/assignments/move?force=\(force)",
+            body: MoveAssignmentBody(employee_id: employeeID, from_shift_id: from, to_shift_id: to)
+        )
+    }
+
     // MARK: Paid time off (business admins)
 
     static func pendingPTO() async throws -> [PTOAdminRequest] {

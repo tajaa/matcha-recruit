@@ -119,6 +119,36 @@ enum WallClock {
         formatter(pattern).string(from: value)
     }
 
+    /// The other direction: a clock-face Date back to the UTC-tagged string
+    /// the server stores. Editors show their pickers on the UTC calendar
+    /// (`timeZone`) so what the manager picks IS the store's clock.
+    static func iso(_ value: Date) -> String {
+        formatter("yyyy-MM-dd'T'HH:mm:ss'Z'").string(from: value)
+    }
+
+    /// The zone a wall-clock picker runs in.
+    static var timeZone: TimeZone { utc }
+
+    /// `day`'s calendar date at `time`'s hour and minute.
+    static func combine(day: Date, time: Date) -> Date {
+        let calendar = gregorian
+        let date = calendar.dateComponents([.year, .month, .day], from: day)
+        let clock = calendar.dateComponents([.hour, .minute], from: time)
+        var parts = DateComponents()
+        parts.year = date.year; parts.month = date.month; parts.day = date.day
+        parts.hour = clock.hour; parts.minute = clock.minute
+        return calendar.date(from: parts) ?? day
+    }
+
+    /// A shift's window from a day and two clock times. An end at or before
+    /// the start finishes the next day (an overnight shift).
+    static func window(day: Date, start: Date, end: Date) -> (start: Date, end: Date) {
+        let from = combine(day: day, time: start)
+        var until = combine(day: day, time: end)
+        if until <= from { until = gregorian.date(byAdding: .day, value: 1, to: until) ?? until }
+        return (from, until)
+    }
+
     /// "8h" or "7h 30m" between two wall-clock timestamps.
     static func duration(from start: String, to end: String) -> String? {
         guard let from = date(start), let until = date(end), until > from else { return nil }

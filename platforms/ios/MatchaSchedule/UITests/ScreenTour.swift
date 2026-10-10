@@ -4,12 +4,18 @@ import XCTest
 /// design review. Opt-in: needs the local backend running and credentials in
 /// the runner environment (TEST_RUNNER_MATCHA_UI_EMAIL / _PASSWORD when run
 /// through xcodebuild). Without them it captures the sign-in screen and skips.
+/// A manager account also tours Manage (approvals, the week, a shift, the
+/// people picker, a new shift) without saving anything.
+/// TEST_RUNNER_MATCHA_UI_API_URL points the app at another backend.
 final class ScreenTour: XCTestCase {
     private var app: XCUIApplication!
 
     override func setUp() {
         continueAfterFailure = true
         app = XCUIApplication()
+        if let api = ProcessInfo.processInfo.environment["MATCHA_UI_API_URL"], !api.isEmpty {
+            app.launchEnvironment["MATCHA_API_URL"] = api
+        }
         app.launch()
     }
 
@@ -40,6 +46,14 @@ final class ScreenTour: XCTestCase {
         dismissSavePasswordIfAsked()
 
         pause(3)
+        // A business admin has no shifts of their own: no Schedule or Requests tab.
+        guard app.tabBars.buttons["Schedule"].exists else {
+            snap("02-manage-first")
+            tourManage()
+            open(tab: "Me")
+            snap("07-me")
+            return
+        }
         snap("02-schedule")
         // Demo data may sit in past weeks: MATCHA_UI_WEEKS_BACK pages back to it.
         let weeksBack = Int(env["MATCHA_UI_WEEKS_BACK"] ?? "") ?? 0
@@ -80,6 +94,8 @@ final class ScreenTour: XCTestCase {
             pause(1)
         }
 
+        if app.tabBars.buttons["Manage"].exists { tourManage() }
+
         open(tab: "Me")
         snap("07-me")
         let dark = app.buttons["appearance.dark"]
@@ -104,6 +120,49 @@ final class ScreenTour: XCTestCase {
             bell.tap()
             pause(2)
             snap("08-notifications")
+        }
+    }
+
+    /// Looks at every manager screen and backs out of each; saves nothing.
+    private func tourManage() {
+        open(tab: "Manage")
+        snap("09-manage-approvals")
+        let request = app.buttons.matching(identifier: "approvals.request").firstMatch
+        if request.waitForExistence(timeout: 2) {
+            request.tap()
+            pause(1.5)
+            snap("09b-review")
+            app.buttons["Close"].tap()
+            pause(1)
+        }
+        let week = app.segmentedControls.buttons["Week"]
+        guard week.waitForExistence(timeout: 2) else { return }
+        week.tap()
+        pause(3)
+        snap("10-manage-week")
+        let shift = app.buttons.matching(identifier: "week.shift").firstMatch
+        if shift.waitForExistence(timeout: 3) {
+            shift.tap()
+            pause(1.5)
+            snap("10b-manage-shift")
+            let add = app.buttons["shift.addPerson"]
+            if add.waitForExistence(timeout: 2) {
+                add.tap()
+                pause(2.5)
+                snap("10c-manage-picker")
+                app.buttons["Cancel"].firstMatch.tap()
+                pause(1)
+            }
+            app.buttons["Done"].firstMatch.tap()
+            pause(1)
+        }
+        let addShift = app.buttons["week.addShift"]
+        if addShift.waitForExistence(timeout: 2) {
+            addShift.tap()
+            pause(1.5)
+            snap("10d-manage-new-shift")
+            app.buttons["Cancel"].firstMatch.tap()
+            pause(1)
         }
     }
 
