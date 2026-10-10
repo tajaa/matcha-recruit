@@ -8,7 +8,9 @@ from jose import jwt, JWTError
 
 from ...config import get_settings
 from ..models.auth import TokenPayload, UserRole
-from .session_tokens import SessionLifetimes, access_token_stale, issue_stamp_ms, refresh_token_times
+from .session_tokens import (
+    MOBILE_SESSION_ROLES, SessionLifetimes, access_token_stale, issue_stamp_ms, refresh_token_times,
+)
 
 
 def hash_password(password: str) -> str:
@@ -212,7 +214,8 @@ def decode_token(
         if token_type == "access" and ("sid" in payload or "cl" in payload):
             # Callers that only decode a JWT (WebSockets, telemetry) cannot
             # check device revocation. Only the bearer dependency does that.
-            if not allow_mobile_access or payload.get("cl") != "ios_schedule" or payload.get("role") != "employee":
+            if (not allow_mobile_access or payload.get("cl") != "ios_schedule"
+                    or payload.get("role") not in MOBILE_SESSION_ROLES):
                 return None
             try:
                 UUID(payload["sid"])

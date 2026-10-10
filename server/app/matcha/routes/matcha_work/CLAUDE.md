@@ -17,6 +17,13 @@ session owner; generic thread reads, lists, and recent activity must not expose
 schedule state or staged actions. The old `/employee-schedule/chat` parser is no
 longer mounted; voice transcription lives under `/employee-schedule/assistant`.
 
+**A Matcha Schedule phone session streams to schedule threads only** (any role:
+`current_user.device_session_id` set ⇒ 403 on every other surface). The phone
+scope middleware (`core/services/mobile_scope.py`) has to let a business admin's
+phone token through to `/threads/{id}/messages/stream` for the schedule
+assistant; this check is what keeps that from opening every Matcha Work thread
+the admin owns.
+
 **Route count (recounted 2026-07-19, from source; +2 for `huume.py`'s plan approve/execute routes added since):** **204** gated routes on `router` + **4** on `public_router` = 208 endpoints. Reproduce with:
 
 ```bash
