@@ -4,6 +4,8 @@ one-shot call, and the admin endpoint that sets it. No network, no database.
     cd server && ./venv/bin/python -m pytest tests/core/test_anthropic_messages.py -q
 """
 
+import json
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -398,18 +400,20 @@ async def test_admin_saves_the_map_and_the_legacy_row_and_primes_the_cache(admin
 async def test_settings_page_reports_the_map_registry_choices_version_and_key_state(monkeypatch):
     from app.core.routes.admin import platform_settings as route
 
-    models = platform_settings.normalize_agent_models({"apps": {"matcha": "claude-haiku-5-5"}})
     for name, value in {
         "get_visible_features": [], "get_matcha_work_model_mode": "light",
         "get_jurisdiction_research_model_mode": "light", "get_er_similarity_weights": {},
         "get_tenant_codified_only": True, "get_autopr_board_capabilities": {},
-        "get_agent_models": models,
     }.items():
         monkeypatch.setattr(route, name, AsyncMock(return_value=value))
+    # A stale cached map (another worker's view) must not be paired with the
+    # fresh version: the page gets the map and version from one read.
+    monkeypatch.setattr(platform_settings, "_agent_models_cache", platform_settings.normalize_agent_models({}))
+    monkeypatch.setattr(platform_settings, "_agent_models_cached_at", time.monotonic())
 
     @asynccontextmanager
     async def connection():
-        yield _Conn({"agent_models": "{}"})
+        yield _Conn({"agent_models": json.dumps({"apps": {"matcha": "claude-haiku-5-5"}})})
 
     monkeypatch.setattr(route, "get_connection", connection)
     monkeypatch.setattr(route, "get_settings", _settings("sk-test"))

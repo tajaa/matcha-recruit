@@ -57,7 +57,7 @@ from app.core.services.platform_settings import (
     get_er_similarity_weights, prime_er_similarity_weights_cache,
     get_tenant_codified_only, prime_tenant_codified_only_cache,
     get_autopr_board_capabilities, prime_autopr_board_capabilities_cache,
-    AGENT_MODELS_QUERY, agent_models_from_rows, get_agent_models, normalize_agent_models,
+    AGENT_MODELS_QUERY, agent_models_from_rows, normalize_agent_models,
     prime_agent_models_cache,
     DEFAULT_ER_SIMILARITY_WEIGHTS, EXPECTED_WEIGHT_KEYS,
     AUTOPR_BOARD_CAPABILITIES,
@@ -469,9 +469,11 @@ async def get_all_platform_settings():
     er_weights = await get_er_similarity_weights()
     codified_only = await get_tenant_codified_only()
     autopr_boards = await get_autopr_board_capabilities()
-    agent_models = await get_agent_models()
     async with get_connection() as conn:
-        _stored, agent_models_version = agent_models_from_rows(await conn.fetch(AGENT_MODELS_QUERY))
+        # Map and version from one read, not the 30s cache: another worker's
+        # cached map paired with a fresh version would let a stale page pass
+        # the PUT's 409 check and overwrite the newer save.
+        agent_models, agent_models_version = agent_models_from_rows(await conn.fetch(AGENT_MODELS_QUERY))
     return {
         "visible_features": visible,
         "matcha_work_model_mode": mw_mode,
