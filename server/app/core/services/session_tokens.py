@@ -6,6 +6,12 @@ from typing import Optional
 
 from ...config import get_settings
 
+# Roles that may hold a Matcha Schedule (`cl=ios_schedule`) device session.
+# Crew and store managers sign in as employees; business admins as clients,
+# whose phone tokens are then held to the schedule routes by
+# `core.services.mobile_scope`. Admin and individual accounts never get one.
+MOBILE_SESSION_ROLES = frozenset({"employee", "client"})
+
 
 @dataclass(frozen=True)
 class SessionLifetimes:
