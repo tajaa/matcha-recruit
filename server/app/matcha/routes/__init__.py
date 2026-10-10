@@ -19,6 +19,7 @@ from .employee_lifecycle import (
     training_router,
 )
 from .work import (
+    calendar_router,
     journals_router,
     mw_notifications_router,
     matcha_work_billing_router,
@@ -261,6 +262,12 @@ matcha_router.include_router(
     productivity_router,
     prefix="/matcha-work",
     tags=["matcha-work-productivity"],
+    dependencies=[Depends(require_feature("matcha_work"))],
+)
+matcha_router.include_router(
+    calendar_router,
+    prefix="/matcha-work",
+    tags=["matcha-work-calendar"],
     dependencies=[Depends(require_feature("matcha_work"))],
 )
 matcha_router.include_router(

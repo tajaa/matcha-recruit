@@ -117,3 +117,6 @@ class RunContext:
     on_receipt: Callable[[dict], Awaitable[None]] | None = None
     reasoning_effort: str = "medium"
     store_responses: bool = True
+    # The IANA zone the person's app reported (`calendar_service.get_timezone`),
+    # or None. Dates and times are spoken in it.
+    timezone: str | None = None

@@ -4,6 +4,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
+from app.matcha.services.matcha_work import calendar_service
 from app.matcha.services.matcha_work import google_calendar_service as gcal
 from app.matcha.services.matcha_work.agent_runtime import result, runner
 from app.matcha.services.matcha_work.agent_runtime.abilities import calendar
@@ -244,11 +245,14 @@ async def test_the_reminder_insert_is_the_requesters_own_default_board(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_the_ability_is_not_offered_without_the_calendar_scope(monkeypatch):
+async def test_without_the_calendar_scope_only_the_espresso_calendar_is_offered(monkeypatch):
     wire_store(monkeypatch)
     client = FakeClient([response(call("finish", FINISH))])
     await run(client, FakeCalendar(), _ctx("what is on friday", scopes=frozenset()))
-    assert [t["name"] for t in client.calls[0]["tools"]] == ["add_reminder", "finish"]
+    assert [t["name"] for t in client.calls[0]["tools"]] == [
+        "list_espresso_events", "add_espresso_event", "update_espresso_event", "delete_espresso_event",
+        "add_reminder", "finish",
+    ]
 
 
 @pytest.mark.asyncio
@@ -315,5 +319,176 @@ async def test_the_calendar_client_notifies_only_when_there_are_attendees(monkey
     events = await service.list_events(time_min=START, time_max=END, query="review", max_results=500)
     assert [s[2].get("sendUpdates") for s in sent[:4]] == ["none", "all", "none", "all"]
     assert [e["id"] for e in events] == ["e1"]
-    assert sent[5][2]["maxResults"] == "50" and sent[5][2]["q"] == "review"
+    assert sent[5][2]["maxResults"] == "250" and sent[5][2]["q"] == "review"
     assert await service._headers() == {"Authorization": "Bearer token"}
+
+
+# ── the Espresso calendar ──────────────────────────────────────────────────
+
+ESPRESSO_ID = "6f1c0d7e-8b9a-4c3d-9e2f-1a2b3c4d5e6f"
+
+
+def _mine(id_=ESPRESSO_ID, **over):
+    base = {"id": id_, "title": "Dentist", "start": START, "end": END, "all_day": False,
+            "location": None, "notes": None, "source_kind": "manual", "source_ref": None,
+            "source_label": None}
+    base.update(over)
+    return base
+
+
+class FakeStore:
+    def __init__(self, events=None):
+        self.events = list(events if events is not None else [_mine()])
+        self.created, self.updated, self.deleted, self.listed = [], [], [], []
+
+    async def list_events(self, user_id, begin, finish, *, tz=None, query=None):
+        self.listed.append((begin, finish, tz, query))
+        return self.events
+
+    async def list_dated_todos(self, user_id, first_day, last_day):
+        return [{"title": "Renew lease", "due_date": "2026-10-02", "board_column": "todo"},
+                {"title": "Old task", "due_date": "2026-10-03", "board_column": "done"}]
+
+    async def create_event(self, user_id, company_id, fields, *, source_kind, source_ref, source_label, tz):
+        self.created.append((fields, source_kind, source_ref, source_label, tz))
+        return _mine("7a2b3c4d-0000-4000-8000-000000000001", title=fields["title"],
+                     source_kind=source_kind, source_ref=source_ref, source_label=source_label)
+
+    async def update_event(self, event_id, user_id, patch, *, tz):
+        self.updated.append((str(event_id), patch))
+        if patch.get("start") == "gone":
+            return None
+        if patch.get("end") == "2000-01-01T00:00:00Z":
+            raise ValueError("An event cannot end before it starts.")
+        return _mine(str(event_id), **{k: v for k, v in patch.items() if k == "title"})
+
+    async def delete_event(self, event_id, user_id):
+        self.deleted.append(str(event_id))
+        return True
+
+
+class _Mail:
+    def __init__(self, messages):
+        self.messages = messages
+
+
+async def run_espresso(client, store, ctx, sessions=None):
+    abilities = [calendar.build(calendar_factory=lambda ctx: FakeCalendar(), espresso_store=store)]
+    if sessions:
+        # Stands in for the email ability: only its session (what the run read) matters here.
+        abilities.append(calendar.Ability(key="email", label="Email", tools=(), prompt_block=lambda c: "",
+                                          session_factory=lambda c: _Mail(sessions)))
+    return await runner.run_agent(
+        ctx, client=client, abilities=abilities,
+        contract=runner.ResultContract(
+            finish=result.finish_tool(abilities),
+            normalize=lambda args, state: result.normalize(args, state, abilities),
+        ),
+        instructions="sys", first_input=[],
+    )
+
+
+@pytest.mark.asyncio
+async def test_adding_to_the_espresso_calendar_is_never_held_and_shows_as_an_event(monkeypatch):
+    _, claim, _ = wire_store(monkeypatch)
+    store = FakeStore()
+    client = FakeClient([
+        response(call("add_espresso_event", {"title": "Dentist", "start": START, "location": "Main St"})),
+        response(call("finish", {**FINISH, "blocks": [{"type": "events",
+                                                       "event_ids": ["7a2b3c4d-0000-4000-8000-000000000001"]}]})),
+    ])
+    out = await run_espresso(client, store, _ctx("put the dentist on my calendar friday at 3",
+                                                 scopes=frozenset(), timezone="America/Los_Angeles"))
+    assert out.kind == "result" and claim.await_count == 0
+    fields, kind, ref, label, tz = store.created[0]
+    assert fields["title"] == "Dentist" and fields["location"] == "Main St"
+    assert fields["ends_at"] - fields["starts_at"] == calendar_service.DEFAULT_LENGTH
+    assert (kind, ref, label) == ("assistant", None, None) and tz.key == "America/Los_Angeles"
+    item = out.result["blocks"][0]["items"][0]
+    assert item["calendar"] == "espresso" and item["title"] == "Dentist"
+
+
+@pytest.mark.asyncio
+async def test_an_event_from_an_email_links_back_only_to_an_email_the_run_read(monkeypatch):
+    wire_store(monkeypatch)
+    store = FakeStore()
+    client = FakeClient([
+        response(call("add_espresso_event", {"title": "Dinner", "start": "2026-10-09",
+                                             "from_email_id": "never-read"}),
+                 call("add_espresso_event", {"title": "Dinner", "start": "2026-10-09",
+                                             "from_email_id": "18c3f0a1b2c3"}),
+                 call("add_espresso_event", {"title": "Bad", "start": "next friday"})),
+        response(call("finish", FINISH)),
+    ])
+    await run_espresso(client, store, _ctx("add the dinner from dana's email", scopes=frozenset()),
+                       sessions={"18c3f0a1b2c3": {"id": "18c3f0a1b2c3", "subject": "Dinner Friday?"}})
+    outputs = [item["output"] for item in client.calls[1]["input"]]
+    assert "an email this run read" in outputs[0] and "RFC 3339" in outputs[2]
+    assert [(c[1], c[2], c[3]) for c in store.created] == [("email", "18c3f0a1b2c3", "Dinner Friday?")]
+
+
+@pytest.mark.asyncio
+async def test_listing_then_moving_and_removing_espresso_events(monkeypatch):
+    _, claim, _ = wire_store(monkeypatch)
+    store = FakeStore()
+    window = {"time_min": "2026-10-01T00:00:00-07:00", "time_max": "2026-10-08T00:00:00-07:00"}
+    client = FakeClient([
+        response(call("update_espresso_event", {"event_id": ESPRESSO_ID, "title": "x"}),
+                 call("list_espresso_events", {"time_min": "2026-10-01", "time_max": "2026-10-08"})),
+        response(call("list_espresso_events", {**window, "query": "lease"})),
+        response(call("update_espresso_event", {"event_id": ESPRESSO_ID, "start": "2026-10-02T16:00:00-07:00"}),
+                 call("update_espresso_event", {"event_id": ESPRESSO_ID}),
+                 call("update_espresso_event", {"event_id": ESPRESSO_ID, "end": "2000-01-01T00:00:00Z"}),
+                 call("delete_espresso_event", {"event_id": ESPRESSO_ID})),
+        response(call("finish", FINISH)),
+    ])
+    out = await run_espresso(client, store, _ctx("move my dentist to 4 and then cancel it", scopes=frozenset()))
+    assert out.kind == "result" and claim.await_count == 0
+    first = [item["output"] for item in client.calls[1]["input"]]
+    assert "list the events first" in first[0] and "two times" in first[1]
+    listed = client.calls[2]["input"][0]["output"]
+    assert '"Renew lease"' in listed and "Old task" not in listed  # the query filters to-dos too
+    assert store.listed[0][3] == "lease"
+    third = [item["output"] for item in client.calls[3]["input"]]
+    assert '"ok":true' in third[0] and "nothing to change" in third[1] and "before it starts" in third[2]
+    assert '"deleted"' in third[3]
+    assert store.updated[0] == (ESPRESSO_ID, {"start": "2026-10-02T16:00:00-07:00"})
+    assert store.deleted == [ESPRESSO_ID]
+
+
+@pytest.mark.asyncio
+async def test_an_event_that_vanished_mid_run_is_reported_and_forgotten(monkeypatch):
+    wire_store(monkeypatch)
+    store = FakeStore()
+    window = {"time_min": "2026-10-01T00:00:00-07:00", "time_max": "2026-10-08T00:00:00-07:00"}
+    client = FakeClient([
+        response(call("list_espresso_events", window)),
+        response(call("update_espresso_event", {"event_id": ESPRESSO_ID, "start": "gone"})),
+        response(call("delete_espresso_event", {"event_id": ESPRESSO_ID})),
+        response(call("finish", FINISH)),
+    ])
+    await run_espresso(client, store, _ctx("move it", scopes=frozenset()))
+    assert "no longer on the calendar" in client.calls[2]["input"][0]["output"]
+    assert "list the events first" in client.calls[3]["input"][0]["output"]
+    assert store.deleted == []
+
+
+def test_the_prompt_names_the_default_calendar_their_zone_and_google_only_when_connected():
+    with_google = calendar.prompt_block(_ctx("x", timezone="America/Los_Angeles"))
+    assert "They are in America/Los_Angeles" in with_google
+    assert "only Google sends invitations" in with_google and "means here" in with_google
+    without = calendar.prompt_block(_ctx("x", scopes=frozenset(), timezone="Nowhere/Zone"))
+    assert "not connected" in without and "if you cannot tell their timezone, ask" in without
+
+
+def test_the_system_prompt_gives_the_local_time_when_the_zone_is_known():
+    from datetime import datetime, timezone as _tz
+
+    from app.matcha.services.matcha_work.agent_runtime.prompt import build_system_prompt
+
+    now = datetime(2026, 10, 10, 23, 2, tzinfo=_tz.utc)
+    local = build_system_prompt(_ctx("x", timezone="America/Los_Angeles"), [], now=now)
+    assert "time is 23:02 UTC" in local
+    assert "For them it is Saturday, 2026-10-10 16:02 in America/Los_Angeles (UTC-07:00)" in local
+    assert "For them" not in build_system_prompt(_ctx("x"), [], now=now)
+    assert "For them" not in build_system_prompt(_ctx("x", timezone="Mars/Olympus"), [], now=now)

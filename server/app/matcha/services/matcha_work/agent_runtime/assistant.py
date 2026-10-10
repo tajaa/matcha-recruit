@@ -19,6 +19,7 @@ from app.core.services import agent_surfaces, anthropic_messages
 from app.matcha.services.huume.claude_client import get_claude_client
 from app.matcha.services.huume.luna_client import get_luna_client, text_item
 
+from .. import calendar_service
 from ..agent_card import agent as card_agent
 from ..agent_card import images
 from ..project_agent import store
@@ -156,6 +157,7 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         if run["prompt"] not in own_texts:
             own_texts = (*own_texts, run["prompt"])
         counts = await load_counts(conn, user_id, abilities)
+        timezone_name = await calendar_service.get_timezone(user_id, conn)
         own = await _own_addresses(conn, user_id, gmail if active else None)
         frozen = None
         if run.get("resume_prompt_id"):
@@ -199,6 +201,7 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         # Nothing from the private conversation is stored by the provider: even
         # a run without mail or calendar replays earlier answers built from them.
         store_responses=not private and not any(a.private_only for a in abilities),
+        timezone=timezone_name,
     )
     contract = runner.ResultContract(
         finish=result.finish_tool(abilities),

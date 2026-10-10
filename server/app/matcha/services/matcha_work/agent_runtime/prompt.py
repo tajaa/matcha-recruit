@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Sequence
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .context import RunContext
 from .registry import Ability
@@ -52,6 +53,15 @@ say so plainly and never say it was done.
 """
 
 
+def _local_now(now: datetime, name: str | None) -> datetime | None:
+    if not name:
+        return None
+    try:
+        return now.astimezone(ZoneInfo(name))
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return None
+
+
 def build_system_prompt(ctx: RunContext, abilities: Sequence[Ability], *,
                         now: datetime | None = None, can_ask: bool = True,
                         unavailable: Sequence[tuple[str, str]] = ()) -> str:
@@ -60,6 +70,12 @@ def build_system_prompt(ctx: RunContext, abilities: Sequence[Ability], *,
     now = now or datetime.now(timezone.utc)
     parts = [_BASE]
     parts.append(f"\nToday is {now.strftime('%A, %Y-%m-%d')} and the time is {now.strftime('%H:%M')} UTC.\n")
+    local = _local_now(now, ctx.timezone)
+    if local is not None:
+        parts.append(
+            f"For them it is {local.strftime('%A, %Y-%m-%d %H:%M')} in {ctx.timezone} "
+            f"(UTC{local.strftime('%z')[:3]}:{local.strftime('%z')[3:]}). Say times in their zone.\n"
+        )
     if ctx.surface == "project_chat":
         parts.append(_PROJECT_CHAT)
     if ctx.resume is not None:

@@ -24,6 +24,7 @@ from app.core.services.redis_cache import get_redis_cache
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.matcha.models.matcha_work.assistant import GoogleConnectRequest
+from app.matcha.models.matcha_work.calendar import EmailCalendarSuggest
 from app.matcha.models.matcha_work.matcha_work import UsageSummaryResponse
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 
@@ -576,6 +577,43 @@ async def agent_email_summarize(
     gmail = await _connected_gmail(current_user)
     msg = await _get_message_or_404(gmail, email_id)
     return {"email_id": email_id, "summary": await email_ai.summarize_email(msg)}
+
+
+@router.post("/agent/email/calendar-suggest")
+async def agent_email_calendar_suggest(
+    body: EmailCalendarSuggest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Flash Lite reads one message and proposes events for the person's
+    Espresso calendar. Nothing is saved here: the app shows them for review and
+    saves what the person keeps (`POST /calendar/events`, source `email`).
+    `existing` is what this message already put on the calendar, so the app can
+    say so instead of offering a duplicate."""
+    from app.matcha.services.matcha_work import calendar_service as cal
+    from app.matcha.services.matcha_work import email_ai_service as email_ai
+
+    await _require_email_ai(current_user)
+    email_id = _require_message_id(body.email_id)
+    if cal.zone(body.timezone) is not None:
+        tz_name = await cal.set_timezone(current_user.id, body.timezone)
+    else:
+        tz_name = await cal.get_timezone(current_user.id)
+
+    gmail = await _connected_gmail(current_user)
+    msg = await _get_message_or_404(gmail, email_id)
+    events = await email_ai.suggest_calendar_events(msg, body.instructions, tz_name=tz_name or "UTC")
+    if events is None:
+        raise HTTPException(
+            status_code=502, detail="AI is temporarily unavailable — try again"
+        )
+    existing = await cal.events_from_source(current_user.id, "email", email_id, tz=cal.zone(tz_name))
+    return {
+        "email_id": email_id,
+        "subject": msg.get("subject"),
+        "timezone": tz_name,
+        "events": events,
+        "existing": existing,
+    }
 
 
 @router.post("/agent/email/triage")

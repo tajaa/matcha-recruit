@@ -29,7 +29,8 @@ Worker: `workers/tasks/assistant.py`. REST: `routes/matcha_work/assistant.py`.
 Browser: `../browser/`. Migrations: `agentrt01` (run kind, steps, prompts),
 `agentrt02` (channel scope), `agentrt03` (grants), `assistbuy01` (shipping
 addresses, card billing address, purchases without a project/task),
-`assistdom01` (domain registrations).
+`assistdom01` (domain registrations), `mwcal01` (the Espresso calendar and the
+person's timezone).
 
 ## Adding an ability
 
@@ -290,6 +291,34 @@ Questions reuse the agent-card prompt message and its socket event
 the normal send, exactly like a card question. Only the person who was asked
 can answer. `prompts.parse_confirmation` is a closed list: a confirmation goes
 ahead on a clear yes and on nothing else.
+
+## Calendar (`abilities/calendar.py`)
+
+Two calendars in one ability:
+
+- **The Espresso calendar** (`../calendar_service.py`, `mw_calendar_events`,
+  REST in `routes/work/calendar.py`, the Calendar tab in the macOS app) is the
+  default. `list_espresso_events` reads it with the person's dated to-dos;
+  `add_espresso_event`, `update_espresso_event` and `delete_espresso_event` are
+  `draft` tools: the calendar is the person's alone and nobody is told, so
+  nothing is held, claimed or dry-run. They need no Google connection, but the
+  ability's consent (`calendar-openai-1`) and the private conversation still
+  apply. Update and delete take only an event this run listed or added.
+  `from_email_id` links an added event to an email **this run read** (the
+  email session's `messages`), so the calendar can show "From email: …".
+- **Google Calendar** keeps its commit tools (`create_event` & co.), offered
+  only with `calendar.events`. The prompt sends invitations there and nowhere
+  else; the Espresso calendar never emails anyone.
+
+The `events` result block gates ids from both sessions and says which with
+`calendar` (`google` / `espresso`); both apps render it.
+
+**The person's timezone.** The macOS app reports its IANA zone
+(`PUT /matcha-work/calendar/prefs`, also on every email calendar suggestion)
+into `mw_calendar_prefs`. `assistant.py` reads it into `RunContext.timezone`
+(`calendar_service.get_timezone`, which never raises: a missing table logs
+and reads as None), `build_system_prompt` then gives the local time beside
+UTC, and Espresso-calendar times are written in that zone.
 
 ## Google
 

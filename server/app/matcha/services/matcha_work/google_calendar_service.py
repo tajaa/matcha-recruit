@@ -14,6 +14,8 @@ import httpx
 from .gmail_service import GmailService
 
 CALENDAR_API_BASE = "https://www.googleapis.com/calendar/v3"
+# The calendar view asks for a whole month; the assistant asks for 25.
+MAX_LIST_RESULTS = 250
 _EVENT_ID = re.compile(r"^[A-Za-z0-9_\-]{1,1024}$")
 
 
@@ -92,7 +94,7 @@ class GoogleCalendarService:
                           max_results: int = 25) -> list[dict]:
         params = {
             "timeMin": time_min, "timeMax": time_max, "singleEvents": "true",
-            "orderBy": "startTime", "maxResults": str(max(1, min(int(max_results), 50))),
+            "orderBy": "startTime", "maxResults": str(max(1, min(int(max_results), MAX_LIST_RESULTS))),
         }
         if query:
             params["q"] = query[:200]
