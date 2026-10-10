@@ -5,6 +5,7 @@ one-shot call, and the admin endpoint that sets it. No network, no database.
 """
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -138,6 +139,9 @@ async def test_an_unreadable_setting_is_default_not_an_outage(monkeypatch):
     assert await anthropic_messages.claude_override("matcha.ir") is None
 
 
+_SAVED_AT = datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc)
+
+
 class _Conn:
     """platform_settings rows for `get_agent_models` (key → stored JSON text)."""
 
@@ -147,7 +151,7 @@ class _Conn:
 
     async def fetch(self, query):
         self.reads += 1
-        return [{"key": k, "value": v} for k, v in self.rows.items()]
+        return [{"key": k, "value": v, "updated_at": _SAVED_AT} for k, v in self.rows.items()]
 
 
 @pytest.mark.asyncio
@@ -270,71 +274,133 @@ def test_client_needs_a_key_and_is_cached(monkeypatch):
 
 # --- Admin endpoint -------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_admin_refuses_claude_without_a_key(monkeypatch):
+class _AdminDb:
+    """platform_settings for the admin PUT: a transaction, the locked read,
+    and the two upserts it writes."""
+
+    def __init__(self, rows: dict | None = None):
+        self.rows = dict(rows or {})
+        self.saved_at = {k: _SAVED_AT for k in self.rows}
+        self.writes: dict[str, object] = {}
+
+    def transaction(self):
+        @asynccontextmanager
+        async def tx():
+            yield
+
+        return tx()
+
+    async def fetch(self, query):
+        assert "FOR UPDATE" in query
+        return [{"key": k, "value": v, "updated_at": self.saved_at[k]} for k, v in self.rows.items()]
+
+    async def fetchval(self, query, value):
+        new_at = datetime(2026, 10, 10, tzinfo=timezone.utc)
+        self.rows["agent_models"], self.saved_at["agent_models"] = value, new_at
+        self.writes["agent_models"] = value
+        return new_at
+
+    async def execute(self, query, value):
+        self.writes["agent_model"] = value
+
+
+@pytest.fixture
+def admin_db(monkeypatch):
+    from app.core.routes.admin import platform_settings as route
+
+    def use(rows=None, *, key="sk-test") -> _AdminDb:
+        db = _AdminDb(rows)
+
+        @asynccontextmanager
+        async def connection():
+            yield db
+
+        monkeypatch.setattr(route, "get_connection", connection)
+        monkeypatch.setattr(route, "get_settings", _settings(key))
+        return db
+
+    return use
+
+
+async def _put(**body):
     from app.core.models.admin import AgentModelsUpdate
     from app.core.routes.admin import platform_settings as route
 
-    monkeypatch.setattr(route, "get_settings", _settings(None))
-    with pytest.raises(HTTPException) as err:
-        await route.update_agent_models(
-            AgentModelsUpdate(surfaces={"matcha.ir": "claude-haiku-5-5"}), admin=None,
-        )
-    assert err.value.status_code == 400
+    return await route.update_agent_models(AgentModelsUpdate(**body), admin=None)
 
 
 @pytest.mark.asyncio
-async def test_admin_refuses_an_unknown_app_or_product(monkeypatch):
-    from app.core.models.admin import AgentModelsUpdate
-    from app.core.routes.admin import platform_settings as route
-
-    monkeypatch.setattr(route, "get_settings", _settings("sk-test"))
+async def test_admin_refuses_a_newly_chosen_claude_without_a_key(admin_db):
+    admin_db(key=None)
     with pytest.raises(HTTPException) as err:
-        await route.update_agent_models(
-            AgentModelsUpdate(apps={"nope": "default"}, surfaces={"matcha.typo": "default"}), admin=None,
-        )
-    assert err.value.status_code == 400 and "matcha.typo" in err.value.detail and "nope" in err.value.detail
+        await _put(surfaces={"matcha.ir": "claude-haiku-5-5"})
+    assert err.value.status_code == 400 and "ANTHROPIC_API_KEY" in err.value.detail
 
 
 @pytest.mark.asyncio
-async def test_admin_saves_the_whole_map_and_primes_the_cache(monkeypatch):
+async def test_removing_the_key_never_locks_the_page(admin_db):
+    """A Claude value already stored (even on a row the page doesn't change)
+    rides through; only a newly chosen one needs the key."""
     import json
 
-    from app.core.models.admin import AgentModelsUpdate
-    from app.core.routes.admin import platform_settings as route
-
-    executed = []
-
-    class Conn:
-        async def execute(self, query, *args):
-            executed.append(args)
-
-    @asynccontextmanager
-    async def connection():
-        yield Conn()
-
-    monkeypatch.setattr(route, "get_settings", _settings("sk-test"))
-    monkeypatch.setattr(route, "get_connection", connection)
-    out = await route.update_agent_models(
-        AgentModelsUpdate(apps={"matcha": "claude-haiku-5-5"}, surfaces={"matcha.ir": "claude-sonnet-5-5"}),
-        admin=None,
+    stored = {"apps": {"matcha": "claude-haiku-5-5"}, "surfaces": {"espresso.chat": "claude-sonnet-5-5"}}
+    db = admin_db({"agent_models": json.dumps(stored)}, key=None)
+    out = await _put(
+        apps={"matcha": "claude-haiku-5-5"},
+        surfaces={"espresso.chat": "claude-sonnet-5-5", "matcha.ir": "default"},
+        version=_SAVED_AT.isoformat(),
     )
-    saved = json.loads(executed[0][0])
-    assert saved == out["agent_models"]
-    assert saved["apps"] == {"matcha": "claude-haiku-5-5", "espresso": "default", "gummfit": "default", "tellus": "default"}
-    assert saved["surfaces"]["matcha.ir"] == "claude-sonnet-5-5"
-    assert saved["surfaces"]["matcha.huume"] == "inherit"  # omitted → follows Matcha
-    # The cache serves the write without a read.
-    assert await platform_settings.get_agent_model("matcha.huume", conn=_Conn({})) == "claude-haiku-5-5"
-
-    # Back to built-in never needs a key.
-    monkeypatch.setattr(route, "get_settings", _settings(None))
-    out = await route.update_agent_models(AgentModelsUpdate(), admin=None)
-    assert set(out["agent_models"]["apps"].values()) == {"default"}
+    assert out["agent_models"]["surfaces"]["matcha.ir"] == "default"
+    assert json.loads(db.writes["agent_models"])["surfaces"]["espresso.chat"] == "claude-sonnet-5-5"
 
 
 @pytest.mark.asyncio
-async def test_settings_page_reports_the_map_registry_and_key_state(monkeypatch):
+async def test_admin_refuses_an_unknown_app_product_or_model(admin_db):
+    admin_db()
+    with pytest.raises(HTTPException) as err:
+        await _put(apps={"nope": "default"}, surfaces={"matcha.typo": "default"})
+    assert err.value.status_code == 400 and "matcha.typo" in err.value.detail and "nope" in err.value.detail
+    with pytest.raises(HTTPException) as err:
+        await _put(surfaces={"matcha.ir": "claude-opus-9"})
+    assert err.value.status_code == 400 and "claude-opus-9" in err.value.detail
+
+
+@pytest.mark.asyncio
+async def test_a_stale_page_gets_409_instead_of_overwriting(admin_db):
+    import json
+
+    admin_db({"agent_models": json.dumps({"apps": {"matcha": "claude-sonnet-5-5"}})})
+    with pytest.raises(HTTPException) as err:
+        await _put(apps={"matcha": "default"}, version="2026-01-01T00:00:00+00:00")
+    assert err.value.status_code == 409
+    with pytest.raises(HTTPException) as err:  # a page that never saw the first save
+        await _put(apps={"matcha": "default"}, version=None)
+    assert err.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_admin_saves_the_map_and_the_legacy_row_and_primes_the_cache(admin_db):
+    import json
+
+    db = admin_db({"agent_model": '"claude-haiku-5-5"'})  # never saved: version is None
+    out = await _put(
+        apps={"matcha": "claude-sonnet-5-5"}, surfaces={"matcha.ir": "claude-haiku-5-5"}, version=None,
+    )
+    saved = json.loads(db.writes["agent_models"])
+    assert saved == out["agent_models"]
+    assert saved["apps"] == {
+        "matcha": "claude-sonnet-5-5", "espresso": "default", "gummfit": "default", "tellus": "default",
+    }
+    assert saved["surfaces"]["matcha.huume"] == "inherit"  # omitted → follows Matcha
+    # A container still on the old code reads the legacy row: keep it current.
+    assert json.loads(db.writes["agent_model"]) == "claude-sonnet-5-5"
+    assert out["version"] == "2026-10-10T00:00:00+00:00"
+    # The cache serves the write without a read.
+    assert await platform_settings.get_agent_model("matcha.huume", conn=_Conn({})) == "claude-sonnet-5-5"
+
+
+@pytest.mark.asyncio
+async def test_settings_page_reports_the_map_registry_choices_version_and_key_state(monkeypatch):
     from app.core.routes.admin import platform_settings as route
 
     models = platform_settings.normalize_agent_models({"apps": {"matcha": "claude-haiku-5-5"}})
@@ -345,9 +411,26 @@ async def test_settings_page_reports_the_map_registry_and_key_state(monkeypatch)
         "get_agent_models": models,
     }.items():
         monkeypatch.setattr(route, name, AsyncMock(return_value=value))
+
+    @asynccontextmanager
+    async def connection():
+        yield _Conn({"agent_models": "{}"})
+
+    monkeypatch.setattr(route, "get_connection", connection)
     monkeypatch.setattr(route, "get_settings", _settings("sk-test"))
     out = await route.get_all_platform_settings()
     assert out["agent_models"]["apps"]["matcha"] == "claude-haiku-5-5" and out["anthropic_configured"] is True
+    assert out["agent_models_version"] == _SAVED_AT.isoformat()
+    assert [c["id"] for c in out["agent_model_choices"]] == ["claude-haiku-5-5", "claude-sonnet-5-5"]
     apps = {app["key"]: app for app in out["agent_model_registry"]}
     assert [s["key"] for s in apps["matcha"]["surfaces"]][:2] == ["matcha.huume", "matcha.scheduling"]
     assert [s["label"] for s in apps["espresso"]["surfaces"]] == ["Chat", "Purchase agent", "Assistant", "Projects"]
+
+
+def test_an_unregistered_surface_is_warned_about_once(caplog):
+    platform_settings._warned_unregistered_surfaces.discard("matcha.once_only")
+    models = platform_settings.normalize_agent_models({})
+    with caplog.at_level("WARNING"):
+        for _ in range(3):
+            platform_settings.resolve_agent_model(models, "matcha.once_only")
+    assert sum("matcha.once_only" in r.message for r in caplog.records) == 1

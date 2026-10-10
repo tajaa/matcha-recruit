@@ -51,10 +51,16 @@ export type AgentModelApp = {
   surfaces: { key: string; label: string; description: string; builtin: string }[]
 }
 
+/** A Claude model the AI-models page offers. */
+export type AgentModelChoice = { id: string; label: string }
+
 export type PlatformSettings = {
   jurisdiction_research_model_mode?: string | null
   agent_models?: AgentModels
   agent_model_registry?: AgentModelApp[]
+  agent_model_choices?: AgentModelChoice[]
+  /** Sent back on save; null before the map was ever saved. */
+  agent_models_version?: string | null
   anthropic_configured?: boolean
 }
 
@@ -82,9 +88,10 @@ export const adminSettingsApi = {
   setResearchModelMode: (mode: string) =>
     api.put<void>('/admin/platform-settings/jurisdiction-research-model-mode', { mode }),
 
-  /** Replaces the WHOLE map — an app or product omitted here goes back to built-in / inherit. */
-  setAgentModels: (models: AgentModels) =>
-    api.put<{ agent_models: AgentModels }>('/admin/platform-settings/agent-models', models),
+  /** Replaces the WHOLE map — an app or product omitted here goes back to
+   *  built-in / inherit. `version` is the loaded map's; a stale one is a 409. */
+  setAgentModels: (models: AgentModels & { version: string | null }) =>
+    api.put<{ agent_models: AgentModels; version: string }>('/admin/platform-settings/agent-models', models),
 
   getAutoPRBoardCapabilities: () =>
     api.get<AutoPRBoardCapabilities>('/admin/platform-settings/autopr-board-capabilities'),
