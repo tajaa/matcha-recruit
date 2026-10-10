@@ -42,7 +42,7 @@ from app.core.feature_flags import (
 )
 from app.core.services.platform_settings import get_visible_features
 from app.core.services.redis_cache import check_rate_limit, client_ip
-from app.core.services.session_tokens import refresh_session_expired
+from app.core.services.session_tokens import MOBILE_SESSION_ROLES, refresh_session_expired
 from app.matcha.services.scheduling.schedule_rules import INACTIVE_EMPLOYMENT_STATUSES
 from app.config import get_settings
 
@@ -103,8 +103,67 @@ async def _end_mobile_device(conn, sid: UUID, user_id: UUID) -> None:
     )
 
 
+# A business company a phone session may run on: not a personal workspace,
+# and not held back by the approval flow (`_ensure_company_is_accessible`).
+_CLIENT_COMPANY_OK_SQL = (
+    "NOT COALESCE(c.is_personal, false) "
+    "AND COALESCE(c.status, 'approved') NOT IN ('pending', 'rejected')"
+)
+
+# Who may keep a Matcha Schedule device session, read at every rotation of the
+# `auth_device_sessions` row aliased `ds`: an employee with an employee record
+# that is not inactive ($3 is INACTIVE_EMPLOYMENT_STATUSES), or a business admin
+# on a business company that is still accessible.
+_MOBILE_ELIGIBLE_SQL = f"""(
+    EXISTS (
+        SELECT 1 FROM users u
+          JOIN employees e ON e.user_id = u.id
+         WHERE u.id = ds.user_id AND u.role = 'employee'
+           AND NOT (COALESCE(e.employment_status, 'active') = ANY($3::text[]))
+    )
+    OR EXISTS (
+        SELECT 1 FROM users u
+          JOIN clients cl ON cl.user_id = u.id
+          JOIN companies c ON c.id = cl.company_id
+         WHERE u.id = ds.user_id AND u.role = 'client' AND {_CLIENT_COMPANY_OK_SQL}
+    )
+)"""
+
+
+async def _assert_mobile_login_allowed(conn, user, capabilities) -> None:
+    """Matcha Schedule admits crew and store managers (employees) and, from a
+    build that can manage, business admins (clients). Everyone else is 403."""
+    if user["role"] == "employee":
+        employee = await conn.fetchrow(
+            "SELECT id, employment_status FROM employees WHERE user_id = $1", user["id"]
+        )
+        if not employee or employee["employment_status"] in INACTIVE_EMPLOYMENT_STATUSES:
+            raise HTTPException(status_code=403, detail="Employee account is inactive")
+        return
+    if user["role"] == "client":
+        if "manage" not in capabilities:
+            raise HTTPException(
+                status_code=403,
+                detail="Update Matcha Schedule to sign in with a business account.",
+            )
+        company_ok = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM clients cl JOIN companies c ON c.id = cl.company_id "
+            f"WHERE cl.user_id = $1 AND {_CLIENT_COMPANY_OK_SQL})",
+            user["id"],
+        )
+        if not company_ok:
+            raise HTTPException(
+                status_code=403,
+                detail="Matcha Schedule needs an approved business account.",
+            )
+        return
+    raise HTTPException(
+        status_code=403, detail="Matcha Schedule is for employees and business admins",
+    )
+
+
 def _mobile_session_id(payload: TokenPayload) -> UUID:
-    if payload.cl != "ios_schedule" or not payload.sid or payload.role != "employee":
+    if payload.cl != "ios_schedule" or not payload.sid or payload.role not in MOBILE_SESSION_ROLES:
         raise HTTPException(status_code=401, detail="Invalid mobile session")
     try:
         return UUID(payload.sid)
@@ -212,13 +271,7 @@ async def login(request: LoginRequest, req: Request):
 
         mobile_sid = None
         if request.client == "ios_schedule":
-            if user["role"] != "employee":
-                raise HTTPException(status_code=403, detail="Matcha Schedule is for employees")
-            employee = await conn.fetchrow(
-                "SELECT id, employment_status FROM employees WHERE user_id = $1", user["id"]
-            )
-            if not employee or employee["employment_status"] in INACTIVE_EMPLOYMENT_STATUSES:
-                raise HTTPException(status_code=403, detail="Employee account is inactive")
+            await _assert_mobile_login_allowed(conn, user, request.capabilities)
             mobile_sid = uuid4()
             await conn.execute(
                 "INSERT INTO auth_device_sessions (id, user_id, client, device_name) "
@@ -318,7 +371,7 @@ async def refresh_token(request: RefreshTokenRequest):
                 if user["company_deleted_at"]:
                     raise refused("This account's company has been deactivated.", user["id"])
 
-                if mobile_sid and (user["role"] != "employee" or user["is_suspended"]):
+                if mobile_sid and (user["role"] not in MOBILE_SESSION_ROLES or user["is_suspended"]):
                     raise refused("Invalid mobile session", user["id"])
                 settings = get_settings()
                 if refresh_session_expired(payload.iat, payload.session_started_at):
@@ -334,20 +387,17 @@ async def refresh_token(request: RefreshTokenRequest):
                         raise HTTPException(status_code=401, detail="Invalid mobile session")
                     # One statement: bump the generation only if the presented token
                     # carries the current one. Atomic against a concurrent mobile
-                    # logout; a stale, revoked, replayed, or no-longer-employed device
-                    # cannot rotate its token.
+                    # logout; a stale, revoked, replayed, or no-longer-eligible device
+                    # (employee gone, business company no longer accessible) cannot
+                    # rotate its token.
                     rotated = await conn.fetchrow(
-                        """UPDATE auth_device_sessions AS ds
+                        f"""UPDATE auth_device_sessions AS ds
                            SET last_refreshed_at = NOW(),
                                refresh_generation = ds.refresh_generation + 1
                          WHERE ds.id = $1 AND ds.user_id = $2
                            AND ds.client = 'ios_schedule' AND ds.revoked_at IS NULL
                            AND ds.refresh_generation = $4
-                           AND EXISTS (
-                               SELECT 1 FROM employees e
-                                WHERE e.user_id = ds.user_id
-                                  AND NOT (COALESCE(e.employment_status, 'active') = ANY($3::text[]))
-                           )
+                           AND {_MOBILE_ELIGIBLE_SQL}
                          RETURNING ds.id, ds.refresh_generation""",
                         mobile_sid, user["id"], list(INACTIVE_EMPLOYMENT_STATUSES), payload.gen,
                     )
@@ -357,17 +407,13 @@ async def refresh_token(request: RefreshTokenRequest):
                         # not a replay: hand back the current generation
                         # without bumping it (_MOBILE_REFRESH_GRACE_SECONDS).
                         rotated = await conn.fetchrow(
-                            """SELECT ds.id, ds.refresh_generation
+                            f"""SELECT ds.id, ds.refresh_generation
                                  FROM auth_device_sessions AS ds
                                 WHERE ds.id = $1 AND ds.user_id = $2
                                   AND ds.client = 'ios_schedule' AND ds.revoked_at IS NULL
                                   AND ds.refresh_generation = $4 + 1
                                   AND ds.last_refreshed_at > NOW() - make_interval(secs => $5)
-                                  AND EXISTS (
-                                      SELECT 1 FROM employees e
-                                       WHERE e.user_id = ds.user_id
-                                         AND NOT (COALESCE(e.employment_status, 'active') = ANY($3::text[]))
-                                  )""",
+                                  AND {_MOBILE_ELIGIBLE_SQL}""",
                             mobile_sid, user["id"], list(INACTIVE_EMPLOYMENT_STATUSES), payload.gen,
                             _MOBILE_REFRESH_GRACE_SECONDS,
                         )
@@ -418,7 +464,7 @@ async def refresh_token(request: RefreshTokenRequest):
                 "DELETE FROM device_tokens WHERE device_session_id = $1 AND user_id = $2",
                 replay.sid, replay.user_id,
             )
-            raise HTTPException(status_code=401, detail="Mobile session revoked or employee inactive")
+            raise HTTPException(status_code=401, detail="Mobile session revoked or account inactive")
         except _EndedMobileSession as ended:
             await _end_mobile_device(conn, ended.sid, ended.user_id)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ended.detail)

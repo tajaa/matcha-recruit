@@ -34,6 +34,10 @@ class LoginRequest(BaseModel):
     password: str
     client: Optional[Literal["ios_schedule"]] = None
     device_name: Optional[str] = Field(default=None, max_length=200)
+    # What the signing-in Matcha Schedule build can do. A business admin needs
+    # "manage": an older build would get a session minted and then throw it
+    # away, leaving an orphan device row and the wrong error on screen.
+    capabilities: list[Literal["manage"]] = Field(default_factory=list, max_length=8)
 
 
 class TokenResponse(BaseModel):

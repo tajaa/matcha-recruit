@@ -86,6 +86,12 @@ async def send_message_stream(
         current_user.role == "employee" and is_schedule_thread
     ):
         raise HTTPException(status_code=403, detail="Matcha Work access is not enabled for this account")
+    # A Matcha Schedule phone session (any role) only ever talks to the
+    # schedule assistant. Without this a business admin's phone token, which
+    # core/services/mobile_scope.py lets through to this path for that reason,
+    # would reach every Matcha Work thread the admin owns.
+    if getattr(current_user, "device_session_id", None) is not None and not is_schedule_thread:
+        raise HTTPException(status_code=403, detail="Matcha Schedule can only open the schedule assistant")
 
     # Use the thread's actual company for all downstream operations (AI profile,
     # token budget, etc.) so collaborators don't accidentally scope ops to their

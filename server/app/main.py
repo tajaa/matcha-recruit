@@ -79,6 +79,7 @@ _unhandled_logger = logging.getLogger("matcha.unhandled")
 
 from .config import get_settings, load_settings
 from .core.services.error_reporter import install_error_logging, report_server_error
+from .core.services.mobile_scope import ManagerPhoneScopeMiddleware
 from .core.services.usage_tracker import (
     record_event,
     resolve_token,
@@ -293,6 +294,11 @@ _cors_kwargs: dict = dict(
 if _debug:
     _cors_kwargs["allow_origin_regex"] = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
+# A business admin's Matcha Schedule phone token reaches the schedule routes
+# only (core/services/mobile_scope.py). Added before CORS so CORS wraps it
+# (Starlette puts the last-added middleware outermost) and a refusal still
+# carries the usual headers.
+app.add_middleware(ManagerPhoneScopeMiddleware)
 app.add_middleware(CORSMiddleware, **_cors_kwargs)
 
 # Trusted hosts — reject requests with spoofed Host headers. Static allowlist

@@ -46,6 +46,7 @@ server/
 - JWT bearer token in `Authorization: Bearer …`. Roles: `admin`, `client`, `candidate`, `employee`, `creator`, `agency`, `individual` (see root CLAUDE.md).
 - Per-endpoint deps: `require_admin`, `require_client`, `require_candidate`, `require_employee`, `require_admin_or_client`.
 - Feature-gated routers add `dependencies=[Depends(require_feature("flag"))]` at mount time (see `routes/__init__.py`).
+- **Matcha Schedule phone sessions** (`client="ios_schedule"` at login → `auth_device_sessions` row, `sid`/`cl` claims): `session_tokens.MOBILE_SESSION_ROLES` = employee + client. A client (business admin) needs `capabilities=["manage"]` from the app and an accessible business company (`login._MOBILE_ELIGIBLE_SQL`, re-checked at every refresh rotation). A client phone token is held to the schedule routes by the pure-ASGI `core/services/mobile_scope.ManagerPhoneScopeMiddleware` allowlist (403 elsewhere); employee phone tokens are bounded by their role and not filtered. A new route the app needs for business admins is an allowlist entry there, or it 403s.
 
 **Models**:
 - Pydantic v2 (`BaseModel`, `Field`, `model_validator`).

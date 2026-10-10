@@ -44,6 +44,8 @@ class _Connection:
         self.device_updates = 0
         self.generation = 0
         self.company_deleted_at = None
+        # A business admin's company is non-personal and approved.
+        self.client_company_ok = True
         # Whether the previous generation is still inside the lost-response
         # grace window (_MOBILE_REFRESH_GRACE_SECONDS after the last rotation).
         self.grace_open = True
@@ -57,18 +59,20 @@ class _Connection:
         if "refresh_generation = $4 + 1" in query:
             sid, user_id, _inactive, presented, grace = args
             assert grace == login_routes._MOBILE_REFRESH_GRACE_SECONDS
+            assert login_routes._MOBILE_ELIGIBLE_SQL in query
             if sid != self.sid or user_id != self.user_id or self.revoked \
-                    or self.employment_status in ("terminated", "offboarded") \
+                    or not self._eligible() \
                     or presented != self.generation - 1 or not self.grace_open:
                 return None
             return {"id": self.sid, "refresh_generation": self.generation}
         if "UPDATE auth_device_sessions" in query:
             # Compare-and-swap rotation: the presented generation must match.
             assert "refresh_generation = $4" in query
+            assert login_routes._MOBILE_ELIGIBLE_SQL in query
             sid, user_id, _inactive, presented = args
             self.device_updates += 1
             if sid != self.sid or user_id != self.user_id or self.revoked \
-                    or self.employment_status in ("terminated", "offboarded") \
+                    or not self._eligible() \
                     or presented != self.generation:
                 return None
             self.generation += 1
@@ -86,9 +90,19 @@ class _Connection:
             return {"id": uuid4(), "employment_status": self.employment_status}
         raise AssertionError(query)
 
+    def _eligible(self):
+        """What `_MOBILE_ELIGIBLE_SQL` decides, for the role the fake holds."""
+        if self.role == "employee":
+            return self.employment_status not in ("terminated", "offboarded")
+        return self.role == "client" and self.client_company_ok
+
     async def fetchval(self, query, *args):
         if "SELECT EXISTS" in query and "auth_device_sessions" in query:
             return args == (self.sid, self.user_id) and not self.revoked
+        if "FROM clients cl JOIN companies c" in query:
+            assert args == (self.user_id,)
+            assert "NOT COALESCE(c.is_personal, false)" in query
+            return self.client_company_ok
         raise AssertionError(query)
 
     async def execute(self, query, *args):
@@ -455,3 +469,99 @@ async def test_revoking_user_sessions_ends_every_mobile_device(route_env):
 async def test_revoke_mobile_devices_with_no_users_is_a_no_op(route_env):
     await dependencies.revoke_mobile_devices(route_env, [])
     assert route_env.executed == []
+
+
+# ── business admins on Matcha Schedule ───────────────────────────────────────
+
+
+def _manager_login(**kwargs):
+    return LoginRequest(email="owner@example.com", password="password", client="ios_schedule",
+                        device_name="iPhone", **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_business_admin_signs_in_from_a_build_that_can_manage(route_env):
+    conn = route_env
+    conn.role = "client"
+    result = await login_routes.login(_manager_login(capabilities=["manage"]), _request())
+    payload = auth.decode_token(result.refresh_token, expected_type="refresh")
+    assert payload.sid == str(conn.sid) and payload.cl == "ios_schedule" and payload.role == "client"
+    access = HTTPAuthorizationCredentials(scheme="Bearer", credentials=result.access_token)
+    assert (await dependencies.get_token_payload(access)).role == "client"
+    # Never through a plain decode: WebSockets and telemetry can't check revocation.
+    assert auth.decode_token(result.access_token, expected_type="access") is None
+
+    rotated = await login_routes.refresh_token(RefreshTokenRequest(refresh_token=result.refresh_token))
+    assert auth.decode_token(rotated.refresh_token, expected_type="refresh").sid == payload.sid
+    assert conn.device_updates == 1
+
+    await login_routes.mobile_logout(MobileLogoutRequest(refresh_token=rotated.refresh_token))
+    assert conn.revoked
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("role", "capabilities", "company_ok", "detail"), [
+    ("client", [], True, "Update Matcha Schedule"),
+    ("client", ["manage"], False, "approved business account"),
+    ("admin", ["manage"], True, "employees and business admins"),
+    ("individual", ["manage"], True, "employees and business admins"),
+    ("candidate", ["manage"], True, "employees and business admins"),
+])
+async def test_other_accounts_cannot_start_a_phone_session(route_env, role, capabilities, company_ok, detail):
+    conn = route_env
+    conn.role = role
+    conn.client_company_ok = company_ok
+    with pytest.raises(HTTPException) as error:
+        await login_routes.login(_manager_login(capabilities=capabilities), _request())
+    assert error.value.status_code == 403
+    assert detail in error.value.detail
+    assert conn.sid is None
+
+
+@pytest.mark.asyncio
+async def test_a_business_admin_whose_company_is_no_longer_accessible_cannot_refresh(route_env):
+    conn = route_env
+    conn.role = "client"
+    result = await login_routes.login(_manager_login(capabilities=["manage"]), _request())
+    conn.client_company_ok = False
+    with pytest.raises(HTTPException) as error:
+        await login_routes.refresh_token(RefreshTokenRequest(refresh_token=result.refresh_token))
+    assert error.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_a_phone_session_whose_user_became_an_admin_is_ended(route_env):
+    conn = route_env
+    conn.role = "client"
+    result = await login_routes.login(_manager_login(capabilities=["manage"]), _request())
+    conn.role = "admin"
+    with pytest.raises(HTTPException) as error:
+        await login_routes.refresh_token(RefreshTokenRequest(refresh_token=result.refresh_token))
+    assert error.value.status_code == 401
+    assert conn.revoked
+
+
+def test_eligibility_sql_covers_both_roles():
+    sql = login_routes._MOBILE_ELIGIBLE_SQL
+    assert "u.role = 'employee'" in sql and "employment_status" in sql and "$3::text[]" in sql
+    assert "u.role = 'client'" in sql and "NOT IN ('pending', 'rejected')" in sql
+    assert "is_personal" in sql
+
+
+@pytest.mark.parametrize(("role", "ok"), [("employee", True), ("client", True), ("admin", False), ("individual", False)])
+def test_mobile_session_roles(role, ok, monkeypatch):
+    for module in (auth, session_tokens):
+        monkeypatch.setattr(module, "get_settings", _settings)
+    sid = uuid4()
+    token = auth.create_access_token(uuid4(), "x@example.com", role,
+                                     extra_claims={"sid": str(sid), "cl": "ios_schedule"})
+    decoded = auth.decode_token(token, expected_type="access", allow_mobile_access=True)
+    assert (decoded is not None) is ok
+    refresh = auth.create_refresh_token(uuid4(), "x@example.com", role,
+                                        extra_claims={"sid": str(sid), "cl": "ios_schedule", "gen": 0})
+    payload = auth.decode_token(refresh, expected_type="refresh")
+    if ok:
+        assert login_routes._mobile_session_id(payload) == sid
+    else:
+        with pytest.raises(HTTPException):
+            login_routes._mobile_session_id(payload)
