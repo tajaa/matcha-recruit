@@ -331,6 +331,7 @@ extension AppState {
             showChannelBrowse = false
             showEmailHub = false
             showAssistantHub = false
+            showCalendarHub = false
         }
 
         if let project {

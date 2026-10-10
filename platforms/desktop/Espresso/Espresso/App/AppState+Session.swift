@@ -56,6 +56,8 @@ extension AppState {
         Task { await refreshSubscription() }
         Task { await refreshEntitlements() }
         Task { await refreshBetaFeatures() }
+        // The assistant speaks in the person's time; tell the server the zone.
+        Task { await CalendarService.shared.reportTimeZoneIfNeeded() }
         promptForNotificationsIfNeeded()
         installRealtimeHandlers()
         subscribeNewNotificationObserver()
@@ -85,6 +87,9 @@ extension AppState {
         selectedJournalId = nil
         showEmailHub = false
         showAssistantHub = false
+        showCalendarHub = false
+        calendarFocusDate = nil
+        pendingEmailId = nil
         showInbox = false
         showPeople = false
         showHome = false

@@ -31,6 +31,9 @@ struct EmailWorkspace: View {
     @State private var railCollapsed = false
     @State private var boardRequest: BoardRequest?
     @State private var boardNote: String?
+    /// A message opened from elsewhere (a calendar event's "Open email") that
+    /// is not in the unread list; the reader fetches it by id.
+    @State private var openedElsewhere: String?
     @FocusState private var listFocused: Bool
 
     var body: some View {
@@ -71,7 +74,12 @@ struct EmailWorkspace: View {
         .onChange(of: appState.canEmailAI) { _, _ in
             Task { await autoOrganizeIfNeeded() }
         }
-        .onChange(of: selection) { _, _ in boardNote = nil }
+        .onChange(of: selection) { _, picked in
+            boardNote = nil
+            if !picked.isEmpty { openedElsewhere = nil }
+        }
+        .onAppear(perform: consumePendingEmail)
+        .onChange(of: appState.pendingEmailId) { _, _ in consumePendingEmail() }
         .sheet(item: $boardRequest) { request in
             EmailSendToBoardSheet(emails: request.emails) { board in
                 boardNote = request.emails.count == 1
@@ -92,6 +100,19 @@ struct EmailWorkspace: View {
 
     /// Drop picks that no longer resolve: read elsewhere, gone from the
     /// unread list, and not the message open in the reader.
+    private func consumePendingEmail() {
+        guard let id = appState.pendingEmailId else { return }
+        appState.pendingEmailId = nil
+        if vm.message(id: id) != nil {
+            selection = [id]
+            anchor = id
+            scrollTarget = id
+        } else {
+            selection = []
+            openedElsewhere = id
+        }
+    }
+
     private func pruneSelection() {
         let live = selection.filter { vm.message(id: $0) != nil }
         if live != selection { selection = live }
@@ -452,6 +473,8 @@ struct EmailWorkspace: View {
         let picked = selectedEmails
         if picked.count == 1 {
             EmailDetailView(emailId: picked[0].id)
+        } else if picked.isEmpty, let openedElsewhere {
+            EmailDetailView(emailId: openedElsewhere)
         } else if picked.count > 1 {
             multiSelectPanel(picked)
         } else {

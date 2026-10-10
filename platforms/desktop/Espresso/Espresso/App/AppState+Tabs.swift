@@ -64,6 +64,7 @@ extension AppState {
         selectedJournalId = nil
         showEmailHub = false
         showAssistantHub = false
+        showCalendarHub = false
         showHome = false
         showSkills = false
         showInbox = false

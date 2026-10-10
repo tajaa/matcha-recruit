@@ -5,7 +5,8 @@ import AppKit
 // MARK: - Reader
 
 /// One message: header, AI quick actions (summarize; draft a reply — saved to
-/// Gmail drafts and reviewed in `EmailReplySheet` before sending), and the
+/// Gmail drafts and reviewed in `EmailReplySheet` before sending; add its
+/// events to the calendar — reviewed in `EmailCalendarSheet`), and the
 /// body. HTML mail renders in a locked-down web view (`EmailHTMLView`); plain
 /// text renders natively with its links shortened. Hosted by the Email hub's
 /// reader column. Resolves from the loaded list, falling back to a fetch by id
@@ -31,6 +32,9 @@ struct EmailDetailView: View {
     @State private var actionError: String?
     @State private var sentNote: String?
     @State private var showSendToBoard = false
+    @State private var showCalendarSheet = false
+    /// "Added 2 events" + the day to open the Calendar on.
+    @State private var calendarNote: (text: String, date: Date?)?
     /// Bumped whenever the shown message changes, so a slow response for the
     /// previous message can't land on this one.
     @State private var generation = 0
@@ -147,6 +151,13 @@ struct EmailDetailView: View {
             EmailSendToBoardSheet(emails: [msg]) { board in
                 actionError = nil
                 sentNote = "Email card created on \(board)"
+            }
+        }
+        .sheet(isPresented: $showCalendarSheet) {
+            EmailCalendarSheet(email: msg) { count, date in
+                actionError = nil
+                sentNote = nil
+                calendarNote = (count == 1 ? "Added to your calendar" : "Added \(count) events to your calendar", date)
             }
         }
     }
@@ -284,10 +295,26 @@ struct EmailDetailView: View {
                     .onSubmit { draft(msg) }
                     .help("e.g. \"say yes to Friday, keep it short\"")
                 actionButton("Summarize", icon: "text.alignleft", busy: isSummarizing) { summarize(msg) }
+                actionButton("Add to calendar", icon: "calendar.badge.plus", busy: false) {
+                    guard requireEmailAI() else { return }
+                    calendarNote = nil
+                    showCalendarSheet = true
+                }
                 actionButton("Draft reply", icon: "arrowshape.turn.up.left", busy: isDrafting, primary: true) { draft(msg) }
             }
             if let actionError {
                 statusLine(icon: "exclamationmark.triangle.fill", text: actionError, color: .orange)
+            } else if let calendarNote {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 9))
+                    Text(calendarNote.text).font(.system(size: 10))
+                    Button("Open Calendar") { appState.openCalendar(at: calendarNote.date) }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10, weight: .semibold))
+                        .underline()
+                    Spacer()
+                }
+                .foregroundColor(.green)
             } else if let sentNote {
                 statusLine(icon: "checkmark.circle.fill", text: sentNote, color: .green)
             }

@@ -92,6 +92,15 @@ class AppState {
     /// Full-pane private conversation with Espresso (the assistant). Same
     /// nav-only model; the pane owns its conversation.
     var showAssistantHub: Bool = false
+    /// Full-pane Calendar (the person's Espresso calendar, dated to-dos and
+    /// Google Calendar). Same nav-only model.
+    var showCalendarHub: Bool = false
+    /// A day for the Calendar to show next (set with `openCalendar(at:)`);
+    /// the Calendar consumes and clears it.
+    var calendarFocusDate: Date? = nil
+    /// A message for the Email hub to open next (`openEmail(id:)`); the hub
+    /// consumes and clears it.
+    var pendingEmailId: String? = nil
     /// Full-pane "Browse Channels" surface. Reached from the sidebar Channels
     /// section header. Mutually exclusive with thread/project/channel/journal
     /// selection — toggling on clears those.
@@ -119,6 +128,21 @@ class AppState {
         showProductivityHub = false
         showEmailHub = false
         showAssistantHub = false
+        showCalendarHub = false
+    }
+
+    /// Open the Calendar, on `date`'s month or week when given.
+    func openCalendar(at date: Date? = nil) {
+        clearPrimaryNav()
+        calendarFocusDate = date
+        showCalendarHub = true
+    }
+
+    /// Open one message in the Email hub.
+    func openEmail(id: String) {
+        clearPrimaryNav()
+        pendingEmailId = id
+        showEmailHub = true
     }
 
     var onlineUsers: [MWOnlineUser] = []

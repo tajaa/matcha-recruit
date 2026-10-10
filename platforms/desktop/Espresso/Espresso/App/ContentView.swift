@@ -267,7 +267,7 @@ struct ContentView: View {
         let isHomeActive = !appState.showJournalsHub && !appState.showProjectsHub
             && !appState.showThreadsHub && !appState.showChannelsHub
             && !appState.showProductivityHub && !appState.showEmailHub
-            && !appState.showAssistantHub && (appState.showHome || (
+            && !appState.showAssistantHub && !appState.showCalendarHub && (appState.showHome || (
             appState.selectedThreadId == nil &&
             appState.selectedProjectId == nil &&
             appState.selectedChannelId == nil &&
@@ -364,6 +364,7 @@ struct ContentView: View {
         case .projects: projectsSidebarSection
         case .journals: journalsSidebarSection
         case .productivity: productivitySidebarSection
+        case .calendar: calendarSidebarSection
         case .threads:  threadsSidebarSection
         case .email:    emailSidebarSection
         case .assistant: assistantSidebarSection
@@ -471,6 +472,14 @@ struct ContentView: View {
     private var journalsSidebarSection: some View {
         sidebarNavRow(title: "Journals", icon: "book.closed",
                       isActive: appState.showJournalsHub, onOpen: openJournalsHub)
+    }
+
+    /// Nav-only row — opens the Calendar (Espresso events, dated to-dos and
+    /// Google Calendar; the assistant and the email reader write to it).
+    @ViewBuilder
+    private var calendarSidebarSection: some View {
+        sidebarNavRow(title: "Calendar", icon: "calendar",
+                      isActive: appState.showCalendarHub, onOpen: { appState.openCalendar() })
     }
 
     /// Nav-only row — opens the Productivity hub (personal kanban boards).
