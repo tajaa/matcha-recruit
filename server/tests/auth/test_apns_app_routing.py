@@ -33,6 +33,9 @@ def _settings(**overrides):
     ("com.matchawork.app", "schedule_offer_received", False),
     ("com.matchawork.app", "channel_message", True),
     ("com.heymatcha.schedule", "schedule_published", True),
+    # A request waiting for a manager reaches the Schedule app, never Werk.
+    ("com.heymatcha.schedule", "schedule_request_pending", True),
+    ("com.matchawork.app", "schedule_request_pending", False),
     ("com.heymatcha.schedule", "inbox_message", True),
     ("com.heymatcha.schedule", "mention", False),
     ("com.unknown.app", "inbox_message", False),
