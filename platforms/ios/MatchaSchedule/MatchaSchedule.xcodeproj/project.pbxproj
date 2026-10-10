@@ -32,9 +32,12 @@
 		4BB98E7AB8DE2AFFBDBA9623 /* NotificationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A260A3246CB07905538A7F /* NotificationModels.swift */; };
 		4C1CA17B983939232B71141A /* DMThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F3F236B34A9A17D4B76E97D /* DMThreadView.swift */; };
 		623A6EFDB5EAA55F21E5EA69 /* ManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B071AAD4DA34764CDC8C2A /* ManagerTests.swift */; };
+		66AC6BEEAF5FEE5EB6666695 /* HuumeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2604F4F47F75DE4F87359AC9 /* HuumeTests.swift */; };
+		6812715DC9BC07E55C5BC91E /* HuumeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4205437C27822B5B40260871 /* HuumeService.swift */; };
 		6C7CA8E10A30F3E497E37E70 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = CB640D4E6F379D709914C1C1 /* PrivacyInfo.xcprivacy */; };
 		6EEF49625842516E828C5A6D /* RequestModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61233741E1D808A3F43DD962 /* RequestModels.swift */; };
 		7E6AACC62DFEBA440FA467A3 /* ApprovalsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43948B61CED2C3983AFE2ABC /* ApprovalsView.swift */; };
+		7FCBE25D865BFC1284220408 /* HuumeChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C52F2C228F339EB85028AFF /* HuumeChatView.swift */; };
 		80E55D45DEE7F652CA9190E9 /* ManagerShiftDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 958E0EBE9E78FFC8FCEA7C33 /* ManagerShiftDetailView.swift */; };
 		8283027B36FC7CA971E5B5A2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F925A0959D4FA48F5B0026D2 /* Assets.xcassets */; };
 		83DCE3D4B76832F007122D21 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44EF64C867999991140704A /* AppState.swift */; };
@@ -45,6 +48,7 @@
 		A052778B5CE08963BBA127CC /* Inter-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 8A436EE3DA7E76ABB4F60B07 /* Inter-Regular.ttf */; };
 		A27C541491A795CA685BB395 /* ManagerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B86AF36A838DAC21F9915828 /* ManagerService.swift */; };
 		A9466EA77149AB1CCCB34E5B /* NewConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40DE4DAF05D397345E450CEA /* NewConversationView.swift */; };
+		AE559CFF05354BC94BB4574C /* HuumeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59713BF30982B5DB1C94A283 /* HuumeModels.swift */; };
 		B2B8313E3EF5AB5591374D68 /* InboxService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900A8043DCA1FD568AECD561 /* InboxService.swift */; };
 		B5BC82F455926DE51691558C /* ManagerWeekView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B73E92544F17AFB16515D0F /* ManagerWeekView.swift */; };
 		B86457D9BF3C4056C6A30057 /* ManagerWeekTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9F5FF4EAE9342929A033DFD /* ManagerWeekTests.swift */; };
@@ -87,16 +91,20 @@
 		154AC9DCE45E3D704D37EE70 /* InterDisplay-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "InterDisplay-Bold.ttf"; sourceTree = "<group>"; };
 		1AC5BA1D9374212777AF9DFA /* ShiftEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftEditorView.swift; sourceTree = "<group>"; };
 		24FCD97C44641AB8A42A62FF /* InboxAndPushTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxAndPushTests.swift; sourceTree = "<group>"; };
+		2604F4F47F75DE4F87359AC9 /* HuumeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HuumeTests.swift; sourceTree = "<group>"; };
 		26E9D449F241F249F5826E0E /* AvailabilityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvailabilityView.swift; sourceTree = "<group>"; };
 		3B73E92544F17AFB16515D0F /* ManagerWeekView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagerWeekView.swift; sourceTree = "<group>"; };
 		40DE4DAF05D397345E450CEA /* NewConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewConversationView.swift; sourceTree = "<group>"; };
+		4205437C27822B5B40260871 /* HuumeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HuumeService.swift; sourceTree = "<group>"; };
 		42E8FD722F3100C0B1D0E651 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		4382AFA453AC7672B4017239 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		43948B61CED2C3983AFE2ABC /* ApprovalsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalsView.swift; sourceTree = "<group>"; };
 		45D7FFF49F81670DBC005528 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		4C52F2C228F339EB85028AFF /* HuumeChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HuumeChatView.swift; sourceTree = "<group>"; };
 		4C7ECE6100500F49F552054C /* Inter-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Inter-LICENSE.txt"; sourceTree = "<group>"; };
 		519000652F59BE804BD3DFDE /* NotificationFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationFeedView.swift; sourceTree = "<group>"; };
 		58A3F3145F2D4137F9BA74D5 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		59713BF30982B5DB1C94A283 /* HuumeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HuumeModels.swift; sourceTree = "<group>"; };
 		5A8DE49ED689FBD823C0DD38 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		61233741E1D808A3F43DD962 /* RequestModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestModels.swift; sourceTree = "<group>"; };
 		621C383164B73E3F0D6E4306 /* RequestModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestModelsTests.swift; sourceTree = "<group>"; };
@@ -150,6 +158,7 @@
 			children = (
 				A0C87701129671EC6F55AD55 /* APIClient.swift */,
 				45D7FFF49F81670DBC005528 /* AuthService.swift */,
+				4205437C27822B5B40260871 /* HuumeService.swift */,
 				900A8043DCA1FD568AECD561 /* InboxService.swift */,
 				58A3F3145F2D4137F9BA74D5 /* KeychainHelper.swift */,
 				B86AF36A838DAC21F9915828 /* ManagerService.swift */,
@@ -250,6 +259,7 @@
 		BBBF92741297CF3BB9CA2747 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				2604F4F47F75DE4F87359AC9 /* HuumeTests.swift */,
 				24FCD97C44641AB8A42A62FF /* InboxAndPushTests.swift */,
 				A4B071AAD4DA34764CDC8C2A /* ManagerTests.swift */,
 				E9F5FF4EAE9342929A033DFD /* ManagerWeekTests.swift */,
@@ -273,6 +283,7 @@
 			isa = PBXGroup;
 			children = (
 				43948B61CED2C3983AFE2ABC /* ApprovalsView.swift */,
+				4C52F2C228F339EB85028AFF /* HuumeChatView.swift */,
 				958E0EBE9E78FFC8FCEA7C33 /* ManagerShiftDetailView.swift */,
 				3B73E92544F17AFB16515D0F /* ManagerWeekView.swift */,
 				CE7209F5C2D77D2876B2A846 /* ManageView.swift */,
@@ -295,6 +306,7 @@
 			isa = PBXGroup;
 			children = (
 				D2FBF337459CDF9C519C6B65 /* DateInput.swift */,
+				59713BF30982B5DB1C94A283 /* HuumeModels.swift */,
 				EEB4B3BFC7FB985B1E9B4CD2 /* InboxModels.swift */,
 				AD2E302B1CE8F2BA724A9E7E /* ManagerModels.swift */,
 				79A260A3246CB07905538A7F /* NotificationModels.swift */,
@@ -454,6 +466,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				66AC6BEEAF5FEE5EB6666695 /* HuumeTests.swift in Sources */,
 				CD2231972B575F3C73DA45CE /* InboxAndPushTests.swift in Sources */,
 				623A6EFDB5EAA55F21E5EA69 /* ManagerTests.swift in Sources */,
 				B86457D9BF3C4056C6A30057 /* ManagerWeekTests.swift in Sources */,
@@ -485,6 +498,9 @@
 				4C1CA17B983939232B71141A /* DMThreadView.swift in Sources */,
 				CC568A10AB551AE913B321B6 /* DateInput.swift in Sources */,
 				2C03471218EFFDC7E24642FE /* ForceRetry.swift in Sources */,
+				7FCBE25D865BFC1284220408 /* HuumeChatView.swift in Sources */,
+				AE559CFF05354BC94BB4574C /* HuumeModels.swift in Sources */,
+				6812715DC9BC07E55C5BC91E /* HuumeService.swift in Sources */,
 				455ED0BF69F5F4279DD616EF /* InboxListView.swift in Sources */,
 				4A8AF159E08EB2BAE7C83F14 /* InboxModels.swift in Sources */,
 				B2B8313E3EF5AB5591374D68 /* InboxService.swift in Sources */,
