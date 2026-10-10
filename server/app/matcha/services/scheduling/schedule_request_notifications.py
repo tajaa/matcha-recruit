@@ -3,17 +3,31 @@
 from __future__ import annotations
 
 import json
+import logging
 from html import escape
 from uuid import UUID
 
+from app.core.services import apns_service
 from app.core.services.email import get_email_service
 from app.core.services.email._shared import _is_reserved_test_domain
 from app.config import get_settings
+from app.matcha.services.scheduling.schedule_manager_scope import store_manager_recipients_sql
+
+logger = logging.getLogger(__name__)
 
 
 # A reviewer address that keeps failing is parked after this many sends
 # (empsched27) instead of being retried by every sweep forever.
 MAX_MANAGER_DELIVERY_ATTEMPTS = 5
+
+# Employees flagged is_manager/is_supervisor who run every store this request
+# touches (bell + push; email stays with business admins). Shared with the
+# recovery sweep, which passes its own request column.
+STORE_MANAGER_RECIPIENTS_SQL = store_manager_recipients_sql("$1")
+
+# A `schedule_*` kind reaches the Matcha Schedule app and never Werk/Espresso
+# (apns_service.APP_BUNDLES).
+PUSH_KIND = "schedule_request_pending"
 
 
 async def mark_manager_ready_notifications_resolved(
@@ -54,11 +68,66 @@ async def reset_manager_ready_deliveries(
     return int(result.split()[-1])
 
 
-async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[str, int]:
-    """Send each company reviewer one email for a manager-ready request.
+async def _claim_and_post_in_app(conn, request, recipient_id: UUID, title: str, body: str, link: str) -> bool:
+    """Claim the in-app delivery and write its bell row; True only on a fresh
+    claim, so a retry never posts (or pushes) twice."""
+    in_app_claimed = await conn.fetchval(
+        """
+        INSERT INTO schedule_request_notification_deliveries
+            (company_id, request_id, recipient_user_id, event_type)
+        VALUES ($1,$2,$3,'manager_ready_in_app')
+        ON CONFLICT (request_id, recipient_user_id, event_type) DO UPDATE
+           SET created_at=NOW()
+         WHERE schedule_request_notification_deliveries.sent_at IS NULL
+           AND schedule_request_notification_deliveries.failed_at IS NULL
+           AND schedule_request_notification_deliveries.created_at < NOW() - INTERVAL '5 minutes'
+        RETURNING id
+        """,
+        request["company_id"], request["id"], recipient_id,
+    )
+    if not in_app_claimed:
+        return False
+    # One statement commits the bell row and its outbox receipt together,
+    # preventing retry recovery from creating duplicate manager alerts.
+    await conn.execute(
+        """
+        WITH notification AS (
+            INSERT INTO mw_notifications (user_id, company_id, type, title, body, link, metadata)
+            VALUES ($1, $2, 'schedule_request_pending', $3, $4, $5, $6::jsonb)
+        )
+        UPDATE schedule_request_notification_deliveries
+        SET sent_at=NOW() WHERE id=$7
+        """,
+        recipient_id, request["company_id"], title, body, link,
+        json.dumps({"request_id": str(request["id"])}),
+        in_app_claimed,
+    )
+    return True
 
-    The delivery row is claimed before sending. A failed provider call counts
-    an attempt (re-claimable after five minutes, parked at
+
+async def _push_to_manager(conn, recipient_id: UUID, title: str, body: str, request_id: UUID) -> None:
+    """Best-effort: the bell row is the durable record and the app's approvals
+    badge catches anything a phone missed, so a push failure never fails the
+    delivery."""
+    link = f"matchaschedule://manage/requests/{request_id}"
+    try:
+        await apns_service.send_to_user(
+            recipient_id, title, body,
+            {"type": PUSH_KIND, "link": link, "metadata": {"request_id": str(request_id), "link": link}},
+            kind=PUSH_KIND, conn=conn,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("manager push failed for request %s", request_id, exc_info=True)
+
+
+async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[str, int]:
+    """Tell every reviewer about a manager-ready request.
+
+    Business admins get the bell row and one email; store managers (employees
+    flagged is_manager/is_supervisor who run every store the request touches)
+    get the bell row only. Each fresh bell row also pushes to the Matcha
+    Schedule app. The delivery row is claimed before sending. A failed email
+    counts an attempt (re-claimable after five minutes, parked at
     MAX_MANAGER_DELIVERY_ATTEMPTS), while an interrupted worker's stale claim is
     reclaimed by the recovery task. Request state is never changed by delivery
     success or failure.
@@ -91,52 +160,28 @@ async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[st
         """,
         request["company_id"],
     )
+    store_managers = await conn.fetch(STORE_MANAGER_RECIPIENTS_SQL, request["id"])
     settings = get_settings()
     service = get_email_service()
+    owner = request["owner_name"] or "Employee"
+    target = request["target_name"] or "Coworker"
+    request_type = request["request_type"]
+    summary = (
+        f"{owner} and {target} confirmed a {request_type} request."
+        if request["counterparty_confirmed_at"] else
+        f"{owner} submitted a {request_type} request."
+    )
+    title = f"Shift {request_type} request awaiting approval"
+    body = f"{summary} Review it to approve or deny it."
+    link = f"/ops/schedule?tab=requests&request={request['id']}"
+    # Disjoint from `recipients`: store managers are role 'employee'.
+    for manager in store_managers:
+        if await _claim_and_post_in_app(conn, request, manager["id"], title, body, link):
+            await _push_to_manager(conn, manager["id"], title, body, request["id"])
     sent = 0
     for recipient in recipients:
-        link = f"/ops/schedule?tab=requests&request={request['id']}"
-        in_app_claimed = await conn.fetchval(
-            """
-            INSERT INTO schedule_request_notification_deliveries
-                (company_id, request_id, recipient_user_id, event_type)
-            VALUES ($1,$2,$3,'manager_ready_in_app')
-            ON CONFLICT (request_id, recipient_user_id, event_type) DO UPDATE
-               SET created_at=NOW()
-             WHERE schedule_request_notification_deliveries.sent_at IS NULL
-               AND schedule_request_notification_deliveries.failed_at IS NULL
-               AND schedule_request_notification_deliveries.created_at < NOW() - INTERVAL '5 minutes'
-            RETURNING id
-            """,
-            request["company_id"], request["id"], recipient["id"],
-        )
-        if in_app_claimed:
-            owner = request["owner_name"] or "Employee"
-            target = request["target_name"] or "Coworker"
-            request_type = request["request_type"]
-            summary = (
-                f"{owner} and {target} confirmed a {request_type} request."
-                if request["counterparty_confirmed_at"] else
-                f"{owner} submitted a {request_type} request."
-            )
-            # One statement commits the bell row and its outbox receipt together,
-            # preventing retry recovery from creating duplicate manager alerts.
-            await conn.execute(
-                """
-                WITH notification AS (
-                    INSERT INTO mw_notifications (user_id, company_id, type, title, body, link, metadata)
-                    VALUES ($1, $2, 'schedule_request_pending', $3, $4, $5, $6::jsonb)
-                )
-                UPDATE schedule_request_notification_deliveries
-                SET sent_at=NOW() WHERE id=$7
-                """,
-                recipient["id"], request["company_id"],
-                f"Shift {request_type} request awaiting approval",
-                f"{summary} Review it to approve or deny it.",
-                link,
-                json.dumps({"request_id": str(request["id"])}),
-                in_app_claimed,
-            )
+        if await _claim_and_post_in_app(conn, request, recipient["id"], title, body, link):
+            await _push_to_manager(conn, recipient["id"], title, body, request["id"])
         claimed = await conn.fetchval(
             """
             INSERT INTO schedule_request_notification_deliveries
@@ -159,13 +204,6 @@ async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[st
                 "UPDATE schedule_request_notification_deliveries SET sent_at=NOW() WHERE id=$1", claimed,
             )
             continue
-        owner = request["owner_name"] or "Employee"
-        target = request["target_name"] or "Coworker"
-        summary = (
-            f"{owner} and {target} confirmed a {request['request_type']} request."
-            if request["counterparty_confirmed_at"] else
-            f"{owner} submitted a {request['request_type']} request."
-        )
         subject = "Shift request ready for manager approval"
         email_link = f"{settings.app_base_url.rstrip('/')}{link}"
         html = (
@@ -193,4 +231,4 @@ async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[st
                    WHERE id = $1""",
                 claimed, MAX_MANAGER_DELIVERY_ATTEMPTS,
             )
-    return {"sent": sent, "recipients": len(recipients)}
+    return {"sent": sent, "recipients": len(recipients), "store_managers": len(store_managers)}

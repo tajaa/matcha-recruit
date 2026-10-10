@@ -30,6 +30,7 @@ class _ReadyConn:
         self.recipient_id = uuid4()
         self.executed = []
         self.claims = []
+        self.store_managers = []
 
     async def fetchrow(self, *_args):
         return {
@@ -41,7 +42,9 @@ class _ReadyConn:
             "target_name": "Blair Target",
         }
 
-    async def fetch(self, *_args):
+    async def fetch(self, query, *_args):
+        if "mgr.user_id" in query:
+            return self.store_managers
         return [{"id": self.recipient_id, "email": "manager@company.example", "name": "Manager"}]
 
     async def fetchval(self, query, *_args):
@@ -69,7 +72,7 @@ async def test_notification_claims_then_marks_delivery_sent(monkeypatch):
 
     result = await notifications.send_manager_ready_notifications(conn, request_id=conn.request_id)
 
-    assert result == {"sent": 1, "recipients": 1}
+    assert result == {"sent": 1, "recipients": 1, "store_managers": 0}
     assert any("SET sent_at=NOW()" in query for query, _args in conn.executed)
     assert any("ON CONFLICT (request_id, recipient_user_id, event_type)" in query for query in conn.claims)
 
@@ -186,3 +189,115 @@ def test_migration_adds_attempts_and_open_offer_indexes():
     assert "ORDER BY created_at DESC, id DESC" in source
     assert "('pending', 'awaiting_counterparty', 'awaiting_manager')" in source
     assert "def downgrade" in source and "DROP INDEX IF EXISTS uq_schedule_requests_open_pickup" in source
+
+
+# ── store managers ───────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def pushes(monkeypatch):
+    sent = []
+
+    async def send_to_user(user_id, title, body=None, payload=None, *, kind, conn=None, **_kw):
+        sent.append({"user_id": user_id, "title": title, "payload": payload, "kind": kind})
+
+    monkeypatch.setattr(notifications.apns_service, "send_to_user", send_to_user)
+    monkeypatch.setattr(notifications, "get_settings", lambda: SimpleNamespace(app_base_url="https://matcha.example"))
+    return sent
+
+
+class _NoEmail:
+    def is_configured(self):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_store_managers_get_the_bell_and_a_push_but_no_email(monkeypatch, pushes):
+    conn = _ReadyConn()
+    manager_id = uuid4()
+    conn.store_managers = [{"id": manager_id}]
+    monkeypatch.setattr(notifications, "get_email_service", lambda: _NoEmail())
+
+    result = await notifications.send_manager_ready_notifications(conn, request_id=conn.request_id)
+
+    assert result["store_managers"] == 1
+    bells = [args for query, args in conn.executed if "WITH notification" in query]
+    assert {args[0] for args in bells} == {manager_id, conn.recipient_id}
+    # Only the business admin's email is ever claimed.
+    email_claims = [q for q in conn.claims if "'manager_ready')" in q]
+    assert len(email_claims) == 1
+    manager_push = next(p for p in pushes if p["user_id"] == manager_id)
+    assert manager_push["kind"] == "schedule_request_pending"
+    assert manager_push["payload"]["type"] == "schedule_request_pending"
+    assert manager_push["payload"]["link"] == f"matchaschedule://manage/requests/{conn.request_id}"
+    assert manager_push["payload"]["metadata"]["request_id"] == str(conn.request_id)
+    # Business admins with the app are pushed too.
+    assert any(p["user_id"] == conn.recipient_id for p in pushes)
+
+
+@pytest.mark.asyncio
+async def test_no_push_without_a_fresh_bell_claim(monkeypatch, pushes):
+    conn = _ReadyConn()
+    conn.store_managers = [{"id": uuid4()}]
+
+    async def already_delivered(query, *_args):
+        conn.claims.append(query)
+        return None
+
+    conn.fetchval = already_delivered
+    monkeypatch.setattr(notifications, "get_email_service", lambda: _NoEmail())
+    await notifications.send_manager_ready_notifications(conn, request_id=conn.request_id)
+    assert pushes == []
+    assert not any("WITH notification" in query for query, _ in conn.executed)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_push_never_fails_the_delivery(monkeypatch):
+    conn = _ReadyConn()
+    conn.store_managers = [{"id": uuid4()}]
+
+    async def broken(*_args, **_kwargs):
+        raise RuntimeError("apns down")
+
+    monkeypatch.setattr(notifications.apns_service, "send_to_user", broken)
+    monkeypatch.setattr(notifications, "get_settings", lambda: SimpleNamespace(app_base_url="https://matcha.example"))
+    monkeypatch.setattr(notifications, "get_email_service", lambda: _NoEmail())
+    result = await notifications.send_manager_ready_notifications(conn, request_id=conn.request_id)
+    assert result["store_managers"] == 1
+    assert sum("WITH notification" in query for query, _ in conn.executed) == 2
+
+
+def _squash(sql: str) -> str:
+    return " ".join(sql.split())
+
+
+def test_store_manager_recipients_follow_the_queue_rule():
+    from app.matcha.services.scheduling.schedule_manager_scope import request_scope_sql
+
+    sql = notifications.STORE_MANAGER_RECIPIENTS_SQL
+    assert request_scope_sql("mgr.locs") in sql
+    assert "WHERE r.id = $1" in sql
+    assert "mgr.user_id IS DISTINCT FROM e.user_id" in sql
+    assert "mgr.user_id IS DISTINCT FROM te.user_id" in sql
+    assert "mu.role = 'employee'" in sql and "is_supervisor" in sql
+
+
+def test_sweep_chases_store_managers_with_the_senders_rule():
+    from app.matcha.services.scheduling.schedule_manager_scope import store_manager_recipients_sql
+    from app.workers.tasks import schedule_request_notifications as sweep
+
+    assert sweep._STORE_MANAGERS_FOR_PENDING == store_manager_recipients_sql("pending.id")
+    source = _squash((Path(__file__).parents[2] / "app/workers/tasks/schedule_request_notifications.py").read_text())
+    assert "FROM ({_STORE_MANAGERS_FOR_PENDING}) sm" in source
+    assert "d.recipient_user_id = sm.id AND d.event_type = 'manager_ready_in_app'" in source
+
+
+def test_backlog_floor_migration_uses_the_same_rule():
+    from app.matcha.services.scheduling.schedule_manager_scope import request_scope_sql
+
+    source = (Path(__file__).parents[2] / "alembic/versions/empsched29_store_manager_deliveries.py").read_text()
+    assert 'down_revision = "empsched28"' in source
+    assert _squash(request_scope_sql("mgr.locs"))[1:-1] in _squash(source)
+    assert "'manager_ready_in_app', NOW()" in source
+    assert "WHERE r.status = 'awaiting_manager'" in source
+    assert "ON CONFLICT (request_id, recipient_user_id, event_type) DO NOTHING" in source
