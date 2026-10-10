@@ -740,6 +740,56 @@ In the full editor, an assignment-time meal-break advisory opens the affected
 shift inspector so the manager can set planned break minutes. It must not fall
 through to the generic force-through confirmation used for other advisories.
 
+## Store managers (2026-10-10) — employees who run their own store's schedule
+
+An employee whose own active `employees` row is flagged `is_manager` or
+`is_supervisor` and has a `work_location_id` manages that store. Until now the
+flag only opened the Huume session, planning, fill-vacant and eligibility
+routes; building, assigning, publishing and reviewing requests were
+`require_admin_or_client`, so a shift lead had to borrow an admin login. The
+Matcha Schedule app (iOS) is the surface this was built for.
+
+- **One resolver, one gate.** `schedule_manager_scope.resolve_schedule_manager_scope`
+  returns a `ScheduleManagerScope`: company-wide for `admin`/`client`/`individual`
+  (exactly `require_admin_or_client`'s roles — the eligibility resolver treats
+  `individual` as scoped, and these routes must not change for it), the managed
+  stores for an employee manager, 403 otherwise (a missing role included).
+  `dependencies.require_schedule_manager` is a fast refusal for crew; the
+  resolver, called inside each handler on its own connection, is the real check.
+- **Thirteen endpoints** take the new gate: `GET /week`, `GET /locations/{id}/readiness`,
+  `POST/PUT/DELETE /shifts`, both publish routes, `GET /jobs`, assign, unassign,
+  `POST /assignments/move`, `GET /requests`, `POST /requests/{id}/review`.
+  `tests/employee_schedule/test_schedule_manager_scope.py` pins the exact set and
+  that each handler calls the resolver; everything else in the package keeps
+  its own gate (jobs CRUD, templates, availability edits, stores, auto schedules
+  stay business-admin).
+- **Business admins go through the original checks unchanged.**
+  `_shared.assert_store_in_scope` calls `assert_location_in_company` for them;
+  `scope.assert_shift` is a no-op; `publish_range` binds `$5 = company_wide` so
+  their filter is the same.
+- **A scoped manager names one of their stores** (no store is 403, an inactive
+  or unknown one 404, another manager's 403) and **cannot change a shift with no
+  store** (403 `unscoped_shift_read_only`) — it still shows, read-only, on every
+  store's board. Another store's shift is a 404, so the response says nothing
+  about whether it exists. Publish-week requires a location for them and leaves
+  storeless drafts out (those could never pass readiness anyway).
+- **Requests: every store the request touches must be theirs.**
+  `request_scope_sql` (requester's store, both shifts' stores, the coworker's
+  store) is the one predicate the list, the review and the pending count share
+  through `_shared.request_queue_filter`. A store manager never sees or reviews
+  a request they made or are the coworker on (403 `cannot_review_own_request`;
+  the list excludes them NULL-safely). Review re-checks each shift's store after
+  `fetch_locked_shift_pair`, because the scope read happens before the lock.
+  `REQUEST_SELECT` now carries `location_id` (the shift's store, else the
+  requester's), and `GET /requests?location=` narrows the queue for anyone.
+- **`GET /employee-schedule/manager/scope`** (`routes/employee_schedule/manager.py`,
+  `require_company_member`) tells the app what to show: `can_manage` (false for
+  crew, not a 403), `company_wide`, active `locations` with timezone and week
+  start, `features` (`huume`, `matcha_work`, `time_off`) and `pending_requests`.
+  No wage field rides on it.
+- **Forcing.** A store manager can force through the same advisories a business
+  admin can; it is audit-logged as theirs. There is no per-company switch.
+
 ## Stores from the schedule screens (2026-10-01) — what a week needs before it can publish
 
 A week publishes only for a store with an address, a **timezone** and a
@@ -1281,10 +1331,11 @@ defaulting OFF). **A new cost field on an existing response is a new gate, not
 a new key.** The gate is the company flag AND a business-admin role
 (`admin`/`client`).
 `individual` is dropped even though `require_admin_or_client` admits it — a
-personal Espresso account has no business reading a company payroll. **There is
-no shift-manager role today**, so that is the finest gate the role model
-supports; a manager who can build the schedule can see the wages. A narrower
-gate needs a new role, not a new check here.
+personal Espresso account has no business reading a company payroll. Store
+managers (employee role, `is_manager`/`is_supervisor`, see "Store managers"
+below) can build their store's schedule but are deliberately NOT in
+`COST_ROLES`: building a week does not entitle anyone to coworkers' wages, so
+`/week` omits `summary.cost` and `/jobs` omits `default_hourly_rate` for them.
 
 **Surfaces** — one engine, four readers, so no two can disagree:
 

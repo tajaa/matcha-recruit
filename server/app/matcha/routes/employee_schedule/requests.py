@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
-from ...dependencies import require_admin_or_client
+from ...dependencies import require_schedule_manager
 from app.matcha.models.scheduling.employee_schedule import RequestReview
 from ...services.scheduling.shift_writes import (
     apply_assignment_core, log_availability_override, remove_assignment_core,
@@ -28,6 +28,7 @@ from ...services.scheduling.schedule_breaks import minimum_meal_break_minutes
 from ...services.scheduling.schedule_guidance import resolve_shift_break_plan
 from ._shared import (
     require_company_id, log_audit, serialize_request, REQUEST_SELECT,
+    assert_store_in_scope, request_queue_filter, request_scope_sql, resolve_schedule_manager_scope,
     INACTIVE_EMPLOYMENT_STATUSES, assert_employee_schedulable_at,
     check_job_qualification, find_conflicts, raise_conflict, raise_not_qualified,
     raise_shift_full,
@@ -43,16 +44,23 @@ _MAX_REQUESTS = 200
 @router.get("/requests")
 async def list_requests(
     status: str | None = Query(None),
+    location: UUID | None = Query(None, description="Only requests at this store"),
     limit: int = Query(_MAX_REQUESTS, ge=1, le=500),
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_schedule_manager),
 ):
+    """The review queue. A store manager sees only requests whose every store
+    is theirs (`request_scope_sql`) and never their own."""
     company_id = await require_company_id(current_user)
     params: list = [company_id]
     where = "r.company_id = $1"
     params.append(status or "awaiting_manager")
     where += f" AND r.status = ${len(params)}"
-    params.append(limit)
     async with get_connection() as conn:
+        scope = await resolve_schedule_manager_scope(conn, company_id=company_id, user=current_user)
+        if location is not None:
+            await assert_store_in_scope(conn, company_id, scope, location)
+        where += request_queue_filter(scope, location, params)
+        params.append(limit)
         rows = await conn.fetch(
             f"{REQUEST_SELECT} WHERE {where} ORDER BY r.created_at DESC LIMIT ${len(params)}",
             *params,
@@ -149,14 +157,41 @@ async def _check_recipient(conn, company_id: UUID, shift, employee_id: UUID,
     return outside, unqualified
 
 
+_REQUEST_IN_SCOPE_SQL = f"""
+    SELECT 1
+      FROM schedule_requests r
+      JOIN employees e ON e.id = r.employee_id
+      LEFT JOIN employees te ON te.id = r.target_employee_id
+      LEFT JOIN schedule_shifts s ON s.id = r.shift_id
+      LEFT JOIN schedule_shifts cs ON cs.id = r.counter_shift_id
+     WHERE r.id = $1 AND {request_scope_sql("$2::uuid[]")}
+"""
+
+
+async def _assert_request_in_scope(conn, scope, req) -> None:
+    """404 for a store manager outside the request's stores (the list never
+    showed it), 403 on their own request. Business admins pass untouched."""
+    if scope.company_wide:
+        return
+    if not await conn.fetchval(_REQUEST_IN_SCOPE_SQL, req["id"], sorted(scope.location_ids)):
+        raise HTTPException(status_code=404, detail="Request not found")
+    if scope.is_own_request(req["employee_id"], req["target_employee_id"]):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "cannot_review_own_request",
+                    "message": "Another manager has to review your own request."},
+        )
+
+
 @router.post("/requests/{request_id}/review")
 async def review_request(request_id: UUID, body: RequestReview,
-                         current_user=Depends(require_admin_or_client)):
+                         current_user=Depends(require_schedule_manager)):
     company_id = await require_company_id(current_user)
     new_status = "approved" if body.decision == "approved" else "denied"
     changed_shift_ids: list[UUID] = []
     async with get_connection() as conn:
         async with conn.transaction():
+            scope = await resolve_schedule_manager_scope(conn, company_id=company_id, user=current_user)
             req = await conn.fetchrow(
                 """SELECT id, company_id, request_type, shift_id, employee_id,
                           target_employee_id, counter_shift_id,
@@ -167,6 +202,7 @@ async def review_request(request_id: UUID, body: RequestReview,
             )
             if not req:
                 raise HTTPException(status_code=404, detail="Request not found")
+            await _assert_request_in_scope(conn, scope, req)
             if req["status"] not in ("awaiting_manager", "pending"):
                 raise HTTPException(status_code=409, detail={"code": "request_not_manager_ready", "status": req["status"]})
 
@@ -177,6 +213,9 @@ async def review_request(request_id: UUID, body: RequestReview,
                 shift = locked.get(str(req["shift_id"]))
                 if shift is None or shift["status"] != "published":
                     raise HTTPException(status_code=409, detail="Open shift is no longer published")
+                # Re-checked under the lock: the shift may have moved stores
+                # since the scope check above read it.
+                scope.assert_shift(shift["location_id"])
                 # Wall-clock compare (shift times are the store's clock face
                 # tagged UTC), never the real UTC instant.
                 location_tz = await conn.fetchval(
@@ -243,6 +282,8 @@ async def review_request(request_id: UUID, body: RequestReview,
                         raise HTTPException(status_code=409, detail="Swap is missing its counterparty shift")
                     shift_ids.append(req["counter_shift_id"])
                 locked = await fetch_locked_shift_pair(conn, company_id, *shift_ids)
+                for locked_shift in locked.values():
+                    scope.assert_shift(locked_shift["location_id"])
                 await lock_scheduling_employees(
                     conn, company_id,
                     [employee_id for employee_id in (

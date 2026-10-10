@@ -55,7 +55,7 @@ async def test_single_publish_only_notifies_on_first_publish(monkeypatch, was_pu
     monkeypatch.setattr(routes, "stage_publish_events", stage)
     monkeypatch.setattr(routes, "dispatch_events", lambda: events.append("dispatch"))
 
-    await routes.publish_shift(shift_id, SimpleNamespace(id=uuid4()))
+    await routes.publish_shift(shift_id, SimpleNamespace(id=uuid4(), role="client"))
     if was_published:
         assert events == ["begin", "commit"]
     else:
@@ -112,7 +112,7 @@ async def test_range_publish_batches_one_delivery_per_employee(monkeypatch, has_
     monkeypatch.setattr(routes, "dispatch_events", lambda: events.append("dispatch"))
 
     result = await routes.publish_range(
-        PublishRange(start=now, end=now + timedelta(days=7)), SimpleNamespace(id=uuid4()),
+        PublishRange(start=now, end=now + timedelta(days=7)), SimpleNamespace(id=uuid4(), role="client"),
     )
     assert result["published"] == int(has_drafts)
     if has_drafts:
