@@ -25,7 +25,6 @@ publishes without a listing and the tenant can fill it in (or press "Suggest
 for me") later.
 """
 
-import asyncio
 import json
 import logging
 from typing import Any, Optional
@@ -33,7 +32,10 @@ from uuid import UUID
 
 from google.genai import types
 
+from ...core.services import agent_surfaces
+from ...core.services.anthropic_messages import generate_content_routed, ran_on_claude
 from ...core.services.genai_client import get_genai_client
+from ...core.services.model_catalog import GEMINI_FLASH_LITE
 from ...core.services.rate_limiter import ApiRateLimiter
 from ...database import get_connection
 
@@ -70,7 +72,7 @@ MAX_BLURB_LEN = 200
 
 # Cheapest tier: this is a short classification over text we already hold, not a
 # reasoning task. It runs on every publish, so cost per call matters.
-_MODEL = "gemini-3.7-flash-lite"
+_MODEL = GEMINI_FLASH_LITE
 _TIMEOUT_S = 30
 
 _rate_limiter: Optional[ApiRateLimiter] = None
@@ -382,23 +384,28 @@ async def infer_listing(site_id: UUID) -> Optional[dict[str, Any]]:
 
     try:
         client = get_genai_client()
+        response = None
         try:
             # Bounded: this runs in a fire-and-forget background task, so a hung
-            # call would hold a DB connection with nothing watching it.
-            response = await asyncio.wait_for(
-                client.aio.models.generate_content(
-                    model=_MODEL,
-                    contents=_build_prompt(ctx),
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        thinking_config=types.ThinkingConfig(thinking_level="minimal"),
-                    ),
+            # call would hold a DB connection with nothing watching it. Gemini
+            # unless Admin → Settings → AI models routes it to Claude.
+            response = await generate_content_routed(
+                client,
+                model=_MODEL,
+                contents=_build_prompt(ctx),
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    thinking_config=types.ThinkingConfig(thinking_level="minimal"),
                 ),
-                timeout=_TIMEOUT_S,
+                timeout_seconds=_TIMEOUT_S,
+                surface=agent_surfaces.GUMMFIT_DIRECTORY,
+                rate_label=("cappe_directory", "infer"),
             )
         finally:
-            # Record even on failure — the request was issued and billed.
-            await rate_limiter.record_call("cappe_directory", "infer")
+            # Record even on failure — the request was issued and billed. A
+            # Claude call already counted in the anthropic bucket.
+            if not ran_on_claude(response):
+                await rate_limiter.record_call("cappe_directory", "infer")
 
         payload = _parse_json_response(getattr(response, "text", None) or "")
         if not isinstance(payload, dict):

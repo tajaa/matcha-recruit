@@ -77,7 +77,8 @@ server/
   wins; payer mode stays Gemini via `_get_model(gemini_only=True)`) and the Gemini one-shots behind
   Sym-link chat, IR analysis (analyzer runners, copilot guidance, chat intake, consistency, OSHA
   recordability, interview questions, IR precedent enrichment) and handbooks (audit, guided draft,
-  Handbook Pilot, upload relevance check) via `anthropic_messages.generate_content_routed` — a
+  Handbook Pilot, upload relevance check) — and on Gummfit, Merlin's single-step turn, Merlin
+  Auto, directory inference and booking suggestions — via `anthropic_messages.generate_content_routed` — a
   drop-in for `client.aio.models.generate_content` that returns an object with `.text`. Voice
   dictation, Google-Search-grounded research and ER stay on Gemini. The schedule assistant also
   has a per-chat dropdown. One decision point (`core/services/anthropic_messages.claude_override(surface)`), the

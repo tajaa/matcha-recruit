@@ -21,6 +21,26 @@ For domain-reselling ops (Porkbun, Stripe platform account, go-live checklist), 
 
 Paired frontend lives at `client/src/cappe/` (own `CLAUDE.md` there).
 
+## AI models (Admin → Settings → AI models)
+
+Gummfit is one app on the Matcha platform admin's *AI models* page (registry
+`app/core/services/agent_surfaces.py`, `GUMMFIT_*`). Merlin's single-step turn
+(`merlin/turn.py`), the Merlin Auto classifier (`merlin/routing.py`), directory
+inference (`services/directory.py`) and booking suggestions
+(`services/booking_suggestions.py`) call `core.anthropic_messages.generate_content_routed`
+with their surface: Gemini while the row is built-in, the same request on Claude
+when it names a model. Each keeps its own timeout (the classifier's 6s, booking's
+12s); a Merlin tier then sets Claude's effort (lite low, regular medium, max high).
+A Claude call counts in the `anthropic` rate-limit bucket under the same label, so
+each site skips its Gemini `record_call` when `ran_on_claude(response)`.
+
+Still Gemini-only: Merlin's multi-step agent and setup agent (Gemini tool loops
+with `thought_signature`; a follow-up moves them onto a core Claude session) and
+image generation (`core/services/image_gen.py` — Claude can't produce images).
+Model ids come from `core/services/model_catalog.py`; the Merlin tiers, classifier
+and directory used to hard-code the 3.7 Flash Lite id, which that catalog records
+as unavailable, and `tests/test_model_catalog.py` no longer exempts Cappe.
+
 ## Cross-cutting rules
 
 DB safety rules, test-data email domain rules, and deploy rules are in root `CLAUDE.md` — they apply here unchanged, not restated.

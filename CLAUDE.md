@@ -75,7 +75,7 @@ Cross-product import rule: `cappe/`, `tellus/`, and `oceanlab/` import only from
 - **Framework**: FastAPI + uvicorn (async)
 - **Database**: PostgreSQL via asyncpg (connection pool)
 - **Background jobs**: Celery + Redis
-- **AI**: Google Gemini via `GEMINI_API_KEY` (native Google AI; Vertex removed); OpenAI Luna for the agent loops; Anthropic Claude (Haiku/Sonnet 5.5) opt-in via Admin → Settings → *AI models* (per app — Matcha, Espresso — with per-product overrides; registry `server/app/core/services/agent_surfaces.py`) + the schedule assistant's dropdown, `ANTHROPIC_API_KEY` (→ `server/app/matcha/services/huume/CLAUDE.md` §"Claude")
+- **AI**: Google Gemini via `GEMINI_API_KEY` (native Google AI; Vertex removed); OpenAI Luna for the agent loops; Anthropic Claude (Haiku/Sonnet 5.5) opt-in via Admin → Settings → *AI models* (per app — Matcha, Espresso, Gummfit — with per-product overrides; registry `server/app/core/services/agent_surfaces.py`) + the schedule assistant's dropdown, `ANTHROPIC_API_KEY` (→ `server/app/matcha/services/huume/CLAUDE.md` §"Claude")
 - **Storage**: S3 + CloudFront (`server/app/core/services/storage.py`)
 - **Auth**: JWT
 - **Deployment**: AWS EC2 — Nginx reverse proxy + Postgres in a container on a dedicated DB EC2.

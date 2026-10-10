@@ -150,7 +150,7 @@ client are retired. The Huume loop remains bounded at eight model calls and a
 `ANTHROPIC_API_KEY` is unset — already-stored ones ride through, so removing the key never locks the
 page — and a save carrying an outdated `version` gets 409. Each save also rewrites the legacy
 `agent_model` row with the Matcha default, for a container still on the old code). One
-choice per app (Matcha, Espresso; Gummfit and Tell-Us next), each product row following its app
+choice per app (Matcha, Espresso, Gummfit; Tell-Us next), each product row following its app
 ("inherit") or overriding it. A choice is `default` (the product's built-in provider) or a Claude
 id. The registry of apps and products is `core/services/agent_surfaces.py` — the admin page renders
 it from the GET payload, and `tests/core/test_agent_surfaces.py` fails if a call site names a key
