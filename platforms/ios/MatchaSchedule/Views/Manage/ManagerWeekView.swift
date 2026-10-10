@@ -93,6 +93,14 @@ struct ManagerWeekView: View {
                     .disabled(publishing)
                     .accessibilityIdentifier("week.publish")
                 }
+                if scope.features.assistant {
+                    Button {
+                        sheet = .assistant
+                    } label: {
+                        Label("Ask Huume", systemImage: "sparkles")
+                    }
+                    .accessibilityIdentifier("week.huume")
+                }
                 Button {
                     sheet = .newShift(day: defaultNewShiftDay)
                 } label: {
@@ -134,6 +142,8 @@ struct ManagerWeekView: View {
                         mode: .create(day: day), location: location, jobs: jobs,
                         onSaved: { await reload() }
                     )
+                case .assistant:
+                    HuumeChatView(location: location, weekStart: weekStart) { await reload() }
                 }
             }
         }
@@ -243,11 +253,13 @@ private enum WeekSheet: Identifiable {
     case shift(id: String)
     /// A new shift on this calendar day ("2026-10-12").
     case newShift(day: String)
+    case assistant
 
     var id: String {
         switch self {
         case .shift(let id): "shift-\(id)"
         case .newShift(let day): "new-\(day)"
+        case .assistant: "assistant"
         }
     }
 }
