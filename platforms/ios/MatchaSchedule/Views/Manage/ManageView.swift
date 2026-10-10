@@ -38,21 +38,19 @@ struct ManageView: View {
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                Picker("Show", selection: $page) {
-                    Text(approvalsTitle).tag(Page.approvals)
-                    Text("Week").tag(Page.week)
+                VStack(spacing: 8) {
+                    Picker("Show", selection: $page) {
+                        Text(approvalsTitle).tag(Page.approvals)
+                        Text("Week").tag(Page.week)
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("manage.page")
+                    if scope.locations.count > 1 { storePicker }
                 }
-                .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
-                .accessibilityIdentifier("manage.page")
             }
             .navigationTitle("Manage")
-            .toolbar {
-                if scope.locations.count > 1 {
-                    ToolbarItem(placement: .topBarLeading) { storePicker }
-                }
-            }
         }
         .onChange(of: appState.pendingApprovalID) { _, id in
             if id != nil { page = .approvals }
@@ -63,6 +61,8 @@ struct ManageView: View {
         appState.pendingApprovals > 0 ? "Approvals (\(appState.pendingApprovals))" : "Approvals"
     }
 
+    /// Under the title rather than in the toolbar: iOS 26 draws a toolbar menu
+    /// as its icon alone, which hid which store was showing.
     private var storePicker: some View {
         Menu {
             Picker("Store", selection: $storedLocation) {
@@ -71,11 +71,26 @@ struct ManageView: View {
                 ForEach(scope.locations) { Text($0.displayName).tag($0.id) }
             }
         } label: {
-            Label(page == .week ? (weekLocation?.displayName ?? "Store") : (location?.displayName ?? "All stores"),
-                  systemImage: "storefront")
-                .labelStyle(.titleAndIcon)
-                .font(.app(.subheadline, .medium))
+            StorePickerLabel(
+                name: page == .week ? (weekLocation?.displayName ?? "Store") : (location?.displayName ?? "All stores")
+            )
         }
         .accessibilityIdentifier("manage.store")
+    }
+}
+
+struct StorePickerLabel: View {
+    let name: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "storefront")
+            Text(name).lineLimit(1)
+            Image(systemName: "chevron.up.chevron.down").font(.caption2)
+        }
+        .font(.app(.subheadline, .medium))
+        .foregroundStyle(.primary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
