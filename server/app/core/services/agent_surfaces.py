@@ -20,11 +20,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# The Claude ids are defined once, in anthropic_messages; the admin page gets
+# them (with labels) from `model_choices_payload`, so nothing else spells them.
+from app.core.services.anthropic_messages import CLAUDE_LABELS, CLAUDE_MODELS
+
 INHERIT = "inherit"
 BUILTIN = "default"
-CLAUDE_HAIKU = "claude-haiku-5-5"
-CLAUDE_SONNET = "claude-sonnet-5-5"
-CLAUDE_CHOICES = (CLAUDE_HAIKU, CLAUDE_SONNET)
+CLAUDE_CHOICES = CLAUDE_MODELS
 MODEL_CHOICES = (BUILTIN, *CLAUDE_CHOICES)
 SURFACE_CHOICES = (INHERIT, *MODEL_CHOICES)
 
@@ -164,6 +166,11 @@ def app_of(surface: str) -> str | None:
         return known.app
     prefix = surface.split(".", 1)[0]
     return prefix if prefix in APP_KEYS else None
+
+
+def model_choices_payload() -> list[dict]:
+    """The Claude models the admin page offers, with their labels."""
+    return [{"id": model, "label": CLAUDE_LABELS[model]} for model in CLAUDE_CHOICES]
 
 
 def registry_payload() -> list[dict]:

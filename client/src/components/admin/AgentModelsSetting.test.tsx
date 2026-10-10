@@ -2,7 +2,9 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentModelsSetting } from './AgentModelsSetting'
-import { adminSettingsApi, type AgentModelApp, type AgentModels } from '../../api/admin/platformSettings'
+import {
+  adminSettingsApi, type AgentModelApp, type AgentModelChoice, type AgentModels,
+} from '../../api/admin/platformSettings'
 
 vi.mock('../../api/admin/platformSettings', () => ({ adminSettingsApi: { setAgentModels: vi.fn() } }))
 
@@ -24,11 +26,21 @@ const MODELS: AgentModels = {
   surfaces: { 'matcha.huume': 'inherit', 'matcha.ir': 'inherit' },
 }
 
+const CHOICES: AgentModelChoice[] = [
+  { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5' },
+  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
+]
+
 beforeEach(() => { vi.clearAllMocks() })
 
 function setup(anthropicConfigured = true) {
   const onSaved = vi.fn()
-  render(<AgentModelsSetting models={MODELS} registry={REGISTRY} anthropicConfigured={anthropicConfigured} onSaved={onSaved} />)
+  render(
+    <AgentModelsSetting
+      models={MODELS} registry={REGISTRY} choices={CHOICES} version="v1"
+      anthropicConfigured={anthropicConfigured} onSaved={onSaved}
+    />,
+  )
   return { user: userEvent.setup(), onSaved }
 }
 
@@ -43,15 +55,16 @@ describe('AgentModelsSetting', () => {
 
   it('saves a per-product override and reports what the server stored', async () => {
     const stored = { ...MODELS, surfaces: { ...MODELS.surfaces, 'matcha.ir': 'default' } }
-    vi.mocked(adminSettingsApi.setAgentModels).mockResolvedValue({ agent_models: stored })
+    vi.mocked(adminSettingsApi.setAgentModels).mockResolvedValue({ agent_models: stored, version: 'v2' })
     const { user, onSaved } = setup()
 
     await user.click(screen.getByRole('button', { name: 'Incidents (IR)' }))
     await user.click(screen.getByRole('button', { name: 'Built-in' }))
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
 
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(stored))
-    expect(adminSettingsApi.setAgentModels).toHaveBeenCalledWith(stored)
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(stored, 'v2'))
+    // The loaded version goes back, so a stale page gets a 409 instead of overwriting.
+    expect(adminSettingsApi.setAgentModels).toHaveBeenCalledWith({ ...stored, version: 'v1' })
   })
 
   it('offers Claude only while the server has a key, but keeps a stored choice visible', async () => {
