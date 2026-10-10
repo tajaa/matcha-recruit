@@ -584,7 +584,8 @@ def test_the_order_page_is_never_cached_and_never_referred(monkeypatch):
     assert response.headers["referrer-policy"] == "no-referrer"
     assert response.headers["x-robots-tag"] == "noindex, nofollow"
     # The site is found by host whatever its publish state; the order by token AND site.
-    assert "status" not in conn.sql("FROM cappe_sites WHERE subdomain")[0][1]
+    site_sql = conn.sql("FROM cappe_sites WHERE subdomain")[0][1]
+    assert "WHERE subdomain = $1" in site_sql and "status =" not in site_sql and "status IN" not in site_sql
     assert conn.sql("o.access_token = $1 AND o.site_id = $2")[0][2] == (TOKEN, SITE)
 
 

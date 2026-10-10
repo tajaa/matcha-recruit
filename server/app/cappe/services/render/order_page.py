@@ -160,8 +160,36 @@ def _shipping_html(order: dict) -> str:
     return f'<div class="cz-order__ship">{"".join(parts)}</div>' if parts else ""
 
 
+def _reviews_html(items: list[dict]) -> str:
+    """A review form for each product in a paid order — a verified purchase.
+    Products already reviewed from this order, or no longer sold, are left out."""
+    seen, forms = set(), []
+    for it in items:
+        pid = it.get("product_id")
+        if not pid or not it.get("reviewable") or it.get("reviewed") or str(pid) in seen:
+            continue
+        seen.add(str(pid))
+        stars = "".join(f'<option value="{n}">{"★" * n}</option>' for n in (5, 4, 3, 2, 1))
+        forms.append(
+            f'<form class="cz-order__review" data-czreview data-product="{escape(str(pid), quote=True)}">'
+            f'<div class="cz-order__line"><b>{escape(str(it.get("title") or "Item"))}</b>'
+            f'<select class="cz-field" data-rating aria-label="Rating">{stars}</select></div>'
+            '<textarea class="cz-field" data-body rows="2" maxlength="2000" required '
+            'placeholder="What did you think?" aria-label="Your review"></textarea>'
+            '<input class="cz-field" data-name maxlength="120" required placeholder="Your name" aria-label="Your name" />'
+            '<button class="cz-btn cz-btn--ghost" type="submit">Post review</button>'
+            '<p class="cz-msg" role="status"></p></form>'
+        )
+    if not forms:
+        return ""
+    return ('<div class="cz-order__reviews"><h2 class="cz-order__h">Review what you bought</h2>'
+            '<p class="cz-order__note">Reviews from this page are marked as a verified purchase. '
+            'The store approves them before they appear.</p>' + "".join(forms) + "</div>")
+
+
 def render_order_page(site: dict, nav: list[dict], order: dict, items: list[dict], *,
-                      token: str, takes_cards: bool, now: datetime, clear_cart: bool) -> str:
+                      token: str, takes_cards: bool, now: datetime, clear_cart: bool,
+                      reviews_open: bool = False) -> str:
     """The whole order page. `order` carries the order row plus `site_name`,
     `timezone`, `tax_label`, `shipping_label`; `items` the receipt-shaped lines
     (`download_url` / `deliverable_url` are shown only once released)."""
@@ -185,6 +213,7 @@ def render_order_page(site: dict, nav: list[dict], order: dict, items: list[dict
         f'<h1 class="cz-order__title">{escape(state["headline"])}</h1>'
         f'<p class="cz-order__lead">{escape(state["lead"])}</p>'
         f"{pay}{_items_html(order, items)}{_totals_html(order)}{_shipping_html(order)}{receipt}"
+        f"{_reviews_html(items) if reviews_open and order['status'] in RELEASED else ''}"
         "</div></section>"
     )
     return render_site_html(

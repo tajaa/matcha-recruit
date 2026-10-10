@@ -386,7 +386,8 @@ async def _resolve_site_any_status(conn, host: str | None):
     reaches with an order token: unpublishing a store must not take away the
     downloads and receipts its customers already paid for."""
     sub = subdomain_from_host(host)
-    cols = "id, name, slug, subdomain, custom_domain, theme_config, meta_config, timezone, account_id"
+    cols = ("id, name, slug, subdomain, custom_domain, theme_config, meta_config, timezone, account_id, "
+            "status, review_submissions")
     if sub:
         return await conn.fetchrow(f"SELECT {cols} FROM cappe_sites WHERE subdomain = $1", sub)
     candidates = _custom_domain_candidates(host)
@@ -432,7 +433,10 @@ async def order_page(token: str, request: Request):
             return _not_found_html("Order not found")
         items = await conn.fetch(
             """SELECT oi.title, oi.quantity, oi.fulfillment, oi.unit_price_cents, oi.selected_options,
-                      oi.deliverable_url, p.digital_file_url, b.starts_at AS booking_starts_at
+                      oi.deliverable_url, p.digital_file_url, b.starts_at AS booking_starts_at,
+                      oi.product_id, (p.id IS NOT NULL AND p.status = 'active') AS reviewable,
+                      EXISTS (SELECT 1 FROM cappe_reviews r WHERE r.order_id = oi.order_id
+                               AND r.product_id = oi.product_id) AS reviewed
                  FROM cappe_order_items oi
                  LEFT JOIN cappe_products p ON p.id = oi.product_id
                  LEFT JOIN cappe_bookings b ON b.id = oi.booking_id
@@ -466,6 +470,7 @@ async def order_page(token: str, request: Request):
         [{"slug": r["slug"], "title": r["title"]} for r in nav_rows],
         order_ctx, item_ctx, token=token, takes_cards=takes_cards, now=now,
         clear_cart=order["status"] not in ("cancelled", "declined"),
+        reviews_open=site.get("status") == "published" and (site.get("review_submissions") or "anyone") != "off",
     )
     return HTMLResponse(html, headers={**tenant_security_headers(), **_ORDER_PAGE_HEADERS})
 

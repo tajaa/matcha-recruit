@@ -46,6 +46,14 @@ async def public_products(slug: str, request: Request):
         now_utc = await conn.fetchval("SELECT NOW()")
         groups = await fetch_option_groups(conn, [r["id"] for r in rows])
         subscribable = any(r["subscription_intervals"] for r in rows) and await _sells_subscriptions(conn, site["id"])
+        ratings = {
+            r["product_id"]: r for r in await conn.fetch(
+                "SELECT product_id, COUNT(*) AS n, ROUND(AVG(rating)::numeric, 1)::float AS avg "
+                "FROM cappe_reviews WHERE site_id = $1 AND status = 'approved' "
+                "AND product_id IS NOT NULL AND rating IS NOT NULL GROUP BY product_id",
+                site["id"],
+            )
+        } if rows else {}
     today = site_today(now_utc, site["timezone"])
     out = []
     for r in rows:
@@ -54,6 +62,8 @@ async def public_products(slug: str, request: Request):
             **dict(r),
             # The storefront offers "Subscribe" only where it can be completed.
             **({} if subscribable else {"subscription_intervals": [], "subscription_discount_bps": 0}),
+            "rating_count": int(ratings[r["id"]]["n"]) if r["id"] in ratings else 0,
+            "rating_avg": ratings[r["id"]]["avg"] if r["id"] in ratings else None,
             "intake_fields": loads_list(r["intake_fields"]),
             "option_groups": groups.get(r["id"], []),
             "discount_percent": pct,

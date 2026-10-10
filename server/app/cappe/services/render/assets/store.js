@@ -13,7 +13,7 @@ return '<button type="button" class="cz-opt" data-opt="'+RT.esc(o.id)+'" data-de
 function out(v){return v!=null&&v<=0;}
 function soldOut(p){return p.fulfillment==='physical'&&out(p.inventory);}
 function stars(n){n=Math.round(n||0);var s='';for(var i=1;i<=5;i++)s+=(i<=n?'★':'☆');return s;}
-var REVIEWS=[];
+var REVIEWS=[],rseq=0;
 // One shared product-detail overlay (acts like a product page).
 var ov=document.createElement('div');ov.className='cz-pd';ov.hidden=true;
 ov.innerHTML='<div class="cz-pd__panel"><button class="cz-pd__x" aria-label="Close">×</button><div class="cz-pd__grid"><div class="cz-pd__media" data-media></div><div class="cz-pd__info" data-info></div></div><div class="cz-pd__reviews" data-reviews></div></div>';
@@ -24,10 +24,17 @@ ov.querySelector('.cz-pd__x').addEventListener('click',dismiss);
 ov.addEventListener('click',function(e){if(e.target===ov)dismiss();});
 window.addEventListener('popstate',function(){if(!ov.hidden)hideDetail();});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!ov.hidden)dismiss();});
+// A product's own reviews when it has any; otherwise what clients say about the store.
+function reviewHtml(r){return '<figure class="cz-review"><div class="cz-review__stars">'+stars(r.rating)+(r.verified?' <span class="cz-review__verified">Verified purchase</span>':'')+'</div><blockquote>'+RT.esc(r.body)+'</blockquote><figcaption>'+RT.esc(r.author_name)+'</figcaption>'+
+(r.owner_reply?'<div class="cz-review__reply"><b>Reply from the store</b> '+RT.esc(r.owner_reply)+'</div>':'')+'</figure>';}
+function rlistHtml(title,avg,n,list){return '<h3 class="cz-pd__rtitle">'+title+' <span class="cz-pd__rstars">'+stars(avg)+'</span><span class="cz-pd__rn">'+n+' review'+(n>1?'s':'')+'</span></h3>'+
+'<div class="cz-pd__rlist">'+list.map(reviewHtml).join('')+'</div>';}
+// The summary is the product's rating over every approved review — what its card
+// and structured data say — not the first 50 (verified first) that the list shows.
+function productReviewsHtml(p,list){return rlistHtml('Reviews',p.rating_avg,p.rating_count||list.length,list);}
 function reviewsHtml(){if(!REVIEWS.length)return '';
 var avg=REVIEWS.reduce(function(a,r){return a+(r.rating||0);},0)/REVIEWS.length;
-return '<h3 class="cz-pd__rtitle">What clients say <span class="cz-pd__rstars">'+stars(avg)+'</span><span class="cz-pd__rn">'+REVIEWS.length+' review'+(REVIEWS.length>1?'s':'')+'</span></h3>'+
-'<div class="cz-pd__rlist">'+REVIEWS.map(function(r){return '<figure class="cz-review"><div class="cz-review__stars">'+stars(r.rating)+'</div><blockquote>'+RT.esc(r.body)+'</blockquote><figcaption>'+RT.esc(r.author_name)+'</figcaption></figure>';}).join('')+'</div>';}
+return rlistHtml('What clients say',avg,REVIEWS.length,REVIEWS);}
 // "Subscribe": the product on a schedule. Signing in and checking out happen
 // on the account page (/account), which opens the subscription checkout.
 function subHtml(p){var iv=(p.subscription_intervals||[]).filter(function(i){return i==='week'||i==='month';});
@@ -100,18 +107,29 @@ var ok=true;info.querySelectorAll('.cz-opt-group').forEach(function(g){if(g.getA
 if(!ok){msg.textContent='Please choose the required options';msg.className='cz-msg err';return;}
 window.location='/account?subscribe='+encodeURIComponent(p.id)+'&every='+encodeURIComponent(info.querySelector('[data-every]').value)+
 '&qty='+qn()+'&opts='+encodeURIComponent(chosen().join(','));});
-ov.querySelector('[data-reviews]').innerHTML=reviewsHtml();
+// The overlay is shared: a slow answer for a product opened earlier must not land under this one.
+var rv=ov.querySelector('[data-reviews]'),seq=++rseq;rv.innerHTML=reviewsHtml();
+if(p.rating_count)RT.get('/reviews?product_id='+encodeURIComponent(p.id)).then(function(list){if(seq===rseq&&list&&list.length)rv.innerHTML=productReviewsHtml(p,list);}).catch(function(){});
 ov.querySelector('.cz-pd__panel').scrollTop=0;ov.hidden=false;document.body.style.overflow='hidden';
 if(!(history.state&&history.state.czpd))history.pushState({czpd:1},'');
 }
 function card(p){var c=document.createElement('button');c.type='button';c.className='cz-product';
 var iu=RT.url(p.image_url);var img=iu?'<img class="cz-product__img" src="'+RT.esc(iu)+'" alt="" />':'<div class="cz-product__img"></div>';
 var price;if(p.discount_percent&&p.discounted_price_cents!=null){price='<span class="cz-pd__was">'+RT.money(p.price_cents,p.currency)+'</span>'+RT.money(p.discounted_price_cents,p.currency);}else{price=p.price_cents?RT.money(p.price_cents,p.currency):'Free';}
-c.innerHTML=img+'<div class="cz-product__body"><h3>'+RT.esc(p.name)+'</h3><div class="cz-product__foot"><span class="cz-price">'+price+'</span>'+(soldOut(p)?'<span class="cz-product__opts">Sold out</span>':((p.option_groups||[]).length?'<span class="cz-product__opts">Options</span>':''))+'</div></div>';
+var rated=p.rating_count?'<span class="cz-product__rating" aria-label="'+p.rating_avg+' out of 5">'+stars(p.rating_avg)+' <span>'+p.rating_count+'</span></span>':'';
+c.innerHTML=img+'<div class="cz-product__body"><h3>'+RT.esc(p.name)+'</h3>'+rated+'<div class="cz-product__foot"><span class="cz-price">'+price+'</span>'+(soldOut(p)?'<span class="cz-product__opts">Sold out</span>':((p.option_groups||[]).length?'<span class="cz-product__opts">Options</span>':''))+'</div></div>';
 c.addEventListener('click',function(){openDetail(p);});return c;}
+// Search engines read products (with their own ratings) from structured data.
+function productData(list){if(RT.preview||!list.length)return;try{
+var data={'@context':'https://schema.org','@type':'ItemList',itemListElement:list.slice(0,50).map(function(p,i){
+var prod={'@type':'Product',name:p.name,offers:{'@type':'Offer',price:((p.discounted_price_cents!=null?p.discounted_price_cents:p.price_cents)/100).toFixed(2),priceCurrency:p.currency||'USD',availability:'https://schema.org/'+(soldOut(p)?'OutOfStock':'InStock')}};
+if(p.description)prod.description=String(p.description).slice(0,500);var iu=RT.url(p.image_url);if(iu&&iu.charAt(0)!=='/')prod.image=iu;
+if(p.rating_count)prod.aggregateRating={'@type':'AggregateRating',ratingValue:p.rating_avg,reviewCount:p.rating_count};
+return {'@type':'ListItem',position:i+1,item:prod};})};
+var sc=document.createElement('script');sc.type='application/ld+json';sc.textContent=JSON.stringify(data).replace(/</g,'\\u003c');document.head.appendChild(sc);}catch(e){}}
 function grid(list){var g=document.createElement('div');g.className='cz-store-grid';list.forEach(function(p){g.appendChild(card(p));});return g;}
 Promise.all([RT.get('/products'),RT.get('/reviews').catch(function(){return [];})]).then(function(r){
-var items=r[0]||[];REVIEWS=r[1]||[];
+var items=r[0]||[];REVIEWS=r[1]||[];productData(items);
 if(!items.length){box.innerHTML='<p style="color:var(--muted)">No products yet.</p>';return;}box.innerHTML='';
 var cats=[],byCat={};items.forEach(function(p){var k=(p.category||'').trim();if(!(k in byCat)){byCat[k]=[];cats.push(k);}byCat[k].push(p);});
 if(cats.filter(function(k){return k;}).length===0){box.appendChild(grid(items));return;}
