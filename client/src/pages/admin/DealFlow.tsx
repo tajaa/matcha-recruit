@@ -6,7 +6,6 @@ import { getTemplate, saveTemplate } from '../../api/admin/dealTemplates'
 import SaveTemplateButton from './SaveTemplateButton'
 import FullDealTab from './FullDealTab'
 import LiteEditionPanel from './LiteEditionPanel'
-import BookPricingTab from './BookPricingTab'
 
 type Tier = 'lite' | 'mid' | 'max'
 type OnePagerTemplate = { config: Record<Tier, { pepm: number; onboarding: number }> }
@@ -26,7 +25,6 @@ type DealQuote = {
   onboarding: number
   subscription_yr: number
   subtotal: number
-  broker_disc: number
   partner_disc: number
   discount_pct: number
   your_price_yr: number
@@ -70,11 +68,10 @@ function QuoteCard({ q, recommended }: { q: DealQuote; recommended: boolean }) {
       <div className="mt-4 space-y-1.5 text-sm">
         <Row label="Subscription / yr" value={usd(q.subscription_yr)} />
         <Row label="Onboarding" value={q.onboarding === 0 ? 'None' : `+${usd(q.onboarding)}`} />
-        {(q.broker_disc > 0 || q.partner_disc > 0) && (
+        {q.partner_disc > 0 && (
           <>
             <Row label="Subtotal" value={usd(q.subtotal)} bold border />
-            {q.broker_disc > 0 && <Row label="Broker discount" value={`−${usd(q.broker_disc)}`} muted />}
-            {q.partner_disc > 0 && <Row label="Partner discount" value={`−${usd(q.partner_disc)}`} muted />}
+            <Row label="Partner discount" value={`−${usd(q.partner_disc)}`} muted />
           </>
         )}
         <div className="mt-2 flex items-center justify-between border-t border-zinc-700 pt-2.5">
@@ -124,9 +121,6 @@ export default function DealFlow() {
   const [companyName, setCompanyName] = useState('')
   const [headcount, setHeadcount] = useState('500')
   const [tier, setTier] = useState<Tier>('max')
-  const [broker, setBroker] = useState(true)
-  const [brokerName, setBrokerName] = useState('Alliant')
-  const [brokerPct, setBrokerPct] = useState('10')
   const [partner, setPartner] = useState(true)
   const [partnerPct, setPartnerPct] = useState('5')
   const [hrPartner, setHrPartner] = useState(false)
@@ -145,7 +139,7 @@ export default function DealFlow() {
   const [quotes, setQuotes] = useState<QuoteResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
-  const [view, setView] = useState<'onepager' | 'full' | 'book'>('onepager')
+  const [view, setView] = useState<'onepager' | 'full'>('onepager')
   const [showPreview, setShowPreview] = useState(false)
   const [previewHtml, setPreviewHtml] = useState('')
   const [previewing, setPreviewing] = useState(false)
@@ -196,9 +190,6 @@ export default function DealFlow() {
       company_name: companyName.trim() || 'Prospect',
       headcount: validHeadcount ? headcountNum : 0,
       tier,
-      broker,
-      broker_name: broker ? brokerName.trim() || 'Broker' : null,
-      broker_pct: parseInt(brokerPct, 10) || 0,
       partner,
       partner_pct: parseInt(partnerPct, 10) || 0,
       hr_partner_addon: hrPartner,
@@ -206,7 +197,7 @@ export default function DealFlow() {
       overrides,
       template,
     }
-  }, [companyName, headcountNum, validHeadcount, tier, broker, brokerName, brokerPct, partner, partnerPct, hrPartner, proposalDate, config, template])
+  }, [companyName, headcountNum, validHeadcount, tier, partner, partnerPct, hrPartner, proposalDate, config, template])
 
   // Live quote — server is the single source of pricing truth (debounced).
   useEffect(() => {
@@ -275,7 +266,6 @@ export default function DealFlow() {
         {([
           ['onepager', 'One-Pager'],
           ['full', 'Full Deal'],
-          ['book', 'Book Pricing'],
         ] as const).map(([val, label]) => (
           <button
             key={val}
@@ -294,8 +284,6 @@ export default function DealFlow() {
 
       {view === 'full' ? (
         <FullDealTab />
-      ) : view === 'book' ? (
-        <BookPricingTab />
       ) : (
         <div>
           <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
@@ -404,13 +392,6 @@ export default function DealFlow() {
             </div>
           </div>
 
-          <ToggleRow label="Broker discount" checked={broker} onChange={setBroker} />
-          {broker && (
-            <div className="grid grid-cols-2 gap-3">
-              <Input label="Broker name" value={brokerName} onChange={(e) => setBrokerName(e.target.value)} placeholder="Alliant" />
-              <Input label="Broker %" type="number" min={0} max={100} value={brokerPct} onChange={(e) => setBrokerPct(e.target.value)} />
-            </div>
-          )}
           <ToggleRow label="Partner program" checked={partner} onChange={setPartner} />
           {partner && (
             <Input label="Partner %" type="number" min={0} max={100} value={partnerPct} onChange={(e) => setPartnerPct(e.target.value)} />
