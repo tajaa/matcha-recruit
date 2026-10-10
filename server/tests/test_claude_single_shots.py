@@ -44,14 +44,19 @@ class _Claude:
 
 @pytest.fixture
 def route_to_claude(monkeypatch):
-    """Point the Agent model setting at Claude; returns a setter for the reply."""
-    async def override():
+    """Point the AI-models setting at Claude; returns a setter for the reply.
+    `surfaces` records which setting each call consulted."""
+    surfaces: list[str] = []
+
+    async def override(surface):
+        surfaces.append(surface)
         return CLAUDE
 
     monkeypatch.setattr(anthropic_messages, "claude_override", override)
 
     def use(reply) -> _Claude:
         fake = _Claude(reply)
+        fake.surfaces = surfaces
         monkeypatch.setattr(anthropic_messages, "generate_text", fake)
         return fake
 

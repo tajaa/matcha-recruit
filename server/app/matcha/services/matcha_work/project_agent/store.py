@@ -38,7 +38,7 @@ async def mark_run(run_id: UUID, *, status: str, **values: Any) -> None:
 
 async def set_run_model(run_id: UUID, model: str) -> None:
     """Re-stamp the model a run actually used. Rows are written with the
-    default (Luna) at enqueue; the platform "Agent model" setting is read when
+    default (Luna) at enqueue; the admin "AI models" setting is read when
     the run starts, so the audit column is corrected here when it routed the
     run to Claude."""
     async with connection_or_direct() as conn:

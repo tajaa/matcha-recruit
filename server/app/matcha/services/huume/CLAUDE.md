@@ -143,23 +143,28 @@ assistant voice endpoint; the old `/employee-schedule/chat` parser route and
 client are retired. The Huume loop remains bounded at eight model calls and a
 300-second wall-clock limit, with the existing per-company turn rate limit.
 
-## Claude: the platform "Agent model" setting + the schedule picker (2026-10-08)
+## Claude: the per-app "AI models" setting + the schedule picker (2026-10-09)
 
-**Platform-wide:** Admin → Settings → *Agent model* (`platform_settings.agent_model`:
-`default` | `claude-haiku-5-5` | `claude-sonnet-5-5`, `PUT /admin/platform-settings/agent-model`,
-refused for Claude while `ANTHROPIC_API_KEY` is unset). `default` keeps every surface on the
-provider it was built on. One function decides: `core/services/anthropic_messages.claude_override()`
-(never raises — no key, an unreadable setting or an unknown value all mean "default"). It routes:
-Huume on every surface, the Espresso repo/task-draft agents, agent cards + the Espresso assistant
-(`agent_runtime`), the single-shot Luna calls (credential templates, sym_chat, inventory insight +
-waste narration, AI ticket draft), and EMS channel `@huume` (classify, inventory extraction,
-schedule parse, receipt parse, the ask loop — those were Gemini), the matcha-work / Espresso
-chat skill engine (`matcha_work_ai._models._get_model`: a Gemini pick or the plan default runs the
-admin model, an explicit Claude pick still wins, payer mode stays Gemini; `picker_models` is the
-picker rule both apps render from `entitlements.workspace.chat_models`), and the Gemini one-shots
-behind Sym-link chat, IR analysis (analyzer, copilot guidance, chat intake, consistency, OSHA,
-interview questions, IR precedent) and handbooks (audit, guided draft, Handbook Pilot, upload
-check). Voice dictation, ER and everything else stay where they were. Callers import the MODULE and call through it so
+**Admin → Settings → AI models** (`platform_settings.agent_models`, PUT
+`/admin/platform-settings/agent-models`: a newly chosen Claude model is refused while
+`ANTHROPIC_API_KEY` is unset — already-stored ones ride through, so removing the key never locks the
+page — and a save carrying an outdated `version` gets 409. Each save also rewrites the legacy
+`agent_model` row with the Matcha default, for a container still on the old code). One
+choice per app (Matcha, Espresso; Gummfit and Tell-Us next), each product row following its app
+("inherit") or overriding it. A choice is `default` (the product's built-in provider) or a Claude
+id. The registry of apps and products is `core/services/agent_surfaces.py` — the admin page renders
+it from the GET payload, and `tests/core/test_agent_surfaces.py` fails if a call site names a key
+that isn't there, or if a row is never used. Until the map is first saved, the legacy single
+`agent_model` row seeds the Matcha and Espresso defaults, so the split changed nothing on deploy.
+
+One function decides: `core/services/anthropic_messages.claude_override(surface)` (never raises — no
+key, an unreadable setting or a non-Claude value all mean "default"). Matcha's products: Huume
+(`matcha.huume`), Scheduler (Schedule Pilot, channel shift edits, state rule extraction), IR,
+Handbooks, Ops channels (classify + the ask loop), Inventory, Sym-link, Credentials, and Matcha Work
+chat / agent cards / projects / Sym-chat. Matcha Work and Espresso share the matcha-work backend,
+so those call sites pick `matcha.work_*` or `espresso.*` per account
+(`matcha_work/app_surface.work_surface`, from `companies.is_personal`). Voice dictation, ER and
+Google-Search-grounded research stay on Gemini. Callers import the MODULE and call through it so
 tests patch `anthropic_messages.claude_override`; `tests/conftest.py` blanks `ANTHROPIC_API_KEY` so
 no test reaches the setting unless it opts in.
 

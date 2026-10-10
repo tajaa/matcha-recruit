@@ -26,6 +26,7 @@ from ....core.services.handbook_service import (
 from app.core.services.model_catalog import GEMINI_FLASH
 from ....core.services.storage import get_storage
 from ..er.er_document_parser import ERDocumentParser
+from app.matcha.services.matcha_work.app_surface import work_surface
 from app.core.services.anthropic_messages import generate_content_routed
 from . import matcha_work_document as doc_svc
 from .matcha_work_ai import _infer_skill_from_state, get_ai_provider
@@ -231,7 +232,9 @@ def _keyword_relevance_check(text: str) -> tuple[Optional[bool], Optional[str]]:
     return None, None
 
 
-async def check_handbook_relevance(text: str, client: Any = None) -> tuple[bool, Optional[str]]:
+async def check_handbook_relevance(
+    text: str, client: Any = None, *, company_id: Any = None,
+) -> tuple[bool, Optional[str]]:
     """Classify whether a document is an employee handbook.
 
     Uses a two-tier approach:
@@ -264,7 +267,7 @@ async def check_handbook_relevance(text: str, client: Any = None) -> tuple[bool,
                 ),
                 timeout_seconds=RELEVANCE_TIMEOUT,
                 json_output=True,
-                rate_label=("handbook_upload", "relevance"),
+                surface=await work_surface(company_id, "handbooks"), rate_label=("handbook_upload", "relevance"),
             )
             raw = (response.text or "").strip()
             # Strip markdown code fences if present
@@ -911,7 +914,9 @@ async def run_handbook_upload(
         raise HTTPException(status_code=400, detail="No readable handbook text was found in the uploaded file")
 
     # Quick relevance check — reject clearly wrong documents before expensive work.
-    is_handbook, rejection_reason = await check_handbook_relevance(extracted_text, get_ai_provider().client)
+    is_handbook, rejection_reason = await check_handbook_relevance(
+        extracted_text, get_ai_provider().client, company_id=company_id,
+    )
     if not is_handbook:
         blocking_message = rejection_reason or (
             "This document does not appear to be an employee handbook. "

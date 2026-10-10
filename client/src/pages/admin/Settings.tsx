@@ -10,7 +10,7 @@ import {
   type BetaInvitation,
   type AutoPRBoardCapabilities,
 } from '../../api/admin/platformSettings'
-import { AgentModelSetting, DEFAULT_AGENT_MODEL } from '../../components/admin/AgentModelSetting'
+import { AgentModelsSetting } from '../../components/admin/AgentModelsSetting'
 
 // Mirrors the backend's fallback when platform_settings has no row yet.
 const DEFAULT_RESEARCH_MODE = 'light'
@@ -308,12 +308,12 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* ── Agent model ── */}
-      <div className="mt-12 max-w-xl">
-        <h2 className="text-sm font-medium text-zinc-300 mb-1">Agent model</h2>
+      {/* ── AI models ── */}
+      <div className="mt-12 max-w-2xl">
+        <h2 className="text-sm font-medium text-zinc-300 mb-1">AI models</h2>
         <p className="text-xs text-zinc-500 mb-3">
-          Which model runs Huume, the Espresso agents, Ops channel @huume and the one-shot AI
-          helpers that use Luna. Managers can still pick a model per chat in the schedule assistant.
+          Which model each app runs on, with per-product overrides. Built-in keeps a product on the
+          model it was built on. Managers can still pick a model per chat in the schedule assistant.
         </p>
         {settings.loading ? (
           <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
@@ -322,10 +322,14 @@ export default function Settings() {
         ) : settings.error ? (
           <p className="py-4 text-sm text-red-400">{settings.error}</p>
         ) : (
-          <AgentModelSetting
-            current={settings.data?.agent_model ?? DEFAULT_AGENT_MODEL}
+          <AgentModelsSetting
+            models={settings.data?.agent_models ?? { apps: {}, surfaces: {} }}
+            registry={settings.data?.agent_model_registry ?? []}
+            choices={settings.data?.agent_model_choices ?? []}
+            version={settings.data?.agent_models_version ?? null}
             anthropicConfigured={!!settings.data?.anthropic_configured}
-            onSaved={(model) => settings.setData({ ...settings.data, agent_model: model })}
+            onSaved={(models, version) =>
+              settings.setData({ ...settings.data, agent_models: models, agent_models_version: version })}
           />
         )}
       </div>

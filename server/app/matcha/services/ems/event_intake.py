@@ -25,7 +25,7 @@ from uuid import UUID
 
 from google.genai import types
 
-from app.core.services import anthropic_messages
+from app.core.services import agent_surfaces, anthropic_messages
 from app.core.services.model_catalog import GEMINI_FLASH_LITE
 from app.core.services.model_json import clean_model_json
 from app.matcha.services._shared.gemini import genai_env_client as _get_client
@@ -45,7 +45,7 @@ _MAX_TITLE_CHARS = 300
 _MAX_NARRATIVE_CHARS = 4000  # matches the WS send guard on channel_messages.content
 
 FLASH_LITE_MODEL = GEMINI_FLASH_LITE
-# Claude path (platform "Agent model" setting): same prompt, same parser.
+# Claude path (admin "AI models" setting): same prompt, same parser.
 _CLAUDE_TIMEOUT_SECONDS = 30.0
 
 
@@ -470,7 +470,7 @@ async def classify_event(
         prompt = _build_classify_prompt(
             narrative, context, protocol_text=protocol_text, location_name=location_name,
         )
-        claude_model = await anthropic_messages.claude_override()
+        claude_model = await anthropic_messages.claude_override(agent_surfaces.MATCHA_OPS)
         if claude_model:
             raw = await anthropic_messages.generate_text(
                 prompt, model=claude_model, json_output=True, effort="low",

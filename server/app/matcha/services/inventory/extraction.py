@@ -9,14 +9,14 @@ import re
 
 from google.genai import types
 
-from app.core.services import anthropic_messages
+from app.core.services import agent_surfaces, anthropic_messages
 from app.core.services.model_catalog import GEMINI_FLASH_LITE
 from app.matcha.services._shared.gemini import genai_env_client as _get_client
 
 logger = logging.getLogger(__name__)
 
 FLASH_LITE_MODEL = GEMINI_FLASH_LITE
-# Claude path (platform "Agent model" setting): same prompt, same parser.
+# Claude path (admin "AI models" setting): same prompt, same parser.
 _CLAUDE_TIMEOUT_SECONDS = 30.0
 
 
@@ -109,7 +109,7 @@ async def extract_inventory(content: str, item_names: list[str]) -> dict:
     _bg_ems_intake wholesale in that case, same as EMS's own outage rule."""
     try:
         prompt = _build_prompt(content, item_names)
-        claude_model = await anthropic_messages.claude_override()
+        claude_model = await anthropic_messages.claude_override(agent_surfaces.MATCHA_INVENTORY)
         if claude_model:
             raw = await anthropic_messages.generate_text(
                 prompt, model=claude_model, json_output=True, effort="low",

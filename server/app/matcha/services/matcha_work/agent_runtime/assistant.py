@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from uuid import UUID
 
 from app.database import connection_or_direct, decode_jsonb
-from app.core.services import anthropic_messages
+from app.core.services import agent_surfaces, anthropic_messages
 from app.matcha.services.huume.claude_client import get_claude_client
 from app.matcha.services.huume.luna_client import get_luna_client, text_item
 
@@ -175,8 +175,9 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
             "action_receipt": receipt_view(receipt),
         })
 
-    # Luna unless the platform "Agent model" setting routes agents to Claude.
-    claude_model = await anthropic_messages.claude_override()
+    # Luna unless the admin "AI models" setting routes Espresso's assistant
+    # to Claude (personal accounts only, `eligibility.py`).
+    claude_model = await anthropic_messages.claude_override(agent_surfaces.ESPRESSO_ASSISTANT)
     if claude_model:
         await store.set_run_model(run_id, claude_model)
     ctx = RunContext(

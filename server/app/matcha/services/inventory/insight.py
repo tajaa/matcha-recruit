@@ -1,5 +1,5 @@
 """Grounded, optional Luna interpretation for inventory conclusions — or
-Claude, when the platform "Agent model" setting routes agent workloads there.
+Claude, when the admin "AI models" setting routes agent workloads there.
 
 The model only sees server-formatted display tokens. It may choose wording and
 an allowed action, but never numbers, raw ids, or a diagnosis outside the
@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 
 from app.config import get_settings
-from app.core.services import anthropic_messages
+from app.core.services import agent_surfaces, anthropic_messages
 from app.core.services.ai_usage import record_openai_response
 from app.core.services.redis_cache import cache_get, cache_set, get_redis_cache
 from app.core.services.openai_responses import response_text as _response_text
@@ -87,7 +87,7 @@ async def interpret(*, surface: str, diagnosis: str, tokens: dict[str, str]) -> 
         f"Diagnosis must be {diagnosis!r}. Action must be exactly {_ACTION_FOR_DIAGNOSIS.get(diagnosis, 'none')!r}. "
         f"Surface: {surface}. Available tokens: {json.dumps(tokens, separators=(',', ':'))}."
     )
-    claude_model = await anthropic_messages.claude_override()
+    claude_model = await anthropic_messages.claude_override(agent_surfaces.MATCHA_INVENTORY)
     if claude_model:
         try:
             text = await anthropic_messages.generate_text(

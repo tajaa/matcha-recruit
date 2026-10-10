@@ -96,7 +96,7 @@ def limiter(monkeypatch):
 def setting(monkeypatch, limiter):
     """Set the Agent model (None = default) and the Claude reply."""
     def use(model, reply="{}", stop_reason="end_turn") -> _Claude:
-        async def override():
+        async def override(surface):
             return model
 
         monkeypatch.setattr(anthropic_messages, "claude_override", override)
@@ -111,6 +111,7 @@ def _route(**kwargs):
     kwargs.setdefault("model", "gemini-x")
     kwargs.setdefault("contents", "p")
     kwargs.setdefault("timeout_seconds", 5)
+    kwargs.setdefault("surface", "matcha.ir")
     client = kwargs.pop("client", None) or _Gemini()
     return asyncio.run(anthropic_messages.generate_content_routed(client, **kwargs))
 
@@ -225,9 +226,9 @@ def test_attachments_past_claudes_limits_run_on_gemini(setting, monkeypatch):
     assert claude.calls == []
 
 
-def test_allow_claude_false_pins_gemini(setting, limiter):
+def test_no_surface_pins_gemini(setting, limiter):
     claude = setting(CLAUDE)
-    assert _route(client=_Gemini("gemini"), allow_claude=False).text == "gemini"
+    assert _route(client=_Gemini("gemini"), surface=None).text == "gemini"
     assert claude.calls == [] and limiter.checked == []
 
 
@@ -349,7 +350,7 @@ def test_precedent_enrichment_is_claude_for_ir_only(setting, limiter, precedent_
     assert ("gemini", "er_analysis", "precedent_semantic") in limiter.recorded
 
     limiter.recorded.clear()
-    ir = asyncio.run(precedent_common.run_semantic_enrichment("p", domain="ir_analysis", agent_model=True))
+    ir = asyncio.run(precedent_common.run_semantic_enrichment("p", domain="ir_analysis", surface="matcha.ir"))
     assert ir["pattern_summary"] == "x"
     assert len(claude.calls) == 1
     assert limiter.recorded == [("anthropic", "ir_analysis", "precedent_semantic")]
@@ -357,7 +358,7 @@ def test_precedent_enrichment_is_claude_for_ir_only(setting, limiter, precedent_
 
 def test_precedent_does_not_resend_a_failed_claude_call(setting, precedent_env):
     claude = setting(CLAUDE, RuntimeError("Anthropic Messages request failed: 404 model not found"))
-    out = asyncio.run(precedent_common.run_semantic_enrichment("p", domain="ir_analysis", agent_model=True))
+    out = asyncio.run(precedent_common.run_semantic_enrichment("p", domain="ir_analysis", surface="matcha.ir"))
     assert out == {"scores": [], "pattern_summary": None}
     assert len(claude.calls) == 1
 

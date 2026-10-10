@@ -7,8 +7,9 @@ already builds (function tools, the hosted `web_search` tool, `tool_choice`,
 JSON mode, `reasoning_effort`) and returns the same `LunaResponse`. So the
 Huume loop, Espresso's project agents and the agent runtime do not branch on
 provider — only the session object does. Which session a caller gets is
-decided by `core/services/anthropic_messages.claude_override()` (the platform
-"Agent model" setting) or, on the schedule assistant, by its dropdown.
+decided by `core/services/anthropic_messages.claude_override(surface)` — the
+admin "AI models" setting for that product (`core/services/agent_surfaces.py`)
+— or, on the schedule assistant, by its dropdown.
 
 Differences from Responses, and how each is absorbed here:
 

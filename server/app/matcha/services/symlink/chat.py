@@ -31,6 +31,7 @@ from google.genai import types
 from app.core.services.model_catalog import GEMINI_FLASH_LITE
 from app.matcha.services._shared.gemini import genai_env_client
 from app.matcha.services.ir.ir_voice_parser import _VOICE_PARSE_SAFETY_SETTINGS
+from app.core.services import agent_surfaces
 from app.core.services.anthropic_messages import generate_content_routed
 
 logger = logging.getLogger(__name__)
@@ -276,7 +277,7 @@ async def next_turn(
     try:
         response = await generate_content_routed(
             client, model=GEMINI_FLASH_LITE, contents=[prompt], config=config,
-            timeout_seconds=CHAT_TURN_TIMEOUT, rate_label=("symlink", "chat_turn"),
+            timeout_seconds=CHAT_TURN_TIMEOUT, surface=agent_surfaces.MATCHA_SYMLINK, rate_label=("symlink", "chat_turn"),
         )
         payload = json.loads((getattr(response, "text", None) or "").strip())
     except Exception as exc:

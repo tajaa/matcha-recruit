@@ -21,6 +21,7 @@ from uuid import UUID
 
 from app.core.services.safe_fetch import UnsafeURL, fetch_public
 from app.core.services import anthropic_messages
+from app.matcha.services.matcha_work.app_surface import work_surface
 from app.matcha.services.huume.claude_client import get_claude_client
 from app.matcha.services.huume.luna_client import get_luna_client, text_item
 from app.matcha.services.huume.routing import LUNA
@@ -146,8 +147,9 @@ async def run_card_agent(
                     provenance.add(pick[field].get("source_url"))
         provenance.discard(None)
 
-    # Luna unless the platform "Agent model" setting routes agents to Claude.
-    claude_model = await anthropic_messages.claude_override()
+    # Luna unless the admin "AI models" setting routes agent cards to Claude
+    # (Matcha Work for a business account, Espresso's purchase agent for a personal one).
+    claude_model = await anthropic_messages.claude_override(await work_surface(company_id, "agent_cards"))
     if claude_model:
         await store.set_run_model(run_id, claude_model)
     ctx = RunContext(

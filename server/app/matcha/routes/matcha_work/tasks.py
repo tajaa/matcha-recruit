@@ -478,6 +478,7 @@ async def ai_draft_task_endpoint(
             recent_done=recent_done,
             conventions=conventions or None,
             repository_context=repository_context or None,
+            company_id=project.get("company_id"),
         )
     except Exception as e:
         logger.warning("AI task draft failed project=%s: %s", project_id, e)

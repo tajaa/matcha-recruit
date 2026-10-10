@@ -46,7 +46,7 @@ from uuid import UUID
 
 from google.genai import types
 
-from app.core.services import anthropic_messages
+from app.core.services import agent_surfaces, anthropic_messages
 from app.core.services.model_catalog import GEMINI_FLASH
 from app.matcha.services._shared.gemini import genai_env_client
 from app.matcha.services._shared.pill_text import sanitize_pill_text
@@ -520,7 +520,7 @@ async def _claude_loop(
     model: str, *, env: _ToolEnv, state: _LoopState, started: float, declarations: list,
     system_prompt: str, user_text: str,
 ) -> None:
-    """The same loop on Claude (platform "Agent model" setting): same bounds,
+    """The same loop on Claude (admin "AI models" setting): same bounds,
     same prompts, same tool dispatch. The session keeps the turn's history,
     so each call sends only what is new."""
     from app.database import get_connection
@@ -578,7 +578,7 @@ async def answer_channel_question(
     """Answer one channel ASK. Never raises — any failure degrades to the
     deterministic fallback line, same contract the pre-fetch version had.
 
-    Runs on Gemini, or on Claude when the platform "Agent model" setting
+    Runs on Gemini, or on Claude when the admin "AI models" setting
     routes agents there (`anthropic_messages.claude_override`) — one loop
     shape, one tool dispatcher (`_run_tool_call`), two providers.
 
@@ -641,7 +641,7 @@ async def answer_channel_question(
         system_prompt=system_prompt, user_text=user_text,
     )
 
-    claude_model = await anthropic_messages.claude_override()
+    claude_model = await anthropic_messages.claude_override(agent_surfaces.MATCHA_OPS)
     try:
         if claude_model:
             await _claude_loop(claude_model, **loop_kwargs)

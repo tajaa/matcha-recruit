@@ -29,11 +29,6 @@ DEFAULT_VISIBLE_FEATURES = [
 ]
 DEFAULT_MATCHA_WORK_MODEL_MODE = "light"
 DEFAULT_JURISDICTION_RESEARCH_MODEL_MODE = "light"
-# The platform "Agent model" switch (`anthropic_messages.claude_override`).
-# "default" keeps every agent/one-shot workload on the provider it was built
-# on (Luna, or Gemini for EMS); a Claude id routes them all to that model.
-DEFAULT_AGENT_MODEL = "default"
-AGENT_MODEL_CHOICES = ("default", "claude-haiku-5-5", "claude-sonnet-5-5")
 VISIBLE_FEATURES_CACHE_TTL_SECONDS = 30
 
 # Serve tenants ONLY requirements whose catalog row carries a verified statute
@@ -246,42 +241,137 @@ async def get_jurisdiction_research_model_mode(*, conn=None) -> str:
     return mode
 
 
-_agent_model_cache: str | None = None
-_agent_model_cached_at: float = 0.0
+# ── AI models per app and product (`agent_models`) ──
+#
+# {"apps": {"matcha": choice, ...}, "surfaces": {"matcha.ir": choice | "inherit", ...}}
+# where choice is "default" (the surface's built-in provider) or a Claude id.
+# The registry of apps and surfaces is `core/services/agent_surfaces.py`;
+# `anthropic_messages.claude_override(surface)` is the one reader that routes.
+# Read on every Huume turn, EMS message and routed Gemini call, so every
+# resolution is cached, the no-row default included.
+
+_agent_models_cache: dict | None = None
+_agent_models_cached_at: float = 0.0
 
 
-def prime_agent_model_cache(model: str) -> str:
-    global _agent_model_cache, _agent_model_cached_at
-    _agent_model_cache = model if model in AGENT_MODEL_CHOICES else DEFAULT_AGENT_MODEL
-    _agent_model_cached_at = time.monotonic()
-    return _agent_model_cache
+def normalize_agent_models(parsed: object) -> dict:
+    """The stored map in its full shape: every app and every registered
+    surface present, unknown keys and values dropped (an app → "default", a
+    surface → "inherit"). Lenient on purpose — a registry that has since
+    shrunk, or one bad value, must not unset the rest."""
+    from app.core.services import agent_surfaces as reg
+
+    apps_in = parsed.get("apps") if isinstance(parsed, dict) else None
+    surfaces_in = parsed.get("surfaces") if isinstance(parsed, dict) else None
+    apps_in = apps_in if isinstance(apps_in, dict) else {}
+    surfaces_in = surfaces_in if isinstance(surfaces_in, dict) else {}
+    return {
+        "apps": {
+            app.key: apps_in.get(app.key) if apps_in.get(app.key) in reg.MODEL_CHOICES else reg.BUILTIN
+            for app in reg.APPS
+        },
+        "surfaces": {
+            s.key: surfaces_in.get(s.key) if surfaces_in.get(s.key) in reg.SURFACE_CHOICES else reg.INHERIT
+            for s in reg.SURFACES
+        },
+    }
 
 
-async def get_agent_model(*, conn=None) -> str:
-    """The stored Agent model choice. Unlike the mode getters above, the
-    default is cached too: this is read on every Huume turn and every EMS
-    message, so an unset row must not cost a query each time."""
-    now = time.monotonic()
-    if (
-        _agent_model_cache is not None
-        and now - _agent_model_cached_at < VISIBLE_FEATURES_CACHE_TTL_SECONDS
-    ):
-        return _agent_model_cache
+def _agent_models_from_legacy(legacy: object) -> dict:
+    """Before the first save of `agent_models`: the old single setting drove
+    Matcha and Espresso, so both app defaults take its value and every
+    product inherits. Deploying the split therefore changes nothing."""
+    from app.core.services import agent_surfaces as reg
 
-    query = "SELECT value FROM platform_settings WHERE key = 'agent_model'"
-    if conn is None:
-        async with get_connection() as managed_conn:
-            raw = await managed_conn.fetchval(query)
-    else:
-        raw = await conn.fetchval(query)
+    value = legacy if legacy in reg.MODEL_CHOICES else reg.BUILTIN
+    return normalize_agent_models({"apps": {reg.MATCHA: value, reg.ESPRESSO: value}})
 
-    value = raw
+
+def prime_agent_models_cache(value: object) -> dict:
+    """Seed the cache straight after an admin write; returns the normalized map."""
+    global _agent_models_cache, _agent_models_cached_at
+    _agent_models_cache = normalize_agent_models(value)
+    _agent_models_cached_at = time.monotonic()
+    return _copy_agent_models(_agent_models_cache)
+
+
+def _copy_agent_models(models: dict) -> dict:
+    return {"apps": dict(models["apps"]), "surfaces": dict(models["surfaces"])}
+
+
+def _json_value(raw: object) -> object:
     if isinstance(raw, str):
         try:
-            value = json.loads(raw)
+            return json.loads(raw)
         except json.JSONDecodeError:
-            value = raw
-    return prime_agent_model_cache(value if isinstance(value, str) else DEFAULT_AGENT_MODEL)
+            return raw
+    return raw
+
+
+# Both rows: `agent_models` once saved, else the legacy `agent_model` seed.
+AGENT_MODELS_QUERY = (
+    "SELECT key, value, updated_at FROM platform_settings WHERE key IN ('agent_models', 'agent_model')"
+)
+
+
+def agent_models_from_rows(rows) -> tuple[dict, str | None]:
+    """(full map, version) from AGENT_MODELS_QUERY rows. The version is the
+    saved map's `updated_at` (None before the first save): the admin PUT
+    compares it so a stale tab can't overwrite a newer save."""
+    by_key = {row["key"]: row for row in rows}
+    saved = by_key.get("agent_models")
+    if saved is not None:
+        return normalize_agent_models(_json_value(saved["value"])), saved["updated_at"].isoformat()
+    legacy = by_key.get("agent_model")
+    return _agent_models_from_legacy(_json_value(legacy["value"]) if legacy else None), None
+
+
+async def get_agent_models(*, conn=None) -> dict:
+    """The full per-app/per-surface map, from `agent_models`, or seeded from
+    the legacy `agent_model` row while `agent_models` has never been saved."""
+    global _agent_models_cache, _agent_models_cached_at
+    now = time.monotonic()
+    if _agent_models_cache is not None and now - _agent_models_cached_at < VISIBLE_FEATURES_CACHE_TTL_SECONDS:
+        return _copy_agent_models(_agent_models_cache)
+
+    if conn is None:
+        async with get_connection() as managed_conn:
+            rows = await managed_conn.fetch(AGENT_MODELS_QUERY)
+    else:
+        rows = await conn.fetch(AGENT_MODELS_QUERY)
+    models, _version = agent_models_from_rows(rows)
+    _agent_models_cache = models
+    _agent_models_cached_at = now
+    return _copy_agent_models(models)
+
+
+_warned_unregistered_surfaces: set[str] = set()
+
+
+def resolve_agent_model(models: dict, surface: str) -> str:
+    """One surface's effective choice: its own value unless `inherit`, else
+    its app default, else "default".
+
+    An unregistered key never crashes a turn: it has no row of its own, so it
+    follows the app its prefix names — which may be a Claude default — or
+    "default" when the prefix is no app. It is logged once per key (this runs
+    on every model call). `test_agent_surfaces` keeps call sites to
+    registered keys, so this is a backstop, not a path."""
+    from app.core.services import agent_surfaces as reg
+
+    if surface not in reg.SURFACE_BY_KEY and surface not in _warned_unregistered_surfaces:
+        _warned_unregistered_surfaces.add(surface)
+        logger.warning("agent model: unregistered surface %r; using its app default", surface)
+    own = models.get("surfaces", {}).get(surface, reg.INHERIT)
+    if own in reg.MODEL_CHOICES:
+        return own
+    app = reg.app_of(surface)
+    return models.get("apps", {}).get(app, reg.BUILTIN) if app else reg.BUILTIN
+
+
+async def get_agent_model(surface: str, *, conn=None) -> str:
+    """The effective model choice for one surface (see `resolve_agent_model`)."""
+    return resolve_agent_model(await get_agent_models(conn=conn), surface)
 
 
 def invalidate_tenant_codified_only_cache() -> None:

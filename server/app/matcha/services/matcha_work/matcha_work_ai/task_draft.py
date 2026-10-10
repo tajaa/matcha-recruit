@@ -8,6 +8,7 @@ from typing import Optional
 
 
 from app.core.services import anthropic_messages
+from app.matcha.services.matcha_work.app_surface import work_surface
 from app.core.services.ai_usage import feature_scope
 from app.matcha.services.huume.claude_client import get_claude_client
 from app.matcha.services.huume.luna_client import get_luna_client, text_item
@@ -46,6 +47,7 @@ async def generate_task_draft(
     recent_done: Optional[list[str]] = None,
     conventions: Optional[str] = None,
     repository_context: Optional[str] = None,
+    company_id=None,
 ) -> dict:
     """Turn a natural-language request into a structured kanban-ticket draft via
     OpenAI Luna with high reasoning. Returns a dict of fields (no DB write) — the route maps
@@ -140,9 +142,10 @@ Request:
 
     # Task drafting ignores the thread model picker (which cannot route a draft
     # back to Gemini), so this takes no model argument: it runs on Luna, or on
-    # the Claude model the platform "Agent model" setting routes agent
-    # workloads to. Both sessions take the same call, JSON mode included.
-    claude_model = await anthropic_messages.claude_override()
+    # the Claude model the admin "AI models" setting routes projects to
+    # (Matcha Work or Espresso by `company_id`; none → Matcha Work). Both
+    # sessions take the same call, JSON mode included.
+    claude_model = await anthropic_messages.claude_override(await work_surface(company_id, "projects"))
     model = claude_model or LUNA
     client = get_claude_client() if claude_model else get_luna_client()
     with feature_scope(_AI_USAGE_FEATURE):

@@ -36,10 +36,31 @@ export type BetaInvitation = {
   registered_at: string | null
 }
 
+/** AI models per app and product. A choice is 'default' (the product's
+ *  built-in provider) or a Claude model id; a product can also 'inherit' its app. */
+export type AgentModels = {
+  apps: Record<string, string>
+  surfaces: Record<string, string>
+}
+
+/** One app and its products, as the server's registry lists them. */
+export type AgentModelApp = {
+  key: string
+  label: string
+  description: string
+  surfaces: { key: string; label: string; description: string; builtin: string }[]
+}
+
+/** A Claude model the AI-models page offers. */
+export type AgentModelChoice = { id: string; label: string }
+
 export type PlatformSettings = {
   jurisdiction_research_model_mode?: string | null
-  /** 'default' (each feature on its own provider) or a Claude model id. */
-  agent_model?: string | null
+  agent_models?: AgentModels
+  agent_model_registry?: AgentModelApp[]
+  agent_model_choices?: AgentModelChoice[]
+  /** Sent back on save; null before the map was ever saved. */
+  agent_models_version?: string | null
   anthropic_configured?: boolean
 }
 
@@ -67,8 +88,10 @@ export const adminSettingsApi = {
   setResearchModelMode: (mode: string) =>
     api.put<void>('/admin/platform-settings/jurisdiction-research-model-mode', { mode }),
 
-  setAgentModel: (model: string) =>
-    api.put<{ agent_model: string }>('/admin/platform-settings/agent-model', { model }),
+  /** Replaces the WHOLE map — an app or product omitted here goes back to
+   *  built-in / inherit. `version` is the loaded map's; a stale one is a 409. */
+  setAgentModels: (models: AgentModels & { version: string | null }) =>
+    api.put<{ agent_models: AgentModels; version: string }>('/admin/platform-settings/agent-models', models),
 
   getAutoPRBoardCapabilities: () =>
     api.get<AutoPRBoardCapabilities>('/admin/platform-settings/autopr-board-capabilities'),

@@ -45,7 +45,7 @@ from decimal import Decimal
 from typing import Any, Optional
 from uuid import UUID
 
-from app.core.services import anthropic_messages
+from app.core.services import agent_surfaces, anthropic_messages
 from app.core.services.model_catalog import GEMINI_FLASH
 
 logger = logging.getLogger(__name__)
@@ -317,9 +317,9 @@ async def extract_state_rules(
         return {"status": "skipped_curated", "requirement_count": 0,
                 "extracted_count": 0, "rejected_count": 0}
 
-    # Gemini unless the platform "Agent model" setting routes AI work to
+    # Gemini unless the admin "AI models" setting routes AI work to
     # Claude. Resolved before the run row so `ai_model` records what ran.
-    claude_model = await anthropic_messages.claude_override()
+    claude_model = await anthropic_messages.claude_override(agent_surfaces.MATCHA_SCHEDULING)
     run_id = await conn.fetchval(
         """
         INSERT INTO schedule_rule_extraction_runs (state, status, ai_model, triggered_by)

@@ -11,6 +11,7 @@ from app.core.services.anthropic_messages import (
 )
 from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
 from app.core.services.platform_settings import get_matcha_work_model_mode
+from app.matcha.services.matcha_work.app_surface import work_surface
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +61,11 @@ async def _get_model(
 ) -> str:
     """Pick the model for a call, enforcing plan entitlements.
 
-    The platform "Agent model" setting (Admin → Settings, read through
-    `anthropic_messages.claude_override`) wins over every Gemini outcome: while it names a Claude
-    model, a Gemini pick or the plan default runs that model instead. Both
+    The admin "AI models" setting for this account's chat (Matcha Work chat
+    for a business, Espresso chat for a personal account — `work_surface`,
+    read through `anthropic_messages.claude_override`) wins over every Gemini
+    outcome: while it names a Claude model, a Gemini pick or the plan default
+    runs that model instead. Both
     apps always send their stored pick (Flash unless changed), so "only when
     no pick was sent" would never fire. An explicit Claude pick is still
     honored, so a person can choose Haiku vs Sonnet; the admin's choice is not
@@ -106,7 +109,8 @@ async def _get_model(
     if gemini_only:
         model_override = None if is_claude_model(model_override) else model_override
     else:
-        admin_model = await anthropic_messages.claude_override()
+        # Matcha Work chat for a business account, Espresso chat for a personal one.
+        admin_model = await anthropic_messages.claude_override(await work_surface(company_id, "chat"))
 
     if is_claude_model(model_override) and (model_override == admin_model or (
         anthropic_configured() and (model_override not in PREMIUM_CLAUDE_MODELS or await _pro_allowed())
@@ -130,18 +134,19 @@ async def _get_model(
     return FLASH
 
 
-async def picker_models(*, pro_allowed: bool) -> tuple[list[dict], str]:
+async def picker_models(*, pro_allowed: bool, company_id=None) -> tuple[list[dict], str]:
     """The chat model picker for one person: `[{"id", "locked"}]` in menu
     order, plus the id it starts on. THE rule both apps render (sent as
     `entitlements.workspace.chat_models` / `default_chat_model`), so neither
     client re-derives it; `_get_model` enforces the same rule per turn and
     `test_skill_engine_claude` holds the two together.
 
-    While the admin Agent model names a Claude model, only Claude rows: a
-    Gemini pick would run it anyway. The admin's own model is never locked;
-    Sonnet otherwise needs the pro entitlement.
+    While the admin AI-model setting routes this account's chat (Matcha Work
+    or Espresso, by `company_id`) to Claude, only Claude rows: a Gemini pick
+    would run it anyway. The admin's own model is never locked; Sonnet
+    otherwise needs the pro entitlement.
     """
-    admin_model = await anthropic_messages.claude_override()
+    admin_model = await anthropic_messages.claude_override(await work_surface(company_id, "chat"))
     if admin_model:
         rows = [
             {"id": m, "locked": m in PREMIUM_CLAUDE_MODELS and not pro_allowed and m != admin_model}

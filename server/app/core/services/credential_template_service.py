@@ -5,7 +5,7 @@ Resolves jurisdiction + role-specific credential requirements using a tiered str
 2. System-wide templates
 3. Static fallback (credential_inference.py)
 4. OpenAI Luna research (creates templates for future reuse) — or Claude, when
-   the platform "Agent model" setting routes agent workloads there
+   the admin "AI models" setting routes agent workloads there
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from uuid import UUID
 import httpx
 
 from app.config import get_settings
-from app.core.services import anthropic_messages
+from app.core.services import agent_surfaces, anthropic_messages
 from app.core.services.ai_usage import record_openai_response
 from app.core.services.openai_responses import (
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
@@ -47,11 +47,11 @@ def _luna_credentials() -> tuple[str, str] | None:
 async def _text_model() -> tuple[str, str] | None:
     """`(api_key, model)` for one research/classification call.
 
-    The Claude model the platform "Agent model" setting routes to wins (its
+    The Claude model the admin "AI models" setting routes to wins (its
     key lives in the shared Anthropic client, so `api_key` is empty); else the
     configured Luna key and model, or None when neither is available.
     """
-    claude_model = await anthropic_messages.claude_override()
+    claude_model = await anthropic_messages.claude_override(agent_surfaces.MATCHA_CREDENTIALS)
     if claude_model:
         return "", claude_model
     return _luna_credentials()

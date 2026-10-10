@@ -37,13 +37,14 @@ async def run_semantic_enrichment(
     domain: str,
     api_key: Optional[str] = None,
     timeout: int = GEMINI_CALL_TIMEOUT,
-    agent_model: bool = False,
+    surface: Optional[str] = None,
 ) -> dict[str, Any]:
     """Run one precedent Phase-2 Gemini call and parse its JSON result.
 
     `prompt` is the fully-built, domain-specific prompt; `domain` is the rate-limiter
-    bucket (`"er_analysis"` / `"ir_analysis"`). `agent_model` lets the admin
-    Agent model run it on Claude (IR opts in; ER stays on Gemini). Returns the parsed dict, or
+    bucket (`"er_analysis"` / `"ir_analysis"`). `surface` is the
+    `agent_surfaces` key whose admin AI-model setting may run it on Claude
+    (IR passes `matcha.ir`; ER passes none and stays on Gemini). Returns the parsed dict, or
     `{"scores": [], "pattern_summary": None}` on any failure (unavailable model exhausted,
     timeout, no JSON, parse error) — the structural Phase-1 scores still stand on their own.
     """
@@ -71,7 +72,7 @@ async def run_semantic_enrichment(
                 response = await generate_content_routed(
                     client, model=model_name, contents=prompt, timeout_seconds=timeout,
                     json_output=True, effort="medium",
-                    rate_label=(domain, "precedent_semantic"), allow_claude=agent_model,
+                    surface=surface, rate_label=(domain, "precedent_semantic"),
                 )
                 if model_name != primary_model and not ran_on_claude(response):
                     logger.warning(

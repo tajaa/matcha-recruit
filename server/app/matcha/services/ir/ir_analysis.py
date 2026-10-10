@@ -16,6 +16,7 @@ from typing import Optional, Any, Callable
 from ....core.services.genai_client import get_genai_client
 from ....core.services.rate_limiter import get_rate_limiter, RateLimitExceeded
 from ....core.services.model_catalog import GEMINI_FLASH
+from app.core.services import agent_surfaces
 from app.core.services.anthropic_messages import generate_content_routed, ran_on_claude
 
 
@@ -731,7 +732,7 @@ class IRAnalyzer:
                 response = await generate_content_routed(
                     self.client, model=self.model, contents=prompt,
                     timeout_seconds=GEMINI_CALL_TIMEOUT, json_output=True, effort="medium",
-                    rate_label=("ir_analysis", label),
+                    surface=agent_surfaces.MATCHA_IR, rate_label=("ir_analysis", label),
                 )
 
                 # Record the actual API call (a Claude call counted in its own bucket)

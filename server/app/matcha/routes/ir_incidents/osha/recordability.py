@@ -12,6 +12,7 @@ from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id, require_feature
 from app.matcha.models.ir.osha import OshaRecordabilityUpdate
 from app.core.services.genai_client import get_genai_client
+from app.core.services import agent_surfaces
 from app.core.services.anthropic_messages import generate_content_routed
 from ._shared import _safe_json_loads, log_audit
 
@@ -185,7 +186,7 @@ Respond in JSON:
         client = get_genai_client()
         response = await generate_content_routed(
             client, model=settings.analysis_model, contents=prompt,
-            timeout_seconds=120, json_output=True, rate_label=("ir_osha", "determine"),
+            timeout_seconds=120, json_output=True, surface=agent_surfaces.MATCHA_IR, rate_label=("ir_osha", "determine"),
         )
         text = (response.text or "").strip()
         if text.startswith("```"):

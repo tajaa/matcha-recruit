@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 # external `from ...handbook_service import ...` callers keep working.
 from app.core.services.handbook_service._constants import *  # noqa: F401,F403
 from app.core.services.handbook_service._helpers import *  # noqa: F401,F403
+from app.core.services import agent_surfaces
 from app.core.services.anthropic_messages import generate_content_routed, ran_on_claude
 
 
@@ -583,7 +584,7 @@ class HandbookService:
             response = await generate_content_routed(
                 client, model=model_name, contents=prompt,
                 timeout_seconds=45, json_output=True, effort="medium",
-                rate_label=("handbook_guided_draft", industry_key),
+                surface=agent_surfaces.MATCHA_HANDBOOKS, rate_label=("handbook_guided_draft", industry_key),
             )
             raw_text = (getattr(response, "text", None) or "").strip()
             parsed = _extract_json_payload(raw_text)

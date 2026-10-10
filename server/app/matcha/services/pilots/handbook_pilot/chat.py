@@ -15,6 +15,7 @@ from ._config import DRAFT_KINDS, MODEL, _CONTENT_CAP, _GEMINI_TIMEOUT, _HISTORY
 from app.matcha.services._shared.gemini import _genai
 from app.matcha.services._shared.text import history_text
 from app.matcha.services._shared.text import _slug
+from app.core.services import agent_surfaces
 from app.core.services.anthropic_messages import generate_content_routed
 
 logger = logging.getLogger(__name__)
@@ -183,7 +184,7 @@ async def _generate(session: dict, history: list[dict], corpus: dict, latest: st
     resp = await generate_content_routed(
         _genai(), model=MODEL, contents=prompt,
         timeout_seconds=_GEMINI_TIMEOUT, json_output=True, effort="medium",
-        rate_label=("handbook_pilot", "chat"),
+        surface=agent_surfaces.MATCHA_HANDBOOKS, rate_label=("handbook_pilot", "chat"),
     )
     data = _parse_json(getattr(resp, "text", "") or "")
     drafts, dropped = _coerce_drafts(data.get("proposed_drafts"), corpus.get("index", {}))

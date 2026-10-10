@@ -15,7 +15,7 @@ __all__ = [
     "JurisdictionProcessRequest",
     "PlatformSettingsResponse",
     "TenantCodifiedOnlyUpdate",
-    "AgentModelUpdate",
+    "AgentModelsUpdate",
     "AutoPRBoardCapabilitiesUpdate",
     "SubscriptionSummary",
     "BusinessRegistrationResponse",
@@ -86,7 +86,15 @@ class PlatformSettingsResponse(BaseModel):
     visible_features: list[str]
     matcha_work_model_mode: str
     jurisdiction_research_model_mode: str
-    agent_model: str = "default"
+    # AI models per app and product: {"apps": {...}, "surfaces": {...}}, every
+    # registered key present (`platform_settings.get_agent_models`), plus the
+    # registry the admin page renders (`agent_surfaces.registry_payload`).
+    agent_models: dict[str, dict[str, str]] = {}
+    agent_model_registry: list[dict] = []
+    # The Claude models the page offers (`agent_surfaces.model_choices_payload`).
+    agent_model_choices: list[dict] = []
+    # Send back on save; a stale tab gets a 409 instead of overwriting.
+    agent_models_version: Optional[str] = None
     # False when ANTHROPIC_API_KEY is unset: the Claude choices are then shown
     # disabled, and the PUT refuses them.
     anthropic_configured: bool = False
@@ -95,8 +103,17 @@ class PlatformSettingsResponse(BaseModel):
     tenant_codified_only: bool
 
 
-class AgentModelUpdate(BaseModel):
-    model: Literal["default", "claude-haiku-5-5", "claude-sonnet-5-5"]
+class AgentModelsUpdate(BaseModel):
+    """The whole AI-models map, replaced atomically: an app missing from
+    `apps` goes back to its built-in provider and a surface missing from
+    `surfaces` follows its app. Keys and values are validated against
+    `core/services/agent_surfaces.py` by the route (not restated here, so a
+    new Claude model is one edit). `version` is the GET's
+    `agent_models_version`: a save from a page that loaded an older map is
+    refused with 409."""
+    apps: dict[str, str] = {}
+    surfaces: dict[str, str] = {}
+    version: Optional[str] = None
 
 
 class TenantCodifiedOnlyUpdate(BaseModel):
