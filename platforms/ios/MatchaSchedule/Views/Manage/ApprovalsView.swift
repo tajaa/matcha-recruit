@@ -11,8 +11,20 @@ struct ApprovalsView: View {
     @State private var loading = false
     @State private var loaded = false
     @State private var error: String?
-    @State private var reviewing: ScheduleRequest?
-    @State private var reviewingTimeOff: PTOAdminRequest?
+    /// The one review sheet, by what it reviews.
+    @State private var reviewing: Review?
+
+    private enum Review: Identifiable {
+        case request(ScheduleRequest)
+        case timeOff(PTOAdminRequest)
+
+        var id: String {
+            switch self {
+            case .request(let request): "request-\(request.id)"
+            case .timeOff(let request): "pto-\(request.id)"
+            }
+        }
+    }
 
     /// Time off is company-wide data, so it belongs to business admins only.
     private var showsTimeOff: Bool { scope.company_wide && scope.features.time_off }
@@ -34,7 +46,7 @@ struct ApprovalsView: View {
                     .cardRow()
             } else {
                 ForEach(requests) { request in
-                    Button { reviewing = request } label: {
+                    Button { reviewing = .request(request) } label: {
                         ManagerRequestRow(request: request, store: storeName(request.location_id))
                     }
                     .buttonStyle(.plain)
@@ -52,7 +64,7 @@ struct ApprovalsView: View {
                         .cardRow()
                 } else {
                     ForEach(timeOff) { item in
-                        Button { reviewingTimeOff = item } label: { TimeOffRow(request: item) }
+                        Button { reviewing = .timeOff(item) } label: { TimeOffRow(request: item) }
                             .buttonStyle(.plain)
                             .cardRow()
                     }
@@ -66,16 +78,16 @@ struct ApprovalsView: View {
         .refreshable { await load() }
         .task(id: location?.id) { await load() }
         .onChange(of: appState.pendingApprovalID) { _, _ in openPendingApproval() }
-        .sheet(item: $reviewing) { request in
+        .sheet(item: $reviewing) { item in
             NavigationStack {
-                RequestReviewView(request: request, store: storeName(request.location_id)) {
-                    Task { await load() }
+                switch item {
+                case .request(let request):
+                    RequestReviewView(request: request, store: storeName(request.location_id)) {
+                        Task { await load() }
+                    }
+                case .timeOff(let request):
+                    TimeOffReviewView(request: request) { Task { await load() } }
                 }
-            }
-        }
-        .sheet(item: $reviewingTimeOff) { request in
-            NavigationStack {
-                TimeOffReviewView(request: request) { Task { await load() } }
             }
         }
     }
@@ -117,7 +129,7 @@ struct ApprovalsView: View {
     private func openPendingApproval() {
         guard loaded, let id = appState.pendingApprovalID else { return }
         appState.pendingApprovalID = nil
-        if let request = requests.first(where: { $0.id == id }) { reviewing = request }
+        if let request = requests.first(where: { $0.id == id }) { reviewing = .request(request) }
     }
 }
 

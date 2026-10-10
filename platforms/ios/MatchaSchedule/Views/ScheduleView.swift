@@ -282,7 +282,7 @@ struct ScheduleView: View {
 /// The week's range with previous and next, over its seven days. Each day
 /// shows a dot per shift in its day-part color; tapping a day with shifts
 /// scrolls to it.
-private struct WeekHeader: View {
+struct WeekHeader: View {
     let week: Date
     /// Today's day key on the store's clock.
     let today: String
