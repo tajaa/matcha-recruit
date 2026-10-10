@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, status
 from ..core.feature_flags import default_company_features_json, merge_company_features
 from ..core.dependencies import get_current_user, require_roles
 from ..database import get_connection, set_tenant_id
+from .services.scheduling.schedule_manager_scope import COMPANY_WIDE_ROLES, MANAGES_ANY_STORE_SQL
 
 # Matcha role dependencies
 require_client = require_roles("client")
@@ -21,6 +22,25 @@ require_admin_or_employee = require_roles("admin", "employee")
 # employee still only ever sees/touches their own company's rows.
 COMPANY_MEMBER_ROLES = ("admin", "client", "individual", "employee")
 require_company_member = require_roles(*COMPANY_MEMBER_ROLES)
+
+
+async def require_schedule_manager(current_user=Depends(get_current_user)):
+    """Business admins, plus employees who manage a store.
+
+    A fast refusal for crew before the handler runs. It is not the scope check:
+    every route behind it resolves `resolve_schedule_manager_scope` against the
+    company and refuses writes outside the caller's stores.
+    """
+    if current_user.role in COMPANY_WIDE_ROLES:
+        return current_user
+    if current_user.role == "employee":
+        async with get_connection() as conn:
+            if await conn.fetchval(MANAGES_ANY_STORE_SQL, current_user.id):
+                return current_user
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Only business admins and store managers can manage schedules",
+    )
 
 
 def _ensure_company_is_accessible(company_status: Optional[str], rejection_reason: Optional[str]) -> None:

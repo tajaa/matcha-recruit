@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
 from app.core.feature_flags import get_company_features
-from ...dependencies import require_admin_or_client
+from ...dependencies import require_admin_or_client, require_schedule_manager
 from app.matcha.models.scheduling.employee_schedule import (
     ShiftCreate, ShiftUpdate, PublishRange, DuplicateShift,
     BreakRuleApplicabilityDecision,
@@ -44,7 +44,7 @@ from ...services.scheduling.schedule_break_rule_store import (
 from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
     assert_employee_in_company, assert_employee_schedulable_at, assert_location_in_company,
-    assert_job_in_company,
+    assert_job_in_company, assert_store_in_scope, resolve_schedule_manager_scope,
     find_conflicts, raise_conflict, shift_snapshot,
     fetch_availability, availability_violations, log_availability_override, raise_outside_availability,
     shift_window_on_date, check_job_qualification, raise_not_qualified,
@@ -311,7 +311,7 @@ async def decide_shift_break_rule_applicability(
 async def get_week(
     start: date = Query(..., description="Week start date (YYYY-MM-DD)"),
     location: UUID = Query(..., description="Business location to scope this week's shifts to"),
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_schedule_manager),
 ):
     """Weekly grid: the 7 days from `start` for ONE location, plus the roster
     for the picker. `location` is mandatory — callers fetch the location list
@@ -320,7 +320,8 @@ async def get_week(
     company_id = await require_company_id(current_user)
     lo, hi = _week_bounds(start)
     async with get_connection() as conn:
-        await assert_location_in_company(conn, company_id, location)
+        scope = await resolve_schedule_manager_scope(conn, company_id=company_id, user=current_user)
+        await assert_store_in_scope(conn, company_id, scope, location)
         # starts_within: the grid buckets by start date and publish_range only
         # publishes shifts starting in the window — matching on overlap here
         # would count a shift in the summary that no day column renders and no
@@ -436,12 +437,13 @@ async def location_scheduling_compliance(
 
 @router.get("/locations/{location_id}/readiness")
 async def schedule_location_readiness(
-    location_id: UUID, current_user=Depends(require_admin_or_client),
+    location_id: UUID, current_user=Depends(require_schedule_manager),
 ):
     """Expose the exact prerequisites that block schedule publication."""
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
-        await assert_location_in_company(conn, company_id, location_id)
+        scope = await resolve_schedule_manager_scope(conn, company_id=company_id, user=current_user)
+        await assert_store_in_scope(conn, company_id, scope, location_id)
         readiness = await get_schedule_location_readiness(conn, company_id, location_id)
     return {
         "location_id": str(location_id),
@@ -457,10 +459,11 @@ async def schedule_location_readiness(
 @router.post("/shifts")
 async def create_shift(body: ShiftCreate,
                        force: bool = Query(False, description="Assign despite overlapping shifts"),
-                       current_user=Depends(require_admin_or_client)):
+                       current_user=Depends(require_schedule_manager)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
-        await assert_location_in_company(conn, company_id, body.location_id)
+        scope = await resolve_schedule_manager_scope(conn, company_id=company_id, user=current_user)
+        await assert_store_in_scope(conn, company_id, scope, body.location_id)
         await assert_job_in_company(
             conn, company_id, body.job_id, location_id=body.location_id,
         )
@@ -716,7 +719,7 @@ async def duplicate_shift(shift_id: UUID, body: DuplicateShift,
 @router.put("/shifts/{shift_id}")
 async def update_shift(shift_id: UUID, body: ShiftUpdate,
                        force: bool = Query(False, description="Retime despite overlapping shifts"),
-                       current_user=Depends(require_admin_or_client)):
+                       current_user=Depends(require_schedule_manager)):
     """True PATCH: only the fields the caller sent are written, so an explicit
     null clears a nullable column (role, department, location, colour, notes).
     """
@@ -732,6 +735,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
         patch.pop("break_minutes", None)
     break_was_explicit = break_mode == "manual"
     async with get_connection() as conn:
+        scope = await resolve_schedule_manager_scope(conn, company_id=company_id, user=current_user)
         existing = await conn.fetchrow(
             """
             SELECT starts_at, ends_at, status, published_at, break_minutes, location_id,
@@ -743,10 +747,11 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
         )
         if not existing:
             raise HTTPException(status_code=404, detail="Shift not found")
+        scope.assert_shift(existing["location_id"])
         if not patch and (not auto_break_requested or existing["location_id"] is None):
             return await fetch_shift_by_id(conn, company_id, shift_id)
         if "location_id" in patch:
-            await assert_location_in_company(conn, company_id, patch["location_id"])
+            await assert_store_in_scope(conn, company_id, scope, patch["location_id"])
         shift_job_changed = job_changed(patch, existing)
         if shift_job_changed:
             # Same scope rule as create: a job from another store can't be
@@ -1101,20 +1106,25 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
 @router.delete("/shifts/{shift_id}")
 async def delete_shift(shift_id: UUID,
                        force: bool = Query(False, description="Delete despite a Fair Workweek notice/clopening advisory"),
-                       current_user=Depends(require_admin_or_client)):
+                       current_user=Depends(require_schedule_manager)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         async with conn.transaction():
+            scope = await resolve_schedule_manager_scope(conn, company_id=company_id, user=current_user)
+            # FOR UPDATE: the store check below must hold until the DELETE, or
+            # a concurrent move could put a shift outside the caller's stores.
             existing = await conn.fetchrow(
                 """
                 SELECT starts_at, ends_at, status, published_at, location_id, break_minutes,
                        role, department, required_staff, color, notes, job_id
                 FROM schedule_shifts WHERE id = $1 AND company_id = $2
+                FOR UPDATE
                 """,
                 shift_id, company_id,
             )
             if not existing:
                 raise HTTPException(status_code=404, detail="Shift not found")
+            scope.assert_shift(existing["location_id"])
             if existing["published_at"] is not None:
                 # Deleting a published shift is a cancellation for Fair
                 # Workweek purposes — advisory only (never blocks the delete
@@ -1149,11 +1159,12 @@ async def delete_shift(shift_id: UUID,
 
 
 @router.post("/shifts/{shift_id}/publish")
-async def publish_shift(shift_id: UUID, current_user=Depends(require_admin_or_client)):
+async def publish_shift(shift_id: UUID, current_user=Depends(require_schedule_manager)):
     company_id = await require_company_id(current_user)
     notify_employees = False
     async with get_connection() as conn:
         async with conn.transaction():
+            scope = await resolve_schedule_manager_scope(conn, company_id=company_id, user=current_user)
             shift = await conn.fetchrow(
                 """
                 SELECT id, status, location_id, job_id, starts_at, ends_at, break_minutes,
@@ -1166,6 +1177,7 @@ async def publish_shift(shift_id: UUID, current_user=Depends(require_admin_or_cl
             )
             if not shift:
                 raise HTTPException(status_code=404, detail="Shift not found")
+            scope.assert_shift(shift["location_id"])
             await assert_schedule_location_ready_to_publish(
                 conn, company_id, shift["location_id"],
             )
@@ -1199,18 +1211,21 @@ async def publish_shift(shift_id: UUID, current_user=Depends(require_admin_or_cl
 
 
 @router.post("/shifts/publish")
-async def publish_range(body: PublishRange, current_user=Depends(require_admin_or_client)):
+async def publish_range(body: PublishRange, current_user=Depends(require_schedule_manager)):
     """Publish every draft shift starting within [start, end).
 
     `location_id`, when given, scopes this to one location (plus shifts with
     no location set) — matching the location-scoped week the caller is
     looking at, so "Publish week (N)" doesn't silently publish other
-    locations' drafts too.
+    locations' drafts too. A store manager must name one of their stores, and
+    shifts with no location are left out for them: those stay a business
+    admin's.
     """
     company_id = await require_company_id(current_user)
     notify_employees = False
     async with get_connection() as conn:
-        await assert_location_in_company(conn, company_id, body.location_id)
+        scope = await resolve_schedule_manager_scope(conn, company_id=company_id, user=current_user)
+        await assert_store_in_scope(conn, company_id, scope, body.location_id)
         async with conn.transaction():
             candidate_shifts = await conn.fetch(
                 """
@@ -1219,11 +1234,12 @@ async def publish_range(body: PublishRange, current_user=Depends(require_admin_o
                 FROM schedule_shifts
                 WHERE company_id = $1 AND status = 'draft'
                   AND starts_at >= $2 AND starts_at < $3
-                  AND ($4::uuid IS NULL OR location_id = $4 OR location_id IS NULL)
+                  AND ($4::uuid IS NULL OR location_id = $4
+                       OR (location_id IS NULL AND $5::boolean))
                 ORDER BY id
                 FOR UPDATE
                 """,
-                company_id, body.start, body.end, body.location_id,
+                company_id, body.start, body.end, body.location_id, scope.company_wide,
             )
             seen_locations = set()
             for shift in candidate_shifts:

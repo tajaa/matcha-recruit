@@ -363,7 +363,7 @@ def _review_env(monkeypatch, *, starts_at, request_type="pickup"):
 async def test_pickup_decision_notifies_the_coworker_who_accepted(monkeypatch):
     env = _review_env(monkeypatch, starts_at=FUTURE)
     await manager.review_request(
-        env.request_id, RequestReview(decision="approved"), SimpleNamespace(id=uuid4()),
+        env.request_id, RequestReview(decision="approved"), SimpleNamespace(id=uuid4(), role="client"),
     )
     assert env.staged[0]["recipient_employee_ids"] == [env.owner_id, env.accepter_id]
 
@@ -373,7 +373,7 @@ async def test_approval_refuses_a_pickup_whose_shift_already_started(monkeypatch
     env = _review_env(monkeypatch, starts_at=PAST - timedelta(days=1))
     with pytest.raises(HTTPException) as exc:
         await manager.review_request(
-            env.request_id, RequestReview(decision="approved", force=True), SimpleNamespace(id=uuid4()),
+            env.request_id, RequestReview(decision="approved", force=True), SimpleNamespace(id=uuid4(), role="client"),
         )
     assert exc.value.status_code == 409
     assert exc.value.detail == "Offered shift has already started"

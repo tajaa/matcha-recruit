@@ -44,7 +44,7 @@ server/
 
 **Auth**:
 - JWT bearer token in `Authorization: Bearer …`. Roles: `admin`, `client`, `candidate`, `employee`, `creator`, `agency`, `individual` (see root CLAUDE.md).
-- Per-endpoint deps: `require_admin`, `require_client`, `require_candidate`, `require_employee`, `require_admin_or_client`.
+- Per-endpoint deps: `require_admin`, `require_client`, `require_candidate`, `require_employee`, `require_admin_or_client`, and `require_schedule_manager` (business admins plus employees flagged `is_manager`/`is_supervisor`; the handler then resolves `resolve_schedule_manager_scope` — see `app/matcha/services/scheduling/CLAUDE.md` §"Store managers").
 - Feature-gated routers add `dependencies=[Depends(require_feature("flag"))]` at mount time (see `routes/__init__.py`).
 
 **Models**:

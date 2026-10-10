@@ -248,7 +248,7 @@ def _call(conn, source_id, target_id, *, force=False):
     return _run(route.move_employee_assignment(
         _request(source_id, target_id),
         force=force,
-        current_user=SimpleNamespace(id=ACTOR_ID),
+        current_user=SimpleNamespace(id=ACTOR_ID, role="client"),
     ))
 
 

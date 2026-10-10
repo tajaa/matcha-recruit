@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import decode_jsonb, get_connection
-from ...dependencies import require_admin_or_client
+from ...dependencies import require_admin_or_client, require_schedule_manager
 from app.matcha.models.scheduling.employee_schedule import (
     AssignmentBreakPlanUpdate, AssignmentCreate, AssignmentMove, AssignmentNoteUpdate,
 )
@@ -22,7 +22,7 @@ from ._shared import (
     find_conflicts, raise_conflict, raise_shift_full,
     fetch_availability, availability_violations, raise_outside_availability,
     fetch_locked_shift_pair, check_job_qualification, raise_not_qualified,
-    reconcile_warning_events, lock_scheduling_employees,
+    reconcile_warning_events, lock_scheduling_employees, resolve_schedule_manager_scope,
 )
 from ._compliance import check_shift_compliance, raise_for_violations, _fair_workweek_advisories
 
@@ -160,12 +160,13 @@ async def update_assignment_break_plan(
 async def move_employee_assignment(
     body: AssignmentMove,
     force: bool = Query(False, description="Move despite overlap, capacity, availability, or advisory violations"),
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_schedule_manager),
 ):
     """Move one assignment atomically between two tenant-owned shifts."""
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         async with conn.transaction():
+            scope = await resolve_schedule_manager_scope(conn, company_id=company_id, user=current_user)
             shifts = await fetch_locked_shift_pair(
                 conn, company_id, body.from_shift_id, body.to_shift_id,
             )
@@ -174,6 +175,8 @@ async def move_employee_assignment(
             target = shifts.get(str(body.to_shift_id))
             if source is None or target is None:
                 raise HTTPException(status_code=404, detail="Shift not found")
+            scope.assert_shift(source["location_id"])
+            scope.assert_shift(target["location_id"])
             if source["status"] == "cancelled":
                 raise HTTPException(status_code=409, detail="Cannot move an assignment from a cancelled shift")
             if target["status"] == "cancelled":
@@ -317,14 +320,16 @@ async def move_employee_assignment(
 @router.post("/shifts/{shift_id}/assignments")
 async def assign_employee(shift_id: UUID, body: AssignmentCreate,
                           force: bool = Query(False, description="Assign despite an overlapping shift or a full roster"),
-                          current_user=Depends(require_admin_or_client)):
+                          current_user=Depends(require_schedule_manager)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         async with conn.transaction():
+            scope = await resolve_schedule_manager_scope(conn, company_id=company_id, user=current_user)
             # Lock before every state-dependent check.  This serializes
             # cancellation, retiming, capacity changes, and competing
             # assignments through the same shift row.
             shift = await fetch_shift_for_write(conn, company_id, shift_id)
+            scope.assert_shift(shift["location_id"])
             assert_shift_open_for_assignment(shift)
             await assert_employee_in_company(conn, company_id, body.employee_id)
             await assert_employee_schedulable_at(
@@ -397,11 +402,13 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
 @router.delete("/shifts/{shift_id}/assignments/{employee_id}")
 async def unassign_employee(shift_id: UUID, employee_id: UUID,
                             force: bool = Query(False, description="Unassign despite a Fair Workweek notice advisory"),
-                            current_user=Depends(require_admin_or_client)):
+                            current_user=Depends(require_schedule_manager)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         async with conn.transaction():
+            scope = await resolve_schedule_manager_scope(conn, company_id=company_id, user=current_user)
             shift = await fetch_shift_for_write(conn, company_id, shift_id)
+            scope.assert_shift(shift["location_id"])
             if shift["status"] == "published":
                 # Full check_shift_compliance would also re-run meal-break/OT/minor
                 # checks that don't make sense for a REMOVAL (they exist to gate

@@ -358,12 +358,12 @@ async def test_manager_claim_full_shift_requires_force(monkeypatch, force, expec
 
     if expected_status == 409:
         with pytest.raises(HTTPException) as exc:
-            await manager.review_request(request_id, RequestReview(decision="approved", force=force), SimpleNamespace(id=uuid4()))
+            await manager.review_request(request_id, RequestReview(decision="approved", force=force), SimpleNamespace(id=uuid4(), role="client"))
         assert exc.value.status_code == 409
         assert exc.value.detail["code"] == "shift_full"
         assert applied == []
     else:
-        await manager.review_request(request_id, RequestReview(decision="approved", force=force), SimpleNamespace(id=uuid4()))
+        await manager.review_request(request_id, RequestReview(decision="approved", force=force), SimpleNamespace(id=uuid4(), role="client"))
         assert applied == [employee_id]
 
 
@@ -377,7 +377,7 @@ async def test_manager_claim_recounts_seats_after_taking_the_lock(monkeypatch):
     _manager_env(monkeypatch, company_id=company_id, employee_id=employee_id, shift_id=shift_id,
                  request_id=request_id, applied=applied, locked_assigned_count=0, live_assigned_count=1)
     with pytest.raises(HTTPException) as exc:
-        await manager.review_request(request_id, RequestReview(decision="approved", force=False), SimpleNamespace(id=uuid4()))
+        await manager.review_request(request_id, RequestReview(decision="approved", force=False), SimpleNamespace(id=uuid4(), role="client"))
     assert exc.value.detail["code"] == "shift_full"
     assert applied == []
 
@@ -390,7 +390,7 @@ async def test_manager_claim_applies_same_day_hard_block(monkeypatch):
                  request_id=request_id, applied=applied, locked_assigned_count=0, live_assigned_count=0,
                  same_day_rows=[{"shift_id": uuid4()}])
     with pytest.raises(HTTPException) as exc:
-        await manager.review_request(request_id, RequestReview(decision="approved", force=True), SimpleNamespace(id=uuid4()))
+        await manager.review_request(request_id, RequestReview(decision="approved", force=True), SimpleNamespace(id=uuid4(), role="client"))
     assert exc.value.status_code == 409
     assert exc.value.detail["code"] == "same_day_assignment"
     assert applied == []
