@@ -55,6 +55,9 @@ class CappePublicBooking(BaseModel):
     staff_name: Optional[str] = None
     location_id: Optional[UUID] = None
     location_name: Optional[str] = None
+    # Customers can cancel or move it themselves until this long before it
+    # starts; `can_modify` already says whether that time has passed.
+    cancel_cutoff_hours: int = 0
 
 
 # Public (token-resolved) thread view for the client.

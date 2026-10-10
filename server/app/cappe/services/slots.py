@@ -32,6 +32,8 @@ def generate_slots(
     days_ahead: int = 21,
     max_slots: int | None = 60,
     staff_id: Optional[str] = None,
+    start_day: int = 0,
+    blocked: Sequence[tuple] = (),
 ) -> list[dict]:
     """Expand availability windows into concrete open slots for one booking type.
 
@@ -48,6 +50,10 @@ def generate_slots(
       used; when None (legacy / unstaffed), only NULL-staff windows are used.
     - Slots are fixed `duration_minutes` windows stepped through each window;
       hourly types still get per-minute rate-rule pricing within the slot.
+    - `start_day`: the first day, counted from today (paging through dates).
+    - `blocked`: closed (start, end) ranges — time off — kept clear, no buffer.
+    - `btype` may carry `min_notice_minutes` / `max_advance_days`: slots
+      sooner than the notice or past the horizon aren't offered.
     """
     try:
         tz = ZoneInfo(tz_name or "UTC")
@@ -74,13 +80,16 @@ def generate_slots(
         return []
 
     now_local = now_utc.astimezone(tz)
+    earliest = now_utc + timedelta(minutes=int(btype.get("min_notice_minutes") or 0))
+    horizon = btype.get("max_advance_days")
+    latest = now_utc + timedelta(days=int(horizon)) if horizon else None
     busy = [
         (b[0], b[1], max(buf, timedelta(minutes=int(b[2] or 0))) if len(b) > 2 else buf)
         for b in bookings
     ]
     out: list[dict] = []
 
-    for d in range(days_ahead):
+    for d in range(start_day, start_day + days_ahead):
         day = (now_local + timedelta(days=d)).date()
         wd = day.weekday()
         day_windows = sorted(
@@ -99,9 +108,15 @@ def generate_slots(
                     continue
                 s_utc = local_start.astimezone(timezone.utc)
                 e_utc = local_end.astimezone(timezone.utc)
+                if s_utc < earliest:
+                    continue  # inside the minimum notice
+                if latest is not None and s_utc > latest:
+                    return out  # past the horizon: every later slot is too
                 # Buffer enforces a gap on both sides of each existing booking.
                 if any(s_utc < be + gap and bs < e_utc + gap for bs, be, gap in busy):
                     continue  # overlaps an existing booking (or its buffer)
+                if any(s_utc < be and bs < e_utc for bs, be in blocked):
+                    continue  # time off
                 price = booking_quote_cents(base, mode, local_start, local_end, rules)
                 out.append({
                     "start": local_start.strftime("%Y-%m-%dT%H:%M:%S"),

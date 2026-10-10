@@ -17,6 +17,15 @@ interface BookingTypesSectionProps {
   currency?: string
 }
 
+/** " · 2h notice · up to 60 days ahead · changes close 24h before" */
+function rulesText(t: CappeBookingType): string {
+  const bits = []
+  if (t.min_notice_minutes) bits.push(`${+(t.min_notice_minutes / 60).toFixed(1)}h notice`)
+  if (t.max_advance_days) bits.push(`up to ${t.max_advance_days} days ahead`)
+  if (t.cancel_cutoff_hours) bits.push(`changes close ${t.cancel_cutoff_hours}h before`)
+  return bits.length ? ` · ${bits.join(' · ')}` : ''
+}
+
 export function BookingTypesSection({
   types, typeForm, setTypeForm, addType, staff, patchType, removeType, toggleTypeStaff, currency = 'USD',
 }: BookingTypesSectionProps) {
@@ -80,7 +89,7 @@ export function BookingTypesSection({
                 <span className="text-zinc-200">{t.name}</span>
                 {t.status !== 'active' && <span className="ml-1.5 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase text-zinc-400">{t.status} — not bookable</span>}
                 {t.category && <span className="ml-1.5 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">{t.category}</span>}
-                <span className="text-zinc-400"> · {t.duration_minutes} min · {t.pricing_mode === 'hourly' ? `${money(t.price_cents, currency)}/hr` : money(t.price_cents, currency)}{t.buffer_minutes ? ` · ${t.buffer_minutes}m buffer` : ''}</span>
+                <span className="text-zinc-400"> · {t.duration_minutes} min · {t.pricing_mode === 'hourly' ? `${money(t.price_cents, currency)}/hr` : money(t.price_cents, currency)}{t.buffer_minutes ? ` · ${t.buffer_minutes}m buffer` : ''}{rulesText(t)}</span>
                 {t.description && <div className="truncate text-xs text-zinc-500">{t.description}</div>}
                 {staff.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -129,6 +138,9 @@ function TypeEditor({ type: t, currency, onSave, onCancel }: {
     buffer: String(t.buffer_minutes || 0),
     category: t.category || '',
     status: t.status,
+    notice: t.min_notice_minutes ? String(t.min_notice_minutes / 60) : '',
+    advance: t.max_advance_days ? String(t.max_advance_days) : '',
+    cutoff: t.cancel_cutoff_hours ? String(t.cancel_cutoff_hours) : '',
   })
   const [problem, setProblem] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -142,6 +154,12 @@ function TypeEditor({ type: t, currency, onSave, onCancel }: {
     if (!Number.isFinite(duration) || duration < 1) { setProblem('Enter the length in minutes'); return }
     if (!Number.isFinite(buffer) || buffer < 0) { setProblem('Enter the buffer in minutes (0 for none)'); return }
     if (price === null) { setProblem('Enter the price as a plain amount, e.g. 75 or 75.00'); return }
+    const notice = form.notice.trim() === '' ? 0 : Number(form.notice)
+    const advance = form.advance.trim() === '' ? null : Number(form.advance)
+    const cutoff = form.cutoff.trim() === '' ? 0 : Number(form.cutoff)
+    if (!Number.isFinite(notice) || notice < 0 || notice > 720) { setProblem('Minimum notice is 0 to 720 hours'); return }
+    if (advance !== null && (!Number.isInteger(advance) || advance < 1 || advance > 730)) { setProblem('Book up to 1 to 730 days ahead, or leave it empty'); return }
+    if (!Number.isInteger(cutoff) || cutoff < 0 || cutoff > 720) { setProblem('Changes close 0 to 720 hours before'); return }
     setProblem(null)
     setSaving(true)
     try {
@@ -149,6 +167,7 @@ function TypeEditor({ type: t, currency, onSave, onCancel }: {
         name: form.name.trim(), description: form.description.trim() || null,
         duration_minutes: duration, pricing_mode: form.pricing_mode, price_cents: price,
         buffer_minutes: buffer, category: form.category.trim() || null, status: form.status,
+        min_notice_minutes: Math.round(notice * 60), max_advance_days: advance, cancel_cutoff_hours: cutoff,
       })
     } finally {
       setSaving(false)
@@ -179,7 +198,19 @@ function TypeEditor({ type: t, currency, onSave, onCancel }: {
           <option value="archived">Archived — hidden from booking</option>
         </select>
       </div>
-      <p className="text-xs text-zinc-500 sm:col-span-2">Changes apply to new bookings. Existing bookings keep their time and price.</p>
+      <fieldset className="grid gap-2 sm:col-span-2 sm:grid-cols-3">
+        <legend className="mb-1 text-xs font-medium text-zinc-400">Booking rules</legend>
+        <label className="text-xs text-zinc-400">Minimum notice (hours)
+          <input value={form.notice} onChange={(e) => setForm({ ...form, notice: e.target.value })} inputMode="decimal" placeholder="None" className={`mt-1 w-full ${inputCls}`} />
+        </label>
+        <label className="text-xs text-zinc-400">Book up to (days ahead)
+          <input value={form.advance} onChange={(e) => setForm({ ...form, advance: e.target.value })} inputMode="numeric" placeholder="No limit" className={`mt-1 w-full ${inputCls}`} />
+        </label>
+        <label className="text-xs text-zinc-400">Online changes close (hours before)
+          <input value={form.cutoff} onChange={(e) => setForm({ ...form, cutoff: e.target.value })} inputMode="numeric" placeholder="Up to the start" className={`mt-1 w-full ${inputCls}`} />
+        </label>
+      </fieldset>
+      <p className="text-xs text-zinc-500 sm:col-span-2">Changes apply to new bookings. Existing bookings keep their time and price. Bookings you make yourself skip these rules.</p>
       {problem && <p role="alert" className="text-xs text-red-400 sm:col-span-2">{problem}</p>}
       <div className="flex gap-2 sm:col-span-2">
         <button type="submit" disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-60">

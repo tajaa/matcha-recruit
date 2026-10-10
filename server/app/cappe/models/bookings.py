@@ -4,7 +4,7 @@ from datetime import datetime, time
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from ._validators import iana_timezone
 
@@ -138,6 +138,12 @@ class CappeBookingTypeCreate(BaseModel):
     # calendar). A staffed service is only bookable with one of these staff.
     staff_ids: Optional[list[UUID]] = None
     location_id: Optional[UUID] = None  # NULL = offered at all locations
+    # Booking rules (services/booking_rules.py): the soonest and the furthest
+    # ahead a customer can book, and how close to the start they can still
+    # cancel or move it themselves.
+    min_notice_minutes: int = Field(default=0, ge=0, le=43200)
+    max_advance_days: Optional[int] = Field(default=None, ge=1, le=730)
+    cancel_cutoff_hours: int = Field(default=0, ge=0, le=720)
 
 
 class CappeBookingTypeUpdate(BaseModel):
@@ -152,6 +158,9 @@ class CappeBookingTypeUpdate(BaseModel):
     buffer_minutes: Optional[int] = Field(default=None, ge=0, le=240)
     staff_ids: Optional[list[UUID]] = None
     location_id: Optional[UUID] = None
+    min_notice_minutes: Optional[int] = Field(default=None, ge=0, le=43200)
+    max_advance_days: Optional[int] = Field(default=None, ge=1, le=730)
+    cancel_cutoff_hours: Optional[int] = Field(default=None, ge=0, le=720)
 
 
 class CappeBookingType(BaseModel):
@@ -170,6 +179,9 @@ class CappeBookingType(BaseModel):
     location_id: Optional[UUID] = None
     # The store's currency (prices are in it).
     currency: str = "USD"
+    min_notice_minutes: int = 0
+    max_advance_days: Optional[int] = None
+    cancel_cutoff_hours: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -269,6 +281,8 @@ class CappeBooking(BaseModel):
     decline_reason: Optional[str] = None
     rider_acknowledged: bool = False
     rider_snapshot: list[dict[str, Any]] = Field(default_factory=list)
+    # The owner booked it (a phone call, a walk-in).
+    created_by_owner: bool = False
     created_at: datetime
     # The shop order this booking was bought through, if any. Cancelling or
     # declining the booking does not move money: a PAID order has to be
@@ -372,8 +386,58 @@ class CappeBookingQuote(BaseModel):
     original_price_cents: Optional[int] = None        # pre-discount (None if no discount)
     discount_percent: int = 0
 
+# --- Owner bookings and time off (PR 10) --------------------------------------
+
+class CappeOwnerBookingCreate(BaseModel):
+    """A booking the owner makes (a phone call, a walk-in). Skips the notice,
+    horizon, opening hours and time off; can't double-book."""
+    booking_type_id: UUID
+    starts_at: datetime
+    ends_at: Optional[datetime] = None          # hourly types: a custom end
+    staff_id: Optional[UUID] = None
+    location_id: Optional[UUID] = None
+    customer_name: str = Field(min_length=1, max_length=255)
+    customer_email: Optional[EmailStr] = None
+    note: Optional[str] = Field(default=None, max_length=2000)
+    notify: bool = True                         # email the customer a confirmation
+
+
+class CappeOwnerReschedule(BaseModel):
+    """The owner moves a booking (same service; optionally another staff member)."""
+    starts_at: datetime
+    ends_at: Optional[datetime] = None
+    staff_id: Optional[UUID] = None
+    notify: bool = True
+
+
+class CappeTimeOffInput(BaseModel):
+    """A closed period: the whole business, one location, or one staff member."""
+    starts_at: datetime
+    ends_at: datetime
+    staff_id: Optional[UUID] = None
+    location_id: Optional[UUID] = None
+    reason: Optional[str] = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def _order(self):
+        if self.ends_at <= self.starts_at:
+            raise ValueError("The end must be after the start")
+        return self
+
+
+class CappeTimeOff(CappeTimeOffInput):
+    id: UUID
+    staff_name: Optional[str] = None
+    location_name: Optional[str] = None
+    created_at: datetime
+
+
 
 __all__ = [
+    "CappeOwnerBookingCreate",
+    "CappeOwnerReschedule",
+    "CappeTimeOffInput",
+    "CappeTimeOff",
     "BookingPricingMode",
     "CappeLocationHours",
     "CappeLocationCreate",
