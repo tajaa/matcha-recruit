@@ -296,6 +296,7 @@ class FakeReviewConn:
 
 class _User:
     id = uuid4()
+    role = "client"
 
 
 def _patch_review(monkeypatch, conn):

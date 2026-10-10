@@ -11,7 +11,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
-from ...dependencies import require_admin_or_client
+from ...dependencies import require_admin_or_client, require_schedule_manager
 from app.matcha.models.scheduling.employee_schedule import (
     EmployeeJobsReplace, JobCreate, JobCredentialRequirementsReplace,
     JobEmployeesReplace, JobUpdate,
@@ -28,8 +28,8 @@ from ...services.scheduling.schedule_profiles import (
     fetch_employee_jobs, replace_employee_jobs_core,
 )
 from ._shared import (
-    assert_employee_in_company, assert_location_in_company, log_audit,
-    require_company_id, serialize_job,
+    assert_employee_in_company, assert_location_in_company, assert_store_in_scope, log_audit,
+    require_company_id, resolve_schedule_manager_scope, serialize_job,
 )
 
 router = APIRouter()
@@ -131,11 +131,14 @@ async def replace_employee_jobs(
 @router.get("/jobs")
 async def list_jobs(
     location: UUID | None = Query(None),
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_schedule_manager),
 ):
+    """A store manager must pass one of their stores and sees that store's jobs
+    plus the company-wide ones; business admins may omit `location`."""
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
-        await assert_location_in_company(conn, company_id, location)
+        scope = await resolve_schedule_manager_scope(conn, company_id=company_id, user=current_user)
+        await assert_store_in_scope(conn, company_id, scope, location)
         if location is None:
             rows = await conn.fetch(
                 f"SELECT {_JOB_COLS} FROM schedule_jobs WHERE company_id = $1 ORDER BY name ASC",
@@ -148,13 +151,15 @@ async def list_jobs(
                 "ORDER BY name ASC",
                 company_id, location,
             )
+        # Only the listed jobs' qualified lists — the response never carried
+        # any other job's, and a store manager has no business reading them.
         employee_rows = await conn.fetch(
             """
             SELECT job_id, employee_id FROM schedule_job_employees
-            WHERE company_id = $1
+            WHERE company_id = $1 AND job_id = ANY($2::uuid[])
             ORDER BY job_id, employee_id
             """,
-            company_id,
+            company_id, [row["id"] for row in rows],
         )
         requirements = await fetch_job_credential_requirements(
             conn, company_id=company_id, job_ids=[row["id"] for row in rows],

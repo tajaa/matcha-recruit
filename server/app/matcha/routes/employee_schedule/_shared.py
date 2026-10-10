@@ -27,6 +27,9 @@ from ...services.scheduling.shift_writes import (  # noqa: F401 — re-exported 
     log_audit, log_availability_override, shift_snapshot,
 )
 from ...services.scheduling.availability_requests import summarize_proposed_availability
+from ...services.scheduling.schedule_manager_scope import (  # noqa: F401 — re-exported for route modules
+    ScheduleManagerScope, request_scope_sql, resolve_schedule_manager_scope,
+)
 from ...services.scheduling.schedule_warning_events import reconcile_schedule_warning_events
 
 logger = logging.getLogger(__name__)
@@ -52,7 +55,8 @@ REQUEST_SELECT = """
             s.starts_at AS shift_starts_at, s.ends_at AS shift_ends_at,
             s.role AS shift_role, s.department AS shift_department,
             cs.starts_at AS counter_shift_starts_at, cs.ends_at AS counter_shift_ends_at,
-            cs.role AS counter_shift_role, cs.department AS counter_shift_department
+            cs.role AS counter_shift_role, cs.department AS counter_shift_department,
+            COALESCE(s.location_id, e.work_location_id) AS location_id
     FROM schedule_requests r
     JOIN employees e ON e.id = r.employee_id
     LEFT JOIN employees te ON te.id = r.target_employee_id
@@ -137,6 +141,56 @@ async def assert_location_in_company(
     )
     if not row:
         raise HTTPException(status_code=404, detail="Location not found")
+
+
+async def assert_store_in_scope(
+    conn, company_id: UUID, scope: ScheduleManagerScope, location_id: Optional[UUID]
+) -> None:
+    """`assert_location_in_company` for a manager scope.
+
+    Company-wide callers get exactly that check, unchanged. A store manager
+    must name one of their own active stores: no store at all is a 403, an
+    unknown or inactive one a 404, someone else's a 403 (the same answers
+    `assert_manager_location` gives).
+    """
+    if scope.company_wide:
+        await assert_location_in_company(conn, company_id, location_id)
+        return
+    if location_id is None:
+        raise HTTPException(status_code=403, detail="Choose one of your stores")
+    row = await conn.fetchrow(
+        "SELECT is_active FROM business_locations WHERE id = $1 AND company_id = $2",
+        location_id, company_id,
+    )
+    if not row or row["is_active"] is False:
+        raise HTTPException(status_code=404, detail="Location not found")
+    if location_id not in scope.location_ids:
+        raise HTTPException(status_code=403, detail="You are not authorized to manage this location")
+
+
+def request_queue_filter(
+    scope: ScheduleManagerScope, location: Optional[UUID], params: list,
+) -> str:
+    """The review queue's extra WHERE clauses over `REQUEST_SELECT`, appending
+    their arguments to ``params``. The list and the pending count both use it.
+
+    A business admin sees every request, narrowed to one store when asked (the
+    store the request's shift is at, else the requester's). A store manager
+    sees only requests whose every store is theirs, and never their own.
+    """
+    if scope.company_wide:
+        if location is None:
+            return ""
+        params.append(location)
+        return f" AND COALESCE(s.location_id, e.work_location_id) = ${len(params)}"
+    params.append([location] if location is not None else sorted(scope.location_ids))
+    clause = " AND " + request_scope_sql(f"${len(params)}::uuid[]")
+    params.append(sorted(scope.actor_employee_ids))
+    mine = f"${len(params)}::uuid[]"
+    # COALESCE: a request with no coworker has a NULL target, and NOT (NULL)
+    # would silently drop every drop, claim and time-off request.
+    return clause + (f" AND NOT (r.employee_id = ANY({mine}))"
+                     f" AND NOT COALESCE(r.target_employee_id = ANY({mine}), false)")
 
 
 # Sentinel for assert_job_in_company's location_id: distinguishes "this caller
@@ -612,6 +666,7 @@ def serialize_request(r) -> dict:
         "review_notes": r["review_notes"],
         "reviewed_at": _iso(r["reviewed_at"]),
         "created_at": _iso(r["created_at"]),
+        "location_id": str(r["location_id"]) if r.get("location_id") else None,
     }
 
 

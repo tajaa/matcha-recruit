@@ -24,6 +24,7 @@ from .break_reminder_events import router as _break_reminder_events_router
 from .location_profile import router as _location_profile_router
 from .locations import router as _locations_router
 from .planning import router as _planning_router
+from .manager import router as _manager_router
 
 router = APIRouter()
 router.include_router(_shifts_router)
@@ -41,6 +42,7 @@ router.include_router(_break_reminder_events_router)
 router.include_router(_location_profile_router)
 router.include_router(_locations_router)
 router.include_router(_planning_router)
+router.include_router(_manager_router)
 
 # Sibling router — own prefix (/schedule-intelligence) + its own single-flag
 # gate (schedule_intelligence, not employee_schedule), mounted separately in

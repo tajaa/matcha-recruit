@@ -129,7 +129,7 @@ def test_update_without_assignment_checks_has_override_map(monkeypatch, body):
         SHIFT_ID,
         body,
         force=False,
-        current_user=SimpleNamespace(id=ACTOR_ID),
+        current_user=SimpleNamespace(id=ACTOR_ID, role="client"),
     ))
 
     assert result == {"id": str(SHIFT_ID)}
@@ -157,7 +157,7 @@ def test_auto_break_only_is_noop_for_cancelled_shift(monkeypatch):
 
     result = _run(route.update_shift(
         SHIFT_ID, ShiftUpdate(break_mode="auto"), force=False,
-        current_user=SimpleNamespace(id=ACTOR_ID),
+        current_user=SimpleNamespace(id=ACTOR_ID, role="client"),
     ))
 
     assert result["status"] == "cancelled"
