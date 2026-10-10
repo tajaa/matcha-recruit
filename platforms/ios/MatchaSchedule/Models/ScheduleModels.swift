@@ -14,7 +14,30 @@ struct TokenResponse: Decodable {
 
 struct MeResponse: Decodable {
     let user: AuthUser
+    /// Only for an employee: crew and store managers.
     let profile: EmployeeProfile?
+    /// Only for a business admin, whose /auth/me profile has another shape.
+    let business: BusinessProfile?
+
+    private enum CodingKeys: String, CodingKey { case user, profile }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        user = try container.decode(AuthUser.self, forKey: .user)
+        if user.role == "employee" {
+            profile = try container.decodeIfPresent(EmployeeProfile.self, forKey: .profile)
+            business = nil
+        } else {
+            profile = nil
+            business = try? container.decodeIfPresent(BusinessProfile.self, forKey: .profile)
+        }
+    }
+}
+
+/// The parts of a business admin's profile the app shows.
+struct BusinessProfile: Decodable {
+    let name: String?
+    let company_name: String?
 }
 
 struct EmployeeProfile: Decodable {

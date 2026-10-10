@@ -23,9 +23,27 @@ struct ScheduleRequest: Decodable, Identifiable {
     let review_notes: String?
     let created_at: String
     let can_withdraw: Bool?
+    /// The store the request is at (its shift's, else the requester's).
+    let location_id: String?
+    /// What an availability request asks for; managers review it.
+    let proposed_availability: ProposedAvailability?
 
     var title: String { request_type == "claim" ? "Open shift claim" : request_type.capitalized }
     var isPending: Bool { ["pending", "awaiting_counterparty", "awaiting_manager"].contains(status) }
+}
+
+struct ProposedAvailability: Decodable {
+    let availability_state: String?
+    let windows: [AvailabilityWindow]
+
+    private enum CodingKeys: String, CodingKey { case availability_state, windows }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        availability_state = try container.decodeIfPresent(String.self, forKey: .availability_state)
+        // A shape this build does not know must not take the request list down with it.
+        windows = (try? container.decode([AvailabilityWindow].self, forKey: .windows)) ?? []
+    }
 }
 
 struct RequestsResponse: Decodable { let requests: [ScheduleRequest] }
