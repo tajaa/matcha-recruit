@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import MatchaSchedule
 
@@ -197,12 +198,74 @@ final class ManagerTests: XCTestCase {
         XCTAssertNil(ScheduleConflict.parse(status: 409, data: detail(#""Plain message""#)))
     }
 
-    func testTheEditorSendsAMealBreakToTheShiftInsteadOfForcingIt() throws {
+    func testAMealBreakAdvisoryIsFixedRatherThanForcedWhenItCanBe() throws {
         let meal = try XCTUnwrap(ScheduleConflict.parse(status: 409, data: detail(
             #"{"code":"schedule_compliance","violations":[{"check":"meal_break","message":"Needs a meal"}]}"#
         )))
-        XCTAssertFalse(ForcePrompt(conflict: meal, refusesMealBreak: true, retry: {}).forceable)
-        XCTAssertTrue(ForcePrompt(conflict: meal, refusesMealBreak: false, retry: {}).forceable)
+        XCTAssertEqual(ForcePrompt(conflict: meal, fixBreak: {}, retry: {}).choice, .fixBreak)
+        XCTAssertEqual(ForcePrompt(conflict: meal, fixBreak: nil, retry: {}).choice, .force)
+        let full = try XCTUnwrap(ScheduleConflict.parse(status: 409, data: detail(#"{"code":"shift_full","message":"Full"}"#)))
+        XCTAssertEqual(ForcePrompt(conflict: full, fixBreak: {}, retry: {}).choice, .force)
+    }
+
+    private func mealConflict() throws -> APIError {
+        let meal = Data(#"{"detail":{"code":"schedule_compliance","violations":[{"check":"meal_break","message":"Needs a meal"}]}}"#.utf8)
+        return APIError.scheduleConflict(try XCTUnwrap(ScheduleConflict.parse(status: 409, data: meal)))
+    }
+
+    @MainActor
+    func testFixingTheBreakThenTriesTheWriteAgainUnforced() async throws {
+        let meal = try mealConflict()
+        var prompt: ForcePrompt?
+        let binding = Binding(get: { prompt }, set: { prompt = $0 })
+        var writes: [Bool] = []
+        var fixes: [Bool] = []
+        try await ForcePrompt.run(binding, fixBreak: { force in fixes.append(force) }) { force in
+            writes.append(force)
+            if fixes.isEmpty { throw meal }
+        }
+        XCTAssertEqual(writes, [false])
+        let fix = try XCTUnwrap(prompt?.fixBreak)
+        prompt = nil
+        try await fix()
+        XCTAssertEqual(fixes, [false])
+        XCTAssertEqual(writes, [false, false])
+        XCTAssertNil(prompt)
+    }
+
+    /// Changing the break re-runs compliance for everyone on the shift. What
+    /// that turns up is asked about, never overridden on the break's yes.
+    @MainActor
+    func testWhatTheBreakFixTurnsUpIsAskedAboutNotForced() async throws {
+        let meal = try mealConflict()
+        let overtime = APIError.scheduleConflict(try XCTUnwrap(ScheduleConflict.parse(status: 409, data: detail(
+            #"{"code":"schedule_compliance","violations":[{"check":"weekly_overtime","message":"Over 40 hours"}]}"#
+        ))))
+        var prompt: ForcePrompt?
+        let binding = Binding(get: { prompt }, set: { prompt = $0 })
+        var writes: [Bool] = []
+        var fixes: [Bool] = []
+        var breakFixed = false
+        try await ForcePrompt.run(binding, fixBreak: { force in
+            fixes.append(force)
+            if !force { throw overtime }
+            breakFixed = true
+        }) { force in
+            writes.append(force)
+            if !breakFixed && !force { throw meal }
+        }
+        let fix = try XCTUnwrap(prompt?.fixBreak)
+        prompt = nil
+        try await fix()
+        XCTAssertEqual(fixes, [false])
+        let asked = try XCTUnwrap(prompt)
+        XCTAssertEqual(asked.choice, .force)
+        XCTAssertTrue(asked.conflict.prompt.contains("Over 40 hours"), asked.conflict.prompt)
+        prompt = nil
+        try await asked.retry()
+        XCTAssertEqual(fixes, [false, true])
+        XCTAssertEqual(writes, [false, false], "the write itself is never forced")
+        XCTAssertNil(prompt)
     }
 
     func testTheClientThrowsAForceableConflictAndKeepsOtherErrorsPlain() async throws {

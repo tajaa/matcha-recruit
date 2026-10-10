@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Capture every main screen from the running app for design review.
-#   MATCHA_UI_EMAIL=... MATCHA_UI_PASSWORD=... [MATCHA_UI_WEEKS_BACK=n] ./screens.sh [simulator name]
+#   MATCHA_UI_EMAIL=... MATCHA_UI_PASSWORD=... [MATCHA_UI_WEEKS_BACK=n] [MATCHA_UI_API_URL=...] ./screens.sh [simulator name]
 # Needs the local backend (dev-remote.sh). PNGs land in build/screens/.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -13,6 +13,7 @@ xcodegen generate >/dev/null
 TEST_RUNNER_MATCHA_UI_EMAIL="${MATCHA_UI_EMAIL:-}" \
 TEST_RUNNER_MATCHA_UI_PASSWORD="${MATCHA_UI_PASSWORD:-}" \
 TEST_RUNNER_MATCHA_UI_WEEKS_BACK="${MATCHA_UI_WEEKS_BACK:-0}" \
+TEST_RUNNER_MATCHA_UI_API_URL="${MATCHA_UI_API_URL:-}" \
 xcodebuild -project MatchaSchedule.xcodeproj -scheme MatchaScheduleScreens \
   -destination "platform=iOS Simulator,name=$device" \
   -resultBundlePath "$result" test >/dev/null || true
