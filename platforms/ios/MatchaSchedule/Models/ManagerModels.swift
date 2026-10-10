@@ -110,10 +110,15 @@ struct ScheduleJob: Decodable, Identifiable, Hashable {
     let id: String
     let name: String
     let location_id: String?
-    /// Who is qualified. Empty means anyone may work it (the server's rule).
+    /// Everyone with a qualification row for this job, whatever its status.
+    /// Empty means anyone may work it (the server's rule).
     let employee_ids: [String]
 
-    func qualifies(_ employeeID: String) -> Bool { employee_ids.isEmpty || employee_ids.contains(employeeID) }
+    /// The server's rule: a job nobody is listed for is open to anyone;
+    /// otherwise only a current, active qualification counts, which is what
+    /// the roster's `job_ids` holds (`employee_ids` also lists suspended and
+    /// expired rows).
+    func qualifies(_ person: RosterMember) -> Bool { employee_ids.isEmpty || person.job_ids.contains(id) }
 }
 
 struct JobsResponse: Decodable { let jobs: [ScheduleJob] }

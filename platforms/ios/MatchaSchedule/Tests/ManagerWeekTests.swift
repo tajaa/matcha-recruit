@@ -103,9 +103,14 @@ final class ManagerWeekTests: XCTestCase {
                  {"id":"j2","name":"Shift Lead","location_id":null,"color":null,"notes":null,"employee_ids":["e2"],
                   "credential_grace_days":null,"credential_requirements":[]}]}
         """.utf8)).jobs
-        XCTAssertTrue(jobs[0].qualifies("anyone"))
-        XCTAssertTrue(jobs[1].qualifies("e2"))
-        XCTAssertFalse(jobs[1].qualifies("e1"))
+        let anyone = RosterMember(id: "e1", name: "Sam", job_title: nil, job_ids: [])
+        // Listed for the job, but suspended or expired: not on the roster's job_ids.
+        let lapsed = RosterMember(id: "e2", name: "Kai", job_title: nil, job_ids: [])
+        let current = RosterMember(id: "e2", name: "Kai", job_title: nil, job_ids: ["j2"])
+        XCTAssertTrue(jobs[0].qualifies(anyone))
+        XCTAssertTrue(jobs[1].qualifies(current))
+        XCTAssertFalse(jobs[1].qualifies(lapsed))
+        XCTAssertFalse(jobs[1].qualifies(anyone))
     }
 
     func testPlanningInputsAreGuidanceThatNeverFails() throws {

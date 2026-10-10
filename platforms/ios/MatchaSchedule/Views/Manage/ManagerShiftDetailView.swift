@@ -11,6 +11,8 @@ struct ManagerShiftDetailView: View {
     let location: ManagedLocation
     let weekStart: Date
     let canEdit: Bool
+    /// A business admin; a store manager can't write a shift with no store.
+    let companyWide: Bool
     let onChanged: () async -> Void
     @State private var busy = false
     @State private var error: String?
@@ -197,11 +199,13 @@ struct ManagerShiftDetailView: View {
         return "Crew · \(shift.assignments.count) of \(required)"
     }
 
-    /// Other live shifts at this store the person is not already on.
+    /// Other live shifts at this store the person is not already on (and, for
+    /// a business admin, shifts with no store, which the server refuses a
+    /// store manager).
     private func moveTargets(for person: ShiftAssignment) -> [ScheduleShift] {
         weekShifts.filter { other in
             other.id != shift.id && other.status != "cancelled"
-                && (other.location_id == location.id || other.location_id == nil)
+                && (other.location_id == location.id || (other.location_id == nil && companyWide))
                 && !other.assignments.contains { $0.employee_id == person.employee_id }
         }
     }
@@ -224,9 +228,9 @@ struct ManagerShiftDetailView: View {
     }
 
     /// Fixes a meal-break advisory by letting the server set the legal break.
-    private var addRequiredBreak: () async throws -> Void {
+    private var addRequiredBreak: (_ force: Bool) async throws -> Void {
         let id = shift.id
-        return { try await ManagerService.updateShift(id, ShiftPatch(break_mode: "auto"), force: true) }
+        return { force in try await ManagerService.updateShift(id, ShiftPatch(break_mode: "auto"), force: force) }
     }
 
     private func assign(_ person: RosterMember) async {
@@ -318,7 +322,7 @@ struct AssigneePickerView: View {
             }
     }
 
-    private func qualified(_ person: RosterMember) -> Bool { job?.qualifies(person.id) ?? true }
+    private func qualified(_ person: RosterMember) -> Bool { job?.qualifies(person) ?? true }
     private func away(_ person: RosterMember) -> Bool { planning[person.id]?.isAway(on: dayKey) == true }
 
     var body: some View {

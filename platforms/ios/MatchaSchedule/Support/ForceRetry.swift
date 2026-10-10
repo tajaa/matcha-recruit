@@ -8,8 +8,9 @@ struct ForcePrompt: Identifiable {
     let id = UUID()
     let conflict: ScheduleConflict
     /// For a meal-break advisory: give the shift the break the law requires,
-    /// then carry on. The web editor sends that advisory to the shift's break
-    /// rather than forcing past it; without a fix the prompt forces as usual.
+    /// then try the write again. The web editor sends that advisory to the
+    /// shift's break rather than forcing past it; without a fix the prompt
+    /// forces as usual.
     let fixBreak: (() async throws -> Void)?
     let retry: () async throws -> Void
 
@@ -20,15 +21,25 @@ struct ForcePrompt: Identifiable {
     @MainActor
     static func run(
         _ prompt: Binding<ForcePrompt?>,
-        fixBreak: (() async throws -> Void)? = nil,
+        fixBreak: ((_ force: Bool) async throws -> Void)? = nil,
         _ write: @escaping (_ force: Bool) async throws -> Void
     ) async throws {
         do {
             try await write(false)
         } catch APIError.scheduleConflict(let conflict) {
-            // The manager has read every advisory in the prompt; once the
-            // break is fixed the rest go through as they agreed.
-            let fix = fixBreak.map { fix in { try await fix(); try await write(true) } }
+            // Choosing the break agrees to the break, nothing else. Changing it
+            // re-runs compliance for everyone on the shift, so the break and
+            // then the write are each tried unforced, and whatever still stands
+            // in the way gets its own prompt rather than being overridden
+            // in this manager's name.
+            let fix: (() async throws -> Void)? = fixBreak.map { fix in
+                {
+                    try await ForcePrompt.run(prompt) { force in
+                        try await fix(force)
+                        try await ForcePrompt.run(prompt, write)
+                    }
+                }
+            }
             prompt.wrappedValue = ForcePrompt(conflict: conflict, fixBreak: fix) { try await write(true) }
         }
     }
