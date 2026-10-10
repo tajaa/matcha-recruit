@@ -204,7 +204,12 @@ async def review_request(request_id: UUID, body: RequestReview,
                 raise HTTPException(status_code=404, detail="Request not found")
             await _assert_request_in_scope(conn, scope, req)
             if req["status"] not in ("awaiting_manager", "pending"):
-                raise HTTPException(status_code=409, detail={"code": "request_not_manager_ready", "status": req["status"]})
+                # `message`: the phone shows it as-is (a dict detail without one
+                # reaches the manager as raw JSON).
+                raise HTTPException(status_code=409, detail={
+                    "code": "request_not_manager_ready", "status": req["status"],
+                    "message": "This request was already handled, or isn't ready for approval yet.",
+                })
 
             if new_status == "approved" and req["request_type"] == "claim":
                 if req["shift_id"] is None:

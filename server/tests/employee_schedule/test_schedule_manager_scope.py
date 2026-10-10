@@ -536,6 +536,7 @@ async def test_an_in_scope_request_reaches_the_ordinary_review_rules(wire):
         await requests.review_request(REQUEST_ID, RequestReview(decision="approved"), MANAGER)
     assert exc.value.status_code == 409
     assert exc.value.detail["code"] == "request_not_manager_ready"
+    assert exc.value.detail["message"]
 
 
 @pytest.mark.asyncio
