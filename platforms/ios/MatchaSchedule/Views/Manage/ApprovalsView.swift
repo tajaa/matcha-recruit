@@ -65,7 +65,11 @@ struct ApprovalsView: View {
         .animation(.default, value: timeOff.map(\.id))
         .refreshable { await load() }
         .task(id: location?.id) { await load() }
-        .onChange(of: appState.pendingApprovalID) { _, _ in openPendingApproval() }
+        // The list on screen may predate the request a push names: reload,
+        // which opens it. Before the first load, that load opens it.
+        .onChange(of: appState.pendingApprovalID) { _, id in
+            if id != nil, loaded { Task { await load() } }
+        }
         .sheet(item: $reviewing) { request in
             NavigationStack {
                 RequestReviewView(request: request, store: storeName(request.location_id)) {
@@ -108,16 +112,22 @@ struct ApprovalsView: View {
         }
         loading = false
         loaded = true
-        openPendingApproval()
+        await openPendingApproval()
         await appState.refreshBadges()
     }
 
-    /// A push or link named a request: open it once it is on screen. One
-    /// already reviewed elsewhere is simply gone from the list.
-    private func openPendingApproval() {
+    /// A push or link named a request: open it once the list is fresh. The
+    /// store picker may hide its store, so it is then looked up across every
+    /// store this manager runs. One already reviewed elsewhere is simply gone.
+    private func openPendingApproval() async {
         guard loaded, let id = appState.pendingApprovalID else { return }
         appState.pendingApprovalID = nil
-        if let request = requests.first(where: { $0.id == id }) { reviewing = request }
+        if let request = requests.first(where: { $0.id == id }) {
+            reviewing = request
+        } else if location != nil,
+                  let request = try? await ManagerService.requests().first(where: { $0.id == id }) {
+            reviewing = request
+        }
     }
 }
 
