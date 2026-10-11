@@ -330,6 +330,22 @@ async def test_calendar_suggestions_drop_what_the_model_got_wrong_and_cap_at_fiv
 
 
 @pytest.mark.asyncio
+async def test_calendar_suggestions_survive_junk_zones_and_keep_an_hour_on_a_fall_back_night(fake):
+    import json as _json
+
+    fake(text=_json.dumps([
+        {"title": "Late call", "start": "2026-11-01T01:30", "timezone": True},
+        {"title": "Odd zone", "start": "2026-11-02T09:00", "timezone": {"name": "UTC"}},
+        {"title": "Fine", "start": "2026-11-03T09:00", "timezone": "America/New_York"},
+    ]))
+    events = await svc.suggest_calendar_events(_msg(), None, tz_name="America/Los_Angeles")
+    assert [e["title"] for e in events] == ["Late call", "Odd zone", "Fine"]
+    assert (events[0]["start"], events[0]["end"]) == ("2026-11-01T01:30:00-07:00", "2026-11-01T01:30:00-08:00")
+    assert events[1]["start"] == "2026-11-02T09:00:00-08:00"  # junk zone: the reader's
+    assert events[2]["start"] == "2026-11-03T09:00:00-05:00"
+
+
+@pytest.mark.asyncio
 async def test_calendar_suggestions_say_none_when_the_model_cannot_answer(fake):
     fake(exc=RuntimeError("down"))
     assert await svc.suggest_calendar_events(_msg(), None, tz_name="UTC") is None

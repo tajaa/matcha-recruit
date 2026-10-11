@@ -88,6 +88,11 @@ it otherwise), and should declare `resolve`.
   never gets to restate the action between the question and the answer. A
   frozen action needs nothing from the run that froze it, which is why handlers
   read only resolved arguments, never the run's session.
+- **A result is never written beside a write.** A `finish` in the same
+  response as a `commit` or a `draft` is refused (`runner.WRITES`,
+  `FINISH_AFTER_ACTION`): it was written before the write's outcome existed,
+  and a failed draft ("that date does not exist") would otherwise be reported
+  as done. The model reads the outcome and finishes on the next turn.
 - **The claim is written before the call.** `store.claim_step` (status
   `claimed`), then the handler, then `store.resolve_step`. A request that left
   and got no answer resolves to `unknown`, never `failed`, and the model is

@@ -54,9 +54,12 @@ When = date | datetime
 # ── Parsing and validation ───────────────────────────────────────────────
 
 
-def zone(name: Optional[str]) -> Optional[ZoneInfo]:
-    """The IANA zone `name` names, or None for anything else."""
-    text = (name or "").strip()
+def zone(name: Any) -> Optional[ZoneInfo]:
+    """The IANA zone `name` names, or None for anything else (a model can
+    put any JSON value where a zone name belongs)."""
+    if not isinstance(name, str):
+        return None
+    text = name.strip()
     if not text or len(text) > 64:
         return None
     try:
@@ -93,18 +96,26 @@ def _text(value: Any, limit: int) -> Optional[str]:
     return text or None
 
 
+def _utc(value: When) -> When:
+    """Times in UTC, so lengths and order are elapsed time. Python adds and
+    compares two datetimes sharing one ZoneInfo by wall clock: 01:30 + 1h on a
+    fall-back night would be two real hours."""
+    return value.astimezone(timezone.utc) if isinstance(value, datetime) else value
+
+
 def event_fields(*, title: Any, start: Any, end: Any = None,
                  location: Any = None, notes: Any = None) -> dict:
     """The validated columns of one event. A timed event with no end lasts an
-    hour; an all-day event with no end is one day. Raises ValueError with a
-    message fit to show the person (or the model)."""
+    hour; an all-day event with no end is one day. Times come back in UTC
+    (render them with `render_when`). Raises ValueError with a message fit to
+    show the person (or the model)."""
     clean_title = _line(title, MAX_TITLE)
     if not clean_title:
         raise ValueError("An event needs a title.")
     if start is None or (isinstance(start, str) and not start.strip()):
         raise ValueError("An event needs a start.")
-    begin = parse_when(start)
-    finish = None if end is None or (isinstance(end, str) and not end.strip()) else parse_when(end)
+    begin = _utc(parse_when(start))
+    finish = None if end is None or (isinstance(end, str) and not end.strip()) else _utc(parse_when(end))
     fields = {
         "title": clean_title,
         "location": _text(_line(location, MAX_LOCATION), MAX_LOCATION),
@@ -145,11 +156,11 @@ def merged_fields(row, patch: dict) -> dict:
     start: Any = cur_start
     end: Any = cur_end
     if patch.get("start"):
-        start = parse_when(patch["start"])
+        start = _utc(parse_when(patch["start"]))
         if patch.get("end"):
             end = patch["end"]
         elif isinstance(start, datetime) == isinstance(cur_start, datetime):
-            end = start + (cur_end - cur_start)
+            end = start + (_utc(cur_end) - _utc(cur_start))
         else:
             end = None
     elif patch.get("end"):

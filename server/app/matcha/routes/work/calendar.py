@@ -62,8 +62,10 @@ def _google_view(event: dict) -> dict:
 
 
 async def _google_events(user_id: UUID, start: str, end: str) -> dict:
-    """The person's Google Calendar for the range, or why there is none. Never
-    raises: Google being down must not blank the person's own calendar."""
+    """The person's Google Calendar for the range, or why there is none:
+    `ok`, `partial` (Google had more than the listing could read), `not_connected`,
+    `needs_permission` or `error`. Never raises: Google being down must not
+    blank the person's own calendar."""
     from app.matcha.services.matcha_work.gmail_service import SCOPE_CALENDAR_EVENTS, GmailService
     from app.matcha.services.matcha_work.google_calendar_service import GoogleCalendarService
 
@@ -78,13 +80,14 @@ async def _google_events(user_id: UUID, start: str, end: str) -> dict:
     if SCOPE_CALENDAR_EVENTS not in gmail.granted_scopes:
         return {"status": "needs_permission", "events": []}
     try:
-        events = await GoogleCalendarService(user_id, gmail=gmail).list_events(
+        events, complete = await GoogleCalendarService(user_id, gmail=gmail).list_window(
             time_min=start, time_max=end, max_results=GOOGLE_MAX_EVENTS,
         )
     except (httpx.HTTPError, ValueError):
         logger.warning("calendar feed: Google Calendar read failed", exc_info=True)
         return {"status": "error", "events": []}
-    return {"status": "ok", "events": [_google_view(e) for e in events]}
+    # `partial`: Google has more in this range than the view holds.
+    return {"status": "ok" if complete else "partial", "events": [_google_view(e) for e in events]}
 
 
 @router.get("/calendar/feed")

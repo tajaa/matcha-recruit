@@ -47,7 +47,7 @@ def svc(monkeypatch):
 
 
 def _google(monkeypatch, *, configured=True, scopes=(gmail_service.SCOPE_CALENDAR_EVENTS,),
-            events=None, error=None):
+            events=None, error=None, complete=True):
     gmail = SimpleNamespace(load_token=AsyncMock(), is_configured=configured,
                             granted_scopes=frozenset(scopes))
     monkeypatch.setattr(gmail_service, "GmailService", lambda user_id: gmail)
@@ -57,11 +57,11 @@ def _google(monkeypatch, *, configured=True, scopes=(gmail_service.SCOPE_CALENDA
         def __init__(self, user_id, *, gmail):
             seen["gmail"] = gmail
 
-        async def list_events(self, *, time_min, time_max, max_results):
+        async def list_window(self, *, time_min, time_max, max_results):
             seen.update(time_min=time_min, time_max=time_max, max_results=max_results)
             if error:
                 raise error
-            return events or []
+            return events or [], complete
 
     monkeypatch.setattr(google_calendar_service, "GoogleCalendarService", Calendar)
     return seen
@@ -115,6 +115,14 @@ def test_the_feed_says_why_google_is_missing_and_still_answers(svc, monkeypatch,
     with _client() as client:
         body = client.get("/calendar/feed", params=WINDOW).json()
     assert body["google"] == {"status": status, "events": []} and body["events"] == [EVENT]
+
+
+def test_the_feed_says_partial_when_google_had_more_than_it_read(svc, monkeypatch):
+    _google(monkeypatch, events=[{"id": "g1", "title": "Call", "start": "2026-10-06T09:00:00-07:00",
+                                  "end": "2026-10-06T09:30:00-07:00", "all_day": False}], complete=False)
+    with _client() as client:
+        body = client.get("/calendar/feed", params=WINDOW).json()
+    assert body["google"]["status"] == "partial" and len(body["google"]["events"]) == 1
 
 
 def test_the_feed_can_skip_google_and_refuses_a_bad_window(svc, monkeypatch):
