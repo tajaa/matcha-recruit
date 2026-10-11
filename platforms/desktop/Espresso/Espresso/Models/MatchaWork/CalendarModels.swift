@@ -70,7 +70,7 @@ struct MWGoogleCalendarEvent: Codable, Identifiable, Hashable {
 }
 
 struct MWGoogleCalendarFeed: Codable, Hashable {
-    /// ok | not_connected | needs_permission | error | skipped
+    /// ok | partial (more than it could load) | not_connected | needs_permission | error | skipped
     let status: String
     let events: [MWGoogleCalendarEvent]
 }

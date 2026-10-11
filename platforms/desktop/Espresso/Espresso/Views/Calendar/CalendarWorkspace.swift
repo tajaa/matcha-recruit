@@ -253,13 +253,21 @@ private struct CalendarHeader: View {
     @ViewBuilder
     private var googleStatus: some View {
         switch vm.googleStatus {
-        case "ok":
+        case "ok", "partial":
+            let partial = vm.googleStatus == "partial"
             HStack(spacing: 5) {
                 Circle().fill(CalendarPalette.google).frame(width: 7, height: 7)
                 Text("Google Calendar").font(.system(size: 11))
+                if partial {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.system(size: 10))
+                        .foregroundColor(.orange)
+                }
             }
             .foregroundColor(appState.themeTextSecondary)
-            .help("Your Google Calendar is shown read-only. Ask Espresso to change it.")
+            .help(partial
+                  ? "Your Google Calendar has more events here than Espresso could load. Open Google Calendar for the full list."
+                  : "Your Google Calendar is shown read-only. Ask Espresso to change it.")
         case "not_connected", "needs_permission":
             Button(action: onConnectGoogle) {
                 Label(connectingGoogle ? "Waiting for Google…" : "Show Google Calendar",

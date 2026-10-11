@@ -89,7 +89,7 @@ final class CalendarViewModel {
 
     private(set) var entries: [CalendarEntry] = []
     private(set) var byDay: [Date: [CalendarEntry]] = [:]
-    /// ok | not_connected | needs_permission | error | skipped
+    /// ok | partial | not_connected | needs_permission | error | skipped
     private(set) var googleStatus = "skipped"
     private(set) var isLoading = false
     private(set) var hasLoaded = false
