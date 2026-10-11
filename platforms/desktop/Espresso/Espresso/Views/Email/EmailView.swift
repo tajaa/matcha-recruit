@@ -14,6 +14,7 @@ import AppKit
 struct EmailDetailView: View {
     let emailId: String
     @Environment(AppState.self) private var appState
+    @Environment(\.workPane) private var pane
     private let vm = EmailViewModel.shared
 
     @State private var loaded: EmailMessage?
@@ -161,6 +162,7 @@ struct EmailDetailView: View {
                 sentNote = nil
                 calendarNote = (count == 1 ? "Added to your calendar" : "Added \(count) events to your calendar", date)
             }
+            .environment(\.workPane, pane)
         }
     }
 
@@ -310,7 +312,7 @@ struct EmailDetailView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "checkmark.circle.fill").font(.system(size: 9))
                     Text(calendarNote.text).font(.system(size: 10))
-                    Button("Open Calendar") { appState.openCalendar(at: calendarNote.date) }
+                    Button("Open Calendar") { appState.openCalendar(at: calendarNote.date, in: pane) }
                         .buttonStyle(.plain)
                         .font(.system(size: 10, weight: .semibold))
                         .underline()

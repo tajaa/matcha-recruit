@@ -22,6 +22,8 @@ struct ChannelsLibraryView: View {
     @State private var starGen = 0
     @State private var railSearch = ""
     @State private var railCollapsed = false
+    /// Folded while a side pane is open; never touches the setting above.
+    @State private var railFoldedForPane = false
     /// Channel id with a join request in flight (spinner on that card).
     @State private var joiningId: String?
 
@@ -29,8 +31,8 @@ struct ChannelsLibraryView: View {
 
     var body: some View {
         HSplitView {
-            if railCollapsed {
-                MWHubRailStrip { railCollapsed = false }
+            if railCollapsed || railFoldedForPane {
+                MWHubRailStrip { railCollapsed = false; railFoldedForPane = false }
             } else {
                 rail.frame(minWidth: 232, idealWidth: 258, maxWidth: 320)
             }
@@ -49,7 +51,7 @@ struct ChannelsLibraryView: View {
             .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .foldsRailForSidePane($railCollapsed)
+        .foldsRailForSidePane($railFoldedForPane)
         .task { await load() }
         .onChange(of: appState.channelsListGeneration) { _, _ in Task { await load() } }
         .sheet(isPresented: $showCreate) {

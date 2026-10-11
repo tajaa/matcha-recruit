@@ -381,6 +381,8 @@ struct ThreadsLibraryView: View {
     @State private var creating = false
     @State private var railSearch = ""
     @State private var railCollapsed = false
+    /// Folded while a side pane is open; never touches the setting above.
+    @State private var railFoldedForPane = false
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", active = "Active", finalized = "Finalized"
@@ -392,8 +394,8 @@ struct ThreadsLibraryView: View {
 
     var body: some View {
         HSplitView {
-            if railCollapsed {
-                MWHubRailStrip { railCollapsed = false }
+            if railCollapsed || railFoldedForPane {
+                MWHubRailStrip { railCollapsed = false; railFoldedForPane = false }
             } else {
                 rail.frame(minWidth: 232, idealWidth: 258, maxWidth: 320)
             }
@@ -412,7 +414,7 @@ struct ThreadsLibraryView: View {
             .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .foldsRailForSidePane($railCollapsed)
+        .foldsRailForSidePane($railFoldedForPane)
         .task { await load() }
         .onChange(of: filter) { _, _ in Task { await load() } }
     }

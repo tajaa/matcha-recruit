@@ -343,6 +343,8 @@ struct JournalsWorkspace: View {
     @State private var hasLoaded = false
     @State private var errorMessage: String?
     @AppStorage("journals.folderRailCollapsed") private var folderRailCollapsed = false
+    /// Folded while a side pane is open; never touches the setting above.
+    @State private var railFoldedForPane = false
     /// Rail row a dragged journal is hovering ("uncategorized" or a folder id).
     @State private var dropTarget: String? = nil
     @State private var scrollTarget: String? = nil
@@ -361,8 +363,8 @@ struct JournalsWorkspace: View {
 
     var body: some View {
         HSplitView {
-            if folderRailCollapsed {
-                MWHubRailStrip { folderRailCollapsed = false }
+            if folderRailCollapsed || railFoldedForPane {
+                MWHubRailStrip { folderRailCollapsed = false; railFoldedForPane = false }
             } else {
                 folderRail.frame(minWidth: 190, idealWidth: 220, maxWidth: 280)
             }
@@ -370,7 +372,7 @@ struct JournalsWorkspace: View {
             editorPane.frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(ThemeRadialBackground())
-        .foldsRailForSidePane($folderRailCollapsed)
+        .foldsRailForSidePane($railFoldedForPane)
         // ⌘N anywhere in the workspace — the list header's compose button is
         // a menu, which can't carry a shortcut of its own.
         .background {
@@ -388,6 +390,10 @@ struct JournalsWorkspace: View {
         .onChange(of: appState.selectedJournalId) { _, v in
             if let v { selectedJournalId = v; ensureModeFor(v) }
         }
+        // The workspace owns its selection; mirror it so swapping the main
+        // pane with a side pane takes the journal that is actually open.
+        .onChange(of: selectedJournalId, initial: true) { _, id in appState.mainJournalsSelection = id }
+        .onDisappear { appState.mainJournalsSelection = nil }
         .onChange(of: selectedJournalId) { _, _ in
             // After leaving an edited journal, re-sort the list by recent edit
             // (the backend bumps the journal's updated_at on entry save).

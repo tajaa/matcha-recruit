@@ -7,6 +7,9 @@ import SwiftUI
 struct AuxWindowRootView: View {
     let target: AuxWindowTarget?
     @Environment(AppState.self) private var appState
+    /// Whoever was signed in when this first showed. A window left open
+    /// across a sign-out never shows its target to the next account.
+    @State private var ownerId: String?
 
     var body: some View {
         Group {
@@ -14,6 +17,11 @@ struct AuxWindowRootView: View {
                 // macOS may restore an aux window on relaunch before sign-in;
                 // don't render a detail view that would fire token-less requests.
                 Text("Sign in to Werk to open this window.")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let ownerId, ownerId != appState.currentUser?.id {
+                Text("This window belongs to another account.")
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -56,6 +64,9 @@ struct AuxWindowRootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(appState.themeBg)
+        .onChange(of: appState.currentUser?.id, initial: true) { _, id in
+            if ownerId == nil { ownerId = id }
+        }
     }
 }
 

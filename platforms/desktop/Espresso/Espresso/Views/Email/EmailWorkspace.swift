@@ -30,6 +30,8 @@ struct EmailWorkspace: View {
     @State private var anchor: String?
     @State private var scrollTarget: String?
     @State private var railCollapsed = false
+    /// Folded while a side pane is open; never touches the setting above.
+    @State private var railFoldedForPane = false
     @State private var boardRequest: BoardRequest?
     @State private var boardNote: String?
     /// A message opened from elsewhere (a calendar event's "Open email") that
@@ -59,8 +61,8 @@ struct EmailWorkspace: View {
                 }
             } else {
                 HSplitView {
-                    if railCollapsed {
-                        MWHubRailStrip { railCollapsed = false }
+                    if railCollapsed || railFoldedForPane {
+                        MWHubRailStrip { railCollapsed = false; railFoldedForPane = false }
                     } else {
                         mailboxRail.frame(minWidth: 180, idealWidth: 200, maxWidth: 250)
                     }
@@ -70,7 +72,7 @@ struct EmailWorkspace: View {
             }
         }
         .background(ThemeRadialBackground())
-        .foldsRailForSidePane($railCollapsed)
+        .foldsRailForSidePane($railFoldedForPane)
         .task {
             // Reopening the hub reuses a recent load instead of re-reading
             // the mailbox every time.
@@ -94,6 +96,7 @@ struct EmailWorkspace: View {
         }
         .onAppear(perform: consumePendingEmail)
         .onChange(of: appState.pendingEmailId) { _, _ in consumePendingEmail() }
+        .onChange(of: appState.panePendingEmailId) { _, _ in consumePendingEmail() }
         .sheet(item: $boardRequest) { request in
             EmailSendToBoardSheet(emails: request.emails) { board in
                 boardNote = request.emails.count == 1
@@ -114,10 +117,12 @@ struct EmailWorkspace: View {
 
     /// Drop picks that no longer resolve: read elsewhere, gone from the
     /// unread list, and not the message open in the reader.
+    /// Open the message another surface asked for. The main pane's Email
+    /// and one in a side pane each take only their own hand-off.
     private func consumePendingEmail() {
-        // An email opened from elsewhere is for the main pane's Email.
-        guard !pane.isSide, let id = appState.pendingEmailId else { return }
-        appState.pendingEmailId = nil
+        let pending = pane.isSide ? appState.panePendingEmailId : appState.pendingEmailId
+        guard let id = pending else { return }
+        if pane.isSide { appState.panePendingEmailId = nil } else { appState.pendingEmailId = nil }
         if vm.message(id: id) != nil {
             selection = [id]
             anchor = id

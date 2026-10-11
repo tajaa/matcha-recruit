@@ -48,18 +48,19 @@ struct CalendarWorkspace: View {
         .background(ThemeRadialBackground())
         .task {
             vm.mode = CalendarViewModel.Mode(rawValue: storedMode) ?? .month
-            // A focus date is meant for the main pane's calendar.
-            if !pane.isSide, let date = appState.calendarFocusDate {
-                appState.calendarFocusDate = nil
+            if let date = takeFocusDate() {
                 vm.focus(date, load: false)
             }
             await vm.load()
         }
         .onChange(of: vm.mode) { _, mode in storedMode = mode.rawValue }
-        .onChange(of: appState.calendarFocusDate) { _, date in
-            guard let date, !pane.isSide else { return }
-            appState.calendarFocusDate = nil
-            vm.focus(date)
+        // Each pane takes its own hand-off: a date sent to the main pane's
+        // calendar never moves one in a side pane, and the other way round.
+        .onChange(of: appState.calendarFocusDate) { _, _ in
+            if !pane.isSide, let date = takeFocusDate() { vm.focus(date) }
+        }
+        .onChange(of: appState.paneCalendarFocusDate) { _, _ in
+            if pane.isSide, let date = takeFocusDate() { vm.focus(date) }
         }
         // Back from the browser after connecting Google: show it.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -74,7 +75,19 @@ struct CalendarWorkspace: View {
                 onSave: { draft in try await vm.save(draft, editing: request.event?.id) },
                 onDelete: deleteAction(for: request.event)
             )
+            // Its "Open email" goes where this calendar is.
+            .environment(\.workPane, pane)
         }
+    }
+
+    /// The date this pane's calendar was asked to show, cleared once read.
+    private func takeFocusDate() -> Date? {
+        if pane.isSide {
+            defer { appState.paneCalendarFocusDate = nil }
+            return appState.paneCalendarFocusDate
+        }
+        defer { appState.calendarFocusDate = nil }
+        return appState.calendarFocusDate
     }
 
     private var grid: some View {

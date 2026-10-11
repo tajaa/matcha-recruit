@@ -78,6 +78,13 @@ extension AuxWindowTarget {
     /// Whether this is a whole surface rather than one item in it.
     var isSurface: Bool { surface == self }
 
+    /// Whether ⌘\ may bring it back later. A file carries a signed storage
+    /// URL, which is not something to write to preferences.
+    var isRememberable: Bool {
+        if case .file = self { return false }
+        return true
+    }
+
     var surfaceName: String {
         switch self {
         case .calendar: return "Calendar"

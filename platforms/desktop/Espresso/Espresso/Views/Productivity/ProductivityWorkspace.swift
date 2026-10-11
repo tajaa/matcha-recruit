@@ -9,6 +9,8 @@ struct ProductivityWorkspace: View {
     @Environment(\.workPane) private var pane
     @State private var vm = ProductivityViewModel()
     @State private var railCollapsed = false
+    /// Folded while a side pane is open; never touches the setting above.
+    @State private var railFoldedForPane = false
     @State private var mode: BoardMode = .board
 
     private enum BoardMode: String, CaseIterable { case board = "Board", calendar = "Calendar" }
@@ -21,8 +23,8 @@ struct ProductivityWorkspace: View {
                 boardPane.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HSplitView {
-                    if railCollapsed {
-                        MWHubRailStrip { railCollapsed = false }
+                    if railCollapsed || railFoldedForPane {
+                        MWHubRailStrip { railCollapsed = false; railFoldedForPane = false }
                     } else {
                         boardRail.frame(minWidth: 190, idealWidth: 220, maxWidth: 280)
                     }
@@ -31,7 +33,7 @@ struct ProductivityWorkspace: View {
             }
         }
         .background(ThemeRadialBackground())
-        .foldsRailForSidePane($railCollapsed)
+        .foldsRailForSidePane($railFoldedForPane)
         .task { await vm.loadBoards() }
     }
 

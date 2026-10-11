@@ -3,6 +3,7 @@ import SwiftUI
 /// Create or edit one event on the person's Espresso calendar.
 struct CalendarEventEditor: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.workPane) private var pane
     @Environment(\.dismiss) private var dismiss
     let request: CalendarEditorRequest
     let onSave: (CalendarDraft) async throws -> Void
@@ -116,7 +117,7 @@ struct CalendarEventEditor: View {
                 if let id = event.sourceRef {
                     Button("Open email") {
                         dismiss()
-                        appState.openEmail(id: id)
+                        appState.openEmail(id: id, in: pane)
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))

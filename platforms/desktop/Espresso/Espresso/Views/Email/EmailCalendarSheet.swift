@@ -6,6 +6,7 @@ import SwiftUI
 /// nothing reaches the calendar until they press Add.
 struct EmailCalendarSheet: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.workPane) private var pane
     @Environment(\.dismiss) private var dismiss
     let email: EmailMessage
     /// How many were added, and the first one's start.
@@ -104,7 +105,7 @@ struct EmailCalendarSheet: View {
             ForEach(existing) { event in
                 Button {
                     dismiss()
-                    appState.openCalendar(at: CalendarWire.date(event.start))
+                    appState.openCalendar(at: CalendarWire.date(event.start), in: pane)
                 } label: {
                     HStack(spacing: 6) {
                         Text(event.title).font(.system(size: 11, weight: .medium)).lineLimit(1)
