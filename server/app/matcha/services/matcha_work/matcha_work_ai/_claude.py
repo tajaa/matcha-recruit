@@ -37,9 +37,10 @@ import asyncio
 import io
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import anthropic
 from google.genai import types
@@ -51,12 +52,12 @@ from app.core.services.rate_limiter import RateLimitExceeded, get_rate_limiter
 from app.matcha.services.billing.model_pricing import claude_turn_cost
 
 from ._claude_thread import ENGINE_SCHEMA, ThreadRequest, engine_reply_text
-from ._stream import partial_reply
+from ._stream import ReplyStreamExtractor, partial_reply
 
 logger = logging.getLogger(__name__)
 
-# Document turns (a handbook, a deck) can be long. Non-streaming, but the
-# explicit timeout below is what bounds the call.
+# Document turns (a handbook, a deck) can be long; the explicit timeout
+# below bounds both streamed and non-streamed calls.
 _MAX_TOKENS = 32_000
 REFUSAL_REPLY = "I can't help with that one."
 CUT_OFF_NOTE = "\n\n(This answer was cut off before it finished. Ask me to continue.)"
@@ -237,7 +238,11 @@ def _usage(message: Any, model: str) -> dict[str, Any] | None:
 
 
 class ClaudeCallFailed(RuntimeError):
-    """The Anthropic call did not produce a reply (after its ledger row)."""
+    """The Anthropic call failed, optionally with usage from a partial stream."""
+
+    def __init__(self, message: str, usage: dict | None = None):
+        super().__init__(message)
+        self.usage = usage
 
 
 @dataclass
@@ -295,8 +300,27 @@ def reply_text(raw: str, *, stop_reason: str | None, structured: bool, stop_deta
     return text
 
 
+def _stream_snapshot(stream):
+    if stream is None:
+        return None
+    try:
+        return stream.current_message_snapshot
+    except (RuntimeError, AttributeError, AssertionError):
+        return None
+
+
+def _stream_usage(stream, model: str) -> dict | None:
+    return _usage(_stream_snapshot(stream), model)
+
+
+def _stream_payload(stream):
+    snapshot = _stream_snapshot(stream)
+    return snapshot.model_dump(mode="json") if snapshot is not None else None
+
+
 async def call_claude_thread(
     request: ThreadRequest, *, model: str, effort: str, timeout_seconds: float,
+    on_reply_delta: Callable[[str], None] | None = None,
 ) -> ClaudeResult:
     """One thread turn on Claude → ClaudeResult.
 
@@ -307,16 +331,36 @@ async def call_claude_thread(
     system_role = model not in _NO_SYSTEM_ROLE
     structured = model not in _NO_SCHEMA
     client = get_async_client().with_options(timeout=timeout_seconds)
+    streaming = on_reply_delta is not None and os.getenv("MATCHA_WORK_CLAUDE_STREAMING", "true").lower() not in {"0", "false", "off", "no"}
+    emitted = False
     for _attempt in range(3):
         params = request_params(request, model=model, effort=effort, system_role=system_role, structured=structured)
         started = time.monotonic()
+        stream = None
         try:
-            message = await client.beta.messages.create(**params)
+            if streaming:
+                async with client.beta.messages.stream(**params) as stream:
+                    extractor = ReplyStreamExtractor()
+                    async for text_delta in stream.text_stream:
+                        delta = extractor.feed(text_delta)
+                        if delta:
+                            emitted = True
+                            on_reply_delta(delta)
+                    message = await stream.get_final_message()
+            else:
+                message = await client.beta.messages.create(**params)
+        except asyncio.CancelledError:
+            if not emitted:
+                raise
+            usage = _stream_usage(stream, model)
+            await record_anthropic_response(model=model, status="timeout", error="Stream timed out",
+                                            message=_stream_payload(stream), latency_ms=int((time.monotonic() - started) * 1000))
+            raise ClaudeCallFailed("Claude stream timed out", usage) from None
         except anthropic.BadRequestError as exc:
             await record_anthropic_response(
-                model=model, latency_ms=int((time.monotonic() - started) * 1000), error=str(exc)[:500], status="error",
+                model=model, message=_stream_payload(stream), latency_ms=int((time.monotonic() - started) * 1000), error=str(exc)[:500], status="error",
             )
-            feature = _rejected_feature(exc, system_role=system_role, structured=structured)
+            feature = None if emitted else _rejected_feature(exc, system_role=system_role, structured=structured)
             if feature == "system_role":
                 logger.warning("skill engine: %s rejects a mid-conversation system message; using a user block", model)
                 _NO_SYSTEM_ROLE.add(model)
@@ -327,13 +371,13 @@ async def call_claude_thread(
                 _NO_SCHEMA.add(model)
                 structured = False
                 continue
-            raise ClaudeCallFailed(f"Anthropic Messages request failed: {exc}") from exc
+            raise ClaudeCallFailed(f"Anthropic Messages request failed: {exc}", _stream_usage(stream, model)) from exc
         except anthropic.APIError as exc:
             await record_anthropic_response(
-                model=model, latency_ms=int((time.monotonic() - started) * 1000), error=str(exc)[:500],
+                model=model, message=_stream_payload(stream), latency_ms=int((time.monotonic() - started) * 1000), error=str(exc)[:500],
                 status="timeout" if isinstance(exc, anthropic.APITimeoutError) else "error",
             )
-            raise ClaudeCallFailed(f"Anthropic Messages request failed: {exc}") from exc
+            raise ClaudeCallFailed(f"Anthropic Messages request failed: {exc}", _stream_usage(stream, model)) from exc
         await record_anthropic_response(
             model=model, latency_ms=int((time.monotonic() - started) * 1000),
             message=message.model_dump(mode="json"),

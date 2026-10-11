@@ -1223,6 +1223,7 @@ export interface MWCreateResponse {
 
 // SSE event types from the stream endpoint
 export type MWStreamEvent =
+  | { type: 'delta'; text: string }
   | { type: 'usage'; data: MWTokenUsage & { stage: 'estimate' | 'final' } }
   | { type: 'status'; message: string }
   | { type: 'step'; data: HuumeStep }

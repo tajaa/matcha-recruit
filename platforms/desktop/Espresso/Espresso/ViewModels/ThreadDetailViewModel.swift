@@ -270,6 +270,7 @@ class ThreadDetailViewModel {
 
             await MainActor.run {
                 isStreaming = false
+                streamingContent = ""
             }
 
             // Always invalidate cache so the next view fetches fresh state.
@@ -318,6 +319,8 @@ class ThreadDetailViewModel {
     @MainActor
     private func handleSSEEvent(_ event: SSEEvent, tempMessageId: String? = nil) {
         switch event.type {
+        case "delta":
+            streamingContent += event.text ?? ""
         case "complete":
             guard let data = event.data, let serverUserMessage = data.userMessage else {
                 streamingContent = ""
@@ -415,6 +418,7 @@ class ThreadDetailViewModel {
                 tokenUsage = usage
             }
         case "error":
+            streamingContent = ""
             errorMessage = event.message ?? "Unknown streaming error"
         default:
             break
@@ -657,4 +661,5 @@ struct SSEEvent: Codable {
     let type: String
     let data: SSEEventData?
     let message: String?  // error events
+    let text: String?  // reply delta events
 }

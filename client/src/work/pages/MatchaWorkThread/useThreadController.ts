@@ -39,6 +39,7 @@ export function useThreadController() {
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [mentionCursor, setMentionCursor] = useState(0)
   const [streaming, setStreaming] = useState(false)
+  const [streamingText, setStreamingText] = useState('')
   const [loading, setLoading] = useState(true)
   const [lightMode, setLightMode] = useState(() => localStorage.getItem('mw-chat-theme') === 'light')
   const [error, setError] = useState('')
@@ -161,6 +162,7 @@ export function useThreadController() {
     // (user-initiated), so nothing else resets `streaming` — without this the
     // new thread mounts with a disabled composer and a permanent "Thinking…".
     setStreaming(false)
+    setStreamingText('')
     setPendingAttachments([])
     getThread(threadId)
       .then((data) => {
@@ -195,6 +197,7 @@ export function useThreadController() {
     setInput('')
     setMentionQuery(null)
     setStreaming(true)
+    setStreamingText('')
     setError('')
 
     // Optimistically add user message
@@ -219,6 +222,8 @@ export function useThreadController() {
     abortRef.current = sendMessageStream(threadId, content, {
       onEvent: (event: MWStreamEvent) => {
         if (event.type === 'status') setStatusMessage(event.message)
+        if (event.type === 'delta') setStreamingText((text) => text + event.text)
+        if (event.type === 'error') setStreamingText('')
         if (event.type === 'step') setPendingHuumeSteps((prev) => [...prev, event.data])
       },
       onComplete: (data: MWSendResponse) => {
@@ -246,6 +251,7 @@ export function useThreadController() {
           setPdfUrl(getPdfProxyUrl(threadId, data.version))
         }
         setStreaming(false)
+        setStreamingText('')
         refreshUsage()
         notifyUsageChanged()
 
@@ -275,6 +281,7 @@ export function useThreadController() {
         setPendingHuumeSteps([])
         setError(err)
         setStreaming(false)
+        setStreamingText('')
         // A 429/402 quota refusal is exactly when the meter should snap to
         // red without waiting for the next poll.
         notifyUsageChanged()
@@ -299,6 +306,8 @@ export function useThreadController() {
     }
 
     setStreaming(true)
+
+    setStreamingText('')
     setError('')
 
     const tempMsg: MWMessage = {
@@ -315,6 +324,8 @@ export function useThreadController() {
     abortRef.current = uploadResumes(threadId, fileList, {
       onEvent: (event: MWStreamEvent) => {
         if (event.type === 'status') setStatusMessage(event.message)
+        if (event.type === 'delta') setStreamingText((text) => text + event.text)
+        if (event.type === 'error') setStreamingText('')
       },
       onComplete: (data: MWSendResponse) => {
         setStatusMessage('')
@@ -326,11 +337,13 @@ export function useThreadController() {
         )
         setPdfUrl(null)
         setStreaming(false)
+        setStreamingText('')
       },
       onError: (err) => {
         setStatusMessage('')
         setError(err)
         setStreaming(false)
+        setStreamingText('')
       },
     })
   }
@@ -387,6 +400,8 @@ export function useThreadController() {
     }
 
     setStreaming(true)
+
+    setStreamingText('')
     setError('')
 
     const tempMsg: MWMessage = {
@@ -403,6 +418,8 @@ export function useThreadController() {
     abortRef.current = uploadInventory(threadId, files, {
       onEvent: (event: MWStreamEvent) => {
         if (event.type === 'status') setStatusMessage(event.message)
+        if (event.type === 'delta') setStreamingText((text) => text + event.text)
+        if (event.type === 'error') setStreamingText('')
       },
       onComplete: (data: MWSendResponse) => {
         setStatusMessage('')
@@ -414,11 +431,13 @@ export function useThreadController() {
         )
         setPdfUrl(null)
         setStreaming(false)
+        setStreamingText('')
       },
       onError: (err) => {
         setStatusMessage('')
         setError(err)
         setStreaming(false)
+        setStreamingText('')
       },
     })
   }
@@ -604,7 +623,7 @@ export function useThreadController() {
     messages, setMessages,
     input, setInput,
     mentionQuery, mentionMatches, applyHuumeMention, handleInputChange,
-    streaming,
+    streaming, streamingText,
     loading,
     lightMode,
     error, setError,
