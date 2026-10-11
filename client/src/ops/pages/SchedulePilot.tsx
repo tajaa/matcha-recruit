@@ -133,8 +133,11 @@ export default function SchedulePilot() {
     setMobileTab('board')
     toast(`Add planned break minutes, save the shift, then assign again. ${message}`, 'info')
   }, [toast])
-  const editor = useScheduleEditor(weekStart, locationId, { onMealBreakRequired: openBreakPlanner })
   const planning = usePlanningInputs(locationId, weekStart)
+  const editor = useScheduleEditor(weekStart, locationId, {
+    onMealBreakRequired: openBreakPlanner,
+    onShiftRemoved: planning.reload,
+  })
   const scenarios = useScheduleScenarios(locationId, weekStart)
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),

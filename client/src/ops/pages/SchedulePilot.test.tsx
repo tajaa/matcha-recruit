@@ -218,6 +218,15 @@ describe('SchedulePilot — the workspace', () => {
     await waitFor(() => expect(planningInputsMock).toHaveBeenCalledWith('loc1', '2026-08-09'))
   })
 
+  it('refreshes planning hours after the editor removes a shift', async () => {
+    renderPilot()
+    await waitFor(() => expect(planningInputsMock).toHaveBeenCalledWith('loc1', '2026-08-09'))
+    const calls = planningInputsMock.mock.calls.length
+    const { onShiftRemoved } = useEditorMock.mock.calls.at(-1)![2]
+    act(() => onShiftRemoved())
+    await waitFor(() => expect(planningInputsMock).toHaveBeenCalledTimes(calls + 1))
+  })
+
   it('leaves the Huume thread out entirely for a plan that does not include it', async () => {
     // Without the flag the thread can only answer "feature not enabled", so
     // no session is opened and nothing points at a panel that cannot work.
