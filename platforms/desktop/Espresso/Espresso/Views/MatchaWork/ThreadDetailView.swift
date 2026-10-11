@@ -25,7 +25,9 @@ struct ThreadDetailView: View {
     @State var assetUnseen = false
 
     enum CompactTab { case chat, asset }
-    static let compactWidth: CGFloat = 820
+    /// Below this the chat (min 280) and the document (min 320) can't sit
+    /// side by side with room to read, so they become tabs.
+    static let compactWidth: CGFloat = 680
 
     @MainActor
     init(threadId: String, isEmbedded: Bool = false) {
