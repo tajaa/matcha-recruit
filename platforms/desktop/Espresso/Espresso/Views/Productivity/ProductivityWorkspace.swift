@@ -6,6 +6,7 @@ import SwiftUI
 /// (they carry a back-link to the source journal).
 struct ProductivityWorkspace: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.workPane) private var pane
     @State private var vm = ProductivityViewModel()
     @State private var railCollapsed = false
     @State private var mode: BoardMode = .board
@@ -13,13 +14,21 @@ struct ProductivityWorkspace: View {
     private enum BoardMode: String, CaseIterable { case board = "Board", calendar = "Calendar" }
 
     var body: some View {
-        HSplitView {
-            if railCollapsed {
-                MWHubRailStrip { railCollapsed = false }
+        Group {
+            if pane.isSide {
+                // Beside another surface there's no room for the rail: the
+                // board header's title becomes the board picker.
+                boardPane.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                boardRail.frame(minWidth: 190, idealWidth: 220, maxWidth: 280)
+                HSplitView {
+                    if railCollapsed {
+                        MWHubRailStrip { railCollapsed = false }
+                    } else {
+                        boardRail.frame(minWidth: 190, idealWidth: 220, maxWidth: 280)
+                    }
+                    boardPane.frame(minWidth: 460, maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
-            boardPane.frame(minWidth: 460, maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(ThemeRadialBackground())
         .task { await vm.loadBoards() }
@@ -119,7 +128,7 @@ struct ProductivityWorkspace: View {
                                     onToggleDone: { card in Task { await vm.toggleDone(card) } },
                                     onSetDate: { id, date in Task { await vm.setCardDate(id, to: date) } },
                                 )
-                                .frame(width: 280)
+                                .frame(width: pane.isSide ? 250 : 280)
                             }
                         }
                         .padding(14)
@@ -140,6 +149,8 @@ struct ProductivityWorkspace: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(appState.themeText)
                     .onSubmit { Task { await vm.commitRename() } }
+            } else if pane.isSide {
+                boardPicker
             } else {
                 Text(vm.selectedBoard?.title ?? "Board")
                     .font(.system(size: 14, weight: .semibold))
@@ -151,9 +162,42 @@ struct ProductivityWorkspace: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 170)
+            .frame(width: pane.isSide ? 140 : 170)
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
+    }
+
+    /// The side-pane stand-in for the board rail.
+    private var boardPicker: some View {
+        Menu {
+            ForEach(vm.boards) { board in
+                Button {
+                    Task { await vm.select(board.id) }
+                } label: {
+                    if board.id == vm.selectedBoardId {
+                        Label(board.title, systemImage: "checkmark")
+                    } else {
+                        Text(board.title)
+                    }
+                }
+            }
+            Divider()
+            Button("New board") { Task { await vm.createBoard() } }
+        } label: {
+            HStack(spacing: 4) {
+                Text(vm.selectedBoard?.title ?? "Board")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(appState.themeText)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(appState.themeTextSecondary)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Switch board")
     }
 
     private func emptyState(icon: String, title: String, sub: String) -> some View {
@@ -168,6 +212,10 @@ struct ProductivityWorkspace: View {
     }
 
     private func openJournal(_ journalId: String) {
+        if pane.isSide {
+            pane.open(.journal(journalId))
+            return
+        }
         appState.clearPrimaryNav()
         appState.selectedJournalId = journalId
     }

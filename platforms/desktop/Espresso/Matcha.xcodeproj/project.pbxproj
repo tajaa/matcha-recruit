@@ -348,6 +348,7 @@
 		DEADBEEF000000000000B008 /* KanbanSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F008 /* KanbanSearch.swift */; };
 		DEADBEEF000000000000B0E1 /* ReviewGuideWizard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F0E1 /* ReviewGuideWizard.swift */; };
 		DETA11PANE000000000000B1 /* DetailPanes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DETA11PANE000000000000F2 /* DetailPanes.swift */; };
+		51DE0PA2E0000000000000B1 /* SidePane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51DE0PA2E0000000000000F2 /* SidePane.swift */; };
 		DF437ADE59FABFE8C32C332D /* SafeURL.swift in Sources */ = {isa = PBXBuildFile; fileRef = 181ADEB8343F9C92BC77CA4F /* SafeURL.swift */; };
 		547AA3C8A96389C312EC3F98 /* MWLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0951985A8D0EF82C72437AF /* MWLog.swift */; };
 		DFADE57E23B12BD8F147A579 /* MarkdownPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC22DD33EE44FF660003 /* MarkdownPreviewView.swift */; };
@@ -677,6 +678,7 @@
 		DEADBEEF000000000000F008 /* KanbanSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanSearch.swift; sourceTree = "<group>"; };
 		DEADBEEF000000000000F0E1 /* ReviewGuideWizard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewGuideWizard.swift; sourceTree = "<group>"; };
 		DETA11PANE000000000000F2 /* DetailPanes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailPanes.swift; sourceTree = "<group>"; };
+		51DE0PA2E0000000000000F2 /* SidePane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidePane.swift; sourceTree = "<group>"; };
 		E1A313DF21F27ED062AE2758 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		E21DF105CC19746BC2BF16B1 /* ProjectLayoutEnums.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectLayoutEnums.swift; sourceTree = "<group>"; };
 		E2A1B0C0D0E0F00100000002 /* EmailService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailService.swift; sourceTree = "<group>"; };
@@ -1208,6 +1210,7 @@
 				88DD03E26D63AB66B7AF4B39 /* AppState.swift */,
 				9A53863E4FE1105A953775B9 /* ContentView.swift */,
 				DETA11PANE000000000000F2 /* DetailPanes.swift */,
+				51DE0PA2E0000000000000F2 /* SidePane.swift */,
 				AD198140CC378D9E843FA827 /* Color+Extensions.swift */,
 				5EA68D04368CE35CA6B98DC5 /* ContentViewComponents.swift */,
 				EF7F875E51859F0196E4CB23 /* ContentViewSidebars.swift */,
@@ -1722,6 +1725,7 @@
 				A8B0E4F8719EE4B839FFBCBC /* AppState.swift in Sources */,
 				27D89F55D2042BB60126C2E5 /* ContentView.swift in Sources */,
 				DETA11PANE000000000000B1 /* DetailPanes.swift in Sources */,
+				51DE0PA2E0000000000000B1 /* SidePane.swift in Sources */,
 				E6875027B0F5CBDE47D488EF /* Color+Extensions.swift in Sources */,
 				1FEDFFD4BC1C7F59E9CFD687 /* AuthModels.swift in Sources */,
 				29E4BDC2148FC96D831C7A74 /* KeychainHelper.swift in Sources */,

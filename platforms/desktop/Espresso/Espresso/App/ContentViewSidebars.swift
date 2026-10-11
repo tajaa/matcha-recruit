@@ -31,6 +31,22 @@ struct AuxWindowRootView: View {
                     // Chrome-less preview body — the split-pane headers (and
                     // the aux window title bar) already carry the filename.
                     AttachmentPreviewContent(file: ref.asProjectFile)
+                case .calendar:
+                    CalendarWorkspace()
+                case .kanban:
+                    ProductivityWorkspace()
+                case .email:
+                    EmailWorkspace()
+                case .assistant:
+                    AssistantView()
+                case .journals:
+                    SidePaneList(surface: .journals)
+                case .channels:
+                    SidePaneList(surface: .channels)
+                case .threads:
+                    SidePaneList(surface: .threads)
+                case .workspaces:
+                    SidePaneList(surface: .workspaces)
                 case nil:
                     Text("Nothing to show")
                         .foregroundColor(.secondary)
@@ -38,7 +54,7 @@ struct AuxWindowRootView: View {
                 }
             }
         }
-        .frame(minWidth: 480, minHeight: 400)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(appState.themeBg)
     }
 }
@@ -275,6 +291,21 @@ struct SidebarStarredView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if let target = paneTarget(pin) {
+                AuxOpenMenuButtons(target: target)
+            }
+        }
+    }
+
+    private func paneTarget(_ pin: Pin) -> AuxWindowTarget? {
+        switch pin.kind {
+        case .project: return .project(pin.id)
+        case .channel: return .channel(pin.id)
+        case .thread:  return .thread(pin.id)
+        case .journal: return .journal(pin.id)
+        case .file:    return FileStarStore.shared.ref(for: pin.id).map { .file($0) }
+        }
     }
 
     private func isActive(_ pin: Pin) -> Bool {

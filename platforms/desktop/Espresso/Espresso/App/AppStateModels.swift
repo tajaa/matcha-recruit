@@ -39,6 +39,72 @@ enum AuxWindowTarget: Codable, Hashable {
     /// surface. Carries a snapshot ref (not just an id) so panes don't have to
     /// refetch project file lists to resolve it.
     case file(MWFileRef)
+    // Whole surfaces, for keeping one beside whatever is open (a thread next
+    // to the calendar). In a side pane each renders its pane layout
+    // (`WorkPane.isSide`): the hubs with one canvas (calendar, kanban, email,
+    // Espresso) adapt to the narrower width, and the list hubs (threads,
+    // channels, journals, workspaces) show a list that opens items in place.
+    case calendar
+    case journals
+    case kanban
+    case assistant
+    case channels
+    case threads
+    case email
+    case workspaces
+}
+
+extension AuxWindowTarget {
+    /// The surfaces offered in a side pane's dock and the View menu, in order.
+    /// `.assistant` is dropped where the workspace has no Espresso assistant.
+    static func dock(assistantEnabled: Bool) -> [AuxWindowTarget] {
+        let all: [AuxWindowTarget] = [.calendar, .journals, .kanban, .assistant, .channels, .threads, .email, .workspaces]
+        return assistantEnabled ? all : all.filter { $0 != .assistant }
+    }
+
+    /// The surface an item belongs to, so the dock can show where a pane is
+    /// (a journal open in a pane lights up Journals). nil for a file.
+    var surface: AuxWindowTarget? {
+        switch self {
+        case .thread: return .threads
+        case .channel: return .channels
+        case .journal: return .journals
+        case .project: return .workspaces
+        case .file: return nil
+        default: return self
+        }
+    }
+
+    /// Whether this is a whole surface rather than one item in it.
+    var isSurface: Bool { surface == self }
+
+    var surfaceName: String {
+        switch self {
+        case .calendar: return "Calendar"
+        case .journals, .journal: return "Journals"
+        case .kanban: return "Kanban"
+        case .assistant: return "Espresso"
+        case .channels, .channel: return "Channels"
+        case .threads, .thread: return "Threads"
+        case .email: return "Email"
+        case .workspaces, .project: return "Workspaces"
+        case .file(let ref): return ref.filename
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .calendar: return "calendar"
+        case .journals, .journal: return "book.closed"
+        case .kanban: return "checklist"
+        case .assistant: return "sparkles"
+        case .channels, .channel: return "number"
+        case .threads, .thread: return "bubble.left.and.bubble.right"
+        case .email: return "envelope"
+        case .workspaces, .project: return "square.grid.2x2"
+        case .file(let ref): return ref.asProjectFile.isImage ? "photo" : "doc"
+        }
+    }
 }
 
 /// Lightweight Codable snapshot of a project file, used wherever a file needs

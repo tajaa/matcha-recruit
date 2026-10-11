@@ -56,6 +56,80 @@ extension AppState {
         }
     }
 
+    // MARK: - Side pane
+
+    private static let lastSideTargetKey = "mw-last-side-target-v1"
+
+    /// What the side pane showed last, so ⌘\ brings it back.
+    var lastSideTarget: AuxWindowTarget {
+        guard let data = UserDefaults.standard.data(forKey: Self.lastSideTargetKey),
+              let target = try? JSONDecoder().decode(AuxWindowTarget.self, from: data)
+        else { return .calendar }
+        return target
+    }
+
+    /// Show `target` beside whatever the main pane has open.
+    @MainActor
+    func openBeside(_ target: AuxWindowTarget) {
+        splitTarget = target
+        if let data = try? JSONEncoder().encode(target) {
+            UserDefaults.standard.set(data, forKey: Self.lastSideTargetKey)
+        }
+    }
+
+    /// ⌘\: close the side pane, or reopen the last one.
+    @MainActor
+    func toggleSidePane() {
+        if splitTarget != nil {
+            splitTarget = nil
+        } else {
+            openBeside(lastSideTarget)
+        }
+    }
+
+    /// What the main pane shows, as a pane target: the open item, else the
+    /// open hub. nil on Home and the other full-pane pages (inbox, people…).
+    var mainPaneTarget: AuxWindowTarget? {
+        if let id = selectedThreadId { return .thread(id) }
+        if let id = selectedProjectId { return .project(id) }
+        if let id = selectedChannelId { return .channel(id) }
+        if let id = selectedJournalId { return .journal(id) }
+        if showThreadsHub { return .threads }
+        if showProjectsHub { return .workspaces }
+        if showJournalsHub { return .journals }
+        if showChannelsHub { return .channels }
+        if showProductivityHub { return .kanban }
+        if showCalendarHub { return .calendar }
+        if showEmailHub { return .email }
+        if showAssistantHub { return .assistant }
+        return nil
+    }
+
+    /// Navigate the main pane to `target` (a file opens the preview sheet).
+    @MainActor
+    func showInMain(_ target: AuxWindowTarget) {
+        if case .file(let ref) = target {
+            globalPreviewFile = ref.asProjectFile
+            return
+        }
+        clearPrimaryNav()
+        switch target {
+        case .project(let id): selectedProjectId = id
+        case .channel(let id): selectedChannelId = id
+        case .thread(let id): selectedThreadId = id
+        case .journal(let id): selectedJournalId = id
+        case .calendar: showCalendarHub = true
+        case .journals: showJournalsHub = true
+        case .kanban: showProductivityHub = true
+        case .assistant: showAssistantHub = true
+        case .channels: showChannelsHub = true
+        case .threads: showThreadsHub = true
+        case .email: showEmailHub = true
+        case .workspaces: showProjectsHub = true
+        case .file: break
+        }
+    }
+
     @MainActor
     private func navigateToDestination(_ tab: WorkTab) {
         selectedProjectId = nil

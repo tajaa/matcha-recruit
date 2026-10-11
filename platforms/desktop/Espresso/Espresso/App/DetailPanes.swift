@@ -79,159 +79,9 @@ struct PrimaryDetailPane: View {
     }
 }
 
-/// Secondary (right) split pane — pinned to `target`. Renders via
-/// AuxWindowRootView (isEmbedded, so it never writes shared nav state). Reads
-/// only theme + the value-typed `target`, so WS/poll churn can't rebuild it.
-struct SplitSecondaryPane: View {
-    let target: AuxWindowTarget
-    @Environment(AppState.self) private var appState
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "rectangle.split.2x1")
-                    .font(.system(size: 11))
-                    .foregroundColor(appState.themeTextSecondary)
-                Text(label)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(appState.themeTextSecondary)
-                Spacer()
-                Button {
-                    openWindow(id: "aux", value: target)
-                    appState.splitTarget = nil
-                } label: {
-                    Image(systemName: "macwindow.on.rectangle")
-                        .font(.system(size: 11))
-                        .foregroundColor(appState.themeTextSecondary)
-                }
-                .buttonStyle(.plain)
-                .help("Pop out to a window")
-                Button { appState.splitTarget = nil } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(appState.themeTextSecondary)
-                }
-                .buttonStyle(.plain)
-                .help("Close split")
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            Divider().opacity(0.2)
-            AuxWindowRootView(target: target)
-        }
-    }
-
-    private var label: String {
-        switch target {
-        case .project: return "Workspace"
-        case .channel: return "Channel"
-        case .thread: return "Thread"
-        case .journal: return "Journal"
-        case .file(let ref): return ref.filename
-        }
-    }
-}
-
-/// Bottom (horizontal) split pane — stacks full-width beneath the top row.
-/// Unlike `SplitSecondaryPane` (pinned to one target), its header carries a
-/// switcher so the user can swap the pane between any thread / channel /
-/// project / journal without leaving the split. Body renders via
-/// AuxWindowRootView (isEmbedded), so it never touches shared nav state.
-struct BottomSplitPane: View {
-    let target: AuxWindowTarget
-    @Environment(AppState.self) private var appState
-    @Environment(\.openWindow) private var openWindow
-    @State private var switcher = SplitSwitcherModel()
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "rectangle.split.1x2")
-                    .font(.system(size: 11))
-                    .foregroundColor(appState.themeTextSecondary)
-                Menu {
-                    switcherMenu
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(switcher.title(for: target))
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(appState.themeTextSecondary)
-                            .lineLimit(1)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundColor(appState.themeTextSecondary)
-                    }
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Switch what's shown here")
-                Spacer()
-                Button {
-                    openWindow(id: "aux", value: target)
-                    appState.bottomSplitTarget = nil
-                } label: {
-                    Image(systemName: "macwindow.on.rectangle")
-                        .font(.system(size: 11))
-                        .foregroundColor(appState.themeTextSecondary)
-                }
-                .buttonStyle(.plain)
-                .help("Pop out to a window")
-                Button { appState.bottomSplitTarget = nil } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(appState.themeTextSecondary)
-                }
-                .buttonStyle(.plain)
-                .help("Close bottom split")
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            Divider().opacity(0.2)
-            AuxWindowRootView(target: target)
-        }
-        .task { await switcher.loadIfNeeded() }
-    }
-
-    @ViewBuilder
-    private var switcherMenu: some View {
-        if !switcher.threads.isEmpty {
-            Section("Threads") {
-                ForEach(switcher.threads) { t in
-                    Button(t.title) { appState.bottomSplitTarget = .thread(t.id) }
-                }
-            }
-        }
-        if !switcher.channels.isEmpty {
-            Section("Channels") {
-                ForEach(switcher.channels) { c in
-                    Button("#\(c.name)") { appState.bottomSplitTarget = .channel(c.id) }
-                }
-            }
-        }
-        if !switcher.projects.isEmpty {
-            Section("Workspaces") {
-                ForEach(switcher.projects) { p in
-                    Button(p.title) { appState.bottomSplitTarget = .project(p.id) }
-                }
-            }
-        }
-        if !switcher.journals.isEmpty {
-            Section("Journals") {
-                ForEach(switcher.journals) { j in
-                    Button(j.title) { appState.bottomSplitTarget = .journal(j.id) }
-                }
-            }
-        }
-        Divider()
-        Button("Reload list") { Task { await switcher.load() } }
-    }
-}
-
-/// Loads the four surface lists once so the bottom-pane switcher can offer
-/// them and resolve a target id back to a human title. Cheap, list-only
-/// fetches; refreshed on demand via the menu's "Reload list".
+/// Loads the four surface lists once so the side panes and the finder palette
+/// can offer them and resolve a target id back to a human title. Cheap,
+/// list-only fetches.
 @Observable
 final class SplitSwitcherModel {
     var threads: [MWThread] = []
@@ -274,13 +124,15 @@ final class SplitSwitcherModel {
             return journals.first { $0.id == id }?.title ?? "Journal"
         case .file(let ref):
             return ref.filename
+        default:
+            return target.surfaceName
         }
     }
 }
 
 // MARK: - Shared "open elsewhere" context-menu actions
 
-/// The three open-elsewhere actions (new window · right split · bottom split)
+/// The three open-elsewhere actions (new window · beside · below)
 /// shared by every hub's row + card context menu. Setting `splitTarget` /
 /// `bottomSplitTarget` is what lights up the side/bottom panes in ContentView —
 /// this is the single affordance that lets two surfaces (e.g. a journal + a
@@ -294,19 +146,20 @@ struct AuxOpenMenuButtons: View {
         Button { openWindow(id: "aux", value: target) } label: {
             Label("Open in New Window", systemImage: "macwindow.on.rectangle")
         }
-        Button { appState.splitTarget = target } label: {
-            Label("Open in Split", systemImage: "rectangle.split.2x1")
+        Button { appState.openBeside(target) } label: {
+            Label("Open Beside", systemImage: "rectangle.split.2x1")
         }
         Button { appState.bottomSplitTarget = target } label: {
-            Label("Open in Bottom Split", systemImage: "rectangle.split.1x2")
+            Label("Open Below", systemImage: "rectangle.split.1x2")
         }
     }
 }
 
 // MARK: - Split finder palette
 
-/// The Cmd+F find-anything palette: Spotlight-style search over every surface
-/// (thread / channel / project / journal) AND every project file. A result can
+/// The Cmd+F find-anything palette: Spotlight-style search over the surfaces
+/// themselves (Calendar, Kanban…), every thread / channel / project / journal,
+/// AND every project file. A result can
 /// open into the main pane, the right split, or the bottom split (segmented
 /// destination picker), and every row carries a ☆ that pins it to the
 /// sidebar's Starred strip. Raised via Cmd+F.
@@ -375,7 +228,7 @@ struct SplitFinderPalette: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 13)).foregroundColor(appState.themeTextSecondary)
-                TextField("Find a thread, channel, project, journal, or file…", text: $search)
+                TextField("Find a surface, thread, channel, project, journal, or file…", text: $search)
                     .textFieldStyle(.plain)
                     .font(.system(size: 14))
                     .foregroundColor(appState.themeText)
@@ -413,7 +266,9 @@ struct SplitFinderPalette: View {
 
     // ── Results list ────────────────────────────────────────────────────
     private var allEntries: [Entry] {
-        var out: [Entry] = []
+        var out: [Entry] = AuxWindowTarget.dock(assistantEnabled: appState.assistantEnabled).map {
+            Entry(id: "s:\($0.surfaceName)", target: $0, title: $0.surfaceName, icon: $0.icon, group: "Surfaces")
+        }
         out += model.threads.map { Entry(id: "t:\($0.id)", target: .thread($0.id), title: $0.displayName, icon: "bubble.left.and.bubble.right", group: "Threads") }
         out += model.channels.map { Entry(id: "c:\($0.id)", target: .channel($0.id), title: "#\($0.name)", icon: "number", group: "Channels") }
         out += model.projects.map { Entry(id: "p:\($0.id)", target: .project($0.id), title: $0.title, icon: "square.grid.2x2", group: "Workspaces") }
@@ -436,7 +291,7 @@ struct SplitFinderPalette: View {
 
     // Must match the `group` strings in `allEntries` — an unlisted group falls
     // out of the palette's section ordering.
-    private let groupOrder = ["Threads", "Channels", "Workspaces", "Journals", "Files"]
+    private let groupOrder = ["Surfaces", "Threads", "Channels", "Workspaces", "Journals", "Files"]
 
     @ViewBuilder
     private var results: some View {
@@ -490,17 +345,20 @@ struct SplitFinderPalette: View {
             .buttonStyle(.plain)
 
             // ☆ — add/remove from the sidebar Starred strip without opening.
-            let starred = isStarred(entry)
-            Button { toggleStar(entry) } label: {
-                Image(systemName: starred ? "star.fill" : "star")
-                    .font(.system(size: 11))
-                    .foregroundColor(starred ? .yellow : appState.themeTextSecondary.opacity(0.55))
-                    .frame(width: 26, height: 26)
-                    .contentShape(Rectangle())
+            // Surfaces already have their own sidebar row.
+            if !entry.target.isSurface {
+                let starred = isStarred(entry)
+                Button { toggleStar(entry) } label: {
+                    Image(systemName: starred ? "star.fill" : "star")
+                        .font(.system(size: 11))
+                        .foregroundColor(starred ? .yellow : appState.themeTextSecondary.opacity(0.55))
+                        .frame(width: 26, height: 26)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 8)
+                .help(starred ? "Remove from sidebar Starred" : "Add to sidebar Starred")
             }
-            .buttonStyle(.plain)
-            .padding(.trailing, 8)
-            .help(starred ? "Remove from sidebar Starred" : "Add to sidebar Starred")
         }
     }
 
@@ -513,6 +371,7 @@ struct SplitFinderPalette: View {
         case .channel(let id): return ChannelStarStore.shared.isStarred(id)
         case .journal(let id): return JournalStarStore.shared.isStarred(id)
         case .file(let ref):   return FileStarStore.shared.isStarred(ref.id)
+        default:               return false
         }
     }
 
@@ -539,6 +398,8 @@ struct SplitFinderPalette: View {
             JournalStarStore.shared.toggle(id)
         case .file(let ref):
             FileStarStore.shared.toggle(ref)
+        default:
+            break
         }
     }
 
@@ -556,15 +417,8 @@ struct SplitFinderPalette: View {
                 }
                 return
             }
-            appState.clearPrimaryNav()
-            switch entry.target {
-            case .project(let id): appState.selectedProjectId = id
-            case .channel(let id): appState.selectedChannelId = id
-            case .thread(let id):  appState.selectedThreadId = id
-            case .journal(let id): appState.selectedJournalId = id
-            case .file: break
-            }
-        case .right:  appState.splitTarget = entry.target
+            appState.showInMain(entry.target)
+        case .right:  appState.openBeside(entry.target)
         case .bottom: appState.bottomSplitTarget = entry.target
         }
         dismiss()

@@ -8,6 +8,7 @@ import AppKit
 /// ⌘-click / ⇧-click picks several messages to send to a board together.
 struct EmailWorkspace: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.workPane) private var pane
     private let vm = EmailViewModel.shared
 
     enum Filter: Hashable {
@@ -44,6 +45,18 @@ struct EmailWorkspace: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if !vm.connected {
                 connectState
+            } else if pane.isSide {
+                // Beside another surface: the list, and a message opens over
+                // it with a way back.
+                if selection.isEmpty && openedElsewhere == nil {
+                    messageList
+                } else {
+                    VStack(spacing: 0) {
+                        sidePaneBackBar
+                        Divider().opacity(0.2)
+                        readerPane
+                    }
+                }
             } else {
                 HSplitView {
                     if railCollapsed {
@@ -101,7 +114,8 @@ struct EmailWorkspace: View {
     /// Drop picks that no longer resolve: read elsewhere, gone from the
     /// unread list, and not the message open in the reader.
     private func consumePendingEmail() {
-        guard let id = appState.pendingEmailId else { return }
+        // An email opened from elsewhere is for the main pane's Email.
+        guard !pane.isSide, let id = appState.pendingEmailId else { return }
         appState.pendingEmailId = nil
         if vm.message(id: id) != nil {
             selection = [id]
@@ -465,6 +479,22 @@ struct EmailWorkspace: View {
     }
 
     // MARK: - Reader
+
+    private var sidePaneBackBar: some View {
+        HStack {
+            Button {
+                selection = []
+                openedElsewhere = nil
+            } label: {
+                Label(listTitle, systemImage: "chevron.left")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(appState.themeTextSecondary)
+            }
+            .buttonStyle(.plain)
+            Spacer()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 7)
+    }
 
     /// Driven by the picks that still resolve, so a selection whose messages
     /// have all gone can't strand the reader on an empty multi-select panel.

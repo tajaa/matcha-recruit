@@ -7,6 +7,7 @@ import AppKit
 /// email reader write to the same calendar.
 struct CalendarWorkspace: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.workPane) private var pane
     @State private var vm = CalendarViewModel()
     @State private var editor: CalendarEditorRequest?
     @State private var connectingGoogle = false
@@ -14,36 +15,41 @@ struct CalendarWorkspace: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            CalendarHeader(vm: vm, connectingGoogle: connectingGoogle,
+            CalendarHeader(vm: vm, connectingGoogle: connectingGoogle, compact: pane.isSide,
                            onNew: { newEvent(on: vm.selectedDay) },
-                           onConnectGoogle: connectGoogle)
+                           onConnectGoogle: connectGoogle,
+                           onAsk: askEspresso)
             Divider().opacity(0.2)
             if let error = vm.errorMessage, vm.hasLoaded {
                 errorBanner(error)
             }
             if !vm.hasLoaded && vm.errorMessage != nil {
                 loadFailed
-            } else {
-                HStack(spacing: 0) {
-                    Group {
-                        switch vm.mode {
-                        case .month:
-                            CalendarMonthGrid(vm: vm, onOpen: open, onNew: { newEvent(on: $0) })
-                        case .week:
-                            CalendarWeekGrid(vm: vm, onOpen: open, onNew: { day, hour in newEvent(on: day, hour: hour) })
+            } else if pane.isSide {
+                // Beside another surface: the day's agenda goes under the
+                // grid when the pane is narrow, beside it when it's wide (the
+                // bottom pane).
+                GeometryReader { geo in
+                    if geo.size.width < 640 {
+                        VStack(spacing: 0) {
+                            grid
+                            Divider().opacity(0.2)
+                            dayPanel
+                                .frame(height: min(260, geo.size.height * 0.42))
                         }
+                    } else {
+                        sideBySide
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    Divider().opacity(0.2)
-                    CalendarDayPanel(vm: vm, onOpen: open, onNew: { newEvent(on: vm.selectedDay) })
-                        .frame(width: 290)
                 }
+            } else {
+                sideBySide
             }
         }
         .background(ThemeRadialBackground())
         .task {
             vm.mode = CalendarViewModel.Mode(rawValue: storedMode) ?? .month
-            if let date = appState.calendarFocusDate {
+            // A focus date is meant for the main pane's calendar.
+            if !pane.isSide, let date = appState.calendarFocusDate {
                 appState.calendarFocusDate = nil
                 vm.focus(date, load: false)
             }
@@ -51,7 +57,7 @@ struct CalendarWorkspace: View {
         }
         .onChange(of: vm.mode) { _, mode in storedMode = mode.rawValue }
         .onChange(of: appState.calendarFocusDate) { _, date in
-            guard let date else { return }
+            guard let date, !pane.isSide else { return }
             appState.calendarFocusDate = nil
             vm.focus(date)
         }
@@ -71,7 +77,42 @@ struct CalendarWorkspace: View {
         }
     }
 
+    private var grid: some View {
+        Group {
+            switch vm.mode {
+            case .month:
+                CalendarMonthGrid(vm: vm, onOpen: open, onNew: { newEvent(on: $0) })
+            case .week:
+                CalendarWeekGrid(vm: vm, onOpen: open, onNew: { day, hour in newEvent(on: day, hour: hour) })
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var dayPanel: some View {
+        CalendarDayPanel(vm: vm, onOpen: open, onNew: { newEvent(on: vm.selectedDay) })
+    }
+
+    private var sideBySide: some View {
+        HStack(spacing: 0) {
+            grid
+            Divider().opacity(0.2)
+            dayPanel.frame(width: 290)
+        }
+    }
+
     // MARK: Actions
+
+    /// In the main pane Espresso takes the pane; beside a thread it takes this
+    /// pane, so the thread stays put.
+    private func askEspresso() {
+        if pane.isSide {
+            pane.open(.assistant)
+        } else {
+            appState.clearPrimaryNav()
+            appState.showAssistantHub = true
+        }
+    }
 
     private func deleteAction(for event: MWCalendarEvent?) -> (() async throws -> Void)? {
         guard let event else { return nil }
@@ -177,41 +218,53 @@ private struct CalendarHeader: View {
     @Environment(AppState.self) private var appState
     let vm: CalendarViewModel
     let connectingGoogle: Bool
+    /// Beside another surface: tighter, icon-only, and no keyboard shortcuts
+    /// (⌘← ⌘→ ⌘T ⌘N would fire while typing in the other pane).
+    let compact: Bool
     let onNew: () -> Void
     let onConnectGoogle: () -> Void
+    let onAsk: () -> Void
+
+    private func shortcut(_ key: KeyEquivalent) -> KeyboardShortcut? {
+        compact ? nil : KeyboardShortcut(key, modifiers: .command)
+    }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: compact ? 8 : 10) {
             Text(vm.title)
-                .font(.system(size: 18, weight: .bold))
+                .font(.system(size: compact ? 15 : 18, weight: .bold))
                 .foregroundColor(appState.themeText)
-                .frame(minWidth: 170, alignment: .leading)
+                .lineLimit(1)
+                .frame(minWidth: compact ? 0 : 170, alignment: .leading)
             HStack(spacing: 2) {
-                navButton("chevron.left", help: "Previous (⌘←)") { vm.shift(-1) }
-                    .keyboardShortcut(.leftArrow, modifiers: .command)
+                navButton("chevron.left", help: compact ? "Previous" : "Previous (⌘←)") { vm.shift(-1) }
+                    .keyboardShortcut(shortcut(.leftArrow))
                 Button("Today") { vm.goToToday() }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(appState.themeText)
                     .padding(.horizontal, 9).padding(.vertical, 4)
                     .background(RoundedRectangle(cornerRadius: 5).stroke(appState.themeBorder, lineWidth: 1))
-                    .keyboardShortcut("t", modifiers: .command)
-                    .help("Today (⌘T)")
-                navButton("chevron.right", help: "Next (⌘→)") { vm.shift(1) }
-                    .keyboardShortcut(.rightArrow, modifiers: .command)
+                    .keyboardShortcut(shortcut("t"))
+                    .help(compact ? "Today" : "Today (⌘T)")
+                navButton("chevron.right", help: compact ? "Next" : "Next (⌘→)") { vm.shift(1) }
+                    .keyboardShortcut(shortcut(.rightArrow))
             }
             if vm.isLoading {
                 ProgressView().controlSize(.small).padding(.leading, 2)
             }
-            Spacer(minLength: 12)
-            googleStatus
+            Spacer(minLength: compact ? 4 : 12)
+            if !compact {
+                googleStatus
+            }
             if appState.assistantEnabled {
-                Button {
-                    appState.clearPrimaryNav()
-                    appState.showAssistantHub = true
-                } label: {
-                    Label("Ask Espresso", systemImage: "sparkles")
-                        .font(.system(size: 11, weight: .medium))
+                Button(action: onAsk) {
+                    if compact {
+                        Image(systemName: "sparkles").font(.system(size: 12))
+                    } else {
+                        Label("Ask Espresso", systemImage: "sparkles")
+                            .font(.system(size: 11, weight: .medium))
+                    }
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(appState.themeTextSecondary)
@@ -222,20 +275,28 @@ private struct CalendarHeader: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 130)
+            .frame(width: compact ? 104 : 130)
             Button(action: onNew) {
-                Label("New event", systemImage: "plus")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(appState.themeOnAccent)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(appState.themeAccent))
+                Group {
+                    if compact {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .bold))
+                            .frame(width: 24, height: 22)
+                    } else {
+                        Label("New event", systemImage: "plus")
+                            .font(.system(size: 11, weight: .semibold))
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                    }
+                }
+                .foregroundColor(appState.themeOnAccent)
+                .background(RoundedRectangle(cornerRadius: 6).fill(appState.themeAccent))
             }
             .buttonStyle(.plain)
-            .keyboardShortcut("n", modifiers: .command)
-            .help("New event (⌘N)")
+            .keyboardShortcut(shortcut("n"))
+            .help(compact ? "New event" : "New event (⌘N)")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 11)
+        .padding(.horizontal, compact ? 12 : 16)
+        .padding(.vertical, compact ? 9 : 11)
     }
 
     private func navButton(_ icon: String, help: String, action: @escaping () -> Void) -> some View {
