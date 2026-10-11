@@ -214,6 +214,18 @@ enum JournalKind: String, CaseIterable, Identifiable {
         case .journal: return "book.closed"
         }
     }
+    /// List / card tint for a journal with no color of its own, so the list
+    /// reads by type at a glance. nil = neutral: plain journals, the bulk of
+    /// the list, stay quiet instead of all taking the accent.
+    var tint: Color? {
+        switch self {
+        case .blog: return .blue
+        case .todo: return .teal
+        case .novel: return .purple
+        case .screenplay: return .pink
+        case .note, .journal: return nil
+        }
+    }
     var blurb: String {
         switch self {
         case .note: return "A blank journal for quick thoughts."
@@ -322,33 +334,51 @@ struct JournalsWorkspace: View {
     @State private var journals: [MWJournal] = []
     @State private var mode: FolderMode = .all
     @State private var collapsed: Set<String> = []
-    @State private var sort: SortKey = .modified
+    @AppStorage("journals.listSort") private var sortRaw: String = SortKey.modified.rawValue
     @State private var search = ""
     @State private var selectedJournalId: String? = nil       // local col-3 selection
     @State private var renamingFolderId: String? = nil
     @State private var renamingJournalId: String? = nil
     @State private var renameText = ""
-    @State private var isLoading = true
+    @State private var hasLoaded = false
     @State private var errorMessage: String?
-    @State private var folderRailCollapsed = false
+    @AppStorage("journals.folderRailCollapsed") private var folderRailCollapsed = false
+    /// Rail row a dragged journal is hovering ("uncategorized" or a folder id).
+    @State private var dropTarget: String? = nil
+    @State private var scrollTarget: String? = nil
     @FocusState private var renameFocused: Bool
+    @FocusState private var listFocused: Bool
 
-    private static let relFmt: RelativeDateTimeFormatter = {
-        let f = RelativeDateTimeFormatter(); f.unitsStyle = .abbreviated; return f
-    }()
     private let palette = ["matcha", "blue", "purple", "pink", "amber", "red", "teal", "gray"]
+    /// Diary `.journal` kind is retired — every new journal is a single
+    /// document. Only the doc-kind templates are offered.
+    private static let creatableKinds = JournalKind.allCases.filter { $0 != .journal }
+    /// Drag payload prefix, so a journal dropped on a folder can't be confused
+    /// with plain text dragged in from elsewhere.
+    private static let dragPrefix = "espresso-journal:"
+
+    private var sort: SortKey { SortKey(rawValue: sortRaw) ?? .modified }
 
     var body: some View {
         HSplitView {
             if folderRailCollapsed {
                 MWHubRailStrip { folderRailCollapsed = false }
             } else {
-                folderRail.frame(minWidth: 180, idealWidth: 210, maxWidth: 260)
+                folderRail.frame(minWidth: 190, idealWidth: 220, maxWidth: 280)
             }
-            noteList.frame(minWidth: 250, idealWidth: 290, maxWidth: 380)
+            noteList.frame(minWidth: 260, idealWidth: 310, maxWidth: 400)
             editorPane.frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(ThemeRadialBackground())
+        // ⌘N anywhere in the workspace — the list header's compose button is
+        // a menu, which can't carry a shortcut of its own.
+        .background {
+            Button("New journal") { Task { await createNote(.note) } }
+                .keyboardShortcut("n", modifiers: .command)
+                .opacity(0)
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+        }
         .task {
             await load()
             if let jid = appState.selectedJournalId { selectedJournalId = jid; ensureModeFor(jid) }
@@ -367,42 +397,46 @@ struct JournalsWorkspace: View {
     // ── Folder rail ─────────────────────────────────────────────────────
 
     private var folderRail: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Folders")
+        let counts = railCounts
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Text("Journals")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(appState.themeTextSecondary)
                 Spacer()
-                Button { folderRailCollapsed = true } label: {
-                    Image(systemName: "sidebar.left").font(.system(size: 12))
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(appState.themeTextSecondary)
-                .help("Hide sidebar")
-                Button { Task { await newFolder(parent: nil) } } label: {
-                    Image(systemName: "folder.badge.plus").font(.system(size: 12))
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(appState.themeTextSecondary)
-                .help("New folder")
+                MWHubRailIconButton(icon: "sidebar.left", help: "Hide folders") { folderRailCollapsed = true }
             }
             .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 8)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
-                    fixedRow(title: "All Journals", icon: "tray.full", selected: mode == .all) { mode = .all }
-                    fixedRow(title: "Starred", icon: "star", selected: mode == .starred) { mode = .starred }
+                    smartRow(.all, title: "All Journals", icon: "tray.full", count: counts.all)
+                    smartRow(.starred, title: "Starred", icon: "star", count: counts.starred)
                     if hasSharedNotes {
-                        fixedRow(title: "Shared with me", icon: "person.2",
-                                 selected: mode == .shared) { mode = .shared }
+                        smartRow(.shared, title: "Shared with me", icon: "person.2", count: counts.shared)
                     }
-                    fixedRow(title: "Uncategorized", icon: "tray",
-                             selected: mode == .uncategorized) { mode = .uncategorized }
-                    if !folders.isEmpty {
-                        Divider().padding(.horizontal, 8).padding(.vertical, 4)
-                    }
-                    ForEach(visibleFolders, id: \.0.id) { pair in
-                        folderTreeRow(pair.0, depth: pair.1)
+                    smartRow(.uncategorized, title: "Uncategorized", icon: "tray", count: counts.uncategorized)
+                        .dropDestination(for: String.self) { items, _ in
+                            handleDrop(items, into: nil)
+                        } isTargeted: { setDropTarget("uncategorized", $0) }
+
+                    foldersHeading
+
+                    if folders.isEmpty {
+                        Button { Task { await newFolder(parent: nil) } } label: {
+                            JournalRailRow(icon: "folder.badge.plus",
+                                           iconColor: appState.themeSidebarTextSecondary,
+                                           selected: false) {
+                                Text("New folder")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(appState.themeSidebarTextSecondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        ForEach(visibleFolders, id: \.0.id) { pair in
+                            folderTreeRow(pair.0, depth: pair.1, count: counts.folders[pair.0.id] ?? 0)
+                        }
                     }
                 }
                 .padding(.horizontal, 8).padding(.bottom, 12)
@@ -412,21 +446,38 @@ struct JournalsWorkspace: View {
         .background(appState.themeSidebar)
     }
 
-    private func fixedRow(title: String, icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 7) {
-                Image(systemName: icon)
-                    .font(.system(size: 11))
-                    .foregroundColor(selected ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
-                    .frame(width: 15)
+    private var foldersHeading: some View {
+        HStack(spacing: 4) {
+            Text("FOLDERS")
+                .font(.system(size: 9, weight: .semibold))
+                .tracking(0.6)
+                .foregroundColor(appState.themeSidebarTextSecondary)
+            Spacer()
+            Button { Task { await newFolder(parent: nil) } } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(appState.themeSidebarTextSecondary)
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("New folder")
+        }
+        .padding(.leading, 8).padding(.trailing, 4).padding(.top, 14).padding(.bottom, 3)
+    }
+
+    private func smartRow(_ target: FolderMode, title: String, icon: String, count: Int) -> some View {
+        let selected = mode == target
+        let isDrop = target == .uncategorized && dropTarget == "uncategorized"
+        return Button { mode = target } label: {
+            JournalRailRow(icon: icon,
+                           iconColor: selected ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary,
+                           selected: selected, count: count, isDropTarget: isDrop) {
                 Text(title)
                     .font(.system(size: 12, weight: selected ? .semibold : .regular))
                     .foregroundColor(appState.themeSidebarText.opacity(0.92))
-                Spacer(minLength: 0)
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 6).fill(selected ? appState.themeSidebarAccent.opacity(0.10) : Color.clear))
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -448,53 +499,41 @@ struct JournalsWorkspace: View {
 
     private func hasChildren(_ id: String) -> Bool { folders.contains { $0.parentId == id } }
 
+    /// A folder row. Renaming swaps only the title for a field — the row frame,
+    /// gutter and icon stay put, so nothing jumps while you type.
     @ViewBuilder
-    private func folderTreeRow(_ folder: MWJournalFolder, depth: Int) -> some View {
+    private func folderTreeRow(_ folder: MWJournalFolder, depth: Int, count: Int) -> some View {
         let isSel = mode == .folder(folder.id)
-        HStack(spacing: 4) {
-            if hasChildren(folder.id) {
-                Button { toggle(folder.id) } label: {
-                    Image(systemName: collapsed.contains(folder.id) ? "chevron.right" : "chevron.down")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundColor(appState.themeSidebarTextSecondary)
-                        .frame(width: 10)
-                }
-                .buttonStyle(.plain)
-            } else {
-                Spacer().frame(width: 10)
-            }
+        let tint = iconColor(folder.color, fallback: isSel ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
+        let expandable = hasChildren(folder.id)
+        let isOpen = !collapsed.contains(folder.id)
+
+        Group {
             if renamingFolderId == folder.id {
-                TextField("Folder", text: $renameText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundColor(appState.themeSidebarText)
-                    .focused($renameFocused)
-                    .onSubmit { Task { await commitFolderRename(folder.id) } }
-                    .onChange(of: renameFocused) { _, f in
-                        if !f, renamingFolderId == folder.id { Task { await commitFolderRename(folder.id) } }
+                JournalRailRow(depth: depth, icon: "folder.fill", iconColor: tint, selected: true, count: count) {
+                    renameField("Folder name", size: 12, weight: .regular, color: appState.themeSidebarText) {
+                        commitFolderRename(folder.id)
                     }
-                    .padding(.vertical, 5)
+                }
             } else {
                 Button { mode = .folder(folder.id) } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: "folder.fill")
-                            .font(.system(size: 11))
-                            .foregroundColor(iconColor(folder.color, fallback: appState.themeSidebarTextSecondary))
-                            .frame(width: 15)
+                    JournalRailRow(depth: depth, icon: "folder.fill", iconColor: tint, selected: isSel,
+                                   count: count, isDropTarget: dropTarget == folder.id) {
                         Text(folder.name)
                             .font(.system(size: 12, weight: isSel ? .semibold : .regular))
                             .foregroundColor(appState.themeSidebarText.opacity(0.92))
                             .lineLimit(1)
-                        Spacer(minLength: 0)
                     }
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(isSel ? appState.themeSidebarAccent.opacity(0.10) : Color.clear))
-                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .simultaneousGesture(TapGesture(count: 2).onEnded { startFolderRename(folder) })
+                .dropDestination(for: String.self) { items, _ in
+                    handleDrop(items, into: folder.id)
+                } isTargeted: { setDropTarget(folder.id, $0) }
                 .contextMenu {
+                    Button("New journal here") { mode = .folder(folder.id); Task { await createNote(.note) } }
                     Button("New subfolder") { Task { await newFolder(parent: folder.id) } }
+                    Divider()
                     Button("Rename…") { startFolderRename(folder) }
                     colorMenu { c in Task { await setFolderColor(folder, c) } }
                     Divider()
@@ -502,142 +541,215 @@ struct JournalsWorkspace: View {
                 }
             }
         }
-        .padding(.leading, CGFloat(depth) * 12)
+        // The disclosure lives in the row's reserved gutter, outside the
+        // select button so a click on it only expands/collapses.
+        .overlay(alignment: .leading) {
+            if expandable {
+                Button { toggle(folder.id) } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
+                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                        .foregroundColor(appState.themeSidebarTextSecondary)
+                        .frame(width: JournalRailRow<EmptyView>.gutter, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, JournalRailRow<EmptyView>.leadingInset(depth: depth))
+                .help(isOpen ? "Collapse" : "Expand")
+            }
+        }
     }
 
     // ── Note list (col 2) ───────────────────────────────────────────────
 
     private var noteList: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundColor(appState.themeTextSecondary)
-                    TextField("Search", text: $search)
-                        .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(appState.themeText)
-                }
-                .padding(.horizontal, 8).padding(.vertical, 5)
-                .background(RoundedRectangle(cornerRadius: 6).fill(appState.themeCard.opacity(0.6)))
-
-                HStack(spacing: 8) {
-                    Text(listTitle).font(.system(size: 13, weight: .bold)).foregroundColor(appState.themeText).lineLimit(1)
-                    Spacer()
-                    Menu {
-                        ForEach(SortKey.allCases, id: \.self) { s in
-                            Button { sort = s } label: { Label(s.rawValue, systemImage: sort == s ? "checkmark" : "") }
-                        }
-                    } label: {
-                        Image(systemName: "arrow.up.arrow.down").font(.system(size: 11)).foregroundColor(appState.themeTextSecondary)
-                    }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                    .help("Sort")
-                    Menu {
-                        // Diary `.journal` kind is retired — every new journal is a
-                        // single document. Offer only the doc-kind templates.
-                        ForEach(JournalKind.allCases.filter { $0 != .journal }) { k in
-                            Button { Task { await createNote(k) } } label: { Label(k.label, systemImage: k.icon) }
-                        }
-                    } label: {
-                        Image(systemName: "square.and.pencil").font(.system(size: 13)).foregroundColor(appState.themeAccent)
-                    }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                    .help("New journal")
-                }
-            }
-            .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 8)
+            listHeader
             Divider().opacity(0.2)
 
-            if isLoading {
-                Spacer(); ProgressView().tint(appState.themeTextSecondary); Spacer()
-            } else if let errorMessage {
+            if !hasLoaded && errorMessage == nil {
                 Spacer()
-                Text(errorMessage).font(.system(size: 11)).foregroundColor(.red.opacity(0.8)).padding(12)
+                ProgressView().controlSize(.small)
                 Spacer()
+            } else if !hasLoaded, let errorMessage {
+                loadErrorState(errorMessage)
             } else if shownNotes.isEmpty {
                 noteEmptyState
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 1) {
-                        ForEach(shownNotes) { j in noteRow(j) }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            ForEach(sections) { section in
+                                if let title = section.title { sectionHeader(title) }
+                                ForEach(section.notes) { j in
+                                    noteRowContainer(j).id(j.id)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 6).padding(.horizontal, 8)
                     }
-                    .padding(.vertical, 4).padding(.horizontal, 6)
+                    .onChange(of: scrollTarget) { _, id in
+                        guard let id else { return }
+                        proxy.scrollTo(id)
+                    }
                 }
+                .focusable()
+                .focused($listFocused)
+                .focusEffectDisabled()
+                .onKeyPress(.upArrow) { step(-1); return .handled }
+                .onKeyPress(.downArrow) { step(1); return .handled }
             }
+
+            if hasLoaded, let errorMessage { errorBanner(errorMessage) }
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(appState.themeBg.opacity(0.3))
     }
 
+    private var listHeader: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 6) {
+                Text(listTitle)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(appState.themeText)
+                    .lineLimit(1)
+                Text(countLabel)
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .foregroundColor(appState.themeTextSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Menu {
+                    Picker("Sort by", selection: $sortRaw) {
+                        ForEach(SortKey.allCases, id: \.self) { s in Text(s.rawValue).tag(s.rawValue) }
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down").font(.system(size: 11, weight: .medium))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                // Borderless menu labels take the window tint, not
+                // foregroundColor — keep sort neutral; compose is the one accent.
+                .tint(appState.themeTextSecondary)
+                .help("Sort: \(sort.rawValue)")
+                Menu {
+                    ForEach(Self.creatableKinds) { k in
+                        Button { Task { await createNote(k) } } label: { Label(k.label, systemImage: k.icon) }
+                    }
+                } label: {
+                    Image(systemName: "square.and.pencil").font(.system(size: 13, weight: .medium))
+                } primaryAction: {
+                    Task { await createNote(.note) }
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.visible)
+                .fixedSize()
+                .tint(appState.themeAccent)
+                .help("New journal (⌘N) · arrow for templates")
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundColor(appState.themeTextSecondary)
+                TextField("Search \(listTitle)", text: $search)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(appState.themeText)
+                if !search.isEmpty {
+                    Button { search = "" } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(appState.themeTextSecondary)
+                    .help("Clear search")
+                }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 6).fill(appState.themeCard.opacity(0.6)))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(appState.themeBorder.opacity(0.35), lineWidth: 0.5))
+        }
+        .padding(.horizontal, 12).padding(.top, 14).padding(.bottom, 10)
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 9.5, weight: .semibold))
+            .tracking(0.6)
+            .foregroundColor(appState.themeTextSecondary)
+            .padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 3)
+    }
+
+    /// Own journals drag onto a folder (or Uncategorized) to file them. A
+    /// journal shared with me sits in its owner's tree, so it can't be moved.
+    @ViewBuilder
+    private func noteRowContainer(_ j: MWJournal) -> some View {
+        if j.isSharedWithMe || renamingJournalId == j.id {
+            noteRow(j)
+        } else {
+            noteRow(j).draggable(Self.dragPrefix + j.id) {
+                Label(displayTitle(j), systemImage: j.icon ?? JournalKind.from(j.kind).icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(appState.themeCard))
+            }
+        }
+    }
+
+    @ViewBuilder
     private func noteRow(_ j: MWJournal) -> some View {
+        let _ = JournalStarStore.shared.generation
         let kind = JournalKind.from(j.kind)
         let selected = selectedJournalId == j.id
-        _ = JournalStarStore.shared.generation
-        return Button { selectedJournalId = j.id } label: {
-            HStack(alignment: .top, spacing: 9) {
-                Image(systemName: j.icon ?? kind.icon)
-                    .font(.system(size: 14))
-                    .foregroundColor(iconColor(j.color, fallback: appState.themeAccent))
-                    .frame(width: 18)
-                VStack(alignment: .leading, spacing: 2) {
-                    if renamingJournalId == j.id {
-                        TextField("Title", text: $renameText)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(appState.themeText)
-                            .focused($renameFocused)
-                            .onSubmit { Task { await commitNoteRename(j.id) } }
-                            .onChange(of: renameFocused) { _, f in
-                                if !f, renamingJournalId == j.id { Task { await commitNoteRename(j.id) } }
-                            }
-                    } else {
-                        HStack(spacing: 5) {
-                            Text(j.title.isEmpty ? "Untitled" : j.title)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(appState.themeText)
-                                .lineLimit(1)
-                            if JournalStarStore.shared.isStarred(j.id) {
-                                Image(systemName: "star.fill").font(.system(size: 8)).foregroundColor(appState.themeAccent)
-                            }
-                        }
-                    }
-                    if let p = j.preview, !p.isEmpty {
-                        Text(p).font(.system(size: 11)).foregroundColor(appState.themeTextSecondary)
-                            .lineLimit(2).multilineTextAlignment(.leading)
-                    }
-                    Text(modifiedLabel(j.updatedAt))
-                        .font(.system(size: 10)).foregroundColor(appState.themeTextSecondary.opacity(0.8))
-                    if j.isSharedWithMe {
-                        HStack(spacing: 3) {
-                            Image(systemName: "person.2.fill").font(.system(size: 8))
-                            Text(j.ownerName.map { "Shared by \($0)" } ?? "Shared")
-                                .font(.system(size: 9, weight: .medium))
-                                .lineLimit(1)
-                        }
-                        .foregroundColor(appState.themeAccent)
-                        .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(Capsule().fill(appState.themeAccent.opacity(0.12)))
-                        .padding(.top, 1)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 6).fill(selected ? appState.themeAccent.opacity(0.14) : Color.clear))
-            .contentShape(Rectangle())
+        let row: (AnyView) -> JournalNoteRow<AnyView> = { title in
+            JournalNoteRow(
+                icon: j.icon ?? kind.icon,
+                tint: noteTint(j),
+                selected: selected,
+                dateLabel: rowDate(j),
+                preview: j.preview,
+                starred: JournalStarStore.shared.isStarred(j.id),
+                folderName: showsFolderNames ? folderName(j.folderId) : nil,
+                sharedBy: j.isSharedWithMe ? (j.ownerName.map { "Shared by \($0)" } ?? "Shared") : nil,
+            ) { title }
         }
-        .buttonStyle(.plain)
-        .simultaneousGesture(TapGesture(count: 2).onEnded { startNoteRename(j) })
-        .contextMenu { noteMenu(j) }
+        if renamingJournalId == j.id {
+            row(AnyView(renameField("Title", size: 13, weight: .semibold, color: appState.themeText) {
+                commitNoteRename(j.id)
+            }))
+        } else {
+            Button {
+                selectedJournalId = j.id
+                listFocused = true
+            } label: {
+                row(AnyView(
+                    Text(displayTitle(j))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(appState.themeText)
+                        .lineLimit(1)
+                ))
+            }
+            .buttonStyle(.plain)
+            .simultaneousGesture(TapGesture(count: 2).onEnded { startNoteRename(j) })
+            .contextMenu { noteMenu(j) }
+        }
     }
 
     @ViewBuilder
     private func noteMenu(_ j: MWJournal) -> some View {
         Button("Rename") { startNoteRename(j) }
         colorMenu { c in Task { await setNoteColor(j, c) } }
-        Menu("Move to") {
-            Button("None (unfiled)") { Task { await move(j, to: nil) } }
-            if !folders.isEmpty { Divider() }
-            ForEach(folders.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) { f in
-                Button(f.name) { Task { await move(j, to: f.id) } }
+        if !j.isSharedWithMe {
+            Menu("Move to") {
+                Button("Uncategorized") { Task { await move(j, to: nil) } }
+                    .disabled(j.folderId == nil)
+                if !folders.isEmpty { Divider() }
+                ForEach(folders.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) { f in
+                    Button(f.name) { Task { await move(j, to: f.id) } }
+                        .disabled(j.folderId == f.id)
+                }
             }
         }
         Button(JournalStarStore.shared.isStarred(j.id) ? "Unstar" : "Star") { JournalStarStore.shared.toggle(j.id) }
@@ -657,15 +769,123 @@ struct JournalsWorkspace: View {
         }
     }
 
+    /// Inline rename field. Sits on a faint well that bleeds 4pt past the
+    /// text on each side, so the typed text lines up with the static title.
+    private func renameField(
+        _ placeholder: String, size: CGFloat, weight: Font.Weight, color: Color,
+        onCommit: @escaping () -> Void
+    ) -> some View {
+        TextField(placeholder, text: $renameText)
+            .textFieldStyle(.plain)
+            .font(.system(size: size, weight: weight))
+            .foregroundColor(color)
+            .focused($renameFocused)
+            .onAppear { DispatchQueue.main.async { renameFocused = true } }
+            .onSubmit(onCommit)
+            .onExitCommand { cancelRename() }
+            .onChange(of: renameFocused) { _, focused in if !focused { onCommit() } }
+            .padding(.horizontal, 4).padding(.vertical, 1)
+            .background(RoundedRectangle(cornerRadius: 4).fill(appState.themeBg.opacity(0.55)))
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(appState.themeAccent.opacity(0.55), lineWidth: 1))
+            .padding(.horizontal, -4)
+    }
+
+    // ── Empty / error states ────────────────────────────────────────────
+
     private var noteEmptyState: some View {
-        VStack(spacing: 8) {
+        let copy = emptyCopy
+        return VStack(spacing: 10) {
             Spacer()
-            Image(systemName: "note.text").font(.system(size: 26)).foregroundColor(appState.themeTextSecondary.opacity(0.6))
-            Text(search.isEmpty ? "No journals here" : "No matches")
-                .font(.system(size: 12)).foregroundColor(appState.themeTextSecondary)
+            Image(systemName: copy.icon)
+                .font(.system(size: 20, weight: .light))
+                .foregroundColor(appState.themeTextSecondary)
+                .frame(width: 48, height: 48)
+                .background(Circle().fill(appState.themeText.opacity(0.05)))
+            Text(copy.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(appState.themeText)
+                .multilineTextAlignment(.center)
+            Text(copy.detail)
+                .font(.system(size: 11.5))
+                .foregroundColor(appState.themeTextSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 230)
+            if !search.isEmpty {
+                Button("Clear search") { search = "" }
+                    .controlSize(.small)
+                    .padding(.top, 2)
+            } else if copy.canCreate {
+                Button { Task { await createNote(.note) } } label: {
+                    Label("New journal", systemImage: "square.and.pencil")
+                        .font(.system(size: 11.5, weight: .medium))
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(appState.themeAccent)
+                .controlSize(.small)
+                .padding(.top, 2)
+            }
+            Spacer()
             Spacer()
         }
+        .padding(.horizontal, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var emptyCopy: (icon: String, title: String, detail: String, canCreate: Bool) {
+        if !search.isEmpty {
+            return ("magnifyingglass", "No matches for “\(search)”", "Try a different word, or search another folder.", false)
+        }
+        switch mode {
+        case .all:
+            return ("book.closed", "No journals yet", "Capture notes, drafts and to-dos. Press ⌘N to start one.", true)
+        case .starred:
+            return ("star", "Nothing starred", "Star a journal from its right-click menu to keep it here.", false)
+        case .shared:
+            return ("person.2", "Nothing shared with you", "Journals a collaborator invites you to will show up here.", false)
+        case .uncategorized:
+            return ("tray", "No unfiled journals", "Journals that aren't in a folder land here.", true)
+        case .folder:
+            return ("folder", "This folder is empty", "Start a journal here, or drag one in from the list.", true)
+        }
+    }
+
+    private func loadErrorState(_ message: String) -> some View {
+        VStack(spacing: 10) {
+            Spacer()
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 20, weight: .light))
+                .foregroundColor(.orange)
+            Text("Couldn't load journals")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(appState.themeText)
+            Text(message)
+                .font(.system(size: 11))
+                .foregroundColor(appState.themeTextSecondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .frame(maxWidth: 240)
+            Button("Try again") { Task { await load() } }
+                .controlSize(.small)
+            Spacer()
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 9))
+            Text(message).font(.system(size: 10.5)).lineLimit(2)
+            Spacer(minLength: 0)
+            Button { errorMessage = nil } label: {
+                Image(systemName: "xmark").font(.system(size: 8, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss")
+        }
+        .foregroundColor(.orange)
+        .padding(.horizontal, 12).padding(.vertical, 6)
     }
 
     // ── Editor (col 3) ──────────────────────────────────────────────────
@@ -675,15 +895,11 @@ struct JournalsWorkspace: View {
         if let jid = selectedJournalId {
             JournalDetailView(journalId: jid, isEmbedded: true)
         } else {
-            VStack(spacing: 10) {
-                Spacer()
-                Image(systemName: "doc.text").font(.system(size: 40)).foregroundColor(appState.themeTextSecondary.opacity(0.45))
-                Text("Select a journal").font(.system(size: 14, weight: .medium)).foregroundColor(appState.themeTextSecondary)
-                Text("or create one with the pencil button.").font(.system(size: 12)).foregroundColor(appState.themeTextSecondary.opacity(0.8))
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.appBackground)
+            JournalsStartPane(
+                kinds: Self.creatableKinds,
+                destination: newJournalDestination,
+                tint: { kindTint($0) },
+            ) { kind in Task { await createNote(kind) } }
         }
     }
 
@@ -699,12 +915,47 @@ struct JournalsWorkspace: View {
         }
     }
 
+    private var countLabel: String {
+        let n = shownNotes.count
+        return search.isEmpty ? "\(n)" : "\(n) found"
+    }
+
+    /// Where ⌘N / a template card files the new journal, for the start pane's
+    /// hint. Starred and Shared views create at the root.
+    private var newJournalDestination: String? {
+        switch mode {
+        case .folder, .uncategorized: return listTitle
+        default: return nil
+        }
+    }
+
     /// Any journals shared with me (I'm a collaborator, not the owner)?
     private var hasSharedNotes: Bool { journals.contains { $0.isSharedWithMe } }
 
     private var currentFolderId: String? {
         if case .folder(let id) = mode { return id }
         return nil
+    }
+
+    /// Cross-folder views say where each journal is filed.
+    private var showsFolderNames: Bool { mode == .all || mode == .starred }
+
+    private struct RailCounts {
+        var all = 0, starred = 0, shared = 0, uncategorized = 0
+        var folders: [String: Int] = [:]
+    }
+
+    /// Per-row counts, matching what each view lists (`shownNotes`).
+    private var railCounts: RailCounts {
+        _ = JournalStarStore.shared.generation
+        var c = RailCounts()
+        for j in journals {
+            if JournalStarStore.shared.isStarred(j.id) { c.starred += 1 }
+            if j.isSharedWithMe { c.shared += 1; continue }
+            c.all += 1
+            if let f = j.folderId { c.folders[f, default: 0] += 1 } else { c.uncategorized += 1 }
+        }
+        return c
     }
 
     private var shownNotes: [MWJournal] {
@@ -734,9 +985,70 @@ struct JournalsWorkspace: View {
         return base
     }
 
-    private func modifiedLabel(_ iso: String?) -> String {
-        guard let iso, let d = parseMWDate(iso) else { return "" }
-        return Self.relFmt.localizedString(for: d, relativeTo: Date())
+    private struct NoteSection: Identifiable {
+        let id: String
+        let title: String?
+        let notes: [MWJournal]
+    }
+
+    /// Date-sorted lists group like Notes (Today · Yesterday · Previous 7 Days
+    /// · Previous 30 Days · month · year), in Pacific like every other date in
+    /// the app. A title sort is one ungrouped run.
+    private var sections: [NoteSection] {
+        let notes = shownNotes
+        guard sort != .title, !notes.isEmpty else { return [NoteSection(id: "all", title: nil, notes: notes)] }
+        let cal = PacificDateFormatter.pacificCalendar
+        let startOfToday = cal.startOfDay(for: Date())
+        var order: [String] = []
+        var buckets: [String: [MWJournal]] = [:]
+        for j in notes {
+            let key = Self.bucketTitle(for: sortDate(j), calendar: cal, startOfToday: startOfToday)
+            if buckets[key] == nil { order.append(key) }
+            buckets[key, default: []].append(j)
+        }
+        return order.map { NoteSection(id: $0, title: $0, notes: buckets[$0] ?? []) }
+    }
+
+    private func sortDate(_ j: MWJournal) -> Date? {
+        PacificDateFormatter.parse(sort == .created ? j.createdAt : j.updatedAt)
+    }
+
+    private static let monthFmt = PacificDateFormatter.display { $0.dateFormat = "LLLL" }
+    private static let yearFmt = PacificDateFormatter.display { $0.dateFormat = "yyyy" }
+    private static let weekdayFmt = PacificDateFormatter.display { $0.dateFormat = "EEEE" }
+    private static let timeFmt = PacificDateFormatter.display { $0.dateFormat = "h:mm a" }
+    private static let dayFmt = PacificDateFormatter.display { $0.dateFormat = "MMM d" }
+    private static let fullDayFmt = PacificDateFormatter.display { $0.dateFormat = "M/d/yy" }
+
+    private static func bucketTitle(for date: Date?, calendar cal: Calendar, startOfToday: Date) -> String {
+        guard let date else { return "Earlier" }
+        func daysAgo(_ n: Int) -> Date { cal.date(byAdding: .day, value: -n, to: startOfToday) ?? startOfToday }
+        if date >= startOfToday { return "Today" }
+        if date >= daysAgo(1) { return "Yesterday" }
+        if date >= daysAgo(7) { return "Previous 7 Days" }
+        if date >= daysAgo(30) { return "Previous 30 Days" }
+        if cal.isDate(date, equalTo: startOfToday, toGranularity: .year) { return monthFmt.string(from: date) }
+        return yearFmt.string(from: date)
+    }
+
+    /// Notes-style row date: a time today, "Yesterday", a weekday this week,
+    /// then a short date.
+    private func rowDate(_ j: MWJournal) -> String {
+        guard let d = sortDate(j) else { return "" }
+        let cal = PacificDateFormatter.pacificCalendar
+        let startOfToday = cal.startOfDay(for: Date())
+        if d >= startOfToday { return Self.timeFmt.string(from: d) }
+        if let y = cal.date(byAdding: .day, value: -1, to: startOfToday), d >= y { return "Yesterday" }
+        if let w = cal.date(byAdding: .day, value: -6, to: startOfToday), d >= w { return Self.weekdayFmt.string(from: d) }
+        if cal.isDate(d, equalTo: startOfToday, toGranularity: .year) { return Self.dayFmt.string(from: d) }
+        return Self.fullDayFmt.string(from: d)
+    }
+
+    private func displayTitle(_ j: MWJournal) -> String { j.title.isEmpty ? "Untitled" : j.title }
+
+    private func folderName(_ id: String?) -> String? {
+        guard let id else { return nil }
+        return folders.first { $0.id == id }?.name
     }
 
     private func paletteColor(_ name: String) -> Color {
@@ -757,6 +1069,13 @@ struct JournalsWorkspace: View {
         return paletteColor(name)
     }
 
+    private func kindTint(_ kind: JournalKind) -> Color { kind.tint ?? appState.themeTextSecondary }
+
+    /// A journal's own color wins; otherwise it's color-coded by type.
+    private func noteTint(_ j: MWJournal) -> Color {
+        iconColor(j.color, fallback: kindTint(JournalKind.from(j.kind)))
+    }
+
     private func toggle(_ id: String) {
         if collapsed.contains(id) { collapsed.remove(id) } else { collapsed.insert(id) }
     }
@@ -767,6 +1086,31 @@ struct JournalsWorkspace: View {
         // so route it to the "Shared with me" view, not a phantom folder.
         if j.isSharedWithMe { mode = .shared; return }
         if let fid = j.folderId { mode = .folder(fid); collapsed.remove(fid) } else { mode = .uncategorized }
+    }
+
+    /// Arrow-key selection through the list, in display order.
+    private func step(_ delta: Int) {
+        let ids = sections.flatMap { $0.notes.map(\.id) }
+        guard !ids.isEmpty else { return }
+        let current = selectedJournalId.flatMap { ids.firstIndex(of: $0) } ?? (delta > 0 ? -1 : ids.count)
+        let next = min(max(current + delta, 0), ids.count - 1)
+        selectedJournalId = ids[next]
+        scrollTarget = ids[next]
+    }
+
+    private func setDropTarget(_ key: String, _ targeted: Bool) {
+        if targeted { dropTarget = key } else if dropTarget == key { dropTarget = nil }
+    }
+
+    private func handleDrop(_ items: [String], into folderId: String?) -> Bool {
+        let ids = Set(items.compactMap { item -> String? in
+            item.hasPrefix(Self.dragPrefix) ? String(item.dropFirst(Self.dragPrefix.count)) : nil
+        })
+        let moving = journals.filter { ids.contains($0.id) && !$0.isSharedWithMe && $0.folderId != folderId }
+        dropTarget = nil
+        guard !moving.isEmpty else { return false }
+        Task { for j in moving { await move(j, to: folderId) } }
+        return true
     }
 
     private func startFolderRename(_ folder: MWJournalFolder) {
@@ -784,17 +1128,23 @@ struct JournalsWorkspace: View {
         renameFocused = true
     }
 
+    /// Escape: drop the edit. Clearing the ids first makes the focus-loss
+    /// commit that follows a no-op.
+    private func cancelRename() {
+        renamingFolderId = nil
+        renamingJournalId = nil
+    }
+
     // ── Data ────────────────────────────────────────────────────────────
 
     private func load() async {
-        isLoading = true
-        errorMessage = nil
-        defer { isLoading = false }
         do {
             async let f = MatchaWorkService.shared.listJournalFolders()
             async let j = MatchaWorkService.shared.listJournals(forceRefresh: true)
             folders = try await f
             journals = try await j
+            errorMessage = nil
+            hasLoaded = true
             if case .folder(let id) = mode, !folders.contains(where: { $0.id == id }) { mode = .all }
         } catch {
             errorMessage = error.localizedDescription
@@ -828,12 +1178,17 @@ struct JournalsWorkspace: View {
         await load()
     }
 
-    private func commitFolderRename(_ id: String) async {
-        let name = renameText.trimmingCharacters(in: .whitespaces)
+    /// Ends the edit synchronously (so Return and the focus loss that follows
+    /// don't both save), then renames in the background.
+    private func commitFolderRename(_ id: String) {
+        guard renamingFolderId == id else { return }
+        let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         renamingFolderId = nil
-        guard !name.isEmpty else { return }
-        _ = try? await MatchaWorkService.shared.renameJournalFolder(id: id, name: name)
-        await load()
+        guard !name.isEmpty, name != folders.first(where: { $0.id == id })?.name else { return }
+        Task {
+            _ = try? await MatchaWorkService.shared.renameJournalFolder(id: id, name: name)
+            await load()
+        }
     }
 
     private func createNote(_ kind: JournalKind) async {
@@ -845,20 +1200,27 @@ struct JournalsWorkspace: View {
             )
             appState.journalsListGeneration &+= 1
             await load()
+            // Starred / Shared views can't show a brand-new journal; jump to
+            // where it was filed so the rename field is on screen.
+            if mode == .starred || mode == .shared { mode = .all }
+            search = ""
             selectedJournalId = j.id
             startNoteRename(j)
         } catch { errorMessage = error.localizedDescription }
     }
 
-    private func commitNoteRename(_ id: String) async {
-        let name = renameText.trimmingCharacters(in: .whitespaces)
+    private func commitNoteRename(_ id: String) {
+        guard renamingJournalId == id else { return }
+        let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         renamingJournalId = nil
-        guard !name.isEmpty else { return }
-        _ = try? await MatchaWorkService.shared.updateJournal(
-            id: id, title: name, description: nil, color: nil, icon: nil,
-        )
-        appState.journalsListGeneration &+= 1
-        await refreshNotes()
+        guard !name.isEmpty, name != journals.first(where: { $0.id == id })?.title else { return }
+        Task {
+            _ = try? await MatchaWorkService.shared.updateJournal(
+                id: id, title: name, description: nil, color: nil, icon: nil,
+            )
+            appState.journalsListGeneration &+= 1
+            await refreshNotes()
+        }
     }
 
     private func setNoteColor(_ j: MWJournal, _ color: String) async {
@@ -886,7 +1248,7 @@ struct JournalsWorkspace: View {
 
     private func confirmDelete(_ j: MWJournal) {
         let alert = NSAlert()
-        alert.messageText = "Delete \"\(j.title.isEmpty ? "Untitled" : j.title)\"?"
+        alert.messageText = "Delete \"\(displayTitle(j))\"?"
         alert.informativeText = "Permanently deletes the document and its contents. Cannot be undone."
         alert.alertStyle = .critical
         alert.addButton(withTitle: "Delete Permanently")
@@ -898,5 +1260,258 @@ struct JournalsWorkspace: View {
             appState.journalsListGeneration &+= 1
             await load()
         }
+    }
+}
+
+// MARK: - Workspace pieces
+
+/// One row in the Journals folder rail. Every row — smart folder, user folder,
+/// a folder being renamed — shares this frame (disclosure gutter · icon ·
+/// title · count), so icons and titles line up the whole way down. Nesting
+/// shifts the whole row right by `depth`; the caller draws the disclosure
+/// chevron into the gutter.
+struct JournalRailRow<Title: View>: View {
+    static var gutter: CGFloat { 12 }
+    static func leadingInset(depth: Int) -> CGFloat { 2 + CGFloat(depth) * 14 }
+
+    var depth: Int = 0
+    let icon: String
+    let iconColor: Color
+    let selected: Bool
+    var count: Int? = nil
+    var isDropTarget: Bool = false
+    @ViewBuilder var title: () -> Title
+
+    @Environment(AppState.self) private var appState
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: Self.gutter, height: 1)
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundColor(iconColor)
+                .frame(width: 16)
+                .padding(.trailing, 7)
+            title()
+            Spacer(minLength: 6)
+            if let count, count > 0 {
+                Text("\(count)")
+                    .font(.system(size: 10.5))
+                    .monospacedDigit()
+                    .foregroundColor(appState.themeSidebarTextSecondary)
+            }
+        }
+        .padding(.leading, Self.leadingInset(depth: depth))
+        .padding(.trailing, 8)
+        .frame(height: 26)
+        .background(RoundedRectangle(cornerRadius: 6).fill(background))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(appState.themeSidebarAccent.opacity(isDropTarget ? 0.75 : 0), lineWidth: 1.5)
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+    }
+
+    private var background: Color {
+        if isDropTarget { return appState.themeSidebarAccent.opacity(0.16) }
+        if selected { return appState.themeSidebarAccent.opacity(0.11) }
+        if hovering { return appState.themeSidebarText.opacity(0.05) }
+        return .clear
+    }
+}
+
+/// One journal in the list: a type-tinted tile, the title with its date, a
+/// two-line preview, and a meta line (star · folder · shared-by) when there is
+/// something to say.
+struct JournalNoteRow<Title: View>: View {
+    let icon: String
+    let tint: Color
+    let selected: Bool
+    let dateLabel: String
+    let preview: String?
+    var starred: Bool = false
+    var folderName: String? = nil
+    var sharedBy: String? = nil
+    @ViewBuilder var title: () -> Title
+
+    @Environment(AppState.self) private var appState
+    @State private var hovering = false
+
+    /// The snippet as one flowing line: a checklist or multi-paragraph body
+    /// would otherwise spend both preview lines on its first item.
+    private var previewText: String? {
+        let p = (preview ?? "").split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return p.isEmpty ? nil : p
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 7)
+                .fill(tint.opacity(selected ? 0.24 : 0.14))
+                .frame(width: 28, height: 28)
+                .overlay(
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(tint)
+                )
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    title()
+                    Spacer(minLength: 4)
+                    Text(dateLabel)
+                        .font(.system(size: 10.5))
+                        .monospacedDigit()
+                        .foregroundColor(appState.themeTextSecondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                Text(previewText ?? "No additional text")
+                    .font(.system(size: 11.5))
+                    .foregroundColor(appState.themeTextSecondary.opacity(previewText == nil ? 0.6 : 1))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if starred || folderName != nil || sharedBy != nil {
+                    metaLine.padding(.top, 1)
+                }
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 9)
+        .background(RoundedRectangle(cornerRadius: 8).fill(background))
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+    }
+
+    private var metaLine: some View {
+        HStack(spacing: 8) {
+            if starred {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 9))
+                    .foregroundColor(appState.themeAccent)
+            }
+            if let folderName {
+                Label(folderName, systemImage: "folder")
+                    .labelStyle(JournalMetaLabelStyle())
+                    .foregroundColor(appState.themeTextSecondary)
+            }
+            if let sharedBy {
+                Label(sharedBy, systemImage: "person.2.fill")
+                    .labelStyle(JournalMetaLabelStyle())
+                    .foregroundColor(appState.themeTextSecondary)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Capsule().fill(appState.themeText.opacity(0.06)))
+            }
+        }
+    }
+
+    private var background: Color {
+        if selected { return appState.themeAccent.opacity(0.16) }
+        if hovering { return appState.themeText.opacity(0.045) }
+        return .clear
+    }
+}
+
+private struct JournalMetaLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 3) {
+            configuration.icon.font(.system(size: 8.5))
+            configuration.title.font(.system(size: 10, weight: .medium)).lineLimit(1)
+        }
+    }
+}
+
+/// Column 3 with nothing open: a short prompt and one card per journal type,
+/// so the empty pane is the fastest way to start writing.
+struct JournalsStartPane: View {
+    let kinds: [JournalKind]
+    /// Folder the new journal will land in (nil = top level).
+    let destination: String?
+    let tint: (JournalKind) -> Color
+    let onCreate: (JournalKind) -> Void
+
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        VStack(spacing: 22) {
+            VStack(spacing: 8) {
+                Image(systemName: "book.closed")
+                    .font(.system(size: 22, weight: .light))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .frame(width: 52, height: 52)
+                    .background(Circle().fill(appState.themeText.opacity(0.05)))
+                Text("No journal open")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(appState.themeText)
+                Text("Pick one from the list, or start something new.")
+                    .font(.system(size: 12))
+                    .foregroundColor(appState.themeTextSecondary)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: 10)], spacing: 10) {
+                ForEach(kinds) { kind in
+                    JournalKindCard(kind: kind, tint: tint(kind)) { onCreate(kind) }
+                }
+            }
+            .frame(maxWidth: 560)
+
+            HStack(spacing: 6) {
+                Text("⌘N")
+                    .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).strokeBorder(appState.themeBorder.opacity(0.8), lineWidth: 1))
+                Text(destination.map { "New journal in \($0)" } ?? "New journal")
+                    .font(.system(size: 11))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.appBackground)
+    }
+}
+
+private struct JournalKindCard: View {
+    let kind: JournalKind
+    let tint: Color
+    let action: () -> Void
+
+    @Environment(AppState.self) private var appState
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 7) {
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(tint.opacity(0.14))
+                    .frame(width: 28, height: 28)
+                    .overlay(Image(systemName: kind.icon).font(.system(size: 12, weight: .medium)).foregroundColor(tint))
+                Text(kind.label)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundColor(appState.themeText)
+                Text(kind.blurb)
+                    .font(.system(size: 10.5))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // Equal-height cards keep the type icons on one line across a row.
+            .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 10).fill(appState.themeCard.opacity(hovering ? 0.95 : 0.6)))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(hovering ? tint.opacity(0.45) : appState.themeBorder.opacity(0.45), lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("New \(kind.label.lowercased())")
     }
 }
