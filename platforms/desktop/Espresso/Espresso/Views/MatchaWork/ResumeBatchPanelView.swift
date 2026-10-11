@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ResumeBatchPanelView: View {
+    @Environment(AppState.self) private var appState
     let state: [String: AnyCodable]
     let threadId: String?
 
@@ -56,10 +57,10 @@ struct ResumeBatchPanelView: View {
             HStack {
                 Text("Candidates")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
                 Text("(\(candidates.count))")
                     .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(appState.themeTextSecondary)
                 Spacer()
 
                 if let tid = threadId {
@@ -81,7 +82,7 @@ struct ResumeBatchPanelView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(appState.themeTextSecondary)
                     .disabled(isSyncing)
                     .help("Sync interview statuses")
 
@@ -90,7 +91,7 @@ struct ResumeBatchPanelView: View {
                             .font(.system(size: 11, weight: .medium))
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.matcha600)
+                    .tint(appState.themeAccent)
                     .controlSize(.small)
                     .disabled(selectedIds.isEmpty)
                 }
@@ -102,7 +103,7 @@ struct ResumeBatchPanelView: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(appState.themeTextSecondary)
                 TextField("Search candidates...", text: $searchText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
@@ -124,14 +125,14 @@ struct ResumeBatchPanelView: View {
                 } label: {
                     Image(systemName: "arrow.up.arrow.down")
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
-            .background(Color.zinc800.opacity(0.5))
+            .background(appState.assetWell)
 
             Divider().opacity(0.3)
 
@@ -139,7 +140,7 @@ struct ResumeBatchPanelView: View {
             if let msg = successMessage {
                 Text(msg)
                     .font(.system(size: 11))
-                    .foregroundColor(.matcha500)
+                    .foregroundColor(appState.themeAccent)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 4)
             }
@@ -157,13 +158,13 @@ struct ResumeBatchPanelView: View {
                 VStack(spacing: 8) {
                     Image(systemName: "doc.text.magnifyingglass")
                         .font(.system(size: 28))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                     Text("No candidates yet")
                         .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                     Text("Upload resumes to start analyzing")
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary.opacity(0.7))
+                        .foregroundColor(appState.themeTextSecondary.opacity(0.7))
                 }
                 Spacer()
             } else {
@@ -193,7 +194,6 @@ struct ResumeBatchPanelView: View {
                 }
             }
         }
-        .background(Color.zinc900)
         .sheet(isPresented: $showSendSheet) {
             SendInterviewSheet(
                 count: selectedIds.count,
@@ -231,6 +231,7 @@ struct ResumeBatchPanelView: View {
 // MARK: - Candidate Row
 
 private struct CandidateRow: View {
+    @Environment(AppState.self) private var appState
     let candidate: MWResumeCandidate
     let isExpanded: Bool
     let isSelected: Bool
@@ -243,29 +244,29 @@ private struct CandidateRow: View {
                 Button(action: onToggleSelect) {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 14))
-                        .foregroundColor(isSelected ? .matcha500 : .secondary)
+                        .foregroundColor(isSelected ? appState.themeAccent : appState.themeTextSecondary)
                 }
                 .buttonStyle(.plain)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(candidate.displayName)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white)
+                        .foregroundColor(appState.themeText)
                     HStack(spacing: 6) {
                         if let title = candidate.currentTitle {
                             Text(title)
                                 .font(.system(size: 10))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(appState.themeTextSecondary)
                         }
                         if let yrs = candidate.experienceYears {
                             Text("\(String(format: "%.0f", yrs))y exp")
                                 .font(.system(size: 10))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(appState.themeTextSecondary)
                         }
                         if let loc = candidate.location {
                             Text(loc)
                                 .font(.system(size: 10))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(appState.themeTextSecondary)
                         }
                     }
                 }
@@ -285,7 +286,7 @@ private struct CandidateRow: View {
 
                 Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                     .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(appState.themeTextSecondary)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -297,7 +298,7 @@ private struct CandidateRow: View {
                     if let summary = candidate.summary {
                         Text(summary)
                             .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                     }
                     if let skills = candidate.skills, !skills.isEmpty {
                         FlowTagView(label: "Skills", tags: skills, color: .cyan)
@@ -311,12 +312,12 @@ private struct CandidateRow: View {
                     if let edu = candidate.education {
                         Label(edu, systemImage: "graduationcap")
                             .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                     }
                     if let certs = candidate.certifications, !certs.isEmpty {
                         Label(certs.joined(separator: ", "), systemImage: "rosette")
                             .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                     }
                 }
                 .padding(.horizontal, 46)
@@ -324,11 +325,12 @@ private struct CandidateRow: View {
                 .transition(.opacity)
             }
         }
-        .background(isExpanded ? Color.zinc800.opacity(0.3) : Color.clear)
+        .background(isExpanded ? appState.assetWell : Color.clear)
     }
 }
 
 private struct FlowTagView: View {
+    @Environment(AppState.self) private var appState
     let label: String
     let tags: [String]
     let color: Color
@@ -337,7 +339,7 @@ private struct FlowTagView: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
                 .font(.system(size: 9, weight: .medium))
-                .foregroundColor(.secondary)
+                .foregroundColor(appState.themeTextSecondary)
             HStack(spacing: 4) {
                 ForEach(tags.prefix(8), id: \.self) { tag in
                     Text(tag)
@@ -351,7 +353,7 @@ private struct FlowTagView: View {
                 if tags.count > 8 {
                     Text("+\(tags.count - 8)")
                         .font(.system(size: 9))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                 }
             }
         }

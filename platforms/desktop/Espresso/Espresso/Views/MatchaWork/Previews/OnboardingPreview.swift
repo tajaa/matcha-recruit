@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct OnboardingPreview: View {
+    @Environment(AppState.self) private var appState
     let state: [String: AnyCodable]
 
     struct EmployeeEntry: Identifiable {
@@ -92,7 +93,7 @@ struct OnboardingPreview: View {
         case "ready": return .orange
         case "processing": return .blue
         case "complete": return .green
-        default: return .secondary
+        default: return appState.themeTextSecondary
         }
     }
 
@@ -118,237 +119,239 @@ struct OnboardingPreview: View {
         case "created", "done": return .green
         case "provisioning": return .blue
         case "error": return .red
-        default: return .secondary
+        default: return appState.themeTextSecondary
         }
     }
 
     // MARK: - Body
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                // Header
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Onboarding Plan")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.white)
+        VStack(alignment: .leading, spacing: 16) {
+            // Header
+            VStack(alignment: .leading, spacing: 8) {
+                Text("ONBOARDING")
+                    .font(.espresso(size: 10, weight: .semibold))
+                    .tracking(1.2)
+                    .foregroundColor(AssetKind(.onboarding).tint)
+                Text("Onboarding Plan")
+                    .font(.espresso(size: 22, weight: .bold))
+                    .foregroundColor(appState.themeText)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                    HStack(spacing: 8) {
-                        if !batchStatus.isEmpty {
-                            Text(batchStatus.replacingOccurrences(of: "_", with: " ").capitalized)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(batchStatusColor)
+                HStack(spacing: 8) {
+                    if !batchStatus.isEmpty {
+                        Text(batchStatus.replacingOccurrences(of: "_", with: " ").capitalized)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(batchStatusColor)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(batchStatusColor.opacity(0.12))
+                            .cornerRadius(4)
+                    }
+                    if !companyName.isEmpty {
+                        Text(companyName)
+                            .font(.system(size: 12))
+                            .foregroundColor(appState.themeTextSecondary)
+                    }
+                }
+
+                if !employees.isEmpty {
+                    HStack(spacing: 6) {
+                        Text("\(employees.count) employee\(employees.count == 1 ? "" : "s")")
+                            .foregroundColor(appState.themeText.opacity(0.7))
+                        if createdCount > 0 {
+                            Text("·")
+                                .foregroundColor(appState.themeTextSecondary)
+                            Text("\(createdCount) created")
+                                .foregroundColor(.green)
+                        }
+                        if errorCount > 0 {
+                            Text("·")
+                                .foregroundColor(appState.themeTextSecondary)
+                            Text("\(errorCount) error\(errorCount == 1 ? "" : "s")")
+                                .foregroundColor(.red)
+                        }
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                }
+            }
+
+            // Defaults card
+            if !defaultStartDate.isEmpty || !defaultEmploymentType.isEmpty || !defaultWorkState.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    if !defaultStartDate.isEmpty {
+                        HStack(spacing: 6) {
+                            Text("Start Date:")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(appState.themeTextSecondary)
+                            Text(defaultStartDate)
+                                .font(.system(size: 12))
+                                .foregroundColor(appState.themeText.opacity(0.85))
+                        }
+                    }
+                    if !defaultEmploymentType.isEmpty {
+                        HStack(spacing: 6) {
+                            Text("Employment:")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(appState.themeTextSecondary)
+                            Text(defaultEmploymentType.replacingOccurrences(of: "_", with: " ").capitalized)
+                                .font(.system(size: 12))
+                                .foregroundColor(appState.themeText.opacity(0.85))
+                        }
+                    }
+                    if !defaultWorkState.isEmpty {
+                        HStack(spacing: 6) {
+                            Text("Work State:")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(appState.themeTextSecondary)
+                            Text(defaultWorkState)
+                                .font(.system(size: 12))
+                                .foregroundColor(appState.themeText.opacity(0.85))
+                        }
+                    }
+                }
+                .padding(12)
+                .background(appState.assetWell)
+                .cornerRadius(8)
+            }
+
+            // Employee cards
+            if employees.isEmpty {
+                if !batchStatus.isEmpty {
+                    EmptyPreviewView(message: "Collecting employee details...", icon: "person.badge.plus")
+                } else {
+                    EmptyPreviewView(message: "Describe the employees you'd like to onboard...", icon: "person.badge.plus")
+                }
+            } else {
+                ForEach(employees) { employee in
+                    let resolvedStatus = resolvedEmployeeStatus(for: employee)
+                    VStack(alignment: .leading, spacing: 8) {
+                        // Top row: avatar + name/role + status badge
+                        HStack(spacing: 10) {
+                            ZStack {
+                                Circle()
+                                    .fill(employeeStatusColor(resolvedStatus).opacity(0.15))
+                                    .frame(width: 36, height: 36)
+                                Text(employee.initials)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(employeeStatusColor(resolvedStatus))
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(employee.name)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(appState.themeText)
+                                if !employee.role.isEmpty {
+                                    Text(employee.role)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(appState.themeTextSecondary)
+                                }
+                            }
+                            Spacer()
+                            Text(resolvedStatus.replacingOccurrences(of: "_", with: " ").capitalized)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(employeeStatusColor(resolvedStatus))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 3)
-                                .background(batchStatusColor.opacity(0.12))
+                                .background(employeeStatusColor(resolvedStatus).opacity(0.12))
                                 .cornerRadius(4)
                         }
-                        if !companyName.isEmpty {
-                            Text(companyName)
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
-                        }
-                    }
 
-                    if !employees.isEmpty {
-                        HStack(spacing: 6) {
-                            Text("\(employees.count) employee\(employees.count == 1 ? "" : "s")")
-                                .foregroundColor(.white.opacity(0.7))
-                            if createdCount > 0 {
-                                Text("·")
-                                    .foregroundColor(.secondary)
-                                Text("\(createdCount) created")
-                                    .foregroundColor(.green)
+                        // Detail rows (indented past avatar)
+                        VStack(alignment: .leading, spacing: 4) {
+                            if !employee.workEmail.isEmpty {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "envelope.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(appState.themeTextSecondary)
+                                    Text(employee.workEmail)
+                                        .font(.system(size: 11))
+                                        .foregroundColor(appState.themeText.opacity(0.75))
+                                }
                             }
-                            if errorCount > 0 {
-                                Text("·")
-                                    .foregroundColor(.secondary)
-                                Text("\(errorCount) error\(errorCount == 1 ? "" : "s")")
+                            if !employee.personalEmail.isEmpty {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "envelope")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(appState.themeTextSecondary)
+                                    Text(employee.personalEmail)
+                                        .font(.system(size: 11))
+                                        .foregroundColor(appState.themeText.opacity(0.6))
+                                }
+                            }
+                            if !employee.employmentType.isEmpty || !employee.workState.isEmpty {
+                                HStack(spacing: 6) {
+                                    if !employee.employmentType.isEmpty {
+                                        Text(employee.employmentType.replacingOccurrences(of: "_", with: " ").capitalized)
+                                            .font(.system(size: 10, weight: .medium))
+                                            .foregroundColor(.purple)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.purple.opacity(0.12))
+                                            .cornerRadius(3)
+                                    }
+                                    if !employee.workState.isEmpty {
+                                        Text(employee.workState)
+                                            .font(.system(size: 10, weight: .medium))
+                                            .foregroundColor(.blue)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.blue.opacity(0.12))
+                                            .cornerRadius(3)
+                                    }
+                                }
+                            }
+                            if !employee.startDate.isEmpty {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "calendar")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(appState.themeTextSecondary)
+                                    Text("Starts \(employee.startDate)")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(appState.themeTextSecondary)
+                                }
+                            }
+                        }
+                        .padding(.leading, 46)
+
+                        // Error banner
+                        if resolvedStatus == "error" && !employee.error.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 11))
                                     .foregroundColor(.red)
+                                Text(employee.error)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.red)
+                                    .lineLimit(3)
                             }
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.red.opacity(0.1))
+                            .cornerRadius(6)
                         }
-                        .font(.system(size: 12, weight: .medium))
-                    }
-                }
 
-                // Defaults card
-                if !defaultStartDate.isEmpty || !defaultEmploymentType.isEmpty || !defaultWorkState.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        if !defaultStartDate.isEmpty {
-                            HStack(spacing: 6) {
-                                Text("Start Date:")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                Text(defaultStartDate)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.85))
-                            }
-                        }
-                        if !defaultEmploymentType.isEmpty {
-                            HStack(spacing: 6) {
-                                Text("Employment:")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                Text(defaultEmploymentType.replacingOccurrences(of: "_", with: " ").capitalized)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.85))
-                            }
-                        }
-                        if !defaultWorkState.isEmpty {
-                            HStack(spacing: 6) {
-                                Text("Work State:")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                Text(defaultWorkState)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.85))
-                            }
-                        }
-                    }
-                    .padding(12)
-                    .background(Color.zinc800)
-                    .cornerRadius(8)
-                }
-
-                // Employee cards
-                if employees.isEmpty {
-                    if !batchStatus.isEmpty {
-                        EmptyPreviewView(message: "Collecting employee details...", icon: "person.badge.plus")
-                    } else {
-                        EmptyPreviewView(message: "Describe the employees you'd like to onboard...", icon: "person.badge.plus")
-                    }
-                } else {
-                    ForEach(employees) { employee in
-                        let resolvedStatus = resolvedEmployeeStatus(for: employee)
-                        VStack(alignment: .leading, spacing: 8) {
-                            // Top row: avatar + name/role + status badge
-                            HStack(spacing: 10) {
-                                ZStack {
-                                    Circle()
-                                        .fill(employeeStatusColor(resolvedStatus).opacity(0.15))
-                                        .frame(width: 36, height: 36)
-                                    Text(employee.initials)
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundColor(employeeStatusColor(resolvedStatus))
-                                }
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(employee.name)
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundColor(.white)
-                                    if !employee.role.isEmpty {
-                                        Text(employee.role)
-                                            .font(.system(size: 12))
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                Text(resolvedStatus.replacingOccurrences(of: "_", with: " ").capitalized)
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundColor(employeeStatusColor(resolvedStatus))
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3)
-                                    .background(employeeStatusColor(resolvedStatus).opacity(0.12))
-                                    .cornerRadius(4)
-                            }
-
-                            // Detail rows (indented past avatar)
-                            VStack(alignment: .leading, spacing: 4) {
-                                if !employee.workEmail.isEmpty {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "envelope.fill")
+                        // Provisioning results
+                        if !employee.provisioningResults.isEmpty {
+                            HStack(spacing: 12) {
+                                ForEach(Array(employee.provisioningResults.sorted(by: { $0.key < $1.key })), id: \.key) { service, result in
+                                    HStack(spacing: 4) {
+                                        Image(systemName: provisioningIcon(for: service))
                                             .font(.system(size: 10))
-                                            .foregroundColor(.secondary)
-                                        Text(employee.workEmail)
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.white.opacity(0.75))
-                                    }
-                                }
-                                if !employee.personalEmail.isEmpty {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "envelope")
+                                            .foregroundColor(provisioningColor(for: result))
+                                        Text("\(provisioningLabel(for: service)): \(result)")
                                             .font(.system(size: 10))
-                                            .foregroundColor(.secondary)
-                                        Text(employee.personalEmail)
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.white.opacity(0.6))
-                                    }
-                                }
-                                if !employee.employmentType.isEmpty || !employee.workState.isEmpty {
-                                    HStack(spacing: 6) {
-                                        if !employee.employmentType.isEmpty {
-                                            Text(employee.employmentType.replacingOccurrences(of: "_", with: " ").capitalized)
-                                                .font(.system(size: 10, weight: .medium))
-                                                .foregroundColor(.purple)
-                                                .padding(.horizontal, 6)
-                                                .padding(.vertical, 2)
-                                                .background(Color.purple.opacity(0.12))
-                                                .cornerRadius(3)
-                                        }
-                                        if !employee.workState.isEmpty {
-                                            Text(employee.workState)
-                                                .font(.system(size: 10, weight: .medium))
-                                                .foregroundColor(.blue)
-                                                .padding(.horizontal, 6)
-                                                .padding(.vertical, 2)
-                                                .background(Color.blue.opacity(0.12))
-                                                .cornerRadius(3)
-                                        }
-                                    }
-                                }
-                                if !employee.startDate.isEmpty {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "calendar")
-                                            .font(.system(size: 10))
-                                            .foregroundColor(.secondary)
-                                        Text("Starts \(employee.startDate)")
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.secondary)
+                                            .foregroundColor(provisioningColor(for: result))
                                     }
                                 }
                             }
                             .padding(.leading, 46)
-
-                            // Error banner
-                            if resolvedStatus == "error" && !employee.error.isEmpty {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.red)
-                                    Text(employee.error)
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.red)
-                                        .lineLimit(3)
-                                }
-                                .padding(8)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color.red.opacity(0.1))
-                                .cornerRadius(6)
-                            }
-
-                            // Provisioning results
-                            if !employee.provisioningResults.isEmpty {
-                                HStack(spacing: 12) {
-                                    ForEach(Array(employee.provisioningResults.sorted(by: { $0.key < $1.key })), id: \.key) { service, result in
-                                        HStack(spacing: 4) {
-                                            Image(systemName: provisioningIcon(for: service))
-                                                .font(.system(size: 10))
-                                                .foregroundColor(provisioningColor(for: result))
-                                            Text("\(provisioningLabel(for: service)): \(result)")
-                                                .font(.system(size: 10))
-                                                .foregroundColor(provisioningColor(for: result))
-                                        }
-                                    }
-                                }
-                                .padding(.leading, 46)
-                            }
                         }
-                        .padding(12)
-                        .background(Color.zinc800)
-                        .cornerRadius(8)
                     }
+                    .padding(12)
+                    .background(appState.assetWell)
+                    .cornerRadius(8)
                 }
             }
-            .padding(20)
         }
     }
 

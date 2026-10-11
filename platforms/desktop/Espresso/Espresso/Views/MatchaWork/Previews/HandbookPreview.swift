@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct HandbookPreview: View {
+    @Environment(AppState.self) private var appState
     let state: [String: AnyCodable]
 
     private var title: String { (state["handbook_title"]?.value as? String) ?? "Employee Handbook" }
@@ -76,255 +77,257 @@ struct HandbookPreview: View {
         case "generating": return .orange
         case "error": return .red
         case "ready": return .blue
-        default: return .secondary
+        default: return appState.themeTextSecondary
         }
     }
 
     private var scoreColor: Color {
-        guard let score = strengthScore else { return .secondary }
+        guard let score = strengthScore else { return appState.themeTextSecondary }
         if score >= 80 { return .green }
         if score >= 50 { return .orange }
         return .red
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                // Header
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.white)
+        VStack(alignment: .leading, spacing: 16) {
+            // Header
+            VStack(alignment: .leading, spacing: 8) {
+                Text("EMPLOYEE HANDBOOK")
+                    .font(.espresso(size: 10, weight: .semibold))
+                    .tracking(1.2)
+                    .foregroundColor(AssetKind(.handbook).tint)
+                Text(title)
+                    .font(.espresso(size: 22, weight: .bold))
+                    .foregroundColor(appState.themeText)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                    HStack(spacing: 8) {
-                        if !mode.isEmpty {
-                            Text(mode == "multi_state" ? "Multi-State" : "Single State")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.white.opacity(0.7))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.zinc800)
-                                .cornerRadius(4)
-                        }
-                        Text(status.replacingOccurrences(of: "_", with: " ").capitalized)
+                HStack(spacing: 8) {
+                    if !mode.isEmpty {
+                        Text(mode == "multi_state" ? "Multi-State" : "Single State")
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(statusColor)
+                            .foregroundColor(appState.themeText.opacity(0.7))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
-                            .background(statusColor.opacity(0.12))
+                            .background(appState.assetWell)
+                            .cornerRadius(4)
+                    }
+                    Text(status.replacingOccurrences(of: "_", with: " ").capitalized)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(statusColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(statusColor.opacity(0.12))
+                        .cornerRadius(4)
+                }
+            }
+
+            // Error banner
+            if !errorMessage.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.red)
+                        .font(.system(size: 12))
+                    Text(errorMessage)
+                        .font(.system(size: 12))
+                        .foregroundColor(.red)
+                        .lineLimit(3)
+                }
+                .padding(10)
+                .background(Color.red.opacity(0.1))
+                .cornerRadius(8)
+            }
+
+            // States
+            if !states.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "map.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeTextSecondary)
+                    ForEach(states, id: \.self) { st in
+                        Text(st)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(appState.themeText)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.blue.opacity(0.2))
                             .cornerRadius(4)
                     }
                 }
+            }
 
-                // Error banner
-                if !errorMessage.isEmpty {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.red)
+            // Industry
+            if !industry.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "building.2.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeTextSecondary)
+                    Text(industry.capitalized)
+                        .font(.system(size: 13))
+                        .foregroundColor(appState.themeText.opacity(0.85))
+                    if !subIndustry.isEmpty {
+                        Text("(\(subIndustry))")
                             .font(.system(size: 12))
-                        Text(errorMessage)
-                            .font(.system(size: 12))
-                            .foregroundColor(.red)
-                            .lineLimit(3)
+                            .foregroundColor(appState.themeTextSecondary)
                     }
-                    .padding(10)
-                    .background(Color.red.opacity(0.1))
-                    .cornerRadius(8)
-                }
-
-                // States
-                if !states.isEmpty {
-                    HStack(spacing: 6) {
-                        Image(systemName: "map.fill")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                        ForEach(states, id: \.self) { st in
-                            Text(st)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.blue.opacity(0.2))
-                                .cornerRadius(4)
-                        }
-                    }
-                }
-
-                // Industry
-                if !industry.isEmpty {
-                    HStack(spacing: 6) {
-                        Image(systemName: "building.2.fill")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                        Text(industry.capitalized)
-                            .font(.system(size: 13))
-                            .foregroundColor(.white.opacity(0.85))
-                        if !subIndustry.isEmpty {
-                            Text("(\(subIndustry))")
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-
-                // Company info
-                if !legalName.isEmpty || !ceo.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        if !legalName.isEmpty {
-                            HStack(spacing: 6) {
-                                Text("Legal Name:")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                Text(legalName)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.85))
-                            }
-                        }
-                        if !dba.isEmpty {
-                            HStack(spacing: 6) {
-                                Text("DBA:")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                Text(dba)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.85))
-                            }
-                        }
-                        if !ceo.isEmpty {
-                            HStack(spacing: 6) {
-                                Text("CEO:")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                Text(ceo)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.85))
-                            }
-                        }
-                        if let hc = headcount {
-                            HStack(spacing: 6) {
-                                Text("Headcount:")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                Text("\(hc)")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.85))
-                            }
-                        }
-                    }
-                    .padding(12)
-                    .background(Color.zinc800)
-                    .cornerRadius(8)
-                }
-
-                // Profile flags
-                if !profileFlags.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Company Profile")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.white)
-
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                            ForEach(profileFlags, id: \.0) { label, enabled in
-                                HStack(spacing: 6) {
-                                    Image(systemName: enabled ? "checkmark.circle.fill" : "xmark.circle")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(enabled ? .green : .secondary.opacity(0.5))
-                                    Text(label)
-                                        .font(.system(size: 11))
-                                        .foregroundColor(enabled ? .white.opacity(0.85) : .secondary.opacity(0.6))
-                                    Spacer()
-                                }
-                            }
-                        }
-                    }
-                    .padding(12)
-                    .background(Color.zinc800)
-                    .cornerRadius(8)
-                }
-
-                // Progress (before generation)
-                if status != "created" && status != "error" {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Required Fields (\(requiredFieldsFilled)/4)")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.secondary)
-
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(Color.zinc800)
-                                    .frame(height: 6)
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(requiredFieldsFilled == 4 ? Color.green : Color.matcha500)
-                                    .frame(width: geo.size.width * CGFloat(requiredFieldsFilled) / 4.0, height: 6)
-                            }
-                        }
-                        .frame(height: 6)
-                    }
-                }
-
-                // Strength score (after creation)
-                if let score = strengthScore {
-                    HStack(spacing: 10) {
-                        ZStack {
-                            Circle()
-                                .stroke(scoreColor.opacity(0.2), lineWidth: 4)
-                                .frame(width: 44, height: 44)
-                            Circle()
-                                .trim(from: 0, to: CGFloat(score) / 100.0)
-                                .stroke(scoreColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                                .frame(width: 44, height: 44)
-                                .rotationEffect(.degrees(-90))
-                            Text("\(score)")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(scoreColor)
-                        }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Coverage Score")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.secondary)
-                            Text(strengthLabel)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(scoreColor)
-                        }
-                    }
-                    .padding(12)
-                    .background(Color.zinc800)
-                    .cornerRadius(8)
-                }
-
-                // Sections (after creation)
-                if !sections.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("\(sections.count) Sections")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.white)
-
-                        ForEach(sections, id: \.key) { section in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(section.title)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(.white)
-                                if !section.content.isEmpty {
-                                    Text(section.content)
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.white.opacity(0.6))
-                                        .lineLimit(3)
-                                        .lineSpacing(2)
-                                }
-                            }
-                            .padding(10)
-                            .background(Color.zinc800)
-                            .cornerRadius(6)
-                        }
-                    }
-                }
-
-                if state.isEmpty {
-                    EmptyPreviewView(message: "Handbook in progress...", icon: "book.closed")
                 }
             }
-            .padding(20)
+
+            // Company info
+            if !legalName.isEmpty || !ceo.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    if !legalName.isEmpty {
+                        HStack(spacing: 6) {
+                            Text("Legal Name:")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(appState.themeTextSecondary)
+                            Text(legalName)
+                                .font(.system(size: 12))
+                                .foregroundColor(appState.themeText.opacity(0.85))
+                        }
+                    }
+                    if !dba.isEmpty {
+                        HStack(spacing: 6) {
+                            Text("DBA:")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(appState.themeTextSecondary)
+                            Text(dba)
+                                .font(.system(size: 12))
+                                .foregroundColor(appState.themeText.opacity(0.85))
+                        }
+                    }
+                    if !ceo.isEmpty {
+                        HStack(spacing: 6) {
+                            Text("CEO:")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(appState.themeTextSecondary)
+                            Text(ceo)
+                                .font(.system(size: 12))
+                                .foregroundColor(appState.themeText.opacity(0.85))
+                        }
+                    }
+                    if let hc = headcount {
+                        HStack(spacing: 6) {
+                            Text("Headcount:")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(appState.themeTextSecondary)
+                            Text("\(hc)")
+                                .font(.system(size: 12))
+                                .foregroundColor(appState.themeText.opacity(0.85))
+                        }
+                    }
+                }
+                .padding(12)
+                .background(appState.assetWell)
+                .cornerRadius(8)
+            }
+
+            // Profile flags
+            if !profileFlags.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Company Profile")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(appState.themeText)
+
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                        ForEach(profileFlags, id: \.0) { label, enabled in
+                            HStack(spacing: 6) {
+                                Image(systemName: enabled ? "checkmark.circle.fill" : "xmark.circle")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(enabled ? .green : appState.themeTextSecondary.opacity(0.5))
+                                Text(label)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(enabled ? appState.themeText.opacity(0.85) : appState.themeTextSecondary.opacity(0.6))
+                                Spacer()
+                            }
+                        }
+                    }
+                }
+                .padding(12)
+                .background(appState.assetWell)
+                .cornerRadius(8)
+            }
+
+            // Progress (before generation)
+            if status != "created" && status != "error" {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Required Fields (\(requiredFieldsFilled)/4)")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(appState.themeTextSecondary)
+
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(appState.assetWell)
+                                .frame(height: 6)
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(requiredFieldsFilled == 4 ? Color.green : Color.matcha500)
+                                .frame(width: geo.size.width * CGFloat(requiredFieldsFilled) / 4.0, height: 6)
+                        }
+                    }
+                    .frame(height: 6)
+                }
+            }
+
+            // Strength score (after creation)
+            if let score = strengthScore {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .stroke(scoreColor.opacity(0.2), lineWidth: 4)
+                            .frame(width: 44, height: 44)
+                        Circle()
+                            .trim(from: 0, to: CGFloat(score) / 100.0)
+                            .stroke(scoreColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                            .frame(width: 44, height: 44)
+                            .rotationEffect(.degrees(-90))
+                        Text("\(score)")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(scoreColor)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Coverage Score")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(appState.themeTextSecondary)
+                        Text(strengthLabel)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(scoreColor)
+                    }
+                }
+                .padding(12)
+                .background(appState.assetWell)
+                .cornerRadius(8)
+            }
+
+            // Sections (after creation)
+            if !sections.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("\(sections.count) Sections")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(appState.themeText)
+
+                    ForEach(sections, id: \.key) { section in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(section.title)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(appState.themeText)
+                            if !section.content.isEmpty {
+                                Text(section.content)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(appState.themeText.opacity(0.6))
+                                    .lineLimit(3)
+                                    .lineSpacing(2)
+                            }
+                        }
+                        .padding(10)
+                        .background(appState.assetWell)
+                        .cornerRadius(6)
+                    }
+                }
+            }
+
+            if state.isEmpty {
+                EmptyPreviewView(message: "Handbook in progress...", icon: "book.closed")
+            }
         }
     }
 }

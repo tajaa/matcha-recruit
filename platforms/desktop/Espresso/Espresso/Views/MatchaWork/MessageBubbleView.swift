@@ -14,6 +14,8 @@ struct MessageBubbleView: View {
     @State private var isExporting = false
     @State private var exportError: String?
     @State private var selectedPreviewImageURL: String? = nil
+    /// The thread's document, when this bubble is in a thread that has one.
+    @Environment(\.threadAsset) private var threadAsset
 
     var body: some View {
         VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 4) {
@@ -53,10 +55,15 @@ struct MessageBubbleView: View {
                         .cornerRadius(12)
 
                         if let version = message.versionCreated, message.role == "assistant" {
-                            Text("Document updated — v\(version)")
-                                .font(.system(size: 11))
-                                .foregroundColor(.matcha500)
-                                .padding(.leading, 4)
+                            if let threadAsset {
+                                AssetMessageCard(version: version, asset: threadAsset)
+                                    .padding(.top, 2)
+                            } else {
+                                Text("Document updated — v\(version)")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.matcha500)
+                                    .padding(.leading, 4)
+                            }
                         }
 
                         if message.role == "assistant" && !message.content.isEmpty {
@@ -164,56 +171,13 @@ struct MessageBubbleView: View {
                     spacing: 6
                 ) {
                     ForEach(images, id: \.url) { att in
-                        Button {
-                            selectedPreviewImageURL = att.url
-                        } label: {
-                            AsyncImage(url: URL(string: att.url)) { phase in
-                                switch phase {
-                                case .success(let img):
-                                    img.resizable().scaledToFill()
-                                case .failure:
-                                    Image(systemName: "photo")
-                                        .foregroundColor(.white.opacity(0.4))
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                        .background(Color.black.opacity(0.15))
-                                default:
-                                    ProgressView()
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                        .background(Color.black.opacity(0.15))
-                                }
-                            }
-                            .frame(height: 120)
-                            .frame(maxWidth: .infinity)
-                            .clipped()
-                            .cornerRadius(8)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Click to view larger and download")
+                        AttachmentImageTile(url: att.url) { selectedPreviewImageURL = att.url }
                     }
                 }
                 .frame(maxWidth: 320)
             }
             ForEach(files, id: \.url) { att in
-                Button {
-                    SafeURL.open(att.url)
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "doc")
-                            .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.8))
-                        Text(att.filename ?? "file")
-                            .font(.system(size: 12))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.2))
-                    .cornerRadius(6)
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: 320, alignment: .leading)
+                AttachmentFileCard(attachment: att, onAccent: message.role == "user")
             }
         }
     }
