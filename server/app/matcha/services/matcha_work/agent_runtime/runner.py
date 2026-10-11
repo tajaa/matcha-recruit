@@ -36,6 +36,8 @@ from .registry import Ability, AgentTool, ToolOutput, declarations, offered_tool
 
 logger = logging.getLogger(__name__)
 
+# Effects whose outcome a result must not be written ahead of.
+WRITES = frozenset({"commit", "draft"})
 FINISH_AFTER_ACTION = ("Not accepted: an action in this same turn had not finished yet. "
                        "Read its outcome, then call finish again.")
 FINISH_NUDGE = "Call the finish tool with the structured result now."
@@ -426,8 +428,10 @@ async def run_agent(
         outputs: list[dict[str, Any]] = []
         # A result written in the same turn as an action was written before
         # the action's outcome existed, so it cannot be trusted to describe it.
+        # A draft writes too (a saved Gmail draft, an event on the person's own
+        # calendar) and can fail just the same.
         acts = any(
-            name_owner is not None and name_owner[1].effect == "commit"
+            name_owner is not None and name_owner[1].effect in WRITES
             for name_owner in (owners.get(c["name"]) for c in response.function_calls)
         )
         for call in response.function_calls:

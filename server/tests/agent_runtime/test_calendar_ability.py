@@ -323,6 +323,44 @@ async def test_the_calendar_client_notifies_only_when_there_are_attendees(monkey
     assert await service._headers() == {"Authorization": "Bearer token"}
 
 
+@pytest.mark.asyncio
+async def test_listing_follows_googles_pages_and_says_when_it_stopped_short(monkeypatch):
+    service = gcal.GoogleCalendarService(uuid4(), gmail=object())
+    pages = [
+        # Google may answer with an empty page and more behind it.
+        {"items": [], "nextPageToken": "p2"},
+        {"items": [{"id": "e1"}, {"id": "gone", "status": "cancelled"}], "nextPageToken": "p3"},
+        {"items": [{"id": "e2"}]},
+    ]
+    sent = []
+
+    async def request(method, path, *, params=None, body=None):
+        sent.append(dict(params))
+        return pages[len(sent) - 1]
+
+    monkeypatch.setattr(service, "_request", request)
+    events, complete = await service.list_window(time_min=START, time_max=END, max_results=50)
+    assert [e["id"] for e in events] == ["e1", "e2"] and complete
+    assert [s.get("pageToken") for s in sent] == [None, "p2", "p3"]
+    assert [s["maxResults"] for s in sent] == ["50", "50", "49"]
+    sent.clear()
+    # The assistant's list_events reads through the same pages.
+    assert [e["id"] for e in await service.list_events(time_min=START, time_max=END)] == ["e1", "e2"]
+
+    endless = []
+
+    async def always_more(method, path, *, params=None, body=None):
+        endless.append(params)
+        return {"items": [{"id": f"e{len(endless)}"}], "nextPageToken": "more"}
+
+    monkeypatch.setattr(service, "_request", always_more)
+    events, complete = await service.list_window(time_min=START, time_max=END, max_results=250)
+    assert not complete and len(endless) == gcal.MAX_LIST_PAGES and len(events) == gcal.MAX_LIST_PAGES
+    endless.clear()
+    events, complete = await service.list_window(time_min=START, time_max=END, max_results=2)
+    assert not complete and len(events) == 2 and len(endless) == 2
+
+
 # ── the Espresso calendar ──────────────────────────────────────────────────
 
 ESPRESSO_ID = "6f1c0d7e-8b9a-4c3d-9e2f-1a2b3c4d5e6f"
@@ -406,6 +444,22 @@ async def test_adding_to_the_espresso_calendar_is_never_held_and_shows_as_an_eve
     assert (kind, ref, label) == ("assistant", None, None) and tz.key == "America/Los_Angeles"
     item = out.result["blocks"][0]["items"][0]
     assert item["calendar"] == "espresso" and item["title"] == "Dentist"
+
+
+@pytest.mark.asyncio
+async def test_a_result_written_beside_an_add_waits_for_the_adds_outcome(monkeypatch):
+    wire_store(monkeypatch)
+    store = FakeStore()
+    client = FakeClient([
+        # The add fails (no such date) and the model already claims success.
+        response(call("add_espresso_event", {"title": "Dentist", "start": "2026-02-31"}),
+                 call("finish", {"headline": "Dentist added", "summary": "Done."})),
+        response(call("finish", {"headline": "Couldn't add it", "summary": "That date does not exist."})),
+    ])
+    out = await run_espresso(client, store, _ctx("add the dentist on feb 31", scopes=frozenset()))
+    outputs = [item["output"] for item in client.calls[1]["input"]]
+    assert "does not exist" in outputs[0] and "Not accepted" in outputs[1]
+    assert out.result["headline"] == "Couldn't add it" and store.created == []
 
 
 @pytest.mark.asyncio

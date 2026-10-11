@@ -68,6 +68,23 @@ def test_unusable_events_are_refused_in_words_a_person_can_read(kwargs, message)
         cal.event_fields(**kwargs)
 
 
+def test_lengths_are_elapsed_time_across_a_dst_change():
+    # 01:30 on the night Los Angeles falls back: an hour later is 01:30 again,
+    # an hour behind. Wall-clock arithmetic on the ZoneInfo would say 02:30 PST.
+    fields = cal.event_fields(title="Late call", start=datetime(2026, 11, 1, 1, 30, tzinfo=LA))
+    assert fields["ends_at"] - fields["starts_at"] == timedelta(hours=1)
+    assert cal.render_when(fields["ends_at"], LA) == "2026-11-01T01:30:00-08:00"
+    # 00:30 PDT to 01:15 PST is 1h45 elapsed, though 45 minutes on the clock.
+    span = cal.event_fields(title="x", start=datetime(2026, 11, 1, 0, 30, tzinfo=LA),
+                            end=datetime(2026, 11, 1, 1, 15, fold=1, tzinfo=LA))
+    assert span["ends_at"] - span["starts_at"] == timedelta(hours=1, minutes=45)
+    with pytest.raises(ValueError, match="before it starts"):
+        cal.event_fields(title="x", start=datetime(2026, 11, 1, 1, 30, fold=1, tzinfo=LA),
+                         end=datetime(2026, 11, 1, 1, 45, fold=0, tzinfo=LA))
+    moved = cal.merged_fields(_row(), {"start": "2026-11-01T01:30:00-07:00"})
+    assert moved["ends_at"] - moved["starts_at"] == timedelta(hours=1)
+
+
 def test_parse_when_takes_objects_and_refuses_a_naive_time():
     moment = datetime(2026, 10, 2, 15, tzinfo=LA)
     assert cal.parse_when(moment) is moment
@@ -108,7 +125,7 @@ def test_windows_are_two_times_at_most_100_days_apart():
 
 def test_zone_accepts_only_real_iana_names():
     assert cal.zone("America/Los_Angeles") == LA
-    for bad in (None, "", "America", "../etc/passwd", "Not/AZone", "x" * 65):
+    for bad in (None, "", "America", "../etc/passwd", "Not/AZone", "x" * 65, True, 7, ["UTC"], {"tz": "UTC"}):
         assert cal.zone(bad) is None
 
 
