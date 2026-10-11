@@ -14,6 +14,12 @@ import httpx
 from .gmail_service import GmailService
 
 CALENDAR_API_BASE = "https://www.googleapis.com/calendar/v3"
+# The calendar view asks for a whole month; the assistant asks for 25.
+MAX_LIST_RESULTS = 250
+# Pages followed for one listing. Google can return a short or even empty
+# page with more behind it, so a listing follows `nextPageToken`; this bounds
+# the round trips.
+MAX_LIST_PAGES = 5
 _EVENT_ID = re.compile(r"^[A-Za-z0-9_\-]{1,1024}$")
 
 
@@ -88,16 +94,36 @@ class GoogleCalendarService:
         response.raise_for_status()
         return response.json() if response.content else {}
 
-    async def list_events(self, *, time_min: str, time_max: str, query: str | None = None,
-                          max_results: int = 25) -> list[dict]:
-        params = {
-            "timeMin": time_min, "timeMax": time_max, "singleEvents": "true",
-            "orderBy": "startTime", "maxResults": str(max(1, min(int(max_results), 50))),
-        }
+    async def list_window(self, *, time_min: str, time_max: str, query: str | None = None,
+                          max_results: int = 25) -> tuple[list[dict], bool]:
+        """Events in the window, following Google's pages, and whether that is
+        all of them. False when `max_results` or `MAX_LIST_PAGES` stopped the
+        listing with a page still to read."""
+        wanted = max(1, min(int(max_results), MAX_LIST_RESULTS))
+        params = {"timeMin": time_min, "timeMax": time_max, "singleEvents": "true", "orderBy": "startTime"}
         if query:
             params["q"] = query[:200]
-        data = await self._request("GET", "/calendars/primary/events", params=params)
-        return [event_view(item) for item in data.get("items") or [] if item.get("status") != "cancelled"]
+        events: list[dict] = []
+        token = None
+        for _ in range(MAX_LIST_PAGES):
+            page = {**params, "maxResults": str(wanted - len(events))}
+            if token:
+                page["pageToken"] = token
+            data = await self._request("GET", "/calendars/primary/events", params=page)
+            events += [event_view(item) for item in data.get("items") or [] if item.get("status") != "cancelled"]
+            token = data.get("nextPageToken")
+            if not token:
+                return events[:wanted], True
+            if len(events) >= wanted:
+                return events[:wanted], False
+        return events[:wanted], False
+
+    async def list_events(self, *, time_min: str, time_max: str, query: str | None = None,
+                          max_results: int = 25) -> list[dict]:
+        events, _complete = await self.list_window(
+            time_min=time_min, time_max=time_max, query=query, max_results=max_results,
+        )
+        return events
 
     async def get_event(self, event_id: str) -> dict:
         return event_view(await self._request("GET", f"/calendars/primary/events/{_check_id(event_id)}"))

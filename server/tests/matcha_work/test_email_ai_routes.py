@@ -62,6 +62,7 @@ def test_email_routes_exist_and_require_admin_or_client():
     wanted = {
         ("GET", "/agent/email/messages/{email_id}"),
         ("POST", "/agent/email/summarize"),
+        ("POST", "/agent/email/calendar-suggest"),
         ("POST", "/agent/email/triage"),
         ("POST", "/agent/email/draft"),
         ("POST", "/agent/email/send"),
@@ -584,3 +585,50 @@ def test_path_message_id_with_bad_characters_is_refused(gmail):
     with _client() as client:
         assert client.get("/agent/email/messages/abc%3Fformat=raw").status_code == 400
     gmail.get_message.assert_not_awaited()
+
+
+# --- POST calendar-suggest ------------------------------------------------------
+
+@pytest.fixture
+def calendar(monkeypatch):
+    from app.matcha.services.matcha_work import calendar_service
+
+    fakes = SimpleNamespace(
+        set_timezone=AsyncMock(side_effect=lambda user_id, name: name.strip()),
+        get_timezone=AsyncMock(return_value="America/New_York"),
+        events_from_source=AsyncMock(return_value=[{"id": "e1", "title": "Already there"}]),
+    )
+    for name, fake in vars(fakes).items():
+        monkeypatch.setattr(calendar_service, name, fake)
+    return fakes
+
+
+def test_calendar_suggest_is_gated_and_reports_what_is_already_there(gmail, plan, calendar, monkeypatch):
+    suggest = AsyncMock(return_value=[{"title": "Sync", "start": "2026-09-11T10:00:00-07:00"}])
+    monkeypatch.setattr(email_ai_service, "suggest_calendar_events", suggest)
+    with _client() as client:
+        resp = client.post("/agent/email/calendar-suggest", json={
+            "email_id": "18c3f0a1b2c3", "instructions": "just the sync", "timezone": "America/Los_Angeles"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["events"][0]["title"] == "Sync" and body["existing"][0]["title"] == "Already there"
+    assert body["subject"] == "Friday sync" and body["timezone"] == "America/Los_Angeles"
+    plan.assert_awaited_once()
+    calendar.set_timezone.assert_awaited_once_with(USER.id, "America/Los_Angeles")
+    assert suggest.await_args.args[1] == "just the sync"
+    assert suggest.await_args.kwargs["tz_name"] == "America/Los_Angeles"
+    assert calendar.events_from_source.await_args.args == (USER.id, "email", "18c3f0a1b2c3")
+
+
+def test_calendar_suggest_falls_back_to_the_stored_zone_and_502s_without_the_model(
+        gmail, plan, calendar, monkeypatch):
+    suggest = AsyncMock(return_value=None)
+    monkeypatch.setattr(email_ai_service, "suggest_calendar_events", suggest)
+    with _client() as client:
+        down = client.post("/agent/email/calendar-suggest",
+                           json={"email_id": "18c3f0a1b2c3", "timezone": "Pacific Time"})
+        bad_id = client.post("/agent/email/calendar-suggest", json={"email_id": "../etc"})
+    assert down.status_code == 502
+    calendar.set_timezone.assert_not_awaited()
+    assert suggest.await_args.kwargs["tz_name"] == "America/New_York"
+    assert bad_id.status_code == 400

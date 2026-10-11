@@ -1,4 +1,4 @@
-"""Matcha-work web surfaces — journals, notifications, and the thread / project websockets.
+"""Matcha-work web surfaces — journals, calendar, notifications, and the thread / project websockets.
 
 Namespace grouping: each module is an independent router with its own mount + gate in the
 parent ``routes/__init__.py``; this package only re-exports them under their historical names.
@@ -10,6 +10,7 @@ stage 3); ``project_ws.py`` re-exports it for backward compatibility.
 """
 
 from .billing import router as matcha_work_billing_router, admin_router as matcha_work_billing_admin_router
+from .calendar import router as calendar_router
 from .journals import router as journals_router
 from .notifications import router as mw_notifications_router
 from .productivity import router as productivity_router
@@ -19,6 +20,7 @@ from .thread_ws import router as thread_ws_router
 __all__ = [
     "matcha_work_billing_router",
     "matcha_work_billing_admin_router",
+    "calendar_router",
     "journals_router",
     "mw_notifications_router",
     "productivity_router",

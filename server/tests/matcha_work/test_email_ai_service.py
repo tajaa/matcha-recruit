@@ -283,3 +283,76 @@ def test_snapshot_markdown_truncates_body():
     md = svc.snapshot_markdown(_msg(body="y" * (svc.SNAPSHOT_BODY_CHARS + 50)))
     assert "[truncated]" in md
     assert "y" * (svc.SNAPSHOT_BODY_CHARS + 1) not in md
+
+
+# --- calendar suggestions ----------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_calendar_suggestions_attach_the_zone_across_a_dst_change(fake):
+    import json as _json
+    from datetime import date
+
+    calls = fake(text=_json.dumps([
+        {"title": "Dentist", "start": "2026-10-30T15:00", "end": None, "timezone": None,
+         "location": "Main St", "notes": "Bring forms"},
+        {"title": "Dentist follow-up", "start": "2026-11-06T15:00", "end": "2026-11-06T15:30"},
+        {"title": "NY call", "start": "2026-10-30T09:00", "timezone": "America/New_York"},
+        {"title": "Conference", "start": "2026-11-09", "end": "2026-11-11"},
+    ]))
+    events = await svc.suggest_calendar_events(_msg(), None, tz_name="America/Los_Angeles",
+                                               today=date(2026, 10, 10))
+    assert [e["start"] for e in events] == [
+        "2026-10-30T15:00:00-07:00", "2026-11-06T15:00:00-08:00", "2026-10-30T09:00:00-04:00", "2026-11-09"]
+    assert events[0]["end"] == "2026-10-30T16:00:00-07:00"  # no end: an hour
+    assert events[0]["location"] == "Main St" and events[0]["notes"] == "Bring forms"
+    assert events[3] == {"title": "Conference", "start": "2026-11-09", "end": "2026-11-11",
+                         "all_day": True, "location": None, "notes": None}
+    prompt = calls[0]["contents"]
+    assert "America/Los_Angeles" in prompt and "2026-10-10" in prompt
+    assert svc.DEFAULT_CALENDAR_INSTRUCTIONS in prompt
+    assert calls[0]["config"].response_mime_type == "application/json"
+    nonce = re.search(r"<<<EMAIL ([0-9a-f]{16})>>>", prompt).group(1)
+    assert f"<<<END EMAIL {nonce}>>>" in prompt
+
+
+@pytest.mark.asyncio
+async def test_calendar_suggestions_drop_what_the_model_got_wrong_and_cap_at_five(fake):
+    import json as _json
+
+    good = [{"title": f"Event {i}", "start": f"2026-10-{12 + i}"} for i in range(7)]
+    bad = [{"title": "", "start": "2026-10-12"}, {"title": "No start"}, "not an object",
+           {"title": "Bad time", "start": "Friday afternoon"},
+           {"title": "Backwards", "start": "2026-10-12T10:00", "end": "2026-10-12T09:00"},
+           {"title": "Impossible", "start": "2026-02-30T10:00"}]
+    fake(text=_json.dumps(bad + good))
+    events = await svc.suggest_calendar_events(_msg(), "only the dinners", tz_name="Nowhere/Zone")
+    assert [e["title"] for e in events] == [f"Event {i}" for i in range(5)]
+
+
+@pytest.mark.asyncio
+async def test_calendar_suggestions_survive_junk_zones_and_keep_an_hour_on_a_fall_back_night(fake):
+    import json as _json
+
+    fake(text=_json.dumps([
+        {"title": "Late call", "start": "2026-11-01T01:30", "timezone": True},
+        {"title": "Odd zone", "start": "2026-11-02T09:00", "timezone": {"name": "UTC"}},
+        {"title": "Fine", "start": "2026-11-03T09:00", "timezone": "America/New_York"},
+    ]))
+    events = await svc.suggest_calendar_events(_msg(), None, tz_name="America/Los_Angeles")
+    assert [e["title"] for e in events] == ["Late call", "Odd zone", "Fine"]
+    assert (events[0]["start"], events[0]["end"]) == ("2026-11-01T01:30:00-07:00", "2026-11-01T01:30:00-08:00")
+    assert events[1]["start"] == "2026-11-02T09:00:00-08:00"  # junk zone: the reader's
+    assert events[2]["start"] == "2026-11-03T09:00:00-05:00"
+
+
+@pytest.mark.asyncio
+async def test_calendar_suggestions_say_none_when_the_model_cannot_answer(fake):
+    fake(exc=RuntimeError("down"))
+    assert await svc.suggest_calendar_events(_msg(), None, tz_name="UTC") is None
+    fake(text="not json")
+    assert await svc.suggest_calendar_events(_msg(), None, tz_name="UTC") is None
+    fake(text='{"events": []}')
+    assert await svc.suggest_calendar_events(_msg(), None, tz_name="UTC") == []
+    calls = fake(text="[]")
+    assert await svc.suggest_calendar_events(_msg(), "  just the party  ", tz_name="UTC") == []
+    assert "Reader's instructions: just the party" in calls[0]["contents"]
