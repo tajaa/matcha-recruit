@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct VersionHistoryView: View {
+    @Environment(AppState.self) private var appState
     let versions: [MWDocumentVersion]
     let currentVersion: Int
     let onRevert: (Int) -> Void
@@ -13,7 +14,7 @@ struct VersionHistoryView: View {
             HStack {
                 Text("Version History")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
                 Spacer()
             }
             .padding(.horizontal, 16)
@@ -24,7 +25,7 @@ struct VersionHistoryView: View {
             if versions.isEmpty {
                 Spacer()
                 Text("No versions yet")
-                    .foregroundColor(.secondary)
+                    .foregroundColor(appState.themeTextSecondary)
                     .font(.system(size: 13))
                 Spacer()
             } else {
@@ -45,7 +46,7 @@ struct VersionHistoryView: View {
                 }
             }
         }
-        .background(Color.zinc900)
+        .background(appState.themeCard)
         .confirmationDialog("Revert to v\(versionToRevert ?? 0)?", isPresented: $showConfirm) {
             Button("Revert") {
                 if let v = versionToRevert { onRevert(v) }
@@ -58,6 +59,7 @@ struct VersionHistoryView: View {
 }
 
 struct VersionRowView: View {
+    @Environment(AppState.self) private var appState
     let version: MWDocumentVersion
     let isCurrent: Bool
     let onRevert: () -> Void
@@ -79,14 +81,14 @@ struct VersionRowView: View {
                 HStack(spacing: 6) {
                     Text("v\(version.version)")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(appState.themeText)
                     if isCurrent {
                         Text("current")
                             .font(.system(size: 10, weight: .medium))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
-                            .background(Color.matcha600.opacity(0.3))
-                            .foregroundColor(.matcha500)
+                            .background(appState.themeAccent.opacity(0.18))
+                            .foregroundColor(appState.themeAccent)
                             .cornerRadius(4)
                     }
                 }
@@ -94,13 +96,13 @@ struct VersionRowView: View {
                 if let summary = version.diffSummary, !summary.isEmpty {
                     Text(summary)
                         .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                         .lineLimit(2)
                 }
 
                 Text(formattedDate)
                     .font(.system(size: 11))
-                    .foregroundColor(.secondary.opacity(0.7))
+                    .foregroundColor(appState.themeTextSecondary.opacity(0.7))
             }
 
             Spacer()
@@ -111,15 +113,15 @@ struct VersionRowView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                .foregroundColor(appState.themeTextSecondary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(Color.zinc800)
+                .background(appState.assetWell)
                 .cornerRadius(5)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(isCurrent ? Color.matcha600.opacity(0.08) : Color.clear)
+        .background(isCurrent ? appState.themeAccent.opacity(0.08) : Color.clear)
     }
 }

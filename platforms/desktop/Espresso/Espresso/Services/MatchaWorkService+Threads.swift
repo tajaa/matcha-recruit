@@ -128,6 +128,17 @@ extension MatchaWorkService {
         return response.pdfUrl
     }
 
+    /// The presentation (or workbook) PDF itself, for saving to a file.
+    func getPresentationPdfData(threadId: String) async throws -> Data {
+        let raw = try await getPresentationPdfUrl(threadId: threadId)
+        guard let url = URL(string: raw) else { throw APIError.invalidURL }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw APIError.httpError(http.statusCode, "PDF download failed")
+        }
+        return data
+    }
+
     func uploadImages(
         threadId: String,
         images: [(data: Data, filename: String, mimeType: String)]

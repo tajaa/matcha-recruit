@@ -4,15 +4,28 @@ struct ThreadDetailView: View {
     let threadId: String
     /// True in a secondary (aux) window — suppresses shared nav/tab writes.
     var isEmbedded: Bool = false
-    @Environment(AppState.self) private var appState
-    @State private var viewModel = ThreadDetailViewModel()
-    @State private var showVersionHistory = false
-    @State private var showFinalizeConfirm = false
-    @State private var showUsageSummary = false
-    @State private var showAgentPanel = false
-    @State private var editingTitle = false
-    @State private var titleDraft = ""
-    @FocusState private var titleFocused: Bool
+    @Environment(AppState.self) var appState
+    @State var viewModel = ThreadDetailViewModel()
+    @State var showVersionHistory = false
+    @State var showFinalizeConfirm = false
+    @State var showUsageSummary = false
+    @State var showAgentPanel = false
+    @State var editingTitle = false
+    @State var titleDraft = ""
+    @FocusState var titleFocused: Bool
+    /// The document fills the thread, chat hidden (Esc or the header button exits).
+    @State var assetFocused = false
+    /// Below `compactWidth` chat and document trade places behind a switch.
+    @State var compactTab: CompactTab = .chat
+    @State var paneWidth: CGFloat = 1_000
+    /// Armed once this thread has loaded, so only a document that appears
+    /// during the session reveals itself — not one that was already there.
+    @State var revealArmed = false
+    /// Compact mode: the document changed while the chat was showing.
+    @State var assetUnseen = false
+
+    enum CompactTab { case chat, asset }
+    static let compactWidth: CGFloat = 820
 
     @MainActor
     init(threadId: String, isEmbedded: Bool = false) {
@@ -25,30 +38,89 @@ struct ThreadDetailView: View {
             : WorkDetailVMStore.shared.threadVM(threadId))
     }
 
-    private func commitTitle() {
+    func commitTitle() {
         let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         editingTitle = false
         guard !trimmed.isEmpty, trimmed != viewModel.thread?.title else { return }
         Task { await viewModel.updateTitle(trimmed) }
     }
-    @AppStorage("mw-chat-theme") private var lightMode = false
-    @AppStorage("mw-model") private var selectedModelId = "flash"
-    @AppStorage("mw-preview-collapsed") private var previewCollapsed = false
+    @AppStorage("mw-chat-theme") var lightMode = false
+    @AppStorage("mw-model") var selectedModelId = "flash"
+    @AppStorage("mw-preview-collapsed") var previewCollapsed = false
 
-    private var selectedModelValue: String? {
+    var selectedModelValue: String? {
         appState.modelValue(for: selectedModelId)
     }
 
-    private var isBusinessAccount: Bool {
+    var isBusinessAccount: Bool {
         guard let role = appState.currentUser?.role else { return false }
         return ["client", "admin", "employee"].contains(role)
     }
 
-    private var stateInferredType: MWTaskType {
+    var stateInferredType: MWTaskType {
         inferMWTaskType(from: viewModel.currentState)
     }
 
+    // MARK: Layout state
+
+    var showsAsset: Bool { viewModel.hasPreviewContent || viewModel.isLoadingPDF }
+    var isCompact: Bool { paneWidth < Self.compactWidth }
+    var assetKind: AssetKind { AssetKind(viewModel.currentTaskType) }
+    /// Chat and document side by side (the wide layout).
+    var showsSideBySide: Bool { showsAsset && !previewCollapsed && !isCompact && !assetFocused }
+    /// The document over the chat: focus mode, or the compact switch on it.
+    /// The chat stays mounted underneath so its draft and scroll survive.
+    var showsAssetOverlay: Bool {
+        showsAsset && (assetFocused || (isCompact && !previewCollapsed && compactTab == .asset))
+    }
+    var showsCompactSwitch: Bool { showsAsset && isCompact && !previewCollapsed && !assetFocused }
+
     var body: some View {
+        withWindowToolbar(threadBody)
+            .task(id: threadId) {
+                revealArmed = false
+                // Re-point at this thread's cached VM (the view is reused across
+                // thread→thread switches, so @State still holds the prior thread's).
+                if !isEmbedded {
+                    let cached = WorkDetailVMStore.shared.threadVM(threadId)
+                    if cached !== viewModel { viewModel = cached }
+                }
+                await viewModel.loadThread(id: threadId)
+                revealArmed = true
+                if !isEmbedded {
+                    appState.setActiveContext(WorkTab(kind: .thread, entityId: threadId,
+                                                      title: viewModel.thread?.displayName ?? "Chat"))
+                }
+            }
+            .onChange(of: showsAsset) { had, has in
+                // A document was just created: bring it into view.
+                guard revealArmed, !had, has else { return }
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                    previewCollapsed = false
+                    compactTab = .asset
+                }
+            }
+            .onChange(of: viewModel.thread?.version) { old, new in
+                guard let old, let new, new > old, isCompact, compactTab == .chat else { return }
+                assetUnseen = true
+            }
+            .onChange(of: compactTab) { _, tab in if tab == .asset { assetUnseen = false } }
+            .onChange(of: threadId) { _, _ in
+                assetFocused = false
+                compactTab = .chat
+                assetUnseen = false
+            }
+            .alert("Finalize Thread?", isPresented: $showFinalizeConfirm) {
+                Button("Finalize", role: .destructive) {
+                    Task { await viewModel.finalize() }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This will lock the thread and remove any watermarks from documents.")
+            }
+    }
+
+    private var threadBody: some View {
         VStack(spacing: 0) {
             LinearGradient(
                 colors: [Color.black.opacity(0.35), Color.clear],
@@ -61,26 +133,36 @@ struct ThreadDetailView: View {
                 alignment: .top
             )
 
+            // A pane beside the main one gets its own header: its toolbar
+            // items would otherwise merge into the window's, next to the main
+            // pane's own title and pickers.
+            if isEmbedded, let thread = viewModel.thread {
+                paneHeader(thread)
+            }
+
             if viewModel.thread == nil && viewModel.isLoadingThread {
                 // Cold load only — warm re-entry keeps prior content (the VM is
                 // retained by WorkDetailVMStore) and revalidates silently.
                 ChatSkeleton()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                HSplitView {
-                    ChatPanelView(viewModel: viewModel, lightMode: lightMode, selectedModel: selectedModelValue)
-                        .frame(minWidth: 280, idealWidth: 520)
+                if showsCompactSwitch {
+                    compactSwitch
+                }
+                ZStack {
+                    HSplitView {
+                        ChatPanelView(viewModel: viewModel, lightMode: lightMode, selectedModel: selectedModelValue)
+                            .environment(\.threadAsset, threadAssetContext)
+                            .frame(minWidth: 280, idealWidth: 520)
 
-                    if !previewCollapsed && (viewModel.hasPreviewContent || viewModel.isLoadingPDF) {
-                        PreviewPanelView(
-                            currentState: viewModel.currentState,
-                            pdfData: viewModel.pdfData,
-                            isLoading: viewModel.isLoadingPDF,
-                            taskType: viewModel.thread?.taskType,
-                            threadId: viewModel.thread?.id,
-                            selectedSlideIndex: Bindable(viewModel).selectedSlideIndex
-                        )
-                        .frame(minWidth: 320, idealWidth: 420, maxWidth: .infinity)
+                        if showsSideBySide {
+                            assetCanvas
+                                .frame(minWidth: 320, idealWidth: 420, maxWidth: .infinity)
+                        }
+                    }
+                    if showsAssetOverlay {
+                        assetCanvas
+                            .transition(.opacity.combined(with: .scale(scale: 0.985)))
                     }
                 }
                 // Keep this low: in a bottom split pane the whole view gets as
@@ -91,272 +173,176 @@ struct ThreadDetailView: View {
             }
         }
         .background(Color.appBackground)
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: ThreadPaneWidthKey.self, value: geo.size.width)
+            }
+        )
+        .onPreferenceChange(ThreadPaneWidthKey.self) { paneWidth = $0 }
         .preferredColorScheme(lightMode ? .light : .dark)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                if let thread = viewModel.thread {
-                    HStack(spacing: 8) {
-                        if editingTitle {
-                            TextField("Thread title", text: $titleDraft)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 200)
-                                .focused($titleFocused)
-                                .onSubmit { commitTitle() }
-                                // TextField onCommit only fires on Enter, so a
-                                // click-out used to discard the draft. Commit
-                                // on blur so clicking elsewhere saves the edit.
-                                .onChange(of: titleFocused) { _, focused in
-                                    if !focused && editingTitle { commitTitle() }
-                                }
-                                .onExitCommand {
-                                    // Escape discards the edit.
-                                    editingTitle = false
-                                }
+    }
 
-                            Button {
-                                // Explicit cancel — discard draft.
-                                editingTitle = false
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                        } else {
-                            Text(thread.displayName)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                                .onTapGesture {
-                                    titleDraft = thread.title
-                                    editingTitle = true
-                                    titleFocused = true
-                                }
+    // MARK: Asset
 
-                            Button {
-                                titleDraft = thread.title
-                                editingTitle = true
-                                titleFocused = true
-                            } label: {
-                                Image(systemName: "pencil")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                        }
+    private var assetCanvas: some View {
+        PreviewPanelView(
+            currentState: viewModel.currentState,
+            pdfData: viewModel.pdfData,
+            isLoading: viewModel.isLoadingPDF,
+            taskType: viewModel.thread?.taskType,
+            threadId: viewModel.thread?.id,
+            selectedSlideIndex: Bindable(viewModel).selectedSlideIndex,
+            context: canvasContext
+        )
+    }
 
-                        VersionBadge(version: thread.version)
-                        StatusBadge(status: thread.status)
+    private var canvasContext: AssetCanvasContext {
+        let thread = viewModel.thread
+        let name = thread?.displayName
+        return AssetCanvasContext(
+            threadId: thread?.id,
+            threadTitle: name == "(UNNAMED)" ? nil : name,
+            version: thread?.version,
+            updatedAt: thread?.updatedAt,
+            status: thread?.status,
+            versions: viewModel.versions,
+            isStreaming: viewModel.isStreaming,
+            isFocused: assetFocused,
+            onToggleFocus: {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) { assetFocused.toggle() }
+            },
+            onRevert: { version in Task { await viewModel.revert(to: version) } }
+        )
+    }
 
-                        if stateInferredType != .chat {
-                            HStack(spacing: 3) {
-                                Image(systemName: stateInferredType.icon)
-                                    .font(.system(size: 9))
-                                Text(stateInferredType.label.capitalized)
-                                    .font(.system(size: 10, weight: .medium))
-                            }
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.white.opacity(0.06))
-                            .cornerRadius(4)
-                        }
+    /// What the chat's asset cards show and open; nil while the thread has no
+    /// document, so replies keep the plain "Document updated" line.
+    private var threadAssetContext: ThreadAssetContext? {
+        guard showsAsset else { return nil }
+        return ThreadAssetContext(
+            kind: assetKind,
+            title: assetKind.title(from: viewModel.currentState),
+            versions: viewModel.versions,
+            currentVersion: viewModel.thread?.version ?? 0,
+            open: { revealAsset() }
+        )
+    }
 
-                        if let usageText = viewModel.tokenUsage?.displayText {
-                            Text(usageText)
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.white.opacity(0.06))
-                                .cornerRadius(4)
-                        }
-                    }
-                }
-            }
-
-            ToolbarItemGroup(placement: .primaryAction) {
-                // Mode toggles
-                if isBusinessAccount {
-                    ModeToggleButton(
-                        label: "Node",
-                        icon: "cylinder",
-                        isOn: viewModel.thread?.nodeMode ?? false,
-                        onColor: .purple,
-                        isLoading: viewModel.togglingMode == "node",
-                        tooltip: "Query employees, policies, handbooks"
-                    ) {
-                        Task { await viewModel.toggleMode("node") }
-                    }
-
-
-                    ModeToggleButton(
-                        label: "Compliance",
-                        icon: "shield",
-                        isOn: viewModel.thread?.complianceMode ?? false,
-                        onColor: .cyan,
-                        isLoading: viewModel.togglingMode == "compliance",
-                        tooltip: "Jurisdiction requirements context"
-                    ) {
-                        Task { await viewModel.toggleMode("compliance") }
-                    }
-
-                    ModeToggleButton(
-                        label: "Payer",
-                        icon: "stethoscope",
-                        isOn: viewModel.thread?.payerMode ?? false,
-                        onColor: Color.matcha500,
-                        isLoading: viewModel.togglingMode == "payer",
-                        tooltip: "Medicare NCD/LCD lookups"
-                    ) {
-                        Task { await viewModel.toggleMode("payer") }
-                    }
-                }
-
-                Divider()
-
-                // Model picker. The pro model is a Pro/Business entitlement —
-                // locked rows open the paywall (server clamps the override
-                // regardless, so this is purely honest UI).
-                Menu {
-                    ForEach(appState.modelOptions) { option in
-                        let locked = appState.isModelLocked(option)
-                        Button {
-                            if locked {
-                                appState.presentPaywall(for: "ai_model_pro")
-                            } else {
-                                selectedModelId = option.id
-                            }
-                        } label: {
-                            HStack {
-                                Text(locked ? "\(option.label) 🔒" : option.label)
-                                if appState.modelOption(for: selectedModelId)?.id == option.id {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "cpu")
-                            .font(.system(size: 10))
-                        Text(appState.modelOption(for: selectedModelId)?.label ?? "Flash")
-                            .font(.system(size: 10, weight: .medium))
-                    }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(appState.themeText.opacity(0.08)))
-                    .overlay(Capsule().stroke(appState.themeBorder, lineWidth: 1))
-                    .foregroundColor(appState.themeTextSecondary)
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .help("Select AI model")
-
-                // Email agent
-                Button {
-                    showAgentPanel.toggle()
-                } label: {
-                    Image(systemName: "envelope")
-                        .font(.system(size: 13))
-                        .foregroundColor(showAgentPanel ? .matcha500 : nil)
-                }
-                .help("Email agent")
-                .popover(isPresented: $showAgentPanel) {
-                    AgentPanelView()
-                        .frame(width: 560, height: 440)
-                }
-
-                // Usage summary
-                Button {
-                    showUsageSummary = true
-                } label: {
-                    Image(systemName: "chart.bar")
-                        .font(.system(size: 13))
-                }
-                .help("Token usage summary")
-                .popover(isPresented: $showUsageSummary) {
-                    UsageSummaryView()
-                        .frame(width: 340, height: 360)
-                }
-
-                // Light/dark toggle
-                Button {
-                    lightMode.toggle()
-                } label: {
-                    Image(systemName: lightMode ? "moon" : "sun.max")
-                        .font(.system(size: 13))
-                }
-                .help(lightMode ? "Switch to dark mode" : "Switch to light mode")
-
-                // Preview collapse toggle
-                if viewModel.hasPreviewContent || viewModel.isLoadingPDF {
-                    Button {
-                        previewCollapsed.toggle()
-                    } label: {
-                        Image(systemName: previewCollapsed
-                              ? "rectangle.righthalf.inset.filled"
-                              : "rectangle.righthalf.inset.filled.arrow.right")
-                            .font(.system(size: 13))
-                            .foregroundColor(previewCollapsed ? .secondary : .matcha500)
-                    }
-                    .help(previewCollapsed ? "Show preview panel" : "Hide preview panel")
-                }
-
-                if !viewModel.versions.isEmpty {
-                    Button {
-                        showVersionHistory = true
-                    } label: {
-                        Label("History", systemImage: "clock")
-                    }
-                    .popover(isPresented: $showVersionHistory) {
-                        VersionHistoryView(
-                            versions: viewModel.versions,
-                            currentVersion: viewModel.thread?.version ?? 1,
-                            onRevert: { version in
-                                Task { await viewModel.revert(to: version) }
-                                showVersionHistory = false
-                            }
-                        )
-                        .frame(width: 320, height: 400)
-                    }
-                }
-
-                if viewModel.thread?.status == "active" {
-                    Button {
-                        showFinalizeConfirm = true
-                    } label: {
-                        Text("Finalize")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.matcha600)
-                }
-            }
-        }
-        .task(id: threadId) {
-            // Re-point at this thread's cached VM (the view is reused across
-            // thread→thread switches, so @State still holds the prior thread's).
-            if !isEmbedded {
-                let cached = WorkDetailVMStore.shared.threadVM(threadId)
-                if cached !== viewModel { viewModel = cached }
-            }
-            await viewModel.loadThread(id: threadId)
-            if !isEmbedded {
-                appState.setActiveContext(WorkTab(kind: .thread, entityId: threadId,
-                                                  title: viewModel.thread?.displayName ?? "Chat"))
-            }
-        }
-        .alert("Finalize Thread?", isPresented: $showFinalizeConfirm) {
-            Button("Finalize", role: .destructive) {
-                Task { await viewModel.finalize() }
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This will lock the thread and remove any watermarks from documents.")
+    func revealAsset() {
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            previewCollapsed = false
+            compactTab = .asset
         }
     }
+
+    /// Chat | <document> — the compact layout's switch.
+    private var compactSwitch: some View {
+        AssetTabSwitch(
+            showingAsset: Binding(
+                get: { compactTab == .asset },
+                set: { compactTab = $0 ? .asset : .chat }
+            ),
+            kind: assetKind,
+            unseen: assetUnseen
+        )
+    }
+
+    // MARK: Window toolbar (main pane only)
+
+    @ViewBuilder
+    private func withWindowToolbar<Content: View>(_ content: Content) -> some View {
+        // `isEmbedded` is fixed for a view's lifetime, so the branch never
+        // flips under a live view.
+        if isEmbedded {
+            content
+        } else {
+            content.toolbar { windowToolbar }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var windowToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            if let thread = viewModel.thread {
+                HStack(spacing: 8) {
+                    titleEditor(thread, color: .white)
+                    threadChips(thread)
+                }
+            }
+        }
+
+        ToolbarItemGroup(placement: .primaryAction) {
+            modeToggles
+
+            Divider()
+
+            modelPicker
+
+            // Email agent
+            Button {
+                showAgentPanel.toggle()
+            } label: {
+                Image(systemName: "envelope")
+                    .font(.system(size: 13))
+                    .foregroundColor(showAgentPanel ? .matcha500 : nil)
+            }
+            .help("Email agent")
+            .popover(isPresented: $showAgentPanel) {
+                AgentPanelView()
+                    .frame(width: 560, height: 440)
+            }
+
+            // Usage summary
+            Button {
+                showUsageSummary = true
+            } label: {
+                Image(systemName: "chart.bar")
+                    .font(.system(size: 13))
+            }
+            .help("Token usage summary")
+            .popover(isPresented: $showUsageSummary) {
+                UsageSummaryView()
+                    .frame(width: 340, height: 360)
+            }
+
+            // Light/dark toggle
+            Button {
+                lightMode.toggle()
+            } label: {
+                Image(systemName: lightMode ? "moon" : "sun.max")
+                    .font(.system(size: 13))
+            }
+            .help(lightMode ? "Switch to dark mode" : "Switch to light mode")
+
+            previewToggle
+
+            if !viewModel.versions.isEmpty {
+                Button {
+                    showVersionHistory = true
+                } label: {
+                    Label("History", systemImage: "clock")
+                }
+                .popover(isPresented: $showVersionHistory) {
+                    VersionHistoryView(
+                        versions: viewModel.versions,
+                        currentVersion: viewModel.thread?.version ?? 1,
+                        onRevert: { version in
+                            Task { await viewModel.revert(to: version) }
+                            showVersionHistory = false
+                        }
+                    )
+                    .frame(width: 320, height: 400)
+                }
+            }
+
+            finalizeButton
+        }
+    }
+}
+
+private struct ThreadPaneWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 // MARK: - Mode Toggle Button

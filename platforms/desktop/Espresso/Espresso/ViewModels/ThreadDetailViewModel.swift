@@ -50,7 +50,9 @@ class ThreadDetailViewModel {
             return currentState["candidates"] != nil
         case .inventory:
             return currentState["inventory_items"] != nil
-        case .chat, .policy, .project, .languageTutor, .blog:
+        case .policy:
+            return currentState.keys.contains { $0.hasPrefix("policy_") }
+        case .chat, .project, .languageTutor, .blog:
             return false
         }
     }
@@ -387,6 +389,8 @@ class ThreadDetailViewModel {
             if let v = data.version {
                 thread?.version = v
             }
+            // The turn just wrote the thread; the canvas's "edited …" reads this.
+            thread?.updatedAt = ISO8601DateFormatter().string(from: Date())
             thread?.taskType = data.taskType ?? inferMWTaskType(from: updatedState)
 
             if let threadId = thread?.id {

@@ -420,6 +420,15 @@
 		CD260926000000000000B003 /* CodexResearchCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD260926000000000000F003 /* CodexResearchCoordinator.swift */; };
 		CD260926000000000000B004 /* CodexControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD260926000000000000F004 /* CodexControls.swift */; };
 		CD260926000000000000B005 /* CodexProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD260926000000000000F005 /* CodexProtocolTests.swift */; };
+		MWAS010000000000000000BF /* AssetKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = MWAS010000000000000000FR /* AssetKind.swift */; };
+		MWAS020000000000000000BF /* AssetCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = MWAS020000000000000000FR /* AssetCanvasView.swift */; };
+		MWAS030000000000000000BF /* AssetExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = MWAS030000000000000000FR /* AssetExport.swift */; };
+		MWAS040000000000000000BF /* AssetMessageCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = MWAS040000000000000000FR /* AssetMessageCard.swift */; };
+		MWAS050000000000000000BF /* PolicyPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = MWAS050000000000000000FR /* PolicyPreview.swift */; };
+		MWAS060000000000000000BF /* MessageAttachmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = MWAS060000000000000000FR /* MessageAttachmentViews.swift */; };
+		MWAS070000000000000000BF /* ThreadDetailView+Chrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = MWAS070000000000000000FR /* ThreadDetailView+Chrome.swift */; };
+		MWAST00000000000000000BF /* AssetInferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = MWAST00000000000000000FR /* AssetInferenceTests.swift */; };
+		MWAS080000000000000000BF /* AssetTabSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = MWAS080000000000000000FR /* AssetTabSwitch.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -741,6 +750,15 @@
 		CD260926000000000000F003 /* CodexResearchCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexResearchCoordinator.swift; sourceTree = "<group>"; };
 		CD260926000000000000F004 /* CodexControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexControls.swift; sourceTree = "<group>"; };
 		CD260926000000000000F005 /* CodexProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexProtocolTests.swift; sourceTree = "<group>"; };
+		MWAS010000000000000000FR /* AssetKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "AssetKind.swift"; path = "Espresso/Views/MatchaWork/Assets/AssetKind.swift"; sourceTree = SOURCE_ROOT; };
+		MWAS020000000000000000FR /* AssetCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "AssetCanvasView.swift"; path = "Espresso/Views/MatchaWork/Assets/AssetCanvasView.swift"; sourceTree = SOURCE_ROOT; };
+		MWAS030000000000000000FR /* AssetExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "AssetExport.swift"; path = "Espresso/Views/MatchaWork/Assets/AssetExport.swift"; sourceTree = SOURCE_ROOT; };
+		MWAS040000000000000000FR /* AssetMessageCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "AssetMessageCard.swift"; path = "Espresso/Views/MatchaWork/Assets/AssetMessageCard.swift"; sourceTree = SOURCE_ROOT; };
+		MWAS050000000000000000FR /* PolicyPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "PolicyPreview.swift"; path = "Espresso/Views/MatchaWork/Previews/PolicyPreview.swift"; sourceTree = SOURCE_ROOT; };
+		MWAS060000000000000000FR /* MessageAttachmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "MessageAttachmentViews.swift"; path = "Espresso/Views/MatchaWork/MessageAttachmentViews.swift"; sourceTree = SOURCE_ROOT; };
+		MWAS070000000000000000FR /* ThreadDetailView+Chrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "ThreadDetailView+Chrome.swift"; path = "Espresso/Views/MatchaWork/ThreadDetailView+Chrome.swift"; sourceTree = SOURCE_ROOT; };
+		MWAST00000000000000000FR /* AssetInferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetInferenceTests.swift; sourceTree = "<group>"; };
+		MWAS080000000000000000FR /* AssetTabSwitch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "AssetTabSwitch.swift"; path = "Espresso/Views/MatchaWork/Assets/AssetTabSwitch.swift"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -888,6 +906,14 @@
 				8E35F4A71D8F7681E613FCF9 /* ChatMessageComposer.swift */,
 				3AE423DAF2E806EE77E7FB4D /* MessageBubbleView.swift */,
 				DCD9DCBDB9CC47BA70B5F0FF /* PreviewPanelView.swift */,
+				MWAS010000000000000000FR /* AssetKind.swift */,
+				MWAS020000000000000000FR /* AssetCanvasView.swift */,
+				MWAS030000000000000000FR /* AssetExport.swift */,
+				MWAS040000000000000000FR /* AssetMessageCard.swift */,
+				MWAS050000000000000000FR /* PolicyPreview.swift */,
+				MWAS060000000000000000FR /* MessageAttachmentViews.swift */,
+				MWAS070000000000000000FR /* ThreadDetailView+Chrome.swift */,
+				MWAS080000000000000000FR /* AssetTabSwitch.swift */,
 				49C4DFA44755333D647B43C2 /* VersionHistoryView.swift */,
 				1768B8AD82B9DE8709D0ADF7 /* NewThreadView.swift */,
 				B9E4D71F3C825A064D17F308 /* SkillsView.swift */,
@@ -1196,6 +1222,7 @@
 				BC01DD22EE33FF44551100B3 /* CacheKeyTests.swift */,
 				BC01DD22EE33FF44551100B4 /* ChannelMergeTests.swift */,
 				CALV00000000000000000BT2 /* CalendarLogicTests.swift */,
+				MWAST00000000000000000FR /* AssetInferenceTests.swift */,
 				BC01DD22EE33FF44551100B5 /* ModelPickerTests.swift */,
 			);
 			path = MatchaTests;
@@ -1682,6 +1709,7 @@
 				BC01DD22EE33FF44551100C3 /* CacheKeyTests.swift in Sources */,
 				BC01DD22EE33FF44551100C4 /* ChannelMergeTests.swift in Sources */,
 				CALV00000000000000000BT1 /* CalendarLogicTests.swift in Sources */,
+				MWAST00000000000000000BF /* AssetInferenceTests.swift in Sources */,
 				BC01DD22EE33FF44551100C5 /* ModelPickerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1859,6 +1887,14 @@
 				CALV000000000000000000A3 /* CalendarService.swift in Sources */,
 				CALV000000000000000000A5 /* CalendarViewModel.swift in Sources */,
 				CALV000000000000000000A7 /* CalendarWorkspace.swift in Sources */,
+				MWAS010000000000000000BF /* AssetKind.swift in Sources */,
+				MWAS020000000000000000BF /* AssetCanvasView.swift in Sources */,
+				MWAS030000000000000000BF /* AssetExport.swift in Sources */,
+				MWAS040000000000000000BF /* AssetMessageCard.swift in Sources */,
+				MWAS050000000000000000BF /* PolicyPreview.swift in Sources */,
+				MWAS060000000000000000BF /* MessageAttachmentViews.swift in Sources */,
+				MWAS070000000000000000BF /* ThreadDetailView+Chrome.swift in Sources */,
+				MWAS080000000000000000BF /* AssetTabSwitch.swift in Sources */,
 				CALV000000000000000000A9 /* CalendarEventEditor.swift in Sources */,
 				CALV000000000000000000AB /* EmailCalendarSheet.swift in Sources */,
 				0F5C621C255ED1D1ED92354A /* CommonModels.swift in Sources */,

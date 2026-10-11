@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct InventoryPanelView: View {
+    @Environment(AppState.self) private var appState
     let state: [String: AnyCodable]
 
     @State private var searchText = ""
@@ -58,15 +59,15 @@ struct InventoryPanelView: View {
             HStack {
                 Text("Inventory")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
                 Text("(\(items.count) items)")
                     .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(appState.themeTextSecondary)
                 Spacer()
                 if totalCost > 0 {
                     Text("$\(String(format: "%.2f", totalCost))")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.matcha500)
+                        .foregroundColor(appState.themeAccent)
                 }
             }
             .padding(.horizontal, 16)
@@ -85,11 +86,11 @@ struct InventoryPanelView: View {
                                 .padding(.vertical, 3)
                                 .background(
                                     (selectedCategory == nil && cat == "all") || selectedCategory == cat
-                                    ? Color.matcha600 : Color.zinc800
+                                    ? appState.themeAccent : appState.assetWell
                                 )
                                 .foregroundColor(
                                     (selectedCategory == nil && cat == "all") || selectedCategory == cat
-                                    ? .white : .secondary
+                                    ? appState.themeOnAccent : appState.themeTextSecondary
                                 )
                                 .cornerRadius(4)
                         }
@@ -104,7 +105,7 @@ struct InventoryPanelView: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(appState.themeTextSecondary)
                 TextField("Search by name, SKU, vendor...", text: $searchText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
@@ -126,14 +127,14 @@ struct InventoryPanelView: View {
                 } label: {
                     Image(systemName: "arrow.up.arrow.down")
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
-            .background(Color.zinc800.opacity(0.5))
+            .background(appState.assetWell)
 
             Divider().opacity(0.3)
 
@@ -143,10 +144,10 @@ struct InventoryPanelView: View {
                 VStack(spacing: 8) {
                     Image(systemName: "shippingbox")
                         .font(.system(size: 28))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                     Text("No inventory items")
                         .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                 }
                 Spacer()
             } else {
@@ -160,11 +161,11 @@ struct InventoryPanelView: View {
                 }
             }
         }
-        .background(Color.zinc900)
     }
 }
 
 private struct InventoryRow: View {
+    @Environment(AppState.self) private var appState
     let item: MWInventoryItem
     @State private var isExpanded = false
 
@@ -174,7 +175,7 @@ private struct InventoryRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.displayName)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white)
+                        .foregroundColor(appState.themeText)
                     HStack(spacing: 6) {
                         if let cat = item.category {
                             Text(cat.replacingOccurrences(of: "_", with: " "))
@@ -188,7 +189,7 @@ private struct InventoryRow: View {
                         if let vendor = item.vendor {
                             Text(vendor)
                                 .font(.system(size: 10))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(appState.themeTextSecondary)
                         }
                     }
                 }
@@ -198,18 +199,18 @@ private struct InventoryRow: View {
                     if let total = item.totalCost {
                         Text("$\(String(format: "%.2f", total))")
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.white)
+                            .foregroundColor(appState.themeText)
                     }
                     if let qty = item.quantity, let unit = item.unit {
                         Text("\(String(format: qty == qty.rounded() ? "%.0f" : "%.1f", qty)) \(unit)")
                             .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                     }
                 }
 
                 Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                     .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(appState.themeTextSecondary)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -223,17 +224,17 @@ private struct InventoryRow: View {
                     if let sku = item.sku {
                         Label("SKU: \(sku)", systemImage: "barcode")
                             .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                     }
                     if let unitCost = item.unitCost, let unit = item.unit {
                         Label("$\(String(format: "%.2f", unitCost)) / \(unit)", systemImage: "dollarsign.circle")
                             .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                     }
                     if let par = item.parLevel {
                         Label("Par level: \(String(format: "%.0f", par))", systemImage: "chart.bar")
                             .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -241,6 +242,6 @@ private struct InventoryRow: View {
                 .transition(.opacity)
             }
         }
-        .background(isExpanded ? Color.zinc800.opacity(0.3) : Color.clear)
+        .background(isExpanded ? appState.assetWell : Color.clear)
     }
 }

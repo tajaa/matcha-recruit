@@ -69,7 +69,15 @@ func inferMWTaskType(from state: [String: AnyCodable]) -> MWTaskType {
     if state.keys.contains(where: { $0.hasPrefix("handbook_") }) {
         return .handbook
     }
-    if state["candidates"] != nil || state["batch_title"] != nil || state["batch_status"] != nil {
+    // Same place the server checks it (`_infer_skill_from_state`): a policy
+    // thread's `policy_*` keys outrank anything else it accumulates.
+    if state.keys.contains(where: { $0.hasPrefix("policy_") }) {
+        return .policy
+    }
+    // Onboarding also writes `batch_status`; with its `employees` present the
+    // state is onboarding, not a resume batch.
+    if state["candidates"] != nil || state["batch_title"] != nil
+        || (state["batch_status"] != nil && state["employees"] == nil) {
         return .resumeBatch
     }
     if state["inventory_items"] != nil || state["inventory_title"] != nil {
