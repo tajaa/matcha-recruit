@@ -224,6 +224,7 @@ async def test_readiness_reports_the_rule_blocker_first(monkeypatch):
     monkeypatch.setattr(week_builder, "connection_or_direct", lambda: _AsyncContext(conn))
     monkeypatch.setattr(week_builder, "resolve_week_start_weekday", AsyncMock(return_value=0))
     _patch_bundle(monkeypatch, FRESH_BUNDLE)
+    monkeypatch.setattr(week_builder, "get_company_features", AsyncMock(return_value={}))
     monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={
         "employees": [{
             "id": "employee-1", "name": "Amy", "availability_state": "windows",

@@ -384,3 +384,59 @@ def test_state_block_counts_statutory_advisories_on_a_verified_state():
 def test_a_clean_verified_week_adds_no_compliance_line():
     block = build_state_block({"huume_action": _action(review=_week_review())}, schedule_surface=True)
     assert "Compliance:" not in block and "Load:" not in block
+
+
+@pytest.mark.parametrize("status", ["proposed", "applied", "cancelled"])
+def test_automatic_autopilot_source_and_frozen_weather_survive_later_turns(status):
+    """Reproduce the toolbar -> adopted action -> model-context path, no DB.
+
+    The saved template is irrelevant to this 42-position forecast. The old
+    state block omitted both its source and its missing-weather explanation.
+    """
+    from app.matcha.services.scheduling.schedule_assistant_session import _automatic_action
+
+    action = _automatic_action({
+        "id": RUN_ID, "location_id": LOCATION_ID, "week_start": date(2026, 10, 25),
+        "source_mode": "autopilot", "week_template_id": None,
+        "metrics": {"required_positions": 42, "filled_positions": 42, "open_positions": 0},
+        "proposal": {
+            "review": {"summary": "Built a draft with Autopilot: 42 positions."},
+            "demand_model": {
+                "sentence": "Forecast from 14 days of sales.",
+                "inputs_used": ["sales_history"], "inputs_missing": ["weather"],
+                "policy": {"weather": "rain_hurts"},
+                "days": [{"date": "2026-10-25", "weather": {"modifier": 1.0},
+                          "notes": ["weather unavailable for 2026-10-25 — no weather adjustment"]}],
+                "labor": {"scheduled_cost_after": 999999},
+            },
+        },
+    })
+    action["status"] = status
+
+    block = build_state_block({"huume_action": action}, schedule_surface=True)
+
+    assert f"recorded source ({status}): Autopilot" in block
+    assert "42 positions" in block
+    assert "14 days of sales" in block and "sales_history" in block
+    assert '"inputs_missing": ["weather"]' in block
+    assert "no weather adjustment" in block
+    assert "999999" not in block
+
+
+@pytest.mark.parametrize("source,label", [
+    ("template", "saved week template (fixed staffing pattern)"),
+    ("existing", "existing draft shifts"),
+    (None, "not recorded"),
+])
+def test_week_source_is_recorded_rather_than_inferred(source, label):
+    block = build_state_block({"huume_action": _action(source_mode=source)}, schedule_surface=True)
+    assert label in block
+    assert "Frozen forecast inputs" not in block
+
+
+def test_schedule_prompt_distinguishes_feature_gates_forecast_inputs_and_template_counts():
+    prompt = build_system_prompt(company_name="Example Coffee", today="2026-10-11", surface_context=_schedule_surface())
+    assert "autopilot_availability" in prompt
+    assert "null autopilot field" in prompt
+    assert "do not replace an Autopilot proposal with a template" in prompt
+    assert "inputs_used, inputs_missing, daily weather modifiers and notes" in prompt

@@ -1485,3 +1485,21 @@ readiness is blocked: repair required setup, inspect optional input quality and
 save planning choices, then explicitly build a Huume review. Returning from the
 Week setup or Jobs drawer rechecks readiness. Generation is gated on a fresh
 server readiness read; it never confirms a proposal or publishes shifts.
+
+
+### Autopilot provenance in schedule chat
+
+`schedule_generation_runs.source_mode` records the demand source actually used;
+`proposal.demand_model` freezes its input usage, missing inputs, daily weather
+modifiers, and degradation notes. Adoption preserves these in `huume_action`.
+The Huume state block carries them on later turns, including after apply; a
+saved default template does not establish an Autopilot draft's provenance or
+require the forecast to repeat that template's shift count.
+
+`get_week_build_readiness.autopilot_availability` reports the current merged
+company flag and all `FEATURE_REQUIRES["schedule_autopilot"]` gates for every
+source selection. Its separate `autopilot` field contains optional forecast
+readiness only when requested and permitted: null is not a disabled flag.
+Explicit Autopilot builds refuse with the names of missing gates rather than
+falling back to a template. Weather missing from a run means no adjustment for
+those days; it does not mean the run was built without Autopilot.

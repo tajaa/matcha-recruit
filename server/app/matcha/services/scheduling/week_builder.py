@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 from app.core.feature_flags import get_company_features
 from app.database import connection_or_direct
 
+from .autopilot.access import autopilot_availability
 from .autopilot.policy import POLICY_SALES_HISTORY_DAYS
 from .assignment_guard import (
     POLICY_MAX_CONSECUTIVE_DAYS, POLICY_MAX_SHIFTS_PER_DAY, POLICY_MIN_REST_HOURS,
@@ -192,7 +193,7 @@ def _review_payload(
         })
     source_label = (
         "the existing draft shifts" if source_mode == "existing" else
-        "sales, weather and this store's setup (Autopilot)" if source_mode == "autopilot" else
+        "Autopilot using this store's setup and available forecast inputs" if source_mode == "autopilot" else
         f'template "{template_name}"'
     )
     summary = (
@@ -2241,9 +2242,10 @@ async def get_week_build_readiness(
                 conn, company_id=company_id, location_id=location_id, week_start=week_start,
             ) if shift["status"] == "published"
         ]
+        availability = autopilot_availability(await get_company_features(company_id, conn=conn))
         autopilot_info = None
         autopilot_has_jobs = True
-        if source_mode == "autopilot":
+        if source_mode == "autopilot" and availability["available"]:
             # Committed imports plus POS days still waiting on item mapping —
             # the same days the engine forecasts from.
             sales_days = int(await conn.fetchval(
@@ -2365,6 +2367,8 @@ async def get_week_build_readiness(
     autopilot_mode = source_mode == "autopilot"
     rules_missing = missing_fields(rules_bundle, mode="autopilot" if autopilot_mode else "template")
     blockers = []
+    if autopilot_mode and not availability["available"]:
+        blockers.append(availability["message"])
     # First, because it is the one blocker the manager can act on without any
     # roster or template work — and the one the builder itself enforces.
     rules_refusal = week_rules_refusal(
@@ -2442,7 +2446,9 @@ async def get_week_build_readiness(
         "leader_job_names": profile["leader_job_names"],
         "leader_job_name": profile["leader_job_names"][0] if profile["leader_job_names"] else None,
         "pattern_findings": pattern_findings,
+        # None means forecast readiness was not evaluated, not that the flag is off.
         "autopilot": autopilot_info,
+        "autopilot_availability": availability,
         "employees": [
             {"employee_id": employee["id"], "name": employee["name"],
              "availability_state": employee["availability_state"],
@@ -2593,8 +2599,9 @@ async def propose_week_draft(
         autopilot_roster: dict[str, Any] | None = None
         if selected_source == "autopilot":
             features = await get_company_features(company_id, conn=conn)
-            if not features.get("schedule_autopilot"):
-                return {"status": "refused", "message": "Schedule Autopilot is not enabled for this company."}
+            availability = autopilot_availability(features)
+            if not availability["available"]:
+                return {"status": "refused", "message": availability["message"]}
             from .autopilot import generate_autopilot_demand
             from .autopilot.inputs import load_autopilot_inputs
             autopilot_roster = await _load_roster_context(

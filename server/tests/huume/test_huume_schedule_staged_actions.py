@@ -667,3 +667,23 @@ async def test_seven_day_correction_stages_one_batch_and_executes_nothing(monkey
     assert "Here's the whole correction" in staged["pill_text"]
     assert _step_statuses(result) == [("propose_schedule_change", "ok")]
     execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_week_stage_echoes_actual_source_and_frozen_forecast_to_the_model(monkeypatch):
+    model = {"inputs_used": ["sales_history"], "inputs_missing": ["weather"], "notes": ["No weather adjustment."]}
+    monkeypatch.setattr(week_builder, "propose_week_draft", AsyncMock(return_value={
+        "status": "ready", "generation_run_id": str(uuid4()), "source_mode": "autopilot",
+        "summary": "Autopilot forecast.", "demand_model": model,
+        "metrics": {"filled_positions": 1, "required_positions": 1, "open_positions": 0},
+    }))
+    frames = await _run_turn(monkeypatch, [
+        _fake_response(calls=[_fake_call("build_week_schedule", {"source_mode": "autopilot"})]),
+        _fake_response(text="Draft ready."),
+    ])
+
+    result = _result(frames)
+    action = result["state_updates"]["huume_action"]
+    response = next(step["result"] for step in result["steps"] if step["tool"] == "build_week_schedule")
+    assert action["source_mode"] == response["source_mode"] == "autopilot"
+    assert action["demand_model"] == response["demand_model"] == model
