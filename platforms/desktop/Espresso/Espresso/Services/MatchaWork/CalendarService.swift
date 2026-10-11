@@ -1,14 +1,37 @@
 import Foundation
 
+/// Which timezone this session has already reported. Signing out clears it
+/// (`reset`), so the next account reports its own; a report that was still in
+/// flight across the sign-out is not recorded for the new session.
+struct TimeZoneReportCache {
+    private(set) var reported: String?
+    private(set) var session = 0
+
+    func needsReport(_ zone: String) -> Bool { zone != reported }
+
+    /// Record a finished report, unless the session it started in has ended.
+    mutating func recordReport(_ zone: String, startedIn session: Int) {
+        if session == self.session { reported = zone }
+    }
+
+    mutating func reset() {
+        reported = nil
+        session &+= 1
+    }
+}
+
 /// The person's Espresso calendar (`/matcha-work/calendar/*`) and the email
 /// agent's calendar suggestions (`/matcha-work/agent/email/calendar-suggest`).
+@MainActor
 final class CalendarService {
     static let shared = CalendarService()
     private let client = APIClient.shared
     private let basePath = "/matcha-work"
 
-    /// Last zone reported this launch, so the PUT happens once per change.
-    private var reportedTimeZone: String?
+    private var timeZoneReports = TimeZoneReportCache()
+
+    /// Sign-out: forget this account's report.
+    func resetSession() { timeZoneReports.reset() }
 
     /// The editable fields of one event. Every key is sent, so a nil
     /// location or notes clears it on update.
@@ -38,20 +61,19 @@ final class CalendarService {
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
-    func feed(from start: Date, to end: Date, includeGoogle: Bool = true) async throws -> MWCalendarFeed {
+    func feed(from start: Date, to end: Date) async throws -> MWCalendarFeed {
         let s = query(CalendarWire.instantString(start))
         let e = query(CalendarWire.instantString(end))
         return try await client.request(
-            method: "GET",
-            path: "\(basePath)/calendar/feed?start=\(s)&end=\(e)&include_google=\(includeGoogle)"
+            method: "GET", path: "\(basePath)/calendar/feed?start=\(s)&end=\(e)"
         )
     }
 
     func createEvent(
         _ fields: EventFields,
-        sourceKind: String = "manual",
-        sourceRef: String? = nil,
-        sourceLabel: String? = nil
+        sourceKind: String,
+        sourceRef: String?,
+        sourceLabel: String?
     ) async throws -> MWCalendarEvent {
         struct Body: Encodable {
             let fields: EventFields
@@ -79,6 +101,12 @@ final class CalendarService {
         try await client.request(method: "PATCH", path: "\(basePath)/calendar/events/\(id)", body: fields)
     }
 
+    func moveEvent(id: String, start: String, end: String) async throws -> MWCalendarEvent {
+        struct Body: Encodable { let start: String; let end: String }
+        return try await client.request(
+            method: "PATCH", path: "\(basePath)/calendar/events/\(id)", body: Body(start: start, end: end))
+    }
+
     func deleteEvent(id: String) async throws {
         _ = try await client.requestData(method: "DELETE", path: "\(basePath)/calendar/events/\(id)")
     }
@@ -87,15 +115,16 @@ final class CalendarService {
     /// the person's time. Best-effort; once per launch unless it changes.
     func reportTimeZoneIfNeeded() async {
         let name = TimeZone.current.identifier
-        guard name != reportedTimeZone else { return }
+        guard timeZoneReports.needsReport(name) else { return }
+        let session = timeZoneReports.session
         struct Body: Encodable { let timezone: String }
         struct Res: Decodable { let timezone: String }
         do {
             let _: Res = try await client.request(
                 method: "PUT", path: "\(basePath)/calendar/prefs", body: Body(timezone: name))
-            reportedTimeZone = name
+            timeZoneReports.recordReport(name, startedIn: session)
         } catch {
-            // The next launch or calendar load tries again.
+            // The next sign-in or calendar load tries again.
         }
     }
 

@@ -496,7 +496,7 @@ private struct CalendarWeekGrid: View {
                 // Half an hour above the first event (8 AM on an empty week),
                 // so the label at the top isn't cut in half.
                 .onAppear { proxy.scrollTo(max(0, firstHour(days) * 2 - 1), anchor: .top) }
-                .onChange(of: vm.loadedRangeStart) { _, _ in
+                .onChange(of: vm.loadedRange) { _, _ in
                     proxy.scrollTo(max(0, firstHour(vm.visibleDays) * 2 - 1), anchor: .top)
                 }
             }
@@ -698,7 +698,10 @@ private struct WeekEventBlock: View {
 }
 
 /// Places timed entries on one day of the week grid: overlapping entries
-/// share the width side by side.
+/// share the width side by side. Positions are clock readings on that day
+/// (the axis the hour labels, the click-to-create hour and the now line use),
+/// so a 09:00 event sits on the 9 AM line on a DST day too. Overlap is judged
+/// by the height a block is drawn at, which is never less than `minHeight`.
 enum WeekLayout {
     struct Placed {
         let entry: CalendarEntry
@@ -708,26 +711,39 @@ enum WeekLayout {
         let height: CGFloat
     }
 
-    static func place(_ entries: [CalendarEntry], on day: Date, hourHeight: CGFloat,
-                      calendar: Calendar = .current) -> [Placed] {
+    static let dayMinutes: Double = 24 * 60
+
+    /// Minutes past midnight on the clock of `day`, 0 before it, 1440 after.
+    static func clockMinutes(_ date: Date, on day: Date, calendar: Calendar = .current) -> Double {
         let dayStart = calendar.startOfDay(for: day)
-        guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { return [] }
-        let spans: [(CalendarEntry, Date, Date)] = entries.map { e in
-            let s = max(e.start, dayStart)
-            let f = min(max(e.end, e.start.addingTimeInterval(15 * 60)), dayEnd)
-            return (e, s, max(f, s))
+        guard date > dayStart else { return 0 }
+        guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart), date < dayEnd else {
+            return dayMinutes
+        }
+        let c = calendar.dateComponents([.hour, .minute, .second], from: date)
+        return Double((c.hour ?? 0) * 60 + (c.minute ?? 0)) + Double(c.second ?? 0) / 60
+    }
+
+    static func place(_ entries: [CalendarEntry], on day: Date, hourHeight: CGFloat,
+                      minHeight: CGFloat = 18, calendar: Calendar = .current) -> [Placed] {
+        let minMinutes = Double(minHeight / hourHeight) * 60
+        // (entry, start, drawn end) in clock minutes.
+        let spans: [(CalendarEntry, Double, Double)] = entries.map { e in
+            let s = min(clockMinutes(e.start, on: day, calendar: calendar), dayMinutes - minMinutes)
+            let f = max(clockMinutes(e.end, on: day, calendar: calendar), s + minMinutes)
+            return (e, s, f)
         }.sorted { $0.1 == $1.1 ? $0.2 > $1.2 : $0.1 < $1.1 }
 
         var out: [Placed] = []
-        var cluster: [(CalendarEntry, Date, Date, Int)] = []
-        var columnEnds: [Date] = []
-        var clusterEnd = Date.distantPast
+        var cluster: [(CalendarEntry, Double, Double, Int)] = []
+        var columnEnds: [Double] = []
+        var clusterEnd = -Double.infinity
 
         func flush() {
             let count = max(1, columnEnds.count)
             for (entry, s, f, column) in cluster {
-                let top = CGFloat(s.timeIntervalSince(dayStart) / 3600) * hourHeight
-                let height = max(18, CGFloat(f.timeIntervalSince(s) / 3600) * hourHeight - 1)
+                let top = CGFloat(s / 60) * hourHeight
+                let height = max(minHeight, CGFloat((f - s) / 60) * hourHeight - 1)
                 out.append(Placed(entry: entry, column: column, columns: count, top: top, height: height))
             }
             cluster = []

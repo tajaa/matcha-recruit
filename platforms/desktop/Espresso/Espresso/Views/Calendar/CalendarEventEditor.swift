@@ -179,7 +179,7 @@ struct CalendarEventEditor: View {
 }
 
 /// All-day switch and start/end pickers. Moving the start moves the end with
-/// it (the length stays), like Calendar.app.
+/// it (the length stays, in whole days when all day), like Calendar.app.
 struct CalendarTimeFields: View {
     @Environment(AppState.self) private var appState
     @Binding var draft: CalendarDraft
@@ -212,9 +212,7 @@ struct CalendarTimeFields: View {
     }
 
     private func setStart(_ next: Date) {
-        let length = draft.end.timeIntervalSince(draft.start)
-        draft.start = next
-        draft.end = next.addingTimeInterval(max(0, length))
+        draft = draft.movingStart(to: next)
     }
 
     private func setAllDay(_ on: Bool) {

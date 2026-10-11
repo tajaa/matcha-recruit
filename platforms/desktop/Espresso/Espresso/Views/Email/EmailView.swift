@@ -83,6 +83,8 @@ struct EmailDetailView: View {
         instructions = ""
         reply = nil
         showSendToBoard = false
+        showCalendarSheet = false
+        calendarNote = nil
         isSummarizing = false
         isDrafting = false
         isResolving = true

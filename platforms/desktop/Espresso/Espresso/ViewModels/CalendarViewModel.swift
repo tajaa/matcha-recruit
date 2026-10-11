@@ -28,21 +28,22 @@ struct CalendarEntry: Identifiable, Hashable {
         }
     }
 
-    init?(event: MWCalendarEvent) {
-        guard let s = CalendarWire.date(event.start), let e = CalendarWire.date(event.end) else { return nil }
+    init?(event: MWCalendarEvent, calendar: Calendar = .current) {
+        guard let s = CalendarWire.date(event.start, calendar: calendar),
+              let e = CalendarWire.date(event.end, calendar: calendar) else { return nil }
         self.init(id: "e:\(event.id)", kind: .espresso(event), title: event.title,
                   start: s, end: max(s, e), allDay: event.allDay)
     }
 
-    init?(google: MWGoogleCalendarEvent) {
-        guard let s = CalendarWire.date(google.start) else { return nil }
-        let e = google.end.flatMap(CalendarWire.date) ?? s
+    init?(google: MWGoogleCalendarEvent, calendar: Calendar = .current) {
+        guard let s = CalendarWire.date(google.start, calendar: calendar) else { return nil }
+        let e = google.end.flatMap { CalendarWire.date($0, calendar: calendar) } ?? s
         self.init(id: "g:\(google.id)", kind: .google(google), title: google.title,
                   start: s, end: max(s, e), allDay: google.allDay)
     }
 
-    init?(todo: MWCalendarTodo) {
-        guard let d = CalendarWire.day(todo.dueDate) else { return nil }
+    init?(todo: MWCalendarTodo, calendar: Calendar = .current) {
+        guard let d = CalendarWire.day(todo.dueDate, calendar: calendar) else { return nil }
         self.init(id: "t:\(todo.id)", kind: .todo(todo), title: todo.title, start: d, end: d, allDay: true)
     }
 
@@ -55,13 +56,18 @@ struct CalendarEntry: Identifiable, Hashable {
         self.allDay = allDay
     }
 
-    /// The local days this entry shows on (a timed event ending exactly at
-    /// midnight does not spill into the next day).
-    func days(in calendar: Calendar, limit: Int = 62) -> [Date] {
-        let first = calendar.startOfDay(for: start)
+    /// The local days this entry shows on, kept to `lower...upper` when given
+    /// (a timed event ending exactly at midnight does not spill into the next
+    /// day). Clipping comes before the bound: a Google event can start months
+    /// before the range it was listed for and still cover all of it.
+    func days(in calendar: Calendar, within lower: Date? = nil, through upper: Date? = nil,
+              limit: Int = 62) -> [Date] {
+        var first = calendar.startOfDay(for: start)
         var lastInstant = end
         if !allDay, end > start, calendar.startOfDay(for: end) == end { lastInstant = end.addingTimeInterval(-1) }
-        let last = calendar.startOfDay(for: lastInstant)
+        var last = calendar.startOfDay(for: lastInstant)
+        if let lower { first = max(first, calendar.startOfDay(for: lower)) }
+        if let upper { last = min(last, calendar.startOfDay(for: upper)) }
         var out: [Date] = []
         var day = first
         while day <= last, out.count < limit {
@@ -72,6 +78,22 @@ struct CalendarEntry: Identifiable, Hashable {
         return out
     }
 }
+
+/// What the Calendar needs from the server: `CalendarService` in the app, a
+/// fake in tests.
+@MainActor
+protocol CalendarBackend {
+    func feed(from start: Date, to end: Date) async throws -> MWCalendarFeed
+    func createEvent(_ fields: CalendarService.EventFields, sourceKind: String,
+                     sourceRef: String?, sourceLabel: String?) async throws -> MWCalendarEvent
+    func updateEvent(id: String, _ fields: CalendarService.EventFields) async throws -> MWCalendarEvent
+    /// Only the times: the server merges them into the event as it is now.
+    func moveEvent(id: String, start: String, end: String) async throws -> MWCalendarEvent
+    func deleteEvent(id: String) async throws
+    func reportTimeZoneIfNeeded() async
+}
+
+extension CalendarService: CalendarBackend {}
 
 /// The Calendar tab: what range is shown, what is in it, and the edits.
 @MainActor
@@ -84,8 +106,8 @@ final class CalendarViewModel {
 
     var mode: Mode = .month
     /// Any day inside the month or week on screen.
-    private(set) var anchor: Date = Date()
-    var selectedDay: Date = Calendar.current.startOfDay(for: Date())
+    private(set) var anchor: Date
+    var selectedDay: Date
 
     private(set) var entries: [CalendarEntry] = []
     private(set) var byDay: [Date: [CalendarEntry]] = [:]
@@ -93,14 +115,22 @@ final class CalendarViewModel {
     private(set) var googleStatus = "skipped"
     private(set) var isLoading = false
     private(set) var hasLoaded = false
-    /// First day of the range the last successful load covered. Changes only
-    /// when a different range arrives, not on a reload after an edit.
-    private(set) var loadedRangeStart: Date?
+    /// The days the last successful load covered. Changes only when a
+    /// different range arrives, not on a reload after an edit.
+    private(set) var loadedRange: ClosedRange<Date>?
     var errorMessage: String?
 
     @ObservationIgnored private var loadGeneration = 0
+    @ObservationIgnored private let backend: CalendarBackend
+    let calendar: Calendar
 
-    var calendar: Calendar { .current }
+    /// `backend` defaults to `CalendarService.shared`.
+    init(backend: CalendarBackend? = nil, calendar: Calendar = .current, now: Date = Date()) {
+        self.backend = backend ?? CalendarService.shared
+        self.calendar = calendar
+        anchor = calendar.startOfDay(for: now)
+        selectedDay = calendar.startOfDay(for: now)
+    }
 
     // MARK: Range
 
@@ -132,6 +162,15 @@ final class CalendarViewModel {
         }
     }
 
+    var visibleRange: ClosedRange<Date>? {
+        let days = visibleDays
+        guard let first = days.first, let last = days.last else { return nil }
+        return first...last
+    }
+
+    /// The range on screen is not the one last loaded.
+    var needsLoad: Bool { !hasLoaded || visibleRange != loadedRange }
+
     func isInAnchorMonth(_ day: Date) -> Bool {
         calendar.isDate(day, equalTo: anchor, toGranularity: .month)
     }
@@ -156,14 +195,18 @@ final class CalendarViewModel {
 
     func goToToday() { focus(Date()) }
 
-    /// Show the month or week holding `date` and select its day. `load: false`
-    /// when the caller loads right after.
-    func focus(_ date: Date, load shouldLoad: Bool = true) {
+    /// Show the month or week holding `date` and select its day; loads when
+    /// that changes the range on screen (October's grid holds November 1, but
+    /// November's grid is a different range). `load: false` when the caller
+    /// loads right after. Returns whether the range needs loading.
+    @discardableResult
+    func focus(_ date: Date, load shouldLoad: Bool = true) -> Bool {
         let day = calendar.startOfDay(for: date)
-        let reload = !visibleDays.contains(day) || !hasLoaded
         anchor = day
         selectedDay = day
-        if reload && shouldLoad { Task { await load() } }
+        let stale = needsLoad
+        if stale && shouldLoad { Task { await load() } }
+        return stale
     }
 
     private func firstOfMonth(_ date: Date) -> Date {
@@ -180,30 +223,32 @@ final class CalendarViewModel {
         let generation = loadGeneration
         isLoading = true
         defer { if generation == loadGeneration { isLoading = false } }
-        await CalendarService.shared.reportTimeZoneIfNeeded()
+        await backend.reportTimeZoneIfNeeded()
         do {
-            let feed = try await CalendarService.shared.feed(from: first, to: end)
+            let feed = try await backend.feed(from: first, to: end)
             guard generation == loadGeneration else { return }
-            apply(feed)
+            apply(feed, from: first, through: last)
             errorMessage = nil
             hasLoaded = true
-            if loadedRangeStart != first { loadedRangeStart = first }
+            if loadedRange != first...last { loadedRange = first...last }
         } catch {
             guard generation == loadGeneration else { return }
             errorMessage = error.localizedDescription
         }
     }
 
-    private func apply(_ feed: MWCalendarFeed) {
+    private func apply(_ feed: MWCalendarFeed, from first: Date, through last: Date) {
         var all: [CalendarEntry] = []
-        all += feed.events.compactMap(CalendarEntry.init(event:))
-        all += feed.google.events.compactMap(CalendarEntry.init(google:))
-        all += feed.todos.compactMap(CalendarEntry.init(todo:))
+        all += feed.events.compactMap { CalendarEntry(event: $0, calendar: calendar) }
+        all += feed.google.events.compactMap { CalendarEntry(google: $0, calendar: calendar) }
+        all += feed.todos.compactMap { CalendarEntry(todo: $0, calendar: calendar) }
         entries = all
         googleStatus = feed.google.status
         var index: [Date: [CalendarEntry]] = [:]
         for entry in all {
-            for day in entry.days(in: calendar) { index[day, default: []].append(entry) }
+            for day in entry.days(in: calendar, within: first, through: last) {
+                index[day, default: []].append(entry)
+            }
         }
         for key in index.keys { index[key]?.sort(by: Self.order) }
         byDay = index
@@ -223,31 +268,39 @@ final class CalendarViewModel {
 
     // MARK: Edits
 
+    /// Write the draft, then show its day: a December event saved from
+    /// October's grid opens December, not an empty October agenda.
     func save(_ draft: CalendarDraft, editing id: String?) async throws {
+        let fields = draft.fields(calendar: calendar)
         if let id {
-            _ = try await CalendarService.shared.updateEvent(id: id, draft.fields())
+            _ = try await backend.updateEvent(id: id, fields)
         } else {
-            _ = try await CalendarService.shared.createEvent(draft.fields())
+            _ = try await backend.createEvent(fields, sourceKind: "manual", sourceRef: nil, sourceLabel: nil)
         }
-        selectedDay = calendar.startOfDay(for: draft.start)
+        focus(draft.start, load: false)
         await load()
     }
 
     func delete(_ event: MWCalendarEvent) async throws {
-        try await CalendarService.shared.deleteEvent(id: event.id)
+        try await backend.deleteEvent(id: event.id)
         await load()
     }
 
     /// Drag an Espresso event to another day; its time of day and length stay.
+    /// Sends only the new times, so a title or note changed elsewhere since
+    /// this view loaded is not written back over.
     func move(_ event: MWCalendarEvent, to day: Date) async {
-        guard var draft = CalendarDraft(event: event) else { return }
+        guard var draft = CalendarDraft(event: event, calendar: calendar) else { return }
         let target = calendar.startOfDay(for: day)
         let from = calendar.startOfDay(for: draft.start)
         guard let delta = calendar.dateComponents([.day], from: from, to: target).day, delta != 0 else { return }
         draft.start = calendar.date(byAdding: .day, value: delta, to: draft.start) ?? draft.start
         draft.end = calendar.date(byAdding: .day, value: delta, to: draft.end) ?? draft.end
+        let fields = draft.fields(calendar: calendar)
         do {
-            try await save(draft, editing: event.id)
+            _ = try await backend.moveEvent(id: event.id, start: fields.start, end: fields.end ?? fields.start)
+            selectedDay = target
+            await load()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -274,6 +327,9 @@ struct CalendarDraft: Identifiable, Equatable {
     var end: Date
     var location: String = ""
     var notes: String = ""
+    /// The email sheet: this one matches an event the email already added,
+    /// so it starts unticked.
+    var alreadyOnCalendar = false
 
     init(title: String = "", allDay: Bool, start: Date, end: Date, location: String = "", notes: String = "") {
         self.title = title
@@ -284,31 +340,53 @@ struct CalendarDraft: Identifiable, Equatable {
         self.notes = notes
     }
 
-    /// A new event on `day`: the next whole hour when that's today, else 9:00.
-    init(on day: Date, hour: Int? = nil, title: String = "", calendar: Calendar = .current) {
+    /// A new event on `day` at `hour` o'clock: the next whole hour when that's
+    /// today, else 9:00. The hour is a clock reading, the one the week grid's
+    /// row is labelled with, not hours elapsed since midnight (which a DST
+    /// change shifts by one).
+    init(on day: Date, hour: Int? = nil, title: String = "", calendar: Calendar = .current, now: Date = Date()) {
         let base = calendar.startOfDay(for: day)
         var startHour = hour ?? 9
-        if hour == nil, calendar.isDateInToday(day) {
-            startHour = min(23, calendar.component(.hour, from: Date()) + 1)
+        if hour == nil, calendar.isDate(day, inSameDayAs: now) {
+            startHour = min(23, calendar.component(.hour, from: now) + 1)
         }
-        let start = calendar.date(byAdding: .hour, value: startHour, to: base) ?? base
+        let start = calendar.date(bySettingHour: startHour, minute: 0, second: 0, of: base) ?? base
         self.init(title: title, allDay: false, start: start, end: start.addingTimeInterval(3600))
     }
 
-    init?(event: MWCalendarEvent) {
-        guard let s = CalendarWire.date(event.start), let e = CalendarWire.date(event.end) else { return nil }
+    init?(event: MWCalendarEvent, calendar: Calendar = .current) {
+        guard let s = CalendarWire.date(event.start, calendar: calendar),
+              let e = CalendarWire.date(event.end, calendar: calendar) else { return nil }
         self.init(title: event.title, allDay: event.allDay, start: s, end: max(s, e),
                   location: event.location ?? "", notes: event.notes ?? "")
     }
 
-    init?(suggestion: MWEmailCalendarSuggestion) {
-        guard let s = CalendarWire.date(suggestion.start) else { return nil }
-        let e = CalendarWire.date(suggestion.end) ?? s
+    init?(suggestion: MWEmailCalendarSuggestion, calendar: Calendar = .current) {
+        guard let s = CalendarWire.date(suggestion.start, calendar: calendar) else { return nil }
+        let e = CalendarWire.date(suggestion.end, calendar: calendar) ?? s
         self.init(title: suggestion.title, allDay: suggestion.allDay, start: s, end: max(s, e),
                   location: suggestion.location ?? "", notes: suggestion.notes ?? "")
     }
 
     var trimmedTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// The draft with its start moved to `next`, keeping its length: whole
+    /// calendar days for an all-day event (both ends stay at local midnight;
+    /// March 7-9 across the spring change is still three days), elapsed time
+    /// for a timed one.
+    func movingStart(to next: Date, calendar: Calendar = .current) -> CalendarDraft {
+        var moved = self
+        if allDay {
+            let days = calendar.dateComponents(
+                [.day], from: calendar.startOfDay(for: start), to: calendar.startOfDay(for: end)).day ?? 0
+            moved.start = calendar.startOfDay(for: next)
+            moved.end = calendar.date(byAdding: .day, value: max(0, days), to: moved.start) ?? moved.start
+        } else {
+            moved.start = next
+            moved.end = next.addingTimeInterval(max(0, end.timeIntervalSince(start)))
+        }
+        return moved
+    }
 
     /// Why this can't be saved, or nil.
     var problem: String? {
@@ -323,15 +401,17 @@ struct CalendarDraft: Identifiable, Equatable {
         return nil
     }
 
-    func fields() -> CalendarService.EventFields {
+    func fields(calendar: Calendar = .current) -> CalendarService.EventFields {
         func clean(_ s: String) -> String? {
             let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
             return t.isEmpty ? nil : t
         }
         return CalendarService.EventFields(
             title: trimmedTitle,
-            start: allDay ? CalendarWire.dayString(start) : CalendarWire.instantString(start),
-            end: allDay ? CalendarWire.dayString(end) : CalendarWire.instantString(end),
+            start: allDay ? CalendarWire.dayString(start, calendar: calendar)
+                : CalendarWire.instantString(start, timeZone: calendar.timeZone),
+            end: allDay ? CalendarWire.dayString(end, calendar: calendar)
+                : CalendarWire.instantString(end, timeZone: calendar.timeZone),
             location: clean(location),
             notes: clean(notes)
         )
@@ -340,5 +420,6 @@ struct CalendarDraft: Identifiable, Equatable {
     static func == (a: CalendarDraft, b: CalendarDraft) -> Bool {
         a.id == b.id && a.include == b.include && a.title == b.title && a.allDay == b.allDay
             && a.start == b.start && a.end == b.end && a.location == b.location && a.notes == b.notes
+            && a.alreadyOnCalendar == b.alreadyOnCalendar
     }
 }

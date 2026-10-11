@@ -141,7 +141,7 @@ enum CalendarWire {
     }
 
     /// A wire value as a Date: an all-day value is that local day's midnight.
-    static func date(_ raw: String) -> Date? {
-        raw.count == 10 ? day(raw) : instant(raw)
+    static func date(_ raw: String, calendar: Calendar = .current) -> Date? {
+        raw.count == 10 ? day(raw, calendar: calendar) : instant(raw)
     }
 }

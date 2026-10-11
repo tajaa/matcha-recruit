@@ -99,6 +99,7 @@ extension AppState {
         JournalStarStore.shared.bind(userId: nil)
         FileStarStore.shared.bind(userId: nil)
         SidebarSectionOrderStore.shared.bind(userId: nil)
+        CalendarService.shared.resetSession()
         heartbeatTask?.cancel()
         heartbeatTask = nil
         inboxPollTask?.cancel()
