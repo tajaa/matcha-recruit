@@ -97,9 +97,10 @@ async def test_transport_filters_legacy_history_and_compacted_summaries(monkeypa
     monkeypatch.setattr(messaging, "get_company_features", AsyncMock(return_value={"employee_schedule": True, "labor_cost": enabled}))
     monkeypatch.setattr(messaging, "resolve_schedule_assistant_scope", AsyncMock(return_value=scope))
     monkeypatch.setattr(messaging, "_run_quota_gate", AsyncMock())
+    monkeypatch.setattr(messaging.doc_svc, "get_thread_message_count", AsyncMock(return_value=3))
     prepared = AsyncMock()
     monkeypatch.setattr(messaging, "_prepare_attachments", prepared)
-    monkeypatch.setattr(messaging.doc_svc, "get_thread_messages", AsyncMock(return_value=[
+    monkeypatch.setattr(messaging.doc_svc, "get_thread_messages_from", AsyncMock(return_value=[
         {"role": "assistant", "content": "Payroll $80", "metadata": '{"schedule_cost_visible":true}'},
         {"role": "assistant", "content": "One seat open", "metadata": '{"schedule_cost_visible":false}'},
         {"role": "user", "content": "Review", "metadata": None},

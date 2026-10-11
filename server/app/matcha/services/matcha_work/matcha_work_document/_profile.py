@@ -62,6 +62,7 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
         _company_profile_cache[key] = profile
         return profile
 
+    locations.sort(key=lambda loc: (str(loc.get("created_at") or ""), str(loc.get("id") or "")), reverse=True)
     if not locations:
         _company_profile_cache[key] = profile
         return profile
@@ -101,7 +102,7 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
                 WHERE r.location_id = ANY($1::uuid[])
                 """
                 + await codified_gate_sql("cat", conn=conn)
-                + " ORDER BY r.location_id, r.category, r.jurisdiction_level",
+                + " ORDER BY r.location_id, r.category, r.jurisdiction_level, r.id",
                 location_ids,
             )
     except Exception:

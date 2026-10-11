@@ -37,6 +37,27 @@ async def get_thread_messages(thread_id: UUID, limit: int | None = None) -> list
         return [dict(r) for r in rows]
 
 
+async def get_thread_messages_from(thread_id: UUID, offset: int) -> list[dict]:
+    """Messages from the `offset`-th (0-based, oldest first) to the newest.
+
+    Ordered by (created_at, id) so an index means the same message on every
+    turn: a Claude thread's history window starts at a fixed index
+    (`_claude_thread.claude_history_start`) and must not shift under ties."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, thread_id, role, content, version_created, metadata, created_at
+            FROM mw_messages
+            WHERE thread_id=$1
+            ORDER BY created_at ASC, id ASC
+            OFFSET $2
+            """,
+            thread_id,
+            max(0, offset),
+        )
+        return [dict(r) for r in rows]
+
+
 async def add_message(
     thread_id: UUID,
     role: str,

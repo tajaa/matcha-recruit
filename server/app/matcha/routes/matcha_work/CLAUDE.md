@@ -147,3 +147,47 @@ Full suite: `cd server && ./venv/bin/python -m pytest tests/matcha_work/ -q` —
 ## Thread modes (moved from root Key Modules)
 
 - **Matcha Work thread modes** (`matcha/services/matcha_work/matcha_work_modes.py` — THE registry) — per-thread grounding modes, one boolean column each on `mw_threads`: `node` (internal data), `compliance`, `payer`, `benefits`, `legal`, `risk`, `training`. Toggle via `POST /matcha-work/threads/{id}/modes/{key}` (3 legacy per-mode aliases remain). Context builders in `services/matcha_work/matcha_work_node.py` (node/compliance/payer-staff) + `services/matcha_work/matcha_work_mode_contexts.py` (benefits/legal/risk/training, all read-only SQL — legal deliberately does NOT call `legal_defense.gather_evidence` per turn). Adding a mode = migration + builder + one `ThreadMode` entry + one frontend `THREAD_MODE_TOGGLES` row (`client/src/work/components/panels/constants.ts`); everything else (setter, route, column lists, models, dispatch loop, toggle buttons, list badges) is registry-driven. Compliance + payer keep bespoke dispatch blocks in `messaging.py` (`custom_dispatch=True`). Modes that read a **paid** subsystem carry `required_feature` (benefits→`benefits_admin`, legal→`legal_defense`, risk→`risk_profile`, training→`training`): the toggle route 403s without the flag, the dispatch loop re-checks it each turn (so a revoked flag stops injecting), and the frontend hides the button. node/compliance/payer predate this and stay ungated.
+
+
+## Claude thread requests
+
+The shared messaging route serves Work web, Espresso web and macOS, including
+project threads. `_claude_thread.py` separates cached instructions (system A),
+company/project/mode context and the summary (system B), and an append-only
+history. All three breakpoints use a one-hour TTL. Live document state, date,
+RAG and the selected slide follow the cached history in TURN CONTEXT. A model
+that rejects the system role gets a trailing user text block instead; schema
+rejection also retries once and is remembered per model until process restart.
+
+`messaging.py` reads count and summary before fetching the history. Claude starts
+at `summary_at_count - 15` (zero before the first summary); after 60 messages
+without compaction the safety anchor advances in steps of 20. The fetch also
+includes Gemini's last 20 messages; Gemini retains its 20/15 message window and
+prompt bytes. Initial-message, posting-extraction and resume-summary calls have
+no persisted history checkpoint and deliberately leave `history_from=None`.
+
+File text travels on its original message for Claude. Gemini keeps its attached
+files block from the latest 20 messages. Slide injection preserves all attachment
+keys and sends Claude the original text plus separate slide context. `_images`
+keeps an in-process, byte-bounded 64 MiB LRU keyed by trusted URL: original bytes
+for Gemini and normalized bytes for Claude. The latter always uses the 2000px
+limit so growing beyond 20 images cannot rewrite earlier history. Concurrent
+fetches share a result; failures are retried, and restart/eviction loses the cache.
+
+Claude model picks do not downgrade for short turns; effort follows the thread's
+skill/mode shape, not message wording, with adaptive thinking. Structured JSON
+carries `updates_json`, decoded before the existing engine validation. Refusal
+and token-limit stops produce visible replies; provider failures/timeouts fall
+back to Gemini. Payer/search and image generation remain on Gemini.
+
+After a saved Claude reply, background compaction reuses its system, history,
+model, effort and output schema. The trigger remains 30 messages, then each 20.
+A successful summary replaces the stored summary; a failed Claude summary uses
+the existing Gemini compaction path. Compaction usage goes through the tenant
+accounting path with `operation="compaction"`. Claude cache reads are excluded
+from quota/budget tokens but billed at the cache-read rate; cache writes cost
+1.25× (5 minutes) or 2× (1 hour), with the model's long-context pricing applied.
+
+Regression coverage: `test_claude_thread_cache.py`, `test_skill_engine_claude.py`
+and the seven unchanged hashes in `test_gemini_prompt_golden.py`. Streaming is
+the subsequent stacked PR; this PR returns the authoritative complete reply.

@@ -19,6 +19,7 @@ import pytest
 from anthropic.types.beta import BetaMessage
 from google.genai import types
 
+from app.matcha.services.matcha_work.matcha_work_ai._claude_thread import ThreadRequest, mark_latest_user_turn
 from app.config import load_settings
 from app.core.services import anthropic_messages
 from app.core.services.anthropic_messages import CLAUDE_HAIKU, CLAUDE_SONNET
@@ -141,7 +142,7 @@ async def test_gemini_only_ignores_the_admin_model_and_claude_picks(monkeypatch,
 
 
 def test_trivial_turn_downgrade_stays_on_the_picked_provider():
-    assert _models.resolve_turn_model("none", "chat", CLAUDE_SONNET) == CLAUDE_HAIKU
+    assert _models.resolve_turn_model("none", "chat", CLAUDE_SONNET) == CLAUDE_SONNET
     assert _models.resolve_turn_model("none", "chat", CLAUDE_HAIKU) == CLAUDE_HAIKU
     assert _models.resolve_turn_model("none", "chat", FLASH) == FLASH_LITE
     assert _models.resolve_turn_model("low", "chat", CLAUDE_SONNET) == CLAUDE_SONNET
@@ -211,47 +212,38 @@ def ledger(monkeypatch):
     return rows
 
 
+def _request():
+    return ThreadRequest(False, "THREAD CONTEXT", mark_latest_user_turn([
+        {"role": "user", "content": "hello"},
+    ]), "TURN CONTEXT")
+
+
 @pytest.mark.asyncio
-async def test_call_claude_caches_the_static_prompt_and_reports_usage(monkeypatch, ledger):
+@pytest.mark.parametrize("effort", ["medium", "high"])
+async def test_call_claude_thread_caching_usage_and_effort(monkeypatch, ledger, effort):
     fake = _FakeClient(_message('{"reply": "Hi"}', model=CLAUDE_SONNET))
     monkeypatch.setattr(_claude, "get_async_client", lambda: fake)
-    text, usage = await _claude.call_claude(
-        static_prompt="STATIC", dynamic_prompt="DYNAMIC",
-        contents=[types.Content(role="user", parts=[types.Part(text="hello")])],
-        model=CLAUDE_SONNET, thinking_level="high", timeout_seconds=30,
-    )
-    assert text == '{"reply": "Hi"}'
-    static, dynamic = fake.params["system"]
-    assert static == {"type": "text", "text": "STATIC", "cache_control": {"type": "ephemeral"}}
-    assert dynamic["text"].startswith("DYNAMIC") and "exactly one JSON object" in dynamic["text"]
-    assert fake.params["output_config"] == {"effort": "high"}
-    assert fake.params["fallbacks"] == "default"  # Sonnet's server-side refusal fallback
+    result = await _claude.call_claude_thread(_request(), model=CLAUDE_SONNET, effort=effort, timeout_seconds=30)
+    assert result.text == '{"reply": "Hi"}'
+    assert all(b["cache_control"] == {"type": "ephemeral", "ttl": "1h"} for b in fake.params["system"])
+    assert fake.params["messages"][-1] == {"role": "system", "content": "TURN CONTEXT"}
+    assert fake.params["output_config"]["effort"] == effort
+    assert fake.params["output_config"]["format"]["type"] == "json_schema"
+    assert fake.params["thinking"] == {"type": "adaptive"}
+    assert fake.params["fallbacks"] == "default"
     assert fake.options == {"timeout": 30}
-    # prompt_tokens is the whole prompt, cache reads included — the split
-    # calculate_call_cost prices.
-    assert usage == {"prompt_tokens": 1000, "completion_tokens": 40, "total_tokens": 1040,
-                     "cached_tokens": 900, "estimated": False, "model": CLAUDE_SONNET}
+    assert result.usage["prompt_tokens"] == 100
+    assert result.usage["total_tokens"] == 140
+    assert result.usage["cached_tokens"] == 900
     assert ledger[0]["message"]["id"] == "msg_1"
-
-
-@pytest.mark.asyncio
-async def test_call_claude_effort_follows_the_thinking_level(monkeypatch, ledger):
-    for level, effort in (("none", "low"), ("low", "medium"), ("high", "high")):
-        fake = _FakeClient(_message("{}"))
-        monkeypatch.setattr(_claude, "get_async_client", lambda fake=fake: fake)
-        await _claude.call_claude(static_prompt="S", dynamic_prompt="D", contents=[], model=CLAUDE_HAIKU,
-                                  thinking_level=level, timeout_seconds=5)
-        assert fake.params["output_config"] == {"effort": effort}
-        assert "fallbacks" not in fake.params
 
 
 @pytest.mark.asyncio
 async def test_call_claude_records_and_raises_on_api_errors(monkeypatch, ledger):
     request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     monkeypatch.setattr(_claude, "get_async_client", lambda: _FakeClient(anthropic.APITimeoutError(request=request)))
-    with pytest.raises(RuntimeError):
-        await _claude.call_claude(static_prompt="S", dynamic_prompt="D", contents=[], model=CLAUDE_HAIKU,
-                                  thinking_level="low", timeout_seconds=5)
+    with pytest.raises(_claude.ClaudeCallFailed):
+        await _claude.call_claude_thread(_request(), model=CLAUDE_HAIKU, effort="medium", timeout_seconds=5)
     assert ledger[0]["status"] == "timeout"
 
 
@@ -267,9 +259,9 @@ async def test_generate_runs_a_claude_pick_through_the_shared_parser(monkeypatch
         "mode": "skill", "skill": "offer_letter", "operation": "update", "confidence": 0.9,
         "reply": "Drafted.", "updates": {"candidate_name": "Ana", "not_a_field": "x"},
     })
-    fake_call = AsyncMock(return_value=(reply, {"prompt_tokens": 1, "model": CLAUDE_HAIKU}))
+    fake_call = AsyncMock(return_value=_claude.ClaudeResult(reply, {"prompt_tokens": 1, "model": CLAUDE_HAIKU}, "end_turn", True))
     monkeypatch.setattr(provider_module, "_get_model", AsyncMock(return_value=CLAUDE_HAIKU))
-    monkeypatch.setattr(provider_module, "call_claude", fake_call)
+    monkeypatch.setattr(provider_module, "call_claude_thread", fake_call)
     provider = GeminiProvider()
     with patch.object(provider, "_call_gemini") as gemini:
         out = await provider.generate(
@@ -281,27 +273,30 @@ async def test_generate_runs_a_claude_pick_through_the_shared_parser(monkeypatch
     assert out.structured_update == {"candidate_name": "Ana"}  # off-skill field filtered
     assert out.token_usage == {"prompt_tokens": 1, "model": CLAUDE_HAIKU}
     kwargs = fake_call.await_args.kwargs
-    assert kwargs["model"] == CLAUDE_HAIKU and kwargs["contents"]
+    assert kwargs["model"] == CLAUDE_HAIKU and fake_call.await_args.args[0].history
 
 
 @pytest.mark.asyncio
 async def test_generate_claude_failure_is_the_usual_retry_reply(monkeypatch):
     monkeypatch.setattr(provider_module, "_get_model", AsyncMock(return_value=CLAUDE_SONNET))
-    monkeypatch.setattr(provider_module, "call_claude", AsyncMock(side_effect=RuntimeError("boom")))
+    monkeypatch.setattr(provider_module, "call_claude_thread", AsyncMock(side_effect=RuntimeError("boom")))
     out = await GeminiProvider().generate(messages=[{"role": "user", "content": "Summarize this"}],
                                           current_state={})
     assert out.assistant_reply.startswith("I encountered an error")
 
 
 @pytest.mark.asyncio
-async def test_generate_claude_timeout_is_the_usual_slow_reply(monkeypatch):
-    import asyncio
-
-    monkeypatch.setattr(provider_module, "_get_model", AsyncMock(return_value=CLAUDE_HAIKU))
-    monkeypatch.setattr(provider_module, "call_claude", AsyncMock(side_effect=asyncio.TimeoutError()))
-    out = await GeminiProvider().generate(messages=[{"role": "user", "content": "Summarize this"}],
-                                          current_state={})
-    assert out.assistant_reply.startswith("I'm taking too long")
+@pytest.mark.parametrize("error", [TimeoutError(), _claude.ClaudeCallFailed("overloaded")])
+async def test_generate_claude_failure_falls_back_to_gemini(monkeypatch, error):
+    monkeypatch.setattr(provider_module, "_get_model", AsyncMock(side_effect=[CLAUDE_HAIKU, FLASH]))
+    monkeypatch.setattr(provider_module, "call_claude_thread", AsyncMock(side_effect=error))
+    expected = provider_module.AIResponse(assistant_reply="Gemini reply", structured_update=None)
+    provider = GeminiProvider()
+    with patch.object(provider, "_call_gemini", return_value=expected) as gemini:
+        out = await provider.generate(messages=[{"role": "user", "content": "Summarize this"}], current_state={})
+    assert out is expected
+    assert gemini.call_args.args[4] == FLASH
+    assert out.claude_turn is None
 
 
 @pytest.mark.asyncio
@@ -553,7 +548,7 @@ async def test_record_claude_call_never_raises(monkeypatch):
 @pytest.mark.asyncio
 async def test_claude_turn_counts_in_the_anthropic_bucket(monkeypatch, limiter):
     monkeypatch.setattr(provider_module, "_get_model", AsyncMock(return_value=CLAUDE_HAIKU))
-    monkeypatch.setattr(provider_module, "call_claude", AsyncMock(return_value=('{"reply": "ok"}', None)))
+    monkeypatch.setattr(provider_module, "call_claude_thread", AsyncMock(return_value=_claude.ClaudeResult('{"reply": "ok"}', None, 'end_turn', True)))
     await GeminiProvider().generate(messages=[{"role": "user", "content": "Summarize this"}], current_state={})
     assert (limiter.checked, limiter.recorded) == (1, 1)
 
@@ -563,7 +558,7 @@ async def test_turn_with_an_unreadable_image_runs_on_gemini(monkeypatch):
     get_model = AsyncMock(side_effect=[CLAUDE_HAIKU, FLASH])
     monkeypatch.setattr(provider_module, "_get_model", get_model)
     claude = AsyncMock()
-    monkeypatch.setattr(provider_module, "call_claude", claude)
+    monkeypatch.setattr(provider_module, "call_claude_thread", claude)
     provider = GeminiProvider()
     gemini_reply = provider_module.AIResponse(assistant_reply="Looks like a receipt.", structured_update=None)
     with patch.object(provider, "_call_gemini", return_value=gemini_reply) as gemini:
@@ -581,13 +576,13 @@ async def test_turn_with_an_unreadable_image_runs_on_gemini(monkeypatch):
 @pytest.mark.asyncio
 async def test_claude_turn_sends_the_converted_image(monkeypatch):
     monkeypatch.setattr(provider_module, "_get_model", AsyncMock(return_value=CLAUDE_HAIKU))
-    claude = AsyncMock(return_value=('{"reply": "A red square."}', None))
-    monkeypatch.setattr(provider_module, "call_claude", claude)
+    claude = AsyncMock(return_value=_claude.ClaudeResult('{"reply": "A red square."}', None, 'end_turn', True))
+    monkeypatch.setattr(provider_module, "call_claude_thread", claude)
     await GeminiProvider().generate(
         messages=[{"role": "user", "content": "What is this?",
                    "image_parts": [(_image("BMP"), "image/bmp")]}],
         current_state={},
     )
-    sent = claude.await_args.kwargs["contents"]
-    image = next(p for c in sent for p in c.parts if p.inline_data)
-    assert image.inline_data.mime_type == "image/jpeg"
+    sent = claude.await_args.args[0].history
+    image = next(p for c in sent for p in c["content"] if p["type"] == "image")
+    assert image["source"]["media_type"] == "image/jpeg"

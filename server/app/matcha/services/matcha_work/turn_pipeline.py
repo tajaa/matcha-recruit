@@ -8,6 +8,7 @@ route handler itself (send_message_stream) stays there and calls into this
 module by name.
 """
 import asyncio
+from decimal import Decimal
 import json
 import logging
 import os
@@ -123,15 +124,22 @@ async def _record_turn_usage(
     """
     if not final_usage:
         return None
-    cost = calculate_call_cost(
-        model=str(final_usage.get("model") or "unknown"),
-        prompt_tokens=final_usage.get("prompt_tokens"),
-        completion_tokens=final_usage.get("completion_tokens"),
-        # Only the huume loop records this key today; skill-engine turns
-        # carry no thinking_tokens and price exactly as before.
-        thinking_tokens=final_usage.get("thinking_tokens"),
-        cached_tokens=final_usage.get("cached_tokens"),
-    )
+    if final_usage.get("cost_dollars") is not None and not final_usage.get("estimated"):
+        # A Claude thread turn prices itself from the full cache split
+        # (`_claude._usage` → `model_pricing.claude_turn_cost`): its
+        # prompt_tokens leave cache reads out so they don't count against
+        # quota, which calculate_call_cost's convention can't express.
+        cost = Decimal(str(final_usage["cost_dollars"]))
+    else:
+        cost = calculate_call_cost(
+            model=str(final_usage.get("model") or "unknown"),
+            prompt_tokens=final_usage.get("prompt_tokens"),
+            completion_tokens=final_usage.get("completion_tokens"),
+            # Only the huume loop records this key today; skill-engine turns
+            # carry no thinking_tokens and price exactly as before.
+            thinking_tokens=final_usage.get("thinking_tokens"),
+            cached_tokens=final_usage.get("cached_tokens"),
+        )
     final_usage["cost_dollars"] = float(cost)
     try:
         await doc_svc.log_token_usage_event(
@@ -468,8 +476,21 @@ async def _build_thread_file_attachment_meta(attachments) -> list[dict]:
 _compacting_threads: set[UUID] = set()  # simple guard against concurrent compaction
 _COMPACTION_REFRESH_INTERVAL = 20  # re-compact after this many new messages
 
-async def _maybe_compact(thread_id: UUID, ai_provider, summary_at_count: int | None) -> None:
-    """Check message count and run compaction if threshold is exceeded or summary is stale."""
+async def _maybe_compact(
+    thread_id: UUID,
+    ai_provider,
+    summary_at_count: int | None,
+    *,
+    claude_turn=None,
+    assistant_reply: str = "",
+    bill=None,
+) -> None:
+    """Check message count and run compaction if threshold is exceeded or summary is stale.
+
+    After a Claude turn (`claude_turn`, the `_claude.ClaudeTurnRef` the turn
+    ran with), the summary is written by Claude on the turn's own cached
+    prefix (`_claude.summarize_thread`); `bill` charges its usage to the
+    tenant like a turn. Gemini threads keep Gemini Flash compaction."""
     if thread_id in _compacting_threads:
         return
     try:
@@ -480,6 +501,17 @@ async def _maybe_compact(thread_id: UUID, ai_provider, summary_at_count: int | N
         # Skip if summary is recent enough
         if summary_at_count is not None and (msg_count - summary_at_count) < _COMPACTION_REFRESH_INTERVAL:
             return
+        if claude_turn is not None:
+            from app.matcha.services.matcha_work.matcha_work_ai import _claude
+
+            summary, usage = await _claude.summarize_thread(claude_turn, assistant_reply)
+            if usage and bill is not None:
+                await bill(usage)
+            if summary:
+                await doc_svc.save_context_summary(thread_id, summary, msg_count)
+                logger.info("Compacted conversation for thread %s with Claude (%d messages)", thread_id, msg_count)
+                return
+            logger.info("Claude compaction produced nothing for thread %s; using Gemini", thread_id)
         # Window of 15 + older cap of 200 = 215 max messages needed
         all_messages = await doc_svc.get_thread_messages(thread_id, limit=215)
         msg_dicts = [{"role": m["role"], "content": m["content"]} for m in all_messages]
@@ -519,7 +551,16 @@ class TurnContext:
     profile: dict | None = None
     ai_provider: object = None
     ctx: str = ""
+    # Claude's company context: `ctx` without the attached-file text, which a
+    # Claude turn sends inside the message that carried the file.
+    claude_ctx: str | None = None
+    # The thread's mode contexts (stable across turns) ...
     dyn_ctx: str = ""
+    # ... and what changes with each message (compliance RAG).
+    dyn_ctx_turn: str = ""
+    # Index into msg_dicts where a Claude turn's history starts
+    # (`_claude_thread.claude_history_start`).
+    history_from: int | None = None
     msg_dicts: list = field(default_factory=list)
     file_context_parts: list = field(default_factory=list)
     file_attachment_refs: list = field(default_factory=list)
@@ -1000,7 +1041,9 @@ async def _run_huume_dispatch(tc: TurnContext):
         async for frame in huume_agent.run_huume_turn(
             thread_id=thread_id, company_id=company_id, user_id=current_user.id,
             user_role=current_user.role, work_access=tc.work_access,
-            history=tc.msg_dicts, current_state=current_state,
+            # The 20 most recent, as before the history fetch grew to cover
+            # a Claude thread's append-only window.
+            history=tc.msg_dicts[-20:], current_state=current_state,
             company_name=(tc.profile or {}).get("name") or "",
             attachment_texts=tc.file_context_parts,
             attachment_refs=tc.file_attachment_refs,
@@ -1223,7 +1266,9 @@ async def _inject_mode_contexts(tc: TurnContext):
                 yield _sse_data({"type": "status", "message": "Searching relevant regulations..."})
                 rag_ctx = await _get_rag_context(body.content, company_id)
                 if rag_ctx:
-                    tc.dyn_ctx += "\n\n=== RELEVANT REGULATIONS (semantic search) ===\n" + rag_ctx
+                    # Per message, so it rides Claude's uncached turn tail;
+                    # Gemini still receives it right after the dump.
+                    tc.dyn_ctx_turn += "\n\n=== RELEVANT REGULATIONS (semantic search) ===\n" + rag_ctx
         except Exception:
             logger.exception("Compliance context failed for company %s", company_id)
             tc.compliance_result = None
@@ -1309,6 +1354,7 @@ async def _generate_turn(tc: TurnContext):
         model_override=body.model,
         company_id=str(company_id), user_id=str(current_user.id),
         payer_mode=bool(tc.stream_payer_prompt),
+        turn_context=tc.dyn_ctx_turn,
     )
     yield _sse_data(
         {
@@ -1343,6 +1389,9 @@ async def _generate_turn(tc: TurnContext):
         blog_mode_state=stream_blog_mode_state,
         thread_id=str(tc.thread_id),
         hr_pilot_mode=tc.hr_pilot_mode_active,
+        turn_context=tc.dyn_ctx_turn,
+        claude_company_context=tc.claude_ctx,
+        history_from=tc.history_from,
     ))
 
     try:

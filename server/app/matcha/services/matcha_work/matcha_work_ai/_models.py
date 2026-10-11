@@ -237,11 +237,15 @@ def resolve_turn_model(thinking_level: str, inferred_skill: str, plan_model: str
     to protect, so it stays eligible for the cheap tier regardless of what
     the picker was set to.
 
-    The cheap tier stays on the picked PROVIDER: a Claude pick downgrades to
-    Claude Haiku, never to Gemini. Swapping providers on an "ok" would put a
-    different model's voice into a thread the person explicitly moved to
-    Claude, and Haiku is already cheaper than Flash Lite.
+    A Claude pick is never downgraded: Messages caches are per model, so an
+    "ok" on Haiku in a Sonnet thread would re-send the whole conversation
+    uncached and write a second cache that is never read again. Adaptive
+    thinking already spends almost nothing on a trivial turn. Nor does it
+    move to Gemini: that would put a different model's voice into a thread
+    the person explicitly moved to Claude.
     """
+    if is_claude_model(plan_model):
+        return plan_model
     if thinking_level == "none" and inferred_skill == "chat":
-        return CLAUDE_HAIKU if is_claude_model(plan_model) else FLASH_LITE
+        return FLASH_LITE
     return plan_model

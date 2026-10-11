@@ -228,7 +228,7 @@ async def _build_node_context_uncached(company_id: UUID) -> str:
                    employment_type, start_date
             FROM employees
             WHERE org_id=$1 AND termination_date IS NULL
-            ORDER BY start_date DESC NULLS LAST, last_name NULLS LAST, first_name NULLS LAST
+            ORDER BY start_date DESC NULLS LAST, last_name NULLS LAST, first_name NULLS LAST, id
             LIMIT 50
             """,
             company_id,
@@ -239,7 +239,7 @@ async def _build_node_context_uncached(company_id: UUID) -> str:
                    COUNT(*) OVER () AS total_n
             FROM policies
             WHERE company_id=$1 AND status='active'
-            ORDER BY title
+            ORDER BY title, id
             LIMIT 20
             """,
             company_id,
@@ -249,7 +249,7 @@ async def _build_node_context_uncached(company_id: UUID) -> str:
             SELECT title, status, mode, COUNT(*) OVER () AS total_n
             FROM handbooks
             WHERE company_id=$1
-            ORDER BY title
+            ORDER BY title, id
             LIMIT 10
             """,
             company_id,
@@ -259,7 +259,7 @@ async def _build_node_context_uncached(company_id: UUID) -> str:
             SELECT case_number, title, status, category, COUNT(*) OVER () AS total_n
             FROM er_cases
             WHERE company_id=$1
-            ORDER BY updated_at DESC
+            ORDER BY updated_at DESC, id
             LIMIT 20
             """,
             company_id,
@@ -270,7 +270,7 @@ async def _build_node_context_uncached(company_id: UUID) -> str:
                    COUNT(*) OVER () AS total_n
             FROM ir_incidents
             WHERE company_id=$1
-            ORDER BY occurred_at DESC
+            ORDER BY occurred_at DESC, id
             LIMIT 20
             """,
             company_id,
@@ -292,13 +292,13 @@ async def _build_node_context_uncached(company_id: UUID) -> str:
         agg_parts = [f"Total active employees: {total_active}"]
         if dept_counts:
             dept_str = ", ".join(
-                f"{k}: {v}" for k, v in sorted(dept_counts.items(), key=lambda x: -x[1])[:10]
+                f"{k}: {v}" for k, v in sorted(dept_counts.items(), key=lambda x: (-x[1], x[0]))[:10]
             )
             agg_parts.append(f"By department: {dept_str}")
         if state_counts:
             # Every work state matters for compliance reasoning — list all.
             state_str = ", ".join(
-                f"{k}: {v}" for k, v in sorted(state_counts.items(), key=lambda x: -x[1])
+                f"{k}: {v}" for k, v in sorted(state_counts.items(), key=lambda x: (-x[1], x[0]))
             )
             agg_parts.append(f"By work state: {state_str}")
 
@@ -431,7 +431,7 @@ async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceCont
             """
             SELECT id, name, city, state, jurisdiction_id, facility_attributes
             FROM business_locations WHERE company_id = $1 AND is_active = true
-            ORDER BY name NULLS LAST, city NULLS LAST
+            ORDER BY name NULLS LAST, city NULLS LAST, id
             """,
             company_id,
         )
@@ -521,6 +521,15 @@ async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceCont
                 [loc["jurisdiction_id"] for loc in jurisdiction_locations]
                 + list(remote_jurisdictions.values()),
             )
+
+            # The resolver orders category/depth; tied requirements/rules also
+            # need a stable order before the governing-rule formatter consumes them.
+            stacks_by_jurisdiction = {
+                jid: sorted(rows, key=lambda r: (
+                    r.get("category") or "", r.get("depth") or 0,
+                    str(r.get("id") or ""), str(r.get("rule_id") or ""),
+                )) for jid, rows in stacks_by_jurisdiction.items()
+            }
 
             # Same gate the Requirements tab applies, enforced here because this
             # path reads the catalog directly. A compliance-mode thread telling a
@@ -685,7 +694,7 @@ async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceCont
                     """
                     + await codified_gate_sql("cat", conn=conn)
                     + """
-                    ORDER BY bl.city, cr.category, cr.jurisdiction_level
+                    ORDER BY bl.city, cr.category, cr.jurisdiction_level, cr.id
                     LIMIT $2
                     """,
                     legacy_ids,
@@ -773,7 +782,7 @@ def _format_facility_profile(
         lines.append(f"Payer Contracts: {', '.join(payer_contracts)}")
 
     # Show other notable attributes
-    for key, val in facility_attrs.items():
+    for key, val in sorted(facility_attrs.items()):
         if key not in ("entity_type", "payer_contracts") and val:
             val_str = ", ".join(val) if isinstance(val, list) else str(val)
             lines.append(f"{key}: {_truncate(val_str, 120)}")
@@ -1134,7 +1143,7 @@ async def _build_payer_staff_context_uncached(company_id: UUID) -> Optional[str]
             else "none configured"
         )
         total = totals_by_loc.get(loc["id"], 0)
-        top_roles = sorted(staff_by_loc.get(loc["id"], []), key=lambda x: -x[1])[:6]
+        top_roles = sorted(staff_by_loc.get(loc["id"], []), key=lambda x: (-x[1], x[0]))[:6]
         roles_str = ", ".join(f"{role} {n}" for role, n in top_roles) if top_roles else "no staff linked"
         label = f"{loc['name'] or 'Unknown'} ({loc['city'] or 'N/A'}, {loc['state'] or 'N/A'})"
         lines.append(f"- {label} — payers: {payer_str} | staff: {total} ({roles_str})")
