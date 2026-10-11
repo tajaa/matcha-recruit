@@ -234,14 +234,18 @@ def _pricing_key(provider: str, model: str) -> tuple[str, str]:
 def compute_cost(provider: str, model: str, input_tokens: Optional[int],
                   output_tokens: Optional[int], thinking_tokens: Optional[int],
                   cached_tokens: Optional[int] = None,
-                  cache_write_tokens: Optional[int] = None) -> Optional[float]:
+                  cache_write_tokens: Optional[int] = None,
+                  cache_write_1h_tokens: Optional[int] = None) -> Optional[float]:
     """Return the token-derived USD cost for one provider response.
 
     Gemini reports thinking separately from candidates, so both are billed as
     output. OpenAI Responses includes reasoning in output_tokens already. Its
     input total includes cached reads and cache writes, which have distinct
-    Luna rates. Returns None when the model is unpriced or no usage metadata
-    survived an errored/timed-out call.
+    Luna rates. Cache writes cost 1.25x input; the part of them written with
+    the 1-hour TTL (`cache_write_1h_tokens`, Anthropic's
+    `usage.cache_creation.ephemeral_1h_input_tokens`) costs 2x. Returns None
+    when the model is unpriced or no usage metadata survived an
+    errored/timed-out call.
     """
     if all(value is None for value in (
         input_tokens, output_tokens, thinking_tokens, cached_tokens, cache_write_tokens,
@@ -256,11 +260,13 @@ def compute_cost(provider: str, model: str, input_tokens: Optional[int],
     cached_total = min(max(cached_tokens or 0, 0), input_total)
     write_total = min(max(cache_write_tokens or 0, 0), input_total - cached_total)
     uncached_total = input_total - cached_total - write_total
+    write_1h_total = min(max(cache_write_1h_tokens or 0, 0), write_total)
     cached_price = _CACHED_INPUT_PRICING.get(key, in_price)
     input_cost = (
         uncached_total * in_price
         + cached_total * cached_price
-        + write_total * in_price * 1.25
+        + (write_total - write_1h_total) * in_price * 1.25
+        + write_1h_total * in_price * 2.0
     )
     output_total = max(output_tokens or 0, 0)
     # Responses and Messages both count reasoning inside output_tokens.
@@ -378,7 +384,8 @@ def _build_row(*, provider: str, model: str, method: str, feature: str,
                 usage: tuple[Optional[int], Optional[int], Optional[int], Optional[int], Optional[int]] = (None, None, None, None, None),
                 provider_response_id: Optional[str] = None,
                 provider_status: Optional[str] = None,
-                service_tier: Optional[str] = None) -> dict[str, Any]:
+                service_tier: Optional[str] = None,
+                cache_write_1h_tokens: Optional[int] = None) -> dict[str, Any]:
     input_tokens, output_tokens, thinking_tokens, cached_tokens, cache_write_tokens = usage
     return {
         "provider": provider,
@@ -392,7 +399,7 @@ def _build_row(*, provider: str, model: str, method: str, feature: str,
         "cache_write_tokens": cache_write_tokens,
         "cost_usd": compute_cost(
             provider, model, input_tokens, output_tokens, thinking_tokens,
-            cached_tokens, cache_write_tokens,
+            cached_tokens, cache_write_tokens, cache_write_1h_tokens,
         ),
         "latency_ms": latency_ms,
         "status": status,
@@ -478,6 +485,8 @@ async def record_anthropic_response(
     uncached = usage.get("input_tokens")
     cache_read = usage.get("cache_read_input_tokens") or 0
     cache_write = usage.get("cache_creation_input_tokens") or 0
+    by_ttl = usage.get("cache_creation")
+    cache_write_1h = (by_ttl.get("ephemeral_1h_input_tokens") or 0) if isinstance(by_ttl, dict) else 0
     input_total = None if uncached is None else uncached + cache_read + cache_write
     actual_model = payload.get("model")
     actual_model = actual_model if isinstance(actual_model, str) and actual_model else model
@@ -496,6 +505,7 @@ async def record_anthropic_response(
         provider_response_id=response_id if isinstance(response_id, str) else None,
         provider_status=stop_reason if isinstance(stop_reason, str) else None,
         service_tier=usage.get("service_tier") if isinstance(usage.get("service_tier"), str) else None,
+        cache_write_1h_tokens=cache_write_1h,
     )
     await _record_async(row)
 

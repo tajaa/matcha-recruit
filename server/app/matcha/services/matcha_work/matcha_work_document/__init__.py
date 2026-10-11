@@ -88,7 +88,7 @@ from .modes import (  # noqa: F401
     set_thread_compliance_mode,
     set_thread_payer_mode,
 )
-from .messages import get_thread_messages, add_message  # noqa: F401
+from .messages import get_thread_messages, get_thread_messages_from, add_message  # noqa: F401
 from .versions import apply_update, revert_to_version, list_versions  # noqa: F401
 from .pdf import (  # noqa: F401
     _get_cached_pdf_url,

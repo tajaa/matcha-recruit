@@ -22,8 +22,13 @@ from app.core.services.genai_client import get_genai_client
 from google.genai import types
 from app.config import get_settings
 
-from ._fields import BLOG_FIELDS, HANDBOOK_FIELDS, HR_PILOT_FIELDS, OFFER_LETTER_FIELDS, ONBOARDING_FIELDS, POLICY_FIELDS, PRESENTATION_FIELDS, PROJECT_FIELDS, REVIEW_FIELDS, SUPPORTED_AI_MODES, SUPPORTED_AI_OPERATIONS, SUPPORTED_AI_SKILLS, WORKBOOK_FIELDS
-from ._claude import call_claude, claude_turn_contents, record_claude_call
+from ._fields import BLOG_FIELDS, SUPPORTED_AI_MODES, SUPPORTED_AI_OPERATIONS, SUPPORTED_AI_SKILLS
+from ._claude import ClaudeCallFailed, ClaudeTurnRef, call_claude_thread, claude_turn_contents, record_claude_call, to_messages
+from ._claude_thread import (
+    ThreadRequest, history_contents, mark_latest_user_turn, thread_context, thread_effort,
+    turn_context as claude_turn_context,
+)
+from ._parts import HR_PILOT_ACTIONS, recruiting_update, slide_lock, summary_block, valid_fields_for
 from ._models import FLASH_LITE, _get_model, classify_thinking_level, is_claude_model, resolve_turn_model
 from ._prompts import MATCHA_WORK_BLOG_DYNAMIC_PROMPT, MATCHA_WORK_BLOG_STATIC_PROMPT, MATCHA_WORK_DYNAMIC_PROMPT_TEMPLATE, MATCHA_WORK_STATIC_PROMPT_TEMPLATE
 from ._text import _clean_json_text, _extract_reply_field, _infer_skill_from_state
@@ -72,6 +77,9 @@ class AIResponse:
     referenced_categories: list[str] | None = field(default=None)
     referenced_locations: list[str] | None = field(default=None)
     attachments: list[dict] | None = field(default=None)
+    # A Claude turn's request, for the compaction that may follow it
+    # (`_claude.ClaudeTurnRef`). Server-side only: never serialized.
+    claude_turn: Any = field(default=None, repr=False, compare=False)
 
 
 class MatchaWorkAIProvider:
@@ -178,7 +186,22 @@ class GeminiProvider(MatchaWorkAIProvider):
         thread_id: Optional[str] = None,
         dynamic_context: str = "",
         hr_pilot_mode: bool = False,
+        turn_context: str = "",
+        claude_company_context: Optional[str] = None,
+        history_from: Optional[int] = None,
     ) -> AIResponse:
+        """One skill-engine turn.
+
+        `dynamic_context` is the thread's mode contexts (stable across turns);
+        `turn_context` is what changes with each message (compliance RAG).
+        Gemini joins them as one block. Claude puts the first in the cached
+        thread context and the second in the per-turn tail, uses
+        `claude_company_context` (the company context without attached-file
+        text, which rides inside the message that carried the file), and
+        starts its history at `messages[history_from]` (`_claude_thread.
+        claude_history_start`); without it, the last 20 messages (15 after a
+        summary) as Gemini.
+        """
         latest_user_msg = next(
             (m["content"] for m in reversed(messages) if m.get("role") == "user"),
             "",
@@ -352,19 +375,9 @@ class GeminiProvider(MatchaWorkAIProvider):
         static_prompt, dynamic_prompt, contents, valid_fields, inferred_skill = self._build_prompt_and_contents(
             messages, current_state, company_context=company_context, slide_index=slide_index,
             context_summary=context_summary, blog_mode_state=blog_mode_state,
-            dynamic_context=dynamic_context, hr_pilot_mode=hr_pilot_mode,
+            dynamic_context=dynamic_context + turn_context, hr_pilot_mode=hr_pilot_mode,
         )
         model = await _get_model(self.settings, model_override, company_id=company_id, user_id=user_id)
-        if is_claude_model(model):
-            # A full anthropic bucket, or an image Claude can't take, runs
-            # this turn on Gemini rather than failing it or dropping the image.
-            claude_contents = await claude_turn_contents(contents)
-            if claude_contents is None:
-                model = await _get_model(
-                    self.settings, model_override, company_id=company_id, user_id=user_id, gemini_only=True,
-                )
-            else:
-                contents = claude_contents
 
         # Auto-pick thinking level based on the latest user message + thread mode.
         latest_user_msg = next(
@@ -379,6 +392,30 @@ class GeminiProvider(MatchaWorkAIProvider):
             node_mode=node_mode,
             grounded_mode=grounded_mode,
         )
+
+        if is_claude_model(model):
+            # A full anthropic bucket, or an image Claude can't take, runs
+            # this turn on Gemini rather than failing it or dropping the image.
+            request = await self._claude_thread_request(
+                messages, current_state,
+                company_context=company_context if claude_company_context is None else claude_company_context,
+                stable_context=dynamic_context, turn_context=turn_context, context_summary=context_summary,
+                slide_index=slide_index, blog_mode_state=blog_mode_state, hr_pilot_mode=hr_pilot_mode,
+                history_from=history_from, valid_fields=valid_fields, skill=inferred_skill,
+            )
+            if request is not None:
+                effort = thread_effort(
+                    current_skill=inferred_skill, grounded=bool(compliance_mode or node_mode or grounded_mode),
+                )
+                return await self._generate_claude(
+                    request, model, effort,
+                    fallback=(static_prompt, dynamic_prompt, contents, valid_fields, inferred_skill,
+                              company_id, user_id, model_override, thinking_level),
+                )
+            model = await _get_model(
+                self.settings, model_override, company_id=company_id, user_id=user_id, gemini_only=True,
+            )
+
         # Downgrade to flash-lite only for skill-less trivial turns — see
         # resolve_turn_model's docstring for why the skill check is required.
         plan_model = model
@@ -391,11 +428,6 @@ class GeminiProvider(MatchaWorkAIProvider):
         # "model is flash-lite" — a user who picks flash-lite in the header
         # picker runs real turns on it and should still get the cache.
         auto_downgraded = model != plan_model
-
-        if is_claude_model(model):
-            return await self._generate_claude(
-                static_prompt, dynamic_prompt, contents, valid_fields, model, inferred_skill, thinking_level,
-            )
 
         try:
             response = await asyncio.wait_for(
@@ -490,42 +522,109 @@ class GeminiProvider(MatchaWorkAIProvider):
             response.text or "", valid_fields, inferred_skill, self._extract_usage_metadata(response, model),
         )
 
+    async def _claude_thread_request(
+        self,
+        messages: list[dict],
+        current_state: dict,
+        *,
+        company_context: str,
+        stable_context: str,
+        turn_context: str,
+        context_summary: Optional[str],
+        slide_index: Optional[int],
+        blog_mode_state: Optional[str],
+        hr_pilot_mode: bool,
+        history_from: Optional[int],
+        valid_fields: list[str],
+        skill: str,
+    ) -> Optional[ThreadRequest]:
+        """The cache-shaped request for this turn (`_claude_thread`), or None
+        when it must run on Gemini (bucket full, image Claude can't take)."""
+        if history_from is None:
+            window = messages[-(15 if context_summary else 20):]
+        else:
+            window = messages[max(0, history_from):]
+        contents = await claude_turn_contents(history_contents(window))
+        if contents is None:
+            return None
+        latest_user = next((m for m in reversed(window) if m.get("role") == "user"), {})
+        return ThreadRequest(
+            blog=blog_mode_state is not None,
+            context=thread_context(
+                company_context=company_context, stable_context=stable_context,
+                summary=context_summary, hr_pilot_mode=hr_pilot_mode and blog_mode_state is None,
+            ),
+            history=mark_latest_user_turn(to_messages(contents)),
+            turn_context=claude_turn_context(
+                today=date.today().isoformat(), current_skill=skill, current_state=current_state,
+                valid_fields=valid_fields, per_message_context=turn_context, blog_state=blog_mode_state,
+                slide_index=slide_index, slide_context=latest_user.get("slide_context") or "",
+            ),
+            valid_fields=valid_fields,
+            skill=skill,
+        )
+
     async def _generate_claude(
         self,
-        static_prompt: str,
-        dynamic_prompt: str,
-        contents: list,
-        valid_fields: list[str],
+        request: ThreadRequest,
         model: str,
-        inferred_skill: str,
-        thinking_level: str,
+        effort: str,
+        *,
+        fallback: tuple,
     ) -> AIResponse:
-        """The skill-engine call on a Claude pick (`_claude.py`). Same reply
-        contract and the same failure replies as the Gemini path. Every
-        attempt counts in the anthropic bucket, failed or not."""
+        """The skill-engine call on Claude (`_claude.py`), parsed by the shared
+        parser. If Claude fails (overloaded, an outage, a timeout), the turn
+        runs on Gemini instead of failing. Every attempt counts in the
+        anthropic bucket, failed or not."""
         await record_claude_call()
         try:
-            raw_text, usage = await asyncio.wait_for(
-                call_claude(
-                    static_prompt=static_prompt, dynamic_prompt=dynamic_prompt, contents=contents,
-                    model=model, thinking_level=thinking_level,
-                    timeout_seconds=GEMINI_CALL_TIMEOUT - 5,
-                ),
+            result = await asyncio.wait_for(
+                call_claude_thread(request, model=model, effort=effort, timeout_seconds=GEMINI_CALL_TIMEOUT - 5),
                 timeout=GEMINI_CALL_TIMEOUT,
             )
-        except asyncio.TimeoutError:
-            logger.error("Claude call timed out after %s seconds", GEMINI_CALL_TIMEOUT)
-            return AIResponse(
-                assistant_reply="I'm taking too long to respond. Please try again.",
-                structured_update=None,
-            )
+        except (asyncio.TimeoutError, ClaudeCallFailed) as exc:
+            logger.warning("Claude call failed (%s); running the turn on Gemini", exc)
+            return await self._gemini_fallback(*fallback)
         except Exception as e:
             logger.error("Claude call failed: %s", e, exc_info=True)
             return AIResponse(
                 assistant_reply="I encountered an error processing your request. Please try again.",
                 structured_update=None,
             )
-        return self._parse_engine_reply(raw_text, valid_fields, inferred_skill, usage)
+        response = self._parse_engine_reply(result.text, request.valid_fields, request.skill, result.usage)
+        response.claude_turn = ClaudeTurnRef(
+            request=request, model=model, effort=effort, structured=result.structured,
+        )
+        return response
+
+    async def _gemini_fallback(
+        self, static_prompt: str, dynamic_prompt: str, contents: list, valid_fields: list[str],
+        inferred_skill: str, company_id: str, user_id: str, model_override: Optional[str], thinking_level: str,
+    ) -> AIResponse:
+        """A Claude turn that could not run, on the Gemini plan model."""
+        model = await _get_model(
+            self.settings, model_override, company_id=company_id, user_id=user_id, gemini_only=True,
+        )
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._call_gemini, static_prompt, dynamic_prompt, contents, valid_fields, model,
+                    inferred_skill, company_id, thinking_level, True,
+                ),
+                timeout=GEMINI_CALL_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.error("Gemini fallback timed out after %s seconds", GEMINI_CALL_TIMEOUT)
+            return AIResponse(
+                assistant_reply="I'm taking too long to respond. Please try again.",
+                structured_update=None,
+            )
+        except Exception as e:
+            logger.error("Gemini fallback failed: %s", e, exc_info=True)
+            return AIResponse(
+                assistant_reply="I encountered an error processing your request. Please try again.",
+                structured_update=None,
+            )
 
     def _parse_engine_reply(
         self, raw_text: str, valid_fields: list[str], inferred_skill: str, usage: Optional[dict],
@@ -689,10 +788,11 @@ class GeminiProvider(MatchaWorkAIProvider):
         company_id: str = "",
         user_id: str = "",
         payer_mode: bool = False,
+        turn_context: str = "",
     ) -> dict:
         static_prompt, dynamic_prompt, _, _, _ = self._build_prompt_and_contents(
             messages, current_state, company_context=company_context,
-            slide_index=slide_index, dynamic_context=dynamic_context,
+            slide_index=slide_index, dynamic_context=dynamic_context + turn_context,
         )
         # Resolve the SAME model the actual turn will use — estimating against
         # the default flash model billed Pro-tier fallback turns at flash prices.
@@ -751,12 +851,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                 company_context=company_context,
             )
             dynamic_prompt = MATCHA_WORK_BLOG_DYNAMIC_PROMPT.format(blog_state=blog_mode_state)
-            if context_summary:
-                dynamic_prompt += (
-                    f"\n\n## Conversation Context Summary\n"
-                    f"(Earlier messages were summarized to preserve context)\n"
-                    f"{context_summary}\n"
-                )
+            dynamic_prompt += summary_block(context_summary)
             if dynamic_context:
                 dynamic_prompt += "\n\n" + dynamic_context
             blog_contents: list = []
@@ -774,33 +869,7 @@ class GeminiProvider(MatchaWorkAIProvider):
             return static_prompt, dynamic_prompt, blog_contents, list(BLOG_FIELDS), "blog"
 
         current_skill = _infer_skill_from_state(current_state)
-        if current_skill == "offer_letter":
-            valid_fields = OFFER_LETTER_FIELDS
-        elif current_skill == "review":
-            valid_fields = REVIEW_FIELDS
-        elif current_skill == "workbook":
-            valid_fields = WORKBOOK_FIELDS
-        elif current_skill == "onboarding":
-            valid_fields = ONBOARDING_FIELDS
-        elif current_skill == "presentation":
-            valid_fields = PRESENTATION_FIELDS
-        elif current_skill == "handbook":
-            valid_fields = HANDBOOK_FIELDS
-        elif current_skill == "policy":
-            valid_fields = POLICY_FIELDS
-        elif current_skill == "project":
-            valid_fields = PROJECT_FIELDS
-        elif current_skill == "blog":
-            valid_fields = BLOG_FIELDS
-        elif current_skill == "hr_pilot":
-            valid_fields = HR_PILOT_FIELDS
-        else:
-            valid_fields = OFFER_LETTER_FIELDS + REVIEW_FIELDS + WORKBOOK_FIELDS + ONBOARDING_FIELDS + PRESENTATION_FIELDS + HANDBOOK_FIELDS + POLICY_FIELDS + PROJECT_FIELDS + BLOG_FIELDS
-            # HR Pilot's action vocabulary is offered only in HR Pilot threads —
-            # otherwise a normal chat could stage an `hr_action` the executor
-            # would then refuse anyway.
-            if hr_pilot_mode:
-                valid_fields = valid_fields + HR_PILOT_FIELDS
+        valid_fields = valid_fields_for(current_skill, hr_pilot_mode)
 
         # Static part — instructions + company context (cached at Gemini API level)
         static_prompt = MATCHA_WORK_STATIC_PROMPT_TEMPLATE.format(
@@ -824,89 +893,14 @@ class GeminiProvider(MatchaWorkAIProvider):
         # `hr_pilot` skill is invisible everywhere else (execution is gated again
         # server-side regardless).
         if hr_pilot_mode:
-            dynamic_prompt += """
+            dynamic_prompt += HR_PILOT_ACTIONS
 
-HR PILOT ACTIONS:
-Besides answering questions, you may PROPOSE two documented actions, and you may
-CONFIRM any action already staged in current_state. All actions are strictly
-two-step and confirm-first — never propose and execute in the same message.
+        # Recruiting project context — post-finalization details from thread state.
+        dynamic_prompt += recruiting_update(current_skill, current_state)
 
-PROPOSE (mode="skill", skill="hr_pilot", operation="none", with the hr_action in updates):
-- Discipline write-up — when a supervisor asks to write someone up / document an
-  attendance, performance, or policy issue:
-  updates={"hr_action": {"type":"discipline_draft", "employee_name": str,
-  "infraction_type": "attendance|performance|policy_violation",
-  "severity": "minor|moderate|severe", "occurrence_dates": ["YYYY-MM-DD", ...],
-  "description": str, "expected_improvement": str, "status": "proposed"}}
-- Time-off request on an employee's behalf — VACATION or PERSONAL only:
-  updates={"hr_action": {"type":"pto_request", "employee_name": str,
-  "request_type": "vacation|personal", "start_date": "YYYY-MM-DD",
-  "end_date": "YYYY-MM-DD", "hours": number, "reason": str, "status": "proposed"}}
-In "reply", summarize what you drafted and ask the supervisor to confirm.
+        dynamic_prompt += summary_block(context_summary)
 
-CONFIRM (mode="skill", skill="hr_pilot", operation="execute_hr_action", updates={}):
-- When current_state.hr_action has status "proposed" (ANY type — including a
-  safety/incident or HR-case report the SYSTEM staged for the supervisor after a
-  hard-stop) and the user confirms (e.g. "yes", "confirm", "file it"), emit the
-  execute operation with an EMPTY updates object. NEVER restate hr_action.
-
-Rules:
-- NEVER claim anything was filed unless you used operation="execute_hr_action".
-- If you're missing the employee, dates, hours, or what happened, ask
-  (mode="clarify") — never invent a name, date, or number for a real record.
-- Do NOT PROPOSE a discipline write-up or PTO request for anything involving
-  safety, injury, harassment, discrimination, sick/medical leave, or termination
-  — those go to corporate HR (and are refused here). This restriction is about
-  PROPOSING; it does NOT stop you from helping the supervisor CONFIRM a
-  system-staged report about such a topic.
-- Never give guidance about the CONTENT of a staged safety/harassment report —
-  only help the supervisor confirm it or cancel it."""
-
-        # Recruiting project context — add specific instructions
-        # (The route-level _inject_recruiting_project_context provides the primary
-        #  context via company_context; this adds post-finalization details from thread state)
-        if current_skill == "project" and current_state.get("posting"):
-            posting = current_state.get("posting", {})
-            candidates_count = len(current_state.get("candidates", []))
-            is_finalized = bool(posting.get("finalized"))
-            dynamic_prompt += f"""
-RECRUITING PROJECT UPDATE:
-- Posting finalized: {is_finalized}
-- Candidates: {candidates_count}
-"""
-
-        if context_summary:
-            dynamic_prompt += (
-                f"\n\n## Conversation Context Summary\n"
-                f"(Earlier messages were summarized to preserve context)\n"
-                f"{context_summary}\n"
-            )
-
-        if slide_index is not None and current_skill in ("presentation", "workbook"):
-            slides = current_state.get("slides") or []
-            if not slides:
-                pres = current_state.get("presentation")
-                if isinstance(pres, dict):
-                    slides = pres.get("slides") or []
-            slide_title = ""
-            if 0 <= slide_index < len(slides):
-                slide_title = slides[slide_index].get("title", "") if isinstance(slides[slide_index], dict) else ""
-            label = f' "{slide_title}"' if slide_title else ""
-            total = len(slides)
-            dynamic_prompt += (
-                f"\n\n--- SLIDE LOCK ACTIVE ---\n"
-                f"The user has selected Slide {slide_index + 1}/{total}{label} (0-based index {slide_index}). "
-                f"You MUST only modify this slide. In your updates JSON:\n"
-                f"- The 'slides' array must be identical to current_state except at index {slide_index}\n"
-                f"- Do NOT change any other slide's title, bullets, or speaker_notes\n"
-                f"- Do NOT include presentation_title, subtitle, theme, or cover_image_url in updates\n"
-                f"- Only include 'slides' in your updates object\n"
-                f"- CRITICAL: The user is requesting a CHANGE to the current slide. You must produce "
-                f"updated content that differs from current_state. If the user asks to add, remove, or "
-                f"modify something, the slide in your response MUST reflect that change. Never return "
-                f"the slide unchanged when the user has requested a modification.\n"
-                f"--- END SLIDE LOCK ---"
-            )
+        dynamic_prompt += slide_lock(slide_index, current_skill, current_state)
 
         contents = []
         for msg in windowed:

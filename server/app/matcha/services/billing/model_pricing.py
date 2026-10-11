@@ -20,9 +20,9 @@ MODEL_PRICING: dict[str, dict[str, Decimal]] = {
         "output_per_1m": Decimal("1.20"),
     },
     # Anthropic Claude — the schedule assistant's opt-in models
-    # (services/huume/claude_client.py). Must match ai_usage.PRICING's rows.
-    # Haiku 5.5's >100K-prompt rate is not modelled here; the admin ledger
-    # (ai_usage.compute_cost) applies it.
+    # (services/huume/claude_client.py) and Claude thread turns. Must match
+    # ai_usage.PRICING's rows. Only `claude_turn_cost` applies Haiku 5.5's
+    # >100K-prompt rate and the cache-write rates.
     "claude-haiku-5-5": {
         "input_per_1m": Decimal("0.10"),
         "cached_input_per_1m": Decimal("0.01"),
@@ -140,4 +140,48 @@ def calculate_call_cost(
 
     total = (input_cost + output_cost).quantize(Decimal("0.000001"), rounding=ROUND_UP)
 
+    return max(total, MINIMUM_COST_PER_CALL)
+
+
+# Haiku 5.5 reprices the whole request above 100K prompt tokens.
+_CLAUDE_LONG_CONTEXT: dict[str, tuple[int, Decimal]] = {
+    "claude-haiku-5-5": (100_000, Decimal("5")),
+}
+
+
+def claude_turn_cost(
+    model: str,
+    *,
+    input_tokens: int,
+    cache_read_tokens: int,
+    cache_write_tokens: int,
+    cache_write_1h_tokens: int,
+    output_tokens: int,
+) -> Decimal:
+    """A Claude thread turn's dollar cost from Messages usage, where
+    `input_tokens` is only the uncached remainder (cache reads and writes are
+    reported apart). Reads at the cached rate, writes at 1.25x input, the
+    1-hour-TTL part of them at 2x, Haiku's long-prompt rate above 100K.
+    Floored at MINIMUM_COST_PER_CALL like every other call."""
+    pricing = MODEL_PRICING.get(model, DEFAULT_PRICING)
+    rate_in = pricing["input_per_1m"]
+    rate_read = pricing.get("cached_input_per_1m", rate_in)
+    uncached = max(input_tokens, 0)
+    reads = max(cache_read_tokens, 0)
+    writes = max(cache_write_tokens, 0)
+    writes_1h = min(max(cache_write_1h_tokens, 0), writes)
+    multiplier = Decimal("1")
+    threshold = _CLAUDE_LONG_CONTEXT.get(model)
+    if threshold and uncached + reads + writes > threshold[0]:
+        multiplier = threshold[1]
+    input_cost = (
+        Decimal(uncached) * rate_in
+        + Decimal(reads) * rate_read
+        + Decimal(writes - writes_1h) * rate_in * Decimal("1.25")
+        + Decimal(writes_1h) * rate_in * Decimal("2")
+    )
+    output_cost = Decimal(max(output_tokens, 0)) * pricing["output_per_1m"]
+    total = ((input_cost + output_cost) * multiplier / Decimal("1000000")).quantize(
+        Decimal("0.000001"), rounding=ROUND_UP,
+    )
     return max(total, MINIMUM_COST_PER_CALL)
