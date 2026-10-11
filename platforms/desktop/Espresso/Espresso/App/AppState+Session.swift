@@ -42,6 +42,10 @@ extension AppState {
         CodexResearchCoordinator.shared.bind(userID: user.id)
         currentUser = user
         isAuthenticated = true
+        // The side pane's first build remembered its last target under one
+        // global key, which could hold a file's signed URL. It is per person
+        // now (`lastSideTargetKey`); drop the old one wherever it was written.
+        UserDefaults.standard.removeObject(forKey: "mw-last-side-target-v1")
         UsageBeaconService.shared.start()
         CallService.shared.currentUserId = user.id
         MatchaWorkService.shared.updateCacheScope(user.id)
