@@ -283,12 +283,15 @@ def reply_text(raw: str, *, stop_reason: str | None, structured: bool, stop_deta
     text = engine_reply_text(raw) if structured else raw
     if stop_reason == "max_tokens":
         try:
-            json.loads(text)
-            return text
+            parsed = json.loads(text)
         except ValueError:
-            written = partial_reply(raw)
-            if written:
-                return json.dumps({"mode": "general", "reply": written.rstrip() + CUT_OFF_NOTE})
+            parsed = None
+        if isinstance(parsed, dict) and isinstance(parsed.get("reply"), str):
+            parsed["reply"] = parsed["reply"].rstrip() + CUT_OFF_NOTE
+            return json.dumps(parsed)
+        written = partial_reply(raw) or ""
+        return json.dumps({"mode": "general", "reply": written.rstrip() + CUT_OFF_NOTE})
+
     return text
 
 

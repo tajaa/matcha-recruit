@@ -5,7 +5,9 @@ before handing messages to the (thread-pool) prompt builder.
 import asyncio
 import logging
 from typing import Optional
-from app.config import get_settings
+from threading import Condition
+
+from cachetools import LRUCache
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +78,54 @@ def _fetch_image_bytes(url: str) -> Optional[tuple[bytes, str]]:
         return None
 
 
+# Account for both representations; keep Gemini's original bytes and a stable
+# Claude version. Always use the 2000px limit, including the first turn, so
+# crossing 20 images cannot change an earlier image's cached prefix.
+_IMAGE_CACHE_BYTES = 64 * 1024 * 1024
+_image_cache = LRUCache(
+    maxsize=_IMAGE_CACHE_BYTES,
+    getsizeof=lambda value: sum(len(part[0]) for part in value if part),
+)
+_image_cache_condition = Condition()
+
+
+_image_pending: set[str] = set()
+
+
+def _cached_image(url: str):
+    from ._claude import normalize_image
+
+    with _image_cache_condition:
+        _image_cache_condition.wait_for(lambda: url not in _image_pending)
+        if url in _image_cache:
+            return _image_cache[url]
+        _image_pending.add(url)
+    try:
+        raw = _fetch_image_bytes(url)
+        if raw is None:
+            # Do not memoize transient download failures.
+            raise ValueError("Image download unavailable")
+        normalized = normalize_image(raw[0], long_edge=2000)
+        result = raw, normalized or raw
+        with _image_cache_condition:
+            _image_cache[url] = result
+        return result
+    finally:
+        with _image_cache_condition:
+            _image_pending.discard(url)
+            _image_cache_condition.notify_all()
+
+
+def _fetch_cached_image(url: str):
+    # Recheck trust even on a hit (configuration can change in a process).
+    if not _is_trusted_image_url(url):
+        return None
+    try:
+        return _cached_image(url)
+    except ValueError:
+        return None
+
+
 async def fetch_image_parts_for_messages(msg_dicts: list[dict]) -> None:
     """Populate msg['image_parts'] as [(bytes, mime), ...] by fetching any
     image_urls concurrently in a thread pool. Mutates msg_dicts in place."""
@@ -87,9 +137,11 @@ async def fetch_image_parts_for_messages(msg_dicts: list[dict]) -> None:
     if not fetches:
         return
     results = await asyncio.gather(
-        *(asyncio.to_thread(_fetch_image_bytes, url) for _, url in fetches)
+        *(asyncio.to_thread(_fetch_cached_image, url) for _, url in fetches)
     )
     for (msg, _url), result in zip(fetches, results):
         if result is None:
             continue
-        msg.setdefault("image_parts", []).append(result)
+        raw, normalized = result
+        msg.setdefault("image_parts", []).append(raw)
+        msg.setdefault("claude_image_parts", []).append(normalized)

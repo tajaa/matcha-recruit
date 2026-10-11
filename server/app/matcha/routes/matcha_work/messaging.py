@@ -48,6 +48,7 @@ from app.matcha.services.matcha_work.turn_pipeline import (
     _run_hard_stop_gates,
     _run_huume_dispatch,
     _run_quota_gate,
+    _record_turn_usage,
     _track_background_task,
 )
 
@@ -142,12 +143,17 @@ async def send_message_stream(
 
     await _prepare_attachments(tc)
 
-    # Fetch message history + company profile + context summary in parallel
-    messages, profile, (context_summary, summary_at_count) = await asyncio.gather(
-        doc_svc.get_thread_messages(thread_id, limit=20),
+    # Resolve the checkpoint before fetching the append-only Claude window.
+    message_count, profile, (context_summary, summary_at_count) = await asyncio.gather(
+        doc_svc.get_thread_message_count(thread_id),
         doc_svc.get_company_profile_for_ai(company_id),
         doc_svc.get_context_summary(thread_id),
     )
+    from app.matcha.services.matcha_work.matcha_work_ai._claude_thread import claude_history_start
+    claude_start = claude_history_start(message_count, summary_at_count)
+    fetch_start = min(claude_start, max(0, message_count - 20))
+    messages = await doc_svc.get_thread_messages_from(thread_id, fetch_start)
+    tc.history_from = claude_start - fetch_start
     if is_schedule_thread:
         include_cost = labor_cost_visible_from(features, current_user.role)
         thread["current_state"] = project_schedule_payload(thread.get("current_state") or {}, include_cost=include_cost)
@@ -168,7 +174,7 @@ async def send_message_stream(
     # References (not text) to the same files, oldest first — Huume tools that
     # need the original bytes (a write-up sent to HR) re-fetch by URL.
     file_attachment_refs: list[dict] = []
-    for m in messages:
+    for message_index, m in enumerate(messages):
         entry = {"role": m["role"], "content": m["content"]}
         meta = m.get("metadata")
         if isinstance(meta, str):
@@ -190,10 +196,12 @@ async def send_message_stream(
                 entry["image_urls"] = urls
             for a in atts:
                 if isinstance(a, dict) and a.get("kind") == "file" and a.get("text"):
-                    file_context_parts.append(
-                        f"[{a.get('filename') or 'file'}]\n{a['text']}"
-                    )
-                if isinstance(a, dict) and a.get("kind") == "file" and a.get("url"):
+                    entry.setdefault("files", []).append((a.get("filename") or "file", a["text"]))
+                    if message_index >= len(messages) - 20:
+                        file_context_parts.append(
+                            f"[{a.get('filename') or 'file'}]\n{a['text']}"
+                        )
+                if message_index >= len(messages) - 20 and isinstance(a, dict) and a.get("kind") == "file" and a.get("url"):
                     file_attachment_refs.append({
                         "url": a["url"], "filename": a.get("filename"), "content_type": a.get("content_type"),
                     })
@@ -217,6 +225,7 @@ async def send_message_stream(
     if thread.get("project_id"):
         from app.matcha.services.matcha_work import project_file_service
         pfiles = await project_file_service.list_project_files(thread["project_id"])
+        pfiles.sort(key=lambda f: (str(f.get("created_at") or ""), str(f.get("id") or "")), reverse=True)
         if pfiles:
             listing = "\n".join(f"- {f['filename']} ({f['content_type']}, {f['file_size']:,} bytes)" for f in pfiles)
             ctx += f"\n\n=== PROJECT ATTACHMENTS ===\nThe user has attached these files to the project. Reference them when relevant:\n{listing}\n"
@@ -224,6 +233,7 @@ async def send_message_stream(
     # Inject the text of files the user attached to chat messages. These are
     # reference material — the system-prompt note tells the model not to
     # volunteer a full analysis unless the user's message asks for it.
+    claude_ctx = ctx
     ctx += _attached_files_context(file_context_parts)
 
     # Fetch the project row ONCE per turn — the recruiting-context injector and
@@ -232,6 +242,8 @@ async def send_message_stream(
 
     # Inject recruiting project context so AI generates posting sections in the right project
     tc.ctx = await _inject_recruiting_project_context(ctx, thread, thread["current_state"], project_meta=tc.project_meta)
+
+    tc.claude_ctx = claude_ctx + tc.ctx[len(ctx):]
 
     # Node/compliance context is built inside event_stream() so we can yield status events
 
@@ -296,7 +308,18 @@ async def send_message_stream(
             yield _sse_data({"type": "complete", "data": response.model_dump(mode="json")})
 
             # Trigger compaction in the background if needed
-            _track_background_task(asyncio.create_task(_maybe_compact(thread_id, tc.ai_provider, tc.summary_at_count)))
+            async def bill_compaction(usage):
+                await _record_turn_usage(
+                    thread_id=thread_id, company_id=company_id,
+                    user_id=current_user.id, user_role=current_user.role,
+                    final_usage=usage, operation="compaction",
+                )
+
+            _track_background_task(asyncio.create_task(_maybe_compact(
+                thread_id, tc.ai_provider, tc.summary_at_count,
+                claude_turn=tc.ai_resp.claude_turn,
+                assistant_reply=tc.assistant_msg["content"], bill=bill_compaction,
+            )))
             _dispatch_autotitle()
         except Exception as e:
             logger.error("Matcha Work stream failed for thread %s: %s (%s)", thread_id, e, type(e).__name__, exc_info=True)

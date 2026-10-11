@@ -484,11 +484,13 @@ def _inject_slide_context(msg_dicts: list[dict], current_state: dict, slide_inde
     # Find last user message and prepend context
     for i in range(len(msg_dicts) - 1, -1, -1):
         if msg_dicts[i]["role"] == "user":
-            original = msg_dicts[i]["content"]
-            msg_dicts[i] = {
-                "role": "user",
-                "content": f"{context_block}\n{original}",
-            }
+            entry = msg_dicts[i]
+            original = entry.get("original_content", entry["content"])
+            entry.update(
+                original_content=original,
+                slide_context=context_block,
+                content=f"{context_block}\n{original}",
+            )
             break
 
 def _scope_slide_update(ai_resp, current_state: dict, slide_index: Optional[int]) -> None:

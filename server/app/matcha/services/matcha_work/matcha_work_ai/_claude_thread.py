@@ -27,6 +27,7 @@ Gemini keeps its own two-string prompt; both are built from `_parts`.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -40,6 +41,8 @@ from ._prompts import (
     MATCHA_WORK_DYNAMIC_PROMPT_TEMPLATE,
     MATCHA_WORK_STATIC_PROMPT_TEMPLATE,
 )
+
+logger = logging.getLogger(__name__)
 
 CACHE_CONTROL = {"type": "ephemeral", "ttl": "1h"}
 TODAY_REF = "given in TURN CONTEXT at the end of the conversation"
@@ -188,7 +191,7 @@ def history_contents(messages: list[dict]) -> list[types.Content]:
         role = "user" if msg["role"] == "user" else "model"
         parts: list[types.Part] = []
         if role == "user":
-            for image_bytes, mime in (msg.get("image_parts") or []):
+            for image_bytes, mime in (msg.get("claude_image_parts", msg.get("image_parts")) or []):
                 if image_bytes:
                     parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime))
             for filename, text in (msg.get("files") or []):
@@ -266,6 +269,7 @@ def engine_reply_text(raw: str) -> str:
         try:
             updates = json.loads(encoded)
         except ValueError:
+            logger.warning("Claude returned invalid updates_json; ignoring document updates")
             updates = {}
     parsed["updates"] = updates if isinstance(updates, dict) else {}
     return json.dumps(parsed)

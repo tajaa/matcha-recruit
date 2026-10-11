@@ -81,7 +81,7 @@ async def _build_benefits_context_uncached(company_id: UUID) -> str:
                    days_remaining, estimated_monthly_leak, detected_at
             FROM benefit_eligibility_exceptions
             WHERE company_id=$1 AND status='open'
-            ORDER BY detected_at DESC
+            ORDER BY detected_at DESC, id
             """,
             company_id,
         )
@@ -93,7 +93,7 @@ async def _build_benefits_context_uncached(company_id: UUID) -> str:
             FROM benefit_renewal_risk
             WHERE company_id=$1
             ORDER BY CASE risk_band WHEN 'critical' THEN 0 WHEN 'elevated' THEN 1 ELSE 2 END,
-                     dimension_type, dimension_value
+                     dimension_type, dimension_value, id
             """,
             company_id,
         )
@@ -108,7 +108,7 @@ async def _build_benefits_context_uncached(company_id: UUID) -> str:
             LEFT JOIN benefit_plan_tiers t ON t.plan_id = p.id
             WHERE p.company_id=$1 AND p.status='active'
             GROUP BY p.id
-            ORDER BY p.plan_type, p.name
+            ORDER BY p.plan_type, p.name, p.id
             """,
             company_id,
         )
@@ -116,13 +116,14 @@ async def _build_benefits_context_uncached(company_id: UUID) -> str:
             """
             SELECT id, name, starts_on, ends_on, plan_year_start
             FROM open_enrollment_periods WHERE company_id=$1 AND status='open'
+            ORDER BY starts_on DESC, id LIMIT 1
             """,
             company_id,
         )
         last_period = None if open_period else await conn.fetchrow(
             """
             SELECT name, status, starts_on, ends_on FROM open_enrollment_periods
-            WHERE company_id=$1 ORDER BY starts_on DESC LIMIT 1
+            WHERE company_id=$1 ORDER BY starts_on DESC, id LIMIT 1
             """,
             company_id,
         )
@@ -154,7 +155,7 @@ async def _build_benefits_context_uncached(company_id: UUID) -> str:
             FROM life_event_changes le
             JOIN employees e ON e.id = le.employee_id
             WHERE le.company_id=$1 AND le.status='pending'
-            ORDER BY le.created_at DESC
+            ORDER BY le.created_at DESC, le.id
             """,
             company_id,
         )
@@ -291,7 +292,7 @@ async def _build_legal_context_uncached(company_id: UUID) -> str:
                    (SELECT MAX(msg.created_at) FROM legal_matter_messages msg WHERE msg.matter_id = m.id) AS last_activity
             FROM legal_matters m
             WHERE m.company_id=$1
-            ORDER BY (m.status='active') DESC, m.created_at DESC
+            ORDER BY (m.status='active') DESC, m.created_at DESC, m.id
             """,
             company_id,
         )
@@ -459,7 +460,7 @@ async def _build_training_context_uncached(company_id: UUID) -> str:
             LEFT JOIN training_records tr ON tr.requirement_id = r.id
             WHERE r.company_id=$1 AND r.is_active
             GROUP BY r.id, r.title, r.training_type, r.jurisdiction, r.frequency_months, r.applies_to
-            ORDER BY overdue DESC, r.title
+            ORDER BY overdue DESC, r.title, r.id
             """,
             company_id,
         )
@@ -470,7 +471,7 @@ async def _build_training_context_uncached(company_id: UUID) -> str:
             JOIN employees e ON e.id = tr.employee_id
             WHERE tr.company_id=$1 AND tr.status IN ('assigned','in_progress')
               AND tr.due_date < CURRENT_DATE
-            ORDER BY tr.due_date ASC
+            ORDER BY tr.due_date ASC, tr.id
             LIMIT $2
             """,
             company_id,
@@ -483,7 +484,7 @@ async def _build_training_context_uncached(company_id: UUID) -> str:
             JOIN employees e ON e.id = tr.employee_id
             WHERE tr.company_id=$1 AND tr.status='completed'
               AND tr.expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '60 days'
-            ORDER BY tr.expiration_date ASC
+            ORDER BY tr.expiration_date ASC, tr.id
             LIMIT $2
             """,
             company_id,
@@ -511,7 +512,7 @@ async def _build_training_context_uncached(company_id: UUID) -> str:
             WHERE ec.org_id=$1
               AND ec.license_expiration BETWEEN CURRENT_DATE - INTERVAL '365 days'
                                             AND CURRENT_DATE + INTERVAL '60 days'
-            ORDER BY ec.license_expiration ASC
+            ORDER BY ec.license_expiration ASC, ec.id
             LIMIT $2
             """,
             company_id,
