@@ -236,6 +236,7 @@ private struct CalendarHeader: View {
                 .foregroundColor(appState.themeText)
                 .lineLimit(1)
                 .frame(minWidth: compact ? 0 : 170, alignment: .leading)
+                .layoutPriority(1)
             HStack(spacing: 2) {
                 navButton("chevron.left", help: compact ? "Previous" : "Previous (⌘←)") { vm.shift(-1) }
                     .keyboardShortcut(shortcut(.leftArrow))
@@ -246,6 +247,7 @@ private struct CalendarHeader: View {
                     .padding(.horizontal, 9).padding(.vertical, 4)
                     .background(RoundedRectangle(cornerRadius: 5).stroke(appState.themeBorder, lineWidth: 1))
                     .keyboardShortcut(shortcut("t"))
+                    .fixedSize()
                     .help(compact ? "Today" : "Today (⌘T)")
                 navButton("chevron.right", help: compact ? "Next" : "Next (⌘→)") { vm.shift(1) }
                     .keyboardShortcut(shortcut(.rightArrow))
@@ -270,12 +272,16 @@ private struct CalendarHeader: View {
                 .foregroundColor(appState.themeTextSecondary)
                 .help("Ask Espresso to add, move or find things on your calendar")
             }
-            Picker("", selection: Binding(get: { vm.mode }, set: { vm.setMode($0) })) {
-                ForEach(CalendarViewModel.Mode.allCases) { Text($0.rawValue).tag($0) }
+            if compact {
+                modeMenu
+            } else {
+                Picker("", selection: Binding(get: { vm.mode }, set: { vm.setMode($0) })) {
+                    ForEach(CalendarViewModel.Mode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 130)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: compact ? 104 : 130)
             Button(action: onNew) {
                 Group {
                     if compact {
@@ -297,6 +303,27 @@ private struct CalendarHeader: View {
         }
         .padding(.horizontal, compact ? 12 : 16)
         .padding(.vertical, compact ? 9 : 11)
+    }
+
+    /// Month/Week as a menu: the segmented picker doesn't fit a side pane.
+    private var modeMenu: some View {
+        Menu {
+            ForEach(CalendarViewModel.Mode.allCases) { mode in
+                Button(mode.rawValue) { vm.setMode(mode) }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(vm.mode.rawValue)
+                    .font(.system(size: 11, weight: .semibold))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .foregroundColor(appState.themeText)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Month or week")
     }
 
     private func navButton(_ icon: String, help: String, action: @escaping () -> Void) -> some View {
@@ -368,11 +395,15 @@ private struct CalendarMonthGrid: View {
                 let days = vm.visibleDays
                 let rows = max(1, days.count / 7)
                 let cellHeight = (geo.size.height - spacing * CGFloat(rows - 1)) / CGFloat(rows)
+                // Narrow cells (the calendar in a side pane) drop the start
+                // time so the title still reads.
+                let showsTime = (geo.size.width - spacing * 6) / 7 >= 96
                 VStack(spacing: spacing) {
                     ForEach(0..<rows, id: \.self) { row in
                         HStack(spacing: spacing) {
                             ForEach(days[(row * 7)..<min(days.count, row * 7 + 7)], id: \.self) { day in
-                                MonthDayCell(vm: vm, day: day, height: cellHeight, onOpen: onOpen, onNew: onNew)
+                                MonthDayCell(vm: vm, day: day, height: cellHeight, showsTime: showsTime,
+                                             onOpen: onOpen, onNew: onNew)
                             }
                         }
                     }
@@ -409,6 +440,7 @@ private struct MonthDayCell: View {
     let vm: CalendarViewModel
     let day: Date
     let height: CGFloat
+    let showsTime: Bool
     let onOpen: (CalendarEntry) -> Void
     let onNew: (Date) -> Void
     @State private var dropTargeted = false
@@ -433,7 +465,7 @@ private struct MonthDayCell: View {
                 Spacer(minLength: 0)
             }
             ForEach(shown) { entry in
-                MonthChip(entry: entry, day: day, dimmed: !inMonth)
+                MonthChip(entry: entry, day: day, dimmed: !inMonth, showsTime: showsTime)
                     .onTapGesture { onOpen(entry) }
                     .modifier(DraggableEntry(entry: entry))
             }
@@ -493,6 +525,7 @@ private struct MonthChip: View {
     let entry: CalendarEntry
     let day: Date
     let dimmed: Bool
+    var showsTime = true
 
     var body: some View {
         let color = CalendarPalette.color(entry, accent: appState.themeAccent, secondary: appState.themeTextSecondary)
@@ -503,9 +536,11 @@ private struct MonthChip: View {
                     .foregroundColor(appState.themeTextSecondary)
             } else if !entry.allDay {
                 Circle().fill(color).frame(width: 6, height: 6)
-                Text(CalendarFormat.shortTime(entry.start, on: day))
-                    .font(.system(size: 10).monospacedDigit())
-                    .foregroundColor(appState.themeTextSecondary)
+                if showsTime {
+                    Text(CalendarFormat.shortTime(entry.start, on: day))
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundColor(appState.themeTextSecondary)
+                }
             }
             Text(entry.title)
                 .font(.system(size: 10.5, weight: entry.allDay && !entry.isTodo ? .semibold : .regular))

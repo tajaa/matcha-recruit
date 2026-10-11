@@ -192,7 +192,7 @@ struct ContentView: View {
                     .frame(minWidth: 360, idealWidth: 760, maxWidth: .infinity, maxHeight: .infinity)
                     .layoutPriority(1)
                 SidePane(slot: .right, target: split)
-                    .frame(minWidth: 360, idealWidth: 440, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 400, idealWidth: 440, maxWidth: .infinity, maxHeight: .infinity)
             }
         } else {
             PrimaryDetailPane()
