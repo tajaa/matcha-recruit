@@ -173,7 +173,7 @@ extension AgentCardMessageView {
                 // Every event opens the Calendar on its day: Espresso's own
                 // events live there, and Google's show there when connected.
                 Button {
-                    appState.openCalendar(at: CalendarWire.date(item.start))
+                    appState.openCalendar(at: CalendarWire.date(item.start), in: pane)
                 } label: {
                     itemRow(icon: "calendar", title: item.title, subtitle: Self.when(item.start, item.end),
                             detail: [item.calendar == "google" ? "Google Calendar" : nil, item.location,

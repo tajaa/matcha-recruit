@@ -7,6 +7,9 @@ import SwiftUI
 struct AuxWindowRootView: View {
     let target: AuxWindowTarget?
     @Environment(AppState.self) private var appState
+    /// Whoever was signed in when this first showed. A window left open
+    /// across a sign-out never shows its target to the next account.
+    @State private var ownerId: String?
 
     var body: some View {
         Group {
@@ -14,6 +17,11 @@ struct AuxWindowRootView: View {
                 // macOS may restore an aux window on relaunch before sign-in;
                 // don't render a detail view that would fire token-less requests.
                 Text("Sign in to Werk to open this window.")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let ownerId, ownerId != appState.currentUser?.id {
+                Text("This window belongs to another account.")
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -31,6 +39,22 @@ struct AuxWindowRootView: View {
                     // Chrome-less preview body — the split-pane headers (and
                     // the aux window title bar) already carry the filename.
                     AttachmentPreviewContent(file: ref.asProjectFile)
+                case .calendar:
+                    CalendarWorkspace()
+                case .kanban:
+                    ProductivityWorkspace()
+                case .email:
+                    EmailWorkspace()
+                case .assistant:
+                    AssistantView()
+                case .journals:
+                    SidePaneList(surface: .journals)
+                case .channels:
+                    SidePaneList(surface: .channels)
+                case .threads:
+                    SidePaneList(surface: .threads)
+                case .workspaces:
+                    SidePaneList(surface: .workspaces)
                 case nil:
                     Text("Nothing to show")
                         .foregroundColor(.secondary)
@@ -38,8 +62,11 @@ struct AuxWindowRootView: View {
                 }
             }
         }
-        .frame(minWidth: 480, minHeight: 400)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(appState.themeBg)
+        .onChange(of: appState.currentUser?.id, initial: true) { _, id in
+            if ownerId == nil { ownerId = id }
+        }
     }
 }
 
@@ -275,6 +302,21 @@ struct SidebarStarredView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if let target = paneTarget(pin) {
+                AuxOpenMenuButtons(target: target)
+            }
+        }
+    }
+
+    private func paneTarget(_ pin: Pin) -> AuxWindowTarget? {
+        switch pin.kind {
+        case .project: return .project(pin.id)
+        case .channel: return .channel(pin.id)
+        case .thread:  return .thread(pin.id)
+        case .journal: return .journal(pin.id)
+        case .file:    return FileStarStore.shared.ref(for: pin.id).map { .file($0) }
+        }
     }
 
     private func isActive(_ pin: Pin) -> Bool {

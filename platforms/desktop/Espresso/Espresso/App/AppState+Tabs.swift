@@ -56,6 +56,108 @@ extension AppState {
         }
     }
 
+    // MARK: - Side pane
+
+    /// Per person: the target can name their threads, journals and so on, and
+    /// must never come back for whoever signs in next on this Mac.
+    private var lastSideTargetKey: String? {
+        currentUser.map { "mw-last-side-target-v2:\($0.id)" }
+    }
+
+    /// What the side pane showed last, so ⌘\ brings it back.
+    var lastSideTarget: AuxWindowTarget {
+        guard let key = lastSideTargetKey,
+              let data = UserDefaults.standard.data(forKey: key),
+              let target = try? JSONDecoder().decode(AuxWindowTarget.self, from: data),
+              target.isRememberable
+        else { return .calendar }
+        return target
+    }
+
+    /// Show `target` beside whatever the main pane has open.
+    @MainActor
+    func openBeside(_ target: AuxWindowTarget) {
+        splitTarget = target
+        guard target.isRememberable, let key = lastSideTargetKey,
+              let data = try? JSONEncoder().encode(target) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    /// ⌘\: close the side pane, or reopen the last one.
+    @MainActor
+    func toggleSidePane() {
+        if splitTarget != nil {
+            splitTarget = nil
+        } else {
+            openBeside(lastSideTarget)
+        }
+    }
+
+    /// What the main pane shows, as a pane target: the open item, else the
+    /// open hub. nil on Home and the other full-pane pages (inbox, people…).
+    /// Same precedence as `PrimaryDetailPane`. Journals is a workspace with its
+    /// own selection (`selectedJournalId` only deep-links into it), so the
+    /// journal actually open there is the one it mirrors here.
+    var mainPaneTarget: AuxWindowTarget? {
+        if let id = selectedThreadId { return .thread(id) }
+        if let id = selectedProjectId { return .project(id) }
+        if let id = selectedChannelId { return .channel(id) }
+        if showThreadsHub { return .threads }
+        if showProjectsHub { return .workspaces }
+        if showJournalsHub || selectedJournalId != nil {
+            return mainJournalsSelection.map { .journal($0) } ?? .journals
+        }
+        if showChannelsHub { return .channels }
+        if showProductivityHub { return .kanban }
+        if showCalendarHub { return .calendar }
+        if showEmailHub { return .email }
+        if showAssistantHub { return .assistant }
+        return nil
+    }
+
+    /// Navigate the main pane to `target` (a file opens the preview sheet).
+    @MainActor
+    func showInMain(_ target: AuxWindowTarget) {
+        if case .file(let ref) = target {
+            globalPreviewFile = ref.asProjectFile
+            return
+        }
+        clearPrimaryNav()
+        switch target {
+        case .project(let id): selectedProjectId = id
+        case .channel(let id): selectedChannelId = id
+        case .thread(let id): selectedThreadId = id
+        case .journal(let id): selectedJournalId = id
+        case .calendar: showCalendarHub = true
+        case .journals: showJournalsHub = true
+        case .kanban: showProductivityHub = true
+        case .assistant: showAssistantHub = true
+        case .channels: showChannelsHub = true
+        case .threads: showThreadsHub = true
+        case .email: showEmailHub = true
+        case .workspaces: showProjectsHub = true
+        case .file: break
+        }
+    }
+
+    /// A calendar link followed from `pane`: in the main pane it opens the
+    /// Calendar there; in a side pane it opens it in that pane, so the main
+    /// pane keeps what it had.
+    @MainActor
+    func openCalendar(at date: Date? = nil, in pane: WorkPane) {
+        guard pane.isSide else { openCalendar(at: date); return }
+        paneCalendarFocusDate = date
+        pane.open(.calendar)
+    }
+
+    /// An email link followed from `pane`, routed like `openCalendar(at:in:)`.
+    @MainActor
+    func openEmail(id: String, in pane: WorkPane) {
+        guard pane.isSide else { openEmail(id: id); return }
+        panePendingEmailId = id
+        pane.open(.email)
+    }
+
     @MainActor
     private func navigateToDestination(_ tab: WorkTab) {
         selectedProjectId = nil

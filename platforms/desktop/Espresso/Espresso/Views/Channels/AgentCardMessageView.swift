@@ -18,6 +18,8 @@ import AppKit
 /// Photos are server-rehosted CDN URLs; links open in the browser.
 struct AgentCardMessageView: View {
     @Environment(AppState.self) var appState
+    /// Links in the card (an event → Calendar) open in the pane it sits in.
+    @Environment(\.workPane) var pane
     let meta: ChannelMessageMetadata
     /// Message text without the leading ticket marker (used for a question's
     /// heading when the payload has none).

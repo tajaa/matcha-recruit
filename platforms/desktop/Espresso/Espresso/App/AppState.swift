@@ -101,6 +101,14 @@ class AppState {
     /// A message for the Email hub to open next (`openEmail(id:)`); the hub
     /// consumes and clears it.
     var pendingEmailId: String? = nil
+    /// The same two hand-offs for a Calendar or Email in a side pane
+    /// (`openCalendar(at:in:)`, `openEmail(id:in:)`). Kept apart so a link in
+    /// a pane never moves the main pane's Calendar or Email.
+    var paneCalendarFocusDate: Date? = nil
+    var panePendingEmailId: String? = nil
+    /// The journal open in the main pane's Journals workspace, which keeps its
+    /// own selection. Mirrored here only so swapping panes takes that journal.
+    var mainJournalsSelection: String? = nil
     /// Full-pane "Browse Channels" surface. Reached from the sidebar Channels
     /// section header. Mutually exclusive with thread/project/channel/journal
     /// selection — toggling on clears those.

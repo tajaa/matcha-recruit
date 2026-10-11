@@ -7,6 +7,7 @@ import AppKit
 /// email reader write to the same calendar.
 struct CalendarWorkspace: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.workPane) private var pane
     @State private var vm = CalendarViewModel()
     @State private var editor: CalendarEditorRequest?
     @State private var connectingGoogle = false
@@ -14,46 +15,52 @@ struct CalendarWorkspace: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            CalendarHeader(vm: vm, connectingGoogle: connectingGoogle,
+            CalendarHeader(vm: vm, connectingGoogle: connectingGoogle, compact: pane.isSide,
                            onNew: { newEvent(on: vm.selectedDay) },
-                           onConnectGoogle: connectGoogle)
+                           onConnectGoogle: connectGoogle,
+                           onAsk: askEspresso)
             Divider().opacity(0.2)
             if let error = vm.errorMessage, vm.hasLoaded {
                 errorBanner(error)
             }
             if !vm.hasLoaded && vm.errorMessage != nil {
                 loadFailed
-            } else {
-                HStack(spacing: 0) {
-                    Group {
-                        switch vm.mode {
-                        case .month:
-                            CalendarMonthGrid(vm: vm, onOpen: open, onNew: { newEvent(on: $0) })
-                        case .week:
-                            CalendarWeekGrid(vm: vm, onOpen: open, onNew: { day, hour in newEvent(on: day, hour: hour) })
+            } else if pane.isSide {
+                // Beside another surface: the day's agenda goes under the
+                // grid when the pane is narrow, beside it when it's wide (the
+                // bottom pane).
+                GeometryReader { geo in
+                    if geo.size.width < 640 {
+                        VStack(spacing: 0) {
+                            grid
+                            Divider().opacity(0.2)
+                            dayPanel
+                                .frame(height: min(260, geo.size.height * 0.42))
                         }
+                    } else {
+                        sideBySide
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    Divider().opacity(0.2)
-                    CalendarDayPanel(vm: vm, onOpen: open, onNew: { newEvent(on: vm.selectedDay) })
-                        .frame(width: 290)
                 }
+            } else {
+                sideBySide
             }
         }
         .background(ThemeRadialBackground())
         .task {
             vm.mode = CalendarViewModel.Mode(rawValue: storedMode) ?? .month
-            if let date = appState.calendarFocusDate {
-                appState.calendarFocusDate = nil
+            if let date = takeFocusDate() {
                 vm.focus(date, load: false)
             }
             await vm.load()
         }
         .onChange(of: vm.mode) { _, mode in storedMode = mode.rawValue }
-        .onChange(of: appState.calendarFocusDate) { _, date in
-            guard let date else { return }
-            appState.calendarFocusDate = nil
-            vm.focus(date)
+        // Each pane takes its own hand-off: a date sent to the main pane's
+        // calendar never moves one in a side pane, and the other way round.
+        .onChange(of: appState.calendarFocusDate) { _, _ in
+            if !pane.isSide, let date = takeFocusDate() { vm.focus(date) }
+        }
+        .onChange(of: appState.paneCalendarFocusDate) { _, _ in
+            if pane.isSide, let date = takeFocusDate() { vm.focus(date) }
         }
         // Back from the browser after connecting Google: show it.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -68,10 +75,57 @@ struct CalendarWorkspace: View {
                 onSave: { draft in try await vm.save(draft, editing: request.event?.id) },
                 onDelete: deleteAction(for: request.event)
             )
+            // Its "Open email" goes where this calendar is.
+            .environment(\.workPane, pane)
+        }
+    }
+
+    /// The date this pane's calendar was asked to show, cleared once read.
+    private func takeFocusDate() -> Date? {
+        if pane.isSide {
+            defer { appState.paneCalendarFocusDate = nil }
+            return appState.paneCalendarFocusDate
+        }
+        defer { appState.calendarFocusDate = nil }
+        return appState.calendarFocusDate
+    }
+
+    private var grid: some View {
+        Group {
+            switch vm.mode {
+            case .month:
+                CalendarMonthGrid(vm: vm, onOpen: open, onNew: { newEvent(on: $0) })
+            case .week:
+                CalendarWeekGrid(vm: vm, onOpen: open, onNew: { day, hour in newEvent(on: day, hour: hour) })
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var dayPanel: some View {
+        CalendarDayPanel(vm: vm, onOpen: open, onNew: { newEvent(on: vm.selectedDay) })
+    }
+
+    private var sideBySide: some View {
+        HStack(spacing: 0) {
+            grid
+            Divider().opacity(0.2)
+            dayPanel.frame(width: 290)
         }
     }
 
     // MARK: Actions
+
+    /// In the main pane Espresso takes the pane; beside a thread it takes this
+    /// pane, so the thread stays put.
+    private func askEspresso() {
+        if pane.isSide {
+            pane.open(.assistant)
+        } else {
+            appState.clearPrimaryNav()
+            appState.showAssistantHub = true
+        }
+    }
 
     private func deleteAction(for event: MWCalendarEvent?) -> (() async throws -> Void)? {
         guard let event else { return nil }
@@ -177,65 +231,112 @@ private struct CalendarHeader: View {
     @Environment(AppState.self) private var appState
     let vm: CalendarViewModel
     let connectingGoogle: Bool
+    /// Beside another surface: tighter, icon-only, and no keyboard shortcuts
+    /// (⌘← ⌘→ ⌘T ⌘N would fire while typing in the other pane).
+    let compact: Bool
     let onNew: () -> Void
     let onConnectGoogle: () -> Void
+    let onAsk: () -> Void
+
+    private func shortcut(_ key: KeyEquivalent) -> KeyboardShortcut? {
+        compact ? nil : KeyboardShortcut(key, modifiers: .command)
+    }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: compact ? 8 : 10) {
             Text(vm.title)
-                .font(.system(size: 18, weight: .bold))
+                .font(.system(size: compact ? 15 : 18, weight: .bold))
                 .foregroundColor(appState.themeText)
-                .frame(minWidth: 170, alignment: .leading)
+                .lineLimit(1)
+                .frame(minWidth: compact ? 0 : 170, alignment: .leading)
+                .layoutPriority(1)
             HStack(spacing: 2) {
-                navButton("chevron.left", help: "Previous (⌘←)") { vm.shift(-1) }
-                    .keyboardShortcut(.leftArrow, modifiers: .command)
+                navButton("chevron.left", help: compact ? "Previous" : "Previous (⌘←)") { vm.shift(-1) }
+                    .keyboardShortcut(shortcut(.leftArrow))
                 Button("Today") { vm.goToToday() }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(appState.themeText)
                     .padding(.horizontal, 9).padding(.vertical, 4)
                     .background(RoundedRectangle(cornerRadius: 5).stroke(appState.themeBorder, lineWidth: 1))
-                    .keyboardShortcut("t", modifiers: .command)
-                    .help("Today (⌘T)")
-                navButton("chevron.right", help: "Next (⌘→)") { vm.shift(1) }
-                    .keyboardShortcut(.rightArrow, modifiers: .command)
+                    .keyboardShortcut(shortcut("t"))
+                    .fixedSize()
+                    .help(compact ? "Today" : "Today (⌘T)")
+                navButton("chevron.right", help: compact ? "Next" : "Next (⌘→)") { vm.shift(1) }
+                    .keyboardShortcut(shortcut(.rightArrow))
             }
             if vm.isLoading {
                 ProgressView().controlSize(.small).padding(.leading, 2)
             }
-            Spacer(minLength: 12)
-            googleStatus
+            Spacer(minLength: compact ? 4 : 12)
+            if !compact {
+                googleStatus
+            }
             if appState.assistantEnabled {
-                Button {
-                    appState.clearPrimaryNav()
-                    appState.showAssistantHub = true
-                } label: {
-                    Label("Ask Espresso", systemImage: "sparkles")
-                        .font(.system(size: 11, weight: .medium))
+                Button(action: onAsk) {
+                    if compact {
+                        Image(systemName: "sparkles").font(.system(size: 12))
+                    } else {
+                        Label("Ask Espresso", systemImage: "sparkles")
+                            .font(.system(size: 11, weight: .medium))
+                    }
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(appState.themeTextSecondary)
                 .help("Ask Espresso to add, move or find things on your calendar")
             }
-            Picker("", selection: Binding(get: { vm.mode }, set: { vm.setMode($0) })) {
-                ForEach(CalendarViewModel.Mode.allCases) { Text($0.rawValue).tag($0) }
+            if compact {
+                modeMenu
+            } else {
+                Picker("", selection: Binding(get: { vm.mode }, set: { vm.setMode($0) })) {
+                    ForEach(CalendarViewModel.Mode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 130)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 130)
             Button(action: onNew) {
-                Label("New event", systemImage: "plus")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(appState.themeOnAccent)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(appState.themeAccent))
+                Group {
+                    if compact {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .bold))
+                            .frame(width: 24, height: 22)
+                    } else {
+                        Label("New event", systemImage: "plus")
+                            .font(.system(size: 11, weight: .semibold))
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                    }
+                }
+                .foregroundColor(appState.themeOnAccent)
+                .background(RoundedRectangle(cornerRadius: 6).fill(appState.themeAccent))
             }
             .buttonStyle(.plain)
-            .keyboardShortcut("n", modifiers: .command)
-            .help("New event (⌘N)")
+            .keyboardShortcut(shortcut("n"))
+            .help(compact ? "New event" : "New event (⌘N)")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 11)
+        .padding(.horizontal, compact ? 12 : 16)
+        .padding(.vertical, compact ? 9 : 11)
+    }
+
+    /// Month/Week as a menu: the segmented picker doesn't fit a side pane.
+    private var modeMenu: some View {
+        Menu {
+            ForEach(CalendarViewModel.Mode.allCases) { mode in
+                Button(mode.rawValue) { vm.setMode(mode) }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(vm.mode.rawValue)
+                    .font(.system(size: 11, weight: .semibold))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .foregroundColor(appState.themeText)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Month or week")
     }
 
     private func navButton(_ icon: String, help: String, action: @escaping () -> Void) -> some View {
@@ -307,11 +408,15 @@ private struct CalendarMonthGrid: View {
                 let days = vm.visibleDays
                 let rows = max(1, days.count / 7)
                 let cellHeight = (geo.size.height - spacing * CGFloat(rows - 1)) / CGFloat(rows)
+                // Narrow cells (the calendar in a side pane) drop the start
+                // time so the title still reads.
+                let showsTime = (geo.size.width - spacing * 6) / 7 >= 96
                 VStack(spacing: spacing) {
                     ForEach(0..<rows, id: \.self) { row in
                         HStack(spacing: spacing) {
                             ForEach(days[(row * 7)..<min(days.count, row * 7 + 7)], id: \.self) { day in
-                                MonthDayCell(vm: vm, day: day, height: cellHeight, onOpen: onOpen, onNew: onNew)
+                                MonthDayCell(vm: vm, day: day, height: cellHeight, showsTime: showsTime,
+                                             onOpen: onOpen, onNew: onNew)
                             }
                         }
                     }
@@ -348,6 +453,7 @@ private struct MonthDayCell: View {
     let vm: CalendarViewModel
     let day: Date
     let height: CGFloat
+    let showsTime: Bool
     let onOpen: (CalendarEntry) -> Void
     let onNew: (Date) -> Void
     @State private var dropTargeted = false
@@ -372,7 +478,7 @@ private struct MonthDayCell: View {
                 Spacer(minLength: 0)
             }
             ForEach(shown) { entry in
-                MonthChip(entry: entry, day: day, dimmed: !inMonth)
+                MonthChip(entry: entry, day: day, dimmed: !inMonth, showsTime: showsTime)
                     .onTapGesture { onOpen(entry) }
                     .modifier(DraggableEntry(entry: entry))
             }
@@ -432,6 +538,7 @@ private struct MonthChip: View {
     let entry: CalendarEntry
     let day: Date
     let dimmed: Bool
+    var showsTime = true
 
     var body: some View {
         let color = CalendarPalette.color(entry, accent: appState.themeAccent, secondary: appState.themeTextSecondary)
@@ -442,9 +549,11 @@ private struct MonthChip: View {
                     .foregroundColor(appState.themeTextSecondary)
             } else if !entry.allDay {
                 Circle().fill(color).frame(width: 6, height: 6)
-                Text(CalendarFormat.shortTime(entry.start, on: day))
-                    .font(.system(size: 10).monospacedDigit())
-                    .foregroundColor(appState.themeTextSecondary)
+                if showsTime {
+                    Text(CalendarFormat.shortTime(entry.start, on: day))
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundColor(appState.themeTextSecondary)
+                }
             }
             Text(entry.title)
                 .font(.system(size: 10.5, weight: entry.allDay && !entry.isTodo ? .semibold : .regular))

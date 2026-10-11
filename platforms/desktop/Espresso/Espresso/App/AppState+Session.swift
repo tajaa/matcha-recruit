@@ -42,6 +42,10 @@ extension AppState {
         CodexResearchCoordinator.shared.bind(userID: user.id)
         currentUser = user
         isAuthenticated = true
+        // The side pane's first build remembered its last target under one
+        // global key, which could hold a file's signed URL. It is per person
+        // now (`lastSideTargetKey`); drop the old one wherever it was written.
+        UserDefaults.standard.removeObject(forKey: "mw-last-side-target-v1")
         UsageBeaconService.shared.start()
         CallService.shared.currentUserId = user.id
         MatchaWorkService.shared.updateCacheScope(user.id)
@@ -62,6 +66,16 @@ extension AppState {
         installRealtimeHandlers()
         subscribeNewNotificationObserver()
         subscribeBannerTapObserver()
+    }
+
+    /// Close every pop-out window. SwiftUI names the windows of
+    /// `WindowGroup(id: "aux")` "aux-AppWindow-N"; AuxWindowRootView also
+    /// refuses to show one to a different account, should any stay open.
+    @MainActor
+    func closeAuxWindows() {
+        for window in NSApp.windows where window.identifier?.rawValue.hasPrefix("aux-") == true {
+            window.close()
+        }
     }
 
     @MainActor
@@ -90,6 +104,14 @@ extension AppState {
         showCalendarHub = false
         calendarFocusDate = nil
         pendingEmailId = nil
+        paneCalendarFocusDate = nil
+        panePendingEmailId = nil
+        mainJournalsSelection = nil
+        // Panes and pop-out windows show the last person's things (a file
+        // pane holds a signed URL): none of it survives into the next session.
+        splitTarget = nil
+        bottomSplitTarget = nil
+        closeAuxWindows()
         showInbox = false
         showPeople = false
         showHome = false

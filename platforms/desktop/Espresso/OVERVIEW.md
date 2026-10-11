@@ -12,6 +12,15 @@ The app is organized around a persistent left sidebar and a detail pane on the r
 
 **Tab bar** sits above the detail pane. Pin up to four items (channels, projects, threads, or journals) as persistent tabs for fast switching without losing your place.
 
+**Side pane** keeps a second surface open beside whatever you're working in, such as a thread with your calendar next to it. Open one with ⌘\\ (it brings back the last one), the split button in the toolbar, ⌥-click on a sidebar row, View ▸ Open Beside (⌥⌘1–8), or "Open Beside" on any row's context menu. ⌘F can send any result to the side or bottom pane.
+- The pane's dock flips it between Calendar, Journals, Kanban, Espresso, Channels, Threads, Email and Workspaces. Lists open the item in the pane, and Back returns.
+- Header buttons swap the pane with the main one, move it to the bottom, pop it out to a window, or close it.
+- In a pane each surface uses a narrower layout and never moves the main pane:
+  - The calendar puts the day's agenda under the grid.
+  - Kanban picks its board from the title.
+  - Email opens a message over the list.
+  - Pane shortcuts such as ⌘T stay off, so they can't fire while you type next door.
+
 **Themes** — Light, Dark, and Cappuchin (warm brown) — are selectable from Settings.
 
 ---

@@ -108,6 +108,22 @@ struct MatchaApp: App {
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(!appState.isAuthenticated)
             }
+            // View ▸ side pane: keep a second surface beside whatever is open.
+            CommandGroup(after: .sidebar) {
+                Button(appState.splitTarget == nil ? "Show Side Pane" : "Hide Side Pane") {
+                    appState.toggleSidePane()
+                }
+                .keyboardShortcut("\\", modifiers: .command)
+                .disabled(!appState.isAuthenticated)
+                Menu("Open Beside") {
+                    ForEach(Array(AuxWindowTarget.dock(assistantEnabled: appState.assistantEnabled).enumerated()),
+                            id: \.offset) { index, surface in
+                        Button(surface.surfaceName) { appState.openBeside(surface) }
+                            .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [.command, .option])
+                    }
+                }
+                .disabled(!appState.isAuthenticated)
+            }
         }
 
         // Secondary windows — opened via openWindow(id:"aux", value:) from
@@ -115,6 +131,10 @@ struct MatchaApp: App {
         // so the generic File > New Window stays suppressed above.
         WindowGroup(id: "aux", for: AuxWindowTarget.self) { $target in
             AuxWindowRootView(target: target)
+                .frame(minWidth: 480, minHeight: 400)
+                // Pane mode: never drive the main window's navigation, and an
+                // item opened inside (a thread from the list) takes the window.
+                .environment(\.workPane, WorkPane(isSide: true, open: { target = $0 }))
                 .environment(appState)
                 .environment(broadcastService)
                 .environment(callService)

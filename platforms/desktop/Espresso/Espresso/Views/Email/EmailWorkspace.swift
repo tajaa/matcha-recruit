@@ -8,6 +8,7 @@ import AppKit
 /// ⌘-click / ⇧-click picks several messages to send to a board together.
 struct EmailWorkspace: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.workPane) private var pane
     private let vm = EmailViewModel.shared
 
     enum Filter: Hashable {
@@ -29,6 +30,8 @@ struct EmailWorkspace: View {
     @State private var anchor: String?
     @State private var scrollTarget: String?
     @State private var railCollapsed = false
+    /// Folded while a side pane is open; never touches the setting above.
+    @State private var railFoldedForPane = false
     @State private var boardRequest: BoardRequest?
     @State private var boardNote: String?
     /// A message opened from elsewhere (a calendar event's "Open email") that
@@ -44,10 +47,22 @@ struct EmailWorkspace: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if !vm.connected {
                 connectState
+            } else if pane.isSide {
+                // Beside another surface: the list, and a message opens over
+                // it with a way back.
+                if selection.isEmpty && openedElsewhere == nil {
+                    messageList
+                } else {
+                    VStack(spacing: 0) {
+                        sidePaneBackBar
+                        Divider().opacity(0.2)
+                        readerPane
+                    }
+                }
             } else {
                 HSplitView {
-                    if railCollapsed {
-                        MWHubRailStrip { railCollapsed = false }
+                    if railCollapsed || railFoldedForPane {
+                        MWHubRailStrip { railCollapsed = false; railFoldedForPane = false }
                     } else {
                         mailboxRail.frame(minWidth: 180, idealWidth: 200, maxWidth: 250)
                     }
@@ -57,6 +72,7 @@ struct EmailWorkspace: View {
             }
         }
         .background(ThemeRadialBackground())
+        .foldsRailForSidePane($railFoldedForPane)
         .task {
             // Reopening the hub reuses a recent load instead of re-reading
             // the mailbox every time.
@@ -80,6 +96,7 @@ struct EmailWorkspace: View {
         }
         .onAppear(perform: consumePendingEmail)
         .onChange(of: appState.pendingEmailId) { _, _ in consumePendingEmail() }
+        .onChange(of: appState.panePendingEmailId) { _, _ in consumePendingEmail() }
         .sheet(item: $boardRequest) { request in
             EmailSendToBoardSheet(emails: request.emails) { board in
                 boardNote = request.emails.count == 1
@@ -100,9 +117,12 @@ struct EmailWorkspace: View {
 
     /// Drop picks that no longer resolve: read elsewhere, gone from the
     /// unread list, and not the message open in the reader.
+    /// Open the message another surface asked for. The main pane's Email
+    /// and one in a side pane each take only their own hand-off.
     private func consumePendingEmail() {
-        guard let id = appState.pendingEmailId else { return }
-        appState.pendingEmailId = nil
+        let pending = pane.isSide ? appState.panePendingEmailId : appState.pendingEmailId
+        guard let id = pending else { return }
+        if pane.isSide { appState.panePendingEmailId = nil } else { appState.pendingEmailId = nil }
         if vm.message(id: id) != nil {
             selection = [id]
             anchor = id
@@ -465,6 +485,22 @@ struct EmailWorkspace: View {
     }
 
     // MARK: - Reader
+
+    private var sidePaneBackBar: some View {
+        HStack {
+            Button {
+                selection = []
+                openedElsewhere = nil
+            } label: {
+                Label(listTitle, systemImage: "chevron.left")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(appState.themeTextSecondary)
+            }
+            .buttonStyle(.plain)
+            Spacer()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 7)
+    }
 
     /// Driven by the picks that still resolve, so a selection whose messages
     /// have all gone can't strand the reader on an empty multi-select panel.

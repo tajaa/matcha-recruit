@@ -41,7 +41,7 @@ struct ContentView: View {
                         // 240 min: pane header (~33) + a chat surface's own
                         // header + composer need ~200pt of fixed chrome — any
                         // less and the composer clips off the bottom edge.
-                        BottomSplitPane(target: bottom)
+                        SidePane(slot: .bottom, target: bottom)
                             .frame(minHeight: 240, maxHeight: .infinity)
                     }
                 } else {
@@ -130,6 +130,7 @@ struct ContentView: View {
             ToolbarItem(placement: .status) {
                 if let user = appState.currentUser {
                     HStack(spacing: 8) {
+                        SidePaneToolbarButton()
                         Button {
                             showNotifications.toggle()
                         } label: {
@@ -185,10 +186,13 @@ struct ContentView: View {
     private var topPanes: some View {
         if let split = appState.splitTarget {
             HSplitView {
+                // The side pane opens narrower than the main one: it's the
+                // reference beside the work, not the work.
                 PrimaryDetailPane()
-                    .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
-                SplitSecondaryPane(target: split)
-                    .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 360, idealWidth: 760, maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
+                SidePane(slot: .right, target: split)
+                    .frame(minWidth: 400, idealWidth: 440, maxWidth: .infinity, maxHeight: .infinity)
             }
         } else {
             PrimaryDetailPane()
@@ -395,11 +399,16 @@ struct ContentView: View {
         // When set, the row renders a lock and opens the paywall (with this
         // feature key) instead of navigating. nil = unlocked.
         lockedFeature: String? = nil,
+        // The surface as a pane target: ⌥-click and the context menu open it
+        // beside / below whatever the main pane shows.
+        paneTarget: AuxWindowTarget? = nil,
         onOpen: @escaping () -> Void
     ) -> some View {
         Button(action: {
             if let feature = lockedFeature {
                 appState.presentPaywall(for: feature)
+            } else if let paneTarget, NSEvent.modifierFlags.contains(.option) {
+                appState.openBeside(paneTarget)
             } else {
                 onOpen()
             }
@@ -434,6 +443,12 @@ struct ContentView: View {
             }
         }
         .padding(.horizontal, 6)
+        .contextMenu {
+            if let paneTarget, lockedFeature == nil {
+                AuxOpenMenuButtons(target: paneTarget)
+            }
+        }
+        .help(paneTarget != nil && lockedFeature == nil ? "⌥-click to open beside" : "")
     }
 
     @ViewBuilder
@@ -441,7 +456,7 @@ struct ContentView: View {
         // No "+" here — the Channels hub has its own New-channel + Browse
         // controls on its rail.
         sidebarNavRow(title: "Channels", icon: "number",
-                      isActive: appState.showChannelsHub, onOpen: openChannelsHub)
+                      isActive: appState.showChannelsHub, paneTarget: .channels, onOpen: openChannelsHub)
     }
 
     @ViewBuilder
@@ -451,7 +466,7 @@ struct ContentView: View {
         sidebarNavRow(title: "Workspaces", icon: "square.grid.2x2",
                       isActive: appState.showProjectsHub,
                       lockedFeature: appState.canSoloProjects ? nil : "projects_solo",
-                      onOpen: openProjectsHub)
+                      paneTarget: .workspaces, onOpen: openProjectsHub)
     }
 
     /// Open the Journals hub — the Obsidian-style parent module that houses all
@@ -471,7 +486,7 @@ struct ContentView: View {
     @ViewBuilder
     private var journalsSidebarSection: some View {
         sidebarNavRow(title: "Journals", icon: "book.closed",
-                      isActive: appState.showJournalsHub, onOpen: openJournalsHub)
+                      isActive: appState.showJournalsHub, paneTarget: .journals, onOpen: openJournalsHub)
     }
 
     /// Nav-only row — opens the Calendar (Espresso events, dated to-dos and
@@ -479,21 +494,21 @@ struct ContentView: View {
     @ViewBuilder
     private var calendarSidebarSection: some View {
         sidebarNavRow(title: "Calendar", icon: "calendar",
-                      isActive: appState.showCalendarHub, onOpen: { appState.openCalendar() })
+                      isActive: appState.showCalendarHub, paneTarget: .calendar, onOpen: { appState.openCalendar() })
     }
 
     /// Nav-only row — opens the Productivity hub (personal kanban boards).
     @ViewBuilder
     private var productivitySidebarSection: some View {
         sidebarNavRow(title: "Productivity", icon: "checklist",
-                      isActive: appState.showProductivityHub, onOpen: openProductivityHub)
+                      isActive: appState.showProductivityHub, paneTarget: .kanban, onOpen: openProductivityHub)
     }
 
     @ViewBuilder
     private var threadsSidebarSection: some View {
         // No "+" here — the Threads hub has its own New-thread control on its rail.
         sidebarNavRow(title: "Threads", icon: "bubble.left.and.bubble.right",
-                      isActive: appState.showThreadsHub, onOpen: openThreadsHub)
+                      isActive: appState.showThreadsHub, paneTarget: .threads, onOpen: openThreadsHub)
     }
 
     /// Nav-only row — opens the full-pane Email hub (mailbox · list ·
@@ -502,7 +517,7 @@ struct ContentView: View {
     private var emailSidebarSection: some View {
         sidebarNavRow(title: "Email", icon: "envelope",
                       isActive: appState.showEmailHub,
-                      onOpen: openEmailHub)
+                      paneTarget: .email, onOpen: openEmailHub)
     }
 
     /// Nav-only row — opens the person's private conversation with Espresso.
@@ -514,7 +529,7 @@ struct ContentView: View {
             sidebarNavRow(title: "Espresso", icon: "sparkles",
                           isActive: appState.showAssistantHub,
                           lockedFeature: appState.canAssistant ? nil : "assistant",
-                          onOpen: openAssistantHub)
+                          paneTarget: .assistant, onOpen: openAssistantHub)
         }
     }
 
@@ -527,7 +542,7 @@ struct ContentView: View {
 
     /// The primary (left) detail pane — routed off the shared `selectedX`
     /// nav state. The detail panes live in DetailPanes.swift (PrimaryDetailPane /
-    /// SplitSecondaryPane) so churning unread counters don't rebuild them.
+    /// SidePane.swift) so churning unread counters don't rebuild them.
 
     private func sidebarSection<Content: View, Trailing: View>(
         title: String,
