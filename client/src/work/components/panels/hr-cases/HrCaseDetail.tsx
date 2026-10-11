@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { CheckCircle2, Circle, ExternalLink, Loader2, X } from 'lucide-react'
-import type { HrCase } from '../../../types'
+import type { HrCase, PolicyViolationReview } from '../../../types'
+import HrCaseIncidentReview from './HrCaseIncidentReview'
 import HrCaseReviewSection from './HrCaseReviewSection'
 import HrCaseSignedSection from './HrCaseSignedSection'
 
@@ -14,6 +15,9 @@ const ORIGIN_LABEL: Record<HrCase['origin'], string> = {
 
 const EVENT_LABEL: Record<string, string> = {
   opened: 'Case opened',
+  start_draft: 'Write-up started',
+  policy_violation_confirmed: 'Policy violation confirmed by HR; suggestion drafted',
+  suggestion_dismissed: 'Write-up suggestion dismissed',
   dismiss: 'Dismissed',
   intake_check_match: 'Intake check: policy match',
   intake_check_clean: 'Intake check: no match',
@@ -45,10 +49,15 @@ interface Props {
   onUploadSigned: (file: File) => Promise<void>
   onAcknowledge: () => Promise<void>
   onRecheck: () => Promise<void>
+  onStartDraft: () => Promise<void>
+  onSuggest: (review: PolicyViolationReview) => Promise<void>
+  onAccept: (suggestionId: string, letter: string) => Promise<void>
+  onDismissSuggestion: (suggestionId: string, reason: string) => Promise<void>
 }
 
 export default function HrCaseDetail({
   hrCase, onClose, onDismiss, onOpenDraft, onDecide, onDelivered, onOpenSigned, onUploadSigned, onAcknowledge, onRecheck,
+  onStartDraft, onSuggest, onAccept, onDismissSuggestion,
 }: Props) {
   const [dismissing, setDismissing] = useState(false)
   const [reason, setReason] = useState('')
@@ -114,6 +123,8 @@ export default function HrCaseDetail({
             ))}
           </ul>
         </section>
+
+        <HrCaseIncidentReview key={`${hrCase.id}:${hrCase.review?.suggestion?.id ?? 'none'}`} hrCase={hrCase} onStartDraft={onStartDraft} onSuggest={onSuggest} onAccept={onAccept} onDismissSuggestion={onDismissSuggestion} />
 
         <HrCaseReviewSection hrCase={hrCase} onOpenDraft={onOpenDraft} onDecide={onDecide} onDelivered={onDelivered} />
 

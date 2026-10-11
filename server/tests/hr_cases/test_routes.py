@@ -216,6 +216,60 @@ def test_flag_registered():
     assert FEATURE_REQUIRES["hr_cases"] == ("matcha_work", "matcha_drive")
 
 
+@pytest.mark.parametrize("endpoint,payload,method", [
+    ("start-draft", None, "start_draft"),
+    ("suggestion", {"classification": "policy_violation", "employee_id": str(uuid4()),
+                    "action_type": "written_warning", "infraction_type": "attendance",
+                    "occurrence_dates": ["2026-09-03"]}, "suggest"),
+    ("suggestion/accept", {"suggestion_id": str(uuid4()), "letter": "Editable letter"}, "accept_suggestion"),
+    ("suggestion/dismiss", {"suggestion_id": str(uuid4()), "reason": "Use a manager draft instead"}, "dismiss_suggestion"),
+])
+def test_incident_review_actions_are_hr_only_and_scoped(mod, scope, monkeypatch, endpoint, payload, method):
+    _no_limit(monkeypatch, mod)
+    seen = {}
+
+    async def action(connect, **kw):
+        seen.update(kw)
+        return {"id": str(kw["case_id"]), "stage": "drafting"}
+    monkeypatch.setattr(mod.incident_review, method, action)
+    cid = uuid4()
+    with _client(mod, USER) as client:
+        assert client.post(f"/hr-cases/{cid}/{endpoint}", json=payload).status_code == 200
+        assert seen["company_id"] == scope["company"] and seen["user"].id == USER.id
+        seen.clear()
+        scope["hr"] = False
+        assert client.post(f"/hr-cases/{cid}/{endpoint}", json=payload).status_code == 404
+        assert seen == {}
+
+
+def test_suggestion_rejects_non_violation_and_overrides(mod, scope, monkeypatch):
+    _no_limit(monkeypatch, mod)
+    data = {"classification": "not_a_violation", "employee_id": str(uuid4()), "action_type": "written_warning",
+            "infraction_type": "attendance", "occurrence_dates": ["2026-09-03"]}
+    with _client(mod, USER) as client:
+        url = f"/hr-cases/{uuid4()}/suggestion"
+        assert client.post(url, json=data).status_code == 422
+        data["classification"] = "policy_violation"
+        assert client.post(url, json={**data, "override": True}).status_code == 422
+        assert client.post(url, json={**data, "occurrence_dates": []}).status_code == 422
+
+
+@pytest.mark.parametrize("status", [409, 422, 503])
+def test_suggestion_service_errors_reach_hr(mod, scope, monkeypatch, status):
+    from app.matcha.services.hr_cases.case_service import CaseError
+    _no_limit(monkeypatch, mod)
+
+    async def fail(*args, **kw):
+        raise CaseError(status, "Review couldn't proceed")
+    monkeypatch.setattr(mod.incident_review, "suggest", fail)
+    with _client(mod, USER) as client:
+        response = client.post(f"/hr-cases/{uuid4()}/suggestion", json={
+            "classification": "policy_violation", "employee_id": str(uuid4()), "action_type": "verbal_warning",
+            "infraction_type": "conduct", "occurrence_dates": ["2026-09-03"],
+        })
+    assert response.status_code == status and response.json()["detail"] == "Review couldn't proceed"
+
+
 # ── Manager + decision routes ───────────────────────────────────────────
 
 

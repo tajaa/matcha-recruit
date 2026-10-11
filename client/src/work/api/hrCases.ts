@@ -1,5 +1,5 @@
 import { api } from '../../api/client'
-import type { HrCase, HrCaseColumn, HrCaseEmployee, HrCaseIncident, HrCaseReadiness, ManagerCase, DraftSubmission } from '../types'
+import type { HrCase, HrCaseColumn, HrCaseEmployee, HrCaseIncident, HrCaseReadiness, ManagerCase, DraftSubmission, PolicyViolationReview } from '../types'
 
 // HR cases — the dedicated HR Cases page (business /work only).
 // Backend: server/app/matcha/routes/matcha_work/hr_cases.py. Every route is
@@ -18,6 +18,17 @@ export const getHrCase = (caseId: string) => api.get<HrCase>(`${BASE}/${caseId}`
 
 export const dismissHrCase = (caseId: string, reason: string) =>
   api.post<HrCase>(`${BASE}/${caseId}/dismiss`, { reason })
+
+export const startHrCaseDraft = (caseId: string) => api.post<HrCase>(`${BASE}/${caseId}/start-draft`)
+
+export const suggestHrCaseDraft = (caseId: string, review: PolicyViolationReview) =>
+  api.post<HrCase>(`${BASE}/${caseId}/suggestion`, review)
+
+export const acceptHrCaseSuggestion = (caseId: string, suggestionId: string, letter: string) =>
+  api.post<HrCase>(`${BASE}/${caseId}/suggestion/accept`, { suggestion_id: suggestionId, letter })
+
+export const dismissHrCaseSuggestion = (caseId: string, suggestionId: string, reason: string) =>
+  api.post<HrCase>(`${BASE}/${caseId}/suggestion/dismiss`, { suggestion_id: suggestionId, reason })
 
 // Manager side — the server returns only the manager's view of a case.
 export const listMyWriteUps = () => api.get<{ cases: ManagerCase[] }>(`${BASE}/mine`)

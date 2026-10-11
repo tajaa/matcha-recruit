@@ -98,7 +98,7 @@ export default function HrCaseWizard({ columns, readiness, readinessLoading, rea
 
           {step === 2 && (
             <div className="space-y-2">
-              <p className="mb-3 text-sm leading-6 text-w-dim">Most of a case runs without you. Three moments are yours:</p>
+              <p className="mb-3 text-sm leading-6 text-w-dim">These moments need your review:</p>
               {NEEDS_YOU_MOMENTS.map((m) => (
                 <div key={m.title} className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3">
                   <p className="text-sm font-medium text-w-text">{m.title}</p>

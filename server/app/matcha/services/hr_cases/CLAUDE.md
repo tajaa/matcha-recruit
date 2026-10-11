@@ -45,8 +45,10 @@ skip a step.
   is the deterministic `decide_flag` (violated/bent ≥ company threshold,
   default 0.60). A clean close check on an existing case is an event for HR,
   never an auto-dismissal.
-- **No narrative leaves the incident.** Cases store policy titles, relevance
-  and confidence (`triage.summarize`) — not the model's free-text summary. Notification bodies are fixed templates
+- **Triage and notifications do not copy narratives.** Triage stores policy
+  titles, relevance and confidence (`triage.summarize`), not the model's free-text
+  summary. HR-confirmed letter suggestions stay in the HR-only review JSON.
+  Notification bodies are fixed templates
   (incident number, case number, policy titles, names copied).
 - **HR access** (`access.has_hr_access`) = Work `admin`, or READ on Drive's
   `HR / Discipline` folder. Every route re-checks it; non-HR gets **404**.
@@ -85,6 +87,42 @@ skip a step.
   and restates this file: change them together.
 
 ## Write-up workflow (5/6: `workflow.py`, `draft_review.py`)
+
+### Incident HR review (`incident_review.py`)
+
+The business `/work/hr-cases` detail panel exposes the existing `start_draft`
+transition as **Request manager write-up** (with a manager notification), and
+**Review policy violation**. Triage matches remain candidate matches: only an
+HR user's explicit `PolicyViolationReview.classification='policy_violation'`
+classifies the incident for drafting. HR chooses the employee, action, conduct
+type (attendance must be selected for absences) and occurrence dates. Gemini
+only drafts wording; it never determines the violation, action level or legality.
+Non-violation / unconfirmed incidents produce no suggestion.
+
+- `POST /{case_id}/suggestion` checks tenant roster membership and the existing
+  deterministic protected-leave gate **before** Gemini and again before saving.
+  A block is **422 with no override**. It stores an editable suggestion in the
+  existing `review` JSON and records `policy_violation_confirmed`; `start_draft`
+  moves a flagged case through `apply_event`, in the same transaction. No schema
+  change and no writes to the retired progressive-discipline product.
+- Gemini runs without a connection. A failure is 503 with no partial state;
+  changed case/incident data is 409, revoked HR access is 404. Duplicate requests
+  return the existing suggestion; a different basis requires dismissal first.
+- `POST /{case_id}/suggestion/accept` accepts HR's edited text through the ordinary
+  `workflow.submit_draft` review + private Drive filing + `draft_submitted`
+  transition. It **does not approve or deliver**. The inputs frozen on the
+  suggestion cannot be changed by accepting it. Both submit connections recheck
+  HR access, suggestion identity, case revision and the gate; the final write
+  holds the case row lock. An unsuccessful acceptance hides only that attempt's
+  unadopted Drive file and audits the cleanup. Existing approval rechecks leave.
+- `POST /{case_id}/suggestion/dismiss` removes only the suggestion and records
+  a reason in `suggestion_dismissed`; the case remains open. Ordinary case
+  dismissal still uses the existing `dismiss` event. Suggestions and their
+  compliance findings never appear in `workflow.manager_view`.
+- Manual DB coverage: `tests/hr_cases/test_incident_review_realdb.py` needs
+  **both** `RUN_DB_TESTS=1` and `RUN_HR_CASE_DB_WRITE_TESTS=1`. It creates only
+  reserved-domain test records and rolls them back, with model/storage/email
+  calls faked. Never auto-run it; no migrations are applied by the test.
 
 A manager sends a letter (upload, a Drive file they can read, or a Google Doc
 link) → it is stored in Drive `HR / Discipline / Drafts` through the system
