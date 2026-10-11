@@ -290,9 +290,11 @@ struct AgentEventItem: Codable, Hashable {
     let end: String?
     let location: String?
     let attendeeCount: Int?
+    /// `espresso` (the Calendar tab) or `google`; absent on older results.
+    var calendar: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case title, start, end, location
+        case title, start, end, location, calendar
         case eventId = "event_id"
         case attendeeCount = "attendee_count"
     }

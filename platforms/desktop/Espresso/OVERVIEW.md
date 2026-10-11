@@ -105,6 +105,16 @@ Journals are shared writing spaces for teams or individuals.
 
 ---
 
+## Calendar
+
+The Calendar tab is your own calendar, in a month or week view with the selected day's agenda beside it.
+
+- Create, edit, move (drag to another day) and delete events; timed or all day
+- Dated to-dos from your Productivity boards show on their day and can be checked off
+- Connect Google (calendar access) and your Google Calendar shows alongside, read-only
+- Ask Espresso to put things on it ("lunch with Sam Friday at noon", "add the dinner from Dana's email"); events it adds say so, and its answers link back to the day
+- In Email, **Add to calendar** reads the open message and proposes its events. Tell it what you want ("only the dinner"), fix anything it got wrong, and nothing is added until you press Add. Events from an email link back to it
+
 ## Inbox
 
 Inbox is the direct message surface for one-on-one and group conversations.

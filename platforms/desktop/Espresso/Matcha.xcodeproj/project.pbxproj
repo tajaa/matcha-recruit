@@ -271,6 +271,7 @@
 		BC01DD22EE33FF44551100C2 /* APIErrorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B2 /* APIErrorTests.swift */; };
 		BC01DD22EE33FF44551100C3 /* CacheKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B3 /* CacheKeyTests.swift */; };
 		BC01DD22EE33FF44551100C4 /* ChannelMergeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B4 /* ChannelMergeTests.swift */; };
+		CALV00000000000000000BT1 /* CalendarLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CALV00000000000000000BT2 /* CalendarLogicTests.swift */; };
 		BC01DD22EE33FF44551100C5 /* ModelPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B5 /* ModelPickerTests.swift */; };
 		BC01DD22EE33FF445566AA01 /* BroadcastModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF445566BB01 /* BroadcastModels.swift */; };
 		BC01DD22EE33FF445566AA02 /* BroadcastService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF445566BB02 /* BroadcastService.swift */; };
@@ -408,6 +409,12 @@
 		PRDV000000000000000000B1 /* ProductivityModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = PRDV000000000000000000B2 /* ProductivityModels.swift */; };
 		PRDV000000000000000000B3 /* MatchaWorkService+Productivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = PRDV000000000000000000B4 /* MatchaWorkService+Productivity.swift */; };
 		PRDV000000000000000000B5 /* ProductivityWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = PRDV000000000000000000B6 /* ProductivityWorkspace.swift */; };
+		CALV000000000000000000A1 /* CalendarModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CALV000000000000000000A2 /* CalendarModels.swift */; };
+		CALV000000000000000000A3 /* CalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CALV000000000000000000A4 /* CalendarService.swift */; };
+		CALV000000000000000000A5 /* CalendarViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CALV000000000000000000A6 /* CalendarViewModel.swift */; };
+		CALV000000000000000000A7 /* CalendarWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = CALV000000000000000000A8 /* CalendarWorkspace.swift */; };
+		CALV000000000000000000A9 /* CalendarEventEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CALV000000000000000000AA /* CalendarEventEditor.swift */; };
+		CALV000000000000000000AB /* EmailCalendarSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CALV000000000000000000AC /* EmailCalendarSheet.swift */; };
 		CD260926000000000000B001 /* CodexProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD260926000000000000F001 /* CodexProtocol.swift */; };
 		CD260926000000000000B002 /* CodexBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD260926000000000000F002 /* CodexBridge.swift */; };
 		CD260926000000000000B003 /* CodexResearchCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD260926000000000000F003 /* CodexResearchCoordinator.swift */; };
@@ -607,6 +614,7 @@
 		BC01DD22EE33FF44551100B2 /* APIErrorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIErrorTests.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF44551100B3 /* CacheKeyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheKeyTests.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF44551100B4 /* ChannelMergeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelMergeTests.swift; sourceTree = "<group>"; };
+		CALV00000000000000000BT2 /* CalendarLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarLogicTests.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF44551100B5 /* ModelPickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPickerTests.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF445566BB01 /* BroadcastModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BroadcastModels.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF445566BB02 /* BroadcastService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BroadcastService.swift; sourceTree = "<group>"; };
@@ -722,6 +730,12 @@
 		PRDV000000000000000000B2 /* ProductivityModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ProductivityModels.swift; path = Espresso/Models/MatchaWork/ProductivityModels.swift; sourceTree = SOURCE_ROOT; };
 		PRDV000000000000000000B4 /* MatchaWorkService+Productivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "MatchaWorkService+Productivity.swift"; path = "Espresso/Services/MatchaWorkService+Productivity.swift"; sourceTree = SOURCE_ROOT; };
 		PRDV000000000000000000B6 /* ProductivityWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ProductivityWorkspace.swift; path = Espresso/Views/Productivity/ProductivityWorkspace.swift; sourceTree = SOURCE_ROOT; };
+		CALV000000000000000000A2 /* CalendarModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CalendarModels.swift; path = Espresso/Models/MatchaWork/CalendarModels.swift; sourceTree = SOURCE_ROOT; };
+		CALV000000000000000000A4 /* CalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CalendarService.swift; path = Espresso/Services/MatchaWork/CalendarService.swift; sourceTree = SOURCE_ROOT; };
+		CALV000000000000000000A6 /* CalendarViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CalendarViewModel.swift; path = Espresso/ViewModels/CalendarViewModel.swift; sourceTree = SOURCE_ROOT; };
+		CALV000000000000000000A8 /* CalendarWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CalendarWorkspace.swift; path = Espresso/Views/Calendar/CalendarWorkspace.swift; sourceTree = SOURCE_ROOT; };
+		CALV000000000000000000AA /* CalendarEventEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CalendarEventEditor.swift; path = Espresso/Views/Calendar/CalendarEventEditor.swift; sourceTree = SOURCE_ROOT; };
+		CALV000000000000000000AC /* EmailCalendarSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EmailCalendarSheet.swift; path = Espresso/Views/Email/EmailCalendarSheet.swift; sourceTree = SOURCE_ROOT; };
 		CD260926000000000000F001 /* CodexProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexProtocol.swift; sourceTree = "<group>"; };
 		CD260926000000000000F002 /* CodexBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexBridge.swift; sourceTree = "<group>"; };
 		CD260926000000000000F003 /* CodexResearchCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexResearchCoordinator.swift; sourceTree = "<group>"; };
@@ -1181,6 +1195,7 @@
 				BC01DD22EE33FF44551100B2 /* APIErrorTests.swift */,
 				BC01DD22EE33FF44551100B3 /* CacheKeyTests.swift */,
 				BC01DD22EE33FF44551100B4 /* ChannelMergeTests.swift */,
+				CALV00000000000000000BT2 /* CalendarLogicTests.swift */,
 				BC01DD22EE33FF44551100B5 /* ModelPickerTests.swift */,
 			);
 			path = MatchaTests;
@@ -1334,6 +1349,7 @@
 			children = (
 				E2A1B0C0D0E0F00100000006 /* EmailView.swift */,
 				E2A1B0C0D0E0F00100000008 /* EmailAIActions.swift */,
+				CALV000000000000000000AC /* EmailCalendarSheet.swift */,
 				E2A1B0C0D0E0F0010000000A /* EmailWorkspace.swift */,
 				E2A1B0C0D0E0F0010000000C /* EmailTicketWizard.swift */,
 			);
@@ -1359,6 +1375,11 @@
 				PRDV000000000000000000B2 /* ProductivityModels.swift */,
 				PRDV000000000000000000B4 /* MatchaWorkService+Productivity.swift */,
 				PRDV000000000000000000B6 /* ProductivityWorkspace.swift */,
+				CALV000000000000000000A2 /* CalendarModels.swift */,
+				CALV000000000000000000A4 /* CalendarService.swift */,
+				CALV000000000000000000A6 /* CalendarViewModel.swift */,
+				CALV000000000000000000A8 /* CalendarWorkspace.swift */,
+				CALV000000000000000000AA /* CalendarEventEditor.swift */,
 				D495ED9EB731DFE8E7E99AB7 /* Screenplay.swift */,
 				ACAA99DB31B29B0F6B72BB8E /* ScreenplayEditorView.swift */,
 				C8716FBE42A3D81F48ED44B1 /* ScreenplayPaginator.swift */,
@@ -1660,6 +1681,7 @@
 				BC01DD22EE33FF44551100C2 /* APIErrorTests.swift in Sources */,
 				BC01DD22EE33FF44551100C3 /* CacheKeyTests.swift in Sources */,
 				BC01DD22EE33FF44551100C4 /* ChannelMergeTests.swift in Sources */,
+				CALV00000000000000000BT1 /* CalendarLogicTests.swift in Sources */,
 				BC01DD22EE33FF44551100C5 /* ModelPickerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1833,6 +1855,12 @@
 				PRDV000000000000000000B1 /* ProductivityModels.swift in Sources */,
 				PRDV000000000000000000B3 /* MatchaWorkService+Productivity.swift in Sources */,
 				PRDV000000000000000000B5 /* ProductivityWorkspace.swift in Sources */,
+				CALV000000000000000000A1 /* CalendarModels.swift in Sources */,
+				CALV000000000000000000A3 /* CalendarService.swift in Sources */,
+				CALV000000000000000000A5 /* CalendarViewModel.swift in Sources */,
+				CALV000000000000000000A7 /* CalendarWorkspace.swift in Sources */,
+				CALV000000000000000000A9 /* CalendarEventEditor.swift in Sources */,
+				CALV000000000000000000AB /* EmailCalendarSheet.swift in Sources */,
 				0F5C621C255ED1D1ED92354A /* CommonModels.swift in Sources */,
 				8E5D6EC70EEDBE08AE76BDEA /* ThreadModels.swift in Sources */,
 				6F4D96E081CDF78AEAF3362F /* ProjectModels.swift in Sources */,

@@ -20,6 +20,7 @@ final class SidebarSectionOrderStore {
         case projects
         case journals
         case productivity
+        case calendar
         case threads
         case email
         /// The person's private conversation with Espresso (the assistant).
@@ -34,6 +35,7 @@ final class SidebarSectionOrderStore {
             case .projects: return "square.grid.2x2"
             case .journals: return "book.closed"
             case .productivity: return "checklist"
+            case .calendar: return "calendar"
             case .threads:  return "bubble.left.and.bubble.right"
             case .email:    return "envelope"
             case .assistant: return "sparkles"
@@ -48,6 +50,7 @@ final class SidebarSectionOrderStore {
             case .projects: return "Workspaces"
             case .journals: return "Journals"
             case .productivity: return "Productivity"
+            case .calendar: return "Calendar"
             case .threads:  return "Threads"
             case .email:    return "Email"
             case .assistant: return "Espresso"

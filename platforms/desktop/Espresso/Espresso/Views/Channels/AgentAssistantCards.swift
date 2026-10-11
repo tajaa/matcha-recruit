@@ -170,9 +170,19 @@ extension AgentCardMessageView {
             }
         case .events(let items):
             ForEach(items, id: \.eventId) { item in
-                itemRow(icon: "calendar", title: item.title, subtitle: Self.when(item.start, item.end),
-                        detail: [item.location, item.attendeeCount.flatMap { $0 > 0 ? "\($0) invited" : nil }]
-                            .compactMap { $0 }.joined(separator: " \u{00B7} "))
+                // Every event opens the Calendar on its day: Espresso's own
+                // events live there, and Google's show there when connected.
+                Button {
+                    appState.openCalendar(at: CalendarWire.date(item.start))
+                } label: {
+                    itemRow(icon: "calendar", title: item.title, subtitle: Self.when(item.start, item.end),
+                            detail: [item.calendar == "google" ? "Google Calendar" : nil, item.location,
+                                     item.attendeeCount.flatMap { $0 > 0 ? "\($0) invited" : nil }]
+                                .compactMap { $0 }.joined(separator: " \u{00B7} "),
+                            trailing: "chevron.right")
+                }
+                .buttonStyle(.plain)
+                .help("Open in Calendar")
             }
         case .flights(let flights):
             if !flights.options.isEmpty { flightRows(flights) }
@@ -185,7 +195,8 @@ extension AgentCardMessageView {
         }
     }
 
-    private func itemRow(icon: String, title: String, subtitle: String, detail: String?) -> some View {
+    private func itemRow(icon: String, title: String, subtitle: String, detail: String?,
+                         trailing: String? = nil) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 11))
@@ -208,8 +219,15 @@ extension AgentCardMessageView {
                 }
             }
             Spacer(minLength: 0)
+            if let trailing {
+                Image(systemName: trailing)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(appState.themeTextSecondary.opacity(0.7))
+                    .padding(.top, 2)
+            }
         }
         .padding(8)
+        .contentShape(Rectangle())
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(appState.themeText.opacity(0.04)))
     }
 
