@@ -12,6 +12,16 @@ class ThreadDetailViewModel {
     /// Monotonic token for loadPDF: only the newest in-flight load may write
     /// pdfData/isLoadingPDF (read+bumped on the MainActor).
     private var pdfLoadGeneration = 0
+    /// The thread version and status `pdfData` was rendered from. The bytes
+    /// outlive a refresh (in flight, or failed), and must not be saved under a
+    /// newer version or a Final header — a draft PDF carries a watermark.
+    private var pdfDataKey: String?
+    private var currentPDFKey: String? { thread.map { "\($0.version):\($0.status)" } }
+    /// Whether `pdfData` is the document the header describes, so it may be
+    /// saved or opened elsewhere.
+    var pdfIsCurrent: Bool {
+        pdfData != nil && !isLoadingPDF && pdfDataKey != nil && pdfDataKey == currentPDFKey
+    }
     var isUploadingImages = false
     var isStreaming = false
     var streamingContent = ""
@@ -577,10 +587,10 @@ class ThreadDetailViewModel {
         // (thread switch cancels the old load; the stream-complete
         // forceRefresh Task is never cancelled). Without this, a stale
         // load's completion clobbers the newer one's spinner/pdfData.
-        let gen = await MainActor.run { () -> Int in
+        let (gen, key) = await MainActor.run { () -> (Int, String?) in
             pdfLoadGeneration &+= 1
             isLoadingPDF = true
-            return pdfLoadGeneration
+            return (pdfLoadGeneration, currentPDFKey)
         }
         do {
             let data = try await service.getPDFData(
@@ -591,6 +601,8 @@ class ThreadDetailViewModel {
             await MainActor.run {
                 guard gen == pdfLoadGeneration else { return }
                 pdfData = data
+                // An older version asked for explicitly is not the current one.
+                pdfDataKey = version == nil ? key : nil
                 isLoadingPDF = false
             }
         } catch {

@@ -190,6 +190,7 @@ struct ThreadDetailView: View {
         PreviewPanelView(
             currentState: viewModel.currentState,
             pdfData: viewModel.pdfData,
+            pdfIsCurrent: viewModel.pdfIsCurrent,
             isLoading: viewModel.isLoadingPDF,
             taskType: viewModel.thread?.taskType,
             threadId: viewModel.thread?.id,

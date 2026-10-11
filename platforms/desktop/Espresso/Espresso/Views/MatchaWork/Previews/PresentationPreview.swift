@@ -173,7 +173,7 @@ struct PresentationPreview: View {
 
     private var stage: some View {
         let locked = shown != nil && selectedSlideIndex == shown
-        return slideCanvas(shown)
+        return slideCanvas(shown, onStage: true)
         .aspectRatio(16.0 / 9.0, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
@@ -187,9 +187,10 @@ struct PresentationPreview: View {
     }
 
     @ViewBuilder
-    private func slideCanvas(_ index: Int?) -> some View {
+    private func slideCanvas(_ index: Int?, onStage: Bool = false) -> some View {
         if let index, index < slides.count {
-            SlideCanvas(theme: theme, deckTitle: presentationTitle, slide: slides[index], total: slides.count)
+            SlideCanvas(theme: theme, deckTitle: presentationTitle, slide: slides[index], total: slides.count,
+                        scrollsOverflow: onStage)
         } else if slides.isEmpty && state["presentation_title"] == nil {
             ZStack {
                 theme.backgroundColor
@@ -323,12 +324,15 @@ struct PresentationPreview: View {
 // MARK: - Slide rendering
 
 /// One slide drawn at any size: type scales with the width, so the same view
-/// is the stage and a filmstrip thumbnail.
+/// is the stage and a filmstrip thumbnail. Every bullet is drawn in full, as
+/// the PDF has them: a long slide steps its text down to fit, and on the
+/// stage (`scrollsOverflow`) one that still doesn't fit scrolls.
 struct SlideCanvas: View {
     let theme: PresentationTheme
     let deckTitle: String
     let slide: PresentationPreview.SlideEntry
     let total: Int
+    var scrollsOverflow = false
 
     var body: some View {
         GeometryReader { geo in
@@ -342,26 +346,25 @@ struct SlideCanvas: View {
                     Text(slide.title.isEmpty ? "Slide \(slide.index)" : slide.title)
                         .font(.system(size: max(5, w * 0.048), weight: .bold))
                         .foregroundColor(theme.titleColor)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.6)
+                        .lineLimit(3)
+                        .minimumScaleFactor(0.5)
                     Rectangle()
                         .fill(theme.accentColor)
                         .frame(width: w * 0.06, height: max(1, w * 0.004))
-                    VStack(alignment: .leading, spacing: w * 0.014) {
-                        ForEach(Array(slide.bullets.prefix(7).enumerated()), id: \.offset) { _, bullet in
-                            HStack(alignment: .firstTextBaseline, spacing: w * 0.014) {
-                                Circle()
-                                    .fill(theme.accentColor)
-                                    .frame(width: max(2, w * 0.009), height: max(2, w * 0.009))
-                                    .alignmentGuide(.firstTextBaseline) { d in d.height * 0.85 }
-                                Text(bullet)
-                                    .font(.system(size: max(4, w * 0.026)))
-                                    .foregroundColor(theme.textColor)
-                                    .lineLimit(2)
-                            }
+                    // The first size whose bullets fit the space left.
+                    ViewThatFits(in: .vertical) {
+                        bullets(width: w, scale: 0.026)
+                        bullets(width: w, scale: 0.022)
+                        bullets(width: w, scale: 0.019)
+                        bullets(width: w, scale: 0.016)
+                        if scrollsOverflow {
+                            ScrollView(.vertical) { bullets(width: w, scale: 0.016) }
+                                .scrollIndicators(.visible)
+                        } else {
+                            bullets(width: w, scale: 0.016)
                         }
                     }
-                    Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     HStack {
                         Text(deckTitle)
                             .lineLimit(1)
@@ -376,6 +379,24 @@ struct SlideCanvas: View {
                 .padding(.bottom, w * 0.035)
             }
         }
+    }
+
+    private func bullets(width w: CGFloat, scale: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: w * scale * 0.55) {
+            ForEach(Array(slide.bullets.enumerated()), id: \.offset) { _, bullet in
+                HStack(alignment: .firstTextBaseline, spacing: w * 0.014) {
+                    Circle()
+                        .fill(theme.accentColor)
+                        .frame(width: max(2, w * 0.009), height: max(2, w * 0.009))
+                        .alignmentGuide(.firstTextBaseline) { d in d.height * 0.85 }
+                    Text(bullet)
+                        .font(.system(size: max(4, w * scale)))
+                        .foregroundColor(theme.textColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

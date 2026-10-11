@@ -34,11 +34,22 @@ enum AssetExport {
             return AssetAction(label: "Save PDF", icon: "arrow.down.to.line") {
                 try save(pdfData, name: "\(title).pdf", type: .pdf)
             }
-        case .presentation, .workbook:
-            guard let threadId, hasPresentationContent(type, state: state) else { return nil }
-            return AssetAction(label: "Save PDF", icon: "arrow.down.to.line") {
-                let data = try await MatchaWorkService.shared.getPresentationPdfData(threadId: threadId)
-                try save(data, name: "\(title).pdf", type: .pdf)
+        case .presentation:
+            guard let threadId, hasSlides(state["slides"]) else { return nil }
+            return presentationPDF(threadId: threadId, title: title, label: "Save PDF")
+        case .workbook:
+            // The PDF endpoint renders a workbook's generated presentation
+            // (`presentation.slides`) and refuses a workbook without one, so
+            // until then the workbook itself saves as Markdown.
+            if let threadId,
+               let presentation = state["presentation"]?.value as? [String: AnyCodable],
+               hasSlides(presentation["slides"]) {
+                return presentationPDF(threadId: threadId, title: title, label: "Save slides as PDF")
+            }
+            guard let markdown = workbookText(state) else { return nil }
+            return AssetAction(label: "Save as Markdown", icon: "arrow.down.to.line") {
+                try save(Data(markdown.utf8), name: "\(title).md",
+                         type: UTType(filenameExtension: "md") ?? .plainText)
             }
         case .policy:
             guard let markdown = string(state["policy_content"]) else { return nil }
@@ -87,9 +98,15 @@ enum AssetExport {
         return cleaned.isEmpty ? "Document" : String(cleaned.prefix(80))
     }
 
-    private static func hasPresentationContent(_ type: MWTaskType, state: [String: AnyCodable]) -> Bool {
-        let key = type == .presentation ? "slides" : "sections"
-        return (state[key]?.value as? [AnyCodable])?.isEmpty == false
+    private static func presentationPDF(threadId: String, title: String, label: String) -> AssetAction {
+        AssetAction(label: label, icon: "arrow.down.to.line") {
+            let data = try await MatchaWorkService.shared.getPresentationPdfData(threadId: threadId)
+            try save(data, name: "\(title).pdf", type: .pdf)
+        }
+    }
+
+    private static func hasSlides(_ value: AnyCodable?) -> Bool {
+        (value?.value as? [AnyCodable])?.isEmpty == false
     }
 
     private static func string(_ value: AnyCodable?) -> String? {

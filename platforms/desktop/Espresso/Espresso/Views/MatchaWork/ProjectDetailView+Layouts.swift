@@ -222,6 +222,7 @@ extension ProjectDetailView {
                         PreviewPanelView(
                             currentState: chatVM.currentState,
                             pdfData: chatVM.pdfData,
+                            pdfIsCurrent: chatVM.pdfIsCurrent,
                             isLoading: chatVM.isLoadingPDF,
                             taskType: chatVM.thread?.taskType,
                             threadId: chatVM.thread?.id,

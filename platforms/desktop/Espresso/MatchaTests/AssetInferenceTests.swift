@@ -110,6 +110,20 @@ final class AssetInferenceTests: XCTestCase {
 
     // MARK: - AssetTime
 
+    func testWorkbookSavesItsSlidesOnlyOnceGenerated() throws {
+        let section = AnyCodable(["title": AnyCodable("Intro"), "content": AnyCodable("Hello")])
+        let plain = state(["workbook_title": "Guide", "sections": [section]])
+        let markdown = try XCTUnwrap(AssetExport.download(.workbook, state: plain, title: "x", threadId: "t", pdfData: nil))
+        XCTAssertEqual(markdown.label, "Save as Markdown")
+
+        var withSlides = plain
+        withSlides["presentation"] = AnyCodable(["slides": AnyCodable([AnyCodable(["title": AnyCodable("a")])])])
+        let pdf = try XCTUnwrap(AssetExport.download(.workbook, state: withSlides, title: "x", threadId: "t", pdfData: nil))
+        XCTAssertEqual(pdf.label, "Save slides as PDF")
+
+        XCTAssertNil(AssetExport.download(.workbook, state: [:], title: "x", threadId: "t", pdfData: nil))
+    }
+
     func testEditedReadsServerTimestamps() throws {
         let now = try XCTUnwrap(AssetTime.parse("2026-10-11T12:00:00Z"))
         XCTAssertEqual(AssetTime.edited("2026-10-11T11:59:40.123Z", now: now), "edited just now")

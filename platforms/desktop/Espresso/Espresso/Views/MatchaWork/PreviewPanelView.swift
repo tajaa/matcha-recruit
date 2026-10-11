@@ -7,11 +7,17 @@ struct PreviewPanelView: View {
     @Environment(AppState.self) private var appState
     let currentState: [String: AnyCodable]
     let pdfData: Data?
+    /// Whether `pdfData` matches the version and status on show
+    /// (`ThreadDetailViewModel.pdfIsCurrent`). Saving or opening the PDF
+    /// elsewhere waits until it does.
+    var pdfIsCurrent = false
     let isLoading: Bool
     let taskType: MWTaskType?
     var threadId: String?
     @Binding var selectedSlideIndex: Int?
     var context = AssetCanvasContext()
+
+    private var exportablePDF: Data? { pdfIsCurrent ? pdfData : nil }
 
     private var resolvedTaskType: MWTaskType {
         taskType ?? inferMWTaskType(from: currentState)
@@ -28,8 +34,8 @@ struct PreviewPanelView: View {
             surface: isLoading ? .stage : Self.surface(for: type),
             copyText: AssetExport.copyText(type, state: currentState),
             download: AssetExport.download(type, state: currentState, title: title,
-                                           threadId: threadId, pdfData: pdfData),
-            openExternally: AssetExport.openExternally(type, title: title, pdfData: pdfData)
+                                           threadId: threadId, pdfData: exportablePDF),
+            openExternally: AssetExport.openExternally(type, title: title, pdfData: exportablePDF)
         ) {
             if isLoading {
                 VStack(spacing: 12) {
