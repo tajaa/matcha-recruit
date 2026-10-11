@@ -16,7 +16,7 @@ import re
 import threading
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Optional, Any
+from typing import Callable, Optional, Any
 from google import genai
 from app.core.services.genai_client import get_genai_client
 from google.genai import types
@@ -102,6 +102,7 @@ class MatchaWorkAIProvider:
         thread_id: Optional[str] = None,
         dynamic_context: str = "",
         hr_pilot_mode: bool = False,
+        on_reply_delta: Callable[[str], None] | None = None,
     ) -> AIResponse:
         raise NotImplementedError
 
@@ -189,6 +190,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         turn_context: str = "",
         claude_company_context: Optional[str] = None,
         history_from: Optional[int] = None,
+        on_reply_delta: Callable[[str], None] | None = None,
     ) -> AIResponse:
         """One skill-engine turn.
 
@@ -409,6 +411,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                 )
                 return await self._generate_claude(
                     request, model, effort,
+                    on_reply_delta=None if hr_pilot_mode else on_reply_delta,
                     fallback=(static_prompt, dynamic_prompt, contents, valid_fields, inferred_skill,
                               company_id, user_id, model_override, thinking_level),
                 )
@@ -571,21 +574,34 @@ class GeminiProvider(MatchaWorkAIProvider):
         effort: str,
         *,
         fallback: tuple,
+        on_reply_delta: Callable[[str], None] | None = None,
     ) -> AIResponse:
         """The skill-engine call on Claude (`_claude.py`), parsed by the shared
         parser. If Claude fails (overloaded, an outage, a timeout), the turn
         runs on Gemini instead of failing. Every attempt counts in the
         anthropic bucket, failed or not."""
         await record_claude_call()
+        emitted = False
+
+        def emit(text):
+            nonlocal emitted
+            emitted = True
+            on_reply_delta(text)
+
         try:
             result = await asyncio.wait_for(
-                call_claude_thread(request, model=model, effort=effort, timeout_seconds=GEMINI_CALL_TIMEOUT - 5),
+                call_claude_thread(request, model=model, effort=effort, timeout_seconds=GEMINI_CALL_TIMEOUT - 5,
+                                   on_reply_delta=emit if on_reply_delta is not None else None),
                 timeout=GEMINI_CALL_TIMEOUT,
             )
         except (asyncio.TimeoutError, ClaudeCallFailed) as exc:
+            if emitted:
+                raise ClaudeCallFailed("Claude stream interrupted after reply text", getattr(exc, "usage", None)) from exc
             logger.warning("Claude call failed (%s); running the turn on Gemini", exc)
             return await self._gemini_fallback(*fallback)
         except Exception as e:
+            if emitted:
+                raise ClaudeCallFailed("Claude stream interrupted after reply text") from e
             logger.error("Claude call failed: %s", e, exc_info=True)
             return AIResponse(
                 assistant_reply="I encountered an error processing your request. Please try again.",

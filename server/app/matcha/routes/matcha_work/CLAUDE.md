@@ -189,5 +189,14 @@ from quota/budget tokens but billed at the cache-read rate; cache writes cost
 1.25× (5 minutes) or 2× (1 hour), with the model's long-context pricing applied.
 
 Regression coverage: `test_claude_thread_cache.py`, `test_skill_engine_claude.py`
-and the seven unchanged hashes in `test_gemini_prompt_golden.py`. Streaming is
-the subsequent stacked PR; this PR returns the authoritative complete reply.
+and the seven unchanged hashes in `test_gemini_prompt_golden.py`. Claude streams only the decoded top-level JSON `reply` through SSE
+`{"type":"delta","text":"..."}` events, coalesced at about 50 ms or 200 characters.
+`complete` still supplies the authoritative persisted message; web and macOS
+replace pending text with it and clear text on errors, cancellation or navigation.
+Gemini emits no deltas. HR Pilot disables deltas before generation because its
+citation audit must finish before text is visible. Set
+`MATCHA_WORK_CLAUDE_STREAMING=false` to use the non-streamed create call with the
+same cache layout. Once any reply text has been emitted, an interrupted Claude
+call ends with an SSE error, with available partial usage billed; it must never
+replay on Gemini. A disconnected client still uses the existing cancellation
+finalizer to account for the provider call.

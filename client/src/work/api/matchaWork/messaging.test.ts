@@ -44,6 +44,20 @@ describe('sendMessageStream', () => {
     })
   })
 
+  it('forwards reply deltas until the authoritative complete frame', async () => {
+    events = [
+      { type: 'delta', text: 'Hello ' },
+      { type: 'delta', text: '🫖' },
+      { type: 'complete', data: completeData },
+    ]
+    const callbacks = { onEvent: vi.fn(), onComplete: vi.fn(), onError: vi.fn() }
+    sendMessageStream('thread-1', 'hello', callbacks)
+    await flushStream()
+    expect(callbacks.onEvent.mock.calls.slice(0, 2).map(([event]) => event.text)).toEqual(['Hello ', '🫖'])
+    expect(callbacks.onComplete).toHaveBeenCalledWith(completeData)
+    expect(callbacks.onError).not.toHaveBeenCalled()
+  })
+
   it('keeps consuming after a Huume error so a later complete frame wins', async () => {
     events = [
       { type: 'error', message: 'Huume hit a problem mid-turn — keeping what worked.' },

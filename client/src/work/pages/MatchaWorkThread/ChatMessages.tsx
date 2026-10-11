@@ -16,7 +16,7 @@ interface ChatMessagesProps {
 // Messages — drop zone for resumes
 export default function ChatMessages({ c, th, isProject }: ChatMessagesProps) {
   const {
-    streaming, setIsDragOver, isDragOver, handleFileUpload, lightMode, messages, thread,
+    streaming, streamingText, setIsDragOver, isDragOver, handleFileUpload, lightMode, messages, thread,
     statusMessage, pendingHuumeSteps, typingUsers, messagesEndRef, threadId, setThread,
     isIndividual, setInput, textareaRef, setShowTutorSetup, setTutorDismissed,
   } = c
@@ -73,10 +73,14 @@ export default function ChatMessages({ c, th, isProject }: ChatMessagesProps) {
         <div className={`flex justify-start ${thread?.huume_mode ? 'items-start gap-2' : ''}`}>
           {thread?.huume_mode && <HuumeAvatar size="sm" lightMode={lightMode} />}
           <div className={`${th.streamBg} rounded-md px-2.5 py-1.5 max-w-[85%]`}>
-            <div className="flex items-center gap-2">
-              <Loader2 size={14} className={`animate-spin ${th.streamText}`} />
-              <span className={`text-[13px] ${th.streamText}`}>{statusMessage || 'Thinking...'}</span>
-            </div>
+            {streamingText ? (
+              <div className={`whitespace-pre-wrap break-words text-[13px] ${th.streamText}`}>{streamingText}</div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Loader2 size={14} className={`animate-spin ${th.streamText}`} />
+                <span className={`text-[13px] ${th.streamText}`}>{statusMessage || 'Thinking...'}</span>
+              </div>
+            )}
             {pendingHuumeSteps.length > 0 && (
               <HuumeStepTimeline steps={pendingHuumeSteps} lightMode={lightMode} live />
             )}

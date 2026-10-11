@@ -1370,6 +1370,7 @@ async def _generate_turn(tc: TurnContext):
     import time as _time
     tc.generate_started_at = _time.monotonic()
     stream_blog_mode_state = _blog_mode_state_from_meta(tc.project_meta)
+    reply_queue: asyncio.Queue[str] = asyncio.Queue()
     tc.ai_task = asyncio.create_task(ai_provider.generate(
         tc.msg_dicts, thread["current_state"], company_context=tc.ctx,
         dynamic_context=tc.dyn_ctx,
@@ -1392,15 +1393,49 @@ async def _generate_turn(tc: TurnContext):
         turn_context=tc.dyn_ctx_turn,
         claude_company_context=tc.claude_ctx,
         history_from=tc.history_from,
+        on_reply_delta=None if tc.hr_pilot_mode_active else reply_queue.put_nowait,
     ))
 
+    from app.matcha.services.matcha_work.matcha_work_ai._claude import ClaudeCallFailed
+
+    delta_task = None
+    pending = ""
+    last_emit = last_activity = _time.monotonic()
     try:
         while True:
-            done, _ = await asyncio.wait({tc.ai_task}, timeout=15.0)
-            if done:
+            if delta_task is None:
+                delta_task = asyncio.create_task(reply_queue.get())
+            now = _time.monotonic()
+            deadline = last_emit + 0.05 if pending else last_activity + 15.0
+            done, _ = await asyncio.wait(
+                {tc.ai_task, delta_task}, timeout=max(0, deadline - now),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if delta_task in done:
+                pending += delta_task.result()
+                delta_task = None
+            while not reply_queue.empty():
+                pending += reply_queue.get_nowait()
+            now = _time.monotonic()
+            if pending and (len(pending) >= 200 or now - last_emit >= 0.05 or tc.ai_task.done()):
+                text, pending = pending, ""
+                last_emit = last_activity = now
+                yield _sse_data({"type": "delta", "text": text})
+            if tc.ai_task.done():
+                tc.ai_resp = await tc.ai_task
                 break
-            yield _sse_data({"type": "keepalive"})
-        tc.ai_resp = await tc.ai_task
+            if now - last_activity >= 15.0:
+                last_activity = now
+                yield _sse_data({"type": "keepalive"})
+    except ClaudeCallFailed as exc:
+        # A partial reply must never be replaced by a second provider. Account
+        # for the failed attempt, then let the route emit its terminal error.
+        await _record_turn_usage(
+            thread_id=tc.thread_id, company_id=tc.company_id,
+            user_id=tc.current_user.id, user_role=tc.current_user.role,
+            final_usage=exc.usage or tc.estimated_usage, operation="send_message",
+        )
+        raise
     except asyncio.CancelledError:
         _schedule_cancel_finalizer(tc)
         raise
@@ -1413,9 +1448,12 @@ async def _generate_turn(tc: TurnContext):
         # BILLING: caught here rather than in a bare `finally` on purpose. A
         # `finally` also fires when OUR code raises, which would charge the
         # customer for our bug. Only the two disconnect signals bill.
-        if tc.ai_task is not None and not tc.ai_task.done():
-            _schedule_cancel_finalizer(tc)
+        _schedule_cancel_finalizer(tc)
         raise
+    finally:
+        if delta_task is not None:
+            delta_task.cancel()
+            await asyncio.gather(delta_task, return_exceptions=True)
 
 
 async def _audit_and_persist(tc: TurnContext) -> None:
