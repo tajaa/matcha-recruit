@@ -70,6 +70,7 @@ struct EmailWorkspace: View {
             }
         }
         .background(ThemeRadialBackground())
+        .foldsRailForSidePane($railCollapsed)
         .task {
             // Reopening the hub reuses a recent load instead of re-reading
             // the mailbox every time.

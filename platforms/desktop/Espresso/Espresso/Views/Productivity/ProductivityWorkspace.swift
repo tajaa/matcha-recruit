@@ -31,6 +31,7 @@ struct ProductivityWorkspace: View {
             }
         }
         .background(ThemeRadialBackground())
+        .foldsRailForSidePane($railCollapsed)
         .task { await vm.loadBoards() }
     }
 
@@ -102,7 +103,14 @@ struct ProductivityWorkspace: View {
     @ViewBuilder
     private var boardPane: some View {
         if vm.boards.isEmpty && !vm.isLoading {
-            emptyState(icon: "checklist", title: "No boards yet", sub: "Create a board to start tracking to-dos.")
+            if pane.isSide {
+                // No rail here, so the empty state carries the create button.
+                MWHubEmpty(icon: "checklist", title: "No boards yet", cta: "New board") {
+                    Task { await vm.createBoard() }
+                }
+            } else {
+                emptyState(icon: "checklist", title: "No boards yet", sub: "Create a board to start tracking to-dos.")
+            }
         } else if let boardId = vm.selectedBoardId {
             VStack(spacing: 0) {
                 boardHeader

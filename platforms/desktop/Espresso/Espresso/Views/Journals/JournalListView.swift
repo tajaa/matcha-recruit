@@ -370,6 +370,7 @@ struct JournalsWorkspace: View {
             editorPane.frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(ThemeRadialBackground())
+        .foldsRailForSidePane($folderRailCollapsed)
         // ⌘N anywhere in the workspace — the list header's compose button is
         // a menu, which can't carry a shortcut of its own.
         .background {

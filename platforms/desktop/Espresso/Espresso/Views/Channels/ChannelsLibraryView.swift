@@ -49,6 +49,7 @@ struct ChannelsLibraryView: View {
             .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .foldsRailForSidePane($railCollapsed)
         .task { await load() }
         .onChange(of: appState.channelsListGeneration) { _, _ in Task { await load() } }
         .sheet(isPresented: $showCreate) {

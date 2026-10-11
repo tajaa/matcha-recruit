@@ -412,6 +412,7 @@ struct ThreadsLibraryView: View {
             .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .foldsRailForSidePane($railCollapsed)
         .task { await load() }
         .onChange(of: filter) { _, _ in Task { await load() } }
     }

@@ -186,10 +186,13 @@ struct ContentView: View {
     private var topPanes: some View {
         if let split = appState.splitTarget {
             HSplitView {
+                // The side pane opens narrower than the main one: it's the
+                // reference beside the work, not the work.
                 PrimaryDetailPane()
-                    .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 360, idealWidth: 760, maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
                 SidePane(slot: .right, target: split)
-                    .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 360, idealWidth: 440, maxWidth: .infinity, maxHeight: .infinity)
             }
         } else {
             PrimaryDetailPane()

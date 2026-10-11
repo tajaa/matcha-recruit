@@ -24,6 +24,41 @@ extension EnvironmentValues {
     }
 }
 
+// MARK: - Main-pane rails
+
+extension View {
+    /// Fold a hub's rail away while a side pane is open, and back when it
+    /// closes, so the item open in the main pane keeps its room. A rail the
+    /// person folded themselves stays folded.
+    func foldsRailForSidePane(_ collapsed: Binding<Bool>) -> some View {
+        modifier(SidePaneRailFold(collapsed: collapsed))
+    }
+}
+
+private struct SidePaneRailFold: ViewModifier {
+    @Binding var collapsed: Bool
+    @Environment(AppState.self) private var appState
+    @Environment(\.workPane) private var pane
+    @State private var foldedForPane = false
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { sync(paneOpen: appState.splitTarget != nil) }
+            .onChange(of: appState.splitTarget != nil) { _, open in sync(paneOpen: open) }
+    }
+
+    private func sync(paneOpen: Bool) {
+        guard !pane.isSide else { return }
+        if paneOpen, !collapsed {
+            collapsed = true
+            foldedForPane = true
+        } else if !paneOpen, foldedForPane {
+            collapsed = false
+            foldedForPane = false
+        }
+    }
+}
+
 // MARK: - Side pane
 
 /// A pane beside the main one: the right split or the bottom split. One view
