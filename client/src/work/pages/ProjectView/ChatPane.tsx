@@ -31,7 +31,7 @@ export function ChatPane({ vm, project, isRecruiting, hasPanelTab }: Props) {
     messages,
     setShowWizard,
     setShowTour,
-    streaming,
+    streaming, streamingText,
     statusMessage,
     isDragOver,
     setIsDragOver,
@@ -197,9 +197,15 @@ export function ChatPane({ vm, project, isRecruiting, hasPanelTab }: Props) {
         ))}
         {streaming && (
           <div className="flex justify-start">
-            <div className="rounded-lg px-4 py-2.5 flex items-center gap-2" style={{ background: 'var(--color-w-surface)', border: '1px solid var(--color-w-line)' }}>
-              <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-w-dim)' }} />
-              <span className="text-sm" style={{ color: 'var(--color-w-dim)' }}>{statusMessage || 'Thinking...'}</span>
+            <div className="rounded-lg px-4 py-2.5 max-w-[85%]" style={{ background: 'var(--color-w-surface)', border: '1px solid var(--color-w-line)' }}>
+              {streamingText ? (
+                <div className="whitespace-pre-wrap break-words text-sm" style={{ color: 'var(--color-w-text)' }}>{streamingText}</div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-w-dim)' }} />
+                  <span className="text-sm" style={{ color: 'var(--color-w-dim)' }}>{statusMessage || 'Thinking...'}</span>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -23,6 +23,7 @@ export function useProjectView() {
   const [messages, setMessages] = useState<MWMessage[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
+  const [streamingText, setStreamingText] = useState('')
   const [statusMessage, setStatusMessage] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -262,8 +263,16 @@ export function useProjectView() {
   // Load active chat messages
   useEffect(() => {
     if (!activeChatId) return
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      setStreaming(false)
+      setStreamingText('')
+      setStatusMessage('')
+    })
     getThread(activeChatId)
       .then((t) => {
+        if (cancelled) return
         setActiveThread(t)
         setMessages(t.messages)
         if (t.task_type === 'offer_letter' || t.linked_offer_letter_id) {
@@ -271,6 +280,10 @@ export function useProjectView() {
         }
       })
       .catch(() => {})
+    return () => {
+      cancelled = true
+      abortRef.current?.abort('thread-switch')
+    }
   }, [activeChatId])
 
   // Auto-scroll
@@ -351,6 +364,7 @@ export function useProjectView() {
 
     if (!activeChatId || streaming) return
     setStreaming(true)
+    setStreamingText('')
     setError('')
 
     const tempMsg = makeLocalMsg('user', content)
@@ -359,6 +373,8 @@ export function useProjectView() {
     abortRef.current = sendMessageStream(activeChatId, content, {
       onEvent: (event: MWStreamEvent) => {
         if (event.type === 'status') setStatusMessage(event.message)
+        if (event.type === 'delta') setStreamingText((text) => text + event.text)
+        if (event.type === 'error') setStreamingText('')
       },
       onComplete: async (data: MWSendResponse) => {
         setStatusMessage('')
@@ -370,6 +386,7 @@ export function useProjectView() {
           setOfferPdfUrl(getPdfProxyUrl(activeChatId, data.version))
         }
         setStreaming(false)
+        setStreamingText('')
         refreshUsage()
         notifyUsageChanged()
         // Refresh project data so side panel picks up AI-generated updates (posting, sections, etc.)
@@ -382,6 +399,7 @@ export function useProjectView() {
         setStatusMessage('')
         setError(err)
         setStreaming(false)
+        setStreamingText('')
         // A 429/402 quota refusal is exactly when the meter should snap to
         // red without waiting for the next poll.
         notifyUsageChanged()
@@ -408,14 +426,18 @@ export function useProjectView() {
       return
     }
     setStreaming(true)
+    setStreamingText('')
     setStatusMessage('Uploading resumes...')
     uploadProjectResumes(projectId, files, {
       onEvent: (event: MWStreamEvent) => {
         if (event.type === 'status') setStatusMessage(event.message)
+        if (event.type === 'delta') setStreamingText((text) => text + event.text)
+        if (event.type === 'error') setStreamingText('')
       },
       onComplete: async () => {
         setStatusMessage('')
         setStreaming(false)
+        setStreamingText('')
         const updated = await getProjectDetail(projectId)
         setProject(updated)
       },
@@ -423,6 +445,7 @@ export function useProjectView() {
         setStatusMessage('')
         setError(err)
         setStreaming(false)
+        setStreamingText('')
       },
     })
   }
@@ -461,7 +484,7 @@ export function useProjectView() {
     setMessages,
     input,
     setInput,
-    streaming,
+    streaming, streamingText,
     statusMessage,
     loading,
     error,
