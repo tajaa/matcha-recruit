@@ -17,6 +17,11 @@ const api = vi.hoisted(() => ({
   uploadSignedCopy: vi.fn(),
   acknowledgeHrCase: vi.fn(),
   recheckHrCase: vi.fn(),
+  startHrCaseDraft: vi.fn(),
+  suggestHrCaseDraft: vi.fn(),
+  acceptHrCaseSuggestion: vi.fn(),
+  dismissHrCaseSuggestion: vi.fn(),
+  searchCaseEmployees: vi.fn(),
 }))
 vi.mock('../api/hrCases', () => api)
 
@@ -102,6 +107,7 @@ beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset())
   for (const fn of [notif.getNotifications, notif.getNotificationUnreadCount, notif.markNotificationsRead, notif.markHrCaseNotificationsRead]) fn.mockReset()
   api.getHrCaseReadiness.mockResolvedValue(READY)
+  api.searchCaseEmployees.mockResolvedValue({ employees: [{ id: 'e1', name: 'Test Employee', job_title: null }] })
   notif.getNotifications.mockResolvedValue({ notifications: [], total: 0 })
   notif.getNotificationUnreadCount.mockResolvedValue({ count: 0 })
   notif.markHrCaseNotificationsRead.mockResolvedValue({ updated: 0 })
@@ -111,6 +117,84 @@ beforeEach(() => {
 })
 
 describe('HrCases', () => {
+  it('advances a flagged incident by requesting a manager write-up', async () => {
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [hrCase()] })
+    api.getHrCase.mockResolvedValue(hrCase())
+    api.startHrCaseDraft.mockResolvedValue(hrCase({ stage: 'drafting' }))
+    renderAt('/work/hr-cases/c1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Request manager write-up' }))
+    await waitFor(() => expect(api.startHrCaseDraft).toHaveBeenCalledWith('c1'))
+  })
+
+  it('requires HR confirmation and explicit employee, conduct and dates before auto-drafting', async () => {
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [hrCase()] })
+    api.getHrCase.mockResolvedValue(hrCase())
+    api.suggestHrCaseDraft.mockResolvedValue(hrCase())
+    renderAt('/work/hr-cases/c1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Review policy violation' }))
+    await screen.findByRole('option', { name: 'Test Employee' })
+    const confirm = screen.getByRole('button', { name: 'Confirm violation and draft' }) as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText('Employee for this action'), { target: { value: 'e1' } })
+    fireEvent.change(screen.getByLabelText('Conduct being addressed'), { target: { value: 'attendance' } })
+    fireEvent.change(screen.getByLabelText(/Occurrence dates/), { target: { value: '2026-09-03, 2026-09-04' } })
+    expect(confirm.disabled).toBe(true)
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(confirm)
+    await waitFor(() => expect(api.suggestHrCaseDraft).toHaveBeenCalledWith('c1', {
+      classification: 'policy_violation', employee_id: 'e1', action_type: 'verbal_warning',
+      infraction_type: 'attendance', occurrence_dates: ['2026-09-03', '2026-09-04'],
+    }))
+  })
+
+  it('lets HR edit and accept a suggestion without approving it', async () => {
+    const suggested = hrCase({ stage: 'drafting', review: { checked_at: '', blocks: [], advisories: [], suggestion: {
+      id: 's1', letter: 'Original draft', input: { classification: 'policy_violation', employee_id: 'e1', action_type: 'written_warning', infraction_type: 'attendance', occurrence_dates: ['2026-09-03'] },
+      confirmed_by: 'u1', created_at: '',
+    } } })
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [suggested] })
+    api.getHrCase.mockResolvedValue(suggested)
+    api.acceptHrCaseSuggestion.mockResolvedValue(suggested)
+    renderAt('/work/hr-cases/c1')
+    expect(await screen.findByRole('button', { name: '1 suggestion to review' })).toBeTruthy()
+    fireEvent.change(await screen.findByLabelText('Suggested letter'), { target: { value: 'HR edited this letter.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Accept into HR review' }))
+    await waitFor(() => expect(api.acceptHrCaseSuggestion).toHaveBeenCalledWith('c1', 's1', 'HR edited this letter.'))
+    expect(api.decideHrCase).not.toHaveBeenCalled()
+  })
+
+  it('dismisses a suggestion independently of the case', async () => {
+    const suggested = hrCase({ review: { checked_at: '', blocks: [], advisories: [], suggestion: {
+      id: 's1', letter: 'Original draft', input: { classification: 'policy_violation', employee_id: 'e1', action_type: 'verbal_warning', infraction_type: 'conduct', occurrence_dates: ['2026-09-03'] },
+      confirmed_by: 'u1', created_at: '',
+    } } })
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [suggested] })
+    api.getHrCase.mockResolvedValue(suggested)
+    api.dismissHrCaseSuggestion.mockResolvedValue(suggested)
+    renderAt('/work/hr-cases/c1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss suggestion' }))
+    fireEvent.change(screen.getByLabelText('Reason for dismissing suggestion'), { target: { value: 'A manager should write this letter.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm dismissal' }))
+    await waitFor(() => expect(api.dismissHrCaseSuggestion).toHaveBeenCalledWith('c1', 's1', 'A manager should write this letter.'))
+    expect(api.dismissHrCase).not.toHaveBeenCalled()
+  })
+
+  it('keeps a compliance refusal visible and never accepts a blocked draft', async () => {
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [] })
+    api.getHrCase.mockResolvedValue(hrCase())
+    api.suggestHrCaseDraft.mockRejectedValue(new Error('Protected sick leave (CA 246.5).'))
+    renderAt('/work/hr-cases/c1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Review policy violation' }))
+    await screen.findByRole('option', { name: 'Test Employee' })
+    fireEvent.change(screen.getByLabelText('Employee for this action'), { target: { value: 'e1' } })
+    fireEvent.change(screen.getByLabelText(/Occurrence dates/), { target: { value: '2026-09-03' } })
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm violation and draft' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('CA 246.5')
+    expect(api.acceptHrCaseSuggestion).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Confirm violation and draft' })).toBeTruthy()
+  })
+
   it('puts cases in their columns', async () => {
     api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [hrCase(), hrCase({ id: 'c2', case_number: 'HRC-2026-0002', stage: 'hr_review', stage_label: 'HR review', column: 'review' })] })
     renderAt('/work/hr-cases')

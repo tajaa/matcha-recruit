@@ -15,6 +15,7 @@ export const NEEDS_YOU = new Set([
 export const UPDATE_LABEL: Record<string, string> = {
   hr_case_flagged: 'Flagged',
   hr_case_draft_submitted: 'Write-up in',
+  hr_case_draft_requested: 'Draft requested',
   hr_case_draft_held: 'Held for HR',
   hr_case_approved: 'Approved',
   hr_case_changes_requested: 'Sent back',
@@ -49,8 +50,8 @@ export type ColumnGuide = { acts: string; lands: string; empty: string }
 
 export const COLUMN_GUIDE: Record<string, ColumnGuide> = {
   new: {
-    acts: 'The manager',
-    lands: 'Flagged by the handbook check, or waiting on the manager’s write-up. You can dismiss one with a reason.',
+    acts: 'You',
+    lands: 'Review the incident, request a manager write-up, or confirm a policy violation to get an editable suggestion. Accept it into HR review, or dismiss with a reason.',
     empty: 'Nothing flagged. A case lands here when the handbook check finds a likely violation.',
   },
   review: {
@@ -76,6 +77,10 @@ export const COLUMN_GUIDE: Record<string, ColumnGuide> = {
 }
 
 export const NEEDS_YOU_MOMENTS: Trigger[] = [
+  {
+    title: 'An incident is flagged',
+    body: 'Choose the next step on the case. HR confirmation of a policy violation produces a suggested letter after the protected-leave check. Edit and accept it into HR review, or dismiss it.',
+  },
   {
     title: 'A write-up is in',
     body: 'It’s been checked and is waiting in HR review. Approve it, or send it back with a reason.',

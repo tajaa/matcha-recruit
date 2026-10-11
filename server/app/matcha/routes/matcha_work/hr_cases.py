@@ -29,7 +29,8 @@ from app.core.models.auth import CurrentUser
 from app.core.services.redis_cache import check_rate_limit
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, require_business_company, require_feature
-from app.matcha.services.hr_cases import case_service, stages, workflow
+from app.matcha.models.hr_cases import PolicyViolationReview, SuggestionAccept, SuggestionDismiss
+from app.matcha.services.hr_cases import case_service, incident_review, stages, workflow
 from app.matcha.services.hr_cases.access import can_change_hr_settings, has_hr_access
 from app.matcha.services.hr_cases.case_service import CaseError
 
@@ -368,6 +369,56 @@ async def decide_case(case_id: UUID, body: CaseDecision, current_user: CurrentUs
             )
         except CaseError as exc:
             _raise(exc)
+
+
+@router.post("/{case_id}/start-draft")
+async def start_case_draft(case_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
+    company_id = await _business_company(current_user)
+    async with get_connection() as conn:
+        await _require_hr(conn, current_user, company_id)
+    try:
+        return await incident_review.start_draft(get_connection, company_id=company_id, case_id=case_id, user=current_user)
+    except CaseError as exc:
+        _raise(exc)
+
+
+@router.post("/{case_id}/suggestion")
+async def suggest_case_draft(case_id: UUID, body: PolicyViolationReview, current_user: CurrentUser = Depends(require_admin_or_client)):
+    company_id = await _business_company(current_user)
+    async with get_connection() as conn:
+        await _require_hr(conn, current_user, company_id)
+    await check_rate_limit(f"hr_case_suggestion:{current_user.id}", *DRAFT_LIMIT)
+    try:
+        return await incident_review.suggest(get_connection, company_id=company_id, case_id=case_id, user=current_user, body=body)
+    except CaseError as exc:
+        _raise(exc)
+
+
+@router.post("/{case_id}/suggestion/accept")
+async def accept_case_suggestion(case_id: UUID, body: SuggestionAccept, current_user: CurrentUser = Depends(require_admin_or_client)):
+    company_id = await _business_company(current_user)
+    async with get_connection() as conn:
+        await _require_hr(conn, current_user, company_id)
+    await check_rate_limit(f"hr_case_draft:{current_user.id}", *DRAFT_LIMIT)
+    try:
+        return await incident_review.accept_suggestion(
+            get_connection, company_id=company_id, case_id=case_id, user=current_user, **body.model_dump(),
+        )
+    except CaseError as exc:
+        _raise(exc)
+
+
+@router.post("/{case_id}/suggestion/dismiss")
+async def dismiss_case_suggestion(case_id: UUID, body: SuggestionDismiss, current_user: CurrentUser = Depends(require_admin_or_client)):
+    company_id = await _business_company(current_user)
+    async with get_connection() as conn:
+        await _require_hr(conn, current_user, company_id)
+    try:
+        return await incident_review.dismiss_suggestion(
+            get_connection, company_id=company_id, case_id=case_id, user=current_user, **body.model_dump(),
+        )
+    except CaseError as exc:
+        _raise(exc)
 
 
 @router.post("/{case_id}/delivered")

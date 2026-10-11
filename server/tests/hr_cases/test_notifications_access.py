@@ -169,6 +169,7 @@ async def test_has_hr_access(drive, level, caps, error, expected):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("step,to_hr,type_", [
+    ("start_draft", False, "hr_case_draft_requested"),
     ("draft_submitted", True, "hr_case_draft_submitted"),
     ("draft_held", True, "hr_case_draft_held"),
     ("approved", False, "hr_case_approved"),

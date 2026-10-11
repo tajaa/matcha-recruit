@@ -88,7 +88,7 @@ export default function HrCaseReviewSection({ hrCase, onOpenDraft, onDecide, onD
           </ul>
         </div>
       ))}
-      {review && review.blocks.length === 0 && groups.length === 0 && (
+      {review && !review.suggestion && review.blocks.length === 0 && groups.length === 0 && (
         <p className="text-xs text-emerald-300">No issues found in the review.</p>
       )}
 

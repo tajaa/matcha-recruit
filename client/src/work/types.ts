@@ -1584,6 +1584,23 @@ export type HrCaseReview = {
   blocks: { source: string; code: string; detail: string; statute?: string | null }[]
   advisories: HrCaseReviewItem[]
   input?: { infraction_type: string; action_type: string; occurrence_dates: string[]; file_id: string }
+  suggestion?: HrCaseSuggestion
+}
+
+export type PolicyViolationReview = {
+  classification: 'policy_violation'
+  employee_id: string
+  action_type: 'verbal_warning' | 'written_warning' | 'final_warning' | 'suspension' | 'pip' | 'other'
+  infraction_type: 'attendance' | 'performance' | 'conduct' | 'safety' | 'policy_violation'
+  occurrence_dates: string[]
+}
+
+export type HrCaseSuggestion = {
+  id: string
+  letter: string
+  input: PolicyViolationReview
+  confirmed_by: string
+  created_at: string
 }
 
 /** What the manager on a case sees (server: workflow.manager_view). */

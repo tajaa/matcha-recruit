@@ -5,11 +5,12 @@ import { useWorkBase } from '../routes/WorkSurfaceContext'
 import {
   acknowledgeHrCase, decideHrCase, dismissHrCase, getHrCase, getHrCaseReadiness, getSignedCopyUrl, getWriteUpDraftUrl, listHrCases,
   markWriteUpDelivered, recheckHrCase, uploadSignedCopy,
+  startHrCaseDraft, suggestHrCaseDraft, acceptHrCaseSuggestion, dismissHrCaseSuggestion,
 } from '../api/hrCases'
 import { markHrCaseNotificationsRead } from '../api/notifications'
 import type { MWNotification } from '../api/notifications'
 import { useHrCaseUpdates } from '../hooks/useHrCaseUpdates'
-import type { HrCase, HrCaseColumn, HrCaseReadiness } from '../types'
+import type { HrCase, HrCaseColumn, HrCaseReadiness, PolicyViolationReview } from '../types'
 import HrCaseDetail from '../components/panels/hr-cases/HrCaseDetail'
 import HrCaseUpdates from '../components/panels/hr-cases/HrCaseUpdates'
 import HrCaseWizard, { HR_CASES_GUIDE_SEEN_KEY } from '../components/panels/hr-cases/HrCaseWizard'
@@ -128,6 +129,8 @@ export default function HrCases() {
   const waiting = useMemo(() => {
     const open = (stage: HrCase['stage']) => (cases ?? []).filter((c) => c.stage === stage)
     return [
+      { key: 'flagged', label: (n: number) => `${plural(n, 'incident', 'incidents')} to review`, items: open('flagged') },
+      { key: 'suggestion', label: (n: number) => `${plural(n, 'suggestion', 'suggestions')} to review`, items: (cases ?? []).filter((c) => c.review?.suggestion && c.stage === 'drafting') },
       { key: 'hr_review', label: (n: number) => `${plural(n, 'write-up', 'write-ups')} to review`, items: open('hr_review') },
       { key: 'needs_attention', label: (n: number) => `${plural(n, 'signed copy', 'signed copies')} to look at`, items: open('needs_attention') },
     ].filter((w) => w.items.length > 0)
@@ -140,6 +143,30 @@ export default function HrCases() {
   async function dismiss(reason: string) {
     if (!shown) return
     await dismissHrCase(shown.id, reason)
+    await refreshCase(shown.id)
+  }
+
+  async function startDraft() {
+    if (!shown) return
+    await startHrCaseDraft(shown.id)
+    await refreshCase(shown.id)
+  }
+
+  async function suggest(review: PolicyViolationReview) {
+    if (!shown) return
+    await suggestHrCaseDraft(shown.id, review)
+    await refreshCase(shown.id)
+  }
+
+  async function accept(suggestionId: string, letter: string) {
+    if (!shown) return
+    await acceptHrCaseSuggestion(shown.id, suggestionId, letter)
+    await refreshCase(shown.id)
+  }
+
+  async function dismissSuggestion(suggestionId: string, reason: string) {
+    if (!shown) return
+    await dismissHrCaseSuggestion(shown.id, suggestionId, reason)
     await refreshCase(shown.id)
   }
 
@@ -282,7 +309,7 @@ export default function HrCases() {
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-[11px] text-w-faint">{c.case_number}</span>
                             <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${STAGE_TONE[c.stage] ?? 'bg-w-surface2 text-w-dim'}`}>
-                              {c.stage_label}
+                              {c.review?.suggestion ? 'Draft suggestion' : c.stage_label}
                             </span>
                           </div>
                           <p className="truncate text-sm text-w-text">{c.incident_title ?? 'HR case'}</p>
@@ -313,6 +340,7 @@ export default function HrCases() {
       {caseId && (
         shown ? (
           <HrCaseDetail hrCase={shown} onClose={() => navigate(`${base}/hr-cases`)} onDismiss={dismiss} onOpenDraft={openDraft} onDecide={decide} onDelivered={delivered}
+            onStartDraft={startDraft} onSuggest={suggest} onAccept={accept} onDismissSuggestion={dismissSuggestion}
             onOpenSigned={openSigned} onUploadSigned={uploadSigned} onAcknowledge={acknowledge} onRecheck={recheck} />
         ) : detailError?.id === caseId ? (
           <aside className="w-96 border-l border-w-line p-4 text-sm text-red-300" role="alert">{detailError.message}</aside>

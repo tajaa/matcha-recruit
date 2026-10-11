@@ -221,10 +221,15 @@ async def send_step(
     number = case["case_number"]
     meta = {"hr_case_id": str(case["id"])}
     gm = case.get("gm_user_id")
-    if step == "draft_submitted":
+    if step == "start_draft":
+        await send(user_ids=[gm], company_id=case["company_id"], type="hr_case_draft_requested",
+                   title=f"{number}: HR requested a write-up",
+                   body="HR reviewed the incident and asked you to prepare a write-up. Submit the draft on the Write-ups page for HR approval.",
+                   link=manager_link(case), metadata=meta, skip_user_id=actor_user_id)
+    elif step == "draft_submitted":
         await send(user_ids=hr_ids, company_id=case["company_id"], type="hr_case_draft_submitted",
                    title=f"{number}: write-up ready for review",
-                   body="A manager sent a write-up. It passed the protected-leave check and is waiting for HR approval.",
+                   body="A write-up was submitted. It passed the protected-leave check and is waiting for HR approval.",
                    link=hr_link(case), metadata=meta, skip_user_id=actor_user_id)
     elif step == "draft_held":
         await send(user_ids=hr_ids, company_id=case["company_id"], type="hr_case_draft_held",
