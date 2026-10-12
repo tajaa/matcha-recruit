@@ -345,3 +345,19 @@ async def test_a_result_written_alongside_an_action_is_sent_back(monkeypatch):
     assert out.result["answer"] == "Not sent: hourly limit."
     second_input = client.calls[1]["input"]
     assert any(runner.FINISH_AFTER_ACTION in str(item) for item in second_input)
+
+
+@pytest.mark.asyncio
+async def test_a_concurrent_ceiling_denial_prevents_an_unapproved_provider_call(monkeypatch):
+    record, claim, resolve = wire_store(monkeypatch)
+    claim.side_effect = runner.store.CommitCeilingExceeded("archive_email", 100)
+    sent = []
+    tool = commit_tool(name="archive_email", handler=recording_handler(sent), ceilings=((100, 3600),))
+    client = FakeClient([response(call("archive_email")), response(call("finish", {"answer": "Limited"}))])
+    ctx = context(policy=policy_ctx(), commit_mode="live")
+    out = await run(client, [ability(tool, private_only=True)], ctx)
+    assert sent == [] and resolve.await_count == 0 and out.receipts == []
+    assert claim.await_args.kwargs == {"ceiling_user_id": ctx.user_id, "ceilings": tool.ceilings}
+    assert record.await_args_list[0].args[1] == 1
+    assert record.await_args_list[0].args[7] == "denied"
+    assert "past the limit" in client.calls[1]["input"][0]["output"]

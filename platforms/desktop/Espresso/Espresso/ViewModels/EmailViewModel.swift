@@ -70,10 +70,15 @@ final class EmailViewModel {
 
     @ObservationIgnored private let fetchPage: (EmailMailbox, String?) async throws -> EmailFetchResponse
 
-    init(fetchPage: @escaping (EmailMailbox, String?) async throws -> EmailFetchResponse = {
+    @ObservationIgnored private let triageEmails: ([String]) async throws -> EmailTriageResponse
+
+    init(triageEmails: @escaping ([String]) async throws -> EmailTriageResponse = {
+        try await EmailService.shared.triage(emailIds: $0)
+    }, fetchPage: @escaping (EmailMailbox, String?) async throws -> EmailFetchResponse = {
         try await EmailService.shared.fetch(mailbox: $0, pageToken: $1)
     }) {
         self.fetchPage = fetchPage
+        self.triageEmails = triageEmails
     }
 
     func loadStatus() async {
@@ -273,12 +278,20 @@ final class EmailViewModel {
         }
         do {
             var next = replacing ? [:] : triage
-            for start in stride(from: 0, to: ids.count, by: 25) {
-                let batch = Array(ids[start..<min(start + 25, ids.count)])
-                let resp = try await service.triage(emailIds: batch)
-                guard gen == loadGeneration else { return }
-                for entry in resp.buckets { next[entry.emailId] = entry }
-                triage = next
+            var pending = ids
+            var attempted = Set<String>()
+            while !pending.isEmpty {
+                for start in stride(from: 0, to: pending.count, by: 25) {
+                    let batch = Array(pending[start..<min(start + 25, pending.count)])
+                    attempted.formUnion(batch)
+                    let resp = try await triageEmails(batch)
+                    guard gen == loadGeneration, triageGen == triageGeneration else { return }
+                    for entry in resp.buckets { next[entry.emailId] = entry }
+                    triage = next
+                }
+                // Pages can arrive while this call is suspended. Drain only
+                // new IDs: an omitted/failed classification must not loop.
+                pending = emails.map(\.id).filter { triage[$0] == nil && !attempted.contains($0) }
             }
         } catch {
             guard gen == loadGeneration else { return }

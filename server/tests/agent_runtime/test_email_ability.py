@@ -466,20 +466,21 @@ async def test_reserved_bcc_addresses_are_skipped_and_rate_limit_counts_recipien
 
 
 @pytest.mark.asyncio
-async def test_custom_organization_creates_then_applies_a_label(monkeypatch):
+@pytest.mark.parametrize("name", ["Follow up", "Follow  up", "Réponses  ⭐", "Nested/Follow  up"])
+async def test_custom_organization_creates_then_applies_a_label(monkeypatch, name):
     wire_store(monkeypatch)
     gmail = FakeGmail()
     client = FakeClient([
         response(call("read_email", {"message_id": "m1"})),
-        response(call("create_email_label", {"name": "Follow up"})),
-        response(call("label_email", {"message_ids": ["m1"], "label": "Follow up"})),
-        response(call("create_email_label", {"name": "Follow up"})),
+        response(call("create_email_label", {"name": name})),
+        response(call("label_email", {"message_ids": ["m1"], "label": name})),
+        response(call("create_email_label", {"name": name})),
         response(call("finish", FINISH)),
     ])
-    out = await run(client, gmail, _ctx("organize this under Follow up", scopes=BASE | {SCOPE_GMAIL_MODIFY}))
-    assert gmail.labels.count({"id": "Label_2", "name": "Follow up"}) == 1
+    out = await run(client, gmail, _ctx(f"organize this under {name}", scopes=BASE | {SCOPE_GMAIL_MODIFY}))
+    assert gmail.labels.count({"id": "Label_2", "name": name}) == 1
     assert gmail.modified == [(["m1"], ["Label_2"], None)]
-    assert len(out.receipts) == 3
+    assert [r["status"] for r in out.receipts] == ["done"] * 3
     with pytest.raises(ValueError):
         email.resolve_label({"name": " "}, RunState(started=0))
     with pytest.raises(ValueError):

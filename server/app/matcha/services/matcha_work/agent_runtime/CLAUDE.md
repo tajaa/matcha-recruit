@@ -100,7 +100,12 @@ it otherwise), and should declare `resolve`.
   refusal from the provider (an HTTP error status) is a definite failure.
 - **Ceilings count what may have happened.** `assistant.load_counts` sums
   `ok`, `claimed` and `unknown` steps, weighted (`weight`: one archive call can
-  be fifty actions).
+  be fifty actions). Before every commit (including approved resumes),
+  `store.claim_step` rechecks every window and inserts the claim in one short
+  READ COMMITTED transaction under an owner/tool advisory lock. Concurrent
+  conversations and workers share that allowance; provider calls run after
+  the reservation commits. Failed calls release their allowance on resolution;
+  crashes and unknown outcomes retain it until the window expires.
 - **`ASSISTANT_COMMIT_MODE` must be exactly `live`.** Anything else, unset
   included, is a dry run: the action is claimed, audited and shown as a
   receipt, and the handler is never called.

@@ -56,16 +56,7 @@ async def load_counts(conn, user_id: UUID, abilities) -> dict[tuple[str, int], i
     for ability in abilities:
         for tool in ability.tools:
             for _limit, window in tool.ceilings:
-                total = await conn.fetchval(
-                    """SELECT COALESCE(SUM(COALESCE(NULLIF(s.result->>'weight', '')::int, 1)), 0)
-                       FROM mw_project_agent_steps s
-                       JOIN mw_project_agent_runs r ON r.id = s.run_id
-                       WHERE r.requested_by = $1 AND s.kind IN ('commit', 'browse') AND s.tool = $2
-                         AND s.status IN ('ok', 'claimed', 'unknown')
-                         AND s.created_at > NOW() - make_interval(secs => $3)""",
-                    user_id, tool.name, float(window),
-                )
-                counts[(tool.name, window)] = int(total or 0)
+                counts[(tool.name, window)] = await store.count_commits(conn, user_id, tool.name, window)
     return counts
 
 

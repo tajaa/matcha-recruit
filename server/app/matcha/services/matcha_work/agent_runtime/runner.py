@@ -299,11 +299,25 @@ async def run_agent(
         state.seq += 1
         seq = state.seq
         title = str(preview.get("title") or tool.name)
-        step_id = await store.claim_step(
-            ctx.run_id, seq, tool.name, "commit", title[:200],
-            # `weight` is what the ceilings count: one call can be many actions.
-            _safe_for_audit(args), _safe_for_audit({**shown, "mode": ctx.commit_mode, "weight": weight}),
-        )
+        try:
+            step_id = await store.claim_step(
+                ctx.run_id, seq, tool.name, "commit", title[:200],
+                # `weight` is what the ceilings count: one call can be many actions.
+                _safe_for_audit(args), _safe_for_audit({**shown, "mode": ctx.commit_mode, "weight": weight}),
+                ceiling_user_id=ctx.user_id, ceilings=tool.ceilings,
+            )
+        except store.CommitCeilingExceeded as exc:
+            # The startup snapshot can be stale: another chat may have claimed
+            # the remaining allowance. No provider call or claim was made here.
+            state.seq -= 1
+            out = {"error": str(exc)}
+            await step(tool.name, "policy", f"Denied: {title}", args,
+                       {**shown, "reason": "ceiling"}, "denied")
+            if approved:
+                await post_receipt({"action": tool.name, "status": "failed", **preview,
+                                    "note": str(exc)[:300]})
+            return out, None
+
         # Counted from the claim, not the outcome: an `unknown` send may have gone out.
         state.commits[tool.name] = state.commits.get(tool.name, 0) + weight
         if ctx.commit_mode != "live":

@@ -14,7 +14,8 @@ struct AssistantView: View {
     @State private var channelId: String?
     @State private var conversations: [AssistantConversation] = []
     @State private var hasMore = false
-    @State private var loading = false
+    @State private var operations = AssistantOperationQueue()
+    private var loading: Bool { operations.loading }
     @State private var errorMessage: String?
     @State private var showAbilities = false
     @State private var showEditor = false
@@ -109,22 +110,19 @@ struct AssistantView: View {
     }
 
     private func open() async {
-        guard !loading else { return }
-        loading = true
-        errorMessage = nil
-        defer { loading = false }
-        do {
-            let fallback = try await MatchaWorkService.shared.ensureAssistantChannel()
-            try await reload()
-            if channelId == nil {
-                let saved = UserDefaults.standard.string(forKey: selectionKey)
-                select(conversations.first { $0.id == saved }?.id ?? conversations.first?.id ?? fallback)
-            }
-        } catch { report(error) }
-        // This creates an isolated email conversation and only prefills its composer.
-        // The person still supplies the instruction and sends the message.
-        loading = false
-        if acceptsEmailHandoff { await takeEmails() }
+        await operations.run {
+            errorMessage = nil
+            do {
+                let fallback = try await MatchaWorkService.shared.ensureAssistantChannel()
+                try await reload()
+                if channelId == nil {
+                    let saved = UserDefaults.standard.string(forKey: selectionKey)
+                    select(conversations.first { $0.id == saved }?.id ?? conversations.first?.id ?? fallback)
+                }
+            } catch { report(error) }
+            // Queued while loading, then drained when opening finishes.
+            if acceptsEmailHandoff { await takeEmails() }
+        }
     }
 
     private func reload() async throws {
@@ -134,49 +132,51 @@ struct AssistantView: View {
     }
 
     private func loadMore() async {
-        guard !loading else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let response = try await MatchaWorkService.shared.assistantConversations(offset: conversations.count)
-            let ids = Set(conversations.map(\.id))
-            conversations.append(contentsOf: response.conversations.filter { !ids.contains($0.id) })
-            hasMore = response.hasMore
-        } catch { report(error) }
+        await operations.run {
+            do {
+                let response = try await MatchaWorkService.shared.assistantConversations(offset: conversations.count)
+                let ids = Set(conversations.map(\.id))
+                conversations.append(contentsOf: response.conversations.filter { !ids.contains($0.id) })
+                hasMore = response.hasMore
+            } catch { report(error) }
+        }
     }
 
     private func saveConversation() async {
-        guard !loading else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let editing {
-                try await MatchaWorkService.shared.renameAssistantConversation(id: editing.id, title: name)
-            } else {
-                let id = try await MatchaWorkService.shared.createAssistantConversation(title: name, requestId: createKey)
-                select(id)
-            }
-            try await reload()
-            showEditor = false
-            errorMessage = nil
-        } catch { report(error) }
+        await operations.run {
+            do {
+                let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let editing {
+                    try await MatchaWorkService.shared.renameAssistantConversation(id: editing.id, title: name)
+                } else {
+                    let id = try await MatchaWorkService.shared.createAssistantConversation(title: name, requestId: createKey)
+                    select(id)
+                }
+                try await reload()
+                showEditor = false
+                errorMessage = nil
+            } catch { report(error) }
+        }
     }
 
     private func takeEmails() async {
-        guard !loading, let request = appState.pendingAssistantEmailContext else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let id = try await MatchaWorkService.shared.createAssistantConversation(
-                title: request.emails.count == 1 ? "Email conversation" : "\(request.emails.count) emails",
-                requestId: request.id)
-            try await reload()
-            select(id, draft: request.prompt)
-            if appState.pendingAssistantEmailContext?.id == request.id {
-                appState.pendingAssistantEmailContext = nil
-            }
-        } catch { report(error) }
+        await operations.takeEmails(
+            pending: { appState.pendingAssistantEmailContext },
+            create: { request in
+                let id = try await MatchaWorkService.shared.createAssistantConversation(
+                    title: request.emails.count == 1 ? "Email conversation" : "\(request.emails.count) emails",
+                    requestId: request.id)
+                try await reload()
+                return id
+            },
+            select: { select($0, draft: $1) },
+            consume: { id in
+                if appState.pendingAssistantEmailContext?.id == id {
+                    appState.pendingAssistantEmailContext = nil
+                }
+            },
+            report: report
+        )
     }
 
     private func report(_ error: Error) {

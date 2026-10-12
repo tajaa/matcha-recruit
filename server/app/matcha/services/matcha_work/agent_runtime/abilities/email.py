@@ -176,7 +176,7 @@ def resolve_bulk(args: dict, state: RunState) -> dict:
         "shown": [f"{known[i].get('from')}: {known[i].get('subject')}"[:160] for i in ids[:3]],
     }
     if args.get("label"):
-        resolved["label"] = " ".join(str(args["label"]).split())[:80]
+        resolved["label"] = resolve_label({"name": args["label"]}, state)["name"]
     return resolved
 
 

@@ -71,6 +71,26 @@ async def record_step(
         )
 
 
+class CommitCeilingExceeded(ValueError):
+    """Another conversation has already reserved this tool's allowance."""
+
+    def __init__(self, tool: str, limit: int):
+        super().__init__(f"That is past the limit of {limit} for {tool}. Try again later or do fewer at once.")
+
+
+async def count_commits(conn, user_id: UUID, tool: str, window: int) -> int:
+    total = await conn.fetchval(
+        """SELECT COALESCE(SUM(COALESCE(NULLIF(s.result->>'weight', '')::int, 1)), 0)
+           FROM mw_project_agent_steps s
+           JOIN mw_project_agent_runs r ON r.id = s.run_id
+           WHERE r.requested_by = $1 AND s.kind IN ('commit', 'browse') AND s.tool = $2
+             AND s.status IN ('ok', 'claimed', 'unknown')
+             AND s.created_at > NOW() - make_interval(secs => $3)""",
+        user_id, tool, float(window),
+    )
+    return int(total or 0)
+
+
 async def claim_step(
     run_id: UUID,
     seq: int,
@@ -79,13 +99,29 @@ async def claim_step(
     label: str,
     args: dict | None,
     result: dict | None,
+    *,
+    ceiling_user_id: UUID | None = None,
+    ceilings: tuple[tuple[int, int], ...] = (),
 ) -> UUID:
-    """Write a step as `claimed` BEFORE the action it records is attempted.
+    """Reserve allowance and write `claimed` BEFORE attempting an action.
 
-    An outward action that dies mid-call then still has a row saying it was
-    started, and `resolve_step` decides what became of it.
+    The short transaction serializes count + claim by owner/tool, across
+    conversations and workers. READ COMMITTED gives a waiter the preceding
+    claimant's committed row. The provider call happens after this commits;
+    a crash or uncertain result keeps consuming the claimed allowance.
     """
-    async with connection_or_direct() as conn:
+    async with connection_or_direct() as conn, conn.transaction(isolation="read_committed"):
+        if ceilings:
+            if ceiling_user_id is None:
+                raise ValueError("A ceiling reservation requires its owner.")
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                f"assistant-commit:{ceiling_user_id}:{tool}",
+            )
+            weight = max(1, int((result or {}).get("weight", 1)))
+            for limit, window in ceilings:
+                if await count_commits(conn, ceiling_user_id, tool, window) + weight > limit:
+                    raise CommitCeilingExceeded(tool, limit)
         return await conn.fetchval(
             """INSERT INTO mw_project_agent_steps
                (run_id, seq, tool, kind, label, args, result, status)
