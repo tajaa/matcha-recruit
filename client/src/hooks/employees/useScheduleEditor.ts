@@ -16,6 +16,7 @@ export type ScheduleSaveState = 'idle' | 'saving' | 'saved' | 'error'
 
 type ScheduleEditorOptions = {
   onMealBreakRequired?: (shift: Shift, employeeId: string, message: string) => void
+  onShiftRemoved?: () => void
 }
 
 /** `locationId` is required to fetch a week's shifts (the server won't serve
@@ -24,10 +25,11 @@ type ScheduleEditorOptions = {
 export function useScheduleEditor(weekStart: string, locationId: string, options: ScheduleEditorOptions = {}) {
   const { toast } = useToast()
   const onMealBreakRequired = options.onMealBreakRequired
+  const onShiftRemoved = options.onShiftRemoved
   const [shifts, setShifts] = useState<Shift[]>([])
   const [roster, setRoster] = useState<RosterEmployee[]>([])
   const [rosterFlags, setRosterFlags] = useState<RosterFlags | null>(null)
-  const [summary, setSummary] = useState<ScheduleSummary | null>(null)
+  const [weekSummary, setSummary] = useState<ScheduleSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [saveState, setSaveState] = useState<ScheduleSaveState>('idle')
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
@@ -36,7 +38,19 @@ export function useScheduleEditor(weekStart: string, locationId: string, options
   const mutationQueues = useRef(new Map<string, Promise<unknown>>())
   const pendingCounts = useRef(new Map<string, number>())
 
-  const reload = useCallback(async () => {
+  // Huume cancellations retain the row for history. Every board consumer
+  // gets the same live shifts, including after reload and publish responses.
+  const activeShifts = useMemo(() => shifts.filter((shift) => shift.status !== 'cancelled'), [shifts])
+  const summary = useMemo(() => weekSummary ? {
+    ...weekSummary,
+    total_shifts: activeShifts.length,
+    draft: activeShifts.filter((shift) => shift.status === 'draft').length,
+    published: activeShifts.filter((shift) => shift.status === 'published').length,
+    open_shifts: activeShifts.filter((shift) => shift.assignments.length < shift.required_staff).length,
+    assigned: activeShifts.reduce((total, shift) => total + shift.assignments.length, 0),
+  } : null, [activeShifts, weekSummary])
+
+  const reload = useCallback(async (showLoading = true) => {
     const version = ++requestVersion.current
     if (!locationId) {
       setShifts([])
@@ -46,7 +60,7 @@ export function useScheduleEditor(weekStart: string, locationId: string, options
       setLoading(false)
       return
     }
-    setLoading(true)
+    if (showLoading) setLoading(true)
     try {
       const week = await fetchWeek(weekStart, locationId)
       if (version !== requestVersion.current) return
@@ -60,6 +74,8 @@ export function useScheduleEditor(weekStart: string, locationId: string, options
   }, [weekStart, locationId])
 
   useEffect(() => {
+    // Fetch on scope changes; the synchronous updates only reset the loading state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload()
   }, [reload])
 
@@ -150,14 +166,6 @@ export function useScheduleEditor(weekStart: string, locationId: string, options
     (force) => createShift(payload, force),
     (result) => {
       setShifts((current) => [...current, result].sort((a, b) => Date.parse(a.starts_at) - Date.parse(b.starts_at)))
-      setSummary((current) => current ? {
-        ...current,
-        total_shifts: current.total_shifts + 1,
-        draft: current.draft + Number(result.status === 'draft'),
-        published: current.published + Number(result.status === 'published'),
-        open_shifts: current.open_shifts + Number(result.status !== 'cancelled' && result.assignments.length < result.required_staff),
-        assigned: current.assigned + result.assignments.length,
-      } : current)
     },
   ), [mutate])
 
@@ -213,18 +221,15 @@ export function useScheduleEditor(weekStart: string, locationId: string, options
       (force) => deleteShift(shift.id, force),
       () => {
         setShifts((current) => current.filter((item) => item.id !== shift.id))
-        setSummary((current) => current ? {
-          ...current,
-          total_shifts: current.total_shifts - 1,
-          draft: current.draft - Number(shift.status === 'draft'),
-          published: current.published - Number(shift.status === 'published'),
-          open_shifts: current.open_shifts - Number(shift.status !== 'cancelled' && shift.assignments.length < shift.required_staff),
-          assigned: current.assigned - shift.assignments.length,
-        } : current)
+        // Reprice on the server: deleting a shift can change overtime on
+        // other days, so subtracting this shift's cost is not sufficient.
+        setSummary((current) => current ? { ...current, cost: undefined } : current)
+        void reload(false).catch(() => { /* Keep the successful deletion; cost stays unavailable. */ })
+        onShiftRemoved?.()
       },
     )
     return result !== null
-  }, [mutate])
+  }, [mutate, onShiftRemoved, reload])
 
   const publishWeek = useCallback(async () => {
     setSaveState('saving')
@@ -244,11 +249,11 @@ export function useScheduleEditor(weekStart: string, locationId: string, options
   // One object per change, not per render: the Schedule Pilot passes this
   // whole to memoized panes, and the page re-renders on every composer keystroke.
   return useMemo(() => ({
-    shifts, roster, rosterFlags, summary, loading, saveState, lastSavedAt, pendingKeys,
+    shifts: activeShifts, roster, rosterFlags, summary, loading, saveState, lastSavedAt, pendingKeys,
     reload, createDraft, updateShiftDraft, moveShift, resizeShift, assignToShift,
     moveEmployee, unassignFromShift, removeShift, publishWeek,
   }), [
-    shifts, roster, rosterFlags, summary, loading, saveState, lastSavedAt, pendingKeys,
+    activeShifts, roster, rosterFlags, summary, loading, saveState, lastSavedAt, pendingKeys,
     reload, createDraft, updateShiftDraft, moveShift, resizeShift, assignToShift,
     moveEmployee, unassignFromShift, removeShift, publishWeek,
   ])
