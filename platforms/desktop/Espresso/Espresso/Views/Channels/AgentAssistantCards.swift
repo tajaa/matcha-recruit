@@ -176,7 +176,7 @@ extension AgentCardMessageView {
                     appState.openCalendar(at: CalendarWire.date(item.start), in: pane)
                 } label: {
                     itemRow(icon: "calendar", title: item.title, subtitle: Self.when(item.start, item.end),
-                            detail: [item.calendar == "google" ? "Google Calendar" : nil, item.location,
+                            detail: [item.calendar == "google" ? "Google Calendar" : item.calendar == "apple" ? "Apple Calendar" : nil, item.location,
                                      item.attendeeCount.flatMap { $0 > 0 ? "\($0) invited" : nil }]
                                 .compactMap { $0 }.joined(separator: " \u{00B7} "),
                             trailing: "chevron.right")

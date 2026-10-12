@@ -212,6 +212,7 @@ async def list_abilities(
         row = rows.get(ability.key)
         abilities.append({
             "key": ability.key,
+            "commit_mode": assistant_run.commit_mode(ability.key),
             "label": ability.label,
             "always_on": ability.consent_version is None,
             "enabled": ability.consent_version is None or ability.key in active,

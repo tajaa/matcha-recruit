@@ -34,13 +34,16 @@ DISCLOSURES: dict[str, Disclosure] = {
         ),
     ),
     "calendar": Disclosure(
-        version="calendar-openai-1",
+        version="calendar-openai-2",
         title="Let Espresso work with your calendar",
         body=(
-            "When you ask Espresso about your calendar, the events it reads (title, time, place "
-            "and attendees) are sent to OpenAI to be processed, with storage turned off.",
+            "When you ask Espresso about your calendar, the events it reads (title, time, place, "
+            "notes and attendees) are sent to OpenAI to be processed, with storage turned off.",
             "Espresso creates, changes and deletes events without asking first. Inviting someone "
             "you did not name needs your yes.",
+            "Apple Calendar sync shares selected events with your Espresso account while the "
+            "connected Mac is running. Personal event changes wait for that Mac; existing "
+            "invitations are read-only. Calendar settings shows whether a queued change finished.",
             "Every change is shown as a receipt in this conversation.",
         ),
     ),

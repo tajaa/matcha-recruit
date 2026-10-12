@@ -231,9 +231,11 @@ async def test_own_addresses_are_the_login_and_the_connected_mailbox(wired, monk
 @pytest.mark.asyncio
 async def test_dry_run_is_the_default_and_live_needs_the_exact_word(wired, monkeypatch):
     assert assistant.commit_mode() == "dry_run"
+    assert assistant.commit_mode("calendar") == "live"
     for value in ("", "LIVE", "true", "1", "live "):
         monkeypatch.setenv(assistant.COMMIT_MODE_ENV, value)
         assert assistant.commit_mode() == ("live" if value.strip() == "live" else "dry_run"), value
+        assert assistant.commit_mode("calendar") == assistant.commit_mode()
     monkeypatch.setenv(assistant.COMMIT_MODE_ENV, "live")
     assert assistant.commit_mode() == "live"
 
@@ -512,3 +514,28 @@ async def test_platform_setting_runs_the_assistant_on_claude(wired, monkeypatch)
     assert "store" not in fake.calls[0] and "chain" not in fake.calls[0]
     luna.assert_not_called()
     set_model.assert_awaited_once_with(run["id"], "claude-sonnet-5-5")
+
+
+@pytest.mark.asyncio
+async def test_native_calendar_capability_requires_current_private_consent(wired, monkeypatch):
+    from app.matcha.services.matcha_work import apple_calendar_service as apple
+    connected = AsyncMock(return_value={"calendars": [{"id": "home"}]})
+    monkeypatch.setattr(apple, "connection", connected)
+    grants.load_grants.return_value = {"calendar": {}}
+    client = wired.client(response(call("finish", FINISH)))
+    await assistant.run_assistant(_run(abilities=["calendar"]))
+    names = [t.get("name") for t in client.calls[0]["tools"]]
+    assert "list_apple_events" in names and "create_apple_event" in names
+    connected.assert_awaited_once()
+    connected.reset_mock()
+    grants.load_grants.return_value = {}
+    client = wired.client(response(call("finish", FINISH)))
+    await assistant.run_assistant(_run())
+    assert "list_apple_events" not in [t.get("name") for t in client.calls[0]["tools"]]
+    connected.assert_not_awaited()
+    grants.load_grants.return_value = {"calendar": {}}
+    conversation.is_private_conversation.return_value = False
+    client = wired.client(response(call("finish", FINISH)))
+    await assistant.run_assistant(_run(surface="project_chat"))
+    assert "list_apple_events" not in [t.get("name") for t in client.calls[0]["tools"]]
+    connected.assert_not_awaited()

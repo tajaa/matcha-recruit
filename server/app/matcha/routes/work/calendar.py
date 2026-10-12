@@ -21,9 +21,10 @@ from app.matcha.dependencies import get_client_company_id, require_admin_or_clie
 from app.matcha.models.matcha_work.calendar import (
     CalendarEventCreate,
     CalendarEventPatch,
-    CalendarPrefs,
+    CalendarPrefs, AppleConnection, AppleSnapshot, AppleActionResult,
 )
 from app.matcha.services.matcha_work import calendar_service as cal
+from app.matcha.services.matcha_work import apple_calendar_service as apple
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,12 @@ async def calendar_feed(
         await _google_events(current_user.id, begin.isoformat(), finish.isoformat())
         if include_google else {"status": "skipped", "events": []}
     )
-    return {"timezone": tz_name, "events": events, "todos": todos, "google": google}
+    try:
+        apple_feed = await apple.feed(current_user.id, begin, finish)
+    except Exception:
+        logger.warning("Apple Calendar feed unavailable", exc_info=True)
+        apple_feed = {"status": "error", "events": []}
+    return {"timezone": tz_name, "events": events, "todos": todos, "google": google, "apple": apple_feed}
 
 
 @router.post("/calendar/events", status_code=201)
@@ -180,3 +186,55 @@ async def set_calendar_prefs(
         return {"timezone": await cal.set_timezone(current_user.id, body.timezone)}
     except ValueError as exc:
         raise _bad(exc) from exc
+
+
+@router.get("/calendar/apple")
+async def apple_connection(current_user: CurrentUser = Depends(require_admin_or_client)):
+    row = await apple.connection(current_user.id)
+    if row is None:
+        return {"connected": False, "actions": []}
+    return {"connected": True, "connection_id": str(row["connection_id"]),
+            "calendars": row["calendars"], "destination": row["destination"],
+            "synced_at": row["synced_at"].isoformat() if row["synced_at"] else None,
+            "actions": await apple.recent(current_user.id)}
+
+
+@router.put("/calendar/apple")
+async def connect_apple(body: AppleConnection, current_user: CurrentUser = Depends(require_admin_or_client)):
+    if body.user_id != current_user.id:
+        raise HTTPException(409, "The signed-in account changed. Choose calendars again.")
+    try:
+        await apple.connect(current_user.id, body)
+    except ValueError as exc:
+        raise _bad(exc) from exc
+    return {"ok": True}
+
+
+@router.delete("/calendar/apple/{connection_id}")
+async def disconnect_apple(connection_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
+    await apple.disconnect(current_user.id, connection_id)
+    return {"ok": True}
+
+
+@router.put("/calendar/apple/snapshot")
+async def sync_apple(body: AppleSnapshot, current_user: CurrentUser = Depends(require_admin_or_client)):
+    try:
+        await apple.snapshot(current_user.id, body)
+    except ValueError as exc:
+        raise _bad(exc) from exc
+    return {"ok": True}
+
+
+@router.post("/calendar/apple/{connection_id}/claim")
+async def claim_apple(connection_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
+    try:
+        return {"actions": await apple.claim(current_user.id, connection_id)}
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.put("/calendar/apple/{connection_id}/actions/{action_id}")
+async def acknowledge_apple(connection_id: UUID, action_id: UUID, body: AppleActionResult,
+                            current_user: CurrentUser = Depends(require_admin_or_client)):
+    await apple.acknowledge(current_user.id, connection_id, action_id, body)
+    return {"ok": True}

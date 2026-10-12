@@ -42,7 +42,7 @@ describe('AssistantAbilities', () => {
     expect(screen.getByText('Always on')).toBeTruthy()
     expect(screen.getByText('Looks things up')).toBeTruthy()
     expect(screen.getByText(/Acts for you, only in this private conversation/)).toBeTruthy()
-    expect(screen.getByText(/nothing leaves yet/)).toBeTruthy()
+    expect(screen.getByText(/Some actions are in preview mode/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Switch on' })).toBeTruthy()
   })
 
@@ -56,7 +56,17 @@ describe('AssistantAbilities', () => {
     fireEvent.click(screen.getByRole('button', { name: 'I understand, switch it on' }))
     await waitFor(() => expect(mock.enable).toHaveBeenCalledWith('email', { consent_version: 'email-openai-1', settings: {} }))
     await waitFor(() => expect(mock.list).toHaveBeenCalledTimes(2))
-    expect(screen.queryByText(/nothing leaves yet/)).toBeNull()
+    expect(screen.queryByText(/Some actions are in preview mode/)).toBeNull()
+  })
+
+  it('shows live calendar changes independently of previewed email actions', async () => {
+    mock.list.mockResolvedValue(payload([
+      ability({ key: 'calendar', label: 'Calendar', enabled: true, available: true, commit_mode: 'live' }),
+      ability({ enabled: true, available: true, commit_mode: 'dry_run' }),
+    ]))
+    render(<AssistantAbilities onClose={() => {}} />)
+    expect(await screen.findByText('Changes are live')).toBeTruthy()
+    expect(screen.getByText('Changes are previewed only')).toBeTruthy()
   })
 
   it('closing the disclosure switches nothing on', async () => {

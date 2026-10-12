@@ -80,6 +80,7 @@ struct MWCalendarFeed: Codable {
     let events: [MWCalendarEvent]
     let todos: [MWCalendarTodo]
     let google: MWGoogleCalendarFeed
+    var apple: AppleCalendarFeed? = nil
 }
 
 /// One event the email agent proposes. Nothing is saved until the person keeps it.
@@ -144,4 +145,70 @@ enum CalendarWire {
     static func date(_ raw: String, calendar: Calendar = .current) -> Date? {
         raw.count == 10 ? day(raw, calendar: calendar) : instant(raw)
     }
+}
+
+
+struct AppleCalendarDescriptor: Codable, Identifiable, Hashable {
+    let id: String
+    let title: String
+    let editable: Bool
+}
+
+struct AppleCalendarEvent: Codable, Identifiable, Hashable {
+    let id: String
+    let calendar_id: String
+    let title: String
+    let start: String
+    let end: String
+    let all_day: Bool
+    let notes: String?
+    let location: String?
+    let modified: String
+    let editable: Bool
+}
+
+struct AppleCalendarFeed: Codable {
+    let status: String
+    let events: [AppleCalendarEvent]
+    let synced_at: String?
+}
+
+struct AppleCalendarConfiguration: Codable {
+    let user_id: String
+    let connection_id: UUID
+    let calendars: [AppleCalendarDescriptor]
+    let destination: String
+}
+
+struct AppleCalendarAction: Decodable, Identifiable {
+    struct Payload: Decodable {
+        struct Fields: Decodable {
+            let title: String?
+            let start: String?
+            let end: String?
+            let notes: String?
+            let location: String?
+            let all_day: Bool?
+        }
+        let event: AppleCalendarEvent?
+        let fields: Fields
+    }
+    let id: String
+    let operation: String
+    let payload: Payload
+}
+
+struct AppleCalendarStatus: Decodable {
+    struct Action: Decodable, Identifiable {
+        let id: String
+        let operation: String
+        let status: String
+        let error: String?
+    }
+    let connected: Bool
+    let connection_id: UUID?
+    let calendars: [AppleCalendarDescriptor]?
+    let destination: String?
+    let synced_at: String?
+    let actions: [Action]
 }

@@ -12,6 +12,7 @@ export type AssistantDisclosure = { version: string; title: string; body: string
 
 export type AssistantAbility = {
   key: string
+  commit_mode?: 'dry_run' | 'live'
   label: string
   /** Reading the web and comparing things to buy need nothing switched on. */
   always_on: boolean
@@ -34,7 +35,7 @@ export type AssistantAbility = {
 export type AssistantAbilities = {
   abilities: AssistantAbility[]
   google: { connected: boolean; scopes: string[] }
-  /** 'dry_run' until the server is switched to 'live': nothing leaves the system. */
+  /** Default for abilities without their own mode. Calendar consent enables live changes. */
   commit_mode: 'dry_run' | 'live'
 }
 

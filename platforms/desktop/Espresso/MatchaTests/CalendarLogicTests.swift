@@ -1,4 +1,5 @@
 import XCTest
+import EventKit
 @testable import Matcha
 
 /// The Calendar tab's and the email sheet's rules, with a fake backend and a
@@ -27,6 +28,48 @@ final class CalendarLogicTests: XCTestCase {
     private func clock(_ date: Date) -> Int {
         let c = la.dateComponents([.hour, .minute], from: date)
         return (c.hour ?? 0) * 60 + (c.minute ?? 0)
+    }
+
+    func testAppleSnapshotConvertsExclusiveAllDayEndsAcrossDST() {
+        let store = EKEventStore()
+        let source = EKCalendar(for: .event, eventStore: store)
+        for (start, end, lastDay) in [(date(2026, 3, 7), date(2026, 3, 10), "2026-03-09"),
+                                      (date(2026, 11, 1), date(2026, 11, 2), "2026-11-01")] {
+            let event = EKEvent(eventStore: store)
+            event.calendar = source
+            event.title = "Vacation"
+            event.isAllDay = true
+            event.startDate = start
+            event.endDate = end
+            let row = AppleCalendarSync.snapshot(event, calendar: la)
+            XCTAssertEqual(row.end, lastDay)
+            XCTAssertEqual(row.start, CalendarWire.dayString(start, calendar: la))
+            XCTAssertEqual(row.id.count, 64)
+        }
+    }
+
+    func testAppleFeedKeepsProviderIdentityAndInclusiveDays() async throws {
+        let backend = FakeCalendarBackend()
+        backend.apple = AppleCalendarFeed(status: "stale", events: [
+            AppleCalendarEvent(id: "a1", calendar_id: "home", title: "Trip", start: "2026-10-15", end: "2026-10-16",
+                all_day: true, notes: nil, location: "Home", modified: "v1", editable: true)
+        ], synced_at: nil)
+        let vm = CalendarViewModel(backend: backend, calendar: la, now: date(2026, 10, 15))
+        await vm.load()
+        XCTAssertEqual(vm.appleStatus, "stale")
+        for day in [date(2026, 10, 15), date(2026, 10, 16)] {
+            let entry = try XCTUnwrap(vm.entries(on: day).first)
+            XCTAssertEqual(entry.id, "a:a1")
+            XCTAssertEqual(entry.location, "Home")
+            XCTAssertNil(entry.espressoEvent)
+        }
+        XCTAssertTrue(vm.entries(on: date(2026, 10, 17)).isEmpty)
+    }
+
+    func testOlderServerFeedWithoutAppleStillDecodes() throws {
+        let raw = #"{"timezone":null,"events":[],"todos":[],"google":{"status":"not_connected","events":[]}}"#
+        let feed = try JSONDecoder().decode(MWCalendarFeed.self, from: Data(raw.utf8))
+        XCTAssertNil(feed.apple)
     }
 
     // MARK: - Email batch (review #1)
@@ -196,6 +239,7 @@ final class CalendarLogicTests: XCTestCase {
 private final class FakeCalendarBackend: CalendarBackend {
     var feedRequests: [(Date, Date)] = []
     var google: [MWGoogleCalendarEvent] = []
+    var apple: AppleCalendarFeed?
     var created: [CalendarService.EventFields] = []
     var updated: [(id: String, fields: CalendarService.EventFields)] = []
     var moved: [(id: String, start: String, end: String)] = []
@@ -205,7 +249,7 @@ private final class FakeCalendarBackend: CalendarBackend {
     func feed(from start: Date, to end: Date) async throws -> MWCalendarFeed {
         feedRequests.append((start, end))
         return MWCalendarFeed(timezone: "America/Los_Angeles", events: [], todos: [],
-                              google: MWGoogleCalendarFeed(status: "ok", events: google))
+                              google: MWGoogleCalendarFeed(status: "ok", events: google), apple: apple)
     }
 
     func createEvent(_ fields: CalendarService.EventFields, sourceKind: String,

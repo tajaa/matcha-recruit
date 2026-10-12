@@ -148,6 +148,8 @@ async def test_abilities_say_what_stands_in_the_way(wired, monkeypatch):
     assert by_key["reservations"]["reason"] == "Not set up on this server yet."
     assert out["google"] == {"connected": True, "scopes": sorted(GMAIL_SCOPES)}
     assert out["commit_mode"] == "dry_run"
+    assert by_key["calendar"]["commit_mode"] == "live"
+    assert by_key["email"]["commit_mode"] == "dry_run"
 
 
 @pytest.mark.asyncio

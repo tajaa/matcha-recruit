@@ -11,6 +11,7 @@ struct CalendarWorkspace: View {
     @State private var vm = CalendarViewModel()
     @State private var editor: CalendarEditorRequest?
     @State private var connectingGoogle = false
+    @State private var showConnections = false
     @AppStorage("calendar.mode") private var storedMode = CalendarViewModel.Mode.month.rawValue
 
     var body: some View {
@@ -18,6 +19,7 @@ struct CalendarWorkspace: View {
             CalendarHeader(vm: vm, connectingGoogle: connectingGoogle, compact: pane.isSide,
                            onNew: { newEvent(on: vm.selectedDay) },
                            onConnectGoogle: connectGoogle,
+                           onConnections: { showConnections = true },
                            onAsk: askEspresso)
             Divider().opacity(0.2)
             if let error = vm.errorMessage, vm.hasLoaded {
@@ -52,6 +54,11 @@ struct CalendarWorkspace: View {
                 vm.focus(date, load: false)
             }
             await vm.load()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard !Task.isCancelled else { break }
+                await vm.load()
+            }
         }
         .onChange(of: vm.mode) { _, mode in storedMode = mode.rawValue }
         // Each pane takes its own hand-off: a date sent to the main pane's
@@ -68,6 +75,15 @@ struct CalendarWorkspace: View {
                 connectingGoogle = false
                 Task { await vm.load() }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AppleCalendarSync.didSync)) { _ in
+            Task { await vm.load() }
+        }
+        .sheet(isPresented: $showConnections) {
+            VStack {
+                HStack { Text("Calendars").font(.headline); Spacer(); Button("Done") { showConnections = false } }.padding()
+                CalendarConnectionsView()
+            }.frame(width: 520, height: 560).environment(appState)
         }
         .sheet(item: $editor) { request in
             CalendarEventEditor(
@@ -148,6 +164,8 @@ struct CalendarWorkspace: View {
             if let raw = event.link, let url = URL(string: raw), url.scheme == "https" {
                 NSWorkspace.shared.open(url)
             }
+        case .apple:
+            if let url = URL(string: "ical://") { NSWorkspace.shared.open(url) }
         case .todo(let todo):
             Task { await vm.toggle(todo) }
         }
@@ -220,6 +238,7 @@ enum CalendarPalette {
         switch entry.kind {
         case .espresso: return accent
         case .google: return google
+        case .apple: return .orange
         case .todo: return secondary
         }
     }
@@ -236,6 +255,7 @@ private struct CalendarHeader: View {
     let compact: Bool
     let onNew: () -> Void
     let onConnectGoogle: () -> Void
+    let onConnections: () -> Void
     let onAsk: () -> Void
 
     private func shortcut(_ key: KeyEquivalent) -> KeyboardShortcut? {
@@ -269,9 +289,10 @@ private struct CalendarHeader: View {
                 ProgressView().controlSize(.small).padding(.leading, 2)
             }
             Spacer(minLength: compact ? 4 : 12)
-            if !compact {
-                googleStatus
-            }
+            Button(action: onConnections) {
+                Label("Calendars", systemImage: "calendar.badge.clock").font(.system(size: 11))
+            }.buttonStyle(.plain).help("Connect Google or Apple Calendar and manage Espresso access")
+            if !compact { appleStatus; googleStatus }
             if appState.assistantEnabled {
                 Button(action: onAsk) {
                     if compact {
@@ -349,6 +370,22 @@ private struct CalendarHeader: View {
         .buttonStyle(.plain)
         .foregroundColor(appState.themeTextSecondary)
         .help(help)
+    }
+
+    @ViewBuilder
+    private var appleStatus: some View {
+        if vm.appleStatus != "not_connected" {
+            let current = vm.appleStatus == "ok"
+            Button(action: onConnections) {
+                Label(current ? "Apple Calendar" : "Apple Calendar · \(vm.appleStatus.replacingOccurrences(of: "_", with: " "))",
+                      systemImage: current ? "calendar" : "exclamationmark.triangle")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(current ? appState.themeTextSecondary : .orange)
+            .help(current ? "Selected Mac calendars are synced. Ask Espresso to change personal events."
+                  : "This view may be incomplete or out of date. Open calendar settings for sync status.")
+        }
     }
 
     @ViewBuilder
@@ -1044,6 +1081,7 @@ private struct DayPanelRow: View {
             default: return nil
             }
         case .google: return "Google Calendar"
+        case .apple: return "Apple Calendar"
         case .todo: return nil
         }
     }
@@ -1052,6 +1090,7 @@ private struct DayPanelRow: View {
         switch entry.kind {
         case .espresso(let e): return e.sourceKind == "email" ? "envelope" : "sparkles"
         case .google: return "globe"
+        case .apple: return "calendar"
         case .todo: return "checklist"
         }
     }
@@ -1060,6 +1099,7 @@ private struct DayPanelRow: View {
         switch entry.kind {
         case .espresso: return "Open to edit"
         case .google: return "Open in Google Calendar"
+        case .apple: return "Open in Apple Calendar; ask Espresso to change personal events"
         case .todo: return ""
         }
     }

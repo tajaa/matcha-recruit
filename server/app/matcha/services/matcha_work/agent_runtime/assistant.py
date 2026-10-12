@@ -19,7 +19,7 @@ from app.core.services import agent_surfaces, anthropic_messages
 from app.matcha.services.huume.claude_client import get_claude_client
 from app.matcha.services.huume.luna_client import get_luna_client, text_item
 
-from .. import calendar_service
+from .. import calendar_service, apple_calendar_service
 from ..agent_card import agent as card_agent
 from ..agent_card import images
 from ..project_agent import store
@@ -41,11 +41,13 @@ LIMITS = RunLimits(max_model_calls=10, wall_seconds=330.0)
 FAILED = "I couldn't finish that. {reason}"
 
 
-def commit_mode() -> str:
-    """`live` only when the environment says exactly that. Anything else,
-    unset included, is a dry run: the action is claimed, audited and shown as
-    a receipt, and the outside world is not touched."""
-    return "live" if os.getenv(COMMIT_MODE_ENV, "").strip() == "live" else "dry_run"
+def commit_mode(ability_key: str | None = None) -> str:
+    """Calendar consent is sufficient by default. An explicit server mode
+    still overrides it; other outward abilities keep their preview default."""
+    configured = os.getenv(COMMIT_MODE_ENV)
+    if configured is None and ability_key == "calendar":
+        return "live"
+    return "live" if (configured or "").strip() == "live" else "dry_run"
 
 
 async def load_counts(conn, user_id: UUID, abilities) -> dict[tuple[str, int], int]:
@@ -129,9 +131,11 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         active = await grants.load_grants(conn, user_id) if private else {}
         if active:
             await gmail.load_token()
+        apple = await apple_calendar_service.connection(user_id) if "calendar" in active else None
+        scopes = gmail.granted_scopes | ({apple_calendar_service.SCOPE} if apple_calendar_service.configured(apple) else set())
         situation = catalog.Situation(
             private=private, grants=active,
-            google_connected=gmail.is_configured, granted_scopes=gmail.granted_scopes,
+            google_connected=gmail.is_configured, granted_scopes=frozenset(scopes),
             # The worker's claim query carries who asked (role, email).
             allowed=catalog.allowances_for(SimpleNamespace(
                 role=run.get("requester_role"), email=run.get("requester_email"),
@@ -187,7 +191,7 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
             grounding=policy.Grounding(user_texts=own_texts, own_addresses=own),
         ),
         granted_scopes=situation.granted_scopes, grants=active,
-        commit_mode=commit_mode(), resume=frozen, resume_prompt_id=run.get("resume_prompt_id"),
+        commit_mode=commit_mode(), commit_modes={a.key: commit_mode(a.key) for a in abilities}, resume=frozen, resume_prompt_id=run.get("resume_prompt_id"),
         on_receipt=on_receipt,
         # Nothing from the private conversation is stored by the provider: even
         # a run without mail or calendar replays earlier answers built from them.

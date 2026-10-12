@@ -10,7 +10,7 @@ import AppKit
 /// card") can pick the tab before it opens the Settings window, and so an
 /// already-open window switches to it.
 enum SettingsTab: String {
-    case notifications, appearance, account, connectors, paymentCards, shipping, about
+    case notifications, appearance, account, connectors, calendars, paymentCards, shipping, about
 
     static let storageKey = "espresso.settingsTab"
 
@@ -60,6 +60,9 @@ struct SettingsView: View {
             AccountSettingsTab()
                 .tabItem { Label("Account", systemImage: "person.circle") }
                 .tag(SettingsTab.account.rawValue)
+            CalendarConnectionsView()
+                .tabItem { Label("Calendars", systemImage: "calendar") }
+                .tag(SettingsTab.calendars.rawValue)
             ConnectorsSettingsTab()
                 .tabItem { Label("AI Connectors", systemImage: "powerplug") }
                 .tag(SettingsTab.connectors.rawValue)

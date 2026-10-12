@@ -293,6 +293,7 @@ struct AssistantAbilitiesSheet: View {
     @State private var errorMessage: String?
     @State private var busyKey: String?
     @State private var consenting: AssistantAbility?
+    @State private var showCalendars = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -308,7 +309,7 @@ struct AssistantAbilitiesSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     if data?.isDryRun == true {
-                        Label("Dry run: Espresso shows what it would send or book, and nothing leaves yet.",
+                        Label("Some actions are in preview mode. Each ability below shows whether its changes are live.",
                               systemImage: "exclamationmark.triangle.fill")
                             .font(.system(size: 11))
                             .foregroundColor(.orange)
@@ -335,6 +336,12 @@ struct AssistantAbilitiesSheet: View {
         .onChange(of: appState.foregroundTick) {
             // Back from Google's consent in the browser: read the list again.
             Task { await load() }
+        }
+        .sheet(isPresented: $showCalendars) {
+            VStack {
+                HStack { Text("Calendars").font(.headline); Spacer(); Button("Done") { showCalendars = false } }.padding()
+                CalendarConnectionsView()
+            }.frame(width: 520, height: 560).environment(appState)
         }
         .sheet(item: $consenting) { ability in
             AssistantConsentSheet(ability: ability) { contact in
@@ -374,18 +381,26 @@ struct AssistantAbilitiesSheet: View {
                   systemImage: ability.acts ? "lock.fill" : "magnifyingglass")
                 .font(.system(size: 11))
                 .foregroundColor(appState.themeTextSecondary)
-            if ability.enabled && ability.available && !ability.needsConnection {
+            if ability.enabled && ability.acts {
+                Text((ability.commitMode ?? data?.commitMode) == "live" ? "Changes are live" : "Changes are previewed only")
+                    .font(.system(size: 11)).foregroundColor(appState.themeTextSecondary)
+            }
+            if ability.key == "calendar" {
+                Button("Connect and manage calendars…") { showCalendars = true }
+                    .controlSize(.small)
+            }
+            if ability.enabled && ability.available && (!ability.needsConnection || ability.key == "calendar") {
                 Label("Ready", systemImage: "checkmark.circle.fill")
                     .font(.system(size: 11))
                     .foregroundColor(.green)
             }
-            if ability.enabled, let reason = ability.reason {
+            if ability.enabled, ability.key != "calendar", let reason = ability.reason {
                 Text(reason)
                     .font(.system(size: 11))
                     .foregroundColor(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if ability.enabled && ability.needsConnection {
+            if ability.enabled && ability.needsConnection && ability.key != "calendar" {
                 Button(data?.google.connected == true ? "Reconnect Google" : "Connect Google") {
                     Task { await connect(ability) }
                 }
