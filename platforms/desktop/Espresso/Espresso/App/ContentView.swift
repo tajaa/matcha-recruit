@@ -130,6 +130,7 @@ struct ContentView: View {
             ToolbarItem(placement: .status) {
                 if let user = appState.currentUser {
                     HStack(spacing: 8) {
+                        QuickNoteButton()
                         SidePaneToolbarButton()
                         Button {
                             showNotifications.toggle()
@@ -182,20 +183,17 @@ struct ContentView: View {
     /// The top region of the detail area: primary pane alone, or primary +
     /// secondary side by side when `splitTarget` is set. Pulled out so it can
     /// nest inside the outer VSplitView once a bottom pane is open.
-    @ViewBuilder
     private var topPanes: some View {
-        if let split = appState.splitTarget {
-            HSplitView {
-                // The side pane opens narrower than the main one: it's the
-                // reference beside the work, not the work.
-                PrimaryDetailPane()
-                    .frame(minWidth: 360, idealWidth: 760, maxWidth: .infinity, maxHeight: .infinity)
-                    .layoutPriority(1)
+        HSplitView {
+            // Keep the primary view mounted when a pane opens or closes,
+            // preserving its editor, draft and undo history.
+            PrimaryDetailPane()
+                .frame(minWidth: 360, idealWidth: 760, maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1)
+            if let split = appState.splitTarget {
                 SidePane(slot: .right, target: split)
                     .frame(minWidth: 400, idealWidth: 440, maxWidth: .infinity, maxHeight: .infinity)
             }
-        } else {
-            PrimaryDetailPane()
         }
     }
 

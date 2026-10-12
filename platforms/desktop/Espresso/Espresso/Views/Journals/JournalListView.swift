@@ -317,13 +317,11 @@ extension SlashBlock {
     static let diagram    = SlashBlock(id: "diagram",    title: "Diagram (Mermaid)", subtitle: "Flowchart / graph", icon: "point.3.connected.trianglepath.dotted", keywords: ["mermaid", "graph", "chart", "flow"], insert: .snippet("\n```mermaid\ngraph TD\n  A[Start] --> B[End]\n```\n"))
 }
 
-// MARK: - Journals workspace (macOS Notes / Evernote, three columns)
+// MARK: - Journals workspace
 
-/// The Journals surface: folder rail · journal list (title + snippet + modified
-/// date) · document editor. Folders are colorable + nestable; journals are
-/// color-coded by document type and open in the embedded per-kind editor
-/// (markdown or screenplay). The col-3 selection is LOCAL — picking a journal must
-/// not route the primary pane away from this workspace.
+/// A journal browser beside the document, with folders available on demand.
+/// Narrow panes put the browser in a popover so the editor keeps its space.
+/// Selection stays local; browsing never navigates another pane.
 struct JournalsWorkspace: View {
     @Environment(AppState.self) private var appState
 
@@ -336,15 +334,17 @@ struct JournalsWorkspace: View {
     @State private var collapsed: Set<String> = []
     @AppStorage("journals.listSort") private var sortRaw: String = SortKey.modified.rawValue
     @State private var search = ""
-    @State private var selectedJournalId: String? = nil       // local col-3 selection
+    @State private var selectedJournalId: String? = nil
+    @State private var focusNewNoteId: String?
     @State private var renamingFolderId: String? = nil
     @State private var renamingJournalId: String? = nil
     @State private var renameText = ""
     @State private var hasLoaded = false
     @State private var errorMessage: String?
-    @AppStorage("journals.folderRailCollapsed") private var folderRailCollapsed = false
-    /// Folded while a side pane is open; never touches the setting above.
-    @State private var railFoldedForPane = false
+    @State private var showFolders = false
+    @State private var showBrowser = false
+    @State private var browserHidden = false
+    @State private var isCreating = false
     /// Rail row a dragged journal is hovering ("uncategorized" or a folder id).
     @State private var dropTarget: String? = nil
     @State private var scrollTarget: String? = nil
@@ -362,21 +362,31 @@ struct JournalsWorkspace: View {
     private var sort: SortKey { SortKey(rawValue: sortRaw) ?? .modified }
 
     var body: some View {
-        HSplitView {
-            if folderRailCollapsed || railFoldedForPane {
-                MWHubRailStrip { folderRailCollapsed = false; railFoldedForPane = false }
-            } else {
-                folderRail.frame(minWidth: 190, idealWidth: 220, maxWidth: 280)
+        GeometryReader { geometry in
+            let compact = geometry.size.width < 760
+            HStack(spacing: 0) {
+                if !compact && !browserHidden {
+                    noteList.frame(width: 280)
+                    Divider().opacity(0.2)
+                }
+                // Keep the editor in the same structural position when the
+                // browser folds, preserving the draft, selection and undo.
+                VStack(spacing: 0) {
+                    workspaceHeader(compact: compact)
+                    Divider().opacity(0.2)
+                    if compact || browserHidden, let errorMessage { errorBanner(errorMessage) }
+                    editorPane
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            noteList.frame(minWidth: 260, idealWidth: 310, maxWidth: 400)
-            editorPane.frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(ThemeRadialBackground())
-        .foldsRailForSidePane($railFoldedForPane)
         // ⌘N anywhere in the workspace — the list header's compose button is
         // a menu, which can't carry a shortcut of its own.
         .background {
             Button("New journal") { Task { await createNote(.note) } }
+                .disabled(isCreating)
                 .keyboardShortcut("n", modifiers: .command)
                 .opacity(0)
                 .frame(width: 0, height: 0)
@@ -401,7 +411,35 @@ struct JournalsWorkspace: View {
         }
     }
 
-    // ── Folder rail ─────────────────────────────────────────────────────
+    private func workspaceHeader(compact: Bool) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                if compact { showBrowser.toggle() } else { browserHidden.toggle() }
+            } label: {
+                Label(compact ? "Browse journals" : "Journals", systemImage: "sidebar.left")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(appState.themeTextSecondary)
+            }
+            .buttonStyle(.plain)
+            .help(compact ? "Browse journals" : (browserHidden ? "Show journal list" : "Hide journal list"))
+            .popover(isPresented: $showBrowser, arrowEdge: .bottom) {
+                noteList.frame(width: 320, height: 480)
+                    .environment(appState)
+            }
+            Spacer(minLength: 4)
+            Button { Task { await createNote(.note) } } label: {
+                Label("New note", systemImage: "square.and.pencil")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(appState.themeAccent)
+            }
+            .buttonStyle(.plain)
+            .disabled(isCreating)
+            .help("Start a blank note here")
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+    }
+
+    // ── Folder picker ───────────────────────────────────────────────────
 
     private var folderRail: some View {
         let counts = railCounts
@@ -411,7 +449,7 @@ struct JournalsWorkspace: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(appState.themeTextSecondary)
                 Spacer()
-                MWHubRailIconButton(icon: "sidebar.left", help: "Hide folders") { folderRailCollapsed = true }
+                MWHubRailIconButton(icon: "xmark", help: "Close folders") { showFolders = false }
             }
             .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 8)
 
@@ -448,6 +486,7 @@ struct JournalsWorkspace: View {
                 }
                 .padding(.horizontal, 8).padding(.bottom, 12)
             }
+            if let errorMessage { errorBanner(errorMessage) }
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(appState.themeSidebar)
@@ -476,7 +515,7 @@ struct JournalsWorkspace: View {
     private func smartRow(_ target: FolderMode, title: String, icon: String, count: Int) -> some View {
         let selected = mode == target
         let isDrop = target == .uncategorized && dropTarget == "uncategorized"
-        return Button { mode = target } label: {
+        return Button { mode = target; showFolders = false } label: {
             JournalRailRow(icon: icon,
                            iconColor: selected ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary,
                            selected: selected, count: count, isDropTarget: isDrop) {
@@ -523,7 +562,7 @@ struct JournalsWorkspace: View {
                     }
                 }
             } else {
-                Button { mode = .folder(folder.id) } label: {
+                Button { mode = .folder(folder.id); showFolders = false } label: {
                     JournalRailRow(depth: depth, icon: "folder.fill", iconColor: tint, selected: isSel,
                                    count: count, isDropTarget: dropTarget == folder.id) {
                         Text(folder.name)
@@ -533,7 +572,6 @@ struct JournalsWorkspace: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .simultaneousGesture(TapGesture(count: 2).onEnded { startFolderRename(folder) })
                 .dropDestination(for: String.self) { items, _ in
                     handleDrop(items, into: folder.id)
                 } isTargeted: { setDropTarget(folder.id, $0) }
@@ -616,10 +654,22 @@ struct JournalsWorkspace: View {
     private var listHeader: some View {
         VStack(spacing: 10) {
             HStack(spacing: 6) {
-                Text(listTitle)
-                    .font(.system(size: 13, weight: .bold))
+                Button { showFolders.toggle() } label: {
+                    HStack(spacing: 5) {
+                        Text(listTitle)
+                            .font(.system(size: 13, weight: .bold))
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
                     .foregroundColor(appState.themeText)
-                    .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .help("Choose a folder or manage journals")
+                .popover(isPresented: $showFolders, arrowEdge: .bottom) {
+                    folderRail.frame(width: 270, height: 430)
+                        .environment(appState)
+                }
                 Text(countLabel)
                     .font(.system(size: 11))
                     .monospacedDigit()
@@ -654,6 +704,7 @@ struct JournalsWorkspace: View {
                 .menuIndicator(.visible)
                 .fixedSize()
                 .tint(appState.themeAccent)
+                .disabled(isCreating)
                 .help("New journal (⌘N) · arrow for templates")
             }
 
@@ -729,6 +780,7 @@ struct JournalsWorkspace: View {
         } else {
             Button {
                 selectedJournalId = j.id
+                showBrowser = false
                 listFocused = true
             } label: {
                 row(AnyView(
@@ -900,13 +952,15 @@ struct JournalsWorkspace: View {
     @ViewBuilder
     private var editorPane: some View {
         if let jid = selectedJournalId {
-            JournalDetailView(journalId: jid, isEmbedded: true)
+            JournalDetailView(journalId: jid, isEmbedded: true, focusOnLoad: focusNewNoteId == jid)
         } else {
-            JournalsStartPane(
-                kinds: Self.creatableKinds,
-                destination: newJournalDestination,
-                tint: { kindTint($0) },
-            ) { kind in Task { await createNote(kind) } }
+            ScrollView {
+                JournalsStartPane(
+                    kinds: Self.creatableKinds,
+                    destination: newJournalDestination,
+                    tint: { kindTint($0) },
+                ) { kind in Task { await createNote(kind) } }
+            }
         }
     }
 
@@ -1199,20 +1253,29 @@ struct JournalsWorkspace: View {
     }
 
     private func createNote(_ kind: JournalKind) async {
+        guard !isCreating, let ownerId = appState.currentUser?.id else { return }
+        isCreating = true
+        defer { isCreating = false }
+        let folderId = currentFolderId
+        let unfiled = mode == .uncategorized
         do {
             let j = try await MatchaWorkService.shared.createJournal(
                 title: "", description: nil, color: nil, icon: nil,
-                kind: kind.rawValue, folderId: currentFolderId,
-                explicitlyUnfiled: mode == .uncategorized,
+                kind: kind.rawValue, folderId: folderId,
+                explicitlyUnfiled: unfiled,
             )
+            guard appState.currentUser?.id == ownerId else { return }
             appState.journalsListGeneration &+= 1
             await load()
-            // Starred / Shared views can't show a brand-new journal; jump to
-            // where it was filed so the rename field is on screen.
+            guard appState.currentUser?.id == ownerId else { return }
+            // Starred / Shared views can't show a brand-new journal.
             if mode == .starred || mode == .shared { mode = .all }
             search = ""
+            focusNewNoteId = j.id
             selectedJournalId = j.id
-            startNoteRename(j)
+            renamingJournalId = nil
+            showFolders = false
+            showBrowser = false
         } catch { errorMessage = error.localizedDescription }
     }
 

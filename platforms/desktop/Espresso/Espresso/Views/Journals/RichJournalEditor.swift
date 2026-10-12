@@ -26,6 +26,8 @@ struct RichJournalEditor: NSViewRepresentable {
     /// Body text color — theme-derived so the editor is legible on light themes
     /// (the old hardcoded white was invisible on platinum/light).
     var textColor: NSColor = .labelColor
+    /// Capture can start immediately when a new note opens in a pane.
+    var focusOnLoad = false
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
@@ -58,6 +60,11 @@ struct RichJournalEditor: NSViewRepresentable {
         context.coordinator.bind(tv: tv)
         controller.textView = tv
         applyMarkdownStyling(to: tv)
+        if focusOnLoad {
+            let focusAnchor = JournalEditorFocusAnchor()
+            focusAnchor.editor = tv
+            scroll.addSubview(focusAnchor)
+        }
         return scroll
     }
 
@@ -109,6 +116,25 @@ struct RichJournalEditor: NSViewRepresentable {
             .foregroundColor: textColor,
             .paragraphStyle: para,
         ]
+    }
+}
+
+/// A representable can be created before AppKit attaches it to its window.
+/// Set this window's responder after attachment without activating the app.
+private final class JournalEditorFocusAnchor: NSView {
+    weak var editor: NSTextView?
+    private var didFocus = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil, !didFocus else { return }
+        DispatchQueue.main.async { [weak self] in self?.focusIfReady() }
+    }
+
+    private func focusIfReady() {
+        guard !didFocus, let window, let editor,
+              editor.window === window else { return }
+        didFocus = window.makeFirstResponder(editor)
     }
 }
 
