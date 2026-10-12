@@ -110,6 +110,7 @@ class AppState {
     /// The journal open in the main pane's Journals workspace, which keeps its
     /// own selection. Mirrored here only so swapping panes takes that journal.
     var mainJournalsSelection: String? = nil
+    var journalFolderSelection: JournalFolderSelection = .all
     /// Full-pane "Browse Channels" surface. Reached from the sidebar Channels
     /// section header. Mutually exclusive with thread/project/channel/journal
     /// selection — toggling on clears those.

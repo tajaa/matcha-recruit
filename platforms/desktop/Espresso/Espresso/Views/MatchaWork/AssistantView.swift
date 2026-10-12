@@ -23,39 +23,70 @@ struct AssistantView: View {
     @State private var title = ""
     @State private var createKey = UUID()
     @State private var initialDraft = ""
+    @State private var sessionSearch = ""
+    @State private var showSessionPicker = false
 
     private var selectionKey: String { "assistant.conversation.\(appState.currentUser?.id ?? "")" }
 
     var body: some View {
+        GeometryReader { geometry in
+            let compact = geometry.size.width < 680
+            HStack(spacing: 0) {
+                if !compact {
+                    sessionsPanel.frame(width: 220)
+                    Divider()
+                }
+                conversationPane(compact: compact)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(appState.themeBg)
+        .task { await open() }
+        .onChange(of: appState.pendingAssistantEmailContext?.id) { _, _ in
+            if acceptsEmailHandoff { Task { await takeEmails() } }
+        }
+        .sheet(isPresented: $showAbilities) {
+            AssistantAbilitiesSheet().environment(appState)
+        }
+        .sheet(isPresented: $showEditor) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(editing == nil ? "New session" : "Rename session").font(.headline)
+                TextField("Name", text: $title).textFieldStyle(.roundedBorder)
+                if let errorMessage { Text(errorMessage).foregroundColor(.orange).font(.caption) }
+                HStack {
+                    Spacer()
+                    Button("Cancel") { showEditor = false }.keyboardShortcut(.cancelAction)
+                    Button("Save") { Task { await saveConversation() } }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(loading || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || title.count > 100)
+                }
+            }.padding(16).frame(width: 360)
+        }
+    }
+
+    private func conversationPane(compact: Bool) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Menu {
-                    ForEach(conversations) { item in
-                        Button(item.title) { select(item.id) }
+                if compact {
+                    Button { showSessionPicker.toggle() } label: {
+                        Label("Sessions", systemImage: "sidebar.left")
                     }
-                    if hasMore {
-                        Button("Load older conversations") { Task { await loadMore() } }
+                    .popover(isPresented: $showSessionPicker, arrowEdge: .bottom) {
+                        sessionsPanel.frame(width: 260, height: 430).environment(appState)
                     }
-                } label: {
-                    Label(conversations.first { $0.id == channelId }?.title ?? "Conversations",
-                          systemImage: "bubble.left.and.bubble.right")
-                        .lineLimit(1)
+                } else {
+                    Text(conversations.first { $0.id == channelId }?.title ?? "Espresso")
+                        .font(.system(size: 12, weight: .semibold)).lineLimit(1)
                 }
-                .menuStyle(.borderlessButton)
-                .frame(maxWidth: 280)
-                Spacer()
+                Spacer(minLength: 4)
                 Button("Rename") {
-                    editing = conversations.first { $0.id == channelId }
-                    title = editing?.title ?? ""
-                    showEditor = true
+                    if let item = conversations.first(where: { $0.id == channelId }) { editSession(item) }
                 }
                 .disabled(channelId == nil || loading)
-                Button {
-                    editing = nil
-                    title = "New conversation"
-                    createKey = UUID()
-                    showEditor = true
-                } label: { Label("New chat", systemImage: "square.and.pencil") }
+                Button(action: newSession) {
+                    Image(systemName: "square.and.pencil")
+                }
+                .help("New session").accessibilityLabel("New session")
                 .disabled(loading)
             }
             .controlSize(.small)
@@ -79,33 +110,80 @@ struct AssistantView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(appState.themeBg)
-        .task { await open() }
-        .onChange(of: appState.pendingAssistantEmailContext?.id) { _, _ in
-            if acceptsEmailHandoff { Task { await takeEmails() } }
-        }
-        .sheet(isPresented: $showAbilities) {
-            AssistantAbilitiesSheet().environment(appState)
-        }
-        .sheet(isPresented: $showEditor) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(editing == nil ? "New conversation" : "Rename conversation").font(.headline)
-                TextField("Name", text: $title).textFieldStyle(.roundedBorder)
-                if let errorMessage { Text(errorMessage).foregroundColor(.orange).font(.caption) }
-                HStack {
-                    Spacer()
-                    Button("Cancel") { showEditor = false }.keyboardShortcut(.cancelAction)
-                    Button("Save") { Task { await saveConversation() } }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(loading || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || title.count > 100)
+    }
+
+    private var sessionsPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Sessions").font(.system(size: 13, weight: .semibold))
+            Button(action: newSession) { Label("New session", systemImage: "plus") }
+                .buttonStyle(.borderedProminent).tint(appState.themeAccent)
+                .disabled(loading)
+            TextField("Filter sessions", text: $sessionSearch)
+                .textFieldStyle(.roundedBorder).controlSize(.small)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 3) {
+                    ForEach(visibleSessions) { item in
+                        Button { select(item.id) } label: {
+                            HStack(spacing: 7) {
+                                Image(systemName: "bubble.left.and.bubble.right")
+                                Text(item.title).lineLimit(2).multilineTextAlignment(.leading)
+                                Spacer(minLength: 0)
+                                if item.id == channelId { Image(systemName: "checkmark").font(.system(size: 9)) }
+                            }
+                            .font(.system(size: 11))
+                            .foregroundColor(item.id == channelId ? appState.themeAccent : appState.themeTextSecondary)
+                            .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(item.id == channelId ? appState.themeAccent.opacity(0.09) : .clear,
+                                        in: RoundedRectangle(cornerRadius: 6))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Rename session") { editSession(item) }.disabled(loading)
+                        }
+                    }
+                    if loading && conversations.isEmpty { ProgressView().controlSize(.small).padding(8) }
+                    if !loading && visibleSessions.isEmpty {
+                        Text(sessionSearch.isEmpty ? "No sessions yet" : "No matching sessions")
+                            .font(.system(size: 11)).foregroundColor(appState.themeTextSecondary).padding(8)
+                    }
+                    if hasMore {
+                        Button("Load older sessions") { Task { await loadMore() } }
+                            .font(.system(size: 11)).disabled(loading).padding(8)
+                    }
                 }
-            }.padding(16).frame(width: 360)
+            }
+            Spacer(minLength: 0)
         }
+        .padding(12)
+        .background(appState.themeSidebar)
+    }
+
+    private var visibleSessions: [AssistantConversation] {
+        let query = sessionSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty ? conversations : conversations.filter { $0.title.localizedCaseInsensitiveContains(query) }
+    }
+
+    private func newSession() {
+        editing = nil
+        title = "New session"
+        createKey = UUID()
+        showSessionPicker = false
+        showEditor = true
+    }
+
+    private func editSession(_ item: AssistantConversation) {
+        editing = item
+        title = item.title
+        showSessionPicker = false
+        showEditor = true
     }
 
     private func select(_ id: String, draft: String = "") {
         initialDraft = draft
         channelId = id
+        sessionSearch = ""
+        showSessionPicker = false
         UserDefaults.standard.set(id, forKey: selectionKey)
     }
 

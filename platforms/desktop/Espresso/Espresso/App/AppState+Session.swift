@@ -109,6 +109,7 @@ extension AppState {
         paneCalendarFocusDate = nil
         panePendingEmailId = nil
         mainJournalsSelection = nil
+        journalFolderSelection = .all
         // Panes and pop-out windows show the last person's things (a file
         // pane holds a signed URL): none of it survives into the next session.
         splitTarget = nil

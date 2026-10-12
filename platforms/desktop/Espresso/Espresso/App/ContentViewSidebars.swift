@@ -370,3 +370,106 @@ struct SidebarStarredView: View {
         await MainActor.run { pins = out }
     }
 }
+
+/// Personal journal folders directly beneath the Journals navigation row.
+struct JournalsSidebarFolders: View {
+    @Environment(AppState.self) private var appState
+    @State private var folders: [MWJournalFolder] = []
+    @State private var collapsed = Set<String>()
+    @State private var loading = false
+    @State private var failed = false
+    @State private var loadGeneration = 0
+
+    var body: some View {
+        VStack(spacing: 1) {
+            smartRow("All journals", icon: "tray", selection: .all)
+            smartRow("Unfiled", icon: "tray.full", selection: .uncategorized)
+            ForEach(JournalFolderTree.visible(folders, collapsed: collapsed), id: \.folder.id) { item in
+                folderRow(item.folder, depth: item.depth)
+            }
+            if loading && folders.isEmpty {
+                ProgressView().controlSize(.mini).padding(8)
+            } else if failed {
+                Button("Couldn't load folders — Retry") { Task { await load() } }
+                    .font(.system(size: 10)).foregroundColor(appState.themeSidebarTextSecondary)
+                    .buttonStyle(.plain).padding(8)
+            } else if folders.isEmpty {
+                Text("No folders yet")
+                    .font(.system(size: 10)).foregroundColor(appState.themeSidebarTextSecondary)
+                    .padding(8)
+            }
+        }
+        .padding(.leading, 18).padding(.trailing, 6)
+        .task(id: appState.journalsListGeneration) { await load() }
+    }
+
+    private func smartRow(_ title: String, icon: String, selection: JournalFolderSelection) -> some View {
+        Button { open(selection) } label: {
+            rowLabel(title, icon: icon, selected: isSelected(selection))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func folderRow(_ folder: MWJournalFolder, depth: Int) -> some View {
+        HStack(spacing: 0) {
+            if folders.contains(where: { $0.parentId == folder.id }) {
+                Button {
+                    if !collapsed.insert(folder.id).inserted { collapsed.remove(folder.id) }
+                } label: {
+                    Image(systemName: collapsed.contains(folder.id) ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 8)).frame(width: 16, height: 25)
+                }
+                .buttonStyle(.plain).foregroundColor(appState.themeSidebarTextSecondary)
+                .help(collapsed.contains(folder.id) ? "Expand folder" : "Collapse folder")
+            } else {
+                Color.clear.frame(width: 16)
+            }
+            Button { open(.folder(folder.id)) } label: {
+                rowLabel(folder.name, icon: "folder", selected: isSelected(.folder(folder.id)))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.leading, CGFloat(depth) * 12)
+    }
+
+    private func rowLabel(_ title: String, icon: String, selected: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).frame(width: 14)
+            Text(title).lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 11))
+        .foregroundColor(selected ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
+        .padding(.horizontal, 6).padding(.vertical, 5)
+        .background(selected ? appState.themeSidebarAccent.opacity(0.08) : .clear,
+                    in: RoundedRectangle(cornerRadius: 5))
+        .contentShape(Rectangle())
+    }
+
+    private func isSelected(_ selection: JournalFolderSelection) -> Bool {
+        appState.showJournalsHub && appState.journalFolderSelection == selection
+    }
+
+    private func open(_ selection: JournalFolderSelection) {
+        appState.clearPrimaryNav()
+        appState.journalFolderSelection = selection
+        appState.showJournalsHub = true
+    }
+
+    private func load() async {
+        loadGeneration += 1
+        let generation = loadGeneration
+        let owner = appState.currentUser?.id
+        loading = true
+        defer { if generation == loadGeneration { loading = false } }
+        do {
+            let response = try await MatchaWorkService.shared.listJournalFolders()
+            guard generation == loadGeneration, owner == appState.currentUser?.id, !Task.isCancelled else { return }
+            folders = response
+            failed = false
+        } catch {
+            guard generation == loadGeneration, owner == appState.currentUser?.id, !Task.isCancelled else { return }
+            failed = true
+        }
+    }
+}

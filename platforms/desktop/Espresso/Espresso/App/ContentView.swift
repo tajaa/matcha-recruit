@@ -387,13 +387,12 @@ struct ContentView: View {
         .cornerRadius(6)
     }
 
-    /// A single nav-only sidebar row: clicking it opens that surface's
-    /// full-pane hub. The sidebar lists NO individual items and no create
-    /// "+" controls — browsing, organizing, and creating all live in the hub
-    /// itself (only the Starred pins strip surfaces specific items).
+    /// A surface row opens its full-pane hub. Journals also discloses its
+    /// folder tree directly beneath the row.
     @ViewBuilder
     private func sidebarNavRow(
         title: String, icon: String, isActive: Bool,
+        isExpanded: Bool? = nil,
         // When set, the row renders a lock and opens the paywall (with this
         // feature key) instead of navigating. nil = unlocked.
         lockedFeature: String? = nil,
@@ -425,6 +424,11 @@ struct ContentView: View {
                         .foregroundColor(appState.themeSidebarTextSecondary.opacity(0.7))
                 }
                 Spacer(minLength: 0)
+                if let isExpanded {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.espresso(size: 9))
+                        .foregroundColor(appState.themeSidebarTextSecondary)
+                }
             }
             .contentShape(Rectangle())
         }
@@ -470,7 +474,12 @@ struct ContentView: View {
     /// Open the Journals hub — the Obsidian-style parent module that houses all
     /// journals in a folder tree. Clears the other nav surfaces so the hub takes
     /// the primary pane.
-    private func openJournalsHub()  { appState.clearPrimaryNav(); appState.showJournalsHub = true }
+    private func openJournalsHub() {
+        let wasActive = appState.showJournalsHub || appState.selectedJournalId != nil
+        journalsSectionOpen = wasActive ? !journalsSectionOpen : true
+        appState.clearPrimaryNav()
+        appState.showJournalsHub = true
+    }
     private func openProjectsHub()  { appState.clearPrimaryNav(); appState.showProjectsHub = true }
     private func openThreadsHub()   { appState.clearPrimaryNav(); appState.showThreadsHub = true }
     private func openChannelsHub()  { appState.clearPrimaryNav(); appState.showChannelsHub = true }
@@ -478,13 +487,19 @@ struct ContentView: View {
     private func openEmailHub()     { appState.clearPrimaryNav(); appState.showEmailHub = true }
     private func openAssistantHub() { appState.clearPrimaryNav(); appState.showAssistantHub = true }
 
-    /// Nav-only row — opens the full-pane Notes-style Journals workspace
-    /// (folders · note list · editor). Browsing/organizing lives in the
-    /// workspace, not the sidebar.
+    /// Clicking Journals opens its workspace and reveals the same folder tree
+    /// in the app sidebar. A second click folds it without leaving Journals.
     @ViewBuilder
     private var journalsSidebarSection: some View {
-        sidebarNavRow(title: "Journals", icon: "book.closed",
-                      isActive: appState.showJournalsHub, paneTarget: .journals, onOpen: openJournalsHub)
+        VStack(spacing: 2) {
+            sidebarNavRow(title: "Journals", icon: "book.closed",
+                          isActive: appState.showJournalsHub || appState.selectedJournalId != nil,
+                          isExpanded: journalsSectionOpen, paneTarget: .journals, onOpen: openJournalsHub)
+            if journalsSectionOpen {
+                JournalsSidebarFolders()
+                    .id(appState.currentUser?.id)
+            }
+        }
     }
 
     /// Nav-only row — opens the Calendar (Espresso events, dated to-dos and

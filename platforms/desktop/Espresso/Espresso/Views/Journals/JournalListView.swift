@@ -321,16 +321,15 @@ extension SlashBlock {
 
 /// A journal browser beside the document, with folders available on demand.
 /// Narrow panes put the browser in a popover so the editor keeps its space.
-/// Selection stays local; browsing never navigates another pane.
+/// The folder filter follows the app sidebar; the open document stays local.
 struct JournalsWorkspace: View {
     @Environment(AppState.self) private var appState
 
-    enum FolderMode: Equatable { case all, starred, shared, uncategorized, folder(String) }
+    typealias FolderMode = JournalFolderSelection
     enum SortKey: String, CaseIterable { case modified = "Date Modified", created = "Date Created", title = "Title" }
 
     @State private var folders: [MWJournalFolder] = []
     @State private var journals: [MWJournal] = []
-    @State private var mode: FolderMode = .all
     @State private var collapsed: Set<String> = []
     @AppStorage("journals.listSort") private var sortRaw: String = SortKey.modified.rawValue
     @State private var search = ""
@@ -360,6 +359,10 @@ struct JournalsWorkspace: View {
     private static let dragPrefix = "espresso-journal:"
 
     private var sort: SortKey { SortKey(rawValue: sortRaw) ?? .modified }
+    private var mode: FolderMode {
+        get { appState.journalFolderSelection }
+        nonmutating set { appState.journalFolderSelection = newValue }
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -530,17 +533,7 @@ struct JournalsWorkspace: View {
 
     /// DFS-ordered (folder, depth) honoring collapse state.
     private var visibleFolders: [(MWJournalFolder, Int)] {
-        var out: [(MWJournalFolder, Int)] = []
-        func walk(_ parent: String?, _ depth: Int) {
-            let kids = folders.filter { $0.parentId == parent }
-                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            for k in kids {
-                out.append((k, depth))
-                if !collapsed.contains(k.id) { walk(k.id, depth + 1) }
-            }
-        }
-        walk(nil, 0)
-        return out
+        JournalFolderTree.visible(folders, collapsed: collapsed)
     }
 
     private func hasChildren(_ id: String) -> Bool { folders.contains { $0.parentId == id } }
@@ -1206,7 +1199,7 @@ struct JournalsWorkspace: View {
             journals = try await j
             errorMessage = nil
             hasLoaded = true
-            if case .folder(let id) = mode, !folders.contains(where: { $0.id == id }) { mode = .all }
+            mode = mode.validated(in: folders)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1222,6 +1215,7 @@ struct JournalsWorkspace: View {
             if let parent { collapsed.remove(parent) }
             await load()
             startFolderRename(f)
+            appState.journalsListGeneration &+= 1
         } catch { errorMessage = error.localizedDescription }
     }
 
@@ -1236,6 +1230,7 @@ struct JournalsWorkspace: View {
 
     private func setFolderColor(_ folder: MWJournalFolder, _ color: String) async {
         _ = try? await MatchaWorkService.shared.updateJournalFolder(id: folder.id, color: color)
+        appState.journalsListGeneration &+= 1
         await load()
     }
 
@@ -1248,6 +1243,7 @@ struct JournalsWorkspace: View {
         guard !name.isEmpty, name != folders.first(where: { $0.id == id })?.name else { return }
         Task {
             _ = try? await MatchaWorkService.shared.renameJournalFolder(id: id, name: name)
+            appState.journalsListGeneration &+= 1
             await load()
         }
     }
