@@ -21,6 +21,7 @@ def _svc():
     svc = GmailService(uuid4())
     svc._gmail_post = AsyncMock(return_value={"id": "gmail-1"})
     svc._check_send_rate = AsyncMock(return_value=None)
+    svc._check_recipient_rate = AsyncMock(return_value=None)
     return svc
 
 
@@ -149,6 +150,8 @@ async def test_both_windows_are_checked_per_user(monkeypatch):
     assert seen == [
         (str(user), "gmail_send_60s", 5, 60),
         (str(user), "gmail_send_3600s", 50, 3600),
+        (str(user), "gmail_recipients_3600s", 100, 3600),
+        (str(user), "gmail_recipients_86400s", 200, 86400),
     ]
 
 
@@ -200,3 +203,53 @@ async def test_gmail_delete_issues_an_authorized_delete(monkeypatch):
     svc._get_headers = AsyncMock(return_value={"Authorization": "Bearer tok"})
     await svc._gmail_delete("/users/me/drafts/d1")
     assert seen == [("DELETE", f"{gmail_service.GMAIL_API_BASE}/users/me/drafts/d1", "Bearer tok")]
+
+
+@pytest.mark.asyncio
+async def test_bcc_lists_are_folded_and_round_trip_without_visible_recipients():
+    from email import policy
+    from email.parser import BytesParser
+    recipients = [f"person-{i}@example.com" for i in range(50)]
+    svc = _svc()
+    for method in (svc.send_email, svc.create_draft):
+        await method(to="", subject="Café ☕", body="Bonjour", bcc=", ".join(recipients))
+        path, payload = svc._gmail_post.await_args.args
+        raw = payload["message"]["raw"] if path.endswith("drafts") else payload["raw"]
+        decoded = base64.urlsafe_b64decode(raw)
+        message = BytesParser(policy=policy.default).parsebytes(decoded)
+        assert message["To"] is None
+        assert [a.addr_spec for a in message["Bcc"].addresses] == recipients
+        assert str(message["Subject"]) == "Café ☕"
+        assert all(len(line) < 998 for line in decoded.split(b"\r\n"))
+
+
+@pytest.mark.asyncio
+async def test_bcc_header_injection_is_refused_before_sending():
+    svc = _svc()
+    with pytest.raises(ValueError):
+        await svc.send_email(to="", subject="Hi", body="Body", bcc="a@example.com\r\nTo: b@example.com")
+    svc._check_send_rate.assert_not_awaited()
+    svc._gmail_post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recipient_limits_hold_across_concurrent_batches(fresh_limits):
+    import asyncio
+    user = uuid4()
+    bcc = ", ".join(f"p{i}@example.com" for i in range(50))
+    services = [_live(user) for _ in range(3)]
+    outcomes = await asyncio.gather(*(
+        svc.send_email(to="", subject="Update", body="News", bcc=bcc) for svc in services
+    ), return_exceptions=True)
+    assert sum(isinstance(out, GmailSendRateLimited) for out in outcomes) == 1
+    assert sum(svc._gmail_post.await_count for svc in services) == 2
+
+
+@pytest.mark.asyncio
+async def test_custom_label_validation_and_transport():
+    svc = _svc()
+    await svc.create_label("  Follow up ☕  ")
+    svc._gmail_post.assert_awaited_once_with("/users/me/labels", {"name": "Follow up ☕"})
+    for name in (" ", "x" * 81, "a\nb"):
+        with pytest.raises(ValueError):
+            await svc.create_label(name)

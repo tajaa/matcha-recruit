@@ -93,3 +93,35 @@ struct AssistantAbilities: Decodable {
 
     var isDryRun: Bool { commitMode != "live" }
 }
+
+
+struct AssistantConversation: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let updatedAt: String?
+    enum CodingKeys: String, CodingKey {
+        case id, title
+        case updatedAt = "updated_at"
+    }
+}
+
+struct AssistantConversationList: Decodable {
+    let conversations: [AssistantConversation]
+    let hasMore: Bool
+    enum CodingKeys: String, CodingKey {
+        case conversations
+        case hasMore = "has_more"
+    }
+}
+
+/// IDs only: mail bodies and sender-controlled text stay out of the user's prompt.
+struct AssistantEmailContext: Identifiable {
+    let id = UUID()
+    let emails: [EmailMessage]
+    var prompt: String {
+        let refs = emails.map { message in
+            "- Message \(message.id)" + (message.threadId.map { " (thread \($0))" } ?? "")
+        }.joined(separator: "\n")
+        return "Help me work with these Gmail messages. Read the relevant messages before drafting replies or organizing them.\n\n\(refs)\n\nMy instructions: "
+    }
+}

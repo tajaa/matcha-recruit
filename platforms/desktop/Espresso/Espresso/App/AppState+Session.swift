@@ -104,6 +104,8 @@ extension AppState {
         showCalendarHub = false
         calendarFocusDate = nil
         pendingEmailId = nil
+        pendingAssistantEmailContext = nil
+        EmailViewModel.shared.resetSession()
         paneCalendarFocusDate = nil
         panePendingEmailId = nil
         mainJournalsSelection = nil

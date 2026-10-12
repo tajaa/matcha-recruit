@@ -13,6 +13,8 @@ import re
 import time
 from email.errors import HeaderParseError
 from email.header import decode_header, make_header
+from email.message import EmailMessage as MIMEMessage
+from email.policy import SMTP
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
@@ -115,6 +117,7 @@ def addresses_in(header_value: str | None) -> set[str]:
 
 # (limit, window seconds, label) — per user, however many requests or workers.
 SEND_RATE_LIMITS = ((5, 60, "5 emails per minute"), (50, 3600, "50 emails per hour"))
+RECIPIENT_RATE_LIMITS = ((100, 3600), (200, 86400))
 
 
 class GmailSendRateLimited(RuntimeError):
@@ -316,6 +319,30 @@ class GmailService:
         results = await _aio.gather(*[_fetch_one(s) for s in stubs])
         return [r for r in results if r is not None]
 
+    async def fetch_page(self, mailbox: str = "unread", page_token: str | None = None) -> dict:
+        """A page of 25 messages; reading never changes Gmail's read status."""
+        import asyncio
+        queries = {"unread": "is:unread", "read": "is:read", "all": ""}
+        if mailbox not in queries:
+            raise ValueError("Unknown mailbox")
+        await self.load_token()
+        params = {"maxResults": "25", "q": queries[mailbox]}
+        if page_token:
+            params["pageToken"] = page_token
+        data = await self._gmail_get("/users/me/messages", params=params)
+
+        async def one(stub):
+            try:
+                return await self.get_message(stub["id"])
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 404:
+                    return None  # deleted between listing and reading
+                raise  # keep the old cursor on auth, quota or transport failure
+
+        results = await asyncio.gather(*(one(s) for s in data.get("messages", [])))
+        return {"emails": [r for r in results if r is not None],
+                "next_page_token": data.get("nextPageToken")}
+
     async def search(self, query: str, max_results: int = 20) -> list[dict]:
         """Messages matching a Gmail search (`from:dana newer_than:7d`), newest
         first, without bodies."""
@@ -399,6 +426,11 @@ class GmailService:
         data = await self._gmail_get("/users/me/labels")
         return [{"id": l.get("id"), "name": l.get("name")} for l in data.get("labels") or []]
 
+    async def create_label(self, name: str) -> dict:
+        if not name.strip() or len(name) > 80 or "\r" in name or "\n" in name:
+            raise ValueError("Label names must be 1-80 characters on one line")
+        return await self._gmail_post("/users/me/labels", {"name": name.strip()})
+
     async def get_message(self, msg_id: str, *, include_html: bool = False) -> dict:
         """One message. `include_html` adds the raw HTML part (`body_html`)
         for the reader. Nothing else needs it, and building it for a list of
@@ -443,24 +475,32 @@ class GmailService:
             f"/users/me/messages/{msg_id}/modify", {"removeLabelIds": ["UNREAD"]}
         )
 
-    def _build_raw(self, to: str, subject: str, body: str, in_reply_to: str | None) -> str:
+    def _build_raw(self, to: str, subject: str, body: str, in_reply_to: str | None, *, bcc: str | None = None) -> str:
         """RFC 822 message, base64url-encoded the way Gmail's `raw` field wants.
 
         `in_reply_to` is the ORIGINAL message's `Message-ID` header value (angle
         brackets included), never Gmail's hex message id — that one only goes in
         the API-level `threadId`.
         """
-        for field_name, value in [("to", to), ("subject", subject)]:
+        for field_name, value in [("to", to), ("subject", subject), ("bcc", bcc or "")]:
             if "\r" in value or "\n" in value:
                 raise ValueError(f"Email {field_name} contains newline characters")
         if in_reply_to and ("\r" in in_reply_to or "\n" in in_reply_to):
             raise ValueError("Email in_reply_to contains newline characters")
 
-        lines = [f"To: {to}", f"Subject: {subject}", "Content-Type: text/plain; charset=utf-8"]
+        # The stdlib folds long recipient headers and encodes Unicode subjects.
+        # One pasted list must not produce an RFC 5322 over-length header line.
+        message = MIMEMessage(policy=SMTP)
+        if to:
+            message["To"] = to
+        message["Subject"] = subject
+        message["Content-Type"] = "text/plain; charset=utf-8"
+        if bcc:
+            message["Bcc"] = bcc
         if in_reply_to:
-            lines += [f"In-Reply-To: {in_reply_to}", f"References: {in_reply_to}"]
-        lines += ["", body]
-        return base64.urlsafe_b64encode("\r\n".join(lines).encode()).decode()
+            message["In-Reply-To"] = in_reply_to
+            message["References"] = in_reply_to
+        return base64.urlsafe_b64encode(message.as_bytes() + body.encode("utf-8")).decode()
 
     async def create_draft(
         self,
@@ -471,13 +511,14 @@ class GmailService:
         *,
         thread_id: str | None = None,
         in_reply_to: str | None = None,
+        bcc: str | None = None,
     ) -> dict:
         """Save a Gmail draft. `thread_id` keeps it in the conversation;
         `in_reply_to` threads it for other mail clients. `reply_to_id` is the
         legacy positional form (a Gmail message id used as the thread id — only
         correct for a thread's first message); it no longer writes a bogus
         In-Reply-To header."""
-        raw = self._build_raw(to, subject, body, in_reply_to)
+        raw = self._build_raw(to, subject, body, in_reply_to, bcc=bcc)
         draft_body: dict = {"message": {"raw": raw}}
         thread = thread_id or reply_to_id
         if thread:
@@ -493,11 +534,13 @@ class GmailService:
         *,
         thread_id: str | None = None,
         in_reply_to: str | None = None,
+        bcc: str | None = None,
     ) -> dict:
         """Send now. Same threading contract as create_draft."""
         # Validate first, so a refused header doesn't spend the allowance.
-        raw = self._build_raw(to, subject, body, in_reply_to)
+        raw = self._build_raw(to, subject, body, in_reply_to, bcc=bcc)
         await self._check_send_rate()
+        await self._check_recipient_rate(len(addresses_in(to) | addresses_in(bcc)))
         send_body: dict = {"raw": raw}
         thread = thread_id or reply_to_id
         if thread:
@@ -525,6 +568,23 @@ class GmailService:
                 await check_rate_limit(str(self.user_id), f"gmail_send_{window}s", limit, window)
             except HTTPException as exc:
                 raise GmailSendRateLimited(f"Send rate limit: max {label}") from exc
+
+    async def _check_recipient_rate(self, count: int) -> None:
+        """Reserve recipient attempts across concurrent chats and workers.
+
+        The shared store increments atomically. A batch that is refused partway
+        through conservatively spends its reserved attempts; no mail is sent.
+        The agent's audit-based ceilings alone cannot serialize different chats.
+        """
+        from fastapi import HTTPException
+        from app.core.services.redis_cache import check_rate_limit
+
+        for limit, window in RECIPIENT_RATE_LIMITS:
+            try:
+                for _ in range(count):
+                    await check_rate_limit(str(self.user_id), f"gmail_recipients_{window}s", limit, window)
+            except HTTPException as exc:
+                raise GmailSendRateLimited(f"Send rate limit: max {limit} recipients per {window // 3600} hours") from exc
 
     def _part_text(self, part: dict) -> str | None:
         """One MIME part's body, decoded with the charset its Content-Type

@@ -315,7 +315,8 @@ async def test_ceilings_count_what_may_have_happened(wired):
     user = uuid4()
     counts = await assistant.load_counts(conn, user, [email.build(gmail_factory=lambda ctx: None)])
     assert counts == {("send_email", 3600): 7, ("send_email", 86400): 7,
-                      ("archive_email", 3600): 7, ("label_email", 3600): 7}
+                      ("archive_email", 3600): 7, ("label_email", 3600): 7,
+                      ("create_email_label", 3600): 7}
     query = conn.calls[0][1]
     assert "s.status IN ('ok', 'claimed', 'unknown')" in query and "result->>'weight'" in query
     assert conn.calls[0][2] == (user, "send_email", 3600.0)

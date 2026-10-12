@@ -5,64 +5,185 @@ import AppKit
 ///
 /// It is a channel underneath, so the messages, the cards and the quick
 /// replies are the chat's own (`ChannelDetailView`). What this adds is the way
-/// in (the conversation is created on first open) and the sheet where
+/// in (named conversations, created separately) and the sheet where
 /// abilities are switched on. Every message here is addressed to Espresso: no
 /// mention is needed.
 struct AssistantView: View {
+    var acceptsEmailHandoff = false
     @Environment(AppState.self) private var appState
     @State private var channelId: String?
+    @State private var conversations: [AssistantConversation] = []
+    @State private var hasMore = false
+    @State private var loading = false
     @State private var errorMessage: String?
     @State private var showAbilities = false
+    @State private var showEditor = false
+    @State private var editing: AssistantConversation?
+    @State private var title = ""
+    @State private var createKey = UUID()
+    @State private var initialDraft = ""
+
+    private var selectionKey: String { "assistant.conversation.\(appState.currentUser?.id ?? "")" }
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Menu {
+                    ForEach(conversations) { item in
+                        Button(item.title) { select(item.id) }
+                    }
+                    if hasMore {
+                        Button("Load older conversations") { Task { await loadMore() } }
+                    }
+                } label: {
+                    Label(conversations.first { $0.id == channelId }?.title ?? "Conversations",
+                          systemImage: "bubble.left.and.bubble.right")
+                        .lineLimit(1)
+                }
+                .menuStyle(.borderlessButton)
+                .frame(maxWidth: 280)
+                Spacer()
+                Button("Rename") {
+                    editing = conversations.first { $0.id == channelId }
+                    title = editing?.title ?? ""
+                    showEditor = true
+                }
+                .disabled(channelId == nil || loading)
+                Button {
+                    editing = nil
+                    title = "New conversation"
+                    createKey = UUID()
+                    showEditor = true
+                } label: { Label("New chat", systemImage: "square.and.pencil") }
+                .disabled(loading)
+            }
+            .controlSize(.small)
+            .padding(10)
+            Divider()
+            if let errorMessage {
+                HStack {
+                    Text(errorMessage).font(.system(size: 11)).foregroundColor(.orange)
+                    Spacer()
+                    Button("Try again") { Task { await open() } }.controlSize(.small)
+                }.padding(10)
+            }
             if let channelId {
                 ChannelDetailView(
                     channelId: channelId, isEmbedded: true, isAssistant: true,
-                    onOpenAbilities: { showAbilities = true }
+                    onOpenAbilities: { showAbilities = true }, initialDraft: initialDraft
                 )
-            } else if let errorMessage {
-                VStack(spacing: 10) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 22))
-                        .foregroundColor(.red)
-                    Text(errorMessage)
-                        .font(.system(size: 12))
-                        .foregroundColor(appState.themeTextSecondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
-                    Button("Try again") { Task { await open() } }
-                        .buttonStyle(.borderedProminent)
-                        .tint(appState.themeAccent)
-                        .controlSize(.small)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .id(channelId) // a switch must reset composer, replies, attachments and socket VM
             } else {
-                ProgressView()
-                    .controlSize(.small)
+                ProgressView().controlSize(.small)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .background(appState.themeBg)
         .task { await open() }
+        .onChange(of: appState.pendingAssistantEmailContext?.id) { _, _ in
+            if acceptsEmailHandoff { Task { await takeEmails() } }
+        }
         .sheet(isPresented: $showAbilities) {
-            AssistantAbilitiesSheet()
-                .environment(appState)
+            AssistantAbilitiesSheet().environment(appState)
+        }
+        .sheet(isPresented: $showEditor) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(editing == nil ? "New conversation" : "Rename conversation").font(.headline)
+                TextField("Name", text: $title).textFieldStyle(.roundedBorder)
+                if let errorMessage { Text(errorMessage).foregroundColor(.orange).font(.caption) }
+                HStack {
+                    Spacer()
+                    Button("Cancel") { showEditor = false }.keyboardShortcut(.cancelAction)
+                    Button("Save") { Task { await saveConversation() } }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(loading || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || title.count > 100)
+                }
+            }.padding(16).frame(width: 360)
         }
     }
 
+    private func select(_ id: String, draft: String = "") {
+        initialDraft = draft
+        channelId = id
+        UserDefaults.standard.set(id, forKey: selectionKey)
+    }
+
     private func open() async {
+        guard !loading else { return }
+        loading = true
         errorMessage = nil
+        defer { loading = false }
         do {
-            channelId = try await MatchaWorkService.shared.ensureAssistantChannel()
-        } catch let error as APIError {
-            if let plan = error.planRequirement {
-                appState.presentPaywall(for: plan.feature)
+            let fallback = try await MatchaWorkService.shared.ensureAssistantChannel()
+            try await reload()
+            if channelId == nil {
+                let saved = UserDefaults.standard.string(forKey: selectionKey)
+                select(conversations.first { $0.id == saved }?.id ?? conversations.first?.id ?? fallback)
             }
+        } catch { report(error) }
+        // This creates an isolated email conversation and only prefills its composer.
+        // The person still supplies the instruction and sends the message.
+        loading = false
+        if acceptsEmailHandoff { await takeEmails() }
+    }
+
+    private func reload() async throws {
+        let response = try await MatchaWorkService.shared.assistantConversations()
+        conversations = response.conversations
+        hasMore = response.hasMore
+    }
+
+    private func loadMore() async {
+        guard !loading else { return }
+        loading = true
+        defer { loading = false }
+        do {
+            let response = try await MatchaWorkService.shared.assistantConversations(offset: conversations.count)
+            let ids = Set(conversations.map(\.id))
+            conversations.append(contentsOf: response.conversations.filter { !ids.contains($0.id) })
+            hasMore = response.hasMore
+        } catch { report(error) }
+    }
+
+    private func saveConversation() async {
+        guard !loading else { return }
+        loading = true
+        defer { loading = false }
+        do {
+            let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let editing {
+                try await MatchaWorkService.shared.renameAssistantConversation(id: editing.id, title: name)
+            } else {
+                let id = try await MatchaWorkService.shared.createAssistantConversation(title: name, requestId: createKey)
+                select(id)
+            }
+            try await reload()
+            showEditor = false
+            errorMessage = nil
+        } catch { report(error) }
+    }
+
+    private func takeEmails() async {
+        guard !loading, let request = appState.pendingAssistantEmailContext else { return }
+        loading = true
+        defer { loading = false }
+        do {
+            let id = try await MatchaWorkService.shared.createAssistantConversation(
+                title: request.emails.count == 1 ? "Email conversation" : "\(request.emails.count) emails",
+                requestId: request.id)
+            try await reload()
+            select(id, draft: request.prompt)
+            if appState.pendingAssistantEmailContext?.id == request.id {
+                appState.pendingAssistantEmailContext = nil
+            }
+        } catch { report(error) }
+    }
+
+    private func report(_ error: Error) {
+        if let error = error as? APIError {
+            if let plan = error.planRequirement { appState.presentPaywall(for: plan.feature) }
             errorMessage = AssistantText.message(for: error)
-        } catch {
-            errorMessage = "Couldn't open your conversation with Espresso."
-        }
+        } else { errorMessage = "Couldn't open your conversation with Espresso." }
     }
 }
 

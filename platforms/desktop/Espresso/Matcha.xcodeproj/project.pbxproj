@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		EAAF00000000000000000001 /* EmailWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAAF00000000000000000002 /* EmailWorkspaceTests.swift */; };
 		A5515700000000000000B004 /* AssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5515700000000000000F003 /* AssistantView.swift */; };
 		A5515700000000000000B003 /* AgentAssistantCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5515700000000000000F002 /* AgentAssistantCards.swift */; };
 		A5515700000000000000B001 /* AssistantModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5515700000000000000F001 /* AssistantModels.swift */; };
@@ -443,6 +444,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		EAAF00000000000000000002 /* EmailWorkspaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailWorkspaceTests.swift; sourceTree = "<group>"; };
 		A5515700000000000000F003 /* AssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantView.swift; sourceTree = "<group>"; };
 		A5515700000000000000F002 /* AgentAssistantCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentAssistantCards.swift; sourceTree = "<group>"; };
 		A5515700000000000000F001 /* AssistantModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantModels.swift; sourceTree = "<group>"; };
@@ -1224,6 +1226,7 @@
 				BC01DD22EE33FF44551100B3 /* CacheKeyTests.swift */,
 				BC01DD22EE33FF44551100B4 /* ChannelMergeTests.swift */,
 				CALV00000000000000000BT2 /* CalendarLogicTests.swift */,
+				EAAF00000000000000000002 /* EmailWorkspaceTests.swift */,
 				MWAST00000000000000000FR /* AssetInferenceTests.swift */,
 				BC01DD22EE33FF44551100B5 /* ModelPickerTests.swift */,
 			);
@@ -1712,6 +1715,7 @@
 				BC01DD22EE33FF44551100C3 /* CacheKeyTests.swift in Sources */,
 				BC01DD22EE33FF44551100C4 /* ChannelMergeTests.swift in Sources */,
 				CALV00000000000000000BT1 /* CalendarLogicTests.swift in Sources */,
+				EAAF00000000000000000001 /* EmailWorkspaceTests.swift in Sources */,
 				MWAST00000000000000000BF /* AssetInferenceTests.swift in Sources */,
 				BC01DD22EE33FF44551100C5 /* ModelPickerTests.swift in Sources */,
 			);

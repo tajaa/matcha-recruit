@@ -49,14 +49,18 @@ class FakeGmail:
     async def get_message(self, message_id):
         return self.messages[message_id]
 
-    async def create_draft(self, to, subject, body, *, thread_id=None, in_reply_to=None):
+    async def create_draft(self, to, subject, body, *, thread_id=None, in_reply_to=None, bcc=None):
         self.drafts.append(dict(to=to, subject=subject, body=body, thread_id=thread_id, in_reply_to=in_reply_to))
+        if bcc is not None:
+            self.drafts[-1]["bcc"] = bcc
         return {"id": "draft-1"}
 
-    async def send_email(self, to, subject, body, *, thread_id=None, in_reply_to=None):
+    async def send_email(self, to, subject, body, *, thread_id=None, in_reply_to=None, bcc=None):
         if self.send_error:
             raise self.send_error
         self.sent.append(dict(to=to, subject=subject, body=body, thread_id=thread_id, in_reply_to=in_reply_to))
+        if bcc is not None:
+            self.sent[-1]["bcc"] = bcc
         return {"id": "sent-1"}
 
     async def modify_labels(self, ids, *, add=None, remove=None):
@@ -64,6 +68,11 @@ class FakeGmail:
 
     async def list_labels(self):
         return self.labels
+
+    async def create_label(self, name):
+        label = {"id": "Label_2", "name": name}
+        self.labels.append(label)
+        return label
 
 
 def _ability(gmail):
@@ -234,7 +243,7 @@ async def test_unusable_messages_are_refused_before_anything_is_claimed(monkeypa
         {"body": "hi"},
         {"to": ["not an address"], "body": "hi"},
         {"body": "hi", "reply_to_message_id": "never-read"},
-        {"to": [f"p{i}@example.com" for i in range(11)], "body": "hi"},
+        {"to": [f"p{i}@example.com" for i in range(email.MAX_RECIPIENTS + 1)], "body": "hi"},
     ]
     client = FakeClient([response(*[call("send_email", args) for args in bad]), response(call("finish", FINISH))])
     await run(client, gmail, _ctx("send to dana@example.org"))
@@ -389,3 +398,103 @@ def test_the_emails_block_is_rebuilt_from_the_session():
     assert email.gate_block("emails", {"message_ids": ["nope"]}, state) == (
         None, ["Dropped an email this run never read"])
     assert email.gate_block("emails", "junk", state) == (None, [])
+
+
+@pytest.mark.asyncio
+async def test_pasted_bcc_list_sends_once_with_every_recipient_policy_checked(monkeypatch, deliverable):
+    _, claim, _ = wire_store(monkeypatch)
+    gmail = FakeGmail()
+    recipients = [f"person{i}@example.com" for i in range(25)]
+    client = FakeClient([
+        response(call("send_email", {"bcc": recipients, "subject": "Update", "body": "News"})),
+        response(call("finish", FINISH)),
+    ])
+    out = await run(client, gmail, _ctx("send this update to " + ", ".join(recipients)))
+    assert out.kind == "result" and len(gmail.sent) == 1
+    assert gmail.sent[0]["to"] == "" and gmail.sent[0]["bcc"] == ", ".join(recipients)
+    assert claim.await_args.args[-1]["weight"] == 25
+    assert out.receipts[0]["lines"][1] == {"label": "Bcc", "value": ", ".join(recipients)}
+
+
+@pytest.mark.asyncio
+async def test_unnamed_bcc_recipient_is_held_and_frozen_for_resume(monkeypatch, deliverable):
+    wire_store(monkeypatch)
+    gmail = FakeGmail()
+    args = {"to": ["list@example.org"], "bcc": ["extra@example.net"], "body": "Update"}
+    held = await run(FakeClient([response(call("send_email", args))]), gmail, _ctx("send to list@example.org"))
+    assert held.kind == "confirmation" and gmail.sent == []
+    assert [t.value for t in held.decision.ungrounded] == ["extra@example.net"]
+    assert held.pending.args["bcc"] == ["extra@example.net"]
+    await run(FakeClient([response(call("finish", FINISH))]), gmail, _ctx("yes", resume=held.pending))
+    assert len(gmail.sent) == 1 and gmail.sent[0]["bcc"] == "extra@example.net"
+
+
+@pytest.mark.asyncio
+async def test_bcc_drafts_deduplicate_and_limit_counts_include_to_and_bcc(monkeypatch):
+    _, claim, _ = wire_store(monkeypatch)
+    gmail = FakeGmail()
+    client = FakeClient([
+        response(call("draft_email", {"to": ["a@example.com"],
+                                       "bcc": ["a@example.com", "b@example.net; c@example.org"], "body": "Draft"})),
+        response(call("finish", FINISH)),
+    ])
+    await run(client, gmail, _ctx("draft an update"))
+    assert gmail.drafts[0]["to"] == "a@example.com"
+    assert gmail.drafts[0]["bcc"] == "b@example.net, c@example.org"
+    assert gmail.sent == [] and claim.await_count == 0
+    state = RunState(started=0, sessions={"email": email.EmailSession(gmail=gmail)})
+    with pytest.raises(ValueError, match="at most 50"):
+        email.resolve_message({"to": ["a@example.com"],
+                               "bcc": [f"p{i}@example.net" for i in range(50)], "body": "Hi"}, state)
+
+
+@pytest.mark.asyncio
+async def test_reserved_bcc_addresses_are_skipped_and_rate_limit_counts_recipients(monkeypatch, deliverable):
+    wire_store(monkeypatch)
+    monkeypatch.setattr(email, "_is_reserved_test_domain", lambda a: a.endswith("@skip.test"))
+    gmail = FakeGmail()
+    args = {"bcc": ["a@example.com", "b@skip.test"], "body": "Hi"}
+    await run(FakeClient([response(call("send_email", args)), response(call("finish", FINISH))]),
+              gmail, _ctx("send to a@example.com and b@skip.test"))
+    assert gmail.sent[0]["bcc"] == "a@example.com"
+    from dataclasses import replace
+    ctx = _ctx("send to a@example.com and b@skip.test")
+    ctx = replace(ctx, policy=replace(ctx.policy, counts={("send_email", 3600): 99}))
+    gmail.sent.clear()
+    denied = await run(FakeClient([response(call("send_email", args)), response(call("finish", FINISH))]), gmail, ctx)
+    assert gmail.sent == [] and denied.receipts == []
+
+
+@pytest.mark.asyncio
+async def test_custom_organization_creates_then_applies_a_label(monkeypatch):
+    wire_store(monkeypatch)
+    gmail = FakeGmail()
+    client = FakeClient([
+        response(call("read_email", {"message_id": "m1"})),
+        response(call("create_email_label", {"name": "Follow up"})),
+        response(call("label_email", {"message_ids": ["m1"], "label": "Follow up"})),
+        response(call("create_email_label", {"name": "Follow up"})),
+        response(call("finish", FINISH)),
+    ])
+    out = await run(client, gmail, _ctx("organize this under Follow up", scopes=BASE | {SCOPE_GMAIL_MODIFY}))
+    assert gmail.labels.count({"id": "Label_2", "name": "Follow up"}) == 1
+    assert gmail.modified == [(["m1"], ["Label_2"], None)]
+    assert len(out.receipts) == 3
+    with pytest.raises(ValueError):
+        email.resolve_label({"name": " "}, RunState(started=0))
+    with pytest.raises(ValueError):
+        email.resolve_label({"name": "x" * 81}, RunState(started=0))
+
+
+@pytest.mark.asyncio
+async def test_a_full_mailbox_page_can_be_read_and_drafted_in_one_run(monkeypatch):
+    wire_store(monkeypatch)
+    messages = [_message(id_=f"m{i}") for i in range(25)]
+    gmail = FakeGmail(messages)
+    client = FakeClient([
+        response(*(call("read_email", {"message_id": m["id"]}) for m in messages)),
+        response(*(call("draft_email", {"reply_to_message_id": m["id"], "body": "Draft"}) for m in messages)),
+        response(call("finish", FINISH)),
+    ])
+    out = await run(client, gmail, _ctx("draft replies to these 25 messages"))
+    assert out.kind == "result" and len(gmail.drafts) == 25 and gmail.sent == []

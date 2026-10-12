@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 /// Full-pane Email hub — the sidebar "Email" row opens it (same nav-only
-/// model as the other hubs). Three columns: mailbox (unread + the AI triage
+/// model as the other hubs). Three columns: mailbox (Unread / Read / All + AI triage
 /// buckets), message list, reader. Sorting runs automatically for Lite+ and
 /// stays in the app: nothing is labelled, moved or marked read in Gmail.
 /// ⌘-click / ⇧-click picks several messages to send to a board together.
@@ -175,7 +175,7 @@ struct EmailWorkspace: View {
 
     private var listTitle: String {
         switch filter {
-        case .all: return "Unread"
+        case .all: return vm.mailbox.title
         case .bucket(let bucket): return bucket.label
         case .unsorted: return "Unsorted"
         }
@@ -236,8 +236,13 @@ struct EmailWorkspace: View {
                     MWHubRailIconButton(icon: "sidebar.left", help: "Hide mailbox") { railCollapsed = true }
                 }
             } rows: {
-                MWHubRailRow(icon: "tray", title: "Unread", selected: filter == .all,
-                             trailing: countLabel(vm.emails.count)) { filter = .all }
+                ForEach(EmailMailbox.allCases, id: \.self) { mailbox in
+                    MWHubRailRow(icon: mailbox == .read ? "envelope.open" : "tray", title: mailbox.title,
+                                 selected: filter == .all && vm.mailbox == mailbox) {
+                        filter = .all
+                        Task { await vm.selectMailbox(mailbox) }
+                    }
+                }
                 railHeading("Sorted by AI")
                 sortedRows
             }
@@ -353,6 +358,13 @@ struct EmailWorkspace: View {
                 .padding(.horizontal, 8).padding(.vertical, 5)
                 .background(RoundedRectangle(cornerRadius: 6).fill(appState.themeCard.opacity(0.6)))
 
+                Picker("Mailbox", selection: Binding(get: { vm.mailbox }, set: { mailbox in
+                    filter = .all
+                    Task { await vm.selectMailbox(mailbox) }
+                })) {
+                    ForEach(EmailMailbox.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
                 HStack(spacing: 6) {
                     Text(listTitle)
                         .font(.system(size: 13, weight: .bold))
@@ -408,6 +420,23 @@ struct EmailWorkspace: View {
                 .onKeyPress(.downArrow) { move(1); return .handled }
             }
 
+            if vm.nextPageToken != nil {
+                Button(vm.isLoadingMore ? "Loading…" : "Load 25 more") {
+                    Task { await vm.loadMore() }
+                }
+                .controlSize(.small)
+                .disabled(vm.isLoading || vm.isLoadingMore)
+                .padding(8)
+            }
+            if appState.assistantEnabled && !selectedEmails.isEmpty {
+                Button {
+                    appState.workOnEmails(selectedEmails)
+                } label: { Label("Work in Espresso", systemImage: "sparkles") }
+                .controlSize(.small)
+                .disabled(selectedEmails.count > 25)
+                .help("Open a conversation with up to 25 selected emails")
+                .padding(.bottom, 8)
+            }
             listFooter
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -451,6 +480,10 @@ struct EmailWorkspace: View {
             sendToBoard(targets)
         }
         .disabled(targets.count > vm.snapshotLimit)
+        if appState.assistantEnabled {
+            Button("Work in Espresso…") { appState.workOnEmails(targets) }
+                .disabled(targets.count > 25)
+        }
         Button("Copy sender address") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(msg.senderAddress, forType: .string)
@@ -477,7 +510,7 @@ struct EmailWorkspace: View {
             Image(systemName: search.isEmpty ? "tray" : "magnifyingglass")
                 .font(.system(size: 22))
                 .foregroundColor(appState.themeTextSecondary.opacity(0.7))
-            Text(search.isEmpty ? (filter == .all ? "No unread mail" : "Nothing here") : "No matches")
+            Text(search.isEmpty ? (filter == .all ? "No mail in \(vm.mailbox.title.lowercased())" : "Nothing here") : "No matches")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(appState.themeTextSecondary)
         }
@@ -588,7 +621,7 @@ struct EmailWorkspace: View {
             Text("Connect Gmail")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(appState.themeText)
-            Text("Read your unread mail, get a quick summary, and draft replies without leaving Espresso. Sorting happens here in the app: nothing in Gmail is labelled, moved, or marked read.")
+            Text("Read your mail, get a quick summary, and draft replies without leaving Espresso. Sorting happens here in the app: nothing in Gmail is labelled, moved, or marked read.")
                 .font(.system(size: 12))
                 .foregroundColor(appState.themeTextSecondary)
                 .multilineTextAlignment(.center)

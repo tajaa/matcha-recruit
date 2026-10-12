@@ -23,7 +23,7 @@ from app.core.models.auth import CurrentUser
 from app.core.services.redis_cache import get_redis_cache
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.matcha_work.assistant import GoogleConnectRequest
+from app.matcha.models.matcha_work.assistant import GoogleConnectRequest, EmailFetchRequest
 from app.matcha.models.matcha_work.calendar import EmailCalendarSuggest
 from app.matcha.models.matcha_work.matcha_work import UsageSummaryResponse
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
@@ -542,9 +542,12 @@ async def agent_email_disconnect(
 @router.post("/agent/email/fetch")
 async def agent_email_fetch(
     current_user: CurrentUser = Depends(require_admin_or_client),
+    body: EmailFetchRequest | None = None,
 ):
-    """Fetch unread emails for the current user."""
+    """Legacy unread fetch, or a cursor page from the selected mailbox."""
     gmail = await _connected_gmail(current_user)
+    if body is not None:
+        return await gmail.fetch_page(body.mailbox, body.page_token)
     emails = await gmail.fetch_unread(max_results=25)
     return {"emails": emails}
 
