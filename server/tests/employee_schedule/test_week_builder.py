@@ -37,6 +37,9 @@ ESTABLISHED_BUNDLE = {
 
 @pytest.fixture(autouse=True)
 def _established_week_rules(monkeypatch):
+    monkeypatch.setattr(week_builder, "get_company_features", AsyncMock(return_value={
+        "schedule_autopilot": True, "employee_schedule": True, "huume": True, "matcha_work": True,
+    }))
     monkeypatch.setattr(
         week_builder, "load_profile_bundle", AsyncMock(return_value=ESTABLISHED_BUNDLE),
     )
@@ -2037,7 +2040,9 @@ def _autopilot_env(monkeypatch, conn, *, demand, features=None, existing=(), pub
     gate = AsyncMock(return_value=None)
     monkeypatch.setattr(week_builder, "_week_rules_gate", gate)
     monkeypatch.setattr(week_builder, "get_company_features", AsyncMock(
-        return_value=features if features is not None else {"schedule_autopilot": True},
+        return_value=features if features is not None else {
+            "schedule_autopilot": True, "employee_schedule": True, "huume": True, "matcha_work": True,
+        },
     ))
     monkeypatch.setattr(week_builder, "load_profile_bundle", AsyncMock(return_value={"profile": {}}))
     monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={"employees": []}))
@@ -2075,7 +2080,11 @@ async def test_autopilot_needs_the_premium_flag_and_something_to_staff(monkeypat
     conn = _FakeConn(None)
     _autopilot_env(monkeypatch, conn, demand=[_demand_shift()], features={})
     result = await _propose_autopilot()
-    assert result == {"status": "refused", "message": "Schedule Autopilot is not enabled for this company."}
+    assert result == {
+        "status": "refused",
+        "message": "Schedule Autopilot requires these features to be enabled: "
+                   "Schedule Autopilot, Employee scheduling, Huume, Matcha Work.",
+    }
 
     _autopilot_env(monkeypatch, conn, demand=[], demand_model={"notes": ["no job has a qualified employee"]})
     result = await _propose_autopilot()
@@ -2223,3 +2232,63 @@ async def test_autopilot_readiness_blocks_on_drafts_and_missing_timezone(monkeyp
     assert any("already has draft shifts" in blocker for blocker in result["blockers"])
     assert any("needs a timezone" in blocker for blocker in result["blockers"])
     assert result["recommended_source"] != "autopilot"
+
+
+# A generic readiness check must not turn an unrequested forecast into a
+# false "Autopilot unavailable" claim. Exercise the real fetch-and-merge path.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", [None, "schedule_autopilot", "employee_schedule", "huume", "matcha_work"])
+@pytest.mark.parametrize("source_mode", [None, "template", "autopilot"])
+async def test_readiness_reports_merged_autopilot_gates_independently_of_source(monkeypatch, missing, source_mode):
+    from app.core.feature_flags import get_company_features
+
+    flags = {"schedule_autopilot": True, "employee_schedule": True, "huume": True, "matcha_work": True}
+    if missing:
+        flags[missing] = False
+    conn = _FakeConn(None)
+    _empty_week(monkeypatch, conn, [{"id": str(DEFAULT_TEMPLATE_ID), "name": "Busy week", "block_count": 7}])
+    async def fetchrow(query, *args):
+        if "FROM companies" in query:
+            assert args == (COMPANY_ID,)
+            return {"enabled_features": json.dumps(flags), "signup_source": "product:matcha-ops"}
+        return {"id": LOCATION_ID, "name": "Example Coffee", "timezone": "America/Los_Angeles"}
+    conn.fetchrow = fetchrow
+    monkeypatch.setattr(week_builder, "get_company_features", get_company_features)
+    monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={
+        "employees": [_employee("amy", "Amy")], "gated_job_ids": set(),
+    }))
+
+    result = await week_builder.get_week_build_readiness(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, week_start=WEEK_START, source_mode=source_mode,
+    )
+
+    availability = result["autopilot_availability"]
+    assert availability["enabled"] == (missing != "schedule_autopilot")
+    assert availability["available"] == (missing is None)
+    assert availability["missing_features"] == ([missing] if missing else [])
+    if source_mode != "autopilot":
+        assert result["autopilot"] is None
+        assert availability["message"] not in result["blockers"]
+    elif missing:
+        assert not result["ready"]
+        assert result["autopilot"] is None
+        assert result["blockers"][0] == availability["message"]
+    else:
+        assert result["autopilot"] is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing,label", [
+    ("schedule_autopilot", "Schedule Autopilot"), ("employee_schedule", "Employee scheduling"),
+    ("huume", "Huume"), ("matcha_work", "Matcha Work"),
+])
+async def test_autopilot_build_names_the_missing_gate_and_never_falls_back(monkeypatch, missing, label):
+    flags = {"schedule_autopilot": True, "employee_schedule": True, "huume": True, "matcha_work": True}
+    flags[missing] = False
+    conn = _FakeConn(None)
+    _autopilot_env(monkeypatch, conn, demand=[_demand_shift()], features=flags)
+
+    result = await _propose_autopilot()
+
+    assert result == {"status": "refused", "message": f"Schedule Autopilot requires these features to be enabled: {label}."}
+    assert not any("schedule_generation_runs" in call[0] for call in conn.executed)

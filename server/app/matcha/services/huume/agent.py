@@ -1900,6 +1900,8 @@ async def run_huume_turn(
                         response["compliance_status"] = staged.get("compliance_status")
                     if name == "build_week_schedule":
                         response["summary"] = staged.get("summary")
+                        response["source_mode"] = staged.get("source_mode")
+                        response["demand_model"] = staged.get("demand_model")
                         response["metrics"] = staged.get("metrics")
                         response["unfilled"] = staged.get("unfilled")
                         # The model has to be able to relay the gaps in the SAME

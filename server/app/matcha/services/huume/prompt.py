@@ -5,6 +5,7 @@ prompt and the actual declarations can drift (same rule Merlin's
 
 from __future__ import annotations
 
+import json
 from typing import Any, Iterable
 
 from app.matcha.services.scheduling.schedule_batch import MAX_BATCH_OPERATIONS, describe_operations
@@ -58,6 +59,30 @@ def build_discovery_block(tools: Iterable[HuumeTool]) -> str:
     return "\n".join(lines)
 
 
+def _week_draft_provenance(action: dict) -> str:
+    source = action.get("source_mode")
+    label = {
+        "autopilot": "Autopilot",
+        "template": "saved week template (fixed staffing pattern)",
+        "existing": "existing draft shifts",
+    }.get(source, "not recorded — do not infer it from the saved staffing pattern")
+    lines = [f"- Generated week's recorded source ({action.get('status')}): {label}."]
+    if action.get("summary"):
+        lines.append("  Build summary: " + str(action["summary"]))
+    model = action.get("demand_model")
+    if source == "autopilot" and isinstance(model, dict):
+        # Frozen inputs from THIS run, including every day's weather verdict.
+        # Do not send curves, roster, or wage data into the prompt.
+        frozen = {key: model.get(key) for key in ("sentence", "inputs_used", "inputs_missing", "notes")}
+        frozen["weather_policy"] = (model.get("policy") or {}).get("weather")
+        frozen["days"] = [
+            {key: day.get(key) for key in ("date", "weather", "notes")}
+            for day in (model.get("days") or [])[:7]
+        ]
+        lines.append("  Frozen forecast inputs: " + json.dumps(frozen, ensure_ascii=False))
+    return "\n".join(lines)
+
+
 def build_state_block(current_state: dict[str, Any], *, schedule_surface: bool = False) -> str:
     """Pure. Renders whatever is currently staged on the thread so the model
     doesn't have to guess an offer_id on a confirm turn (Huume hardening
@@ -68,6 +93,8 @@ def build_state_block(current_state: dict[str, Any], *, schedule_surface: bool =
     lines: list[str] = []
 
     action = current_state.get("huume_action")
+    if isinstance(action, dict) and action.get("type") == "schedule_week_draft":
+        lines.append(_week_draft_provenance(action))
     if isinstance(action, dict) and action.get("status") == "proposed":
         if action.get("type") == "send_offer":
             lines.append(
@@ -508,6 +535,10 @@ One person, one shift per day unless the manager explicitly asks for a split or 
 ## This location's scheduling profile
 
 {location_profile_block or "No scheduling profile saved yet for this location."}
+
+The staged or applied week's recorded source and frozen forecast inputs are authoritative. A saved staffing pattern is separate from an Autopilot forecast: Autopilot can produce a different shift count. When asked to compare them, explain the difference; do not replace an Autopilot proposal with a template unless the manager asks to switch sources. When asked whether sales or weather was used, use that run's inputs_used, inputs_missing, daily weather modifiers and notes. Weather can be missing or have no effect while Autopilot is enabled and was used. Never claim that every Autopilot build used weather. If no forecast provenance was recorded, say it is unknown rather than guessing from the saved setup.
+
+get_week_build_readiness returns autopilot_availability from the company's current merged feature flags and prerequisites, independently of the requested source. Use it for availability claims and relay its specific missing-feature message. A null autopilot field only means forecast readiness was not evaluated; it does not mean Autopilot is disabled. Current availability does not change the source or inputs frozen on an earlier draft.
 
 For a request to make the whole week's schedule, call get_week_build_readiness and then build_week_schedule when the demand source is unambiguous. The builder REFUSES until this location's week-set rules are saved — its opening hours for every day, a staffing pattern, and an answer on leader coverage. A refusal names the one answer it still needs: ask the manager for exactly that, stage save_location_schedule_profile, and try again after they confirm. There is no way to build around it, so never promise a week you have not been able to build. Availability tells you who can work; existing draft shifts, this location's saved staffing pattern, or another saved week template define how many people the store needs and when. The deterministic builder preserves existing assignments, excludes unconfirmed availability, respects qualifications/time away/hour caps, explains any open positions, AND returns coverage/break `findings`. Relay every gap in those findings to the manager in your own reply — never describe a generated week as compliant, fully covered, or done. `severity="gap"` means a real hole (nobody on while the store is open, nobody for the open prep or the close, no one to relieve a required break); `"advisory"` is worth a mention. When `metrics.operating_hours_known` is false, say plainly that coverage at open and close could not be checked and offer to save the store's hours. Readiness returns `pattern_findings` the same way — holes in the staffing pattern itself, which you should raise BEFORE building rather than after. A generated week always lands as editable drafts after confirmation; only the manager publishes it.
 

@@ -999,7 +999,8 @@ TOOLS: tuple[HuumeTool, ...] = (
         "get_week_build_readiness", "read",
         "Check whether Huume has enough confirmed availability and staffing "
         "demand to build the selected location's entire week. Returns the "
-        "available demand sources, roster readiness, and exact blockers. "
+        "available demand sources, roster readiness, exact blockers, and the "
+        "company Autopilot feature/prerequisite gates regardless of source_mode. "
         "Call this before building a week when the inputs are uncertain.",
         properties={
             "source_mode": _s(
@@ -1110,7 +1111,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "build_week_schedule", "staged",
         "Build and stage a deterministic whole-week schedule proposal from "
         "confirmed employee availability and either the week's existing draft "
-        "shifts or a saved week template. Existing assignments are preserved. "
+        "shifts, a saved week template, or Autopilot sales/weather forecasts. "
+        "The result records the actual source and frozen forecast inputs. "
+        "Existing assignments are preserved. "
         "Nothing is added to the editor until the manager confirms on a LATER "
         "turn with the exact confirm_id; the resulting shifts remain drafts.",
         properties={
