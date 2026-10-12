@@ -100,7 +100,12 @@ it otherwise), and should declare `resolve`.
   refusal from the provider (an HTTP error status) is a definite failure.
 - **Ceilings count what may have happened.** `assistant.load_counts` sums
   `ok`, `claimed` and `unknown` steps, weighted (`weight`: one archive call can
-  be fifty actions).
+  be fifty actions). Before every commit (including approved resumes),
+  `store.claim_step` rechecks every window and inserts the claim in one short
+  READ COMMITTED transaction under an owner/tool advisory lock. Concurrent
+  conversations and workers share that allowance; provider calls run after
+  the reservation commits. Failed calls release their allowance on resolution;
+  crashes and unknown outcomes retain it until the window expires.
 - **`ASSISTANT_COMMIT_MODE` must be exactly `live`.** Anything else, unset
   included, is a dry run: the action is claimed, audited and shown as a
   receipt, and the handler is never called.
@@ -268,8 +273,22 @@ at all. The worker for it is the `matcha-agent-worker` compose service
 
 ## The private conversation
 
-`channel_scope='assistant'`, one per person per company
-(`channels.assistant_user_id`, partial unique index).
+`channel_scope='assistant'`, one per conversation, owned by
+`channels.assistant_user_id`. `assistthread01` replaces the one-per-person
+index with a listing index, preserving the existing canonical conversation.
+The unique `(company_id, slug)` remains: `/assistant/channel` opens the canonical
+`espresso-<user UUID>` conversation for older clients. New conversations use
+an owner-prefixed client request UUID as their slug, making create retries
+idempotent; channel + sole-owner membership are written in one transaction.
+
+- `GET /assistant/conversations` lists only this company and owner (50 at a
+  time); `POST` creates a separate history; `PATCH /{id}` renames only an owned
+  assistant channel. No member, invite, call, broadcast or generic channel
+  mutation path is opened by these routes.
+- Espresso's desktop picker creates, names and reopens these conversations.
+  Switching recreates its channel view so replies and attachments cannot cross
+  conversations. Email handoffs open a new conversation with an editable draft
+  containing only message/thread IDs, never sender-controlled text or bodies.
 
 - `capability_allowed` decides this scope **before** the platform-admin
   bypass: chat only, owner only, flag on. A platform admin cannot read someone
@@ -277,8 +296,7 @@ at all. The worker for it is the `matcha-agent-worker` compose service
 - Every route that changes who is in a channel, or what the channel is, goes
   through `channels._require_shared_channel`, which refuses this scope. A test
   walks the route table.
-- It is never in the channel list; it is opened with
-  `POST /matcha-work/assistant/channel`.
+- It is never in the shared channel list; the assistant endpoints own its listing and creation.
 - A card number typed here is removed before the message is stored, whatever it
   was a reply to.
 
@@ -333,3 +351,37 @@ send. `gmail.modify` (archive, label) and `calendar.events` are asked for only
 when the person switches that on: `POST /agent/email/connect` takes
 `abilities` and requests the union with `include_granted_scopes=true`. The
 callback stores what Google granted, not what was asked for.
+
+
+## Desktop email workspace
+
+`POST /agent/email/fetch` accepts optional `{mailbox: unread|read|all,
+page_token}` and returns `{emails, next_page_token}` in pages of 25. With no
+body it retains the original unread response for older clients. No fetch
+marks a message read. Deleted messages can disappear between listing and
+reading; other provider failures fail the page so the client can retry its
+current cursor. The desktop rejects stale fetch/triage results when changing
+mailboxes and clears cached mail on logout. AI triage processes loaded mail
+in batches of 25; the search field filters loaded messages only.
+
+The agent can draft or send to a mailing-list address or a pasted list of up
+to 50 total To/Bcc recipients. Bcc recipients are deduplicated against To,
+checked by the same grounding policy, frozen into confirmations and included
+in previews/receipts. The send tool counts recipients against 100/hour and
+200/day. Gmail also reserves recipient attempts in the shared rate-limit
+store before sending so concurrent conversations cannot bypass these limits;
+a partially refused batch conservatively spends reserved attempts but sends
+nothing. Existing 5-message/minute and 50-message/hour limits still apply.
+As with the existing send limiter, the fallback is per-process while Redis is
+unavailable. Reserved test recipients are skipped. A timeout remains unknown
+and must not be retried automatically.
+
+`create_email_label` is a separate Gmail-modify commit with its own receipt.
+It reuses an existing label on retry; `label_email` applies it in a separate
+step, so a failure after creation leaves a visible empty label and can safely
+be retried. The runtime offers these tools only with `gmail.modify`.
+
+Apply `assistthread01` before the new API/app. It drops no conversation data.
+Rollback refuses if any owner has multiple conversations; reconcile those
+explicitly rather than deleting or merging histories automatically. Neither
+migration direction is automatically applied by this change.

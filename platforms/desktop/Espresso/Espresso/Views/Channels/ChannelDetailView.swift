@@ -14,6 +14,7 @@ struct ChannelDetailView: View {
     var isAssistant: Bool = false
     /// Shown in the assistant header ("What it can do").
     var onOpenAbilities: (() -> Void)? = nil
+    var initialDraft: String = ""
 
     @Environment(AppState.self) var appState
     @State var vm = ChannelChatViewModel()
@@ -25,11 +26,14 @@ struct ChannelDetailView: View {
 
     @MainActor
     init(channelId: String, isEmbedded: Bool = false, isAssistant: Bool = false,
-         onOpenAbilities: (() -> Void)? = nil) {
+         onOpenAbilities: (() -> Void)? = nil, initialDraft: String = "") {
         self.channelId = channelId
         self.isEmbedded = isEmbedded
         self.isAssistant = isAssistant
         self.onOpenAbilities = onOpenAbilities
+        self.initialDraft = initialDraft
+        _composerSeed = State(initialValue: initialDraft)
+        _composerSeedNonce = State(initialValue: initialDraft.isEmpty ? 0 : 1)
         // Main-window tabs share a cached VM for instant warm re-entry; embedded
         // channels (collab project chat panel) keep a private VM so they never
         // share WS callbacks with a main tab on the same channel.

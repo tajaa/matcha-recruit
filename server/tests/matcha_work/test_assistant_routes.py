@@ -64,6 +64,8 @@ def test_the_router_is_gated_and_mounted():
         ("POST", "/assistant/channel"), ("GET", "/assistant/runs/{run_id}"),
         ("GET", "/assistant/abilities"), ("PUT", "/assistant/abilities/{key}"),
         ("DELETE", "/assistant/abilities/{key}"),
+        ("GET", "/assistant/conversations"), ("POST", "/assistant/conversations"),
+        ("PATCH", "/assistant/conversations/{channel_id}"),
     }
     assert routes.router.prefix == "/assistant" and len(routes.router.dependencies) == 1
 
@@ -248,3 +250,65 @@ async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
     enabled.side_effect = RuntimeError("db down")
     assert (await entitlements_service.resolve_entitlements(uuid4(), company))["workspace"] == {
         "espresso_assistant": False, "claude_models": False, **_GEMINI_PICKER}
+
+
+@pytest.mark.asyncio
+async def test_conversations_are_paginated_and_owned_by_the_caller(wired):
+    now = datetime.now(timezone.utc)
+    wired.conn.on("SELECT id, name, updated_at FROM channels", [
+        {"id": uuid4(), "name": f"Chat {i}", "updated_at": now} for i in range(51)])
+    user = _user()
+    out = await routes.list_conversations(offset=50, current_user=user)
+    assert len(out["conversations"]) == 50 and out["has_more"]
+    query = wired.conn.ran("SELECT id, name")[0]
+    assert query[2] == (wired.company, user.id, 50)
+    assert "assistant_user_id = $2" in query[1] and "channel_scope = 'assistant'" in query[1]
+    assert "ORDER BY updated_at DESC, id DESC LIMIT 51" in query[1]
+    wired.conn.on("SELECT id, name, updated_at FROM channels", [])
+    assert await routes.list_conversations(offset=0, current_user=user) == {
+        "conversations": [], "has_more": False}
+
+
+@pytest.mark.asyncio
+async def test_create_and_rename_preserve_company_and_owner_scope(wired, monkeypatch):
+    from app.matcha.models.matcha_work.assistant import AssistantConversationRequest, AssistantConversationRename
+    user, channel, key = _user(), uuid4(), uuid4()
+    create = AsyncMock(return_value=channel)
+    monkeypatch.setattr(conversation, "create_conversation", create)
+    body = AssistantConversationRequest(title="  Café ☕  ", request_id=key)
+    assert await routes.create_conversation(body, current_user=user) == {"channel_id": str(channel)}
+    assert create.await_args.kwargs == dict(user_id=user.id, company_id=wired.company,
+                                          title="Café ☕", request_id=key)
+    now = datetime.now(timezone.utc)
+    wired.conn.on("UPDATE channels SET name", {"id": channel, "name": "Mail", "updated_at": now})
+    out = await routes.rename_conversation(channel, AssistantConversationRename(title="Mail"), current_user=user)
+    assert out == {"id": str(channel), "title": "Mail", "updated_at": now.isoformat()}
+    query = wired.conn.ran("UPDATE channels SET name")[0]
+    assert query[2] == ("Mail", channel, wired.company, user.id)
+    assert "company_id = $3 AND assistant_user_id = $4" in query[1]
+    wired.conn.on("UPDATE channels SET name", None)
+    with pytest.raises(HTTPException) as exc:
+        await routes.rename_conversation(channel, AssistantConversationRename(title="Mail"), current_user=_user())
+    assert exc.value.status_code == 404
+    for request in (AssistantConversationRequest(title=" ", request_id=key),
+                    AssistantConversationRename(title=" ")):
+        with pytest.raises(HTTPException) as exc:
+            if isinstance(request, AssistantConversationRequest):
+                await routes.create_conversation(request, current_user=user)
+            else:
+                await routes.rename_conversation(channel, request, current_user=user)
+        assert exc.value.status_code == 422
+
+
+def test_conversation_and_mailbox_request_bounds():
+    from app.matcha.models.matcha_work.assistant import (
+        AssistantConversationRequest, AssistantConversationRename, EmailFetchRequest,
+    )
+    assert EmailFetchRequest().mailbox == "unread"
+    for kwargs in ({"mailbox": "trash"}, {"page_token": ""}, {"page_token": "x" * 2049}):
+        with pytest.raises(ValueError):
+            EmailFetchRequest(**kwargs)
+    with pytest.raises(ValueError):
+        AssistantConversationRequest(title="x" * 101, request_id=uuid4())
+    with pytest.raises(ValueError):
+        AssistantConversationRename(title="")

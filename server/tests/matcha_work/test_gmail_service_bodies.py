@@ -196,3 +196,37 @@ def test_an_undecodable_header_comes_back_as_it_arrived():
     assert gmail_service._decode_header(raw) == raw
     assert gmail_service._decode_header(None) == ""
     assert gmail_service._decode_header("Plain Name <a@example.test>") == "Plain Name <a@example.test>"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mailbox,query", [("unread", "is:unread"), ("read", "is:read"), ("all", "")])
+async def test_mailbox_pages_keep_the_cursor_and_never_modify_messages(mailbox, query):
+    svc = _svc()
+    svc.load_token = AsyncMock()
+    svc._gmail_get = AsyncMock(return_value={"messages": [{"id": "m1"}], "nextPageToken": "opaque-next"})
+    svc.get_message = AsyncMock(return_value={"id": "m1", "body": "Plain"})
+    svc._gmail_post = AsyncMock()
+    assert await svc.fetch_page(mailbox, "opaque-current") == {
+        "emails": [{"id": "m1", "body": "Plain"}], "next_page_token": "opaque-next"}
+    svc._gmail_get.assert_awaited_once_with("/users/me/messages", params={
+        "maxResults": "25", "q": query, "pageToken": "opaque-current"})
+    svc._gmail_post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mailbox_page_skips_deleted_mail_but_propagates_retryable_failures():
+    import httpx
+    svc = _svc()
+    svc.load_token = AsyncMock()
+    svc._gmail_get = AsyncMock(return_value={"messages": [{"id": "gone"}]})
+    request = httpx.Request("GET", "https://gmail.googleapis.com")
+    svc.get_message = AsyncMock(side_effect=httpx.HTTPStatusError(
+        "gone", request=request, response=httpx.Response(404, request=request)))
+    assert await svc.fetch_page() == {"emails": [], "next_page_token": None}
+    for failure in (httpx.ReadTimeout("timeout"), httpx.HTTPStatusError(
+            "quota", request=request, response=httpx.Response(429, request=request))):
+        svc.get_message.side_effect = failure
+        with pytest.raises(type(failure)):
+            await svc.fetch_page()
+    with pytest.raises(ValueError):
+        await svc.fetch_page("bad")

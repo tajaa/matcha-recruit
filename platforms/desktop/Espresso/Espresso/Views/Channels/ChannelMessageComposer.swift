@@ -227,6 +227,7 @@ struct ChannelMessageComposer: View {
                         typingPing()
                     }
                 }
+                .onAppear { if text.isEmpty { text = seed } }
                 .onChange(of: seedNonce) { text = seed }
                 // ↵ inserts a newline; ⌘↵ sends (handled inside the text view
                 // so it fires while the field is first responder).

@@ -230,6 +230,13 @@ struct EmailDetailView: View {
                     .controlSize(.small)
                     .help("Load remote images (the sender can tell you opened this)")
                 }
+                if appState.assistantEnabled {
+                    Button { appState.workOnEmails([msg]) } label: {
+                        Label("Work in Espresso", systemImage: "sparkles").font(.system(size: 11))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
                 Button {
                     showSendToBoard = true
                 } label: {

@@ -14,12 +14,14 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.models.auth import CurrentUser
 from app.database import decode_jsonb, get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
-from app.matcha.models.matcha_work.assistant import AbilityEnableRequest
+from app.matcha.models.matcha_work.assistant import (
+    AbilityEnableRequest, AssistantConversationRequest, AssistantConversationRename,
+)
 from app.matcha.services.matcha_work.agent_runtime import (
     assistant as assistant_run,
     catalog,
@@ -80,6 +82,68 @@ async def ensure_assistant_channel(
             conn, user_id=current_user.id, company_id=company_id,
         )
     return {"channel_id": str(channel_id)}
+
+
+def _conversation_view(row) -> dict:
+    return {"id": str(row["id"]), "title": row["name"],
+            "updated_at": _iso(row["updated_at"])}
+
+
+@router.get("/conversations")
+async def list_conversations(
+    offset: int = Query(default=0, ge=0),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await _company(current_user)
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT id, name, updated_at FROM channels
+               WHERE company_id = $1 AND assistant_user_id = $2
+                 AND channel_scope = 'assistant' AND is_archived IS NOT TRUE
+               ORDER BY updated_at DESC, id DESC LIMIT 51 OFFSET $3""",
+            company_id, current_user.id, offset,
+        )
+    return {"conversations": [_conversation_view(r) for r in rows[:50]],
+            "has_more": len(rows) > 50}
+
+
+@router.post("/conversations")
+async def create_conversation(
+    body: AssistantConversationRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="Give the conversation a name.")
+    company_id = await _company(current_user)
+    async with get_connection() as conn:
+        channel_id = await conversation.create_conversation(
+            conn, user_id=current_user.id, company_id=company_id,
+            title=title, request_id=body.request_id,
+        )
+    return {"channel_id": str(channel_id)}
+
+
+@router.patch("/conversations/{channel_id}")
+async def rename_conversation(
+    channel_id: UUID,
+    body: AssistantConversationRename,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="Give the conversation a name.")
+    company_id = await _company(current_user)
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """UPDATE channels SET name = $1, updated_at = NOW()
+               WHERE id = $2 AND company_id = $3 AND assistant_user_id = $4
+                 AND channel_scope = 'assistant' RETURNING id, name, updated_at""",
+            title, channel_id, company_id, current_user.id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    return _conversation_view(row)
 
 
 @router.get("/runs/{run_id}")

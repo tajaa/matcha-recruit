@@ -222,3 +222,29 @@ async def test_a_second_member_makes_the_conversation_not_private():
     assert not await private(row(assistant_user_id=uuid4()))
     assert not await private(row(channel_scope="project_discussion"))
     assert not await private(None)
+
+
+@pytest.mark.asyncio
+async def test_new_conversations_are_transactional_and_retry_by_owner_and_request():
+    channel, user, company, key = uuid4(), uuid4(), uuid4(), uuid4()
+    conn = FakeConn([("INSERT INTO channels", channel)])
+    for _ in range(2):
+        assert await conversation.create_conversation(
+            conn, user_id=user, company_id=company, title="Mail", request_id=key) == channel
+    inserts = conn.ran("INSERT INTO channels")
+    assert inserts[0][2] == inserts[1][2]
+    assert inserts[0][2][2] == f"espresso-{user.hex}-{key.hex}"
+    assert "ON CONFLICT (company_id, slug)" in inserts[0][1]
+    assert "'private', 'assistant'" in inserts[0][1]
+    assert conn.ran("INSERT INTO channel_members")[0][2] == (channel, user)
+    assert conn.in_transaction == 0
+
+
+@pytest.mark.asyncio
+async def test_canonical_open_does_not_select_an_arbitrary_new_conversation():
+    channel, user, company = uuid4(), uuid4(), uuid4()
+    conn = FakeConn([("SELECT id FROM channels", channel)])
+    await conversation.ensure_assistant_channel(conn, user_id=user, company_id=company)
+    query = conn.ran("SELECT id FROM channels")[0]
+    assert "slug = $3" in query[1]
+    assert query[2] == (company, user, f"espresso-{user.hex}")

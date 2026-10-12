@@ -116,6 +116,25 @@ class MatchaWorkService {
         return res.channel_id
     }
 
+    func assistantConversations(offset: Int = 0) async throws -> AssistantConversationList {
+        try await client.request(method: "GET", path: "\(basePath)/assistant/conversations?offset=\(offset)")
+    }
+
+    func createAssistantConversation(title: String, requestId: UUID) async throws -> String {
+        struct Body: Encodable { let title: String; let request_id: UUID }
+        struct Res: Decodable { let channel_id: String }
+        let res: Res = try await client.request(
+            method: "POST", path: "\(basePath)/assistant/conversations",
+            body: Body(title: title, request_id: requestId))
+        return res.channel_id
+    }
+
+    func renameAssistantConversation(id: String, title: String) async throws {
+        struct Body: Encodable { let title: String }
+        let _: AssistantConversation = try await client.request(
+            method: "PATCH", path: "\(basePath)/assistant/conversations/\(id)", body: Body(title: title))
+    }
+
     func assistantAbilities() async throws -> AssistantAbilities {
         try await client.request(method: "GET", path: "\(basePath)/assistant/abilities")
     }

@@ -93,3 +93,83 @@ struct AssistantAbilities: Decodable {
 
     var isDryRun: Bool { commitMode != "live" }
 }
+
+
+struct AssistantConversation: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let updatedAt: String?
+    enum CodingKeys: String, CodingKey {
+        case id, title
+        case updatedAt = "updated_at"
+    }
+}
+
+struct AssistantConversationList: Decodable {
+    let conversations: [AssistantConversation]
+    let hasMore: Bool
+    enum CodingKeys: String, CodingKey {
+        case conversations
+        case hasMore = "has_more"
+    }
+}
+
+/// IDs only: mail bodies and sender-controlled text stay out of the user's prompt.
+struct AssistantEmailContext: Identifiable {
+    let id = UUID()
+    let emails: [EmailMessage]
+    var prompt: String {
+        let refs = emails.map { message in
+            "- Message \(message.id)" + (message.threadId.map { " (thread \($0))" } ?? "")
+        }.joined(separator: "\n")
+        return "Help me work with these Gmail messages. Read the relevant messages before drafting replies or organizing them.\n\n\(refs)\n\nMy instructions: "
+    }
+}
+
+/// Serializes conversation operations and drains the latest email handoff.
+/// A failed request stays pending for explicit retry with the same UUID.
+@Observable
+@MainActor
+final class AssistantOperationQueue {
+    private(set) var loading = false
+    @ObservationIgnored private var queuedHandoff: (() async -> Void)?
+
+    func run(_ operation: () async -> Void) async {
+        guard !loading else { return }
+        loading = true
+        await operation()
+        loading = false
+        let next = queuedHandoff
+        queuedHandoff = nil
+        await next?()
+    }
+
+    func takeEmails(
+        pending: @escaping () -> AssistantEmailContext?,
+        create: @escaping (AssistantEmailContext) async throws -> String,
+        select: @escaping (String, String) -> Void,
+        consume: @escaping (UUID) -> Void,
+        report: @escaping (Error) -> Void
+    ) async {
+        guard let request = pending() else { return }
+        let again = { await self.takeEmails(pending: pending, create: create, select: select,
+                                            consume: consume, report: report) }
+        guard !loading else {
+            queuedHandoff = again
+            return
+        }
+        await run {
+            do {
+                let id = try await create(request)
+                // The user may have chosen different mail while create/list
+                // awaited. Never select that older result over their new one.
+                guard pending()?.id == request.id else {
+                    if pending() != nil { queuedHandoff = again }
+                    return
+                }
+                select(id, request.prompt)
+                consume(request.id)
+            } catch { report(error) }
+        }
+    }
+}

@@ -139,7 +139,7 @@ class FakeConn:
         return self
 
     @asynccontextmanager
-    async def transaction(self):
+    async def transaction(self, **_kwargs):
         self.in_transaction += 1
         try:
             yield

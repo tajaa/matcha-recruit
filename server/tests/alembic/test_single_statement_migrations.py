@@ -25,6 +25,7 @@ from sqlalchemy import text
 VERSIONS = Path(__file__).parents[2] / "alembic" / "versions"
 MIGRATIONS = (
     "agentrt01_assistant_runs.py",
+    "assistthread01_assistant_conversations.py",
     "agentrt02_assistant_channels.py",
     "agentrt03_ability_grants.py",
     "autopilot01_location_weather.py",
@@ -66,3 +67,13 @@ def test_the_guard_catches_both_failure_classes():
     chained = "DO $$ BEGIN NULL; END $$; DO $$ BEGIN NULL; END $$"
     assert ";" in _outside_dollar_quotes(chained).strip().rstrip(";")
     assert text("""SELECT '{"recurring_orders":true}'::jsonb""").compile().params
+
+
+def test_conversation_migration_preserves_history_and_refuses_lossy_downgrade():
+    upgrade = " ".join(_statements("assistthread01_assistant_conversations.py", "upgrade"))
+    downgrade = " ".join(_statements("assistthread01_assistant_conversations.py", "downgrade"))
+    assert "DROP INDEX IF EXISTS uq_channels_assistant_user" in upgrade
+    assert "CREATE INDEX IF NOT EXISTS ix_channels_assistant_conversations" in upgrade
+    assert "DELETE" not in upgrade + downgrade
+    assert "HAVING COUNT(*) > 1" in downgrade and "RAISE EXCEPTION" in downgrade
+    assert downgrade.index("RAISE EXCEPTION") < downgrade.index("CREATE UNIQUE INDEX")

@@ -53,7 +53,7 @@ struct PrimaryDetailPane: View {
                 case .productivity: ProductivityWorkspace()
                 case .calendar: CalendarWorkspace()
                 case .email: EmailWorkspace()
-                case .assistant: AssistantView()
+                case .assistant: AssistantView(acceptsEmailHandoff: true)
                 }
             } else if appState.showChannelBrowse {
                 ChannelBrowseView()

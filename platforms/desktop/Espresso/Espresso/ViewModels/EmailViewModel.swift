@@ -39,6 +39,12 @@ final class EmailViewModel {
     var statusLoaded = false
     var email: String?
     var emails: [EmailMessage] = []
+    var mailbox: EmailMailbox = .unread
+    var nextPageToken: String?
+    var isLoadingMore = false
+    @ObservationIgnored private var loadGeneration = 0
+    @ObservationIgnored private var sessionGeneration = 0
+    @ObservationIgnored private var triageGeneration = 0
     var isLoading = false
     var isConnecting = false
     var errorMessage: String?
@@ -62,17 +68,31 @@ final class EmailViewModel {
 
     private let service = EmailService.shared
 
-    private init() {}
+    @ObservationIgnored private let fetchPage: (EmailMailbox, String?) async throws -> EmailFetchResponse
+
+    @ObservationIgnored private let triageEmails: ([String]) async throws -> EmailTriageResponse
+
+    init(triageEmails: @escaping ([String]) async throws -> EmailTriageResponse = {
+        try await EmailService.shared.triage(emailIds: $0)
+    }, fetchPage: @escaping (EmailMailbox, String?) async throws -> EmailFetchResponse = {
+        try await EmailService.shared.fetch(mailbox: $0, pageToken: $1)
+    }) {
+        self.fetchPage = fetchPage
+        self.triageEmails = triageEmails
+    }
 
     func loadStatus() async {
+        let gen = sessionGeneration
         do {
             let st = try await service.status()
+            guard gen == sessionGeneration else { return }
             connected = st.connected
             email = st.email
             if let limit = st.snapshotMaxEmails, limit > 0 { snapshotLimit = limit }
             statusLoaded = true
             if st.connected { await loadInbox() }
         } catch {
+            guard gen == sessionGeneration else { return }
             // A failing status check just means "not connected" for our purposes.
             connected = false
             statusLoaded = true
@@ -81,11 +101,13 @@ final class EmailViewModel {
 
     func connect() async {
         guard !isConnecting else { return }
+        let gen = sessionGeneration
         isConnecting = true
         errorMessage = nil
-        defer { isConnecting = false }
+        defer { if gen == sessionGeneration { isConnecting = false } }
         do {
             let resp = try await service.connect()
+            guard gen == sessionGeneration else { return }
             guard let url = URL(string: resp.authUrl) else {
                 errorMessage = "Couldn't open the Google sign-in page."
                 return
@@ -94,7 +116,9 @@ final class EmailViewModel {
             // Poll status (~90s) waiting for the browser OAuth to finish.
             for _ in 0..<45 {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard gen == sessionGeneration else { return }
                 if let st = try? await service.status(), st.connected {
+                    guard gen == sessionGeneration else { return }
                     connected = true
                     email = st.email
                     await loadInbox()
@@ -103,16 +127,23 @@ final class EmailViewModel {
             }
             errorMessage = "Timed out waiting for Gmail. Try again."
         } catch {
+            guard gen == sessionGeneration else { return }
             errorMessage = error.localizedDescription
         }
     }
 
     func loadInbox() async {
-        guard connected, !isLoading else { return }
+        guard connected else { return }
+        loadGeneration += 1
+        let gen = loadGeneration
+        let requestedMailbox = mailbox
+        isLoadingMore = false
         isLoading = true
-        defer { isLoading = false }
+        defer { if gen == loadGeneration { isLoading = false } }
         do {
-            let resp = try await service.fetch()
+            let resp = try await fetchPage(requestedMailbox, nil)
+            guard gen == loadGeneration else { return }
+            nextPageToken = resp.nextPageToken
             // Date labels are relative to now, so they're rebuilt per load.
             rowInfoCache = [:]
             emails = resp.emails
@@ -121,6 +152,34 @@ final class EmailViewModel {
             errorMessage = nil
             lastLoadedAt = Date()
         } catch {
+            guard gen == loadGeneration else { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func selectMailbox(_ value: EmailMailbox) async {
+        guard value != mailbox else { return }
+        mailbox = value
+        emails = []
+        nextPageToken = nil
+        lastLoadedAt = nil
+        await loadInbox()
+    }
+
+    func loadMore() async {
+        guard connected, !isLoading, !isLoadingMore, let token = nextPageToken else { return }
+        let gen = loadGeneration
+        isLoadingMore = true
+        defer { if gen == loadGeneration { isLoadingMore = false } }
+        do {
+            let resp = try await fetchPage(mailbox, token)
+            guard gen == loadGeneration else { return }
+            let known = Set(emails.map(\.id))
+            emails.append(contentsOf: resp.emails.filter { !known.contains($0.id) })
+            nextPageToken = resp.nextPageToken
+            errorMessage = nil
+        } catch {
+            guard gen == loadGeneration else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -134,6 +193,21 @@ final class EmailViewModel {
 
     func disconnect() async {
         try? await service.disconnect()
+        resetSession()
+        statusLoaded = true // disconnected is known; show the Connect button immediately
+    }
+
+    func resetSession() {
+        sessionGeneration += 1
+        triageGeneration += 1
+        isTriaging = false
+        loadGeneration += 1
+        isLoading = false
+        isLoadingMore = false
+        isConnecting = false
+        nextPageToken = nil
+        mailbox = .unread
+        statusLoaded = false
         connected = false
         email = nil
         emails = []
@@ -161,7 +235,8 @@ final class EmailViewModel {
             touchFull(id)
             return cached
         }
-        guard connected, let fetched = try? await service.message(id: id) else { return nil }
+        let gen = sessionGeneration
+        guard connected, let fetched = try? await service.message(id: id), gen == sessionGeneration else { return nil }
         fullCache[id] = fetched
         touchFull(id)
         while fullCacheOrder.count > Self.fullCacheLimit {
@@ -190,15 +265,36 @@ final class EmailViewModel {
 
     private func organize(ids: [String], replacing: Bool) async {
         guard connected, !ids.isEmpty, !isTriaging else { return }
+        let gen = loadGeneration
+        triageGeneration += 1
+        let triageGen = triageGeneration
         isTriaging = true
         errorMessage = nil
-        defer { isTriaging = false }
+        defer {
+            if triageGen == triageGeneration {
+                isTriaging = false
+                if gen != loadGeneration && connected { Task { await organizeNew() } }
+            }
+        }
         do {
-            let resp = try await service.triage(emailIds: Array(ids.prefix(25)))
             var next = replacing ? [:] : triage
-            for entry in resp.buckets { next[entry.emailId] = entry }
-            triage = next
+            var pending = ids
+            var attempted = Set<String>()
+            while !pending.isEmpty {
+                for start in stride(from: 0, to: pending.count, by: 25) {
+                    let batch = Array(pending[start..<min(start + 25, pending.count)])
+                    attempted.formUnion(batch)
+                    let resp = try await triageEmails(batch)
+                    guard gen == loadGeneration, triageGen == triageGeneration else { return }
+                    for entry in resp.buckets { next[entry.emailId] = entry }
+                    triage = next
+                }
+                // Pages can arrive while this call is suspended. Drain only
+                // new IDs: an omitted/failed classification must not loop.
+                pending = emails.map(\.id).filter { triage[$0] == nil && !attempted.contains($0) }
+            }
         } catch {
+            guard gen == loadGeneration else { return }
             errorMessage = error.localizedDescription
         }
     }

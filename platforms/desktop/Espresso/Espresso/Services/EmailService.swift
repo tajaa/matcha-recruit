@@ -61,8 +61,24 @@ struct EmailMessage: Decodable, Identifiable, Equatable {
     }
 }
 
+enum EmailMailbox: String, CaseIterable {
+    case unread, read, all
+    var title: String {
+        switch self {
+        case .unread: return "Unread"
+        case .read: return "Read"
+        case .all: return "All mail"
+        }
+    }
+}
+
 struct EmailFetchResponse: Decodable {
     let emails: [EmailMessage]
+    var nextPageToken: String? = nil
+    enum CodingKeys: String, CodingKey {
+        case emails
+        case nextPageToken = "next_page_token"
+    }
 }
 
 struct EmailSummaryResponse: Decodable {
@@ -193,9 +209,14 @@ final class EmailService {
         try await client.request(method: "POST", path: "\(basePath)/connect")
     }
 
-    /// Fetches up to 25 unread messages for the connected account.
-    func fetch() async throws -> EmailFetchResponse {
-        try await client.request(method: "POST", path: "\(basePath)/fetch")
+    /// Fetches the next 25 messages from the selected mailbox without marking them read.
+    func fetch(mailbox: EmailMailbox = .unread, pageToken: String? = nil) async throws -> EmailFetchResponse {
+        struct Body: Encodable {
+            let mailbox: String
+            let page_token: String?
+        }
+        return try await client.request(method: "POST", path: "\(basePath)/fetch",
+                                        body: Body(mailbox: mailbox.rawValue, page_token: pageToken))
     }
 
     /// One message by Gmail id — for a message no longer in the unread list.

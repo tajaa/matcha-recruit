@@ -92,6 +92,7 @@ class AppState {
     /// Full-pane private conversation with Espresso (the assistant). Same
     /// nav-only model; the pane owns its conversation.
     var showAssistantHub: Bool = false
+    var pendingAssistantEmailContext: AssistantEmailContext?
     /// Full-pane Calendar (the person's Espresso calendar, dated to-dos and
     /// Google Calendar). Same nav-only model.
     var showCalendarHub: Bool = false
@@ -151,6 +152,14 @@ class AppState {
         clearPrimaryNav()
         pendingEmailId = id
         showEmailHub = true
+    }
+
+    func workOnEmails(_ emails: [EmailMessage]) {
+        guard !emails.isEmpty else { return }
+        guard canAssistant else { presentPaywall(for: "assistant"); return }
+        clearPrimaryNav()
+        pendingAssistantEmailContext = AssistantEmailContext(emails: Array(emails.prefix(25)))
+        showAssistantHub = true
     }
 
     var onlineUsers: [MWOnlineUser] = []

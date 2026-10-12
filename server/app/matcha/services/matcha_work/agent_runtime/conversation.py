@@ -1,6 +1,6 @@
 """A person's private conversation with Espresso.
 
-One channel per person per company, `channel_scope = 'assistant'`, with that
+One channel per conversation, owned by a person in a company, `channel_scope = 'assistant'`, with that
 person as its only member. It is written here with the scope as a literal:
 this package never imports `werk` (the matcha → werk boundary allows exactly
 the two fan-out imports that already exist).
@@ -23,8 +23,8 @@ async def ensure_assistant_channel(conn, *, user_id: UUID, company_id: UUID) -> 
     """The person's private conversation, created on first use. Idempotent."""
     existing = await conn.fetchval(
         """SELECT id FROM channels
-           WHERE company_id = $1 AND assistant_user_id = $2 AND channel_scope = 'assistant'""",
-        company_id, user_id,
+           WHERE company_id = $1 AND assistant_user_id = $2 AND channel_scope = 'assistant' AND slug = $3""",
+        company_id, user_id, _slug(user_id),
     )
     if existing:
         return existing
@@ -49,8 +49,8 @@ async def ensure_assistant_channel(conn, *, user_id: UUID, company_id: UUID) -> 
         # Two first opens at once: the other one made it.
         return await conn.fetchval(
             """SELECT id FROM channels
-               WHERE company_id = $1 AND assistant_user_id = $2 AND channel_scope = 'assistant'""",
-            company_id, user_id,
+               WHERE company_id = $1 AND assistant_user_id = $2 AND channel_scope = 'assistant' AND slug = $3""",
+            company_id, user_id, _slug(user_id),
         )
 
 
@@ -75,3 +75,25 @@ async def is_private_conversation(conn, *, channel_id: UUID, user_id: UUID) -> b
         and row["members"] == 1
         and row["mine"] == 1
     )
+
+
+async def create_conversation(conn, *, user_id: UUID, company_id: UUID,
+                              title: str, request_id: UUID) -> UUID:
+    """Each conversation is an isolated channel; retrying a create reuses it."""
+    slug = f"espresso-{user_id.hex}-{request_id.hex}"
+    async with conn.transaction():
+        channel_id = await conn.fetchval(
+            """INSERT INTO channels
+                   (company_id, name, slug, description, created_by, visibility,
+                    channel_scope, assistant_user_id, is_paid, currency)
+               VALUES ($1, $2, $3, $4, $5, 'private', 'assistant', $5, FALSE, 'usd')
+               ON CONFLICT (company_id, slug) DO UPDATE SET slug = EXCLUDED.slug
+               RETURNING id""",
+            company_id, title, slug, "Your private conversation with Espresso.", user_id,
+        )
+        await conn.execute(
+            """INSERT INTO channel_members (channel_id, user_id, role, last_contributed_at)
+               VALUES ($1, $2, 'owner', NOW()) ON CONFLICT (channel_id, user_id) DO NOTHING""",
+            channel_id, user_id,
+        )
+    return channel_id

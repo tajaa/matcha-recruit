@@ -40,6 +40,7 @@ def gmail(monkeypatch):
     fake = SimpleNamespace(
         get_message=AsyncMock(return_value=dict(MSG)),
         fetch_unread=AsyncMock(return_value=[dict(MSG)]),
+        fetch_page=AsyncMock(return_value={"emails": [dict(MSG)], "next_page_token": "next"}),
         create_draft=AsyncMock(return_value={"id": "draft-1"}),
         send_email=AsyncMock(return_value={"id": "sent-1"}),
     )
@@ -632,3 +633,15 @@ def test_calendar_suggest_falls_back_to_the_stored_zone_and_502s_without_the_mod
     calendar.set_timezone.assert_not_awaited()
     assert suggest.await_args.kwargs["tz_name"] == "America/New_York"
     assert bad_id.status_code == 400
+
+
+def test_mailbox_page_is_explicit_and_legacy_fetch_stays_compatible(gmail):
+    with _client() as client:
+        legacy = client.post("/agent/email/fetch")
+        assert legacy.status_code == 200 and legacy.json() == {"emails": [MSG]}
+        response = client.post("/agent/email/fetch", json={"mailbox": "read", "page_token": "cursor"})
+        assert response.status_code == 200 and response.json()["next_page_token"] == "next"
+        gmail.fetch_page.assert_awaited_once_with("read", "cursor")
+        for data in ({"mailbox": "bad"}, {"page_token": "x" * 2049}):
+            assert client.post("/agent/email/fetch", json=data).status_code == 422
+    gmail.fetch_unread.assert_awaited_once_with(max_results=25)
