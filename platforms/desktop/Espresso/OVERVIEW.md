@@ -107,6 +107,16 @@ clicks Create. Projects without a repo keep the simpler one-shot draft fallback.
 
 Journals are shared writing spaces for teams or individuals.
 
+- The workspace has a journal list and editor. Click the list's folder title to
+  browse All Journals, Starred, Shared with me, Uncategorized, or your folders;
+  the same picker creates, renames, colors and nests folders.
+- Below 760 points of workspace width, **Browse journals** opens the searchable
+  list in a popover. The editor stays mounted as the list folds, preserving the
+  draft and undo history when opening a side pane or resizing the window.
+- **Quick Note** in the window toolbar (⌥⌘N) creates a blank note in your Notes
+  folder and opens it beside your current work. It autosaves through the normal
+  journal editor and remains available in Journals. **New note** or ⌘N inside
+  Journals creates in the selected folder (Uncategorized stays unfiled).
 - Create journals with a custom color and icon
 - Write entries with a title, date, and rich text content
 - Invite collaborators and manage their permissions

@@ -2,16 +2,15 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-/// Right-pane journal view. A list of entries (grouped by date) that opens a
-/// single entry as a **full page** (Day One style): tap an entry — or "New
-/// entry" — and it fills the pane with a title, date and a full-height
-/// `RichJournalEditor`; a back button autosaves and returns to the list.
+/// A single journal document, embedded in a workspace, pane or window.
 struct JournalDetailView: View {
     let journalId: String
     /// True in a secondary (aux) window — suppresses shared nav/tab writes.
     let isEmbedded: Bool
+    let focusOnLoad: Bool
 
     @Environment(AppState.self) private var appState
+    @Environment(\.workPane) private var pane
     @State private var vm = JournalDetailViewModel()
 
     @State private var showInviteSheet = false
@@ -39,9 +38,10 @@ struct JournalDetailView: View {
     @AppStorage private var fontSizeRaw: Double
     @AppStorage private var lineSpacingRaw: Double
 
-    init(journalId: String, isEmbedded: Bool = false) {
+    init(journalId: String, isEmbedded: Bool = false, focusOnLoad: Bool = false) {
         self.journalId = journalId
         self.isEmbedded = isEmbedded
+        self.focusOnLoad = focusOnLoad
         _fontFamily = AppStorage(wrappedValue: "system", "journal.\(journalId).font.family")
         _fontSizeRaw = AppStorage(wrappedValue: 13.0, "journal.\(journalId).font.size")
         _lineSpacingRaw = AppStorage(wrappedValue: 3.0, "journal.\(journalId).line.spacing")
@@ -52,7 +52,7 @@ struct JournalDetailView: View {
 
     var body: some View {
         Group {
-            if vm.journal != nil {
+            if vm.journal != nil, docSeededFor == journalId {
                 docEditor   // every journal is a single-document note now
             } else {
                 loadingOrError
@@ -61,9 +61,7 @@ struct JournalDetailView: View {
         .background(Color.appBackground)
         .overlay(alignment: .bottom) { toastOverlay }
         .task(id: journalId) {
-            await vm.load(id: journalId)
-            await vm.ensureBodyEntry()
-            syncDocFromVM()
+            await loadDocument()
             if !isEmbedded {
                 appState.setActiveContext(WorkTab(kind: .journal, entityId: journalId,
                                                   title: vm.journal?.title ?? "Journal"))
@@ -73,6 +71,7 @@ struct JournalDetailView: View {
         .onChange(of: journalId) { _, _ in
             flushLeavingDoc()      // persist the doc we're leaving (entry-scoped, safe)
             docSeededFor = nil     // force a reseed for the incoming doc
+            docReadingMode = false
             wireUploadCallbacks()
         }
         .onChange(of: vm.bodyEntry?.id) { _, _ in syncDocFromVM() }
@@ -186,6 +185,7 @@ struct JournalDetailView: View {
                     lineSpacing: lineSpacing,
                     slashBlocks: vm.kind.slashBlocks,
                     textColor: NSColor(appState.themeText),
+                    focusOnLoad: focusOnLoad || pane.isSide,
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal, 14)
@@ -205,8 +205,36 @@ struct JournalDetailView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundColor(appState.themeText)
+                .frame(minWidth: 80)
                 .onSubmit { Task { await saveDocIfDirty() } }
-            Spacer()
+            ViewThatFits(in: .horizontal) {
+                headerActions.fixedSize()
+                Menu {
+                    if !vm.kind.usesScreenplayEditor {
+                        Button(docReadingMode ? "Edit" : "Reading mode") { docReadingMode.toggle() }
+                    }
+                    exportActions
+                    Divider()
+                    Button("Writing style…") { showStylePopover = true }
+                    Button("Invite…") { showInviteSheet = true }
+                } label: {
+                    Image(systemName: "ellipsis.circle").font(.system(size: 13))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Journal actions")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .popover(isPresented: $showStylePopover, arrowEdge: .bottom) {
+            JournalStylePopover(journalId: journalId)
+        }
+    }
+
+    private var headerActions: some View {
+        HStack(spacing: 8) {
             if let n = vm.journal?.collaboratorCount, n > 0 {
                 Text("\(n) collaborator\(n == 1 ? "" : "s")")
                     .font(.system(size: 11))
@@ -225,18 +253,7 @@ struct JournalDetailView: View {
                 .help(docReadingMode ? "Edit" : "Reading mode")
             }
             Menu {
-                if vm.kind.usesScreenplayEditor {
-                    Button("Copy as Fountain") { copyFountain() }
-                    Divider()
-                    Button("Export .fountain…") { exportFountain() }
-                    Button("Export PDF…") { exportScreenplayPDF() }
-                } else {
-                    Button("Copy as Markdown") { copyDoc(asHTML: false) }
-                    Button("Copy as HTML") { copyDoc(asHTML: true) }
-                    Divider()
-                    Button("Export Markdown…") { exportDoc(asHTML: false) }
-                    Button("Export HTML…") { exportDoc(asHTML: true) }
-                }
+                exportActions
             } label: {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: 11, weight: .medium))
@@ -258,9 +275,6 @@ struct JournalDetailView: View {
                     .cornerRadius(4)
             }
             .buttonStyle(.plain)
-            .popover(isPresented: $showStylePopover, arrowEdge: .bottom) {
-                JournalStylePopover(journalId: journalId)
-            }
             Button { showInviteSheet = true } label: {
                 HStack(spacing: 3) {
                     Image(systemName: "person.badge.plus").font(.system(size: 10))
@@ -273,8 +287,22 @@ struct JournalDetailView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private var exportActions: some View {
+        if vm.kind.usesScreenplayEditor {
+            Button("Copy as Fountain") { copyFountain() }
+            Divider()
+            Button("Export .fountain…") { exportFountain() }
+            Button("Export PDF…") { exportScreenplayPDF() }
+        } else {
+            Button("Copy as Markdown") { copyDoc(asHTML: false) }
+            Button("Copy as HTML") { copyDoc(asHTML: true) }
+            Divider()
+            Button("Export Markdown…") { exportDoc(asHTML: false) }
+            Button("Export HTML…") { exportDoc(asHTML: true) }
+        }
     }
 
     @ViewBuilder
@@ -285,7 +313,7 @@ struct JournalDetailView: View {
                 Image(systemName: "exclamationmark.triangle").font(.system(size: 22)).foregroundColor(.red)
                 Text(err).font(.system(size: 11)).foregroundColor(appState.themeTextSecondary)
                     .multilineTextAlignment(.center).padding(.horizontal, 16)
-                Button { Task { await vm.refresh() } } label: {
+                Button { Task { await loadDocument() } } label: {
                     Text("Try again").font(.system(size: 11, weight: .medium))
                 }
                 .buttonStyle(.borderedProminent).tint(appState.themeAccent).controlSize(.small)
@@ -298,10 +326,17 @@ struct JournalDetailView: View {
         }
     }
 
-    /// Seed the editor from the loaded body entry exactly once per journal so
-    /// re-renders never clobber what the user is typing.
+    private func loadDocument() async {
+        await vm.load(id: journalId)
+        guard !Task.isCancelled, vm.journal?.id == journalId, vm.errorMessage == nil else { return }
+        await vm.ensureBodyEntry()
+        guard !Task.isCancelled else { return }
+        syncDocFromVM()
+    }
+
+    /// Seed once per journal so re-renders never clobber live edits.
     private func syncDocFromVM() {
-        guard vm.kind.isDocKind, let entry = vm.bodyEntry else { return }
+        guard vm.kind.isDocKind, let entry = vm.bodyEntry, entry.journalId == journalId else { return }
         guard docSeededFor != journalId else { return }
         docContent = entry.content
         docOrigContent = entry.content
@@ -340,19 +375,29 @@ struct JournalDetailView: View {
         }
     }
 
-    /// Flush the document we're leaving. Entry-scoped (targets the captured
-    /// entry's own journal), so it's safe even after the VM has begun loading a
-    /// different journal. Title edits are persisted on-page via debounce/onSubmit.
+    /// Flush both body and title when closing a quick note or navigating before
+    /// the debounce fires. Both writes target the captured document's IDs.
     private func flushLeavingDoc() {
         saveTask?.cancel()
-        guard let entry = docEntry, docContent != docOrigContent else { return }
+        guard let entry = docEntry else { return }
         let content = docContent
+        let title = docTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let saveContent = content != docOrigContent
+        let saveTitle = !title.isEmpty && title != docOrigTitle
+        guard saveContent || saveTitle else { return }
         docOrigContent = content
+        if saveTitle { docOrigTitle = title }
         Task {
-            _ = try? await MatchaWorkService.shared.updateJournalEntry(
-                entryId: entry.id, journalId: entry.journalId,
-                title: entry.title, content: content, entryDate: entry.entryDate,
-            )
+            if saveContent {
+                _ = try? await MatchaWorkService.shared.updateJournalEntry(
+                    entryId: entry.id, journalId: entry.journalId,
+                    title: entry.title, content: content, entryDate: entry.entryDate,
+                )
+            }
+            if saveTitle {
+                _ = try? await MatchaWorkService.shared.updateJournal(id: entry.journalId, title: title)
+            }
+            appState.journalsListGeneration &+= 1
         }
     }
 

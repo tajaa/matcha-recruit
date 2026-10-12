@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 /// the controller so they share state and behavior.
 struct JournalEditorToolbar: View {
     @ObservedObject var controller: JournalEditorController
+    @Environment(AppState.self) private var appState
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -49,12 +50,12 @@ struct JournalEditorToolbar: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
         }
-        .background(Color.zinc900.opacity(0.6))
+        .background(appState.themeText.opacity(0.035))
         .cornerRadius(4)
     }
 
     private var divider: some View {
-        Rectangle().fill(Color.white.opacity(0.08))
+        Rectangle().fill(appState.themeBorder.opacity(0.6))
             .frame(width: 1, height: 14)
             .padding(.horizontal, 3)
     }
@@ -63,9 +64,9 @@ struct JournalEditorToolbar: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.white.opacity(0.75))
+                .foregroundColor(appState.themeText.opacity(0.75))
                 .frame(width: 22, height: 20)
-                .background(Color.white.opacity(0.001))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(help)
@@ -78,7 +79,7 @@ struct JournalEditorToolbar: View {
         Button(action: action) {
             Text(label)
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.white.opacity(0.75))
+                .foregroundColor(appState.themeText.opacity(0.75))
                 .frame(width: 22, height: 20)
         }
         .buttonStyle(.plain)

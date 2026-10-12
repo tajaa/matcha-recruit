@@ -309,6 +309,55 @@ struct PaneIconButton: View {
 
 // MARK: - Toolbar button
 
+/// One-click capture beside the current work. Uses normal journal storage,
+/// including the user's default Notes folder, rather than a separate scratchpad.
+struct QuickNoteButton: View {
+    @Environment(AppState.self) private var appState
+    @State private var isCreating = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Button {
+            Task { await create() }
+        } label: {
+            Image(systemName: isCreating ? "hourglass" : "square.and.pencil")
+                .font(.system(size: 13))
+                .foregroundColor(appState.themeText.opacity(0.7))
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut("n", modifiers: [.command, .option])
+        .disabled(isCreating)
+        .help("Quick Note (⌥⌘N) — write beside your work")
+        .accessibilityLabel("Quick Note")
+        .alert("Couldn't create quick note", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    @MainActor
+    private func create() async {
+        guard !isCreating, let ownerId = appState.currentUser?.id else { return }
+        isCreating = true
+        defer { isCreating = false }
+        do {
+            let journal = try await MatchaWorkService.shared.createJournal(title: "Quick Note", kind: "note")
+            // A response arriving after sign-out must not navigate the next
+            // person's session to the former account's journal.
+            guard appState.currentUser?.id == ownerId else { return }
+            appState.journalsListGeneration &+= 1
+            appState.openBeside(.journal(journal.id))
+        } catch {
+            guard appState.currentUser?.id == ownerId else { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
 /// The window toolbar's way in: click to show or hide the side pane (the last
 /// surface it had), or pick which surface to put there.
 struct SidePaneToolbarButton: View {
