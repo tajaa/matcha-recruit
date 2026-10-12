@@ -106,7 +106,7 @@ def availability(ability: Ability, situation: Situation) -> Availability:
         return Availability(**base, available=False, needs_consent=True,
                             reason="Switch it on in Espresso's settings first.")
     wanted = set(ability.required_scopes) | {s for tool in ability.tools for s in tool.required_scopes}
-    missing = tuple(sorted(s for s in wanted if s not in situation.granted_scopes))
+    missing = tuple(sorted(s for s in wanted if s.startswith("https://www.googleapis.com/") and s not in situation.granted_scopes))
     if ability.connection == "google":
         if not situation.google_connected:
             return Availability(**base, available=False, needs_connection=True, missing_scopes=missing,

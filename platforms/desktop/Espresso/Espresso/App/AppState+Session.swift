@@ -41,6 +41,7 @@ extension AppState {
     func didLogin(user: UserInfo) {
         CodexResearchCoordinator.shared.bind(userID: user.id)
         currentUser = user
+        AppleCalendarSync.shared.bind(userID: user.id)
         isAuthenticated = true
         // The side pane's first build remembered its last target under one
         // global key, which could hold a file's signed URL. It is per person
@@ -125,6 +126,7 @@ extension AppState {
         FileStarStore.shared.bind(userId: nil)
         SidebarSectionOrderStore.shared.bind(userId: nil)
         CalendarService.shared.resetSession()
+        AppleCalendarSync.shared.bind(userID: nil)
         heartbeatTask?.cancel()
         heartbeatTask = nil
         inboxPollTask?.cancel()

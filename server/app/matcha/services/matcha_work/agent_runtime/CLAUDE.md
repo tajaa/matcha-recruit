@@ -106,9 +106,12 @@ it otherwise), and should declare `resolve`.
   conversations and workers share that allowance; provider calls run after
   the reservation commits. Failed calls release their allowance on resolution;
   crashes and unknown outcomes retain it until the window expires.
-- **`ASSISTANT_COMMIT_MODE` must be exactly `live`.** Anything else, unset
-  included, is a dry run: the action is claimed, audited and shown as a
-  receipt, and the handler is never called.
+- **Calendar consent enables live calendar changes by default.** An unset
+  `ASSISTANT_COMMIT_MODE` makes the calendar ability live after the user's
+  consent; every other commit ability still defaults to dry run. An explicit
+  server value overrides all abilities: exactly `live` enables writes, any
+  other value pauses them. `RunContext.commit_modes` carries per-ability modes
+  through the same policy, ceilings, audit and receipt pipeline.
 - **Personal data stays in the private conversation.** `email`, `calendar` and
   `reservations` are `private_only`. `catalog.abilities_for` leaves them out of
   a project chat, and `evaluate_commit` still denies one that got through.
@@ -317,7 +320,7 @@ ahead on a clear yes and on nothing else.
 
 ## Calendar (`abilities/calendar.py`)
 
-Two calendars in one ability:
+Three calendar sources in one ability:
 
 - **The Espresso calendar** (`../calendar_service.py`, `mw_calendar_events`,
   REST in `routes/work/calendar.py`, the Calendar tab in the macOS app) is the
@@ -325,7 +328,7 @@ Two calendars in one ability:
   `add_espresso_event`, `update_espresso_event` and `delete_espresso_event` are
   `draft` tools: the calendar is the person's alone and nobody is told, so
   nothing is held, claimed or dry-run. They need no Google connection, but the
-  ability's consent (`calendar-openai-1`) and the private conversation still
+  ability's consent (`calendar-openai-2`) and the private conversation still
   apply. Update and delete take only an event this run listed or added.
   `from_email_id` links an added event to an email **this run read** (the
   email session's `messages`), so the calendar can show "From email: …".
@@ -334,7 +337,7 @@ Two calendars in one ability:
   else; the Espresso calendar never emails anyone.
 
 The `events` result block gates ids from both sessions and says which with
-`calendar` (`google` / `espresso`); both apps render it.
+`calendar` (`google` / `espresso` / `apple`); both apps render it.
 
 **The person's timezone.** The macOS app reports its IANA zone
 (`PUT /matcha-work/calendar/prefs`, also on every email calendar suggestion)
@@ -342,6 +345,28 @@ into `mw_calendar_prefs`. `assistant.py` reads it into `RunContext.timezone`
 (`calendar_service.get_timezone`, which never raises: a missing table logs
 and reads as None), `build_system_prompt` then gives the local time beside
 UTC, and Espresso-calendar times are written in that zone.
+
+## Apple Calendar (`abilities/apple_calendar.py`)
+
+The connected Mac shares only selected calendars through EventKit. Snapshots
+cover 30 days back through 336 days ahead, at most 500 events. Read results
+carry freshness and coverage; partial, stale or out-of-range data cannot prove
+availability. Only personal events in writable calendars are editable; existing
+invitations remain read-only. Google handles invitations.
+
+Consent exposes the Apple tools only in the private assistant. Writes freeze
+the connection, original event and new fields, then queue a `handoff` receipt.
+The Mac claims once, rechecks consent, live mode, macOS permission, selected
+calendar and original event before saving. A missing acknowledgment becomes
+`unknown` after five minutes and is never replayed; check Calendar before
+retrying. Reconnection cancels pending work and invalidates the old Mac.
+The app polls every 30 seconds while open; Calendar settings shows recent
+operations. Calendar access is live when ASSISTANT_COMMIT_MODE is unset; an
+explicit non-live value pauses writes. Other abilities retain preview defaults.
+
+`mwcal02` adds private connections and actions (user foreign keys with cascading
+deletes). Deploy the additive migration before connecting a Mac. EventKit
+permission and real iCloud/Google propagation require manual Mac validation.
 
 ## Google
 

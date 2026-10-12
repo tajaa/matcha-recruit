@@ -43,6 +43,7 @@ def svc(monkeypatch):
     for name, fake in vars(fakes).items():
         monkeypatch.setattr(cal, name, fake)
     monkeypatch.setattr(routes, "get_client_company_id", AsyncMock(return_value=COMPANY))
+    monkeypatch.setattr(routes.apple, "feed", AsyncMock(return_value={"status": "not_connected", "events": []}))
     return fakes
 
 
@@ -72,6 +73,10 @@ def test_every_calendar_route_requires_admin_or_client():
         ("GET", "/calendar/feed"), ("POST", "/calendar/events"), ("GET", "/calendar/events/{event_id}"),
         ("PATCH", "/calendar/events/{event_id}"), ("DELETE", "/calendar/events/{event_id}"),
         ("PUT", "/calendar/prefs"),
+        ("GET", "/calendar/apple"), ("PUT", "/calendar/apple"),
+        ("DELETE", "/calendar/apple/{connection_id}"), ("PUT", "/calendar/apple/snapshot"),
+        ("POST", "/calendar/apple/{connection_id}/claim"),
+        ("PUT", "/calendar/apple/{connection_id}/actions/{action_id}"),
     }
     found = {}
     for route in iter_api_routes(routes.router):
@@ -197,3 +202,21 @@ def test_prefs_store_a_real_zone_and_refuse_anything_else(svc):
         bad = client.put("/calendar/prefs", json={"timezone": "Pacific"})
     assert ok.json() == {"timezone": "America/Los_Angeles"}
     assert bad.status_code == 422
+
+
+def test_apple_failure_does_not_blank_the_persons_calendar(svc, monkeypatch):
+    _google(monkeypatch, configured=False)
+    monkeypatch.setattr(routes.apple, "feed", AsyncMock(side_effect=RuntimeError("Mac offline")))
+    with _client() as client:
+        body = client.get("/calendar/feed", params=WINDOW).json()
+    assert body["events"] == [EVENT] and body["apple"] == {"status": "error", "events": []}
+
+
+def test_feed_includes_selected_apple_events_and_sync_status(svc, monkeypatch):
+    _google(monkeypatch, configured=False)
+    feed = {"status": "stale", "events": [{"id": "a1", "title": "Focus"}], "synced_at": "2026-10-01T00:00:00Z"}
+    monkeypatch.setattr(routes.apple, "feed", AsyncMock(return_value=feed))
+    with _client() as client:
+        body = client.get("/calendar/feed", params=WINDOW).json()
+    assert body["apple"] == feed
+    assert routes.apple.feed.await_args.args[0] == USER.id

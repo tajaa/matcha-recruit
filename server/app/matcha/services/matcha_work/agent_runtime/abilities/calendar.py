@@ -32,6 +32,7 @@ from app.matcha.services.matcha_work.google_calendar_service import (
 )
 
 from .. import consent, policy
+from . import apple_calendar
 from ..context import RunContext, RunState
 from ..registry import Ability, AgentTool, Target, ToolOutput
 from ..runner import TransportUncertain
@@ -48,6 +49,9 @@ class CalendarSession:
     espresso: Any = calendar_service  # the Espresso calendar's store
     events: dict[str, dict] = field(default_factory=dict)  # Google, by id
     espresso_events: dict[str, dict] = field(default_factory=dict)  # Espresso, by id
+
+    apple_connection: str | None = None
+    apple_events: dict[str, dict] = field(default_factory=dict)
 
     def remember_espresso(self, event: dict) -> None:
         if event.get("id"):
@@ -569,7 +573,12 @@ def prompt_block(ctx: RunContext) -> str:
         zone = f"They are in {ctx.timezone}: use its offset on the day in question."
     else:
         zone = "Work out the offset from the events you list; if you cannot tell their timezone, ask."
-    return _PROMPT.format(google=google, zone=zone)
+    text = _PROMPT.format(google=google, zone=zone)
+    if apple_calendar.apple.SCOPE in ctx.granted_scopes:
+        text += "\nApple Calendar is connected through their Mac. list_apple_events reads its snapshot; create_apple_event, update_apple_event and delete_apple_event queue changes. Report them as queued until confirmed, never completed. Existing invitations are read-only. Only status ok is complete, current availability. Partial, stale or out_of_range snapshots cannot prove that a time is free."
+    else:
+        text += "\nTo use Apple Calendar, connect it in Espresso Settings > Calendars on their Mac."
+    return text
 
 
 def gate_block(block_type: str, raw: Any, state: RunState) -> tuple[dict | None, list[str]]:
@@ -582,6 +591,8 @@ def gate_block(block_type: str, raw: Any, state: RunState) -> tuple[dict | None,
         source = "google"
         if event is None:
             event, source = session.espresso_events.get(str(event_id)), "espresso"
+        if event is None:
+            event, source = session.apple_events.get(str(event_id)), "apple"
         if event is None:
             warnings.append("Dropped an event this run never saw")
             continue
@@ -606,7 +617,7 @@ def build(*, calendar_factory: Callable[[RunContext], Any] | None = None,
     return Ability(
         key=KEY,
         label="Calendar",
-        tools=_tools(insert_reminder or _insert_reminder),
+        tools=(*_tools(insert_reminder or _insert_reminder), *apple_calendar.tools()),
         prompt_block=prompt_block,
         # No ability-level connection: the Espresso calendar and `add_reminder`
         # work without Google. The Google tools each need `calendar.events` and

@@ -295,6 +295,7 @@ async def run_agent(
             await step(tool.name, "policy", f"Not started: {preview.get('title') or tool.name}", args,
                        {**shown, "reason": "not_enough_time"}, "skipped")
             return out, None
+        mode = ctx.commit_modes.get(ability.key, ctx.commit_mode)
         weight = max(1, tool.weight(args)) if tool.weight else 1
         state.seq += 1
         seq = state.seq
@@ -303,7 +304,7 @@ async def run_agent(
             step_id = await store.claim_step(
                 ctx.run_id, seq, tool.name, "commit", title[:200],
                 # `weight` is what the ceilings count: one call can be many actions.
-                _safe_for_audit(args), _safe_for_audit({**shown, "mode": ctx.commit_mode, "weight": weight}),
+                _safe_for_audit(args), _safe_for_audit({**shown, "mode": mode, "weight": weight}),
                 ceiling_user_id=ctx.user_id, ceilings=tool.ceilings,
             )
         except store.CommitCeilingExceeded as exc:
@@ -320,7 +321,7 @@ async def run_agent(
 
         # Counted from the claim, not the outcome: an `unknown` send may have gone out.
         state.commits[tool.name] = state.commits.get(tool.name, 0) + weight
-        if ctx.commit_mode != "live":
+        if mode != "live":
             receipt = {"action": tool.name, "status": "dry_run", **preview,
                        "note": "Dry run: nothing was sent."}
             payload: dict = {"ok": True, "dry_run": True}

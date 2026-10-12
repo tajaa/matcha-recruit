@@ -84,14 +84,10 @@ export default function AssistantAbilities({ onClose }: { onClose: () => void })
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    try {
-      setData(await listAssistantAbilities())
-      setLoadError(null)
-    } catch (e) {
-      setLoadError(message(e))
-    }
-  }, [])
+  const load = useCallback(() => listAssistantAbilities().then(
+    (abilities) => { setData(abilities); setLoadError(null) },
+    (error: unknown) => { setLoadError(message(error)) },
+  ), [])
 
   useEffect(() => { void load() }, [load])
 
@@ -155,13 +151,16 @@ export default function AssistantAbilities({ onClose }: { onClose: () => void })
         {data?.commit_mode === 'dry_run' && (
           <p className="flex gap-1.5 rounded-lg bg-orange-500/10 p-2 text-[11px] text-orange-300">
             <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-            Dry run: Espresso shows what it would send or book, and nothing leaves yet.
+            Some actions are in preview mode. Each ability below shows whether its changes are live.
           </p>
         )}
         {loadError && <p role="alert" className="text-xs text-red-400">{loadError}</p>}
         {!data && !loadError && <Loader2 size={16} className="animate-spin text-w-dim" />}
         {data?.abilities.map((ability) => (
           <div key={ability.key} className="space-y-1.5 rounded-xl border border-w-line p-2.5">
+            {ability.enabled && ability.acts && (
+              <p className="text-[11px] text-w-dim">{(ability.commit_mode ?? data.commit_mode) === 'live' ? 'Changes are live' : 'Changes are previewed only'}</p>
+            )}
             <div className="flex items-center gap-2">
               <p className="flex-1 text-xs font-semibold text-w-text">{ability.label}</p>
               {ability.always_on ? (

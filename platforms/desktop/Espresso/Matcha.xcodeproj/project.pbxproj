@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		ACCE55000000000000000004 /* CalendarConnectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACCE55000000000000000005 /* CalendarConnectionsView.swift */; };
+		ACCE55000000000000000002 /* AppleCalendarSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACCE55000000000000000003 /* AppleCalendarSync.swift */; };
 		FA11D0010000000000000001 /* JournalNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA11D0010000000000000002 /* JournalNavigationTests.swift */; };
 		EAAF00000000000000000001 /* EmailWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAAF00000000000000000002 /* EmailWorkspaceTests.swift */; };
 		A5515700000000000000B004 /* AssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5515700000000000000F003 /* AssistantView.swift */; };
@@ -445,6 +447,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		ACCE55000000000000000005 /* CalendarConnectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CalendarConnectionsView.swift; path = Espresso/Views/Calendar/CalendarConnectionsView.swift; sourceTree = SOURCE_ROOT; };
+		ACCE55000000000000000003 /* AppleCalendarSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppleCalendarSync.swift; path = Espresso/Services/MatchaWork/AppleCalendarSync.swift; sourceTree = SOURCE_ROOT; };
 		FA11D0010000000000000002 /* JournalNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalNavigationTests.swift; sourceTree = "<group>"; };
 		EAAF00000000000000000002 /* EmailWorkspaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailWorkspaceTests.swift; sourceTree = "<group>"; };
 		A5515700000000000000F003 /* AssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantView.swift; sourceTree = "<group>"; };
@@ -1412,6 +1416,8 @@
 				PRDV000000000000000000B4 /* MatchaWorkService+Productivity.swift */,
 				PRDV000000000000000000B6 /* ProductivityWorkspace.swift */,
 				CALV000000000000000000A2 /* CalendarModels.swift */,
+				ACCE55000000000000000003 /* AppleCalendarSync.swift */,
+				ACCE55000000000000000005 /* CalendarConnectionsView.swift */,
 				CALV000000000000000000A4 /* CalendarService.swift */,
 				CALV000000000000000000A6 /* CalendarViewModel.swift */,
 				CALV000000000000000000A8 /* CalendarWorkspace.swift */,
@@ -1896,6 +1902,8 @@
 				PRDV000000000000000000B3 /* MatchaWorkService+Productivity.swift in Sources */,
 				PRDV000000000000000000B5 /* ProductivityWorkspace.swift in Sources */,
 				CALV000000000000000000A1 /* CalendarModels.swift in Sources */,
+				ACCE55000000000000000002 /* AppleCalendarSync.swift in Sources */,
+				ACCE55000000000000000004 /* CalendarConnectionsView.swift in Sources */,
 				CALV000000000000000000A3 /* CalendarService.swift in Sources */,
 				CALV000000000000000000A5 /* CalendarViewModel.swift in Sources */,
 				CALV000000000000000000A7 /* CalendarWorkspace.swift in Sources */,
@@ -2118,6 +2126,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Espresso;
 				INFOPLIST_KEY_CFBundleName = Espresso;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Espresso syncs only the calendars you select so it can help read and organize your events.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Matcha uses your camera for live video broadcasts in channels.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Matcha uses your microphone for live broadcasts and voice in channels.";
@@ -2210,6 +2219,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Espresso;
 				INFOPLIST_KEY_CFBundleName = Espresso;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Espresso syncs only the calendars you select so it can help read and organize your events.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Matcha uses your camera for live video broadcasts in channels.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Matcha uses your microphone for live broadcasts and voice in channels.";

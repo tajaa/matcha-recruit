@@ -110,6 +110,7 @@ class RunContext:
     granted_scopes: frozenset[str] = frozenset()
     grants: dict[str, dict] = field(default_factory=dict)  # ability key -> its settings
     commit_mode: CommitMode = "dry_run"
+    commit_modes: dict[str, CommitMode] = field(default_factory=dict)
     resume: FrozenAction | None = None
     # The confirmation whose yes this run carries out: what makes a commit
     # idempotent per approval (a purchase row is UNIQUE on it).

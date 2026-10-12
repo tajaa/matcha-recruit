@@ -5,6 +5,7 @@ struct CalendarEntry: Identifiable, Hashable {
     enum Kind: Hashable {
         case espresso(MWCalendarEvent)
         case google(MWGoogleCalendarEvent)
+        case apple(AppleCalendarEvent)
         case todo(MWCalendarTodo)
     }
 
@@ -24,6 +25,7 @@ struct CalendarEntry: Identifiable, Hashable {
         switch kind {
         case .espresso(let e): return e.location
         case .google(let g): return g.location
+        case .apple(let a): return a.location
         case .todo: return nil
         }
     }
@@ -40,6 +42,13 @@ struct CalendarEntry: Identifiable, Hashable {
         let e = google.end.flatMap { CalendarWire.date($0, calendar: calendar) } ?? s
         self.init(id: "g:\(google.id)", kind: .google(google), title: google.title,
                   start: s, end: max(s, e), allDay: google.allDay)
+    }
+
+    init?(apple: AppleCalendarEvent, calendar: Calendar = .current) {
+        guard let s = CalendarWire.date(apple.start, calendar: calendar),
+              let e = CalendarWire.date(apple.end, calendar: calendar) else { return nil }
+        self.init(id: "a:\(apple.id)", kind: .apple(apple), title: apple.title,
+                  start: s, end: max(s, e), allDay: apple.all_day)
     }
 
     init?(todo: MWCalendarTodo, calendar: Calendar = .current) {
@@ -113,6 +122,7 @@ final class CalendarViewModel {
     private(set) var byDay: [Date: [CalendarEntry]] = [:]
     /// ok | partial | not_connected | needs_permission | error | skipped
     private(set) var googleStatus = "skipped"
+    private(set) var appleStatus = "not_connected"
     private(set) var isLoading = false
     private(set) var hasLoaded = false
     /// The days the last successful load covered. Changes only when a
@@ -240,6 +250,8 @@ final class CalendarViewModel {
     private func apply(_ feed: MWCalendarFeed, from first: Date, through last: Date) {
         var all: [CalendarEntry] = []
         all += feed.events.compactMap { CalendarEntry(event: $0, calendar: calendar) }
+        all += (feed.apple?.events ?? []).compactMap { CalendarEntry(apple: $0, calendar: calendar) }
+        appleStatus = feed.apple?.status ?? "not_connected"
         all += feed.google.events.compactMap { CalendarEntry(google: $0, calendar: calendar) }
         all += feed.todos.compactMap { CalendarEntry(todo: $0, calendar: calendar) }
         entries = all

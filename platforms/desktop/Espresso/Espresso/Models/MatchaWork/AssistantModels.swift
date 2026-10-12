@@ -24,6 +24,7 @@ struct AssistantContact: Codable, Hashable {
 
 struct AssistantAbility: Decodable, Identifiable, Hashable {
     let key: String
+    let commitMode: String?
     let label: String
     /// Reading the web and comparing things to buy need nothing switched on.
     let alwaysOn: Bool
@@ -43,6 +44,7 @@ struct AssistantAbility: Decodable, Identifiable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case key, label, enabled, available, reason, acts, disclosure, settings
+        case commitMode = "commit_mode"
         case alwaysOn = "always_on"
         case needsConnection = "needs_connection"
         case consentOutdated = "consent_outdated"
@@ -60,6 +62,7 @@ struct AssistantAbility: Decodable, Identifiable, Hashable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         key = try c.decode(String.self, forKey: .key)
+        commitMode = try c.decodeIfPresent(String.self, forKey: .commitMode)
         label = (try? c.decode(String.self, forKey: .label)) ?? key
         alwaysOn = (try? c.decode(Bool.self, forKey: .alwaysOn)) ?? false
         enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? false
