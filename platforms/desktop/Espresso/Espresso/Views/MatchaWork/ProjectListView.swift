@@ -43,7 +43,7 @@ struct ProjectsLibraryView: View {
     var body: some View {
         Group {
             if let id = appState.selectedProjectId {
-                VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
                     backBar
                     Divider().opacity(0.3)
                     ProjectDetailView(projectId: id)
@@ -103,6 +103,14 @@ struct ProjectsLibraryView: View {
             Spacer()
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        // Navigation chrome stays still while the workspace below loads,
+        // replays board changes, or resizes its columns.
+        .transaction {
+            $0.animation = nil
+            $0.disablesAnimations = true
+        }
     }
 
     private var typeMenu: some View {
