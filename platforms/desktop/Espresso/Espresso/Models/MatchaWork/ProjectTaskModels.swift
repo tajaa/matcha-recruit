@@ -519,3 +519,14 @@ struct MWResearchLaunch: Decodable {
     let prompt: String
     let command: String?
 }
+
+
+extension MWProjectTask {
+    /// pipeline_column defaults to lead even for ordinary tasks; it is not a sales marker.
+    var isSalesDeal: Bool {
+        category == "sales" || dealValue != nil || outcome != nil ||
+        [contactName, contactCompany, contactEmail, contactPhone].contains {
+            !($0?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        }
+    }
+}

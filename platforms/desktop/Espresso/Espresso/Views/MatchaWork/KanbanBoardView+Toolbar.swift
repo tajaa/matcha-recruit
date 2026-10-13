@@ -15,6 +15,11 @@ extension KanbanBoardView {
                 viewModeButton("Pipeline", mode: .pipeline, icon: "dollarsign.circle")
             }
             listModeButton
+            if isPipeline {
+                modeChip(showManualDeals ? "Campaigns" : "Manual deals", icon: "person.3", active: false) {
+                    showManualDeals.toggle(); showListView = false
+                }
+            }
             Spacer()
         }
         .padding(.horizontal, 12)
@@ -33,6 +38,7 @@ extension KanbanBoardView {
     private var listModeButton: some View {
         modeChip("List", icon: "list.bullet", active: showListView) {
             showListView = true
+            if isPipeline { showManualDeals = true }
         }
     }
 

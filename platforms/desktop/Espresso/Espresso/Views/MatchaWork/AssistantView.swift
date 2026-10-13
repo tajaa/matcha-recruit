@@ -45,6 +45,9 @@ struct AssistantView: View {
         .onChange(of: appState.pendingAssistantEmailContext?.id) { _, _ in
             if acceptsEmailHandoff { Task { await takeEmails() } }
         }
+        .onChange(of: appState.pendingAssistantSalesContext?.id) { _, _ in
+            if acceptsEmailHandoff { Task { await takeSales() } }
+        }
         .sheet(isPresented: $showAbilities) {
             AssistantAbilitiesSheet().environment(appState)
         }
@@ -199,7 +202,7 @@ struct AssistantView: View {
                 }
             } catch { report(error) }
             // Queued while loading, then drained when opening finishes.
-            if acceptsEmailHandoff { await takeEmails() }
+            if acceptsEmailHandoff { await takeEmails(); await takeSales() }
         }
     }
 
@@ -255,6 +258,25 @@ struct AssistantView: View {
             },
             report: report
         )
+    }
+
+    private func takeSales() async {
+        await operations.takeSales(
+            pending: {
+                guard let request = appState.pendingAssistantSalesContext,
+                      request.owner == appState.currentUser?.id else { return nil }
+                return request
+            },
+            create: { request in
+                let id = try await MatchaWorkService.shared.createAssistantConversation(
+                    title: String("Sales: \(request.title)".prefix(100)), requestId: request.id)
+                try await reload()
+                return id
+            },
+            select: { select($0, draft: $1) },
+            consume: { id in
+                if appState.pendingAssistantSalesContext?.id == id { appState.pendingAssistantSalesContext = nil }
+            }, report: report)
     }
 
     private func report(_ error: Error) {
@@ -377,7 +399,7 @@ struct AssistantAbilitiesSheet: View {
                     .disabled(busyKey == ability.key)
                 }
             }
-            Label(ability.acts ? "Acts for you, only in this private conversation" : "Looks things up",
+            Label(ability.key == "sales" ? "Builds pipelines and drafts; you review before sending" : (ability.acts ? "Acts for you, only in this private conversation" : "Looks things up"),
                   systemImage: ability.acts ? "lock.fill" : "magnifyingglass")
                 .font(.system(size: 11))
                 .foregroundColor(appState.themeTextSecondary)

@@ -47,7 +47,6 @@ extension KanbanBoardView {
         let hiddenDoneCount: Int
         /// Per-stage deal total (pipeline mode only).
         let stageValue: Double
-        let width: CGFloat
     }
 
     private func layout(forColumn key: String) -> ColumnLayout {
@@ -71,20 +70,14 @@ extension KanbanBoardView {
         let visible: [MWProjectTask] = isDoneColumn
             ? Array(ordered.prefix(doneVisibleCount))
             : ordered
-        // Empty columns shrink so populated columns get the breathing room.
-        // Hovering or starting an inline-add expands them back to full. Full
-        // width is kept tight (240) so all five columns fit without much
-        // horizontal scrolling now that there's a Changes Requested lane.
-        // In compact (vertical) mode every column is full pane width — no shrink.
-        let isEmpty = ordered.isEmpty
-        let expanded = !isEmpty || inlineAddColumn == key || hoveredEmptyColumn == key
+        // Every lane keeps enough room for its title and controls. Shrinking
+        // empty lanes to 100pt crushed Done's count, policy menu and add button.
         return ColumnLayout(
             ordered: ordered,
             visible: visible,
             isDoneColumn: isDoneColumn,
             hiddenDoneCount: hiddenDoneCount,
-            stageValue: ordered.reduce(0.0) { $0 + ($1.dealValue ?? 0) },
-            width: expanded ? 240 : 100
+            stageValue: ordered.reduce(0.0) { $0 + ($1.dealValue ?? 0) }
         )
     }
 
@@ -112,8 +105,7 @@ extension KanbanBoardView {
             }
         }
         .frame(maxWidth: compact ? .infinity : nil, alignment: .leading)
-        .frame(width: compact ? nil : l.width)
-        .animation(compact ? nil : .easeOut(duration: 0.15), value: l.width)
+        .frame(width: compact ? nil : 240)
         // A quiet tint keeps lanes legible without turning each one into a
         // second card around the cards. It also avoids live-blur scroll jank.
         .background(
@@ -124,13 +116,6 @@ extension KanbanBoardView {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.borderColor.opacity(0.22), lineWidth: 0.5)
         )
-        .onHover { hovering in
-            // Only react when the column is empty — populated columns don't
-            // need to expand.
-            if l.ordered.isEmpty {
-                hoveredEmptyColumn = hovering ? key : (hoveredEmptyColumn == key ? nil : hoveredEmptyColumn)
-            }
-        }
         .dropDestination(for: String.self) { items, _ in
             guard let taskId = items.first else { return false }
             move(taskId: taskId, to: key)
@@ -144,8 +129,11 @@ extension KanbanBoardView {
         HStack(spacing: 6) {
             Text(label)
                 .font(.espresso(size: 12))
+                .lineLimit(1)
+                .layoutPriority(1)
                 .foregroundColor(appState.themeText.opacity(0.72))
             Text("\(l.visible.count)")
+                .fixedSize()
                 .font(.espresso(size: 10))
                 .foregroundColor(.secondary.opacity(0.75))
             if l.isDoneColumn {

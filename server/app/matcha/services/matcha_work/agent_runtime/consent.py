@@ -18,6 +18,15 @@ class Disclosure:
 
 
 DISCLOSURES: dict[str, Disclosure] = {
+    "sales": Disclosure(
+        version="sales-openai-1",
+        title="Let Espresso research and draft sales outreach",
+        body=(
+            "When you ask Espresso to work on a sales campaign, the contacts, notes, research and drafts it reads are sent to OpenAI with storage turned off.",
+            "Espresso can discover prospects from public sites, save source links, organize your private pipeline and create personalized drafts.",
+            "Review recipients and messages in Sales before sending. Sales sends each approved message separately from your connected Gmail account and shows its delivery status.",
+        ),
+    ),
     "email": Disclosure(
         version="email-openai-1",
         title="Let Espresso work with your email",

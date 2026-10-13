@@ -78,6 +78,7 @@ celery_app = Celery(
         "app.workers.tasks.project_agent",
         "app.workers.tasks.agent_card",
         "app.workers.tasks.assistant",
+        "app.workers.tasks.sales_campaign",
         "app.workers.tasks.sales_intake_poll",
         "app.workers.tasks.pos_sales_sync",
         "app.workers.tasks.schedule_eligibility",

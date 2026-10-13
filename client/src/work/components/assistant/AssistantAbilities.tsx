@@ -178,7 +178,7 @@ export default function AssistantAbilities({ onClose }: { onClose: () => void })
               )}
             </div>
             <p className="flex items-center gap-1 text-[11px] text-w-dim">
-              {ability.acts ? <><Lock size={10} /> Acts for you, only in this private conversation</> : 'Looks things up'}
+              {ability.key === 'sales' ? 'Builds pipelines and drafts; review and send in the Espresso desktop app' : ability.acts ? <><Lock size={10} /> Acts for you, only in this private conversation</> : 'Looks things up'}
             </p>
             {ability.enabled && ability.available && !ability.needs_connection && (
               <p className="flex items-center gap-1 text-[11px] text-emerald-400"><CheckCircle2 size={11} /> Ready</p>

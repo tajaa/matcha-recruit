@@ -93,6 +93,7 @@ class AppState {
     /// nav-only model; the pane owns its conversation.
     var showAssistantHub: Bool = false
     var pendingAssistantEmailContext: AssistantEmailContext?
+    var pendingAssistantSalesContext: AssistantSalesContext?
     /// Full-pane Calendar (the person's Espresso calendar, dated to-dos and
     /// Google Calendar). Same nav-only model.
     var showCalendarHub: Bool = false
@@ -159,7 +160,18 @@ class AppState {
         guard !emails.isEmpty else { return }
         guard canAssistant else { presentPaywall(for: "assistant"); return }
         clearPrimaryNav()
+        pendingAssistantSalesContext = nil
         pendingAssistantEmailContext = AssistantEmailContext(emails: Array(emails.prefix(25)))
+        showAssistantHub = true
+    }
+
+    func workOnSales(campaign: SalesCampaign, projectId: String) {
+        guard let owner = currentUser?.id else { return }
+        guard canAssistant else { presentPaywall(for: "assistant"); return }
+        clearPrimaryNav()
+        pendingAssistantEmailContext = nil
+        pendingAssistantSalesContext = AssistantSalesContext(owner: owner, campaignId: campaign.id,
+                                                             projectId: projectId, title: campaign.title)
         showAssistantHub = true
     }
 
