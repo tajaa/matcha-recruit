@@ -6,28 +6,34 @@ import SwiftUI
 
 /// Animated shimmer sweep applied over placeholder content.
 struct ShimmerModifier: ViewModifier {
-    @State private var phase: CGFloat = -1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         content
-            .overlay(
-                GeometryReader { geo in
-                    LinearGradient(
-                        colors: [.clear, Color.white.opacity(0.16), .clear],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: geo.size.width * 0.6)
-                    .offset(x: phase * geo.size.width * 1.6)
+            .overlay {
+                if !reduceMotion {
+                    // Keep the sweep in a drawing-only timeline. Starting a
+                    // repeatForever transaction during a cold load can carry
+                    // that animation into surrounding navigation/layout work.
+                    TimelineView(.animation(minimumInterval: 1.0 / 30)) { tick in
+                        GeometryReader { geo in
+                            let progress = tick.date.timeIntervalSinceReferenceDate
+                                .truncatingRemainder(dividingBy: 1.2) / 1.2
+                            LinearGradient(
+                                colors: [.clear, Color.white.opacity(0.16), .clear],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .frame(width: geo.size.width * 0.6)
+                            .offset(x: (progress * 2 - 1) * geo.size.width * 1.6)
+                        }
+                    }
+                    .transaction { $0.animation = nil }
                     .allowsHitTesting(false)
-                }
-            )
-            .clipped()
-            .onAppear {
-                withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
-                    phase = 1
+                    .accessibilityHidden(true)
                 }
             }
+            .clipped()
     }
 }
 
