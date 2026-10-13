@@ -10,15 +10,13 @@ struct CalendarWorkspace: View {
     @Environment(\.workPane) private var pane
     @State private var vm = CalendarViewModel()
     @State private var editor: CalendarEditorRequest?
-    @State private var connectingGoogle = false
     @State private var showConnections = false
     @AppStorage("calendar.mode") private var storedMode = CalendarViewModel.Mode.month.rawValue
 
     var body: some View {
         VStack(spacing: 0) {
-            CalendarHeader(vm: vm, connectingGoogle: connectingGoogle, compact: pane.isSide,
+            CalendarHeader(vm: vm, compact: pane.isSide,
                            onNew: { newEvent(on: vm.selectedDay) },
-                           onConnectGoogle: connectGoogle,
                            onConnections: { showConnections = true },
                            onAsk: askEspresso)
             Divider().opacity(0.2)
@@ -71,10 +69,7 @@ struct CalendarWorkspace: View {
         }
         // Back from the browser after connecting Google: show it.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            if connectingGoogle {
-                connectingGoogle = false
-                Task { await vm.load() }
-            }
+            Task { await vm.load() }
         }
         .onReceive(NotificationCenter.default.publisher(for: AppleCalendarSync.didSync)) { _ in
             Task { await vm.load() }
@@ -82,7 +77,7 @@ struct CalendarWorkspace: View {
         .sheet(isPresented: $showConnections) {
             VStack {
                 HStack { Text("Calendars").font(.headline); Spacer(); Button("Done") { showConnections = false } }.padding()
-                CalendarConnectionsView()
+                CalendarConnectionsView(googleFeed: vm.googleFeed)
             }.frame(width: 520, height: 560).environment(appState)
         }
         .sheet(item: $editor) { request in
@@ -171,20 +166,6 @@ struct CalendarWorkspace: View {
         }
     }
 
-    private func connectGoogle() {
-        Task {
-            do {
-                let raw = try await MatchaWorkService.shared.connectGoogle(forAbility: "calendar")
-                if let url = URL(string: raw) {
-                    connectingGoogle = true
-                    NSWorkspace.shared.open(url)
-                }
-            } catch {
-                vm.errorMessage = error.localizedDescription
-            }
-        }
-    }
-
     // MARK: States
 
     private func errorBanner(_ text: String) -> some View {
@@ -249,12 +230,10 @@ enum CalendarPalette {
 private struct CalendarHeader: View {
     @Environment(AppState.self) private var appState
     let vm: CalendarViewModel
-    let connectingGoogle: Bool
     /// Beside another surface: tighter, icon-only, and no keyboard shortcuts
     /// (⌘← ⌘→ ⌘T ⌘N would fire while typing in the other pane).
     let compact: Bool
     let onNew: () -> Void
-    let onConnectGoogle: () -> Void
     let onConnections: () -> Void
     let onAsk: () -> Void
 
@@ -393,35 +372,31 @@ private struct CalendarHeader: View {
         switch vm.googleStatus {
         case "ok", "partial":
             let partial = vm.googleStatus == "partial"
-            HStack(spacing: 5) {
-                Circle().fill(CalendarPalette.google).frame(width: 7, height: 7)
-                Text("Google Calendar").font(.system(size: 11))
-                if partial {
-                    Image(systemName: "exclamationmark.circle")
-                        .font(.system(size: 10))
-                        .foregroundColor(.orange)
+            Button(action: onConnections) {
+                HStack(spacing: 5) {
+                    Circle().fill(CalendarPalette.google).frame(width: 7, height: 7)
+                    Text("Google Calendar").font(.system(size: 11))
+                    if partial {
+                        Image(systemName: "exclamationmark.circle")
+                            .font(.system(size: 10))
+                            .foregroundColor(.orange)
+                    }
                 }
             }
+            .buttonStyle(.plain)
             .foregroundColor(appState.themeTextSecondary)
             .help(partial
                   ? "Your Google Calendar has more events here than Espresso could load. Open Google Calendar for the full list."
                   : "Your Google Calendar is shown read-only. Ask Espresso to change it.")
-        case "not_connected", "needs_permission":
-            Button(action: onConnectGoogle) {
-                Label(connectingGoogle ? "Waiting for Google…" : "Show Google Calendar",
-                      systemImage: "link")
+        case "not_connected", "needs_permission", "error":
+            Button(action: onConnections) {
+                Label(vm.googleFeed.connectionTitle,
+                      systemImage: vm.googleFeed.needsServerSetup ? "exclamationmark.triangle" : "link")
                     .font(.system(size: 11, weight: .medium))
             }
             .buttonStyle(.plain)
-            .foregroundColor(appState.themeTextSecondary)
-            .disabled(connectingGoogle)
-            .help(vm.googleStatus == "needs_permission"
-                  ? "Allow calendar access on your Google connection"
-                  : "Connect your Google account to see its calendar here")
-        case "error":
-            Label("Google Calendar unavailable", systemImage: "exclamationmark.triangle")
-                .font(.system(size: 11))
-                .foregroundColor(.orange)
+            .foregroundColor(vm.googleStatus == "error" ? .orange : appState.themeTextSecondary)
+            .help(vm.googleFeed.connectionHelp)
         default:
             EmptyView()
         }

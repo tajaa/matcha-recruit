@@ -220,6 +220,8 @@ async def test_connect_asks_google_for_the_named_abilities_incrementally(monkeyp
     query = parse_qs(urlsplit(out["auth_url"]).query)
     assert query["scope"][0].split() == [*GMAIL_SCOPES, "https://www.googleapis.com/auth/calendar.events"]
     assert query["include_granted_scopes"] == ["true"] and query["state"] == ["state-1"]
+    assert set(query["prompt"][0].split()) == {"consent", "select_account"}
+    assert "login_hint" not in query
     plain = await workspace.agent_email_connect(_user())
     assert parse_qs(urlsplit(plain["auth_url"]).query)["scope"][0].split() == GMAIL_SCOPES
 

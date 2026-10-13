@@ -62,6 +62,43 @@ def _google_view(event: dict) -> dict:
     }
 
 
+def _google_failure(exc: httpx.HTTPStatusError) -> dict:
+    """Only controlled recovery copy leaves this boundary, never Google's
+    response text (which can contain account or event details). Keep the
+    legacy status values so older desktop builds still show the failure."""
+    try:
+        payload = exc.response.json()
+    except ValueError:
+        payload = {}
+    error = payload.get("error") if isinstance(payload, dict) else None
+    reasons = {error} if isinstance(error, str) else set()
+    if isinstance(error, dict):
+        for field in ("errors", "details"):
+            entries = error.get(field)
+            if isinstance(entries, list):
+                reasons.update(item["reason"] for item in entries
+                    if isinstance(item, dict) and isinstance(item.get("reason"), str))
+    status, reason = "error", "access_denied"
+    message = "Google refused calendar access. Choose a Google account and reconnect. If it persists, contact support."
+    if reasons & {"accessNotConfigured", "SERVICE_DISABLED", "serviceDisabled"}:
+        reason = "api_disabled"
+        message = "Google Calendar is not enabled for Espresso's Google connection. Contact support; reconnecting your account will not fix this."
+    elif exc.response.status_code == 401 or "invalid_grant" in reasons:
+        status, reason = "needs_permission", "reconnect_required"
+        message = "Your Google connection expired or was revoked. Choose an account and reconnect."
+    elif reasons & {"insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"}:
+        status, reason = "needs_permission", "calendar_permission"
+        message = "Choose your Google account and allow Calendar access on Google's consent screen."
+    elif exc.response.status_code == 429 or reasons & {"rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded"}:
+        reason = "rate_limited"
+        message = "Google is temporarily limiting Calendar requests. Try again later."
+    elif exc.response.status_code >= 500:
+        reason = "provider_unavailable"
+        message = "Google Calendar is temporarily unavailable. Try again later."
+    logger.warning("calendar feed: Google rejected request (HTTP %s, reason=%s)", exc.response.status_code, reason)
+    return {"status": status, "reason": reason, "message": message, "events": []}
+
+
 async def _google_events(user_id: UUID, start: str, end: str) -> dict:
     """The person's Google Calendar for the range, or why there is none:
     `ok`, `partial` (Google had more than the listing could read), `not_connected`,
@@ -84,6 +121,8 @@ async def _google_events(user_id: UUID, start: str, end: str) -> dict:
         events, complete = await GoogleCalendarService(user_id, gmail=gmail).list_window(
             time_min=start, time_max=end, max_results=GOOGLE_MAX_EVENTS,
         )
+    except httpx.HTTPStatusError as exc:
+        return _google_failure(exc)
     except (httpx.HTTPError, ValueError):
         logger.warning("calendar feed: Google Calendar read failed", exc_info=True)
         return {"status": "error", "events": []}

@@ -3,8 +3,10 @@ import AppKit
 
 /// One place for the person's consent, provider connections and sync status.
 struct CalendarConnectionsView: View {
+    var googleFeed: MWGoogleCalendarFeed? = nil
     @Environment(AppState.self) private var appState
     @State private var sync = AppleCalendarSync.shared
+    @State private var googleAccount: MWAgentEmailStatus?
     @State private var abilities: AssistantAbilities?
     @State private var consent: AssistantAbility?
     @State private var selected = Set<String>()
@@ -13,6 +15,7 @@ struct CalendarConnectionsView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var waitingForGoogle = false
+    @State private var refreshGeneration = 0
 
     private var calendarAbility: AssistantAbility? { abilities?.abilities.first { $0.key == "calendar" } }
 
@@ -40,7 +43,15 @@ struct CalendarConnectionsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Connect once to see your Google Calendar here. When calendar access is on, Espresso can create, change and delete events there.")
                             .font(.system(size: 12))
-                        Button(waitingForGoogle ? "Waiting for Google…" : "Connect or reconnect Google Calendar") {
+                        if let email = googleAccount?.email, googleAccount?.connected == true {
+                            Text("Connected account: " + email).font(.system(size: 12, weight: .medium))
+                        }
+                        if let message = googleFeed?.message {
+                            Text(message).font(.caption).foregroundColor(.orange)
+                        }
+                        Text("Email and Calendar share one Google connection in Espresso. Choosing another account switches both.")
+                            .font(.caption).foregroundColor(.secondary)
+                        Button(waitingForGoogle ? "Waiting for Google…" : (googleAccount?.connected == true ? "Choose another Google account…" : "Connect a Google account…")) {
                             Task { await connectGoogle() }
                         }.disabled(busy || waitingForGoogle)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(6)
@@ -94,7 +105,7 @@ struct CalendarConnectionsView: View {
             }.padding(16)
         }
         .task(id: appState.currentUser?.id) {
-            abilities = nil; status = nil; error = nil
+            abilities = nil; status = nil; error = nil; googleAccount = nil
             selected = []; destination = ""
             if appState.currentUser != nil { await refresh() }
         }
@@ -116,14 +127,19 @@ struct CalendarConnectionsView: View {
     private func refresh() async {
         let owner = appState.currentUser?.id
         guard owner != nil else { return }
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
+        let account = try? await MatchaWorkService.shared.agentEmailStatus()
+        guard owner == appState.currentUser?.id, generation == refreshGeneration, !Task.isCancelled else { return }
+        googleAccount = account
         do {
             let loaded = appState.assistantEnabled ? try await MatchaWorkService.shared.assistantAbilities() : nil
             let state = try await sync.status()
-            guard owner == appState.currentUser?.id else { return }
+            guard owner == appState.currentUser?.id, generation == refreshGeneration, !Task.isCancelled else { return }
             abilities = loaded
             status = state
             error = nil
-        } catch { if owner == appState.currentUser?.id { self.error = error.localizedDescription } }
+        } catch { if owner == appState.currentUser?.id, generation == refreshGeneration, !Task.isCancelled { self.error = error.localizedDescription } }
     }
 
     private func disable(_ ability: AssistantAbility) async {
@@ -134,10 +150,12 @@ struct CalendarConnectionsView: View {
     }
 
     private func connectGoogle() async {
+        let owner = appState.currentUser?.id
         busy = true
         defer { busy = false }
         do {
             let raw = try await MatchaWorkService.shared.connectGoogle(forAbility: "calendar")
+            guard owner == appState.currentUser?.id else { return }
             if let url = URL(string: raw), url.scheme == "https" {
                 waitingForGoogle = true
                 NSWorkspace.shared.open(url)

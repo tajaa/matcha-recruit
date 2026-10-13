@@ -429,7 +429,7 @@ async def agent_email_connect(
         "response_type": "code",
         "scope": " ".join(requested_scopes),
         "access_type": "offline",
-        "prompt": "consent",
+        "prompt": "consent select_account",
         # Incremental consent: what the person granted before stays granted.
         "include_granted_scopes": "true",
         "state": state,

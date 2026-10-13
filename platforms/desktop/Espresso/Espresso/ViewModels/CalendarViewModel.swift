@@ -121,7 +121,8 @@ final class CalendarViewModel {
     private(set) var entries: [CalendarEntry] = []
     private(set) var byDay: [Date: [CalendarEntry]] = [:]
     /// ok | partial | not_connected | needs_permission | error | skipped
-    private(set) var googleStatus = "skipped"
+    private(set) var googleFeed = MWGoogleCalendarFeed(status: "skipped", events: [])
+    var googleStatus: String { googleFeed.status }
     private(set) var appleStatus = "not_connected"
     private(set) var isLoading = false
     private(set) var hasLoaded = false
@@ -255,7 +256,7 @@ final class CalendarViewModel {
         all += feed.google.events.compactMap { CalendarEntry(google: $0, calendar: calendar) }
         all += feed.todos.compactMap { CalendarEntry(todo: $0, calendar: calendar) }
         entries = all
-        googleStatus = feed.google.status
+        googleFeed = feed.google
         var index: [Date: [CalendarEntry]] = [:]
         for entry in all {
             for day in entry.days(in: calendar, within: first, through: last) {
