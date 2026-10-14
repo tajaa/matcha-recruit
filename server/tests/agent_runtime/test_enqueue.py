@@ -127,6 +127,35 @@ async def test_locks_are_user_then_conversation_then_sweep_then_count_then_inser
 
 
 @pytest.mark.asyncio
+async def test_the_row_stores_the_model_the_run_will_use(wired, monkeypatch):
+    from app.matcha.services.matcha_work.agent_runtime import models
+
+    conn, _ = wired
+    monkeypatch.setattr(models.anthropic_messages, "anthropic_configured", Mock(return_value=True))
+    override = AsyncMock(return_value=None)
+    monkeypatch.setattr(models.anthropic_messages, "claude_override", override)
+
+    def stored():
+        return conn.ran("INSERT INTO mw_project_agent_runs")[-1][2][6]
+
+    await enqueue.enqueue_assistant_run(**_kwargs(_user()), skip_preflight=True, model="claude-sonnet-5-5")
+    assert stored() == "claude-sonnet-5-5"
+    # An explicit Luna pick wins over an admin setting that routes to Claude.
+    override.return_value = "claude-haiku-5-5"
+    await enqueue.enqueue_assistant_run(**_kwargs(_user()), skip_preflight=True, model="gpt-5.6-luna")
+    assert stored() == "gpt-5.6-luna"
+    # No pick, or one this server does not offer: the admin's model.
+    for pick in (None, "gpt-4o", ""):
+        await enqueue.enqueue_assistant_run(**_kwargs(_user()), skip_preflight=True, model=pick)
+        assert stored() == "claude-haiku-5-5"
+    # Without an Anthropic key only Luna is offered, whatever was picked.
+    monkeypatch.setattr(models.anthropic_messages, "anthropic_configured", Mock(return_value=False))
+    override.return_value = None
+    await enqueue.enqueue_assistant_run(**_kwargs(_user()), skip_preflight=True, model="claude-sonnet-5-5")
+    assert stored() == "gpt-5.6-luna"
+
+
+@pytest.mark.asyncio
 async def test_a_second_message_while_a_run_is_live_is_refused_not_queued(wired):
     conn, dispatch = wired
     conn.on("INSERT INTO mw_project_agent_runs", asyncpg.UniqueViolationError("live run"))

@@ -35,7 +35,7 @@ async def test_a_plain_message_starts_a_run_without_a_mention(wired):
     kwargs = wired.handled.await_args.kwargs
     assert kwargs == dict(channel_id=channel, company_id=wired.company, user=user,
                           content="find a standing desk", message_id=message, surface="assistant",
-                          reply_prompt_id=None)
+                          reply_prompt_id=None, model=None)
     wired.posted.assert_not_awaited()
     # The channel is looked up as THIS person's conversation, not just by id.
     lookup = wired.conn.ran("FROM channels")[0]
@@ -47,6 +47,24 @@ async def test_a_reply_to_a_question_carries_the_question(wired):
     prompt = uuid4()
     await channels_ws._bg_assistant_message(str(uuid4()), _user(), "yes", uuid4(), prompt, False)
     assert wired.handled.await_args.kwargs["reply_prompt_id"] == prompt
+
+
+@pytest.mark.asyncio
+async def test_the_apps_model_pick_reaches_the_run(wired):
+    await channels_ws._bg_assistant_message(
+        str(uuid4()), _user(), "find a desk", uuid4(), None, False, "claude-sonnet-5-5")
+    assert wired.handled.await_args.kwargs["model"] == "claude-sonnet-5-5"
+
+
+def test_the_send_path_reads_the_pick_from_the_frame_and_passes_it_on():
+    source = inspect.getsource(channels_ws)
+    frame = source[source.index('elif msg_type == "message":'):]
+    frame = frame[:frame.index("client_message_id = data.get")]
+    assert 'assistant_model = data.get("assistant_model")' in frame
+    assert "isinstance(assistant_model, str)" in frame and "len(assistant_model) > 64" in frame
+    branch = _send_path()
+    call = branch[branch.index("_spawn_bg(_bg_assistant_message("):]
+    assert "assistant_model," in call[:call.index("))")]
 
 
 @pytest.mark.asyncio

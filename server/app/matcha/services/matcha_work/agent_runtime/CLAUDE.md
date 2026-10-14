@@ -19,6 +19,7 @@ loop in this package and no other: do not add a second.
 | Abilities | `abilities/*.py` | `web`, `shopping`, `flights`, `email`, `calendar`, `reservations`, `purchase`, `domains`, `sales` |
 | Chat entry | `chat_entry.py` | A chat message on its way to a run; answers to questions |
 | Enqueue | `enqueue.py`, `quota.py` | Gates, the daily allowance, one live run per person per conversation |
+| Models | `models.py` | The model menu and which model a run uses |
 | The run | `assistant.py` | Builds the context, runs the loop, posts what came of it |
 | Questions | `prompts.py`, `ask.py` | `ask_user` and `confirm_action`, in `mw_agent_card_prompts` |
 | Progress | `chat_progress.py` | One progress message per run + `agent_run_progress` events |
@@ -150,8 +151,18 @@ it otherwise), and should declare `resolve`.
   every call: the request, each response's output items as returned (reasoning
   comes back as `reasoning.encrypted_content` and goes back as is), and the
   tool outputs. A stored run sends only what is new.
-- **Claude runs keep the turn in-process.** When Admin → Settings → *AI models*
-  picks Claude for the assistant (`espresso.assistant`), `ClaudeSession.keeps_history` makes the runner send only
+- **The model is settled at enqueue.** `models.py` owns the menu: OpenAI Luna,
+  plus Claude Haiku/Sonnet 5.5 when the server has an Anthropic key. Espresso's
+  assistant header sends the pick as `assistant_model` on each socket message;
+  `models.resolve` keeps it only if offered, else uses the default (Admin →
+  Settings → *AI models* for `espresso.assistant`, else Luna). An explicit pick
+  wins over that setting. The row's `model` is what the worker runs; a model
+  the server stopped offering by then runs the default and is re-stamped. The
+  menu reaches the apps as `entitlements.workspace.assistant_models` /
+  `default_assistant_model`. No plan check: Sonnet and the assistant are both
+  Pro and up.
+- **Claude runs keep the turn in-process.** When the run's model is Claude
+  (picked, or the admin setting for `espresso.assistant`), `ClaudeSession.keeps_history` makes the runner send only
   what is new even on a private run: Messages has no stored-response chain to
   opt out of, so `store=False`/`chain=False` and the encrypted-reasoning replay
   do not apply. Web search becomes Anthropic's server tool; its results reach

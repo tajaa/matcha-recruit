@@ -369,3 +369,34 @@ async def test_a_yes_that_cannot_be_queued_is_reopened(wired):
     assert [e["status"] for e in events] == ["answered", "open"]
     assert events[-1]["answer"] is None and events[-1]["answer_text"] is None
     assert wired.posted[-1][0] == enqueue.STILL_WORKING
+
+
+# ── the app's model pick ───────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_the_model_pick_reaches_every_run_a_message_starts(wired):
+    user = _user()
+    pick = "claude-sonnet-5-5"
+    # A new request.
+    await chat_entry.handle_message(**_message(user), model=pick)
+    assert wired.queued.await_args.kwargs["model"] == pick
+    # A yes to a confirmation, sent as a threaded reply.
+    confirm = _prompt(user.id)
+    _script(wired, confirm)
+    await chat_entry.handle_message(**_message(
+        user, content="yes", reply_prompt_id=confirm["id"], channel_id=confirm["channel_id"]), model=pick)
+    assert wired.queued.await_args.kwargs["resume_prompt_id"] == confirm["id"]
+    assert wired.queued.await_args.kwargs["model"] == pick
+    # An answer to a question, and a plain yes to the person's open confirmation.
+    asked = _prompt(user.id, kind="ask_user")
+    _script(wired, asked)
+    await chat_entry.handle_message(**_message(
+        user, content="Friday", reply_prompt_id=asked["id"], channel_id=asked["channel_id"]), model=pick)
+    assert wired.queued.await_args.kwargs["prompt"] == "Friday"
+    assert wired.queued.await_args.kwargs["model"] == pick
+    wired.conn.on("kind = 'confirm_action'", {**confirm})
+    await chat_entry.handle_message(**_message(user, content="Yes", channel_id=confirm["channel_id"]), model=pick)
+    assert wired.queued.await_args.kwargs["model"] == pick
+    # No pick: the runtime's default.
+    await chat_entry.handle_message(**_message(user))
+    assert wired.queued.await_args.kwargs["model"] is None

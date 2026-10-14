@@ -111,6 +111,9 @@ final class ChannelsWebSocket: NSObject {
         let attachments: [ChannelAttachment]
         let replyToId: String?
         var attempts: Int
+        /// The assistant menu's pick, private conversations only. Optional so
+        /// an outbox persisted by an older build still decodes.
+        var assistantModel: String? = nil
     }
     private var outbox: [OutboxItem] = []
     private let outboxKey = "channels_outbox_v1"
@@ -239,7 +242,8 @@ final class ChannelsWebSocket: NSObject {
     @discardableResult
     func sendMessage(
         channelId: String, content: String, attachments: [ChannelAttachment] = [],
-        replyToId: String? = nil, clientMessageId: String? = nil, queue: Bool = true
+        replyToId: String? = nil, clientMessageId: String? = nil, queue: Bool = true,
+        assistantModel: String? = nil
     ) -> Bool {
         // Always carry a client_message_id: it's both the optimistic-UI
         // correlation key and the server-side idempotency key for safe resends.
@@ -247,6 +251,7 @@ final class ChannelsWebSocket: NSObject {
         let item = OutboxItem(
             cmid: cmid, channelId: channelId, content: content,
             attachments: attachments, replyToId: replyToId, attempts: 0,
+            assistantModel: assistantModel,
         )
         guard queue else {
             guard isConnected, task != nil else { return false }
@@ -297,6 +302,7 @@ final class ChannelsWebSocket: NSObject {
             "client_message_id": item.cmid,
         ]
         if let replyToId = item.replyToId { payload["reply_to_id"] = replyToId }
+        if let model = item.assistantModel { payload["assistant_model"] = model }
         if !item.attachments.isEmpty {
             payload["attachments"] = item.attachments.map { att in
                 [

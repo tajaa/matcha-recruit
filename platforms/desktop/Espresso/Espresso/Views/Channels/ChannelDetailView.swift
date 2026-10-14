@@ -23,6 +23,9 @@ struct ChannelDetailView: View {
     /// bumping the nonce — to prefill on "edit message" or clear after send.
     @State var composerSeed = ""
     @State var composerSeedNonce = 0
+    /// The assistant model menu's pick, remembered on this Mac. Empty means
+    /// the server's default; see `AssistantModelMenu`.
+    @AppStorage(AssistantModelMenu.storageKey) var assistantModelPick = ""
 
     @MainActor
     init(channelId: String, isEmbedded: Bool = false, isAssistant: Bool = false,
@@ -161,8 +164,7 @@ struct ChannelDetailView: View {
                 Divider()
                 ChannelMessageComposer(
                     channelId: channelId,
-                    channelSlug: channelSlug,
-                    userHandle: userHandle,
+                    prompt: composerPrompt,
                     members: vm.channel?.members ?? [],
                     currentUserId: appState.currentUser?.id ?? "",
                     // In its own conversation every message is already Espresso's.
@@ -282,6 +284,9 @@ struct ChannelDetailView: View {
                     .lineLimit(1)
             }
             Spacer()
+            if assistantModels.hasChoice {
+                assistantModelMenu
+            }
             if let onOpenAbilities {
                 Button(action: onOpenAbilities) {
                     Label("What it can do", systemImage: "slider.horizontal.3")
@@ -293,6 +298,32 @@ struct ChannelDetailView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// Which model answers the next message. The pick travels with each
+    /// message, so switching mid-conversation applies from the next one.
+    private var assistantModelMenu: some View {
+        let menu = assistantModels
+        let current = menu.current(assistantModelPick)
+        return Menu {
+            ForEach(menu.rows, id: \.id) { row in
+                Button {
+                    assistantModelPick = row.id
+                } label: {
+                    if row.id == current?.id {
+                        Label(row.label, systemImage: "checkmark")
+                    } else {
+                        Text(row.label)
+                    }
+                }
+            }
+        } label: {
+            Label(current?.label ?? "Model", systemImage: "cpu")
+                .font(.system(size: 11, weight: .medium))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Which model answers your next message")
     }
 
     private var assistantSubtitle: String {

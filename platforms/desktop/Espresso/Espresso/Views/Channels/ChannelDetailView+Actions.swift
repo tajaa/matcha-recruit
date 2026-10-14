@@ -86,6 +86,14 @@ extension ChannelDetailView {
         return email.split(separator: "@").first.map(String.init) ?? "you"
     }
 
+    /// Left of the composer. In the assistant chat the channel's slug is an
+    /// opaque `espresso-<ids>` string, so it reads "you@espresso".
+    var composerPrompt: String {
+        isAssistant ? "\(userHandle)@espresso" : "\(userHandle)@\(channelSlug)"
+    }
+
+    var assistantModels: AssistantModelMenu { AssistantModelMenu(workspace: appState.entitlements?.workspace) }
+
     var channelSlug: String {
         vm.channel?.slug ?? vm.channel?.name.lowercased().replacingOccurrences(of: " ", with: "-") ?? "channel"
     }
@@ -120,7 +128,8 @@ extension ChannelDetailView {
         let cmid = UUID().uuidString
         guard ws.sendMessage(
             channelId: channelId, content: content, attachments: attachments,
-            replyToId: target?.id, clientMessageId: cmid, queue: queue
+            replyToId: target?.id, clientMessageId: cmid, queue: queue,
+            assistantModel: isAssistant ? assistantModels.value(for: assistantModelPick) : nil
         ) else { return false }
         appendOptimisticMessage(
             clientMessageId: cmid,

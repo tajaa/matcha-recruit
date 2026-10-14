@@ -277,6 +277,17 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
         except Exception:
             # Informational, like the quotas above.
             pass
+    if workspace["espresso_assistant"]:
+        # The assistant's model menu (`[{"id", "label"}]`) and where it starts,
+        # from `agent_runtime.models`; the run re-checks the pick at enqueue.
+        try:
+            from ..matcha_work.agent_runtime import models as assistant_models
+
+            workspace["assistant_models"], workspace["default_assistant_model"] = (
+                await assistant_models.picker()
+            )
+        except Exception:
+            pass
 
     return {
         "plan": plan,

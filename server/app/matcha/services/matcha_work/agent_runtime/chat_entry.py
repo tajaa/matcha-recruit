@@ -111,9 +111,10 @@ async def ability_keys(user, company_id: UUID, channel_id: UUID, surface: str) -
 async def start_run(
     *, channel_id: UUID, company_id: UUID, user, request: str, message_id: UUID,
     surface: str, project_id: UUID | None = None, resume_prompt_id: UUID | None = None,
+    model: str | None = None,
 ) -> bool:
     """Gate, queue and acknowledge one run. False when it was refused (the
-    reason is posted)."""
+    reason is posted). `model` is the app menu's pick (`models.resolve`)."""
     try:
         await enqueue.preflight(user, company_id)
         keys = await ability_keys(user, company_id, channel_id, surface)
@@ -121,7 +122,7 @@ async def start_run(
             user=user, company_id=company_id, channel_id=channel_id,
             trigger_message_id=message_id, project_id=project_id, surface=surface,
             prompt=request, abilities=keys, resume_prompt_id=resume_prompt_id,
-            skip_preflight=True,
+            skip_preflight=True, model=model,
         )
     except HTTPException as exc:
         await post_as_espresso(company_id, channel_id, _reason(exc))
@@ -136,7 +137,8 @@ async def start_run(
 
 
 async def _answer_prompt(*, prompt: dict, channel_id: UUID, company_id: UUID, user, content: str,
-                         message_id: UUID, surface: str, project_id: UUID | None) -> bool:
+                         message_id: UUID, surface: str, project_id: UUID | None,
+                         model: str | None = None) -> bool:
     messages: list = []
     events: list[dict] = []
     resume: UUID | None = None
@@ -183,7 +185,7 @@ async def _answer_prompt(*, prompt: dict, channel_id: UUID, company_id: UUID, us
         started = await start_run(
             channel_id=channel_id, company_id=company_id, user=user,
             request="Yes, go ahead.", message_id=message_id, surface=surface,
-            project_id=project_id, resume_prompt_id=resume,
+            project_id=project_id, resume_prompt_id=resume, model=model,
         )
         if not started:
             async with get_connection() as conn:
@@ -193,13 +195,13 @@ async def _answer_prompt(*, prompt: dict, channel_id: UUID, company_id: UUID, us
     elif next_request is not None:
         await start_run(
             channel_id=channel_id, company_id=company_id, user=user, request=next_request,
-            message_id=message_id, surface=surface, project_id=project_id,
+            message_id=message_id, surface=surface, project_id=project_id, model=model,
         )
     return True
 
 
 async def answer_loaded_prompt(*, prompt: dict, channel_id: UUID, user, content: str,
-                               message_id: UUID | None = None) -> bool:
+                               message_id: UUID | None = None, model: str | None = None) -> bool:
     """Apply a reply to one of the assistant's questions, already loaded."""
     async with get_connection() as conn:
         if message_id is None:
@@ -217,11 +219,12 @@ async def answer_loaded_prompt(*, prompt: dict, channel_id: UUID, user, content:
     return await _answer_prompt(
         prompt=prompt, channel_id=channel_id, company_id=prompt["company_id"], user=user,
         content=content, message_id=message_id, surface=surface, project_id=prompt.get("project_id"),
+        model=model,
     )
 
 
 async def handle_prompt_reply(*, channel_id: UUID, user, content: str, prompt_id: UUID,
-                              message_id: UUID | None = None) -> bool | None:
+                              message_id: UUID | None = None, model: str | None = None) -> bool | None:
     """A threaded reply to one of Espresso's questions. None when the question
     is not one of the assistant's (an agent-card question), so the caller goes
     on to handle it as it always has."""
@@ -231,19 +234,22 @@ async def handle_prompt_reply(*, channel_id: UUID, user, content: str, prompt_id
         return None
     return await answer_loaded_prompt(
         prompt=prompt, channel_id=channel_id, user=user, content=content, message_id=message_id,
+        model=model,
     )
 
 
 async def handle_message(
     *, channel_id: UUID, company_id: UUID, user, content: str, message_id: UUID,
     surface: str, reply_prompt_id: UUID | None = None, project_id: UUID | None = None,
+    model: str | None = None,
 ) -> bool:
-    """One message addressed to Espresso. Returns whether it was handled."""
+    """One message addressed to Espresso. Returns whether it was handled.
+    `model`: the app menu's pick, for the run this message starts."""
     try:
         if reply_prompt_id is not None:
             handled = await handle_prompt_reply(
                 channel_id=channel_id, user=user, content=content,
-                prompt_id=reply_prompt_id, message_id=message_id,
+                prompt_id=reply_prompt_id, message_id=message_id, model=model,
             )
             if handled is not None:
                 return handled
@@ -272,11 +278,12 @@ async def handle_message(
             return await _answer_prompt(
                 prompt=pending, channel_id=channel_id, company_id=company_id, user=user,
                 content=request, message_id=message_id, surface=surface, project_id=project_id,
+                model=model,
             )
         await chat_flow.broadcast_prompt_updates(events)
         await start_run(
             channel_id=channel_id, company_id=company_id, user=user, request=request,
-            message_id=message_id, surface=surface, project_id=project_id,
+            message_id=message_id, surface=surface, project_id=project_id, model=model,
         )
         # Handled either way: a refusal was posted in the chat.
         return True

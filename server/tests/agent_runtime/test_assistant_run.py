@@ -27,7 +27,7 @@ def _run(**over):
     base = {"id": uuid4(), "company_id": uuid4(), "project_id": None, "channel_id": uuid4(),
             "requested_by": uuid4(), "trigger_message_id": uuid4(), "prompt": "find a standing desk",
             "surface": "assistant", "abilities": ["web", "shopping"], "resume_prompt_id": None,
-            "requester_role": "client"}
+            "requester_role": "client", "model": "gpt-5.6-luna"}
     base.update(over)
     return base
 
@@ -497,23 +497,42 @@ def test_the_claim_query_carries_who_asked():
 
 
 @pytest.mark.asyncio
-async def test_platform_setting_runs_the_assistant_on_claude(wired, monkeypatch):
+async def test_the_run_uses_the_model_stored_at_enqueue(wired, monkeypatch):
+    """The pick (or the admin setting) was settled at enqueue; the run only reads it."""
     fake = FakeClient([response(call("finish", FINISH))])
     fake.keeps_history = True
     luna = Mock()
-    monkeypatch.setattr(assistant.anthropic_messages, "claude_override", AsyncMock(return_value="claude-sonnet-5-5"))
+    monkeypatch.setattr(assistant.models.anthropic_messages, "anthropic_configured", Mock(return_value=True))
+    override = AsyncMock(return_value="claude-haiku-5-5")
+    monkeypatch.setattr(assistant.models.anthropic_messages, "claude_override", override)
     monkeypatch.setattr(assistant, "get_claude_client", Mock(return_value=fake))
     monkeypatch.setattr(assistant, "get_luna_client", luna)
     set_model = AsyncMock()
     monkeypatch.setattr(assistant.store, "set_run_model", set_model)
-    run = _run()
-    out = await assistant.run_assistant(run)
+    out = await assistant.run_assistant(_run(model="claude-sonnet-5-5"))
     assert out.kind == "result" and out.token_usage["model"] == "claude-sonnet-5-5"
     assert fake.calls[0]["model"] == "claude-sonnet-5-5"
     # Claude keeps the turn itself: no Responses store/chain flags, even private.
     assert "store" not in fake.calls[0] and "chain" not in fake.calls[0]
     luna.assert_not_called()
-    set_model.assert_awaited_once_with(run["id"], "claude-sonnet-5-5")
+    # Neither the admin setting nor a re-stamp: the row already names the model.
+    override.assert_not_awaited()
+    set_model.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_model_the_server_stopped_offering_runs_the_default(wired, monkeypatch):
+    # Claude was picked, then the Anthropic key went away before the worker ran.
+    luna_client = wired.client(response(call("finish", FINISH)))
+    claude = Mock()
+    monkeypatch.setattr(assistant, "get_claude_client", claude)
+    set_model = AsyncMock()
+    monkeypatch.setattr(assistant.store, "set_run_model", set_model)
+    run = _run(model="claude-sonnet-5-5")
+    out = await assistant.run_assistant(run)
+    assert out.kind == "result" and luna_client.calls[0]["model"] == "gpt-5.6-luna"
+    claude.assert_not_called()
+    set_model.assert_awaited_once_with(run["id"], "gpt-5.6-luna")
 
 
 @pytest.mark.asyncio
