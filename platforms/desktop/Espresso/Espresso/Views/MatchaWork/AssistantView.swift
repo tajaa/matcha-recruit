@@ -41,6 +41,7 @@ struct AssistantView: View {
             }
         }
         .background(appState.themeBg)
+        .featureGuideOnFirstVisit(.assistant)
         .task { await open() }
         .onChange(of: appState.pendingAssistantEmailContext?.id) { _, _ in
             if acceptsEmailHandoff { Task { await takeEmails() } }

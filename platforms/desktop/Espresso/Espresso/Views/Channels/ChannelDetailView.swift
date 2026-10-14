@@ -294,6 +294,7 @@ struct ChannelDetailView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                FeatureGuideButton(id: .assistant)
             }
         }
         .padding(.horizontal, 12)

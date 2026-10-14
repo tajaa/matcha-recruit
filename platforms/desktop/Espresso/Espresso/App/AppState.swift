@@ -217,6 +217,12 @@ class AppState {
     /// contextual header ("Collab projects need Pro", etc.).
     var showPaywall: Bool = false
     var paywallFeature: String? = nil
+    /// The feature guide (how it works, what to expect) on screen, if any.
+    /// ContentView presents it; see `FeatureGuideSheet`.
+    var featureGuide: FeatureGuideID? = nil
+    /// The guide that opened on its own (first visit), so two features on one
+    /// screen don't both raise theirs at once.
+    var autoFeatureGuide: FeatureGuideID? = nil
 
     var plan: MWPlan { entitlements?.plan ?? .free }
     /// Gate accessors default OPEN while entitlements are unknown (nil) —
