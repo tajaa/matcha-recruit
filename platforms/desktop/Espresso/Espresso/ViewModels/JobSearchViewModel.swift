@@ -51,6 +51,8 @@ final class JobSearchViewModel {
             usage = list.usage
             consent = list.consent
             available = list.available
+            // A first load that failed left its error up; this one worked.
+            if !hasLoaded { errorMessage = nil }
             hasLoaded = true
             if let id = selectedSearchId, !searches.contains(where: { $0.id == id }) {
                 selectedSearchId = nil; detail = nil; selectedLeadId = nil; lead = nil
@@ -150,19 +152,26 @@ final class JobSearchViewModel {
         await load()
     }
 
-    func setState(_ state: String) async {
-        guard let searchId = selectedSearchId, let leadId = selectedLeadId else { return }
+    /// Saved / Applied / Dismissed for the job on screen. `leadId` is the job
+    /// the person acted on, not whichever is selected when the save returns.
+    func setState(_ state: String, leadId: String) async {
+        guard let searchId = selectedSearchId else { return }
         await perform {
-            self.lead = try await self.service.updateLead(searchId, leadId, state: state)
+            let updated = try await self.service.updateLead(searchId, leadId, state: state)
+            self.show(updated)
             await self.loadDetail(searchId)
         }
     }
 
-    func saveNotes(_ notes: String) async {
-        guard let searchId = selectedSearchId, let leadId = selectedLeadId else { return }
-        await perform {
-            self.lead = try await self.service.updateLead(searchId, leadId, notes: notes)
-        }
+    func saveNotes(_ notes: String, leadId: String) async {
+        guard let searchId = selectedSearchId else { return }
+        await perform { self.show(try await self.service.updateLead(searchId, leadId, notes: notes)) }
+    }
+
+    /// A save's answer replaces the open job only if that job is still open:
+    /// clicking another job while it saved must not put the old one back.
+    private func show(_ updated: JobLeadDetail) {
+        if selectedLeadId == updated.summary.id { lead = updated }
     }
 
     func rerank(_ weights: JobSearchWeights) async {
@@ -226,7 +235,9 @@ final class JobSearchViewModel {
 
     nonisolated static func filtered(_ leads: [JobLeadSummary], filter: Filter, showIrrelevant: Bool) -> [JobLeadSummary] {
         leads.filter { lead in
-            if lead.isIrrelevant && !showIrrelevant && filter != .dismissed { return false }
+            // Screened-out jobs hide from the browsing tabs, never from the
+            // person's own lists: a job they saved or applied to stays there.
+            if lead.isIrrelevant && !showIrrelevant && (filter == .all || filter == .postedPay) { return false }
             switch filter {
             case .all: return lead.userState != "dismissed"
             case .postedPay: return lead.compStatus == "posted" && lead.userState != "dismissed"
@@ -235,6 +246,20 @@ final class JobSearchViewModel {
             case .dismissed: return lead.userState == "dismissed"
             }
         }
+    }
+
+    /// Whether a failed create means a retry is a new request. Only when the
+    /// server answered that it didn't start one: a refusal (4xx), or a 503 for
+    /// a search it couldn't queue (marked failed, which is free). With no
+    /// answer, or any other error, the search may be running, so the retry
+    /// keeps the request id and the server hands back that search.
+    nonisolated static func retryIsNewRequest(_ error: Error) -> Bool {
+        guard let api = error as? APIError, case let .httpError(code, _) = api else { return false }
+        return (400..<500).contains(code) || code == 503
+    }
+
+    nonisolated static func dollars(_ value: Int) -> String {
+        "$" + money(Double(value))
     }
 
     nonisolated static func usageLine(_ usage: MWRunQuota?) -> String? {
@@ -272,8 +297,10 @@ final class JobSearchViewModel {
         return part.status == "mentioned" ? "Mentioned, no figure" : "Not posted"
     }
 
-    nonisolated private static func trim(_ value: Double) -> String {
-        value == value.rounded() ? String(Int(value)) : String(format: "%.2g", value)
+    /// "30", "12.5", "1.25", "112.5": up to six significant digits and no
+    /// exponent, matching the server's pay line (Python's `:g`).
+    nonisolated static func trim(_ value: Double) -> String {
+        value == value.rounded() && abs(value) < 1e15 ? String(Int(value)) : String(format: "%g", value)
     }
 
     nonisolated private static func money(_ value: Double) -> String {

@@ -175,7 +175,7 @@ class AppState {
         guard !emails.isEmpty else { return }
         guard canAssistant else { presentPaywall(for: "assistant"); return }
         clearPrimaryNav()
-        pendingAssistantSalesContext = nil
+        clearAssistantHandoffs()
         pendingAssistantEmailContext = AssistantEmailContext(emails: Array(emails.prefix(25)))
         showAssistantHub = true
     }
@@ -184,8 +184,7 @@ class AppState {
         guard let owner = currentUser?.id else { return }
         guard canAssistant else { presentPaywall(for: "assistant"); return }
         clearPrimaryNav()
-        pendingAssistantEmailContext = nil
-        pendingAssistantJobContext = nil
+        clearAssistantHandoffs()
         pendingAssistantSalesContext = AssistantSalesContext(owner: owner, campaignId: campaign.id,
                                                              projectId: projectId, title: campaign.title)
         showAssistantHub = true
@@ -196,10 +195,17 @@ class AppState {
         guard let owner = currentUser?.id else { return }
         guard canAssistant else { presentPaywall(for: "assistant"); return }
         clearPrimaryNav()
-        pendingAssistantEmailContext = nil
-        pendingAssistantSalesContext = nil
+        clearAssistantHandoffs()
         pendingAssistantJobContext = AssistantJobContext(owner: owner, searchId: searchId, jobId: jobId, title: title)
         showAssistantHub = true
+    }
+
+    /// The newest hand-off wins: one left over from a failed attempt must
+    /// never open in place of what the person just picked.
+    private func clearAssistantHandoffs() {
+        pendingAssistantEmailContext = nil
+        pendingAssistantSalesContext = nil
+        pendingAssistantJobContext = nil
     }
 
     var onlineUsers: [MWOnlineUser] = []

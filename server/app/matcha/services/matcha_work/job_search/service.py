@@ -26,6 +26,9 @@ _LIVE_SQL = ", ".join(f"'{status}'" for status in LIVE)
 STALE_INTERVAL = "2 hours"
 MAX_LIST = 50
 MAX_REDRAFTS = 20
+# Searches that can draft more approaches: finished, or cancelled with jobs
+# found before the cancel. A failed search has no ranked jobs to draft for.
+REDRAFTABLE = ("done", "cancelled")
 RESUME_CHARS = 6_000
 # States with a pay-range law (in postings or on request): where "ask for the
 # range" is backed by law. The employer-side list in workforce_compliance, plus
@@ -328,16 +331,24 @@ async def end_stale(conn, user_id: UUID) -> int:
         ))
         if found:
             await rerank(conn, row)
+        ended = resting_status(row) or ("done" if found else "failed")
         await conn.execute(
             """UPDATE mw_job_searches
                SET status = $2, dispatch_token = NULL, lease_until = NULL,
                    error = COALESCE(error, 'Stopped: the search stopped making progress.'),
                    completed_at = NOW(), updated_at = NOW()
                WHERE id = $1""",
-            row["id"], "done" if found else "failed",
+            row["id"], ended,
         )
         await release_drafts(conn, row["id"])
     return len(rows)
+
+
+def resting_status(search: dict) -> str | None:
+    """`cancelled` while a cancelled search drafts a requested approach (the
+    status it goes back to whatever happens), else None."""
+    cursor = decode_jsonb(search.get("phase_cursor"), {}) or {}
+    return "cancelled" if isinstance(cursor, dict) and cursor.get("after") == "cancelled" else None
 
 
 async def find_by_request(user_id: UUID, request_id: UUID) -> dict | None:
@@ -436,8 +447,8 @@ async def requeue_approach(search_id: UUID, lead_id: UUID, user_id: UUID):
         search = await owned_search(conn, search_id, user_id, lock=True)
         if search["status"] in LIVE:
             raise JobSearchError("This search is still running. Try again when it finishes.", 409)
-        if search["status"] != "done":
-            raise JobSearchError("Only a finished search can draft more approaches.", 409)
+        if search["status"] not in REDRAFTABLE:
+            raise JobSearchError("Only a finished or cancelled search can draft more approaches.", 409)
         if int(search["redrafts"] or 0) >= MAX_REDRAFTS:
             raise JobSearchError("This search has used its redrafts.", 429)
         lead = await conn.fetchrow(
@@ -458,7 +469,10 @@ async def requeue_approach(search_id: UUID, lead_id: UUID, user_id: UUID):
                        progress = progress || '{"note": "Drafting the approach…"}'::jsonb,
                        updated_at = NOW()
                    WHERE id = $1 RETURNING *""",
-                search_id, token, json.dumps({"approach_queue": [str(lead_id)]}),
+                search_id, token,
+                # `after`: the status to return to once drafted, so a cancelled
+                # search stays cancelled instead of turning into a finished one.
+                json.dumps({"approach_queue": [str(lead_id)], "after": search["status"]}),
             )
         except asyncpg.UniqueViolationError as exc:
             raise JobSearchError("Another job search is running. Try again when it finishes.", 409) from exc

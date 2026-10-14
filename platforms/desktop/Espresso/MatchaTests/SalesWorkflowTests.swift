@@ -81,7 +81,7 @@ final class SalesWorkflowTests: XCTestCase {
         var pending: AssistantSalesContext? = request
         var selected = ""
         await queue.run {
-            await queue.takeSales(pending: { pending }, create: { value in
+            await queue.take(pending: { pending }, create: { value in
                 XCTAssertEqual(value.id, request.id); return "sales-session"
             }, select: { id, prompt in selected = id; XCTAssertTrue(prompt.contains("campaign")) },
             consume: { _ in pending = nil }, report: { _ in XCTFail("Unexpected error") })

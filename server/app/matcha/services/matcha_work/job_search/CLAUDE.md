@@ -149,8 +149,11 @@ A search that ends any other way (cancelled, past `MAX_ATTEMPTS`, swept as
 stale) drafts nothing more: `service.release_drafts` marks its still-queued
 jobs `approach_status='failed'`, so they show Redraft, never "drafting" forever.
 
-Redraft: `POST …/leads/{lead}/approach` puts a `done` search back into
-`approaching` for that one job (free; ≤20 per search, 10/hour). The pay-law
+Redraft: `POST …/leads/{lead}/approach` puts a `done` or `cancelled` search
+back into `approaching` for that one job (free; ≤20 per search, 10/hour). The
+cursor's `after` remembers which: a cancelled search goes back to `cancelled`
+when the draft finishes, fails or goes stale (`service.resting_status`), never
+to `done`. A `failed` search has no ranked jobs and can't redraft. The pay-law
 hint (`service.PAY_LAW_STATES`: the employer-side list plus MA) is set at
 re-rank for unposted pay and given to the approach phase.
 

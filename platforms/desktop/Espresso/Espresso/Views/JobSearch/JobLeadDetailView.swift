@@ -86,12 +86,12 @@ struct JobLeadDetailView: View {
                     .tint(appState.themeAccent)
                 }
                 Menu {
-                    Button("Saved") { Task { await vm.setState("saved") } }
-                    Button("Applied") { Task { await vm.setState("applied") } }
-                    Button("Dismiss") { Task { await vm.setState("dismissed") } }
+                    Button("Saved") { Task { await vm.setState("saved", leadId: job.id) } }
+                    Button("Applied") { Task { await vm.setState("applied", leadId: job.id) } }
+                    Button("Dismiss") { Task { await vm.setState("dismissed", leadId: job.id) } }
                     if job.userState != "new" {
                         Divider()
-                        Button("Clear") { Task { await vm.setState("new") } }
+                        Button("Clear") { Task { await vm.setState("new", leadId: job.id) } }
                     }
                 } label: {
                     Text(job.userState == "new" ? "Mark…" : job.userState.capitalized)
@@ -166,7 +166,7 @@ struct JobLeadDetailView: View {
     private func approachSection(_ lead: JobLeadDetail) -> some View {
         let job = lead.summary
         section("How to approach it", trailing: {
-            if !job.isDrafting && !(vm.selectedSearch?.isLive ?? true) {
+            if !job.isDrafting && (vm.selectedSearch?.canDraft ?? false) {
                 Button(lead.approach == nil ? "Draft" : "Redraft") { Task { await vm.redraft() } }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
@@ -270,7 +270,7 @@ struct JobLeadDetailView: View {
     private func notesSection(_ lead: JobLeadDetail) -> some View {
         section("Your notes", trailing: {
             if notes != lead.notes {
-                Button("Save") { Task { await vm.saveNotes(notes) } }
+                Button("Save") { Task { await vm.saveNotes(notes, leadId: lead.summary.id) } }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(appState.themeAccent)

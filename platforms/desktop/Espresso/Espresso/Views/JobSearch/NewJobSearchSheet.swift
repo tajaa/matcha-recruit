@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 
 /// Start a job search: what they're after, what matters most, and whether to
 /// use their résumé. The first search also shows what Job search does with
@@ -26,9 +25,11 @@ struct NewJobSearchSheet: View {
     @State private var requestId = UUID()
 
     private var needsConsent: Bool { !(vm.consent?.granted ?? false) }
+    private var floor: JobSearchCriteria.BaseFloor { JobSearchCriteria.parseBaseFloor(baseFloor) }
     private var canStart: Bool {
         ask.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3
             && weights.anyAboveZero && (!needsConsent || agreed) && !starting && !uploading
+            && floor != .invalid
     }
 
     var body: some View {
@@ -69,7 +70,17 @@ struct NewJobSearchSheet: View {
                             .frame(width: 160)
                         }
                         field("Minimum base (USD, optional)") {
-                            TextField("250000", text: $baseFloor).textFieldStyle(.roundedBorder).frame(width: 160)
+                            TextField("250000 or $250k", text: $baseFloor).textFieldStyle(.roundedBorder).frame(width: 160)
+                            switch floor {
+                            case .none: EmptyView()
+                            case .amount(let dollars):
+                                Text("Using \(JobSearchViewModel.dollars(dollars)) a year")
+                                    .font(.system(size: 10)).foregroundColor(appState.themeTextSecondary)
+                            case .invalid:
+                                Text("Enter an amount like 250000, $250k or 1.5M (up to $10M).")
+                                    .font(.system(size: 10)).foregroundColor(.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     }
                     field("What matters most") {
@@ -177,7 +188,7 @@ struct NewJobSearchSheet: View {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.allowedContentTypes = ["pdf", "doc", "docx", "txt"].compactMap { UTType(filenameExtension: $0) }
+        panel.allowedContentTypes = JobSearchService.resumeTypes
         guard panel.runModal() == .OK, let url = panel.url else { return }
         uploading = true
         errorMessage = nil
@@ -201,7 +212,7 @@ struct NewJobSearchSheet: View {
         criteria.titles = Array(JobSearchCriteria.split(titles).prefix(8))
         criteria.locations = Array(JobSearchCriteria.split(locations).prefix(6))
         criteria.remote = remote
-        criteria.baseFloor = Int(baseFloor.filter(\.isNumber))
+        if case .amount(let dollars) = floor { criteria.baseFloor = dollars }
         let body = JobSearchService.CreateBody(
             requestId: requestId,
             title: criteria.titles.first ?? "",
@@ -221,11 +232,13 @@ struct NewJobSearchSheet: View {
                 return
             }
             errorMessage = AssistantText.message(for: error, fallback: "Couldn't start the search.")
-            // A retry after a refusal is a new request.
-            requestId = UUID()
+            // Only a clear refusal makes the retry a new request. After a
+            // timeout or a dropped connection the search may have started, so
+            // the retry keeps the request id and the server returns that
+            // search instead of refusing a second live one or counting another.
+            if JobSearchViewModel.retryIsNewRequest(error) { requestId = UUID() }
         } catch {
             errorMessage = error.localizedDescription
-            requestId = UUID()
         }
     }
 }

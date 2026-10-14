@@ -188,7 +188,7 @@ enum SalesCSV {
     }
 }
 
-struct AssistantSalesContext: Identifiable {
+struct AssistantSalesContext: AssistantHandoff {
     let id = UUID()
     let owner: String
     let campaignId: String

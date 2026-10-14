@@ -131,6 +131,11 @@ struct JobSearchWorkspace: View {
     private var content: some View {
         if !vm.hasLoaded && vm.errorMessage == nil {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if !vm.hasLoaded, let error = vm.errorMessage {
+            // Never the empty state: someone with searches would think they
+            // were gone and start (and pay for) a new one.
+            emptyState(icon: "exclamationmark.triangle", title: "Couldn't load your job searches",
+                       text: error, action: ("Try again", { Task { await vm.load() } }))
         } else if !vm.available {
             emptyState(icon: "briefcase", title: "Job search isn't available yet",
                        text: "It hasn't been set up on this server.", action: nil)

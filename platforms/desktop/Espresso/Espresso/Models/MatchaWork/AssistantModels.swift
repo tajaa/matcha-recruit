@@ -117,8 +117,15 @@ struct AssistantConversationList: Decodable {
     }
 }
 
+/// Something handed to a new Espresso conversation: its id doubles as the
+/// conversation's request id (so a retry can't make two), and `prompt` is the
+/// draft the conversation opens with.
+protocol AssistantHandoff: Identifiable where ID == UUID {
+    var prompt: String { get }
+}
+
 /// IDs only: mail bodies and sender-controlled text stay out of the user's prompt.
-struct AssistantEmailContext: Identifiable {
+struct AssistantEmailContext: AssistantHandoff {
     let id = UUID()
     let emails: [EmailMessage]
     var prompt: String {
@@ -147,76 +154,26 @@ final class AssistantOperationQueue {
         await next?()
     }
 
-    func takeEmails(
-        pending: @escaping () -> AssistantEmailContext?,
-        create: @escaping (AssistantEmailContext) async throws -> String,
+    /// Hand a context (emails, a sales campaign, a job) to a new conversation:
+    /// create it, then select it with the context's prompt as the draft, unless
+    /// the person moved on to another hand-off meanwhile. A hand-off that
+    /// arrives while another operation runs waits for it.
+    func take<Context: AssistantHandoff>(
+        pending: @escaping () -> Context?,
+        create: @escaping (Context) async throws -> String,
         select: @escaping (String, String) -> Void,
         consume: @escaping (UUID) -> Void,
         report: @escaping (Error) -> Void
     ) async {
         guard let request = pending() else { return }
-        let again = { await self.takeEmails(pending: pending, create: create, select: select,
-                                            consume: consume, report: report) }
-        guard !loading else {
-            queuedHandoff = again
-            return
-        }
-        await run {
-            do {
-                let id = try await create(request)
-                // The user may have chosen different mail while create/list
-                // awaited. Never select that older result over their new one.
-                guard pending()?.id == request.id else {
-                    if pending() != nil { queuedHandoff = again }
-                    return
-                }
-                select(id, request.prompt)
-                consume(request.id)
-            } catch { report(error) }
-        }
-    }
-    /// The same hand-off for any context with a UUID id (a job, say): create
-    /// the conversation, then select it with `prompt` as the draft, unless the
-    /// person moved on to another hand-off meanwhile.
-    func take<Context: Identifiable>(
-        pending: @escaping () -> Context?,
-        prompt: @escaping (Context) -> String,
-        create: @escaping (Context) async throws -> String,
-        select: @escaping (String, String) -> Void,
-        consume: @escaping (Context.ID) -> Void,
-        report: @escaping (Error) -> Void
-    ) async {
-        guard let request = pending() else { return }
-        let again = { await self.take(pending: pending, prompt: prompt, create: create, select: select,
+        let again = { await self.take(pending: pending, create: create, select: select,
                                       consume: consume, report: report) }
         guard !loading else { queuedHandoff = again; return }
         await run {
             do {
                 let id = try await create(request)
-                guard pending()?.id == request.id else {
-                    if pending() != nil { queuedHandoff = again }
-                    return
-                }
-                select(id, prompt(request))
-                consume(request.id)
-            } catch { report(error) }
-        }
-    }
-
-    func takeSales(
-        pending: @escaping () -> AssistantSalesContext?,
-        create: @escaping (AssistantSalesContext) async throws -> String,
-        select: @escaping (String, String) -> Void,
-        consume: @escaping (UUID) -> Void,
-        report: @escaping (Error) -> Void
-    ) async {
-        guard let request = pending() else { return }
-        let again = { await self.takeSales(pending: pending, create: create, select: select,
-                                           consume: consume, report: report) }
-        guard !loading else { queuedHandoff = again; return }
-        await run {
-            do {
-                let id = try await create(request)
+                // The person may have chosen something else while create/list
+                // awaited. Never select that older result over their new one.
                 guard pending()?.id == request.id else {
                     if pending() != nil { queuedHandoff = again }
                     return

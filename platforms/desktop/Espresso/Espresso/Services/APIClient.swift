@@ -426,6 +426,67 @@ class APIClient {
         return data
     }
 
+    /// A multipart POST (`MultipartUploadBuilder`'s body and content type) with
+    /// the same 401 → refresh → retry path as `request`, so a sheet left open
+    /// past the access token's 15 minutes still uploads. Never replayed after a
+    /// network error: an upload is not idempotent.
+    func upload<T: Decodable>(
+        path: String,
+        body: Data,
+        contentType: String,
+        timeout: TimeInterval = 120,
+        retryOnUnauthorized: Bool = true
+    ) async throws -> T {
+        guard let url = URL(string: baseURL + path) else {
+            throw APIError.invalidURL
+        }
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "POST"
+        urlRequest.cachePolicy = .reloadIgnoringLocalCacheData
+        urlRequest.timeoutInterval = timeout
+        urlRequest.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        if let token = accessToken {
+            urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        urlRequest.httpBody = body
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: urlRequest)
+        } catch {
+            if let urlError = _isTransientNetworkError(error) { throw APIError.networkUnavailable(urlError) }
+            throw error
+        }
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.noData
+        }
+        if httpResponse.statusCode == 401 {
+            guard retryOnUnauthorized else {
+                await MainActor.run { onUnauthorized?() }
+                throw APIError.unauthorized
+            }
+            do {
+                _ = try await AuthService.shared.refresh()
+            } catch {
+                try await failAfterRefreshFailure(error)
+            }
+            return try await upload(path: path, body: body, contentType: contentType,
+                                    timeout: timeout, retryOnUnauthorized: false)
+        }
+        guard (200...299).contains(httpResponse.statusCode) else {
+            if _isTransientMaintenance(httpResponse, data: data) {
+                throw APIError.serviceUnavailable(httpResponse.statusCode)
+            }
+            let message = _extractErrorMessage(from: data) ?? "Unknown error"
+            throw APIError.httpError(httpResponse.statusCode, message)
+        }
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+
     /// Extract a human-readable error from a typical FastAPI error response
     /// (`{"detail": "..."}`) or fall back to the raw body.
     private func _extractErrorMessage(from data: Data) -> String? {

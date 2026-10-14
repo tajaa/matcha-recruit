@@ -46,6 +46,34 @@ struct JobSearchCriteria: Encodable, Hashable {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
     }
+
+    /// What the minimum-base field means.
+    enum BaseFloor: Equatable {
+        case none
+        case amount(Int)
+        case invalid
+    }
+
+    /// The server's ceiling on a minimum base (`base_floor`, le=10,000,000).
+    static let maxBaseFloor = 10_000_000
+
+    /// "250000", "250,000", "$250,000.00", "250k", "$250K", "1.5M" or "1.5 mm"
+    /// as dollars. Anything else, or more than the server takes, is invalid
+    /// rather than quietly read as some other number.
+    static func parseBaseFloor(_ text: String) -> BaseFloor {
+        var s = text.lowercased().replacingOccurrences(of: "usd", with: "")
+        s.removeAll { $0 == "$" || $0 == "," || $0 == "_" || $0.isWhitespace }
+        if s.isEmpty { return .none }
+        var multiplier = 1.0
+        if s.hasSuffix("mm") { multiplier = 1_000_000; s.removeLast(2) }
+        else if s.hasSuffix("m") { multiplier = 1_000_000; s.removeLast() }
+        else if s.hasSuffix("k") { multiplier = 1_000; s.removeLast() }
+        guard !s.isEmpty, s.allSatisfy({ $0.isASCII && ($0.isNumber || $0 == ".") }),
+              let number = Double(s), number.isFinite else { return .invalid }
+        let dollars = (number * multiplier).rounded()
+        guard dollars >= 0, dollars <= Double(maxBaseFloor) else { return .invalid }
+        return .amount(Int(dollars))
+    }
 }
 
 struct JobSearchProgress: Decodable, Hashable {
@@ -161,6 +189,9 @@ struct JobSearchSummary: Decodable, Identifiable, Hashable {
     }
 
     var isLive: Bool { JobSearchStatus.isLive(status) }
+    /// The server drafts more approaches only for a search that finished or
+    /// was cancelled; a failed one has no ranked jobs to draft for.
+    var canDraft: Bool { status == "done" || status == "cancelled" }
     var displayTitle: String { title.isEmpty ? ask : title }
 }
 
@@ -520,7 +551,7 @@ struct ProfileResume: Decodable {
 }
 
 /// A hand-off from a job to a new Espresso conversation, like Sales'.
-struct AssistantJobContext: Identifiable {
+struct AssistantJobContext: AssistantHandoff {
     let id = UUID()
     let owner: String
     let searchId: String

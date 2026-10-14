@@ -65,6 +65,61 @@ final class JobSearchLogicTests: XCTestCase {
         XCTAssertTrue(JobSearchViewModel.filtered(leads, filter: .applied, showIrrelevant: true).isEmpty)
     }
 
+    func testJobsYouSavedOrAppliedToStayInThoseTabsEvenIfScreenedOut() throws {
+        var leads = try decode(JobSearchDetail.self, detailJSON).leads
+        leads[1].userState = "applied"  // l2 is screened out
+        XCTAssertEqual(JobSearchViewModel.filtered(leads, filter: .applied, showIrrelevant: false).map(\.id), ["l2"])
+        leads[1].userState = "saved"
+        XCTAssertEqual(JobSearchViewModel.filtered(leads, filter: .saved, showIrrelevant: false).map(\.id), ["l1", "l2"])
+        XCTAssertEqual(JobSearchViewModel.filtered(leads, filter: .all, showIrrelevant: false).map(\.id), ["l1"])
+    }
+
+    func testMinimumBaseReadsWhatPeopleType() {
+        typealias C = JobSearchCriteria
+        XCTAssertEqual(C.parseBaseFloor(""), .none)
+        XCTAssertEqual(C.parseBaseFloor("  "), .none)
+        XCTAssertEqual(C.parseBaseFloor("250000"), .amount(250_000))
+        XCTAssertEqual(C.parseBaseFloor("250,000"), .amount(250_000))
+        XCTAssertEqual(C.parseBaseFloor("$250,000.00"), .amount(250_000))
+        XCTAssertEqual(C.parseBaseFloor("250k"), .amount(250_000))
+        XCTAssertEqual(C.parseBaseFloor("$250K"), .amount(250_000))
+        XCTAssertEqual(C.parseBaseFloor("1.5M"), .amount(1_500_000))
+        XCTAssertEqual(C.parseBaseFloor("1.5 mm"), .amount(1_500_000))
+        XCTAssertEqual(C.parseBaseFloor("250000 USD"), .amount(250_000))
+        XCTAssertEqual(C.parseBaseFloor("lots"), .invalid)
+        XCTAssertEqual(C.parseBaseFloor("250-300k"), .invalid)
+        XCTAssertEqual(C.parseBaseFloor("1.2.3"), .invalid)
+        XCTAssertEqual(C.parseBaseFloor("20M"), .invalid, "more than the server's $10M ceiling")
+        XCTAssertEqual(JobSearchViewModel.dollars(250_000), "$250,000")
+    }
+
+    func testOnlyARefusalMakesARetryANewRequest() {
+        XCTAssertTrue(JobSearchViewModel.retryIsNewRequest(APIError.httpError(409, "already running")))
+        XCTAssertTrue(JobSearchViewModel.retryIsNewRequest(APIError.httpError(429, "limit")))
+        XCTAssertTrue(JobSearchViewModel.retryIsNewRequest(APIError.httpError(503, "couldn't queue")))
+        XCTAssertFalse(JobSearchViewModel.retryIsNewRequest(APIError.networkUnavailable(URLError(.timedOut))))
+        XCTAssertFalse(JobSearchViewModel.retryIsNewRequest(APIError.serviceUnavailable(504)))
+        XCTAssertFalse(JobSearchViewModel.retryIsNewRequest(APIError.httpError(500, "boom")))
+        XCTAssertFalse(JobSearchViewModel.retryIsNewRequest(URLError(.networkConnectionLost)))
+    }
+
+    func testDraftingIsOfferedOnlyWhereTheServerAllowsIt() throws {
+        var search = try decode(JobSearchDetail.self, detailJSON).search
+        for (status, allowed) in [("done", true), ("cancelled", true), ("failed", false), ("enriching", false)] {
+            search.status = status
+            XCTAssertEqual(search.canDraft, allowed, status)
+        }
+    }
+
+    func testResumeFileTypes() {
+        XCTAssertEqual(JobSearchService.mimeType(for: "cv.pdf"), "application/pdf")
+        XCTAssertEqual(JobSearchService.mimeType(for: "CV.DOCX"),
+                       "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        XCTAssertEqual(JobSearchService.mimeType(for: "notes.txt"), "text/plain")
+        XCTAssertEqual(JobSearchService.mimeType(for: "mystery"), "application/octet-stream")
+        XCTAssertEqual(JobSearchService.resumeTypes.count, 4)
+    }
+
     func testLeadDetailWithEvidenceAndApproach() throws {
         let lead = try decode(JobLeadDetail.self, """
         {"id": "l1", "title": "COO", "company": "Acme", "location": "Austin, TX",
@@ -106,6 +161,11 @@ final class JobSearchLogicTests: XCTestCase {
         XCTAssertEqual(JobSearchViewModel.partLine("Bonus", bonus), "20–30% of base")
         let equity = JobCompPart(status: "posted", pctMin: 0.5, pctMax: 1)
         XCTAssertEqual(JobSearchViewModel.partLine("Equity", equity), "0.5–1%")
+        // Like the server's pay line: never "12%" for 12.5% or an exponent.
+        XCTAssertEqual(JobSearchViewModel.partLine("Bonus", JobCompPart(status: "posted", pctMin: 12.5)), "12.5% of base")
+        XCTAssertEqual(JobSearchViewModel.partLine("Equity", JobCompPart(status: "posted", pctMin: 1.25)), "1.25%")
+        XCTAssertEqual(JobSearchViewModel.partLine("Bonus", JobCompPart(status: "posted", pctMin: 112.5)), "112.5% of base")
+        XCTAssertEqual(JobSearchViewModel.trim(0.125), "0.125")
         XCTAssertEqual(JobSearchViewModel.partLine("Equity", JobCompPart(status: "mentioned")), "Mentioned, no figure")
         XCTAssertEqual(JobSearchViewModel.compBadge("posted"), "Posted")
         XCTAssertEqual(JobSearchViewModel.compBadge("not_disclosed"), "Not posted")

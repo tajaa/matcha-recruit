@@ -244,7 +244,7 @@ struct AssistantView: View {
     }
 
     private func takeEmails() async {
-        await operations.takeEmails(
+        await operations.take(
             pending: { appState.pendingAssistantEmailContext },
             create: { request in
                 let id = try await MatchaWorkService.shared.createAssistantConversation(
@@ -264,13 +264,13 @@ struct AssistantView: View {
     }
 
     private func takeSales() async {
-        await operations.takeSales(
-            pending: {
+        await operations.take(
+            pending: { () -> AssistantSalesContext? in
                 guard let request = appState.pendingAssistantSalesContext,
                       request.owner == appState.currentUser?.id else { return nil }
                 return request
             },
-            create: { request in
+            create: { (request: AssistantSalesContext) in
                 let id = try await MatchaWorkService.shared.createAssistantConversation(
                     title: String("Sales: \(request.title)".prefix(100)), requestId: request.id)
                 try await reload()
@@ -289,7 +289,6 @@ struct AssistantView: View {
                       request.owner == appState.currentUser?.id else { return nil }
                 return request
             },
-            prompt: { (request: AssistantJobContext) in request.prompt },
             create: { (request: AssistantJobContext) in
                 let id = try await MatchaWorkService.shared.createAssistantConversation(
                     title: request.conversationTitle, requestId: request.id)

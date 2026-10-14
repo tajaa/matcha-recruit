@@ -196,7 +196,7 @@ final class EmailWorkspaceTests: XCTestCase {
         var suspended: CheckedContinuation<String, Error>?
         let started = expectation(description: "First conversation creation started")
         func take() async {
-            await queue.takeEmails(pending: { pending }, create: { request in
+            await queue.take(pending: { pending }, create: { request in
                 calls.append(request.id)
                 if request.id == a.id {
                     return try await withCheckedThrowingContinuation {
@@ -237,7 +237,7 @@ final class EmailWorkspaceTests: XCTestCase {
         }
         await fulfillment(of: [started], timeout: 2)
         var selected: String?
-        await queue.takeEmails(pending: { pending }, create: { _ in "email-chat" },
+        await queue.take(pending: { pending }, create: { _ in "email-chat" },
                                select: { id, _ in selected = id }, consume: { _ in pending = nil },
                                report: { XCTFail("Unexpected error: \($0)") })
         XCTAssertNil(selected)
@@ -256,7 +256,7 @@ final class EmailWorkspaceTests: XCTestCase {
         var failures = 0
         var selected: String?
         func take() async {
-            await queue.takeEmails(pending: { pending }, create: { request in
+            await queue.take(pending: { pending }, create: { request in
                 attempts.append(request.id)
                 if attempts.count == 1 { throw URLError(.timedOut) }
                 return "same-chat"

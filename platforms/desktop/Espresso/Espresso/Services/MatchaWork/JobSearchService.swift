@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 
 /// Espresso Job search (`/matcha-work/job-searches/*`) and the person's saved
 /// résumé (`/users/me/resume`), which a search may use when they choose to.
@@ -85,35 +86,21 @@ final class JobSearchService {
         try await client.request(method: "GET", path: "/users/me/resume")
     }
 
-    /// Upload (or replace) the résumé. The server parses it before answering.
+    /// The file types the résumé picker offers (the server reads these).
+    nonisolated static let resumeTypes: [UTType] = ["pdf", "doc", "docx", "txt"]
+        .compactMap { UTType(filenameExtension: $0) }
+
+    /// Upload (or replace) the résumé. The server parses it before answering,
+    /// so it gets a longer timeout; an expired login refreshes like any call.
     func uploadResume(data: Data, filename: String) async throws -> ProfileResume {
         var multipart = MultipartUploadBuilder()
         multipart.addFile(name: "file", filename: filename, mimeType: Self.mimeType(for: filename), data: data)
         let (body, contentType) = multipart.finalize()
-        guard let url = URL(string: "\(client.baseURL)/users/me/resume") else { throw APIError.invalidURL }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
-        if let token = client.accessToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        request.httpBody = body
-        request.timeoutInterval = 120
-        let (responseData, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw APIError.noData }
-        guard (200...299).contains(http.statusCode) else {
-            throw APIError.httpError(http.statusCode, String(data: responseData, encoding: .utf8) ?? "")
-        }
-        return try JSONDecoder().decode(ProfileResume.self, from: responseData)
+        return try await client.upload(path: "/users/me/resume", body: body, contentType: contentType)
     }
 
     nonisolated static func mimeType(for filename: String) -> String {
-        switch (filename as NSString).pathExtension.lowercased() {
-        case "pdf": return "application/pdf"
-        case "doc": return "application/msword"
-        case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        case "txt": return "text/plain"
-        default: return "application/octet-stream"
-        }
+        UTType(filenameExtension: (filename as NSString).pathExtension.lowercased())?.preferredMIMEType
+            ?? "application/octet-stream"
     }
 }
