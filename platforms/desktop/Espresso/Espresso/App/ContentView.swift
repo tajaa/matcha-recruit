@@ -269,7 +269,8 @@ struct ContentView: View {
         let isHomeActive = !appState.showJournalsHub && !appState.showProjectsHub
             && !appState.showThreadsHub && !appState.showChannelsHub
             && !appState.showProductivityHub && !appState.showEmailHub
-            && !appState.showAssistantHub && !appState.showCalendarHub && (appState.showHome || (
+            && !appState.showAssistantHub && !appState.showCalendarHub
+            && !appState.showJobSearchHub && (appState.showHome || (
             appState.selectedThreadId == nil &&
             appState.selectedProjectId == nil &&
             appState.selectedChannelId == nil &&
@@ -370,6 +371,7 @@ struct ContentView: View {
         case .threads:  threadsSidebarSection
         case .email:    emailSidebarSection
         case .assistant: assistantSidebarSection
+        case .jobs: jobSearchSidebarSection
         }
     }
 
@@ -543,6 +545,19 @@ struct ContentView: View {
                           isActive: appState.showAssistantHub,
                           lockedFeature: appState.canAssistant ? nil : "assistant",
                           paneTarget: .assistant, onOpen: openAssistantHub)
+        }
+    }
+
+    /// Nav-only row — opens Job search. Shown only when the workspace has it
+    /// (a personal account on a server with a listings provider); on a plan
+    /// without it the row opens the paywall instead.
+    @ViewBuilder
+    private var jobSearchSidebarSection: some View {
+        if appState.jobSearchEnabled {
+            sidebarNavRow(title: "Job search", icon: "briefcase",
+                          isActive: appState.showJobSearchHub,
+                          lockedFeature: appState.canJobSearch ? nil : "job_search",
+                          onOpen: { appState.openJobSearch() })
         }
     }
 

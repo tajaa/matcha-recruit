@@ -175,6 +175,34 @@ final class AssistantOperationQueue {
             } catch { report(error) }
         }
     }
+    /// The same hand-off for any context with a UUID id (a job, say): create
+    /// the conversation, then select it with `prompt` as the draft, unless the
+    /// person moved on to another hand-off meanwhile.
+    func take<Context: Identifiable>(
+        pending: @escaping () -> Context?,
+        prompt: @escaping (Context) -> String,
+        create: @escaping (Context) async throws -> String,
+        select: @escaping (String, String) -> Void,
+        consume: @escaping (Context.ID) -> Void,
+        report: @escaping (Error) -> Void
+    ) async {
+        guard let request = pending() else { return }
+        let again = { await self.take(pending: pending, prompt: prompt, create: create, select: select,
+                                      consume: consume, report: report) }
+        guard !loading else { queuedHandoff = again; return }
+        await run {
+            do {
+                let id = try await create(request)
+                guard pending()?.id == request.id else {
+                    if pending() != nil { queuedHandoff = again }
+                    return
+                }
+                select(id, prompt(request))
+                consume(request.id)
+            } catch { report(error) }
+        }
+    }
+
     func takeSales(
         pending: @escaping () -> AssistantSalesContext?,
         create: @escaping (AssistantSalesContext) async throws -> String,

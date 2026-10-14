@@ -134,6 +134,18 @@ The Calendar tab is your own calendar, in a month or week view with the selected
 - Ask Espresso to put things on it ("lunch with Sam Friday at noon", "add the dinner from Dana's email"); events it adds say so, and its answers link back to the day
 - In Email, **Add to calendar** reads the open message and proposes its events. Tell it what you want ("only the dinner"), fix anything it got wrong, and nothing is added until you press Add. Events from an email link back to it
 
+## Job search
+
+Job search (Pro, personal accounts) runs a full search from what you ask for ("COO roles across the US, mostly salary, bonus and equity") and keeps it in the sidebar.
+
+- New search: say what you're after, optionally titles, places, remote and a minimum base, set what matters most (base, bonus, equity, fit), and choose whether to use your saved résumé (upload or replace it here)
+- It plans the search, finds postings, screens them for fit, reads each one for pay and the application's questions, ranks them, and drafts how to approach the top ones; the stepper shows where it is, and Cancel stops it
+- Pay is only what a posting states, quoted with where it came from; jobs that don't post pay rank after those that do and are never counted as zero. **What matters** re-ranks without using a search
+- Each job: the route in, people named on the company's own pages, a first message (Copy, Open in Mail), answers to the application's real questions, a cover letter, and the questions only you should answer. Redraft any job; mark it Saved, Applied or Dismissed; keep notes; **Ask Espresso** opens a conversation about it
+- Nothing is sent, applied for or submitted. 4 searches a month on Pro
+
+---
+
 ## Inbox
 
 Inbox is the direct message surface for one-on-one and group conversations.

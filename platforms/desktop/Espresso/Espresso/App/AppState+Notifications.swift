@@ -332,6 +332,7 @@ extension AppState {
             showEmailHub = false
             showAssistantHub = false
             showCalendarHub = false
+            showJobSearchHub = false
         }
 
         if let project {

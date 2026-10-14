@@ -48,6 +48,9 @@ struct AssistantView: View {
         .onChange(of: appState.pendingAssistantSalesContext?.id) { _, _ in
             if acceptsEmailHandoff { Task { await takeSales() } }
         }
+        .onChange(of: appState.pendingAssistantJobContext?.id) { _, _ in
+            if acceptsEmailHandoff { Task { await takeJob() } }
+        }
         .sheet(isPresented: $showAbilities) {
             AssistantAbilitiesSheet().environment(appState)
         }
@@ -202,7 +205,7 @@ struct AssistantView: View {
                 }
             } catch { report(error) }
             // Queued while loading, then drained when opening finishes.
-            if acceptsEmailHandoff { await takeEmails(); await takeSales() }
+            if acceptsEmailHandoff { await takeEmails(); await takeSales(); await takeJob() }
         }
     }
 
@@ -276,6 +279,26 @@ struct AssistantView: View {
             select: { select($0, draft: $1) },
             consume: { id in
                 if appState.pendingAssistantSalesContext?.id == id { appState.pendingAssistantSalesContext = nil }
+            }, report: report)
+    }
+
+    private func takeJob() async {
+        await operations.take(
+            pending: { () -> AssistantJobContext? in
+                guard let request = appState.pendingAssistantJobContext,
+                      request.owner == appState.currentUser?.id else { return nil }
+                return request
+            },
+            prompt: { (request: AssistantJobContext) in request.prompt },
+            create: { (request: AssistantJobContext) in
+                let id = try await MatchaWorkService.shared.createAssistantConversation(
+                    title: request.conversationTitle, requestId: request.id)
+                try await reload()
+                return id
+            },
+            select: { select($0, draft: $1) },
+            consume: { id in
+                if appState.pendingAssistantJobContext?.id == id { appState.pendingAssistantJobContext = nil }
             }, report: report)
     }
 
@@ -399,7 +422,7 @@ struct AssistantAbilitiesSheet: View {
                     .disabled(busyKey == ability.key)
                 }
             }
-            Label(ability.key == "sales" ? "Builds pipelines and drafts; you review before sending" : (ability.acts ? "Acts for you, only in this private conversation" : "Looks things up"),
+            Label(ability.key == "sales" ? "Builds pipelines and drafts; you review before sending" : ability.key == "jobs" ? "Reads your job searches and keeps your notes; never applies" : (ability.acts ? "Acts for you, only in this private conversation" : "Looks things up"),
                   systemImage: ability.acts ? "lock.fill" : "magnifyingglass")
                 .font(.system(size: 11))
                 .foregroundColor(appState.themeTextSecondary)

@@ -167,6 +167,7 @@ extension AppState {
         showEmailHub = false
         showAssistantHub = false
         showCalendarHub = false
+        showJobSearchHub = false
         showHome = false
         showSkills = false
         showInbox = false
