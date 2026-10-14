@@ -209,6 +209,7 @@ def features_for_plan(plan: str) -> dict[str, bool]:
         "agent_cards": pro_plus,
         "assistant": pro_plus,
         "job_search": pro_plus,
+        "agent_tasks": pro_plus,
     }
 
 

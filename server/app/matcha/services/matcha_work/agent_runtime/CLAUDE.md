@@ -6,7 +6,8 @@ four on Friday at 7"); each message is one run.
 
 Agent cards (`../agent_card/`) are a caller of this same loop, and so are Job
 search's model phases (`../job_search/agent_phase.py` over `phase_run.py`, run
-kind `job_search`).
+kind `job_search`) and Espresso Tasks' (`../agent_tasks/model_run.py`, run
+kind `agent_task`, surface `agent_task`).
 There is one loop in this package and no other: do not add a second.
 
 ## The shape
@@ -68,7 +69,9 @@ it otherwise), and should declare `resolve`.
 
 A job too long for one worker task (prod's main worker has one slot) runs as
 a chain of short tasks, one phase each. Job search is the first owner
-(`../job_search/orchestrator.py`, `JOB_CHAIN`).
+(`../job_search/orchestrator.py`, `JOB_CHAIN`); Espresso Tasks is the second
+(`../agent_tasks/orchestrator.py`, `TASK_CHAIN`, phases stored in its `phase`
+column as `<playbook>.<phase>`).
 
 - **`chain.ChainSpec`** describes one kind of row: its table (a whitelist,
   `ChainTable`: `mw_job_searches`, `mw_agent_tasks`), its live statuses and

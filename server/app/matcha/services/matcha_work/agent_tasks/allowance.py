@@ -1,7 +1,7 @@
 """One monthly allowance for the work Espresso does in the background.
 
-Agent-card runs and job searches (and Espresso tasks, when they arrive) draw
-from one pool of units per person per UTC month, `AGENT_TASK_MONTHLY_UNITS`.
+Agent-card runs, job searches and Espresso tasks draw from one pool of units
+per person per UTC month, `AGENT_TASK_MONTHLY_UNITS`.
 Each kind costs roughly what it costs us (`WEIGHTS`): a card run is one quick
 web research pass; a job search is a long chain of searches, page loads and
 model runs. Pro's 60 units keep today's totals: 40 card runs plus 4 job
@@ -11,6 +11,9 @@ Nothing is stored for it. `used_units` sums what each source already records,
 so the old rules carry over unchanged: a failed card run or job search is
 free; a cancelled or deleted search counts (deleting leaves a blanked row).
 A card's send-backs, rounds 2 to 5, are free; after that each costs a run.
+A task's rounds carry their own `units` (the playbook's weight for the first,
+`ROUND_UNITS` after that) and count unless the round failed; a deleted task
+keeps its rounds.
 
 Every creator counts and inserts under one per-person lock (`lock`), so two
 starts at once can't both slip under the allowance, whatever their kinds.
@@ -34,6 +37,10 @@ WEIGHTS: dict[str, int] = {
 }
 # A card's rounds 2..(1 + FREE_CARD_SENDBACKS) cost nothing.
 FREE_CARD_SENDBACKS = 4
+# A follow-up round on a task. A refine re-screens what was found in code and
+# only looks up what is missing; "search more" is a new search; a document
+# uses no model.
+ROUND_UNITS: dict[str, int] = {"refine": 0, "more": 1, "document": 0, "action": 0}
 
 
 def limit_for_plan(plan: str | None) -> int:
@@ -89,7 +96,10 @@ async def used_units(conn, user_id: UUID | str) -> int:
                  AND (COALESCE(r.round, 1) <= 1 OR r.round > 1 + $2)) * $3
            + (SELECT COUNT(*) FROM mw_job_searches s, month
                WHERE s.user_id = $1 AND s.status <> 'failed'
-                 AND s.created_at >= month.start) * $4""",
+                 AND s.created_at >= month.start) * $4
+           + (SELECT COALESCE(SUM(r.units), 0) FROM mw_agent_task_rounds r, month
+               WHERE r.user_id = $1 AND r.units > 0 AND r.status <> 'failed'
+                 AND r.created_at >= month.start)""",
         UUID(str(user_id)), FREE_CARD_SENDBACKS, WEIGHTS["agent_card"], WEIGHTS["job_search"],
     )
     return int(used or 0)

@@ -18,6 +18,22 @@ MAX_TEXT_CHARS = 8_000
 MAX_PRODUCTS = 3
 MAX_REVIEWS = 5
 MAX_JOBS = 2
+# Homes, places, events and loose offers (Espresso Tasks reads these); each
+# key appears only when the page has one, so other pages keep their shape.
+MAX_LISTINGS = 4
+MAX_PLACES = 3
+MAX_EVENTS = 3
+MAX_LOOSE_OFFERS = 4
+LISTING_TYPES = frozenset({
+    "Apartment", "SingleFamilyResidence", "House", "Residence", "Accommodation",
+    "ApartmentComplex", "RealEstateListing", "Room", "Suite",
+})
+PLACE_TYPES = frozenset({
+    "Place", "LocalBusiness", "Restaurant", "FoodEstablishment", "CafeOrCoffeeShop", "BarOrPub",
+    "Bakery", "Store", "Hotel", "LodgingBusiness",
+})
+EVENT_TYPES = frozenset({"Event"})
+OFFER_TYPES = frozenset({"Offer", "AggregateOffer"})
 # In the general page view (the model's fetch_page output) a job description
 # stays short; `job_postings` gives the job search the whole thing.
 MAX_JOB_DESCRIPTION = 3_000
@@ -208,6 +224,157 @@ def _job_posting(node: dict, base: str, description_limit: int = MAX_JOB_DESCRIP
     }
 
 
+def _text_of(value: Any, limit: int) -> str:
+    return " ".join(str(value or "").split())[:limit] if isinstance(value, (str, int, float)) else ""
+
+
+def _quantity(value: Any) -> dict | None:
+    """schema.org QuantitativeValue (or a bare number): `{value, unit}`."""
+    if isinstance(value, dict):
+        number = _scalar(value.get("value"))
+        if number is None:
+            return None
+        return {"value": number, "unit": _scalar(value.get("unitCode") or value.get("unitText"), 16)}
+    number = _scalar(value)
+    return {"value": number, "unit": None} if number is not None else None
+
+
+def _rating(node: dict) -> dict | None:
+    rating = node.get("aggregateRating") if isinstance(node.get("aggregateRating"), dict) else {}
+    if _scalar(rating.get("ratingValue")) is None:
+        return None
+    return {
+        "value": _scalar(rating.get("ratingValue")),
+        "count": _scalar(rating.get("reviewCount") or rating.get("ratingCount")),
+        "best": _scalar(rating.get("bestRating")) or 5,
+    }
+
+
+def _price_unit(offer: dict) -> Any:
+    spec = offer.get("priceSpecification")
+    for item in _as_list(spec):
+        if isinstance(item, dict):
+            unit = _scalar(item.get("unitText") or item.get("unitCode") or item.get("billingDuration"), 16)
+            if unit is not None:
+                return unit
+    return _scalar(offer.get("unitText"), 16)
+
+
+def _loose_offer(node: dict, base: str) -> dict:
+    """An Offer on its own (a rental's rent, a ticket): price, currency, and
+    the unit it is charged per when the page says (MONTH, NIGHT)."""
+    price = node.get("price") if node.get("price") is not None else node.get("lowPrice")
+    spec = node.get("priceSpecification")
+    if price is None:
+        for item in _as_list(spec):
+            if isinstance(item, dict) and item.get("price") is not None:
+                price = item.get("price")
+                break
+    item = node.get("itemOffered") if isinstance(node.get("itemOffered"), dict) else {}
+    url = node.get("url")
+    return {
+        "price": _scalar(price),
+        "currency": _scalar(node.get("priceCurrency"), 8),
+        "unit": _price_unit(node),
+        "availability": str(node.get("availability") or "").rsplit("/", 1)[-1][:40] or None,
+        "available_from": _scalar(node.get("availabilityStarts") or node.get("validFrom"), 40),
+        "item": _text_of(item.get("name"), 200) or None,
+        "url": urljoin(base, url) if isinstance(url, str) else None,
+    }
+
+
+def _pets(value: Any) -> str | None:
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    return _text_of(value, 120) or None
+
+
+def _amenities(value: Any) -> list[str]:
+    out = []
+    for item in _as_list(value)[:20]:
+        name = item.get("name") if isinstance(item, dict) else item
+        if isinstance(item, dict) and item.get("value") is False:
+            continue
+        text = _text_of(name, 60)
+        if text:
+            out.append(text)
+    return out[:12]
+
+
+def _listing(node: dict, base: str) -> dict:
+    """A home for rent or sale (Apartment, House, RealEstateListing...)."""
+    about = node.get("about") if isinstance(node.get("about"), dict) else {}
+    entity = node.get("mainEntity") if isinstance(node.get("mainEntity"), dict) else {}
+    home = {**about, **entity, **{k: v for k, v in node.items() if v not in (None, "", [])}}
+    url = home.get("url")
+    offers = [_loose_offer(o, base) for o in _as_list(home.get("offers")) if isinstance(o, dict)]
+    return {
+        "type": sorted(_types(node) & LISTING_TYPES)[0] if _types(node) & LISTING_TYPES else "Residence",
+        "name": _text_of(home.get("name"), 200),
+        "url": urljoin(base, url) if isinstance(url, str) else None,
+        "description": plain_text(home.get("description"), 600),
+        "address": _address(home),
+        "bedrooms": _scalar(home.get("numberOfBedrooms") or home.get("numberOfRooms")),
+        "bathrooms": _scalar(home.get("numberOfBathroomsTotal") or home.get("numberOfFullBathrooms")),
+        "floor_size": _quantity(home.get("floorSize")),
+        "pets_allowed": _pets(home.get("petsAllowed")),
+        "amenities": _amenities(home.get("amenityFeature")),
+        "date_posted": _scalar(home.get("datePosted"), 40),
+        "images": _image_urls(home.get("image") or home.get("photo"), base),
+        "offers": offers[:4],
+    }
+
+
+def _hours(node: dict) -> list[str]:
+    out = [_text_of(h, 80) for h in _as_list(node.get("openingHours")) if _text_of(h, 80)]
+    for spec in _as_list(node.get("openingHoursSpecification"))[:14]:
+        if not isinstance(spec, dict):
+            continue
+        days = " ".join(str(d).rsplit("/", 1)[-1] for d in _as_list(spec.get("dayOfWeek")))[:60]
+        opens, closes = _text_of(spec.get("opens"), 8), _text_of(spec.get("closes"), 8)
+        if days and opens and closes:
+            out.append(f"{days} {opens}-{closes}")
+    return out[:14]
+
+
+def _place(node: dict, base: str) -> dict:
+    """A restaurant, shop or other place: where it is, when it is open, how it rates."""
+    url = node.get("url")
+    menu = node.get("hasMenu") or node.get("menu")
+    if isinstance(menu, dict):
+        menu = menu.get("url")
+    cuisine = ", ".join(_text_of(c, 40) for c in _as_list(node.get("servesCuisine")) if _text_of(c, 40))
+    return {
+        "type": sorted(_types(node) & PLACE_TYPES)[0],
+        "name": _text_of(node.get("name"), 200),
+        "url": urljoin(base, url) if isinstance(url, str) else None,
+        "address": _address(node),
+        "telephone": _text_of(node.get("telephone"), 40) or None,
+        "price_range": _text_of(node.get("priceRange"), 20) or None,
+        "cuisine": cuisine[:120] or None,
+        "rating": _rating(node),
+        "hours": _hours(node),
+        "accepts_reservations": _pets(node.get("acceptsReservations")),
+        "menu_url": urljoin(base, menu) if isinstance(menu, str) else None,
+        "images": _image_urls(node.get("image") or node.get("photo"), base),
+    }
+
+
+def _event(node: dict, base: str) -> dict:
+    url = node.get("url")
+    location = node.get("location")
+    venue = location.get("name") if isinstance(location, dict) else location
+    return {
+        "name": _text_of(node.get("name"), 200),
+        "url": urljoin(base, url) if isinstance(url, str) else None,
+        "start": _scalar(node.get("startDate"), 40),
+        "end": _scalar(node.get("endDate"), 40),
+        "venue": _text_of(venue, 120) or None,
+        "address": _address(location) if isinstance(location, dict) else "",
+        "offers": [_loose_offer(o, base) for o in _as_list(node.get("offers")) if isinstance(o, dict)][:3],
+    }
+
+
 def _ld_nodes(soup: BeautifulSoup):
     for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
         raw = script.string or script.get_text() or ""
@@ -235,11 +402,28 @@ def extract_page(html: bytes, final_url: str) -> dict:
     soup = BeautifulSoup(html, "lxml")
     products: list[dict] = []
     jobs: list[dict] = []
+    more: dict[str, list[dict]] = {"listings": [], "places": [], "events": [], "offers": []}
+    # Nodes a listing or event already read (its offers, the home a listing
+    # is `about`), so the walk does not report them twice.
+    consumed: set[int] = set()
     for node in _ld_nodes(soup):
-        if "Product" in _types(node) and len(products) < MAX_PRODUCTS:
+        types = _types(node)
+        if id(node) in consumed:
+            continue
+        if "Product" in types and len(products) < MAX_PRODUCTS:
             products.append(_product(node, final_url))
-        elif "JobPosting" in _types(node) and len(jobs) < MAX_JOBS:
+        elif "JobPosting" in types and len(jobs) < MAX_JOBS:
             jobs.append(_job_posting(node, final_url))
+        elif types & LISTING_TYPES and len(more["listings"]) < MAX_LISTINGS:
+            more["listings"].append(_listing(node, final_url))
+            consumed.update(id(n) for key in ("offers", "about", "mainEntity") for n in _as_list(node.get(key)))
+        elif types & PLACE_TYPES and len(more["places"]) < MAX_PLACES:
+            more["places"].append(_place(node, final_url))
+        elif types & EVENT_TYPES and len(more["events"]) < MAX_EVENTS:
+            more["events"].append(_event(node, final_url))
+            consumed.update(id(o) for o in _as_list(node.get("offers")))
+        elif types & OFFER_TYPES and len(more["offers"]) < MAX_LOOSE_OFFERS and not products:
+            more["offers"].append(_loose_offer(node, final_url))
 
     def meta(*names: str) -> str | None:
         for name in names:
@@ -267,6 +451,9 @@ def extract_page(html: bytes, final_url: str) -> dict:
     # Only when the page has one, so product pages keep their exact shape.
     if jobs:
         page["jobs"] = jobs
+    for key, found in more.items():
+        if found:
+            page[key] = found
     return page
 
 
@@ -277,4 +464,9 @@ def page_urls(page: dict) -> set[str]:
         for offer in product.get("offers") or []:
             if offer.get("url"):
                 urls.add(offer["url"])
+    for key in ("listings", "places", "events", "offers"):
+        for item in page.get(key) or []:
+            for url in (item.get("url"), *(o.get("url") for o in item.get("offers") or [])):
+                if isinstance(url, str) and url:
+                    urls.add(url)
     return urls

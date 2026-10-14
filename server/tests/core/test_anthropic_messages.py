@@ -429,7 +429,7 @@ async def test_settings_page_reports_the_map_registry_choices_version_and_key_st
     apps = {app["key"]: app for app in out["agent_model_registry"]}
     assert [s["key"] for s in apps["matcha"]["surfaces"]][:2] == ["matcha.huume", "matcha.scheduling"]
     assert [s["label"] for s in apps["espresso"]["surfaces"]] == ["Chat", "Purchase agent", "Assistant", "Projects",
-                                                              "Job search"]
+                                                              "Job search", "Tasks"]
 
 
 def test_an_unregistered_surface_is_warned_about_once(caplog):

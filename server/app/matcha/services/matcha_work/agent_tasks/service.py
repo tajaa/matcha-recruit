@@ -1,0 +1,402 @@
+"""Tasks, their rounds and findings. Pool-free, so the API and the worker share it.
+
+Every read and write is scoped to the owner (`user_id`); another person's id
+is "not found". A deleted task keeps a blanked row and its rounds (a
+tombstone) so it still counts against the month's allowance; its findings and
+runs are deleted.
+
+Statuses: `queued` and `running` are a live chain; `waiting` needs the person
+(a form, a confirmation) and holds no worker, so it doesn't count toward the
+live limit; `done`, `failed` and `cancelled` are resting. A task left waiting
+for `WAIT_DAYS` is cancelled, and that round is free.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+from typing import Any
+from uuid import UUID
+
+from app.database import connection_or_direct, decode_jsonb
+
+from . import items as items_mod
+from . import playbooks
+
+LIVE = ("queued", "running")
+OPEN = (*LIVE, "waiting")
+RESTING = ("done", "failed", "cancelled")
+_LIVE_SQL = ", ".join(f"'{s}'" for s in LIVE)
+_OPEN_SQL = ", ".join(f"'{s}'" for s in OPEN)
+# A live task that has not moved in this long has lost its chain for good.
+STALE_INTERVAL = "2 hours"
+WAIT_DAYS = 7
+MAX_LIST = 50
+MAX_ITEMS_SHOWN = 200
+
+
+class AgentTaskError(ValueError):
+    def __init__(self, message: str, code: int = 400, detail: Any = None):
+        super().__init__(message)
+        self.code = code
+        self.detail = detail
+
+
+def _iso(value):
+    return value.isoformat() if value is not None and hasattr(value, "isoformat") else value
+
+
+def phase_name(row: dict) -> str | None:
+    phase = row.get("phase")
+    return phase.split(".", 1)[1] if isinstance(phase, str) and "." in phase else phase
+
+
+def task_view(row) -> dict:
+    row = dict(row)
+    completed, seen = row.get("completed_at"), row.get("seen_at")
+    return {
+        "id": str(row["id"]),
+        "playbook": row.get("playbook"),
+        "source": row.get("source") or "espresso",
+        "engine": row.get("engine") or "chain",
+        "title": row.get("title") or "",
+        "directive": row.get("directive") or "",
+        "brief": decode_jsonb(row.get("brief"), {}) or {},
+        "status": row["status"],
+        "phase": phase_name(row),
+        "progress": decode_jsonb(row.get("progress"), {}) or {},
+        "error": row.get("error"),
+        "needs": decode_jsonb(row.get("needs"), None),
+        "current_round": int(row.get("current_round") or 0),
+        "item_count": int(row.get("item_count") or 0),
+        "shown_count": int(row.get("shown_count") or 0),
+        "input_ids": [str(i) for i in row.get("input_ids") or []],
+        "unseen": bool(completed and (seen is None or seen < completed)),
+        "created_at": _iso(row.get("created_at")),
+        "updated_at": _iso(row.get("updated_at")),
+        "started_at": _iso(row.get("started_at")),
+        "completed_at": _iso(row.get("completed_at")),
+    }
+
+
+def round_view(row) -> dict:
+    row = dict(row)
+    return {
+        "id": str(row["id"]),
+        "n": row["n"],
+        "kind": row["kind"],
+        "directive": row.get("directive") or "",
+        "status": row["status"],
+        "units": int(row.get("units") or 0),
+        "items_added": int(row.get("items_added") or 0),
+        "summary": decode_jsonb(row.get("summary"), {}) or {},
+        "document": decode_jsonb(row.get("document"), None),
+        "error": row.get("error"),
+        "created_at": _iso(row.get("created_at")),
+        "completed_at": _iso(row.get("completed_at")),
+    }
+
+
+def plan_view(task: dict) -> dict:
+    playbook = playbooks.get(task.get("playbook"))
+    plan = decode_jsonb(task.get("plan"), {}) or {}
+    if playbook is None or not plan:
+        return {"columns": [], "constraints": [], "preferences": [], "summary": ""}
+    describe = playbook.describe_constraint or (lambda _c: "")
+    return {
+        "summary": plan.get("summary") or "",
+        "item_kind": plan.get("item_kind"),
+        "location": plan.get("location"),
+        "columns": [playbook.field_library[k].view() for k in plan.get("fields") or []
+                    if k in playbook.field_library],
+        "constraints": [{**c, "label": describe(c)} for c in plan.get("constraints") or []],
+        "preferences": plan.get("preferences") or [],
+    }
+
+
+def fingerprint(row) -> str:
+    row = dict(row)
+    raw = json.dumps(
+        [row.get("status"), row.get("phase"), _iso(row.get("updated_at")),
+         decode_jsonb(row.get("progress"), {}), row.get("current_round")],
+        default=str, sort_keys=True,
+    )
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+_COUNTS = """(SELECT COUNT(*) FROM mw_agent_task_items i WHERE i.task_id = t.id) AS item_count,
+             (SELECT COUNT(*) FROM mw_agent_task_items i WHERE i.task_id = t.id
+                AND i.rank_band < 9) AS shown_count"""
+
+
+async def list_tasks(user_id: UUID, company_id: UUID) -> list[dict]:
+    async with connection_or_direct() as conn:
+        rows = await conn.fetch(
+            f"""SELECT t.*, {_COUNTS} FROM mw_agent_tasks t
+                WHERE t.user_id = $1 AND t.company_id = $2 AND t.deleted_at IS NULL
+                  AND t.engine = 'chain'
+                ORDER BY t.created_at DESC LIMIT {MAX_LIST}""",
+            user_id, company_id,
+        )
+    return [task_view(row) for row in rows]
+
+
+async def summary(user_id: UUID, company_id: UUID) -> dict:
+    """What the sidebar row shows: running, waiting for the person, finished unseen."""
+    async with connection_or_direct() as conn:
+        row = await conn.fetchrow(
+            f"""SELECT COUNT(*) FILTER (WHERE status IN ({_LIVE_SQL})) AS running,
+                       COUNT(*) FILTER (WHERE status = 'waiting') AS waiting,
+                       COUNT(*) FILTER (WHERE status IN ('done', 'failed') AND completed_at IS NOT NULL
+                                          AND (seen_at IS NULL OR seen_at < completed_at)) AS unseen
+                FROM mw_agent_tasks
+                WHERE user_id = $1 AND company_id = $2 AND deleted_at IS NULL AND engine = 'chain'""",
+            user_id, company_id,
+        )
+    row = dict(row or {})
+    return {k: int(row.get(k) or 0) for k in ("running", "waiting", "unseen")}
+
+
+async def owned_task(conn, task_id: UUID, user_id: UUID, *, lock: bool = False):
+    row = await conn.fetchrow(
+        f"""SELECT t.*, {_COUNTS} FROM mw_agent_tasks t
+            WHERE t.id = $1 AND t.user_id = $2 AND t.deleted_at IS NULL"""
+        if not lock else
+        """SELECT * FROM mw_agent_tasks
+           WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL FOR UPDATE""",
+        task_id, user_id,
+    )
+    if row is None:
+        raise AgentTaskError("Task not found.", 404)
+    return row
+
+
+_ITEM_ORDER = "ORDER BY rank NULLS LAST, created_at, id"
+
+
+async def get_task(task_id: UUID, user_id: UUID, *, mark_seen: bool = True) -> dict:
+    async with connection_or_direct() as conn:
+        task = await owned_task(conn, task_id, user_id)
+        rows = await conn.fetch(
+            f"SELECT * FROM mw_agent_task_items WHERE task_id = $1 {_ITEM_ORDER} LIMIT {MAX_ITEMS_SHOWN}",
+            task_id,
+        )
+        rounds = await conn.fetch(
+            "SELECT * FROM mw_agent_task_rounds WHERE task_id = $1 ORDER BY n", task_id,
+        )
+        if mark_seen and task["completed_at"] is not None and task["status"] in RESTING:
+            await conn.execute("UPDATE mw_agent_tasks SET seen_at = NOW() WHERE id = $1", task_id)
+    return {
+        **task_view(task),
+        "fingerprint": fingerprint(task),
+        "plan": plan_view(dict(task)),
+        "rounds": [round_view(r) for r in rounds],
+        "items": [items_mod.item_summary(r) for r in rows],
+    }
+
+
+async def status_view(task_id: UUID, user_id: UUID) -> dict:
+    async with connection_or_direct() as conn:
+        task = await owned_task(conn, task_id, user_id)
+    view = {
+        "id": str(task["id"]),
+        "status": task["status"],
+        "phase": phase_name(dict(task)),
+        "progress": decode_jsonb(task["progress"], {}) or {},
+        "error": task["error"],
+        "item_count": int(task["item_count"] or 0),
+        "current_round": int(task["current_round"] or 0),
+        "updated_at": _iso(task["updated_at"]),
+        "fingerprint": fingerprint(task),
+    }
+    if task["status"] in LIVE and task["engine"] == "chain":
+        # A chain whose task was lost is restarted by whoever looks at it.
+        from . import orchestrator
+
+        await orchestrator.nudge(task_id)
+    return view
+
+
+async def get_item(task_id: UUID, item_id: UUID, user_id: UUID) -> dict:
+    async with connection_or_direct() as conn:
+        await owned_task(conn, task_id, user_id)
+        row = await conn.fetchrow(
+            "SELECT * FROM mw_agent_task_items WHERE id = $1 AND task_id = $2", item_id, task_id,
+        )
+    if row is None:
+        raise AgentTaskError("Finding not found.", 404)
+    return items_mod.item_detail(row)
+
+
+async def _rerank(conn, task) -> None:
+    playbook = playbooks.get(task["playbook"])
+    if playbook is not None:
+        await playbook.rerank(conn, dict(task))
+
+
+async def patch_item(task_id: UUID, item_id: UUID, user_id: UUID, *, user_state: str | None,
+                     notes: str | None) -> dict:
+    async with connection_or_direct() as conn, conn.transaction():
+        task = await owned_task(conn, task_id, user_id, lock=True)
+        row = await conn.fetchrow(
+            "SELECT * FROM mw_agent_task_items WHERE id = $1 AND task_id = $2 FOR UPDATE", item_id, task_id,
+        )
+        if row is None:
+            raise AgentTaskError("Finding not found.", 404)
+        was_dismissed = row["user_state"] == "dismissed"
+        state = user_state if user_state is not None else row["user_state"]
+        row = await conn.fetchrow(
+            """UPDATE mw_agent_task_items SET user_state = $3, notes = $4, updated_at = NOW()
+               WHERE id = $1 AND task_id = $2 RETURNING *""",
+            item_id, task_id, state, notes if notes is not None else row["notes"],
+        )
+        # Dismissing (or restoring) moves the finding in or out of the ranking.
+        if (state == "dismissed") != was_dismissed:
+            await _rerank(conn, task)
+            row = await conn.fetchrow(
+                "SELECT * FROM mw_agent_task_items WHERE id = $1 AND task_id = $2", item_id, task_id,
+            )
+    return items_mod.item_detail(row)
+
+
+async def close_round(conn, task_id: UUID) -> None:
+    """Settle the current round once its task stops: failed (free) when the
+    task failed, the round was called off, or a "search more" found nothing
+    new; cancelled when the task was; done otherwise. A task now waiting keeps
+    its round open and starts its wait."""
+    await conn.execute(
+        """UPDATE mw_agent_task_rounds r
+           SET status = CASE
+                   WHEN t.status = 'failed' THEN 'failed'
+                   WHEN t.status = 'cancelled' THEN 'cancelled'
+                   WHEN t.phase_cursor ? 'round_failed' THEN 'failed'
+                   WHEN r.kind = 'more' AND r.items_added = 0 THEN 'failed'
+                   ELSE 'done' END,
+               error = CASE
+                   WHEN t.status = 'failed' THEN t.error
+                   WHEN t.phase_cursor ? 'round_failed' THEN t.phase_cursor->>'round_failed'
+                   WHEN r.kind = 'more' AND r.items_added = 0 THEN 'Nothing new turned up.'
+                   ELSE r.error END,
+               completed_at = NOW()
+           FROM mw_agent_tasks t
+           WHERE t.id = $1 AND r.task_id = t.id AND r.n = t.current_round
+             AND r.status IN ('queued', 'running') AND t.status <> 'waiting'""",
+        task_id,
+    )
+    await conn.execute(
+        """UPDATE mw_agent_tasks SET waiting_since = COALESCE(waiting_since, NOW())
+           WHERE id = $1 AND status = 'waiting'""",
+        task_id,
+    )
+
+
+async def cancel_task(task_id: UUID, user_id: UUID) -> dict:
+    async with connection_or_direct() as conn, conn.transaction():
+        task = await owned_task(conn, task_id, user_id, lock=True)
+        if task["status"] in OPEN and task["engine"] == "chain":
+            task = await conn.fetchrow(
+                """UPDATE mw_agent_tasks
+                   SET status = 'cancelled', dispatch_token = NULL, lease_until = NULL,
+                       waiting_since = NULL, needs = NULL,
+                       progress = progress || '{"note": "Cancelled."}'::jsonb,
+                       completed_at = NOW(), updated_at = NOW()
+                   WHERE id = $1 RETURNING *""",
+                task_id,
+            )
+            await close_round(conn, task_id)
+            # What was found so far stays useful, ranked.
+            await _rerank(conn, task)
+    return await get_task(task_id, user_id, mark_seen=False)
+
+
+async def delete_task(task_id: UUID, user_id: UUID) -> dict:
+    """Blank the task and drop its findings and runs; the row and its rounds
+    stay as a tombstone so a deleted task still counts toward this month."""
+    async with connection_or_direct() as conn, conn.transaction():
+        await owned_task(conn, task_id, user_id, lock=True)
+        await conn.execute(
+            f"""UPDATE mw_agent_tasks SET status = 'cancelled', dispatch_token = NULL, lease_until = NULL
+                WHERE id = $1 AND status IN ({_OPEN_SQL})""",
+            task_id,
+        )
+        await close_round(conn, task_id)
+        await conn.execute("DELETE FROM mw_agent_task_items WHERE task_id = $1", task_id)
+        await conn.execute(
+            "DELETE FROM mw_project_agent_runs WHERE agent_task_id = $1 AND kind = 'agent_task'", task_id,
+        )
+        await conn.execute(
+            """UPDATE mw_agent_task_rounds SET directive = '', scope = '{}'::jsonb, summary = '{}'::jsonb,
+                      document = NULL, error = NULL
+               WHERE task_id = $1""",
+            task_id,
+        )
+        await conn.execute(
+            """UPDATE mw_agent_tasks
+               SET deleted_at = NOW(), title = '', directive = '', brief = '{}'::jsonb, plan = '{}'::jsonb,
+                   progress = '{}'::jsonb, phase_cursor = '{}'::jsonb, needs = NULL, waiting_since = NULL,
+                   input_ids = '{}', error = NULL, dispatch_token = NULL, lease_until = NULL,
+                   completed_at = COALESCE(completed_at, NOW()), updated_at = NOW()
+               WHERE id = $1""",
+            task_id,
+        )
+    return {"deleted": True}
+
+
+async def end_stale(conn, user_id: UUID) -> int:
+    """End this person's live tasks that stopped moving STALE_INTERVAL ago, the
+    way reconcile would: `done` when it found something (ranked), else
+    `failed` (free). Runs inside the caller's transaction."""
+    rows = await conn.fetch(
+        f"""SELECT * FROM mw_agent_tasks
+            WHERE user_id = $1 AND status IN ({_LIVE_SQL}) AND deleted_at IS NULL AND engine = 'chain'
+              AND updated_at < NOW() - INTERVAL '{STALE_INTERVAL}'
+            FOR UPDATE""",
+        user_id,
+    )
+    for row in rows:
+        found = bool(await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM mw_agent_task_items WHERE task_id = $1)", row["id"],
+        ))
+        if found:
+            await _rerank(conn, row)
+        await conn.execute(
+            """UPDATE mw_agent_tasks
+               SET status = $2, dispatch_token = NULL, lease_until = NULL,
+                   error = COALESCE(error, 'Stopped: the task stopped making progress.'),
+                   completed_at = NOW(), updated_at = NOW()
+               WHERE id = $1""",
+            row["id"], "done" if found else "failed",
+        )
+        await close_round(conn, row["id"])
+    return len(rows)
+
+
+async def expire_waiting() -> int:
+    """Cancel tasks nobody answered for WAIT_DAYS. That round is free."""
+    async with connection_or_direct() as conn, conn.transaction():
+        rows = await conn.fetch(
+            f"""UPDATE mw_agent_tasks
+                SET status = 'cancelled', waiting_since = NULL, needs = NULL, completed_at = NOW(),
+                    progress = progress || '{{"note": "Cancelled: no answer for {WAIT_DAYS} days."}}'::jsonb,
+                    updated_at = NOW()
+                WHERE status = 'waiting' AND deleted_at IS NULL
+                  AND waiting_since < NOW() - INTERVAL '{WAIT_DAYS} days'
+                RETURNING id, current_round"""
+        )
+        if rows:
+            await conn.execute(
+                """UPDATE mw_agent_task_rounds r SET status = 'failed', completed_at = NOW(),
+                          error = 'No answer in time.'
+                   FROM unnest($1::uuid[], $2::int[]) AS v(task_id, n)
+                   WHERE r.task_id = v.task_id AND r.n = v.n AND r.status IN ('queued', 'running')""",
+                [row["id"] for row in rows], [row["current_round"] for row in rows],
+            )
+    return len(rows)
+
+
+async def find_by_request(user_id: UUID, request_id: UUID) -> dict | None:
+    """A task this person already started with this request id (a retry)."""
+    async with connection_or_direct() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM mw_agent_tasks WHERE user_id = $1 AND request_id = $2", user_id, request_id,
+        )
+    return task_view(row) if row else None
