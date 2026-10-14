@@ -164,3 +164,17 @@ def test_checking_a_claim_against_its_source():
     assert comp.numbers_supported([180000, 220000], "$180,000 to $220K")
     assert not comp.numbers_supported([180000, 250000], "$180,000 to $220K")
     assert comp.numbers_supported([None], "anything")
+
+
+def test_quotes_stop_at_flattened_bullets():
+    # Real Google Jobs text (dev, 2026-10-14): a posting's bullet list arrives as one line.
+    text = ("Compensation * Competitive Base Salary * Executive Performance Bonus 25%-35% (Based on hitting "
+            "performance targets) * Company Equity Participation (for long-term performance) * Full Benefits "
+            "Package * On-site leadership role with impact $200,000 - $275,000 a year Actual compensation will "
+            "be determined based on job-related factors including experience, education, certifications, "
+            "security clearance requirements.")
+    found = {f["component"]: f["evidence"]["quote"] for f in comp.scan_text(text, origin="google_jobs")}
+    assert found["bonus"] == "Executive Performance Bonus 25%-35% (Based on hitting performance targets)"
+    assert found["equity"] == "Company Equity Participation (for long-term performance)"
+    assert found["base"].startswith("On-site leadership role with impact $200,000 - $275,000 a year")
+    assert len(found["base"]) <= 160 and all(q in text for q in found.values())
