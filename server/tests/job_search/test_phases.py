@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 from app.core.services.safe_fetch import FetchedResponse, UnsafeURL
+from app.matcha.services.matcha_work.agent_runtime import chain
 from app.matcha.services.matcha_work.job_search import ats, phases, providers
 from tests.agent_runtime.helpers import FakeConn, connection
 
@@ -35,6 +36,8 @@ def test_plan_from_criteria():
 def conn(monkeypatch):
     conn = FakeConn()
     monkeypatch.setattr(phases, "connection_or_direct", connection(conn))
+    # Guard, grant and refund run in agent_runtime.chain.
+    monkeypatch.setattr(chain, "connection_or_direct", connection(conn))
     return conn
 
 

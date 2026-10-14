@@ -24,7 +24,8 @@ from app.matcha.services.billing.entitlements_service import PLAN_PRO, require_p
 
 from .agent import CARD_AGENT_MODEL
 from .chat_flow import broadcast_prompt_updates, close_open_prompts
-from .quota import card_agent_usage, limit_for_plan, usage_payload, used_this_month
+from ..agent_tasks import allowance
+from .quota import card_agent_usage
 
 logger = logging.getLogger(__name__)
 
@@ -54,14 +55,29 @@ def _limit_error(usage: dict) -> HTTPException:
     )
 
 
-async def preflight(user, company_id: UUID) -> None:
-    """Plan, monthly cap, workspace token budget and rate limit. Raises
-    HTTPException. Advisory for the cap (enqueue re-checks it atomically)."""
+async def _next_round(conn, task_id: UUID) -> int:
+    done = await conn.fetchval(
+        """SELECT COALESCE(MAX(round), 0) FROM mw_project_agent_runs
+           WHERE task_id = $1 AND kind = 'card_agent' AND status = 'done'""",
+        task_id,
+    )
+    return int(done or 0) + 1
+
+
+async def preflight(user, company_id: UUID, *, task_id: UUID | None = None) -> None:
+    """Plan, monthly allowance, workspace token budget and rate limit. Raises
+    HTTPException. Advisory for the allowance (enqueue re-checks it
+    atomically). With `task_id`, the card's next round is priced: a send-back
+    within the free rounds needs no allowance left."""
     if _is_admin(user):
         return
     plan = await require_plan(user.id, PLAN_PRO, "agent_cards")
+    cost = allowance.WEIGHTS["agent_card"]
+    if task_id is not None:
+        async with get_connection() as conn:
+            cost = allowance.card_round_cost(await _next_round(conn, task_id))
     usage = await card_agent_usage(user.id, plan=plan)
-    if usage["remaining"] <= 0:
+    if cost and usage["remaining"] <= 0:
         raise _limit_error(usage)
     from app.matcha.services.billing import token_budget_service
 
@@ -95,23 +111,21 @@ async def enqueue_card_agent(
     project_id = UUID(str(task["project_id"]))
     company_id = UUID(str(task["company_id"]))
     if not skip_preflight:
-        await preflight(user, company_id)
+        await preflight(user, company_id, task_id=task_id)
 
     # Plan is cached (60s), so re-resolving it here is cheap and keeps the
-    # atomic cap below correct even for callers that skipped preflight.
+    # atomic check below correct even for callers that skipped preflight.
     limit: int | None = None
     if not _is_admin(user):
-        limit = limit_for_plan(await require_plan(user.id, PLAN_PRO, "agent_cards"))
+        limit = allowance.limit_for_plan(await require_plan(user.id, PLAN_PRO, "agent_cards"))
 
     async with get_connection() as conn:
         async with conn.transaction():
             # User lock first, then card lock — every caller takes them in this
-            # order, so two enqueues can't deadlock. The user lock makes
-            # count-then-insert atomic per person: two cards created at once
-            # can't both slip under the cap.
-            await conn.execute(
-                "SELECT pg_advisory_xact_lock(hashtext($1))", f"{user.id}:card_agent_cap",
-            )
+            # order, so two enqueues can't deadlock. The user lock is the
+            # shared allowance's: count-then-insert is atomic per person across
+            # cards, job searches and tasks.
+            await allowance.lock(conn, user.id)
             await conn.execute(
                 "SELECT pg_advisory_xact_lock(hashtext($1))", f"{task_id}:card_agent",
             )
@@ -126,18 +140,16 @@ async def enqueue_card_agent(
                       AND COALESCE(started_at, created_at) < NOW() - INTERVAL '{_STALE_RUN_INTERVAL}'""",
                 task_id,
             )
-            if limit is not None:
-                used = await used_this_month(conn, user.id)
-                if used >= limit:
-                    raise _limit_error(usage_payload(limit, used))
-            done_round = await conn.fetchval(
-                """SELECT COALESCE(MAX(round), 0) FROM mw_project_agent_runs
-                   WHERE task_id = $1 AND kind = 'card_agent' AND status = 'done'""",
-                task_id,
-            )
             # A redirect always starts the next round; a rerun of a failed pass
             # (or the first run) retries the round that never finished.
-            round_no = int(done_round or 0) + 1
+            round_no = await _next_round(conn, task_id)
+            cost = allowance.card_round_cost(round_no)
+            if limit is not None and cost:
+                used = await allowance.used_units(conn, user.id)
+                if allowance.over(limit, used, cost):
+                    raise _limit_error(allowance.as_count(
+                        allowance.usage_payload(limit, used), allowance.WEIGHTS["agent_card"],
+                    ))
             prompt = task.get("title") or ""
             if task.get("description"):
                 prompt = f"{prompt}\n\n{task['description']}"

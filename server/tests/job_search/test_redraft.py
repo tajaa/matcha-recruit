@@ -7,6 +7,7 @@ from uuid import uuid4
 import asyncpg
 import pytest
 
+from app.matcha.services.matcha_work.agent_runtime import chain
 from app.matcha.services.matcha_work.job_search import enqueue, phases, service
 from tests.agent_runtime.helpers import FakeConn, connection
 
@@ -85,6 +86,8 @@ async def test_redraft_dispatches_and_tolerates_a_down_broker(monkeypatch):
 async def test_enrich_queues_the_top_jobs_for_approaches(monkeypatch):
     conn = FakeConn()
     monkeypatch.setattr(phases, "connection_or_direct", connection(conn))
+    # The guard's token check and grant/refund run in agent_runtime.chain.
+    monkeypatch.setattr(chain, "connection_or_direct", connection(conn))
     monkeypatch.setattr(phases, "rerank", AsyncMock(return_value=3))
     top = [{"id": uuid4(), "rank": 2}, {"id": uuid4(), "rank": 1}]
     conn.on("SET approach_status = 'queued'", top)
