@@ -111,6 +111,19 @@ async def test_discover_dedupes_filters_and_counts_calls(conn):
 
 
 @pytest.mark.asyncio
+async def test_discover_drops_the_same_posting_under_another_employer_name(conn):
+    title = "Senior Vice President and Chief Operating Officer"
+    provider = FakeProvider({"COO": [([posting(title, "Beth Israel Lahey Health", location="Burlington, MA"),
+                                       posting(title, "Lahey Clinic Hospital, Inc.", location="United States"),
+                                       posting(title, "Northwind Health", location="Austin, TX")], None)]})
+    conn.on("SELECT COUNT(*) FROM mw_job_leads", count_script(0, 2))
+    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 3)
+    await phases.discover(discover_search(["COO"]), phases.Deps(provider=lambda: provider), guard())
+    records = json.loads(conn.ran("INSERT INTO mw_job_leads")[0][2][2])
+    assert sorted(r["company"] for r in records) == ["Beth Israel Lahey Health", "Northwind Health"]
+
+
+@pytest.mark.asyncio
 async def test_discover_respects_remote_preference_and_budget(conn):
     provider = FakeProvider({"COO": [([posting("COO", "Acme"), posting("COO", "Remote Co", remote=True)], "1"),
                                      ([posting("COO", "Later")], None)]})

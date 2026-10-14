@@ -302,7 +302,12 @@ async def discover(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
             for posting in postings:
                 if keep_posting(posting, criteria):
                     record = lead_record(posting)
-                    records.setdefault(record["dedupe_key"], record)
+                    if record["dedupe_key"] in records or any(
+                        normalize.same_posting(record["title"], record["company"], r["title"], r["company"])
+                        for r in records.values()
+                    ):
+                        continue
+                    records[record["dedupe_key"]] = record
             if not token:
                 return
 
