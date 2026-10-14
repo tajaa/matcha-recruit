@@ -140,18 +140,28 @@ def _window(text: str, start: int, end: int, span: int = 90) -> str:
     return text[max(0, start - span): min(len(text), end + span)]
 
 
+# Where a quote may start or stop: sentence ends, new lines, and the bullet
+# separators Google Jobs flattens a posting's lists into ("* Base Salary *
+# Executive Bonus 25%-35% * Company Equity ...").
+_QUOTE_STARTS = (". ", "\n", "• ", "; ", " * ", " | ")
+_QUOTE_STOPS = ((". ", 1), ("\n", 0), (" •", 0), ("; ", 1), (" * ", 0), (" | ", 0))
+# Context kept either side when the text has no boundary nearby.
+_QUOTE_CONTEXT = 80
+
+
 def quote_around(text: str, start: int, end: int, limit: int = MAX_QUOTE) -> str:
-    """The sentence holding text[start:end], trimmed to `limit`. Always a slice of `text`."""
-    left = max(0, start - 120)
-    for mark in (". ", "\n", "• ", "; "):
+    """The sentence or bullet holding text[start:end], trimmed to `limit`.
+    Always a slice of `text`."""
+    left = max(0, start - _QUOTE_CONTEXT)
+    for mark in _QUOTE_STARTS:
         i = text.rfind(mark, left, start)
         if i != -1:
             left = max(left, i + len(mark))
-    right = min(len(text), end + 120)
-    for mark in (". ", "\n", " •", "; "):
+    right = min(len(text), end + _QUOTE_CONTEXT)
+    for mark, keep in _QUOTE_STOPS:
         i = text.find(mark, end, right)
         if i != -1:
-            right = min(right, i + 1)
+            right = min(right, i + keep)
     if right - left > limit:
         left = max(left, end - limit) if end - left > limit else left
         right = min(right, left + limit)
