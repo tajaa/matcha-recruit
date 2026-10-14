@@ -555,24 +555,27 @@ struct AgentCardMessageView: View {
             )
     }
 
-    private func photo(_ urlString: String?, size: CGFloat) -> some View {
-        Group {
-            if let urlString, let url = URL(string: urlString), url.scheme == "https" {
+    /// An https image (our CDN), or a placeholder when there is none or it
+    /// fails to load. `height` defaults to `size`, the width.
+    func photo(_ urlString: String?, size: CGFloat, height: CGFloat? = nil, fill: Bool = true) -> some View {
+        let height = height ?? size
+        return Group {
+            if let url = httpsURL(urlString) {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):
-                        image.resizable().aspectRatio(contentMode: .fill)
+                        image.resizable().aspectRatio(contentMode: fill ? .fill : .fit)
                     default:
-                        placeholder(size: size)
+                        placeholder(size: min(size, height))
                     }
                 }
             } else {
-                placeholder(size: size)
+                placeholder(size: min(size, height))
             }
         }
-        .frame(width: size, height: size)
+        .frame(width: size, height: height)
         .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: size > 60 ? 12 : 8, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: min(size, height) > 60 ? 12 : 8, style: .continuous))
     }
 
     private func placeholder(size: CGFloat) -> some View {
@@ -582,6 +585,13 @@ struct AgentCardMessageView: View {
                 .font(.system(size: size / 4))
                 .foregroundColor(appState.themeTextSecondary)
         }
+    }
+
+    /// Images load only from https URLs, which means our CDN.
+    func httpsURL(_ string: String?) -> URL? {
+        guard let string, let url = URL(string: string),
+              url.scheme?.lowercased() == "https", url.host != nil else { return nil }
+        return url
     }
 
     func httpURL(_ string: String?) -> URL? {

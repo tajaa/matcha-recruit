@@ -64,13 +64,22 @@ async def _rehost_one(source_url: str, prefix: str) -> str | None:
         return None
     if fetched.status != 200 or fetched.truncated or not fetched.content_type.startswith("image/"):
         return None
+    return await store_image(fetched.body, prefix)
+
+
+async def store_image(data: bytes, prefix: str, filename: str = "photo.webp") -> str | None:
+    """Re-encode image bytes and upload them: a CDN URL, or None when the
+    bytes are not an image or the upload failed. Also used for the
+    assistant's page screenshots (`agent_runtime/abilities/screenshots.py`).
+
+    Raises StorageHasNoPublicUrl when storage hands back no loadable URL."""
     try:
-        webp = await asyncio.to_thread(_reencode, fetched.body)
+        webp = await asyncio.to_thread(_reencode, data)
     except Exception:
         return None
     try:
         url = await asyncio.wait_for(
-            get_storage().upload_file(webp, "photo.webp", prefix=prefix, content_type="image/webp"),
+            get_storage().upload_file(webp, filename, prefix=prefix, content_type="image/webp"),
             timeout=_PER_IMAGE_SECONDS,
         )
     except Exception:
@@ -84,9 +93,13 @@ async def _rehost_one(source_url: str, prefix: str) -> str | None:
 
 async def rehost_images(
     result: dict, *, company_id: UUID, project_id: UUID, task_id: UUID,
-    total_seconds: float = 60.0,
+    total_seconds: float = 60.0, photos: list[dict] | None = None,
 ) -> list[str]:
     """Replace every pick's `images[].source_url` with a CDN `url`, in place.
+
+    `photos` are loose images (the assistant's `photos` block), rehosted after
+    the picks within the same budget and deadline and replaced in place too.
+    They keep their own `alt`; a pick's image without one takes the pick's name.
 
     Every pick ends up with only fully rehosted images, however this ends:
     out of budget, out of time, or storage unable to serve URLs. Returns
@@ -94,13 +107,17 @@ async def rehost_images(
     """
     prefix = f"matcha-work/{company_id}/{project_id}/agent/{task_id}"
     picks = [p for p in [result.get("top_pick"), *(result.get("alternatives") or [])] if p]
+    groups: list[tuple[list, str | None]] = [(pick.get("images") or [], pick["name"]) for pick in picks]
+    if photos is not None:
+        groups.append((list(photos), None))
     deadline = time.monotonic() + total_seconds
     budget = MAX_IMAGES_PER_RUN
     storage_ok = True
     warnings: list[str] = []
-    for pick in picks:
+    rehosted: list[list[dict]] = []
+    for group, name in groups:
         kept = []
-        for image in pick.get("images") or []:
+        for image in group:
             remaining = deadline - time.monotonic()
             if budget <= 0 or remaining <= 1 or not storage_ok:
                 continue
@@ -118,8 +135,13 @@ async def rehost_images(
             except TimeoutError:
                 url = None
             if url:
-                kept.append({"url": url, "page_url": image["page_url"], "alt": image.get("alt") or pick["name"]})
+                kept.append({"url": url, "page_url": image["page_url"], "alt": image.get("alt") or name or ""})
             else:
-                warnings.append(f"Dropped an image for {pick['name']}: could not load it safely")
+                warnings.append(f"Dropped an image for {name}: could not load it safely" if name
+                                else "Dropped a photo: could not load it safely")
+        rehosted.append(kept)
+    for pick, kept in zip(picks, rehosted):
         pick["images"] = kept
+    if photos is not None:
+        photos[:] = rehosted[-1]
     return warnings

@@ -1380,6 +1380,8 @@ export type AgentRunProgress = {
   steps: AgentProgressStep[]
 }
 
+export type AgentResultImage = { url: string; page_url?: string | null; alt?: string | null; caption?: string | null }
+
 /** One typed part of an answer. A block type this build doesn't know is
  *  skipped, never an error: the server can add one before the apps do. */
 export type AgentResultBlock =
@@ -1387,6 +1389,10 @@ export type AgentResultBlock =
   | { type: 'flights'; flights: AgentChatFlights }
   | { type: 'sections'; sections: { heading: string; body_md: string }[] }
   | { type: 'sources'; sources: { title: string; url: string }[] }
+  /** Photos from pages the run loaded, rehosted on our CDN (`alt`). */
+  | { type: 'photos'; photos: AgentResultImage[] }
+  /** Page screenshots the run took in a real browser, on our CDN (`caption`). */
+  | { type: 'screenshots'; screenshots: AgentResultImage[] }
   | { type: 'emails'; items: { message_id: string; from: string; subject: string; date?: string | null; snippet?: string | null }[] }
   | { type: 'events'; items: { event_id: string; title: string; start: string; end?: string | null; location?: string | null; attendee_count?: number }[] }
   | {

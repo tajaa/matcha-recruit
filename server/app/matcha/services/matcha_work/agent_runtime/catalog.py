@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
-from .abilities import calendar, domains, email, flights, purchase, reservations, sales, shopping, web
+from .abilities import calendar, domains, email, flights, purchase, reservations, sales, screenshots, shopping, web
 from .registry import Ability, validate_catalog
 
 ALWAYS_ON = ("web", "shopping")
@@ -62,6 +62,9 @@ def build_catalog(*, fetch_page, max_fetches: int = 10, fetch_seconds: float = 2
     abilities = [
         web.build(fetch_page=fetch_page, max_fetches=max_fetches, fetch_seconds=fetch_seconds,
                   untrusted=True),
+        # A real browser for pages drawn by JavaScript, plus screenshots.
+        # Offered only where the browser queue exists (`enqueue.queue_for`).
+        screenshots.build(),
         shopping.build(),
         # Live fares when DUFFEL_ACCESS_TOKEN is set; read-only, so project
         # chats get it too.

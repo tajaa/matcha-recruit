@@ -30,7 +30,7 @@ PICK = {
 def test_the_finish_tool_offers_the_blocks_of_the_enabled_abilities():
     tool = result.finish_tool(_abilities())
     blocks = tool.parameters["properties"]["blocks"]
-    assert blocks["items"]["properties"]["type"]["enum"] == ["picks", "sections", "sources"]
+    assert blocks["items"]["properties"]["type"]["enum"] == ["photos", "picks", "sections", "sources"]
     assert {"top_pick", "alternatives", "sections", "sources"} <= set(blocks["items"]["properties"])
     assert tool.effect == "finish" and tool.name == "finish"
     none = result.finish_tool([])

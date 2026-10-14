@@ -615,3 +615,52 @@ def test_earlier_links_may_be_cited_but_never_book():
         reservations.resolve_booking(args, state)
     state.provenance.add("https://resy.example/nopa")
     assert reservations.resolve_booking(args, state)["url"] == "https://resy.example/nopa"
+
+
+@pytest.mark.asyncio
+async def test_photos_are_rehosted_before_the_result_is_stored(wired, monkeypatch):
+    from app.matcha.services.matcha_work.agent_runtime.abilities import web
+
+    page = {"url": "https://www.zillow.com/a/", "title": "Tower 737",
+            "og_image": "https://photos.zillow.example/1.jpg", "products": []}
+    monkeypatch.setattr(assistant.card_agent, "fetch_page_tool", AsyncMock(return_value=(page, {page["url"]})))
+
+    async def rehost(picks, *, photos, **kwargs):
+        photos[:] = [{"url": "https://cdn.example/1.webp", "page_url": page["url"], "alt": "Lobby"}]
+        return []
+
+    monkeypatch.setattr(assistant.images, "rehost_images", AsyncMock(side_effect=rehost))
+    photos = {"type": "photos", "photos": [{"source_url": "https://photos.zillow.example/1.jpg", "alt": "Lobby"}]}
+    wired.client(
+        response(call("fetch_page", {"url": page["url"]})),
+        response(call("finish", {**FINISH, "blocks": [photos]})),
+    )
+    run = _run()
+    await assistant.run_assistant(run)
+    stored = wired.mark.await_args.kwargs["result"]
+    assert [b for b in stored["blocks"] if b["type"] == "photos"] == [{"type": "photos", "photos": [
+        {"url": "https://cdn.example/1.webp", "page_url": page["url"], "alt": "Lobby"}]}]
+    # One call: no picks here, so the photos alone, under the run's one budget.
+    assert assistant.images.rehost_images.await_count == 1
+    assert assistant.images.rehost_images.await_args.args == ({},)
+    kwargs = assistant.images.rehost_images.await_args.kwargs
+    assert kwargs["project_id"] == run["channel_id"] and kwargs["task_id"] == run["id"]
+    assert web.MAX_PHOTOS == 6
+    # The chat card carries the CDN copy, never the site's own URL.
+    view = wired.posted[-1][1]["result_v2"]
+    assert "photos.zillow.example" not in str(view) and "cdn.example/1.webp" in str(view)
+
+    # None could be rehosted: the block goes, nothing is shown from the site.
+    async def nothing(picks, *, photos, **kwargs):
+        photos[:] = []
+        return ["Dropped a photo: could not load it safely"]
+
+    assistant.images.rehost_images.side_effect = nothing
+    wired.client(
+        response(call("fetch_page", {"url": page["url"]})),
+        response(call("finish", {**FINISH, "blocks": [photos]})),
+    )
+    await assistant.run_assistant(_run())
+    stored = wired.mark.await_args.kwargs["result"]
+    assert all(b["type"] != "photos" for b in stored["blocks"])
+    assert "Dropped a photo: could not load it safely" in stored["warnings"]

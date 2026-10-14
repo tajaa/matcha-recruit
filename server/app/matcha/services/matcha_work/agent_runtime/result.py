@@ -11,10 +11,13 @@ A block type no enabled ability owns is dropped. Card runs keep storing v1;
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Sequence
 
 from .context import RunState
 from .registry import Ability, AgentTool
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = "agent_result.v2"
 MAX_BLOCKS = 8
@@ -91,7 +94,16 @@ def normalize(args: Any, state: RunState, abilities: Sequence[Ability]) -> tuple
         if kind in seen:
             warnings.append(f"Dropped a second {kind} block")
             continue
-        block, block_warnings = owner.gate(kind, raw, state)
+        try:
+            block, block_warnings = owner.gate(kind, raw, state)
+        except ValueError:
+            raise
+        except Exception:
+            # A gate that trips on odd model input costs that block, never
+            # the finished answer.
+            logger.exception("result gate failed for a %s block", kind)
+            warnings.append(f"Dropped a {kind} block: it could not be read")
+            continue
         warnings.extend(block_warnings)
         if block is not None:
             seen.add(kind)

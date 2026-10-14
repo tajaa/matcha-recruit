@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import type {
   AgentActionReceipt, AgentChatButton, AgentChatFlights, AgentChatMetadata, AgentChatPick, AgentChatPromptView,
-  AgentChatReceipt, AgentChatResult, AgentChatResultV2, AgentResultBlock, AgentRunProgress,
+  AgentChatReceipt, AgentChatResult, AgentChatResultV2, AgentResultBlock, AgentResultImage, AgentRunProgress,
 } from '../../types'
 import { dayOffset, flightClock, flightDay, flightDuration, stopsText } from '../../utils/flightFormat'
 import { isAssistantPrompt } from './agentCardMessageHelpers'
@@ -44,19 +44,50 @@ function host(url: string): string {
   }
 }
 
-function Photo({ url, size, alt }: { url?: string | null; size: number; alt: string }) {
+/** An https image (our CDN), or a placeholder when there is none or it fails
+ *  to load. `size` is the width, and the height unless one is given. */
+function Photo({ url, size, alt, height = size, fit = 'cover' }: {
+  url?: string | null; size: number; alt: string; height?: number; fit?: 'cover' | 'contain'
+}) {
   const [failed, setFailed] = useState(false)
   const src = url && url.startsWith('https://') && !failed ? url : null
   return (
     <div
       className="shrink-0 overflow-hidden rounded-lg border border-w-line bg-white flex items-center justify-center"
-      style={{ width: size, height: size }}
+      style={{ width: size, height }}
     >
       {src ? (
-        <img src={src} alt={alt} className="h-full w-full object-cover" onError={() => setFailed(true)} />
+        <img
+          src={src}
+          alt={alt}
+          className={`h-full w-full ${fit === 'cover' ? 'object-cover' : 'object-contain'}`}
+          onError={() => setFailed(true)}
+        />
       ) : (
-        <ImageIcon className="text-w-faint" style={{ width: size / 4, height: size / 4 }} />
+        <ImageIcon className="text-w-faint" style={{ width: Math.min(size, height) / 4, height: Math.min(size, height) / 4 }} />
       )}
+    </div>
+  )
+}
+
+/** Photos and page screenshots. Only https images render (our CDN copies);
+ *  each opens full size in a new tab, with the page it came from on hover. */
+function ImageStrip({ images, width, height, fit }: {
+  images: AgentResultImage[]; width: number; height: number; fit: 'cover' | 'contain'
+}) {
+  const shown = images.filter((image) => image.url?.startsWith('https://'))
+  if (!shown.length) return null
+  return (
+    <div className="flex gap-2 overflow-x-auto pb-1">
+      {shown.map((image) => {
+        const label = image.caption || image.alt || ''
+        return (
+          <a key={image.url} href={image.url} {...EXTERNAL} title={image.page_url || undefined} className="shrink-0 space-y-1" style={{ width }}>
+            <Photo url={image.url} size={width} height={height} fit={fit} alt={label} />
+            {label && <p className="line-clamp-2 text-[10px] text-w-dim">{label}</p>}
+          </a>
+        )
+      })}
     </div>
   )
 }
@@ -273,7 +304,7 @@ const RESERVATION_TEXT: Record<string, string> = {
 }
 
 function isKnownBlock(block: { type: string }): block is AgentResultBlock {
-  return ['picks', 'flights', 'sections', 'sources', 'emails', 'events', 'reservation', 'purchase_setup'].includes(block.type)
+  return ['picks', 'flights', 'sections', 'sources', 'photos', 'screenshots', 'emails', 'events', 'reservation', 'purchase_setup'].includes(block.type)
 }
 
 const SETUP_ANCHOR = { payment_card: 'payment-cards', shipping_address: 'shipping-addresses' } as const
@@ -360,6 +391,10 @@ function Block({ block }: { block: AgentResultBlock }) {
           })}
         </div>
       )
+    case 'photos':
+      return <ImageStrip images={block.photos} width={96} height={96} fit="cover" />
+    case 'screenshots':
+      return <ImageStrip images={block.screenshots} width={240} height={150} fit="contain" />
     case 'emails':
       return (
         <ul className="space-y-1.5">

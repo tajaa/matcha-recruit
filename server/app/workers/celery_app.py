@@ -252,6 +252,25 @@ def _serves_default_queue(consumer) -> bool:
         return True
 
 
+# The queues this worker process was started to consume, read when the
+# process starts: after that the live set also grows with every queue the
+# process merely sends to (`Queues.__missing__`). None outside a worker.
+_consumed_queues: frozenset[str] | None = None
+
+
+@worker_process_init.connect
+def _note_consumed_queues(**_kwargs):
+    global _consumed_queues
+    _consumed_queues = frozenset(celery_app.amqp.queues.consume_from)
+
+
+def consumes_queue(name: str | None) -> bool:
+    """Whether this worker process serves queue `name` itself. A task that
+    would wait on a task it sends there must run that work in-process
+    instead: with one slot, the other task could only start after it."""
+    return bool(name) and _consumed_queues is not None and name in _consumed_queues
+
+
 @worker_ready.connect
 def on_worker_ready(sender=None, **kwargs):
     """Auto-dispatch scheduled compliance checks on every worker startup.

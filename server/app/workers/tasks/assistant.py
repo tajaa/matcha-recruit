@@ -1,4 +1,5 @@
-"""Celery entry point for Espresso assistant runs (`mw_project_agent_runs.kind='assistant'`).
+"""Celery entry points for Espresso assistant runs (`mw_project_agent_runs.kind='assistant'`)
+and the page views a run sends to the browser worker.
 
 Lifecycle: claim the queued run → run the agent → post the answer, a question
 or a confirmation card in the chat it was asked in. A failure closes the
@@ -24,6 +25,16 @@ RUN_DEADLINE_SECONDS = 450.0
 @celery_app.task(name="app.workers.tasks.assistant.run_assistant")
 def run_assistant(run_id: str) -> None:
     run_with_chat_fanout(_run(UUID(run_id)))
+
+
+# One page view for a run on another worker (`abilities/screenshots.py`): sent
+# to AGENT_BROWSER_QUEUE, its result read back by the run. The view bounds
+# itself (VIEW_SECONDS + STORE_SECONDS); these limits are the backstop.
+@celery_app.task(name="app.workers.tasks.assistant.view_page", soft_time_limit=90, time_limit=120)
+def view_page(url: str, prefix: str) -> dict:
+    from app.matcha.services.matcha_work.agent_runtime.abilities.screenshots import view_and_store
+
+    return asyncio.run(view_and_store(url, prefix))
 
 
 async def _run(run_id: UUID) -> None:
