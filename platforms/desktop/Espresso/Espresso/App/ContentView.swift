@@ -113,6 +113,11 @@ struct ContentView: View {
         }) {
             CollabProjectWizardView(mode: appState.collabProjectWizardMode)
         }
+        // A feature's how-it-works guide, asked for from the sidebar menu or
+        // Help ▸ Feature Guides. Marked seen however it closes.
+        .sheet(item: $appState.featureGuide) { id in
+            FeatureGuideSheet.presented(id, appState: appState) { appState.featureGuideClosed(id) }
+        }
         .overlay(alignment: .topTrailing) {
             // In-app toast banner for inbound channel messages. Stacks
             // up to 3, auto-dismisses each after 5s, tap to switch to
@@ -349,6 +354,10 @@ struct ContentView: View {
                         .disabled(idx == 0)
                     Button("Move down") { orderStore.moveDown(section) }
                         .disabled(idx == visibleSections.count - 1)
+                    Divider()
+                    Button("\(section.displayName) Guide") {
+                        appState.showFeatureGuide(section.guide)
+                    }
                     Divider()
                     Button("Reset sidebar order") {
                         orderStore.resetToDefault()

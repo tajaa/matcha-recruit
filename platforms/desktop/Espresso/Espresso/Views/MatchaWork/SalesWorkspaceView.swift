@@ -26,9 +26,11 @@ struct SalesWorkspaceView: View {
                 Text("Sales").font(.headline)
                 Text("Your campaigns in this workspace").font(.caption).foregroundStyle(.secondary)
                 Spacer()
+                FeatureGuideButton(id: .sales)
                 Button("New campaign") { showCreate = true }
                 Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }
             }
+            .featureGuideOnFirstVisit(.sales)
             if let error = model.error { Text(error).foregroundStyle(.orange).font(.caption).textSelection(.enabled) }
             if let notice = model.notice { Text(notice).foregroundStyle(.secondary).font(.caption) }
             if !model.campaigns.isEmpty {
