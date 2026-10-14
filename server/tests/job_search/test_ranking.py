@@ -104,3 +104,31 @@ def test_normalize_helpers():
     assert normalize.posted_age_hours("30+ days ago") == 720
     assert normalize.posted_age_hours("Just posted") == 0
     assert normalize.posted_age_hours("whenever") is None and normalize.posted_age_hours(None) is None
+
+
+def test_a_bonus_is_worth_the_base_it_is_paid_on():
+    # Seen on dev: with a high bonus weight, $200-275K + 25-35% outranked $500K.
+    weights = {"base": 0.9, "bonus": 0.8, "equity": 0.8, "fit": 0.3}
+    leads = [
+        lead("smaller", {"base": base(200_000, 275_000),
+                         "bonus": {"status": "posted", "kind": "annual", "pct_min": 25, "pct_max": 35},
+                         "equity": {"status": "mentioned"}}, fit=5),
+        lead("larger", {"base": base(500_000, 500_000), "bonus": {"status": "mentioned"}}, fit=4),
+    ]
+    ranked = ranking.rank(leads, weights)
+    assert [r.lead_id for r in ranked] == ["larger", "smaller"]
+    smaller = ranked[1].explain["components"]
+    assert smaller["bonus"] == round(0.6 * smaller["base"], 4)  # 30% of 50%, scaled by base share
+
+
+def test_duplicate_postings_under_two_employer_names():
+    from app.matcha.services.matcha_work.job_search import normalize
+
+    title = "Senior Vice President and Chief Operating Officer"
+    assert normalize.same_posting(title, "Beth Israel Lahey Health", title, "Lahey Clinic Hospital, Inc.")
+    assert not normalize.same_posting(title, "Beth Israel Lahey Health", "Chief Operating Officer",
+                                      "Lahey Clinic Hospital, Inc.")
+    # Sharing only a generic word ("Health", "Group") is not the same employer.
+    assert not normalize.same_posting("COO", "Brightline Health", "COO", "Northwind Health")
+    assert not normalize.same_posting("COO", "Acme Group", "COO", "Beta Group")
+    assert normalize.name_words("Truenorth Executive Search") == {"truenorth"}

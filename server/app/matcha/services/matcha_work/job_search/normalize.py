@@ -45,6 +45,32 @@ def dedupe_key(company: str, title: str, location: str) -> str:
     return "|".join((company_key(company), " ".join(_words(title)), " ".join(_words(city))))[:400]
 
 
+# Words too common in employer names to say two names are the same employer.
+_GENERIC_NAME_WORDS = {
+    "health", "healthcare", "group", "global", "services", "service", "partners", "capital",
+    "systems", "solutions", "international", "holdings", "hospital", "hospitals", "clinic",
+    "america", "american", "national", "united", "medical", "management", "consulting",
+    "technologies", "technology", "corporate", "enterprises", "industries", "network",
+    "foundation", "university", "center", "centre", "staffing", "search", "executive",
+    "recruiting", "consultants", "associates", "office", "offices", "company", "family",
+}
+
+
+def name_words(company: str) -> set[str]:
+    """The distinctive words of an employer name ("Beth Israel Lahey Health" ->
+    beth, israel, lahey)."""
+    return {w for w in company_key(company).split() if len(w) >= 4 and w not in _GENERIC_NAME_WORDS}
+
+
+def same_posting(a_title: str, a_company: str, b_title: str, b_company: str) -> bool:
+    """The same job listed under two employer names: the same title, and the
+    names share a distinctive word ("Beth Israel Lahey Health" and "Lahey
+    Clinic Hospital, Inc." posting the same SVP & COO requisition)."""
+    if " ".join(_words(a_title)) != " ".join(_words(b_title)):
+        return False
+    return bool(name_words(a_company) & name_words(b_company))
+
+
 def state_of(location: str) -> str | None:
     """A two-letter US state code from "Austin, TX", "Austin, Texas" or "Texas"."""
     if not location:
