@@ -49,3 +49,33 @@ async def test_history_shows_where_each_assistant_run_got_to(monkeypatch):
     monkeypatch.setattr(chat_progress, "overlay_run_progress", broken)
     # Best effort: history still loads without the overlay.
     assert await channels._resolve_assistant_run_states(conn, messages, channel_id=channel) == messages
+
+
+@pytest.mark.asyncio
+async def test_both_history_reads_show_where_assistant_runs_got_to(monkeypatch):
+    """The channel's first page (`get_channel`) and older pages both run every
+    overlay. The first page skipping the assistant one left each finished run
+    in a reopened chat showing "Starting…"."""
+    import inspect
+
+    from app.werk.routes import channels
+
+    for endpoint in (channels.get_channel, channels.get_channel_messages):
+        assert "_resolve_history_overlays(" in inspect.getsource(endpoint), endpoint.__name__
+
+    calls = []
+
+    def record(name):
+        async def overlay(conn, messages, *, channel_id):
+            calls.append((name, channel_id))
+            return messages + [name]
+        return overlay
+
+    for name in ("_resolve_event_draft_action_statuses", "_resolve_agent_card_prompt_statuses",
+                 "_resolve_assistant_run_states"):
+        monkeypatch.setattr(channels, name, record(name))
+    channel = uuid4()
+    out = await channels._resolve_history_overlays(object(), [], channel_id=channel)
+    assert out == ["_resolve_event_draft_action_statuses", "_resolve_agent_card_prompt_statuses",
+                   "_resolve_assistant_run_states"]
+    assert {c for _, c in calls} == {channel}

@@ -199,6 +199,19 @@ async def _resolve_assistant_run_states(conn, messages, *, channel_id: UUID):
         return messages
 
 
+async def _resolve_history_overlays(conn, messages, *, channel_id: UUID):
+    """Every live-state overlay a page of history gets, in one place.
+
+    Both history reads go through this: the channel's first page (inside
+    `get_channel`) and older pages (`get_channel_messages`). The first page
+    once skipped the assistant overlay, so every Espresso run in a reopened
+    chat showed "Starting…" however it had ended.
+    """
+    messages = await _resolve_event_draft_action_statuses(conn, messages, channel_id=channel_id)
+    messages = await _resolve_agent_card_prompt_statuses(conn, messages, channel_id=channel_id)
+    return await _resolve_assistant_run_states(conn, messages, channel_id=channel_id)
+
+
 async def _resolve_event_draft_action_statuses(conn, messages, *, channel_id: UUID):
     """Overlay canonical draft state onto persisted action-card metadata.
 
@@ -1513,10 +1526,7 @@ async def get_channel(
             _msg_query("m.channel_id = $1", limit_param="50"),
             channel_id,
         )
-        messages = await _resolve_event_draft_action_statuses(
-            conn, messages, channel_id=channel_id,
-        )
-        messages = await _resolve_agent_card_prompt_statuses(conn, messages, channel_id=channel_id)
+        messages = await _resolve_history_overlays(conn, messages, channel_id=channel_id)
         msg_ids = [m["id"] for m in messages]
         reactions_map = await _fetch_reactions_map(conn, msg_ids)
 
@@ -1644,11 +1654,7 @@ async def get_channel_messages(
                 channel_id, limit,
             )
 
-        rows = await _resolve_event_draft_action_statuses(
-            conn, rows, channel_id=channel_id,
-        )
-        rows = await _resolve_agent_card_prompt_statuses(conn, rows, channel_id=channel_id)
-        rows = await _resolve_assistant_run_states(conn, rows, channel_id=channel_id)
+        rows = await _resolve_history_overlays(conn, rows, channel_id=channel_id)
         msg_ids = [r["id"] for r in rows]
         reactions_map = await _fetch_reactions_map(conn, msg_ids)
         return [_row_to_message(r, reactions_map) for r in reversed(rows)]
