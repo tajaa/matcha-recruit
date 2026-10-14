@@ -35,7 +35,7 @@ def gate_block(block_type: str, raw: Any, state: RunState) -> tuple[dict | None,
 
     if not isinstance(raw, dict):
         return None, ["Dropped a picks block: not an object"]
-    gate = schema.Gate(state.provenance)
+    gate = schema.Gate(state.citable())
     top_pick = schema.gate_pick(raw.get("top_pick"), gate) if raw.get("top_pick") else None
     alternatives = [
         p for p in (schema.gate_pick(a, gate) for a in (raw.get("alternatives") or []) if isinstance(a, dict)) if p

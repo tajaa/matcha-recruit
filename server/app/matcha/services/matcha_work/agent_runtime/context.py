@@ -78,6 +78,10 @@ class RunState:
 
     started: float
     provenance: set[str] = field(default_factory=set)
+    # Links earlier runs in this conversation verified (`history.earlier_links`).
+    # Only result blocks may cite them (`citable`); anything that acts, such as
+    # the booking page check, reads `provenance` alone.
+    earlier_links: set[str] = field(default_factory=set)
     calls: dict[str, int] = field(default_factory=dict)
     commits: dict[str, int] = field(default_factory=dict)
     hosted_calls: int = 0
@@ -90,6 +94,11 @@ class RunState:
     warnings: list[str] = field(default_factory=list)
     receipts: list[dict] = field(default_factory=list)
     seq: int = 0
+
+    def citable(self) -> set[str]:
+        """What a result block may link to: this run's provenance plus links
+        earlier runs here verified."""
+        return self.provenance | self.earlier_links
 
 
 @dataclass(frozen=True)

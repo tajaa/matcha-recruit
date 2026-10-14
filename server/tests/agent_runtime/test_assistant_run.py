@@ -558,3 +558,60 @@ async def test_native_calendar_capability_requires_current_private_consent(wired
     await assistant.run_assistant(_run(surface="project_chat"))
     assert "list_apple_events" not in [t.get("name") for t in client.calls[0]["tools"]]
     connected.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_links_earlier_runs_verified_survive_the_result_gate(wired, monkeypatch):
+    """"Send me those links": the run may give back what an earlier run here
+    verified, and still nothing else."""
+    earlier = AsyncMock(return_value=frozenset({"https://www.zillow.com/a/"}))
+    monkeypatch.setattr(history, "earlier_links", earlier)
+    client = wired.client(response(call("finish", {**FINISH, "blocks": [{"type": "sources", "sources": [
+        {"title": "Zillow", "url": "https://www.zillow.com/a/"},
+        {"title": "Made up", "url": "https://tower737.example.com/"},
+    ]}]})))
+    run = _run()
+    await assistant.run_assistant(run)
+    assert client.calls
+    kwargs = earlier.await_args.kwargs
+    assert kwargs == {"channel_id": run["channel_id"], "exclude_run": run["id"]}
+    stored = wired.mark.await_args.kwargs["result"]
+    sources = [b for b in stored["blocks"] if b["type"] == "sources"][0]["sources"]
+    assert [s["url"] for s in sources] == ["https://www.zillow.com/a/"]
+
+
+def test_the_prompt_says_to_go_to_the_source_ask_when_unsure_and_report_only_what_ran():
+    from app.matcha.services.matcha_work.agent_runtime import catalog
+    from app.matcha.services.matcha_work.agent_runtime.prompt import build_system_prompt
+
+    async def no_fetch(_url):
+        return {}, set()
+
+    web = next(a for a in catalog.build_catalog(fetch_page=no_fetch) if a.key == "web")
+    text = build_system_prompt(SimpleNamespace(timezone=None, surface="assistant", resume=None), [web])
+    assert "find that place with web_search and load it with fetch_page" in text
+    assert "When you are not sure what they want, ask before you work" in text
+    assert "Never say a page could not be reached unless fetch_page failed on it in this run" in text
+    assert "When it and the earlier answer's wording disagree, go by the record" in text
+    assert "a step it lists as skipped was never tried" in text
+    assert "never contradict" not in text
+    # Effort stays bounded in words, not only by the hard limits.
+    assert "most requests need a few searches and page loads" in text
+    assert "is not the source" in text and "earlier run of yours in this conversation" in text
+
+
+def test_earlier_links_may_be_cited_but_never_book():
+    """A booking page must be one this run found; an earlier run's link is
+    for the answer only."""
+    from app.matcha.services.matcha_work.agent_runtime.abilities import reservations, web
+    from app.matcha.services.matcha_work.agent_runtime.context import RunState
+
+    state = RunState(started=0.0, earlier_links={"https://resy.example/nopa"})
+    block, _ = web.gate_block("sources", {"sources": [{"title": "Nopa", "url": "https://resy.example/nopa"}]}, state)
+    assert block["sources"][0]["url"] == "https://resy.example/nopa"
+    args = {"venue_name": "Nopa", "party_size": 4, "date": "2026-11-02", "time": "19:00",
+            "url": "https://resy.example/nopa"}
+    with pytest.raises(ValueError, match="booking page must be one"):
+        reservations.resolve_booking(args, state)
+    state.provenance.add("https://resy.example/nopa")
+    assert reservations.resolve_booking(args, state)["url"] == "https://resy.example/nopa"
