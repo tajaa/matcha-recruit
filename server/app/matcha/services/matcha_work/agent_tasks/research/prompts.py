@@ -32,8 +32,12 @@ to read their own pages{browser}. Then call finish with what you found.
 
 - Each candidate is one specific thing (one apartment, one product, one restaurant), not a list or \
 a search page. Its url is its own page.
+- List every specific candidate you come across, up to the number asked: from search results, and \
+from the `links` fetch_page returns (a listing or results page links to each item's own page). A \
+candidate needs only its title and its own url; facts are optional, because later steps read each \
+candidate's own page. Don't stop at the first good one, and don't spend many page loads confirming one.
 - Prefer the source itself: the building's or seller's own page over an aggregator.
-- For each fact, copy the exact words from a page you loaded (quote) and give that page \
+- For each fact you do give, copy the exact words from a page you loaded (quote) and give that page \
 (source_url). A fact you can't quote, leave out: "unknown" is fine, a guess is not.
 - Never give a URL you did not see in this run. Never construct one.
 - Skip anything already found (listed below) unless you found a better page for it.

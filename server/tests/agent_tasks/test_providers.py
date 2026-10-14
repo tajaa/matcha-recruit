@@ -11,8 +11,8 @@ async def _no_sleep(_s):
     return None
 
 
-def _api(handler):
-    return P.SearchApi("key", transport=httpx.MockTransport(handler), sleep=_no_sleep, today=lambda: TODAY)
+def _api(handler, cls=P.SearchApi):
+    return cls("key", transport=httpx.MockTransport(handler), sleep=_no_sleep, today=lambda: TODAY)
 
 
 SHOP = {"shopping_results": [
@@ -77,14 +77,34 @@ async def test_errors_and_one_retry():
         await _api(broken).search("places", "x")
 
 
+@pytest.mark.asyncio
+async def test_serpapi_pages_by_offset_and_asks_maps_for_a_search():
+    seen = []
+
+    def handler(request):
+        seen.append((str(request.url).split("?")[0], dict(request.url.params)))
+        return httpx.Response(200, json=SHOP if request.url.params["engine"] == "google_shopping" else MAPS)
+
+    api = _api(handler, P.SerpApi)
+    assert len(await api.search("shopping", "balm")) == 1
+    places = await api.search("places", "ramen", page=3)
+    assert seen[0][0] == "https://serpapi.com/search.json" and "start" not in seen[0][1]
+    assert seen[1][1]["type"] == "search" and seen[1][1]["start"] == "40" and len(places) == 2
+    hours = P.place_item({"title": "x", "website": "https://x.test", "operating_hours": {"monday": "9–5"}},
+                         today=TODAY)
+    assert hours.fields["hours"]["value"] == "monday: 9–5"
+
+
 def test_configured_and_choose(monkeypatch):
-    monkeypatch.setattr(P, "_key", lambda: "k")
+    monkeypatch.setattr(P, "_keys", lambda: ("k", "s"))
     assert P.configured() and isinstance(P.choose_provider(), P.SearchApi)
-    monkeypatch.setattr(P, "_key", lambda: None)
+    monkeypatch.setattr(P, "_keys", lambda: (None, "s"))
+    assert P.configured() and isinstance(P.choose_provider(), P.SerpApi)
+    monkeypatch.setattr(P, "_keys", lambda: (None, None))
     assert not P.configured() and P.choose_provider() is None
 
     def boom():
         raise RuntimeError("settings")
 
-    monkeypatch.setattr(P, "_key", boom)
+    monkeypatch.setattr(P, "_keys", boom)
     assert P.configured() is False

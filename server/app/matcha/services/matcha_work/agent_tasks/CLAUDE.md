@@ -59,7 +59,8 @@ refine starts at `refine`, "search more" at `providers`.
 | Field library, reading pages, checking claims (pure) | `fields.py` |
 | Hard constraints, bands, scores (pure) | `ranking.py` |
 | Finish contracts and their checks (pure) | `contracts.py` |
-| Google Shopping / Google Maps via SearchAPI | `providers.py` |
+| Google Shopping / Google Maps via SearchAPI (`SEARCH_API_KEY`), else SerpApi (`SERP_API_KEY`) | `providers.py` |
+| The model's page loader: agent cards' page facts plus the page's same-site links | `fetch.py` |
 | No-model phases, `rerank`, `Deps` | `phases.py` |
 | Model phases | `model_phases.py` |
 | Brief + intake fields | `brief.py` |
@@ -77,10 +78,12 @@ refine starts at `refine`, "search more" at `providers`.
 - **The person's own limits win.** A brief's budget and date become
   constraints the plan can't drop; a refine may change one, but one the model
   merely left out stays.
-- **Links are provenance-gated.** A candidate's URL must be one the run saw;
+- **Links are provenance-gated.** A candidate's URL must be one the run saw
+  (a search result, a page it loaded, or a link printed on one: `fetch.py`);
   photos only ones a loaded page showed, rehosted on our CDN
   (`images.rehost_urls`), at most 3 per finding and 24 per task.
-- **A summary states only numbers its findings show** (`unsupported_numbers`);
+- **A summary states only numbers its findings show**, or the person's own
+  ask, limits and the counts (`unsupported_numbers`, `context`);
   a reason that doesn't is dropped, a headline that doesn't gets one repair,
   then the ranking-only summary.
 - **Budgets per round** (`Budgets`): 30 provider calls, 60 page loads, 6

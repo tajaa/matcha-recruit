@@ -44,6 +44,7 @@ def test_describe_reads_like_a_person():
     assert d({"field": "available_date", "op": "before", "value": "2026-11-01"}) == "Available by Nov 1, 2026"
     assert d({"field": "available_date", "op": "before", "value": "bad"}) == "Available by bad"
     assert d({"field": "nope", "op": "eq"}) == ""
+    assert d({"field": "beds", "op": "eq", "value": 1.0}) == "Beds is 1"
 
 
 def test_bands_then_score_then_fit():

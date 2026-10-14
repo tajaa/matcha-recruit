@@ -328,6 +328,12 @@ async def summarize(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
         )]
     shown = [items_mod.view_for_model(row) for row in rows]
     note = cursor.get("note")
+    plan_ = plan_of(task)
+    # Numbers the summary may state besides the findings' own: the ask, its
+    # limits and the counts it is told.
+    context = " ".join([task.get("directive") or "", *prompts.plan_lines(plan_),
+                        *(json.dumps(c.get("value"), default=str) for c in plan_.get("constraints") or []),
+                        str(total), str(visible), str(total - visible), note or ""])
     summary = fallback_summary(shown, total=total, hidden=total - visible, note=note)
     if shown:
         batch = {f"F{i + 1}": item["id"] for i, item in enumerate(shown)}
@@ -338,11 +344,11 @@ async def summarize(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
                     finish=contracts.SUMMARY_FINISH,
                     normalize=lambda args, _state: contracts.normalize_summary(
                         args, batch=batch, item_texts={i["id"]: _item_text(i) for i in shown},
-                        citable={u for u in urls if u},
+                        citable={u for u in urls if u}, context=context,
                     ),
                 ),
                 instructions=prompts.SUMMARIZE,
-                user_text=prompts.summary_turn(task.get("directive") or "", plan_of(task), list(zip(batch, shown)),
+                user_text=prompts.summary_turn(task.get("directive") or "", plan_, list(zip(batch, shown)),
                                                total=total, hidden=total - visible, note=note),
                 limits=SUMMARY_LIMITS, progress=_progress(guard), client_factory=deps.client,
                 first_note="Writing up what it found…",

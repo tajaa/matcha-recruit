@@ -97,3 +97,59 @@ async def test_rehost_urls_keeps_order_limit_and_drops_failures(monkeypatch):
     kept, warnings = await images.rehost_urls(wanted, prefix="t", limit=3)
     assert kept == [] and len(warnings) == 3
     assert await images.rehost_urls(wanted, prefix="t", limit=3, total_seconds=0) == ([], [])
+
+
+def test_page_links_are_same_site_detail_links():
+    from app.matcha.services.matcha_work.agent_card.page_extract import page_links
+
+    html = b"""<html><body>
+      <nav><a href="/apartments/sf/rentals">All San Francisco rentals</a></nav>
+      <ol>
+        <li><a href="/apa/d/san-francisco-sunny-1br/123.html">Sunny 1BR, dogs OK - $3,200</a></li>
+        <li><a href="https://www.list.test/apa/d/sf-loft/456.html#photos">Mission loft with yard</a></li>
+        <li><a href="/apa/d/san-francisco-sunny-1br/123.html">Sunny 1BR again</a></li>
+        <li><a href="https://other.test/apa/d/x/789.html">Off-site listing elsewhere</a></li>
+        <li><a href="/a">Short path link</a></li><li><a href="/apa/d/long/path/1">Go</a></li>
+        <li><a href="mailto:x@list.test">Email the landlord</a></li>
+      </ol>
+      <footer><a href="/about/the-company">About the company</a></footer></body></html>"""
+    links = page_links(html, "https://list.test/search/apa")
+    assert links == [
+        {"text": "Sunny 1BR, dogs OK - $3,200", "url": "https://list.test/apa/d/san-francisco-sunny-1br/123.html"},
+        {"text": "Mission loft with yard", "url": "https://www.list.test/apa/d/sf-loft/456.html"},
+    ]
+    assert len(page_links(html, "https://list.test/search/apa", limit=1)) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_research_loader_vouches_for_links():
+    from app.core.services.safe_fetch import UnsafeURL
+    from app.matcha.services.matcha_work.agent_tasks.research import fetch
+
+    body = b'<html><body><p>' + b"word " * 4000 + b'</p><a href="/apa/d/one/1.html">Sunny 1BR</a></body></html>'
+    ok = FetchedResponse(url="https://list.test/s", final_url="https://list.test/s", status=200,
+                         content_type="text/html", body=body, truncated=False)
+    page, urls = await fetch.fetch_page("https://list.test/s", fetch=AsyncMock(return_value=ok))
+    assert page["links"] == [{"text": "Sunny 1BR", "url": "https://list.test/apa/d/one/1.html"}]
+    assert "https://list.test/apa/d/one/1.html" in urls and len(json.dumps(page)) <= fetch.MAX_OUTPUT_CHARS + 50
+    assert page["text_truncated"] is True
+    for fetcher, error in (
+        (AsyncMock(side_effect=UnsafeURL("private")), "Refused"),
+        (AsyncMock(side_effect=RuntimeError("x")), "Could not load"),
+        (AsyncMock(return_value=FetchedResponse(url="u", final_url="u", status=403, content_type="text/html",
+                                                 body=b"", truncated=False)), "HTTP 403"),
+        (AsyncMock(return_value=FetchedResponse(url="u", final_url="u", status=200, content_type="image/png",
+                                                 body=b"", truncated=False)), "Not an HTML page"),
+    ):
+        page, urls = await fetch.fetch_page("https://list.test/s", fetch=fetcher)
+        assert error in page["error"] and urls == set()
+
+
+@pytest.mark.asyncio
+async def test_a_page_that_breaks_the_reader_is_an_error(monkeypatch):
+    from app.matcha.services.matcha_work.agent_tasks.research import fetch
+
+    ok = FetchedResponse(url="u", final_url="u", status=200, content_type="text/html", body=b"<p>x</p>", truncated=False)
+    monkeypatch.setattr(fetch, "_read", lambda *_: (_ for _ in ()).throw(RecursionError()))
+    page, urls = await fetch.fetch_page("u", fetch=AsyncMock(return_value=ok))
+    assert "structure" in page["error"] and urls == set()

@@ -51,6 +51,13 @@ def test_plan_keeps_the_persons_limits():
         C.normalize_plan({"result": "no"}, brief={}, today=TODAY)
 
 
+def test_a_text_limit_given_as_a_list_reads_as_its_text():
+    clean = C.clean_constraint
+    assert clean({"field": "neighborhood", "op": "includes", "value": ["Mission", "x"]}, today=TODAY)["value"] == "Mission"
+    assert clean({"field": "neighborhood", "op": "includes", "value": [1, " "]}, today=TODAY) is None
+    assert clean({"field": "neighborhood", "op": "includes", "value": {"a": 1}}, today=TODAY) is None
+
+
 def test_fallback_plan_searches_the_directive():
     plan = C.plan_from_brief("best organic   lip balm", {"budget_max": 15}, today=TODAY)
     assert plan["queries"] == ["best organic lip balm"] and plan["origin"] == "fallback"
@@ -130,9 +137,15 @@ def test_summary_numbers_come_from_the_findings():
     assert ok["top"] == [{"item_id": "a", "why": "Cheapest at $3,200"}, {"item_id": "b", "why": ""}]
     assert len(ok["sections"]) == 1 and "evil" not in ok["sections"][0]["body_md"]
     assert any("Dropped section" in w for w in warnings)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as exc:
         C.normalize_summary({"result": {"headline": "From $1,999!", "summary": "", "sections": [], "top": []}},
                             batch=batch, item_texts=texts, citable=citable)
+    assert "1,999" in str(exc.value)
+    # The person's own limit and the counts may be stated.
+    ok, _ = C.normalize_summary({"result": {"headline": "2 of 80 fit under your $3,500 budget", "summary": "",
+                                            "sections": [], "top": [{"id": "F2", "why": "Under $3,500"}]}},
+                                batch=batch, item_texts=texts, citable=citable, context="Price at most $3,500/mo 80")
+    assert ok["top"][0]["why"] == "Under $3,500"
     with pytest.raises(ValueError):
         C.normalize_summary({"result": {"headline": "", "summary": "", "sections": [], "top": []}},
                             batch=batch, item_texts=texts, citable=citable)

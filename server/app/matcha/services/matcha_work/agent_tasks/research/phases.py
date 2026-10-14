@@ -72,9 +72,9 @@ def _default_client(model: str) -> Any:
 
 
 async def _default_fetch_page(url: str) -> tuple[dict, set[str]]:
-    from app.matcha.services.matcha_work.agent_card.agent import fetch_page_tool
+    from .fetch import fetch_page
 
-    return await fetch_page_tool(url)
+    return await fetch_page(url)
 
 
 async def _default_view(url: str, prefix: str) -> dict:
@@ -155,6 +155,8 @@ async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutc
     cursor = cursor_of(task)
     source = plan.get("source")
     provider = deps.provider() if source in ("shopping", "places") else None
+    if source in ("shopping", "places") and provider is None:
+        logger.info("research task=%s wanted %s but no listings provider is configured", task["id"], source)
     added = 0
     if provider is not None:
         queries = [q for q in plan.get("queries") or [] if q][:PROVIDER_QUERIES]

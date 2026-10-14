@@ -118,7 +118,9 @@ def clean_constraint(raw: Any, *, today: date) -> dict | None:
     elif spec.type == "date":
         value = F.coerce(spec, value, today=today)
     elif spec.type == "text":
-        value = _text(value, 60) or None
+        if isinstance(value, list):  # ["Mission"] means "Mission"
+            value = next((v for v in value if isinstance(v, str) and v.strip()), None)
+        value = _text(value, 60) or None if isinstance(value, (str, int, float)) else None
     else:
         value = True
     if value is None:
@@ -450,20 +452,27 @@ def unsupported_numbers(text: str, allowed: str) -> list[float]:
             and not any(abs(s - n) <= max(0.5, n * 0.005) for s in stated)]
 
 
+def _shown(numbers: list[float]) -> str:
+    return ", ".join(f"{n:,.0f}" if float(n).is_integer() else f"{n:,.2f}" for n in numbers[:3])
+
+
 def normalize_summary(args: dict, *, batch: dict[str, str], item_texts: dict[str, str],
-                      citable: set[str]) -> tuple[dict, list[str]]:
+                      citable: set[str], context: str = "") -> tuple[dict, list[str]]:
     """`batch`: short id -> item id; `item_texts`: item id -> what its fields
-    and title say. Every number must come from there."""
+    and title say; `context`: what the person asked (their limits, the
+    counts). Every number must come from one of those."""
     result = _result(args)
-    everything = " ".join(item_texts.values())
+    everything = " ".join([*item_texts.values(), context])
     warnings: list[str] = []
     headline = _text(result.get("headline"), 160)
     summary = _text(result.get("summary"), 900)
     if not headline:
         raise ValueError("give a headline")
     for name, text in (("headline", headline), ("summary", summary)):
-        if unsupported_numbers(text, everything):
-            raise ValueError(f"the {name} states a number no finding shows; use only the facts given")
+        wrong = unsupported_numbers(text, everything)
+        if wrong:
+            raise ValueError(f"the {name} states {_shown(wrong)}, which no finding or limit shows; "
+                             "use only the facts given")
     gate = schema.Gate(citable)
     sections = []
     for section in schema.gate_sections(result.get("sections"), gate):
@@ -481,7 +490,7 @@ def normalize_summary(args: dict, *, batch: dict[str, str], item_texts: dict[str
             continue
         seen.add(item_id)
         why = _text(pick.get("why"), 300)
-        if why and unsupported_numbers(why, item_texts.get(item_id, "")):
+        if why and unsupported_numbers(why, f"{item_texts.get(item_id, '')} {context}"):
             warnings.append("Dropped a reason that stated a number its finding doesn't show")
             why = ""
         top.append({"item_id": item_id, "why": why})

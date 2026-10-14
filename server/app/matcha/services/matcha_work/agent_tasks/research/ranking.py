@@ -45,6 +45,8 @@ def describe(constraint: dict) -> str:
     shown = value
     if spec.type == "money" and isinstance(value, (int, float)):
         shown = F.display(spec, float(value), currency=constraint.get("currency"), unit=constraint.get("unit"))
+    elif spec.type in ("number", "rating") and isinstance(value, (int, float)):
+        shown = F.display(spec, float(value))
     elif spec.type == "tags":
         shown = ", ".join(spec.tags.get(t, t) for t in (value if isinstance(value, list) else [value]))
     elif spec.type == "date" and isinstance(value, str):

@@ -6,9 +6,10 @@ findings whose fields are verified with origin `provider`, the way Google Jobs
 is for job search. Anything else (homes, events) has no provider and is found
 by the model with web search.
 
-SearchAPI only (`SEARCH_API_KEY`, the key job search already uses). Only the
-query text leaves the server. Every call counts against the round's provider
-budget (`chain.grant`).
+Through SearchAPI (`SEARCH_API_KEY`) when set, else SerpApi (`SERP_API_KEY`),
+the same keys job search uses: both serve Google's results as JSON with
+nearly the same fields. Only the query text leaves the server. Every call
+counts against the round's provider budget (`chain.grant`).
 """
 from __future__ import annotations
 
@@ -27,7 +28,6 @@ from . import fields as F
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://www.searchapi.io/api/v1/search"
 TIMEOUT_SECONDS = 20.0
 MAX_RESULTS = 20
 KINDS = {"shopping": "product", "places": "place"}
@@ -112,7 +112,7 @@ def place_item(raw: dict, *, today: date) -> ProviderItem | None:
                        ("phone", raw.get("phone")), ("cuisine", raw.get("type"))):
         if value not in (None, ""):
             _put(out, key, value, url=url, today=today, quote=f"Google Maps {key.replace('_', ' ')}: {F.clean_text(value, 120)}")
-    hours = raw.get("open_hours") or raw.get("hours") or raw.get("open_state")
+    hours = raw.get("open_hours") or raw.get("operating_hours") or raw.get("hours") or raw.get("open_state")
     if isinstance(hours, dict):
         hours = "; ".join(f"{day}: {F.clean_text(text, 40)}" for day, text in list(hours.items())[:7])
     if isinstance(hours, str) and hours.strip():
@@ -126,8 +126,9 @@ def place_item(raw: dict, *, today: date) -> ProviderItem | None:
 SleepFn = Callable[[float], Awaitable[None]]
 
 
-class SearchApi:
-    name = "SearchAPI"
+class _Api:
+    name = ""
+    base_url = ""
 
     def __init__(self, key: str, *, transport: httpx.AsyncBaseTransport | None = None,
                  sleep: SleepFn = asyncio.sleep, today: Callable[[], date] = date.today):
@@ -136,44 +137,47 @@ class SearchApi:
         self._sleep = sleep
         self._today = today
 
+    def _params(self, engine: str, query: str, page: int) -> dict:  # pragma: no cover - abstract
+        raise NotImplementedError
+
     async def _get(self, params: dict) -> dict:
         last: Exception | None = None
         for attempt in range(2):
             try:
                 async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, transport=self._transport) as client:
-                    response = await client.get(BASE_URL, params={**params, "api_key": self._key})
+                    response = await client.get(self.base_url, params={**params, "api_key": self._key})
             except httpx.HTTPError as exc:
                 last = exc
             else:
                 if response.status_code in (401, 403):
-                    raise ProviderError("SearchAPI refused the API key", fatal=True)
+                    raise ProviderError(f"{self.name} refused the API key", fatal=True)
                 if response.status_code == 429 or response.status_code >= 500:
-                    last = ProviderError(f"SearchAPI answered {response.status_code}")
+                    last = ProviderError(f"{self.name} answered {response.status_code}")
                 elif response.status_code >= 400:
-                    raise ProviderError(f"SearchAPI answered {response.status_code}")
+                    raise ProviderError(f"{self.name} answered {response.status_code}")
                 else:
                     try:
                         data = response.json()
                     except ValueError as exc:
-                        raise ProviderError("SearchAPI returned something other than JSON") from exc
+                        raise ProviderError(f"{self.name} returned something other than JSON") from exc
                     if not isinstance(data, dict):
-                        raise ProviderError("SearchAPI returned an unexpected shape")
+                        raise ProviderError(f"{self.name} returned an unexpected shape")
                     error = str(data.get("error") or "")
                     if error and "hasn't returned any results" not in error and "no results" not in error.lower():
-                        raise ProviderError(f"SearchAPI: {error[:200]}")
+                        raise ProviderError(f"{self.name}: {error[:200]}")
                     return data
             if attempt == 0:
                 await self._sleep(2.0)
-        raise ProviderError(f"SearchAPI did not answer: {type(last).__name__}")
+        raise ProviderError(f"{self.name} did not answer: {type(last).__name__}")
 
     async def search(self, source: str, query: str, *, page: int = 1) -> list[ProviderItem]:
         """One page of `shopping` or `places` results for the query text."""
         today = self._today()
         if source == "shopping":
-            data = await self._get({"engine": "google_shopping", "q": query, "page": page})
+            data = await self._get(self._params("google_shopping", query, page))
             rows, build = data.get("shopping_results"), shopping_item
         elif source == "places":
-            data = await self._get({"engine": "google_maps", "q": query, "page": page})
+            data = await self._get(self._params("google_maps", query, page))
             rows, build = data.get("local_results"), place_item
         else:
             raise ValueError(f"unknown source {source!r}")
@@ -186,21 +190,48 @@ class SearchApi:
         return items
 
 
-def _key() -> str | None:
+class SearchApi(_Api):
+    name = "SearchAPI"
+    base_url = "https://www.searchapi.io/api/v1/search"
+
+    def _params(self, engine: str, query: str, page: int) -> dict:
+        return {"engine": engine, "q": query, "page": page}
+
+
+class SerpApi(_Api):
+    name = "SerpApi"
+    base_url = "https://serpapi.com/search.json"
+
+    def _params(self, engine: str, query: str, page: int) -> dict:
+        params = {"engine": engine, "q": query}
+        if engine == "google_maps":
+            params["type"] = "search"
+        if page > 1:
+            params["start"] = (page - 1) * MAX_RESULTS  # SerpApi pages by result offset
+        return params
+
+
+def _keys() -> tuple[str | None, str | None]:
     from app.config import get_settings
 
-    return getattr(get_settings(), "search_api_key", None) or None
+    settings = get_settings()
+    return (getattr(settings, "search_api_key", None) or None,
+            getattr(settings, "serp_api_key", None) or None)
 
 
 def configured() -> bool:
     try:
-        return bool(_key())
+        return any(_keys())
     except Exception:
         logger.warning("research provider check failed", exc_info=True)
         return False
 
 
 def choose_provider(*, transport: httpx.AsyncBaseTransport | None = None,
-                    sleep: SleepFn = asyncio.sleep) -> SearchApi | None:
-    key = _key()
-    return SearchApi(key, transport=transport, sleep=sleep) if key else None
+                    sleep: SleepFn = asyncio.sleep) -> _Api | None:
+    search_api, serp_api = _keys()
+    if search_api:
+        return SearchApi(search_api, transport=transport, sleep=sleep)
+    if serp_api:
+        return SerpApi(serp_api, transport=transport, sleep=sleep)
+    return None

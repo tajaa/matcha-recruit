@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
@@ -470,3 +470,39 @@ def page_urls(page: dict) -> set[str]:
                 if isinstance(url, str) and url:
                     urls.add(url)
     return urls
+
+
+MAX_LINKS = 30
+
+
+def _site(host: str | None) -> str:
+    host = (host or "").lower().rstrip(".")
+    return host[4:] if host.startswith("www.") else host
+
+
+def page_links(html: bytes, base: str, limit: int = MAX_LINKS) -> list[dict]:
+    """Links on the page to other pages of the same site, with their text:
+    how a listing or results page points at each item's own page. Navigation,
+    headers and footers are skipped, as are short and anchor-only links.
+    Only Espresso Tasks asks for these; `extract_page` is unchanged."""
+    soup = BeautifulSoup(html, "lxml")
+    site = _site(urlsplit(base).hostname)
+    out: list[dict] = []
+    seen = {base.split("#")[0]}
+    for anchor in soup.find_all("a", href=True):
+        if anchor.find_parent(["nav", "header", "footer"]):
+            continue
+        href = urljoin(base, str(anchor["href"]).strip()).split("#")[0]
+        parts = urlsplit(href)
+        if parts.scheme not in ("http", "https") or _site(parts.hostname) != site:
+            continue
+        if len(parts.path.rstrip("/")) < 8 or href in seen:
+            continue
+        text = " ".join(anchor.get_text(" ", strip=True).split())[:120]
+        if len(text) < 6:
+            continue
+        seen.add(href)
+        out.append({"text": text, "url": href})
+        if len(out) >= limit:
+            break
+    return out
