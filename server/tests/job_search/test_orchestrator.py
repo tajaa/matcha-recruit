@@ -100,6 +100,25 @@ async def test_a_failing_step_is_retried_then_the_search_ends(wired, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_a_phase_whose_task_keeps_getting_killed_ends(wired, monkeypatch):
+    """A killed task never reaches advance, so its claim's attempt stands; the
+    claim past MAX_ATTEMPTS ends the search instead of running the phase."""
+    conn, dispatch, rerank = wired
+    phase = AsyncMock()
+    monkeypatch.setitem(orchestrator.PHASES, "enriching", phase)
+    conn.on("attempts = attempts + 1", search_row(status="enriching", attempts=orchestrator.MAX_ATTEMPTS + 1))
+    conn.on("SELECT COUNT(*) FROM mw_job_leads", 9)
+    conn.on("SELECT * FROM mw_job_searches WHERE id = $1", search_row())
+    await orchestrator.run_phase(SEARCH, TOKEN)
+    phase.assert_not_awaited()
+    args = advance_args(conn)
+    assert args[2] == "done" and "kept stopping" in args[7]  # found jobs: ranked, counted
+    rerank.assert_awaited_once()
+    dispatch.assert_not_awaited()
+    assert "'10 minutes'" in conn.ran("attempts = attempts + 1")[0][1]
+
+
+@pytest.mark.asyncio
 async def test_phase_failed_and_unknown_steps_end_at_once(wired, monkeypatch):
     conn, dispatch, _ = wired
     conn.on("attempts = attempts + 1", search_row(status="discovering", attempts=1))

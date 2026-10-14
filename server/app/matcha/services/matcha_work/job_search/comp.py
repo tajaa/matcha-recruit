@@ -7,8 +7,15 @@ fields (an ATS salary range, JSON-LD `baseSalary`) are quoted as the field and
 its raw values.
 
 A missing number is "not posted", never zero. Text scanning is deliberately
-conservative: a bare number is never pay, and an amount near "budget",
-"revenue" or "Series B" is not pay unless the sentence also says salary.
+conservative:
+
+* outside a known pay field, an amount needs a currency or a K ("$85 an
+  hour", "150K"), so "12 hour days" and "24 hour on-call" are not pay;
+* "401k", "403(b)" and "457(b)" are retirement plans, never a salary;
+* an amount near "budget", "revenue" or "Series B" is not pay unless the
+  sentence also says salary;
+* a percentage is a bonus (or equity) only in the same clause as the word:
+  "a 401(k) match of 4% and an annual bonus" is a mentioned bonus, not 4%.
 """
 from __future__ import annotations
 
@@ -54,7 +61,9 @@ _NOT_PAY = re.compile(
     r"assets under|portfolio|p&l|sales of|deal size|market cap|savings|ebitda|investment)\b",
     re.I,
 )
-_PCT = r"(?P<lo>\d{1,2}(?:\.\d+)?)\s?%(?:\s*(?:-|–|—|to)\s*(?P<hi>\d{1,2}(?:\.\d+)?)\s?%)?"
+# "20%", "20–30%", "20% to 30%", "0.5%-1.0%".
+_PCT = (r"(?P<lo>\d{1,2}(?:\.\d+)?)\s?%?\s*(?:-|–|—|to)\s*(?P<hi>\d{1,2}(?:\.\d+)?)\s?%"
+        r"|(?P<one>\d{1,2}(?:\.\d+)?)\s?%")
 _PCT_RE = re.compile(_PCT)
 _BONUS_WORD = re.compile(r"\bbonus(es)?\b|\bshort[- ]term incentive\b|\bSTI\b", re.I)
 _BONUS_MENTION = re.compile(
@@ -64,7 +73,21 @@ _BONUS_MENTION = re.compile(
     r"|\bshort[- ]term incentive\b",
     re.I,
 )
-_NOT_BONUS = re.compile(r"\b(is|be|a|as)\s+(a\s+)?(huge\s+|big\s+|nice\s+)?bonus\b|\bbonus points?\b", re.I)
+# "Spanish is a bonus", "would be a big bonus": a nice-to-have, not pay. "Plus a
+# bonus of up to 20%" is pay, so a bare "a bonus" is not excluded.
+_NOT_BONUS = re.compile(
+    r"\b(is|be|as|considered)\s+(a\s+)?(huge\s+|big\s+|nice\s+|real\s+|definite\s+|strong\s+)?bonus\b"
+    r"|\bbonus points?\b",
+    re.I,
+)
+# Between a percentage and its word: a clause break or another benefit means
+# the number belongs to something else.
+_CLAUSE_BREAK = re.compile(
+    r"[,;.\n•]|\b(and|or|match|matching|401|403|457|pto|vacation|discount|travel|commission|raise|"
+    r"equity|bonus|options|stock)\b",
+    re.I,
+)
+_RETIREMENT = re.compile(r"(?:401|403|457)\s?\(?[kKbB]\)?")
 _SIGNING = re.compile(r"\b(sign(ing)?[- ]on|signing)\b", re.I)
 _EQUITY_WORD = re.compile(
     r"\bequity\b|\bstock options?\b|\boptions\b|\bRSUs?\b|\brestricted stock\b|\bprofits? interests?\b"
@@ -101,13 +124,13 @@ def _amount(match: re.Match, p: str) -> tuple[float | None, str | None, bool]:
         value = float(raw.replace(",", ""))
     except ValueError:
         return None, None, False
-    if (match.group(f"{p}suf") or "").lower() == "m":
-        return None, None, False
     suffix = (match.group(f"{p}suf") or "").lower()
+    if suffix == "m":
+        return None, None, False
+    if _RETIREMENT.match(match.string, match.start(f"{p}num")):
+        return None, None, False  # "401k" is a retirement plan, not $401,000
     if suffix == "k":
         value *= 1_000
-    elif suffix == "m":
-        value *= 1_000_000
     cur = (match.group(f"{p}cur") or "").strip()
     currency = _SYMBOLS.get(cur) or (cur.upper() if cur.upper() in _CODES else None)
     return value, currency, bool(suffix)
@@ -174,6 +197,14 @@ def _base_finding(text: str, match: re.Match, lo: float, hi: float, currency: st
     }
 
 
+def _priced(currency: str | None, suffix: bool, period: str | None, known_pay: bool) -> bool:
+    """Whether an amount is written like money. A known pay field may say
+    "85–95 an hour"; free text must say "$85" or "85K"."""
+    if known_pay:
+        return bool(currency or suffix or period)
+    return bool(currency or suffix)
+
+
 def scan_base(text: str, *, origin: str, url: str | None = None,
               known_pay: bool = False) -> list[dict]:
     """Base-pay ranges and amounts stated in `text`.
@@ -191,12 +222,11 @@ def scan_base(text: str, *, origin: str, url: str | None = None,
         if lo is None or hi is None:
             continue
         currency = cur_a or cur_b
-        if not (currency or suf_a or suf_b or _period(match)):
+        if not _priced(currency, suf_a or suf_b, _period(match), known_pay):
             continue
-        # "150-200K": the suffix on the second amount applies to the first.
+        # "150-200K": the K on the second amount applies to the first.
         if suf_b and not suf_a and lo < 1_000:
-            hi_suffix = (match.group("bsuf") or "").lower()
-            lo *= 1_000 if hi_suffix == "k" else 1_000_000
+            lo *= 1_000
         if lo > hi:
             lo, hi = hi, lo
         if lo <= 0 or hi / lo > 5:
@@ -210,7 +240,7 @@ def scan_base(text: str, *, origin: str, url: str | None = None,
         if any(a <= match.start() < b for a, b in taken):
             continue
         value, currency, suffix = _amount(match, "a")
-        if value is None or not (currency or suffix or _period(match)):
+        if value is None or not _priced(currency, suffix, _period(match), known_pay):
             continue
         finding = _base_finding(text, match, value, value, currency, _period(match), origin=origin,
                                 url=url, known_pay=known_pay)
@@ -219,19 +249,28 @@ def scan_base(text: str, *, origin: str, url: str | None = None,
     return found
 
 
-def _pct_near(text: str, word: re.Pattern, *, max_pct: float, gap: int = 45) -> list[tuple[re.Match, float, float]]:
-    """Percentages within `gap` characters of `word`."""
+def _pct_tied(text: str, word: re.Pattern, *, max_pct: float,
+              gap: int = 30) -> list[tuple[re.Match, float, float, str]]:
+    """Percentages in the same clause as `word`: (match, lo, hi, the text
+    between them). "Bonus target of 40%" and "a 30% target bonus" are tied;
+    "a 401(k) match of 4% and an annual bonus" is not."""
     out = []
     for match in _PCT_RE.finditer(text):
-        lo = float(match.group("lo"))
+        lo = float(match.group("lo") or match.group("one"))
         hi = float(match.group("hi") or lo)
         if lo > hi:
             lo, hi = hi, lo
         if hi > max_pct or lo <= 0:
             continue
-        around = text[max(0, match.start() - gap): match.end() + gap]
-        if word.search(around):
-            out.append((match, lo, hi))
+        start = max(0, match.start() - gap)
+        for found in word.finditer(text, start, min(len(text), match.end() + gap)):
+            between = (text[found.end():match.start()] if found.end() <= match.start()
+                       else text[match.end():found.start()])
+            if found.start() < match.end() and found.end() > match.start():
+                continue  # overlapping: not a word next to the number
+            if len(between) <= gap and not _CLAUSE_BREAK.search(between):
+                out.append((match, lo, hi, between))
+                break
     return out
 
 
@@ -239,11 +278,9 @@ def scan_bonus(text: str, *, origin: str, url: str | None = None) -> list[dict]:
     if not text:
         return []
     found = []
-    for match, lo, hi in _pct_near(text, _BONUS_WORD, max_pct=100):
+    for match, lo, hi, _between in _pct_tied(text, _BONUS_WORD, max_pct=100):
         around = _window(text, match.start(), match.end(), 45)
-        if _NOT_BONUS.search(around) or _EQUITY_WORD.search(around) and not _BONUS_WORD.search(
-            text[max(0, match.start() - 25): match.end() + 25]
-        ):
+        if _NOT_BONUS.search(around):
             continue
         found.append({
             "component": "bonus", "status": "posted",
@@ -276,13 +313,11 @@ def scan_equity(text: str, *, origin: str, url: str | None = None) -> list[dict]
     if not text:
         return []
     found = []
-    for match, lo, hi in _pct_near(text, _EQUITY_WORD, max_pct=20, gap=35):
+    for match, lo, hi, _between in _pct_tied(text, _EQUITY_WORD, max_pct=20):
         around = text[max(0, match.start() - 35): match.end() + 35]
-        word = _EQUITY_WORD.search(around)
-        if word is None or _BONUS_WORD.search(around):
-            continue
         offset = max(0, match.start() - 35)
-        if not _comp_equity(text, offset + word.start(), offset + word.end()):
+        word = _EQUITY_WORD.search(around)
+        if word is None or not _comp_equity(text, offset + word.start(), offset + word.end()):
             continue
         found.append({
             "component": "equity", "status": "posted", "kind": "percent",

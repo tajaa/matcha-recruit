@@ -83,13 +83,17 @@ async def test_discover_dedupes_filters_and_counts_calls(conn):
     })
     conn.on("SELECT COUNT(*) FROM mw_job_leads", count_script(0, 2))
     conn.on("INSERT INTO mw_job_leads", 2)
+    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 6)
     search = discover_search(["COO", "Chief Operating Officer"],
                              criteria=json.dumps({"exclude_companies": ["excluded co"]}))
     out = await phases.discover(search, phases.Deps(provider=lambda: provider), guard())
     assert out.status == "screening" and out.progress["found"] == 2
     assert len(provider.calls) == 3
-    [counter] = conn.ran("provider_calls = provider_calls + $2")
-    assert counter[2] == (SEARCH, 3)
+    # Reserved up front (2 queries x 3 pages), the 3 unused given back after.
+    [granted] = conn.ran("SET provider_calls = cur.before")
+    assert granted[2] == (SEARCH, 6, phases.MAX_PROVIDER_CALLS)
+    [refund] = conn.ran("SET provider_calls = GREATEST(provider_calls - $2, 0)")
+    assert refund[2] == (SEARCH, 3)
     [insert] = conn.ran("INSERT INTO mw_job_leads")
     records = json.loads(insert[2][2])
     assert sorted(r["company"] for r in records) == ["Acme Inc.", "Beta"]
@@ -103,10 +107,10 @@ async def test_discover_respects_remote_preference_and_budget(conn):
     provider = FakeProvider({"COO": [([posting("COO", "Acme"), posting("COO", "Remote Co", remote=True)], "1"),
                                      ([posting("COO", "Later")], None)]})
     conn.on("SELECT COUNT(*) FROM mw_job_leads", 1)
-    search = discover_search(["COO"], criteria=json.dumps({"remote": "remote_only"}),
-                             provider_calls=phases.MAX_PROVIDER_CALLS - 1)
+    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 1)  # one call left in the search's lifetime budget
+    search = discover_search(["COO"], criteria=json.dumps({"remote": "remote_only"}))
     await phases.discover(search, phases.Deps(provider=lambda: provider), guard())
-    assert len(provider.calls) == 1  # one call left in the search's budget
+    assert len(provider.calls) == 1
     records = json.loads(conn.ran("INSERT INTO mw_job_leads")[0][2][2])
     assert [r["company"] for r in records] == ["Remote Co"]
     assert not phases.keep_posting(posting("COO", "Remote Co", remote=True), {"remote": "onsite_only"})
@@ -114,6 +118,7 @@ async def test_discover_respects_remote_preference_and_budget(conn):
 
 @pytest.mark.asyncio
 async def test_discover_failures(conn):
+    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 3)
     with pytest.raises(phases.PhaseFailed, match="isn't set up"):
         await phases.discover(discover_search(["COO"]), phases.Deps(provider=lambda: None), guard())
 
@@ -164,7 +169,7 @@ def lead(links, **over):
 @pytest.mark.asyncio
 async def test_enrich_one_prefers_the_ats():
     deps = phases.Deps(ats_fetch=AsyncMock(return_value=ats_posting()), page_fetch=AsyncMock())
-    budget = phases._Budget(left=5)
+    budget = phases.Budget(left=5)
     update = await phases.enrich_one(lead(["https://www.linkedin.com/jobs/1", GH_URL]), deps, budget)
     assert update["source"] == "greenhouse" and update["ats"]["questions"][0]["key"] == "q1"
     assert update["comp"]["base"]["annual_max"] == 310000 and update["description"].startswith("Full")
@@ -176,7 +181,7 @@ async def test_enrich_one_prefers_the_ats():
 async def test_enrich_one_reads_the_company_page():
     deps = phases.Deps(ats_fetch=AsyncMock(return_value=None), page_fetch=AsyncMock(return_value=page(JSONLD_PAGE)))
     update = await phases.enrich_one(
-        lead(["https://www.indeed.com/viewjob?jk=1", "https://careers.delta.test/coo"]), deps, phases._Budget(left=5))
+        lead(["https://www.indeed.com/viewjob?jk=1", "https://careers.delta.test/coo"]), deps, phases.Budget(left=5))
     assert update["source"] == "web" and update["remote"] is True
     assert update["comp"]["base"]["evidence"]["origin"] == "jsonld"
     assert update["comp"]["bonus"]["pct_min"] == 25
@@ -187,7 +192,7 @@ async def test_enrich_one_reads_the_company_page():
 async def test_enrich_one_follows_a_careers_redirect_into_the_ats():
     deps = phases.Deps(ats_fetch=AsyncMock(return_value=ats_posting()),
                        page_fetch=AsyncMock(return_value=page("<html></html>", final_url=GH_URL)))
-    update = await phases.enrich_one(lead(["https://delta.test/careers/coo"]), deps, phases._Budget(left=5))
+    update = await phases.enrich_one(lead(["https://delta.test/careers/coo"]), deps, phases.Budget(left=5))
     assert update["source"] == "greenhouse"
 
 
@@ -195,15 +200,18 @@ async def test_enrich_one_follows_a_careers_redirect_into_the_ats():
 async def test_enrich_one_gives_up_quietly():
     aggregator_only = phases.Deps(ats_fetch=AsyncMock(), page_fetch=AsyncMock())
     assert await phases.enrich_one(lead(["https://www.linkedin.com/jobs/1"]), aggregator_only,
-                                   phases._Budget(left=5)) is None
+                                   phases.Budget(left=5)) is None
     aggregator_only.page_fetch.assert_not_awaited()
-    assert await phases.enrich_one(lead([GH_URL]), aggregator_only, phases._Budget(left=0)) is None
+    # Out of granted fetches: not tried, so the lead stays unread for later.
+    budget = phases.Budget(left=0)
+    assert await phases.enrich_one(lead([GH_URL]), aggregator_only, budget) is phases.NOT_TRIED
+    assert budget.exhausted
     for result in (page("", status=404), page("{}", ctype="application/json"), page("<html>no ld</html>")):
         deps = phases.Deps(ats_fetch=AsyncMock(), page_fetch=AsyncMock(return_value=result))
-        assert await phases.enrich_one(lead(["https://delta.test/coo"]), deps, phases._Budget(left=5)) is None
+        assert await phases.enrich_one(lead(["https://delta.test/coo"]), deps, phases.Budget(left=5)) is None
     for exc in (UnsafeURL("private"), TimeoutError(), RuntimeError("weird")):
         deps = phases.Deps(ats_fetch=AsyncMock(), page_fetch=AsyncMock(side_effect=exc))
-        assert await phases.enrich_one(lead(["https://delta.test/coo"]), deps, phases._Budget(left=5)) is None
+        assert await phases.enrich_one(lead(["https://delta.test/coo"]), deps, phases.Budget(left=5)) is None
 
 
 @pytest.mark.asyncio
@@ -215,13 +223,15 @@ async def test_enrich_phase_batches_then_ranks(conn, monkeypatch):
             leads)
     conn.on("SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1\n               AND enriched_at IS NULL", 5)
     conn.on("COUNT(*) FILTER", {"total": 7, "posted": 3})
+    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 4)
     deps = phases.Deps(ats_fetch=AsyncMock(return_value=ats_posting()), page_fetch=AsyncMock())
     search = search_row(status="enriching", fetch_calls=0)
     out = await phases.enrich(search, deps, guard())
     assert out.status == "enriching"  # more to read
     saves = conn.ran("enriched_at = NOW()")
     assert len(saves) == 2 and all(s[2][2] == TOKEN for s in saves)
-    assert conn.ran("fetch_calls = fetch_calls + $2")[0][2] == (SEARCH, 1)
+    assert conn.ran("SET fetch_calls = cur.before")[0][2] == (SEARCH, 4, phases.MAX_FETCHES)
+    assert conn.ran("SET fetch_calls = GREATEST(fetch_calls - $2, 0)")[0][2] == (SEARCH, 3)
     rerank.assert_not_awaited()
 
     conn.on("SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1\n               AND enriched_at IS NULL", 0)
@@ -231,19 +241,51 @@ async def test_enrich_phase_batches_then_ranks(conn, monkeypatch):
     assert out.status == "done" and out.progress["posted_pay"] == 3 and out.progress["ranked"] is True
     rerank.assert_awaited_once()
 
-    # Out of page loads: rank what there is.
+    # Out of page loads: rank what there is, and mark nothing read.
     rerank.reset_mock()
+    conn.calls.clear()
     conn.on("SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1\n               AND enriched_at IS NULL", 5)
-    out = await phases.enrich(search_row(status="enriching", fetch_calls=phases.MAX_FETCHES), deps, guard())
+    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 0)
+    out = await phases.enrich(search_row(status="enriching"), deps, guard())
     assert out.status == "done"
     rerank.assert_awaited_once()
+    assert not conn.ran("enriched_at = NOW()")
 
     # A cancelled search is not ranked by a chain that lost its token.
     conn.on("SELECT 1 FROM mw_job_searches WHERE id = $1 AND dispatch_token = $2", None)
     rerank.reset_mock()
-    out = await phases.enrich(search_row(status="enriching", fetch_calls=phases.MAX_FETCHES), deps, guard())
+    out = await phases.enrich(search_row(status="enriching"), deps, guard())
     assert out.status == "enriching"
     rerank.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_budget_that_runs_out_mid_batch_leaves_the_rest_unread(conn, monkeypatch):
+    monkeypatch.setattr(phases, "rerank", AsyncMock(return_value=2))
+    leads = [lead([GH_URL]), lead([GH_URL])]
+    conn.on("WHERE search_id = $1 AND enriched_at IS NULL AND screen_status <> 'irrelevant'\n                ORDER BY",
+            leads)
+    conn.on("COUNT(*) FILTER", {"total": 2, "posted": 1})
+    conn.on("SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1\n               AND enriched_at IS NULL", 1)
+    conn.on("SELECT 1 FROM mw_job_searches WHERE id = $1 AND dispatch_token = $2", 1)
+    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 1)
+    deps = phases.Deps(ats_fetch=AsyncMock(return_value=ats_posting()), page_fetch=AsyncMock())
+    out = await phases.enrich(search_row(status="enriching"), deps, guard())
+    # One lead read; the other was never tried, so it is not marked read, and
+    # the budget is spent, so the search moves on to ranking.
+    assert len(conn.ran("enriched_at = NOW()")) == 1
+    assert out.status == "done"
+
+
+@pytest.mark.asyncio
+async def test_grant_and_refund(conn):
+    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 5)
+    assert await phases.grant(SEARCH, "fetch_calls", 8, 60) == 5
+    assert await phases.grant(SEARCH, "fetch_calls", 0, 60) == 0
+    await phases.refund(SEARCH, "provider_calls", 0)
+    assert not conn.ran("GREATEST(provider_calls - $2, 0)")
+    with pytest.raises(AssertionError):
+        await phases.grant(SEARCH, "tokens; DROP TABLE x", 1, 1)
 
 
 @pytest.mark.asyncio

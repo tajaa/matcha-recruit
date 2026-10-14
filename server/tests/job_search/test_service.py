@@ -143,3 +143,27 @@ async def test_rerank_writes_every_lead_in_one_statement():
     ids, scores, ranks, bands = write[2][1:5]
     assert ids == [b, a] and ranks == [1, 2] and bands == [0, 2]
     assert await service.rerank(FakeConn(), search_row()) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_stale_search_that_found_jobs_ends_done(monkeypatch):
+    """The create-time sweep ends a dead search the way reconcile would: done
+    and ranked when it paid for jobs (it counts), failed when it found none."""
+    rerank = AsyncMock(return_value=3)
+    monkeypatch.setattr(service, "rerank", rerank)
+    found, empty = uuid4(), uuid4()
+    conn = (FakeConn()
+            .on("FOR UPDATE", [search_row(id=found, status="enriching"), search_row(id=empty, status="discovering")])
+            .on("SELECT EXISTS (SELECT 1 FROM mw_job_leads", lambda search_id: search_id == found))
+    assert await service.end_stale(conn, USER) == 2
+    ends = {call[2][0]: call[2][1] for call in conn.ran("error = COALESCE(error, 'Stopped:")}
+    assert ends == {found: "done", empty: "failed"}
+    assert rerank.await_count == 1
+    assert "INTERVAL '2 hours'" in conn.ran("FOR UPDATE")[0][1]
+
+
+@pytest.mark.asyncio
+async def test_find_by_request(conn):
+    assert await service.find_by_request(USER, uuid4()) is None
+    conn.on("AND request_id = $2", search_row(status="discovering"))
+    assert (await service.find_by_request(USER, uuid4()))["status"] == "discovering"

@@ -46,15 +46,28 @@ Worker: `workers/tasks/job_search.py`. Migration: `mwjobs01`
 - **Unposted pay is unknown, never $0.** Such a lead ranks in band 2 with the
   base weight removed and the rest renormalized. Currencies are never compared
   (band 1 is base pay in another currency).
-- **Text scanning is conservative.** A bare number is never pay. Millions are
-  never a salary. "Budget", "revenue", "Series B" right next to an amount wins
-  over a "salary" elsewhere in the sentence. "Private equity-backed", "DEI",
-  "is a bonus" are not compensation. Tests: `tests/job_search/test_comp.py`.
+- **Text scanning is conservative.** Outside a known pay field (Google's
+  `salary`), an amount needs a currency or a K, so "12 hour days" and "24 hour
+  on-call" are not hourly pay. Millions are never a salary, and "401k",
+  "403(b)", "457(b)" are retirement plans. "Budget", "revenue", "Series B"
+  right next to an amount wins over a "salary" elsewhere in the sentence. A
+  percentage is a bonus (or equity) only in the same clause as the word:
+  "a 401(k) match of 4% and an annual bonus" is a mentioned bonus, not 4%.
+  "Private equity-backed", "DEI", "is a bonus" are not compensation, but "plus
+  a bonus of up to 20%" is. Tests: `tests/job_search/test_comp.py`.
+- **Page data reaching a model is bounded.** `page_extract` keeps only the
+  scalar fields of JSON-LD `baseSalary` (currency, min/max/value, unit), so a
+  page cannot ride a giant salary object into the model's input.
 - **Ranking is deterministic.** Base is scored as a share of the best posted
   base in its currency (not a percentile: $10K apart should be 1.0 vs 0.96).
   Ties break on fit, then newest posting, then id.
 - **One live search per person** (partial unique index). A create while one
-  runs is 409; a live search idle for 2 hours is failed at the next create.
+  runs is 409. A live search idle for `STALE_INTERVAL` (2 hours) is ended at
+  the next create exactly as reconcile ends it (`service.end_stale`): `done`
+  and ranked when it found jobs, `failed` (free) when it found none.
+- **A retried create is answered first.** `create_search` looks up
+  `(user_id, request_id)` before the plan, cap and rate-limit checks, so a
+  person whose first answer was lost gets their running search, not a 429.
 - **Allowance counts what cost money.** Every status but `failed` counts. A
   search the system could not run (nothing found, queue down, every query
   failed) is `failed` and free. Cancelled and deleted searches count; delete
@@ -71,8 +84,12 @@ no `AGENT_*_QUEUE` and every task shares the single-slot main worker. Route it
 elsewhere with `AGENT_JOBS_QUEUE` (else `AGENT_CARD_QUEUE`).
 
 - `claim`: one UPDATE that succeeds only for the current `dispatch_token`, a
-  live status and an expired lease (9 min). Duplicates and retired chains do
-  nothing.
+  live status and an expired lease (10 min, longer than the task's 560s hard
+  limit, so a restart can never run beside a task still alive). Duplicates and
+  retired chains do nothing. Every claim counts an attempt; only a finished
+  phase resets it. The claim past `MAX_ATTEMPTS` ends the search (`done` if it
+  found jobs) instead of running the phase: a task killed by the memory limit
+  or the hard time limit cannot loop through restarts forever.
 - `advance`: writes the outcome under the token and gives the next task a NEW
   token, so a late duplicate of an older message cannot start a second chain.
   Returns `(written, next_token)`.
@@ -87,7 +104,11 @@ elsewhere with `AGENT_JOBS_QUEUE` (else `AGENT_CARD_QUEUE`).
   new token and dispatch it. Celery does not redeliver a killed task.
 
 Budgets per search, across retries: 30 provider calls, 120 leads, 60 page/API
-fetches.
+fetches. Calls are reserved on the search row before they are made
+(`phases.grant`, one statement under a row lock) and only the unused part is
+given back (`refund`). A task killed mid-phase gives nothing back, so a retry
+works from what is left: it can never buy a second budget. A lead the budget
+ran out before is left unread (`NOT_TRIED`), not marked read.
 
 ## Phases
 
