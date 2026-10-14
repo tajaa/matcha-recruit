@@ -31,8 +31,9 @@ ASSISTANT_MODEL = LUNA
 _QUEUE_ENV = "AGENT_ASSISTANT_QUEUE"
 _CARD_QUEUE_ENV = "AGENT_CARD_QUEUE"
 _BROWSER_QUEUE_ENV = "AGENT_BROWSER_QUEUE"
-# Abilities that open Chromium (`abilities/reservations.py`, `abilities/screenshots.py`).
-_BROWSER_ABILITIES = frozenset({"reservations", "screenshots"})
+# Abilities whose run drives Chromium itself (`abilities/reservations.py`).
+# Screenshots don't move the run: each view is its own browser-queue task.
+_BROWSER_ABILITIES = frozenset({"reservations"})
 # Celery's hard task limit is 600s, so a run still live well past that has
 # lost its worker. Older than this it stops blocking the next message.
 _STALE_RUN_INTERVAL = "11 minutes"

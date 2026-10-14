@@ -234,29 +234,20 @@ async def _deliver(run: dict, ctx: RunContext, outcome: runner.RunOutcome,
     if outcome.kind == "result":
         stored = dict(outcome.result or {})
         picks = result.picks_block(stored)
+        photos = next((b for b in stored.get("blocks") or [] if b.get("type") == "photos"), None)
         image_warnings: list[str] = []
-        if picks is not None:
+        if picks is not None or photos is not None:
             await progress.note("Collecting photos…", force=True)
             # The photo rehoster keys its storage path on two ids; a run in a
             # chat has a conversation and itself where a card has a project
-            # and a task.
-            image_warnings = await images.rehost_images(
-                picks, company_id=run["company_id"], project_id=run["channel_id"], task_id=run_id,
-                total_seconds=_PHOTO_SECONDS,
-            )
-        photos = next((b for b in stored.get("blocks") or [] if b.get("type") == "photos"), None)
-        if photos is not None:
-            await progress.note("Collecting photos…", force=True)
-            # The rehoster walks picks; the photos ride in one and come back
-            # out as CDN URLs. One that cannot be rehosted is dropped, never
+            # and a task. One call, so picks and photos share one budget and
+            # one deadline. A photo that cannot be rehosted is dropped, never
             # shown from the site it came from.
-            holder = {"top_pick": {"name": "Photo", "images": photos["photos"]}}
-            image_warnings += await images.rehost_images(
-                holder, company_id=run["company_id"], project_id=run["channel_id"], task_id=run_id,
-                total_seconds=_PHOTO_SECONDS,
+            image_warnings = await images.rehost_images(
+                picks or {}, company_id=run["company_id"], project_id=run["channel_id"], task_id=run_id,
+                total_seconds=_PHOTO_SECONDS, photos=photos["photos"] if photos is not None else None,
             )
-            photos["photos"] = holder["top_pick"]["images"]
-            if not photos["photos"]:
+            if photos is not None and not photos["photos"]:
                 stored["blocks"] = [b for b in stored["blocks"] if b is not photos]
         stored["warnings"] = (outcome.warnings + image_warnings)[:30]
         await store.mark_run(run_id, status="done", result=stored, **usage)

@@ -44,18 +44,27 @@ function host(url: string): string {
   }
 }
 
-function Photo({ url, size, alt }: { url?: string | null; size: number; alt: string }) {
+/** An https image (our CDN), or a placeholder when there is none or it fails
+ *  to load. `size` is the width, and the height unless one is given. */
+function Photo({ url, size, alt, height = size, fit = 'cover' }: {
+  url?: string | null; size: number; alt: string; height?: number; fit?: 'cover' | 'contain'
+}) {
   const [failed, setFailed] = useState(false)
   const src = url && url.startsWith('https://') && !failed ? url : null
   return (
     <div
       className="shrink-0 overflow-hidden rounded-lg border border-w-line bg-white flex items-center justify-center"
-      style={{ width: size, height: size }}
+      style={{ width: size, height }}
     >
       {src ? (
-        <img src={src} alt={alt} className="h-full w-full object-cover" onError={() => setFailed(true)} />
+        <img
+          src={src}
+          alt={alt}
+          className={`h-full w-full ${fit === 'cover' ? 'object-cover' : 'object-contain'}`}
+          onError={() => setFailed(true)}
+        />
       ) : (
-        <ImageIcon className="text-w-faint" style={{ width: size / 4, height: size / 4 }} />
+        <ImageIcon className="text-w-faint" style={{ width: Math.min(size, height) / 4, height: Math.min(size, height) / 4 }} />
       )}
     </div>
   )
@@ -74,12 +83,7 @@ function ImageStrip({ images, width, height, fit }: {
         const label = image.caption || image.alt || ''
         return (
           <a key={image.url} href={image.url} {...EXTERNAL} title={image.page_url || undefined} className="shrink-0 space-y-1" style={{ width }}>
-            <img
-              src={image.url}
-              alt={label}
-              className={`rounded-lg border border-w-line bg-w-surface2 ${fit === 'cover' ? 'object-cover' : 'object-contain'}`}
-              style={{ width, height }}
-            />
+            <Photo url={image.url} size={width} height={height} fit={fit} alt={label} />
             {label && <p className="line-clamp-2 text-[10px] text-w-dim">{label}</p>}
           </a>
         )

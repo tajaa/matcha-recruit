@@ -247,6 +247,10 @@ describe('Espresso assistant messages', () => {
     expect(link?.getAttribute('href')).toBe('https://cdn.example/lobby.webp')
     expect(link?.getAttribute('rel')).toBe('noopener noreferrer nofollow')
     expect(link?.getAttribute('title')).toBe('https://www.zillow.com/a/')
+    // One that fails to load falls back to the placeholder, like every other photo.
+    fireEvent.error(screen.getByAltText('Lobby'))
+    expect(screen.queryByAltText('Lobby')).toBeNull()
+    expect(screen.getByAltText('The unit list').className).toContain('object-contain')
   })
 
   it('renders an answer block by block and skips a block it does not know', () => {

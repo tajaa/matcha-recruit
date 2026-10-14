@@ -212,18 +212,7 @@ extension AgentCardMessageView {
                             NSWorkspace.shared.open(pair.1)
                         } label: {
                             VStack(alignment: .leading, spacing: 3) {
-                                AsyncImage(url: pair.1) { phase in
-                                    if case .success(let image) = phase {
-                                        image.resizable().aspectRatio(contentMode: fill ? .fill : .fit)
-                                    } else {
-                                        ZStack {
-                                            appState.themeText.opacity(0.06)
-                                            Image(systemName: "photo").foregroundColor(appState.themeTextSecondary)
-                                        }
-                                    }
-                                }
-                                .frame(width: width, height: height)
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                photo(pair.0.url, size: width, height: height, fill: fill)
                                 if let label = pair.0.label {
                                     Text(label)
                                         .font(.system(size: 10))
@@ -239,12 +228,6 @@ extension AgentCardMessageView {
                 }
             }
         }
-    }
-
-    /// Images render only from https URLs, which means our CDN.
-    private func httpsURL(_ string: String) -> URL? {
-        guard let url = URL(string: string), url.scheme == "https", url.host != nil else { return nil }
-        return url
     }
 
     private func itemRow(icon: String, title: String, subtitle: String, detail: String?,

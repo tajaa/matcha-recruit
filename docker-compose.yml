@@ -126,7 +126,7 @@ services:
       disable: true
 
   # Agent worker: agent-card runs, Espresso assistant runs, and the guarded
-  # browser that books reservations. Kept apart from matcha-worker because a
+  # browser that books reservations and takes page screenshots. Kept apart from matcha-worker because a
   # Chromium does not fit in its 768M, and a multi-minute run would block its
   # single slot.
   # Start with: docker-compose --profile agent-worker up -d

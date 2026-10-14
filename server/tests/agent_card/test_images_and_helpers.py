@@ -63,6 +63,46 @@ async def test_rehost_replaces_urls_caps_per_run_and_scopes_prefix(monkeypatch):
     assert storage.uploads[0] == ("photo.webp", f"matcha-work/{company}/{project}/agent/{task}", "image/webp")
 
 
+
+def _loose(*alts):
+    return [{"source_url": f"https://img.example/p{i}.png", "page_url": "https://zillow.example/a", "alt": alt}
+            for i, alt in enumerate(alts)]
+
+
+@pytest.mark.asyncio
+async def test_loose_photos_share_the_picks_budget_and_keep_their_own_alt(monkeypatch):
+    storage = _Storage()
+    monkeypatch.setattr(images, "get_storage", lambda: storage)
+    monkeypatch.setattr(images, "fetch_public", AsyncMock(return_value=_fetched(_png((50, 50)))))
+    result = {"top_pick": {"name": "A", "images": _result()["top_pick"]["images"] + _result()["top_pick"]["images"][:1]}}
+    photos = _loose("Lobby", "", "Pool")
+    warnings = await images.rehost_images(result, company_id=uuid4(), project_id=uuid4(), task_id=uuid4(),
+                                          photos=photos)
+    # One budget of six: four for the pick, two left for the photos.
+    assert len(result["top_pick"]["images"]) == 4 and warnings == []
+    assert photos == [{"url": storage.url, "page_url": "https://zillow.example/a", "alt": "Lobby"},
+                      {"url": storage.url, "page_url": "https://zillow.example/a", "alt": ""}]
+    # No picks at all: the photos alone, and one that fails is named as a photo.
+    photos = _loose("Lobby", "Pool")
+    monkeypatch.setattr(images, "fetch_public", AsyncMock(side_effect=[_fetched(_png((20, 20))), _fetched(b"x", status=404)]))
+    warnings = await images.rehost_images({}, company_id=uuid4(), project_id=uuid4(), task_id=uuid4(), photos=photos)
+    assert [p["alt"] for p in photos] == ["Lobby"]
+    assert warnings == ["Dropped a photo: could not load it safely"]
+
+
+@pytest.mark.asyncio
+async def test_unservable_storage_is_reported_once_for_picks_and_photos(monkeypatch):
+    monkeypatch.setattr(images, "get_storage", lambda: _Storage(url="/uploads/x.webp"))
+    fetch = AsyncMock(return_value=_fetched(_png((20, 20))))
+    monkeypatch.setattr(images, "fetch_public", fetch)
+    result = {"top_pick": {"name": "A", "images": [{"source_url": "https://i.example/a", "page_url": "p", "alt": ""}]}}
+    photos = _loose("Lobby", "Pool")
+    warnings = await images.rehost_images(result, company_id=uuid4(), project_id=uuid4(), task_id=uuid4(),
+                                          photos=photos)
+    assert warnings == ["Photos are unavailable: image storage has no public URL configured"]
+    assert result["top_pick"]["images"] == [] and photos == [] and fetch.await_count == 1
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fetch", [
     AsyncMock(side_effect=UnsafeURL("private")),

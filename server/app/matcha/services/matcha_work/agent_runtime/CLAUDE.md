@@ -187,17 +187,30 @@ render https images only, which means our CDN.
   from that record, not from the model. Before the result is stored,
   `assistant._deliver` rehosts each photo through `agent_card/images.py` (the
   same SSRF-guarded fetch and Pillow re-encode as pick photos), and a photo
-  that cannot be rehosted is dropped. At most 6.
+  that cannot be rehosted is dropped. At most 6. Picks and photos go through
+  one `rehost_images` call (`photos=`), so they share its budget of 6 images
+  and its deadline; a photo keeps its own alt text, empty included.
 - **`screenshots`** (`abilities/screenshots.py`, tool `view_page`). It opens
   one page in the guarded browser (`../browser`, the main frame kept on the
-  page's own site), waits for it to settle, and returns the text as drawn.
-  That is the point for pages like a building's unit list, which only appears
-  with JavaScript and is invisible to `fetch_page`. The screenshot is stored
-  through `images.store_image` (WebP, at most 1200px) under the run's prefix.
-  The model gets only a `screenshot_id`, and the block is rebuilt from the
-  session by id. At most 4 views per run and 4 screenshots in an answer.
-  Offered only where `AGENT_BROWSER_QUEUE` is set (see Queues); read-only and
-  no consent, so it is listed as "Not set up on this server yet." until then.
+  page's own site), waits for it to settle, and returns the text as drawn,
+  one line per row. That is the point for pages like a building's unit list,
+  which only appears with JavaScript and is invisible to `fetch_page`. Like
+  `fetch_page`, an HTTP status of 400 or more is a failure, not a page: an
+  error or "Access denied" page is never read, cited or screenshotted. A
+  page that ends up off its own site fails and says where it went; that is
+  checked on the final URL, because the navigation guard never sees an HTTP
+  redirect (Playwright routes only a redirect's first request). The
+  screenshot is stored through `images.store_image` (WebP, at most 1200px)
+  under the run's prefix. The model gets only a `screenshot_id`, and the
+  block is rebuilt from the session by id. At most 4 views per run and 4
+  screenshots in an answer. Each view launches its own Chromium (on the
+  browser worker every task is a fresh process anyway) and is held to
+  `VIEW_SECONDS` from launch to screenshot. Offered only where
+  `AGENT_BROWSER_QUEUE` is set (see Queues); read-only and no consent, so it
+  is listed as "Not set up on this server yet." until then.
+- **A gate never costs the answer.** `result.normalize` drops a block whose
+  gate raises anything but `ValueError` (the ask-again signal), with a
+  warning, so odd model input (a list where an id goes) loses that block only.
 
 ## Buying (`abilities/purchase.py`)
 
@@ -329,12 +342,21 @@ run, and to go by a record when it and an earlier answer's wording disagree.
 
 ## Queues
 
-`enqueue.queue_for`: a run that has the `reservations` or `screenshots`
-ability goes to `$AGENT_BROWSER_QUEUE`; every other run goes to
-`$AGENT_ASSISTANT_QUEUE`, else `$AGENT_CARD_QUEUE`, else Celery's default.
+`enqueue.queue_for`: a run that has the `reservations` ability (it drives
+the browser inside the run) goes to `$AGENT_BROWSER_QUEUE`; every other run
+goes to `$AGENT_ASSISTANT_QUEUE`, else `$AGENT_CARD_QUEUE`, else Celery's
+default. `screenshots` does not move the run, since it needs no consent and
+would otherwise send every run to the browser worker's one slot. Each
+`view_page` is its own task there instead (`workers/tasks/assistant.view_page`,
+`expires` after `QUEUE_SECONDS`), and the run polls its result. A view still
+queued after `QUEUE_SECONDS` is called off with "the browser is busy". The
+exception is a run already on a worker that serves the browser queue
+(`celery_app.consumes_queue`, read from the `-Q` set when the process
+starts): waiting on that queue from its one slot would wait on itself, so the
+view runs in-process. That covers the default setup, where assistant runs
+fall back to `agent_cards` on the same `matcha-agent-worker`.
 Chromium never runs on the main worker: without `AGENT_BROWSER_QUEUE` neither
-ability is offered at all. `screenshots` needs no consent, so once the queue
-exists every assistant run goes to the browser worker. The worker for it is the `matcha-agent-worker` compose service
+ability is offered at all. The worker for it is the `matcha-agent-worker` compose service
 (profile `agent-worker`).
 
 ## The private conversation
