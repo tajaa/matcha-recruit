@@ -164,6 +164,7 @@ _SPLIT_SERVICE_PACKAGES = {
     "autopilot",
     "handbook_pilot",
     "hr_pilot_corpus",
+    "job_search",
     "legal_defense",
     "matcha_work_ai",
     "matcha_work_document",

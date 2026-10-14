@@ -79,6 +79,7 @@ celery_app = Celery(
         "app.workers.tasks.agent_card",
         "app.workers.tasks.assistant",
         "app.workers.tasks.sales_campaign",
+        "app.workers.tasks.job_search",
         "app.workers.tasks.sales_intake_poll",
         "app.workers.tasks.pos_sales_sync",
         "app.workers.tasks.schedule_eligibility",
@@ -311,6 +312,13 @@ def on_worker_ready(sender=None, **kwargs):
         reconcile_sales_campaigns.delay()
     except Exception:
         logger.exception("[Worker] Failed to enqueue sales-campaign reconciliation")
+    try:
+        # A job search is a chain of short tasks; one killed with the old worker
+        # would leave the search live with nothing running it.
+        from app.workers.tasks.job_search import reconcile_job_searches
+        reconcile_job_searches.delay()
+    except Exception:
+        logger.exception("[Worker] Failed to enqueue job-search reconciliation")
     try:
         from app.workers.tasks.schedule_break_refresh import recover_stale_employee_schedule_breaks
         recover_stale_employee_schedule_breaks.delay()

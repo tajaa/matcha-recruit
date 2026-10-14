@@ -47,6 +47,10 @@ from .sales import router as _sales_router
 
 router.include_router(_sales_router)
 
+from .job_search import router as _job_search_router
+
+router.include_router(_job_search_router)
+
 from .tasks import router as _tasks_router
 
 router.include_router(_tasks_router)

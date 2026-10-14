@@ -72,6 +72,14 @@ ASSISTANT_DAILY_RUNS: dict[str, int] = {
     PLAN_BUSINESS: 60,
 }
 
+# Espresso job searches per UTC month. One search is ~30 Google Jobs calls, up
+# to 60 page loads and a chain of model runs, so whole searches are counted;
+# re-ranking and redrafting a search are free. Plans absent here get none.
+JOB_SEARCH_MONTHLY_RUNS: dict[str, int] = {
+    PLAN_PRO: 4,
+    PLAN_BUSINESS: 10,
+}
+
 _PLAN_RANK = {PLAN_FREE: 0, PLAN_LITE: 1, PLAN_PRO: 2, PLAN_BUSINESS: 2}
 
 # Journal kinds gated to lite+ (basic note/todo/journal stay free).
@@ -206,6 +214,7 @@ def features_for_plan(plan: str) -> dict[str, bool]:
         "business_modes": plan == PLAN_BUSINESS,
         "agent_cards": pro_plus,
         "assistant": pro_plus,
+        "job_search": pro_plus,
     }
 
 
@@ -248,6 +257,13 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
     except Exception:
         pass
 
+    try:
+        from ..matcha_work.job_search.quota import job_search_usage
+
+        quotas["job_searches"] = await job_search_usage(user_id, plan=plan)
+    except Exception:
+        pass
+
     # What the WORKSPACE gets, as opposed to what the plan allows. The
     # assistant is for personal accounts only (agent_runtime/eligibility.py);
     # both apps read this instead of guessing.
@@ -265,6 +281,7 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
     )
     workspace = {
         "espresso_assistant": False,
+        "job_search": False,
         "claude_models": anthropic_configured(),
         "chat_models": chat_models,
         "default_chat_model": default_chat_model,
@@ -278,6 +295,14 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
             # Informational, like the quotas above.
             pass
     if workspace["espresso_assistant"]:
+        # Job search rides the same personal-account rule, and needs a
+        # listings provider key on the server.
+        try:
+            from ..matcha_work.job_search import providers as job_providers
+
+            workspace["job_search"] = job_providers.configured()
+        except Exception:
+            pass
         # The assistant's model menu (`[{"id", "label"}]`) and where it starts,
         # from `agent_runtime.models`; the run re-checks the pick at enqueue.
         try:
