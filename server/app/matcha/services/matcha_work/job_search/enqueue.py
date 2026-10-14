@@ -21,7 +21,7 @@ from app.matcha.services.billing.entitlements_service import PLAN_PRO, require_p
 
 from . import providers, ranking
 from .quota import job_search_usage, limit_for_plan, usage_payload, used_this_month
-from .service import LIVE, search_view
+from .service import end_stale, find_by_request, search_view
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +31,6 @@ ENTITLEMENT = "job_search"
 # single-slot main worker it interleaves with everything else; set this (or
 # AGENT_CARD_QUEUE) to move it onto the agent worker.
 _QUEUE_ENVS = ("AGENT_JOBS_QUEUE", "AGENT_CARD_QUEUE")
-# A live search that has not moved in this long has lost its chain for good.
-STALE_INTERVAL = "2 hours"
-
-
 def queue_for() -> str | None:
     for name in _QUEUE_ENVS:
         if os.getenv(name):
@@ -102,6 +98,11 @@ async def dispatch(search_id: UUID, token: UUID, *, countdown: int = 0) -> None:
 
 
 async def create_search(user, company_id: UUID, body: JobSearchCreate) -> dict:
+    # A retried create (the first answer was lost) gets the search it already
+    # started, before any cap or rate limit could refuse it.
+    existing = await find_by_request(user.id, body.request_id)
+    if existing is not None:
+        return existing
     plan = await preflight(user, company_id, consent_version=body.consent_version)
     limit = limit_for_plan(plan) if plan is not None else None
     weights = ranking.clean_weights(body.weights.model_dump() if body.weights else None)
@@ -125,15 +126,7 @@ async def create_search(user, company_id: UUID, body: JobSearchCreate) -> dict:
             if existing is not None:  # a retried create
                 return search_view(existing)
             # A chain that died long ago would hold the one-live-search index forever.
-            await conn.execute(
-                f"""UPDATE mw_job_searches
-                    SET status = 'failed', dispatch_token = NULL, lease_until = NULL,
-                        error = COALESCE(error, 'Stopped: the search stopped making progress.'),
-                        completed_at = NOW(), updated_at = NOW()
-                    WHERE user_id = $1 AND status IN ({", ".join(f"'{s}'" for s in LIVE)})
-                      AND updated_at < NOW() - INTERVAL '{STALE_INTERVAL}'""",
-                user.id,
-            )
+            await end_stale(conn, user.id)
             if limit is not None:
                 used = await used_this_month(conn, user.id)
                 if used >= limit:

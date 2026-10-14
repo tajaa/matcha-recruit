@@ -21,6 +21,9 @@ from . import normalize, ranking
 
 LIVE = ("queued", "planning", "discovering", "screening", "enriching", "approaching")
 TERMINAL = ("done", "failed", "cancelled")
+_LIVE_SQL = ", ".join(f"'{status}'" for status in LIVE)
+# A live search that has not moved in this long has lost its chain for good.
+STALE_INTERVAL = "2 hours"
 MAX_LIST = 50
 MAX_REDRAFTS = 20
 RESUME_CHARS = 6_000
@@ -256,6 +259,17 @@ async def update_weights(search_id: UUID, user_id: UUID, weights: JobWeights) ->
     return await get_search(search_id, user_id)
 
 
+async def release_drafts(conn, search_id: UUID) -> None:
+    """A search that ended (finished early, cancelled, stalled) drafts nothing
+    more: jobs still waiting for an approach become `failed`, which the person
+    can redraft, instead of showing "drafting" forever."""
+    await conn.execute(
+        """UPDATE mw_job_leads SET approach_status = 'failed', updated_at = NOW()
+           WHERE search_id = $1 AND approach_status IN ('queued', 'drafting')""",
+        search_id,
+    )
+
+
 async def cancel_search(search_id: UUID, user_id: UUID) -> dict:
     async with connection_or_direct() as conn, conn.transaction():
         search = await owned_search(conn, search_id, user_id, lock=True)
@@ -270,6 +284,7 @@ async def cancel_search(search_id: UUID, user_id: UUID) -> dict:
             )
             # What was found so far stays useful, ranked.
             await rerank(conn, search)
+            await release_drafts(conn, search_id)
     return await get_search(search_id, user_id)
 
 
@@ -284,18 +299,54 @@ async def delete_search(search_id: UUID, user_id: UUID) -> dict:
             search_id,
         )
         await conn.execute(
-            """UPDATE mw_job_searches
-               SET deleted_at = NOW(), title = '', ask = '', criteria = '{}'::jsonb,
-                   plan = '{}'::jsonb, progress = '{}'::jsonb, phase_cursor = '{}'::jsonb,
+            f"""UPDATE mw_job_searches
+               SET deleted_at = NOW(), title = '', ask = '', criteria = '{{}}'::jsonb,
+                   plan = '{{}}'::jsonb, progress = '{{}}'::jsonb, phase_cursor = '{{}}'::jsonb,
                    error = NULL, dispatch_token = NULL, lease_until = NULL,
-                   status = CASE WHEN status IN ('queued','planning','discovering','screening',
-                                                 'enriching','approaching')
-                                 THEN 'cancelled' ELSE status END,
+                   status = CASE WHEN status IN ({_LIVE_SQL}) THEN 'cancelled' ELSE status END,
                    completed_at = COALESCE(completed_at, NOW()), updated_at = NOW()
                WHERE id = $1""",
             search_id,
         )
     return {"deleted": True}
+
+
+async def end_stale(conn, user_id: UUID) -> int:
+    """End this person's live searches that stopped moving STALE_INTERVAL ago,
+    the way reconcile would: `done` (it counts) when it found jobs, which are
+    ranked, else `failed` (free). Runs inside the caller's transaction."""
+    rows = await conn.fetch(
+        f"""SELECT * FROM mw_job_searches
+            WHERE user_id = $1 AND status IN ({_LIVE_SQL}) AND deleted_at IS NULL
+              AND updated_at < NOW() - INTERVAL '{STALE_INTERVAL}'
+            FOR UPDATE""",
+        user_id,
+    )
+    for row in rows:
+        found = bool(await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM mw_job_leads WHERE search_id = $1)", row["id"],
+        ))
+        if found:
+            await rerank(conn, row)
+        await conn.execute(
+            """UPDATE mw_job_searches
+               SET status = $2, dispatch_token = NULL, lease_until = NULL,
+                   error = COALESCE(error, 'Stopped: the search stopped making progress.'),
+                   completed_at = NOW(), updated_at = NOW()
+               WHERE id = $1""",
+            row["id"], "done" if found else "failed",
+        )
+        await release_drafts(conn, row["id"])
+    return len(rows)
+
+
+async def find_by_request(user_id: UUID, request_id: UUID) -> dict | None:
+    """A search this person already started with this request id (a retry)."""
+    async with connection_or_direct() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM mw_job_searches WHERE user_id = $1 AND request_id = $2", user_id, request_id,
+        )
+    return search_view(row) if row else None
 
 
 def _rank_input(row) -> dict:

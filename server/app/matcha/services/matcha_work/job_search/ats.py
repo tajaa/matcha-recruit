@@ -19,9 +19,8 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 from urllib.parse import parse_qs, urlsplit
 
-from bs4 import BeautifulSoup
-
 from app.core.services.safe_fetch import FetchedResponse, UnsafeURL, fetch_public
+from app.matcha.services.matcha_work.agent_card.page_extract import plain_text
 
 from . import comp as comp_mod
 from . import normalize
@@ -123,15 +122,8 @@ def detect(url: str | None) -> AtsRef | None:
 
 
 def html_to_text(value: str, limit: int = MAX_DESCRIPTION) -> str:
-    """Plain text from HTML, keeping line breaks between blocks."""
-    if not value:
-        return ""
-    soup = BeautifulSoup(html.unescape(value), "lxml")
-    for tag in soup(["script", "style"]):
-        tag.decompose()
-    text = soup.get_text("\n", strip=True)
-    lines = [" ".join(line.split()) for line in text.splitlines()]
-    return "\n".join(line for line in lines if line)[:limit]
+    """Plain text from (possibly HTML-escaped) HTML, one line per block."""
+    return plain_text(html.unescape(value or ""), limit)
 
 
 def _question_kind(key: str, label: str, field_type: str) -> str:

@@ -10,6 +10,11 @@
 
 Every write checks the search's dispatch token (`Guard`), so a cancelled
 search, or a chain a reconcile replaced, stops writing at the next check.
+
+Paid calls (Google Jobs, page and ATS fetches) are reserved on the search row
+BEFORE they are made (`grant`), and only what went unused is given back
+(`refund`). A task killed mid-phase gives nothing back, so its retry works
+from what is left and can never spend a second budget.
 """
 from __future__ import annotations
 
@@ -83,6 +88,55 @@ class Deps:
     # Model phases: the model client for a model id, and the model's fetch_page.
     client: Callable[[str], Any] = _default_client
     fetch_page: Callable[[str], Awaitable[tuple[dict, set[str]]]] = _default_fetch_page
+
+
+_BUDGET_COLUMNS = {"provider_calls", "fetch_calls"}
+
+
+async def grant(search_id: UUID, column: str, want: int, limit: int) -> int:
+    """Reserve up to `want` calls against the search's lifetime `limit`; the
+    number granted (0 when spent)."""
+    assert column in _BUDGET_COLUMNS
+    if want <= 0:
+        return 0
+    async with connection_or_direct() as conn:
+        granted = await conn.fetchval(
+            f"""WITH cur AS (SELECT id, {column} AS before FROM mw_job_searches WHERE id = $1 FOR UPDATE)
+                UPDATE mw_job_searches s
+                SET {column} = cur.before + GREATEST(LEAST($2, $3 - cur.before), 0)
+                FROM cur WHERE s.id = cur.id
+                RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)""",
+            search_id, want, limit,
+        )
+    return int(granted or 0)
+
+
+async def refund(search_id: UUID, column: str, unused: int) -> None:
+    assert column in _BUDGET_COLUMNS
+    if unused <= 0:
+        return
+    async with connection_or_direct() as conn:
+        await conn.execute(
+            f"UPDATE mw_job_searches SET {column} = GREATEST({column} - $2, 0) WHERE id = $1",
+            search_id, unused,
+        )
+
+
+@dataclass
+class Budget:
+    """Calls this phase was granted; `exhausted` once one was refused."""
+
+    left: int
+    used: int = 0
+    exhausted: bool = False
+
+    def take(self) -> bool:
+        if self.left <= 0:
+            self.exhausted = True
+            return False
+        self.left -= 1
+        self.used += 1
+        return True
 
 
 @dataclass
@@ -221,23 +275,23 @@ async def discover(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     if provider is None:
         raise PhaseFailed("Job search isn't set up on this server.")
     criteria = decode_jsonb(search.get("criteria"), {}) or {}
-    queries = (decode_jsonb(search.get("plan"), {}) or {}).get("queries") or []
-    budget = max(0, MAX_PROVIDER_CALLS - int(search.get("provider_calls") or 0))
+    queries = ((decode_jsonb(search.get("plan"), {}) or {}).get("queries") or [])[:MAX_QUERIES]
     async with connection_or_direct() as conn:
         existing = int(await conn.fetchval(
             "SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1", search["id"],
         ) or 0)
     room = max(0, MAX_LEADS - existing)
-    state = {"calls": 0, "errors": 0}
+    budget = Budget(left=await grant(search["id"], "provider_calls",
+                                     len(queries) * PAGES_PER_QUERY, MAX_PROVIDER_CALLS))
+    state = {"errors": 0}
     records: dict[str, dict] = {}
     gate = asyncio.Semaphore(QUERY_CONCURRENCY)
 
     async def run_query(query: dict) -> None:
         token = None
         for _page in range(PAGES_PER_QUERY):
-            if state["calls"] >= budget or len(records) >= room:
+            if len(records) >= room or not budget.take():
                 return
-            state["calls"] += 1
             async with gate:
                 try:
                     postings, token = await provider.search(
@@ -257,13 +311,8 @@ async def discover(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
                 return
 
     await guard.note("Searching Google Jobs…")
-    results = await asyncio.gather(*(run_query(q) for q in queries[:MAX_QUERIES]),
-                                   return_exceptions=True)
-    async with connection_or_direct() as conn:
-        await conn.execute(
-            "UPDATE mw_job_searches SET provider_calls = provider_calls + $2 WHERE id = $1",
-            search["id"], state["calls"],
-        )
+    results = await asyncio.gather(*(run_query(q) for q in queries), return_exceptions=True)
+    await refund(search["id"], "provider_calls", budget.left)
     for result in results:
         if isinstance(result, providers.ProviderError) and result.fatal:
             raise PhaseFailed("The job listings service refused our request.") from result
@@ -275,7 +324,7 @@ async def discover(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
             "SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1", search["id"],
         ) or 0)
     if total == 0:
-        if state["errors"] and state["errors"] >= state["calls"]:
+        if state["errors"] and state["errors"] >= budget.used:
             raise RuntimeError("every job listing query failed")  # retried
         raise PhaseFailed("No postings matched. Try broader titles or more locations.")
     return PhaseOutcome(
@@ -292,19 +341,6 @@ NEXT_AFTER_DISCOVER = "screening"
 def _aggregator(url: str) -> bool:
     host = normalize.host_of(url)
     return any(host == h or host.endswith("." + h) for h in AGGREGATOR_HOSTS)
-
-
-@dataclass
-class _Budget:
-    left: int
-    used: int = 0
-
-    def take(self) -> bool:
-        if self.left <= 0:
-            return False
-        self.left -= 1
-        self.used += 1
-        return True
 
 
 def _apply_ats(update: dict, posting: ats.AtsPosting, comp: dict) -> dict:
@@ -329,8 +365,16 @@ def _pick_job(jobs: list[dict], title: str) -> dict | None:
     return best
 
 
-async def enrich_one(lead: dict, deps: Deps, budget: _Budget) -> dict | None:
-    """The changes for one lead, or None when nothing could be read."""
+class _NotTried:
+    """`enrich_one` ran out of granted fetches before reading this lead."""
+
+
+NOT_TRIED = _NotTried()
+
+
+async def enrich_one(lead: dict, deps: Deps, budget: Budget) -> dict | None | _NotTried:
+    """The changes for one lead; None when nothing could be read; NOT_TRIED
+    when the budget ran out first (the lead stays unread for a later batch)."""
     links = decode_jsonb(lead.get("apply_links"), []) or []
     comp = decode_jsonb(lead.get("comp"), {}) or {}
     update: dict = {"description": lead.get("description") or ""}
@@ -341,7 +385,7 @@ async def enrich_one(lead: dict, deps: Deps, budget: _Budget) -> dict | None:
         if ref is None:
             continue
         if not budget.take():
-            return None
+            return NOT_TRIED
         posting = await deps.ats_fetch(ref)
         if posting is not None:
             update["comp"] = _apply_ats(update, posting, comp)
@@ -350,7 +394,7 @@ async def enrich_one(lead: dict, deps: Deps, budget: _Budget) -> dict | None:
     company_pages = [u for u in urls if not _aggregator(u) and ats.detect(u) is None]
     for url in company_pages[:1]:
         if not budget.take():
-            return None
+            return NOT_TRIED
         try:
             fetched = await deps.page_fetch(url, max_bytes=PAGE_BYTES, accept="text/html,application/xhtml+xml",
                                             total_timeout=PAGE_SECONDS)
@@ -389,33 +433,31 @@ async def enrich_one(lead: dict, deps: Deps, budget: _Budget) -> dict | None:
     return None
 
 
-async def _save_enrichment(search_id: UUID, token: UUID, lead_id, update: dict | None) -> None:
+async def _save_enrichment(conn, search_id: UUID, token: UUID, lead_id, update: dict | None) -> None:
     if update is None:
-        async with connection_or_direct() as conn:
-            await conn.execute(
-                """UPDATE mw_job_leads SET enriched_at = NOW(), updated_at = NOW()
-                   WHERE id = $1 AND search_id = $2
-                     AND EXISTS (SELECT 1 FROM mw_job_searches WHERE id = $2 AND dispatch_token = $3)""",
-                lead_id, search_id, token,
-            )
+        await conn.execute(
+            """UPDATE mw_job_leads SET enriched_at = NOW(), updated_at = NOW()
+               WHERE id = $1 AND search_id = $2
+                 AND EXISTS (SELECT 1 FROM mw_job_searches WHERE id = $2 AND dispatch_token = $3)""",
+            lead_id, search_id, token,
+        )
         return
     comp = update.get("comp") or {}
     lo, hi, currency = comp_mod.annual_range(comp)
-    async with connection_or_direct() as conn:
-        await conn.execute(
-            """UPDATE mw_job_leads SET
-                   comp = $4::jsonb, comp_status = $5, comp_annual_min = $6, comp_annual_max = $7,
-                   comp_currency = $8, description = $9,
-                   source = COALESCE($10, source), source_url = COALESCE($11, source_url),
-                   remote = COALESCE($12, remote), ats = COALESCE($13::jsonb, ats),
-                   enriched_at = NOW(), updated_at = NOW()
-               WHERE id = $1 AND search_id = $2
-                 AND EXISTS (SELECT 1 FROM mw_job_searches WHERE id = $2 AND dispatch_token = $3)""",
-            lead_id, search_id, token, json.dumps(comp, default=str), comp_mod.comp_status(comp),
-            lo, hi, currency, (update.get("description") or "")[:20_000],
-            update.get("source"), update.get("source_url"), update.get("remote"),
-            json.dumps(update["ats"]) if update.get("ats") else None,
-        )
+    await conn.execute(
+        """UPDATE mw_job_leads SET
+               comp = $4::jsonb, comp_status = $5, comp_annual_min = $6, comp_annual_max = $7,
+               comp_currency = $8, description = $9,
+               source = COALESCE($10, source), source_url = COALESCE($11, source_url),
+               remote = COALESCE($12, remote), ats = COALESCE($13::jsonb, ats),
+               enriched_at = NOW(), updated_at = NOW()
+           WHERE id = $1 AND search_id = $2
+             AND EXISTS (SELECT 1 FROM mw_job_searches WHERE id = $2 AND dispatch_token = $3)""",
+        lead_id, search_id, token, json.dumps(comp, default=str), comp_mod.comp_status(comp),
+        lo, hi, currency, (update.get("description") or "")[:20_000],
+        update.get("source"), update.get("source_url"), update.get("remote"),
+        json.dumps(update["ats"]) if update.get("ats") else None,
+    )
 
 
 async def enrich(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
@@ -426,26 +468,29 @@ async def enrich(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
                 ORDER BY fit_score DESC NULLS LAST, created_at, id LIMIT {ENRICH_BATCH}""",
             search["id"],
         )
-    budget = _Budget(left=max(0, MAX_FETCHES - int(search.get("fetch_calls") or 0)))
+    # A lead can take two fetches (a careers page that redirects into an ATS).
+    budget = Budget(left=await grant(search["id"], "fetch_calls", 2 * len(leads), MAX_FETCHES))
+    if leads and budget.left <= 0:
+        budget.exhausted = True
     gate = asyncio.Semaphore(ENRICH_CONCURRENCY)
+    updates: dict = {}
 
     async def one(lead) -> None:
         async with gate:
             try:
-                update = await enrich_one(dict(lead), deps, budget)
+                updates[lead["id"]] = await enrich_one(dict(lead), deps, budget)
             except Exception:
                 logger.warning("job lead enrichment failed lead=%s", lead["id"], exc_info=True)
-                update = None
-            await _save_enrichment(search["id"], guard.token, lead["id"], update)
+                updates[lead["id"]] = None
 
     if leads and budget.left > 0:
         await guard.note(f"Reading {len(leads)} postings for pay and application details…")
         await asyncio.gather(*(one(lead) for lead in leads))
+    await refund(search["id"], "fetch_calls", budget.left)
     async with connection_or_direct() as conn:
-        await conn.execute(
-            "UPDATE mw_job_searches SET fetch_calls = fetch_calls + $2 WHERE id = $1",
-            search["id"], budget.used,
-        )
+        for lead_id, update in updates.items():
+            if update is not NOT_TRIED:
+                await _save_enrichment(conn, search["id"], guard.token, lead_id, update)
         remaining = int(await conn.fetchval(
             """SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1
                AND enriched_at IS NULL AND screen_status <> 'irrelevant'""",
@@ -457,7 +502,7 @@ async def enrich(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
                FROM mw_job_leads WHERE search_id = $1""",
             search["id"],
         )
-    if remaining and budget.left > 0 and leads:
+    if remaining and leads and not budget.exhausted:
         return PhaseOutcome(
             status="enriching",
             progress={"note": f"Read postings; {remaining} to go…", "posted_pay": counts["posted"]},

@@ -130,13 +130,45 @@ def _product(node: dict, base: str) -> dict:
     }
 
 
-def _plain(value: Any, limit: int) -> str:
-    """Text from a JSON-LD string field that may hold HTML."""
+def plain_text(value: Any, limit: int) -> str:
+    """Text from a field that may hold HTML, one line per block, at most `limit`."""
     raw = str(value or "")
     if "<" in raw:
-        raw = BeautifulSoup(raw, "lxml").get_text("\n", strip=True)
+        soup = BeautifulSoup(raw, "lxml")
+        for tag in soup(["script", "style"]):
+            tag.decompose()
+        raw = soup.get_text("\n", strip=True)
     lines = [" ".join(line.split()) for line in raw.splitlines()]
     return "\n".join(line for line in lines if line)[:limit]
+
+
+def _scalar(value: Any, limit: int = 24) -> str | int | float | None:
+    """A number, or a short string; anything else (a nested object a page made
+    up to smuggle text into the model's input) is dropped."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str) and value.strip():
+        return value.strip()[:limit]
+    return None
+
+
+def _salary(raw: Any) -> dict | None:
+    """schema.org `baseSalary`, reduced to the fields pay is read from."""
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, Any] = {"currency": _scalar(raw.get("currency"), 8)}
+    value = raw.get("value")
+    if isinstance(value, dict):
+        out["value"] = {key: _scalar(value.get(key)) for key in ("minValue", "maxValue", "value", "unitText")
+                        if _scalar(value.get(key)) is not None}
+    elif _scalar(value) is not None:
+        out["value"] = _scalar(value)
+        out["unitText"] = _scalar(raw.get("unitText"))
+    else:
+        return None
+    return out
 
 
 def _address(value: Any) -> str:
@@ -159,7 +191,7 @@ def _address(value: Any) -> str:
 def _job_posting(node: dict, base: str, description_limit: int = MAX_JOB_DESCRIPTION) -> dict:
     """schema.org JobPosting: the facts a job search needs, pay included."""
     org = node.get("hiringOrganization")
-    salary = node.get("baseSalary") if isinstance(node.get("baseSalary"), dict) else None
+    salary = _salary(node.get("baseSalary"))
     location_type = " ".join(str(t) for t in _as_list(node.get("jobLocationType")))
     url = node.get("url")
     return {
@@ -172,7 +204,7 @@ def _job_posting(node: dict, base: str, description_limit: int = MAX_JOB_DESCRIP
         "valid_through": str(node.get("validThrough") or "")[:40] or None,
         "employment_type": " ".join(str(t) for t in _as_list(node.get("employmentType")))[:80] or None,
         "url": urljoin(base, url) if isinstance(url, str) else None,
-        "description": _plain(node.get("description"), description_limit),
+        "description": plain_text(node.get("description"), description_limit),
     }
 
 
