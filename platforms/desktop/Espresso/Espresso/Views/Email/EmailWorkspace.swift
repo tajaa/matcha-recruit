@@ -73,6 +73,7 @@ struct EmailWorkspace: View {
         }
         .background(ThemeRadialBackground())
         .foldsRailForSidePane($railFoldedForPane)
+        .featureGuideOnFirstVisit(.email)
         .task {
             // Reopening the hub reuses a recent load instead of re-reading
             // the mailbox every time.
@@ -232,6 +233,9 @@ struct EmailWorkspace: View {
                         MWHubRailIconButton(icon: "arrow.clockwise", help: "Check for new mail") {
                             Task { await vm.loadInbox() }
                         }
+                    }
+                    MWHubRailIconButton(icon: "questionmark.circle", help: "Email guide") {
+                        appState.showFeatureGuide(.email)
                     }
                     MWHubRailIconButton(icon: "sidebar.left", help: "Hide mailbox") { railCollapsed = true }
                 }
