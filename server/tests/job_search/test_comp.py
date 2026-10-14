@@ -30,6 +30,11 @@ def test_base_pay_is_read(text, expected):
     "Founded in 2012, we have 450 employees.",
     "USD 210,000–240,000",  # no pay word and no period: not assumed to be pay
     "$85 gift card on your first day",
+    "Shifts are 12 hour days.",
+    "Competitive salary, 24 hour on-call rotation.",
+    "Competitive salary and 401k with match.",
+    "Salary competitive; 403(b) and 457(b) plans.",
+    "Base pay plus a 401K match.",
 ])
 def test_company_figures_are_never_pay(text):
     assert bases(text) == []
@@ -37,6 +42,21 @@ def test_company_figures_are_never_pay(text):
 
 def test_a_known_pay_field_needs_no_pay_word():
     assert bases("USD 210,000–240,000", known_pay=True) == [(210_000, 240_000, "year")]
+    # Google's salary field may leave out the currency; free text may not.
+    assert bases("85–95 an hour", known_pay=True) == [(85, 95, "hour")]
+    assert bases("Pay is 85–95 an hour") == []
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("Competitive salary, plus a bonus of up to 20%.", ("posted", 20, 20)),
+    ("Bonus: 20–30% of base", ("posted", 20, 30)),
+    ("a bonus of 15% to 25%", ("posted", 15, 25)),
+    ("401(k) match of 4% and an annual bonus.", ("mentioned", None, None)),
+    ("We offer 15% off at the store and a performance bonus.", ("mentioned", None, None)),
+])
+def test_a_percentage_is_a_bonus_only_in_its_clause(text, expected):
+    [bonus] = comp.scan_bonus(text, origin="page")
+    assert (bonus["status"], bonus.get("pct_min"), bonus.get("pct_max")) == expected
 
 
 def test_budget_right_next_to_an_amount_wins_over_salary_elsewhere():

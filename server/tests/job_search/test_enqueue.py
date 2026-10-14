@@ -118,6 +118,7 @@ def body(**over):
 def conn(monkeypatch):
     conn = FakeConn()
     monkeypatch.setattr(enqueue, "connection_or_direct", connection(conn))
+    monkeypatch.setattr(enqueue, "find_by_request", AsyncMock(return_value=None))
     return conn
 
 
@@ -135,7 +136,21 @@ async def test_create_inserts_then_dispatches(gates, conn):
     gates.dispatch.assert_awaited_once()
     assert gates.dispatch.await_args.args[1] == token
     assert conn.ran("pg_advisory_xact_lock")[0][2] == (f"{USER}:job_search_cap",)
-    assert conn.ran("Stopped: the search stopped making progress")  # stale sweep ran first
+    assert conn.ran("updated_at < NOW() - INTERVAL '2 hours'")  # the stale sweep ran first
+
+
+@pytest.mark.asyncio
+async def test_a_retried_create_is_answered_before_any_gate(gates, conn):
+    # The first answer was lost; this person is now at the cap and over the
+    # rate limit. The retry still gets the search it started.
+    enqueue.find_by_request.return_value = {"id": "s1", "status": "enriching"}
+    gates.usage.return_value = {"limit": 4, "used": 4, "remaining": 0}
+    gates.rate.side_effect = HTTPException(status_code=429, detail="slow down")
+    out = await enqueue.create_search(CLIENT, COMPANY, body())
+    assert out == {"id": "s1", "status": "enriching"}
+    gates.plan.assert_not_awaited()
+    gates.rate.assert_not_awaited()
+    assert not conn.calls
 
 
 @pytest.mark.asyncio

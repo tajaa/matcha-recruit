@@ -15,6 +15,11 @@ The chain is held together by the search's `dispatch_token`:
 * A chain whose message was lost (a killed worker, a broker hiccup) is
   restarted under a fresh token by `nudge` (whoever polls the status) and by
   `reconcile` (main-worker start). Celery does not redeliver a killed task.
+* Every claim counts as an attempt; only a finished phase resets the count.
+  A phase whose task keeps getting killed (out of memory, the hard time
+  limit) is claimed again by each restart, and the claim past MAX_ATTEMPTS
+  ends the search instead of running it, so a restart loop cannot hold the
+  one-live-search slot or the worker forever.
 """
 from __future__ import annotations
 
@@ -25,15 +30,18 @@ from uuid import UUID, uuid4
 
 from app.database import connection_or_direct
 
-from .enqueue import STALE_INTERVAL, dispatch
+from .enqueue import dispatch
 from .phases import PHASES, Deps, Guard, PhaseFailed, PhaseOutcome
-from .service import LIVE, rerank
+from .service import LIVE, STALE_INTERVAL, rerank
 
 logger = logging.getLogger(__name__)
 
-# Under Celery's 540s soft limit, with room to write the outcome.
+# Under the task's 500s soft limit (`workers/tasks/job_search.py`), with room
+# to write the outcome.
 PHASE_SECONDS = 420
-LEASE_INTERVAL = "9 minutes"
+# Longer than the task's 560s hard limit: a lease never runs out while its
+# task can still be running, so a restart cannot start a second copy.
+LEASE_INTERVAL = "10 minutes"
 MAX_ATTEMPTS = 3
 RETRY_COUNTDOWN = 30
 # A live search with no lease that has not moved in this long lost its task.
@@ -116,7 +124,12 @@ async def run_phase(search_id: UUID, token: UUID, *, deps: Deps | None = None) -
     phase = PHASES.get(search["status"])
     error = None
     retry = False
-    if phase is None:
+    if int(search["attempts"]) > MAX_ATTEMPTS:
+        # Earlier claims of this phase never finished: their task was killed.
+        message = "A step kept stopping before it finished, so the search stopped."
+        outcome = await _ending(search, message)
+        error = message
+    elif phase is None:
         outcome = await _ending(search, f"Unknown step {search['status']!r}.")
         error = outcome.progress["note"]
     else:
