@@ -3,8 +3,9 @@
 The conversation itself runs over the channel socket (`werk/routes/channels_ws.py`
 hands every message in a private conversation to
 `services/matcha_work/agent_runtime/chat_entry`). These routes are the rest:
-open the private conversation, read a run and its steps, and switch abilities
-on and off.
+open the private conversation, read a run and its steps, switch abilities
+on and off, and open or delete the files the person gave Espresso (uploaded
+through the channel upload route, stored privately: `agent_runtime/inputs.py`).
 
 The whole router is for personal Espresso accounts only
 (`agent_runtime.eligibility`); there is no company flag. Plan limits apply on
@@ -29,6 +30,7 @@ from app.matcha.services.matcha_work.agent_runtime import (
     conversation,
     enqueue,
     grants,
+    inputs,
     result,
 )
 from app.matcha.services.matcha_work.gmail_service import GmailService
@@ -186,6 +188,29 @@ async def get_assistant_run(
             for s in steps
         ],
     }
+
+
+@router.get("/inputs/{input_id}/url")
+async def get_input_url(
+    input_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """A five-minute link to one of the caller's own files."""
+    link = await inputs.presigned(input_id_value=input_id, user_id=current_user.id)
+    if link is None:
+        raise HTTPException(status_code=404, detail="File not found.")
+    return link
+
+
+@router.delete("/inputs/{input_id}", status_code=204)
+async def delete_input(
+    input_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Delete one of the caller's files, the stored copy included. Messages
+    that carried it show it as gone."""
+    if not await inputs.delete(input_id_value=input_id, user_id=current_user.id):
+        raise HTTPException(status_code=404, detail="File not found.")
 
 
 @router.get("/abilities")

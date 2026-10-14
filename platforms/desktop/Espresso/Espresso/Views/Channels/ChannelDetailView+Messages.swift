@@ -176,7 +176,7 @@ extension ChannelDetailView {
                             onToggleReaction: toggleReaction,
                             onRequestDelete: { pendingMessageDelete = $0 },
                             onRequestEdit: { editingMessage = $0; seedComposer($0.content); replyingTo = nil },
-                            onOpenAttachment: { previewFile = previewModel($0) },
+                            onOpenAttachment: { openAttachment($0) },
                             onCreateTicket: vm.channel?.projectId != nil ? { startTicketDraft(from: $0) } : nil,
                             onQuickReply: { quickReply(to: $0, text: $1) }
                         )

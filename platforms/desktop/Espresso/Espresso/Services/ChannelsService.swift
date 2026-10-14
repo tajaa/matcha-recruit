@@ -274,25 +274,12 @@ class ChannelsService {
             body.append("\r\n")
         }
         body.append("--\(boundary)--\r\n")
-
-        guard let url = URL(string: "\(client.baseURL)\(basePath)/\(channelId)/upload") else {
-            throw APIError.invalidURL
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        if let token = client.accessToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        request.httpBody = body
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let detail = String(data: data, encoding: .utf8) ?? "Upload failed"
-            throw APIError.httpError(code, detail)
-        }
-        let decoded = try JSONDecoder().decode(UploadResponse.self, from: data)
+        // Through the API client: an expired login refreshes and retries, and a
+        // refusal arrives as the server's own sentence ("Espresso takes up to
+        // 5 files at a time"), not its JSON.
+        let decoded: UploadResponse = try await client.upload(
+            path: "\(basePath)/\(channelId)/upload", body: body,
+            contentType: "multipart/form-data; boundary=\(boundary)")
         return decoded.attachments
     }
 

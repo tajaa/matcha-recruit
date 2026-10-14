@@ -10,6 +10,7 @@ from app.matcha.services.matcha_work.agent_runtime import (
     consent,
     conversation,
     grants,
+    inputs,
     history,
     prompts,
     result,
@@ -136,12 +137,41 @@ async def test_an_answer_is_stored_and_posted_as_a_card(wired):
     assert [e["status"] for e in wired.events] == ["running", "running", "done"]
     # What the model was given: the conversation, then the request, and one way to ask.
     names = [t.get("name") or t.get("type") for t in client.calls[0]["tools"]]
-    assert names == ["web_search", "fetch_page", "ask_user", "finish"]
-    assert client.calls[0]["input"][-1]["content"][0]["text"] == "find a standing desk"
+    assert names == ["web_search", "fetch_page", "read_file", "ask_user", "finish"]
+    assert client.calls[0]["input"][-1]["content"] == [{"type": "input_text", "text": "find a standing desk"}]
     assert client.calls[0]["feature"] == assistant.USAGE_FEATURE
     # The private conversation is never stored by the provider, even with no
     # mail or calendar in this run: its replayed history may hold them.
     assert client.calls[0]["store"] is False and client.calls[0]["chain"] is False
+
+
+@pytest.mark.asyncio
+async def test_the_files_on_a_request_reach_the_model_as_data(wired):
+    run = _run(prompt="use my resume to find COO roles")
+    resume = {"id": uuid4(), "filename": "cv.pdf", "kind": "document", "text_excerpt": "15 years in operations"}
+    wired.conn.on("seen_run_id IS NULL AND created_at", [resume])
+    wired.conn.on("SELECT id, filename, kind, created_at", [resume])
+    client = wired.client(response(call("finish", FINISH)))
+    await assistant.run_assistant(run)
+    request = client.calls[0]["input"][-1]
+    assert request["role"] == "user" and request["content"][0]["text"] == "use my resume to find COO roles"
+    files_text = request["content"][1]["text"]
+    assert files_text.startswith(inputs.FILES_NOTE) and "15 years in operations" in files_text
+    # Marked as given to this run, so it isn't handed over again next time.
+    assert wired.conn.ran("SET seen_run_id = $2")[0][2][1] == run["id"]
+
+
+@pytest.mark.asyncio
+async def test_a_shared_chat_gets_no_files(wired):
+    from app.matcha.services.matcha_work.agent_runtime import conversation as conv
+
+    conv.is_private_conversation.return_value = False
+    wired.conn.on("seen_run_id IS NULL AND created_at", [{"id": uuid4(), "filename": "x.pdf",
+                                                          "kind": "document", "text_excerpt": "x"}])
+    client = wired.client(response(call("finish", FINISH)))
+    await assistant.run_assistant(_run())
+    assert len(client.calls[0]["input"][-1]["content"]) == 1
+    assert wired.conn.ran("SET seen_run_id") == []
 
 
 @pytest.mark.asyncio

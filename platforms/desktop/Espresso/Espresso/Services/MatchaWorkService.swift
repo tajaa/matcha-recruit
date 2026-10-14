@@ -135,6 +135,19 @@ class MatchaWorkService {
             method: "PATCH", path: "\(basePath)/assistant/conversations/\(id)", body: Body(title: title))
     }
 
+    /// A short-lived link to one of the person's own Espresso files
+    /// (`espresso-input:` attachments are private). Reused until a minute
+    /// before it expires.
+    func assistantInputLink(_ inputId: String) async throws -> URL {
+        if let cached = PrivateInputLinks.shared.url(for: inputId) { return cached }
+        struct Res: Decodable { let url: String; let expires_in: Int? }
+        let res: Res = try await client.request(
+            method: "GET", path: "\(basePath)/assistant/inputs/\(inputId)/url")
+        guard let url = URL(string: res.url) else { throw APIError.invalidURL }
+        PrivateInputLinks.shared.store(url, for: inputId, lifetime: TimeInterval(res.expires_in ?? 300))
+        return url
+    }
+
     func assistantAbilities() async throws -> AssistantAbilities {
         try await client.request(method: "GET", path: "\(basePath)/assistant/abilities")
     }
@@ -347,5 +360,30 @@ class MatchaWorkService {
         journalId: String, data: Data, filename: String, mimeType: String,
     ) async throws -> String {
         try await JournalService.shared.uploadJournalImage(journalId: journalId, data: data, filename: filename, mimeType: mimeType)
+    }
+}
+
+
+/// Links to private Espresso files, kept until a minute before they expire so
+/// scrolling past a photo doesn't ask the server again each time.
+final class PrivateInputLinks: @unchecked Sendable {
+    static let shared = PrivateInputLinks()
+    private var links: [String: (url: URL, until: Date)] = [:]
+    private let lock = NSLock()
+
+    func url(for inputId: String, now: Date = Date()) -> URL? {
+        lock.lock(); defer { lock.unlock() }
+        guard let entry = links[inputId], entry.until > now else { return nil }
+        return entry.url
+    }
+
+    func store(_ url: URL, for inputId: String, lifetime: TimeInterval, now: Date = Date()) {
+        lock.lock(); defer { lock.unlock() }
+        links[inputId] = (url, now.addingTimeInterval(max(0, lifetime - 60)))
+    }
+
+    func clear() {
+        lock.lock(); defer { lock.unlock() }
+        links.removeAll()
     }
 }

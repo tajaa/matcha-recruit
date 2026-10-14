@@ -10,6 +10,18 @@ struct ChannelAttachment: Codable, Hashable {
         case url, filename, size
         case contentType = "content_type"
     }
+
+    /// A file given to Espresso is kept in private storage and has no public
+    /// URL (server: agent_runtime/inputs.py). Its `url` names it instead; the
+    /// app asks for a short-lived link to show it.
+    static let privateInputScheme = "espresso-input:"
+
+    /// The private file's id, or nil for an ordinary attachment.
+    var privateInputId: String? {
+        guard url.hasPrefix(Self.privateInputScheme) else { return nil }
+        let id = String(url.dropFirst(Self.privateInputScheme.count))
+        return id.isEmpty ? nil : id
+    }
 }
 
 struct ChannelMember: Codable, Identifiable, Hashable {

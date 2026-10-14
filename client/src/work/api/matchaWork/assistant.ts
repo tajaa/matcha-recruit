@@ -59,6 +59,22 @@ export function ensureAssistantChannel() {
   return api.post<{ channel_id: string }>('/matcha-work/assistant/channel')
 }
 
+/** A file given to Espresso is private; its attachment URL names it. */
+export const PRIVATE_INPUT_SCHEME = 'espresso-input:'
+
+export function privateInputId(url: string | null | undefined): string | null {
+  if (!url || !url.startsWith(PRIVATE_INPUT_SCHEME)) return null
+  const id = url.slice(PRIVATE_INPUT_SCHEME.length)
+  return id || null
+}
+
+/** A five-minute link to one of the caller's own Espresso files. */
+export function getAssistantInputLink(inputId: string) {
+  return api.get<{ url: string; filename: string; content_type: string; expires_in: number }>(
+    `/matcha-work/assistant/inputs/${inputId}/url`,
+  )
+}
+
 export function getAssistantRun(runId: string) {
   return api.get<AssistantRun>(`/matcha-work/assistant/runs/${runId}`)
 }

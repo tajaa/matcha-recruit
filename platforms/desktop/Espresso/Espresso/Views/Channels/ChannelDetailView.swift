@@ -45,6 +45,9 @@ struct ChannelDetailView: View {
             : WorkDetailVMStore.shared.channelVM(channelId))
     }
     @State var pendingAttachments: [PendingChannelAttachment] = []
+    /// A file that couldn't be added or sent. Shown above the composer, never
+    /// in place of the conversation.
+    @State var attachmentNotice: String?
     @State var isUploading = false
     @State var isDragOver = false
     @State var replyingTo: ChannelMessage? = nil
@@ -87,15 +90,9 @@ struct ChannelDetailView: View {
 
     let ws = ChannelsWebSocket.shared
     let senderColumnWidth: CGFloat = 160
-    let maxAttachments = 10
-    let maxAttachmentBytes = 50 * 1024 * 1024
-    /// Permissive: block only executable / installer types; everything else
-    /// (docs, markdown, code, images, video, audio, archives, …) is allowed.
-    let blockedExtensions: Set<String> = [
-        "exe", "msi", "bat", "cmd", "com", "scr", "vbs", "ps1",
-        "app", "dmg", "pkg", "deb", "rpm", "apk", "jar", "bin",
-        "command", "scpt", "action", "workflow",
-    ]
+    /// What the composer takes: a conversation with Espresso takes what it can
+    /// read, stored privately; a channel nearly anything.
+    var attachmentRules: AttachmentRules { isAssistant ? .espresso : .channel }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -162,6 +159,9 @@ struct ChannelDetailView: View {
                 }
                 messagesList
                 Divider()
+                if let notice = attachmentNotice {
+                    attachmentNoticeBar(notice)
+                }
                 ChannelMessageComposer(
                     channelId: channelId,
                     prompt: composerPrompt,
@@ -169,7 +169,7 @@ struct ChannelDetailView: View {
                     currentUserId: appState.currentUser?.id ?? "",
                     // In its own conversation every message is already Espresso's.
                     supportsEspressoAgent: vm.channel?.projectId != nil && !isAssistant,
-                    maxAttachments: maxAttachments,
+                    attachmentRules: attachmentRules,
                     typingPing: { ws.sendTyping(channelId: channelId) },
                     onSend: { send($0) },
                     onOpenFilePicker: openFilePicker,

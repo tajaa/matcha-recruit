@@ -129,6 +129,8 @@ extension AppState {
         JournalStarStore.shared.bind(userId: nil)
         FileStarStore.shared.bind(userId: nil)
         SidebarSectionOrderStore.shared.bind(userId: nil)
+        // Links to the last account's private Espresso files.
+        PrivateInputLinks.shared.clear()
         CalendarService.shared.resetSession()
         AppleCalendarSync.shared.bind(userID: nil)
         heartbeatTask?.cancel()

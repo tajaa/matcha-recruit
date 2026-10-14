@@ -334,7 +334,7 @@ async def test_a_project_chat_gets_no_private_ability_whatever_is_switched_on(mo
     private.assert_not_awaited()
     loaded.assert_not_awaited()
     keys = await chat_entry.ability_keys(user, uuid4(), uuid4(), "assistant")
-    assert keys == ["web", "shopping", "email", "calendar"]
+    assert keys == ["web", "shopping", "files", "email", "calendar"]
 
     private.return_value = False  # someone else got into the conversation
     assert await chat_entry.ability_keys(user, uuid4(), uuid4(), "assistant") == ["web", "shopping"]
@@ -400,3 +400,37 @@ async def test_the_model_pick_reaches_every_run_a_message_starts(wired):
     # No pick: the runtime's default.
     await chat_entry.handle_message(**_message(user))
     assert wired.queued.await_args.kwargs["model"] is None
+
+
+# ── files sent on their own ────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_files_with_no_words_are_kept_without_spending_a_request(wired):
+    assert await chat_entry.handle_message(**_message(_user(), content="  ", files=1)) is True
+    wired.queued.assert_not_awaited()
+    assert wired.posted == [(chat_entry.files_received(1), None)]
+    await chat_entry.handle_message(**_message(_user(), content="", files=3))
+    assert wired.posted[-1][0] == "Got your 3 files. What would you like me to do with them?"
+
+
+@pytest.mark.asyncio
+async def test_files_answer_the_question_espresso_asked(wired):
+    wired.conn.on("owner_user_id = $2 AND kind = 'ask_user'", {"id": uuid4()})
+    await chat_entry.handle_message(**_message(_user(), content="", files=1))
+    assert wired.queued.await_args.kwargs["prompt"] == "Here's the file."
+    # The question it answered is closed as answered.
+    assert wired.conn.ran("UPDATE mw_agent_card_prompts")[0][2][2] is True
+
+
+@pytest.mark.asyncio
+async def test_files_sent_as_a_reply_to_a_question_answer_it(wired, monkeypatch):
+    seen = {}
+
+    async def reply(**kwargs):
+        seen.update(kwargs)
+        return True
+
+    monkeypatch.setattr(chat_entry, "handle_prompt_reply", reply)
+    await chat_entry.handle_message(**_message(_user(), content="", files=2, reply_prompt_id=uuid4()))
+    assert seen["content"] == "Here are the files."
+    wired.queued.assert_not_awaited()

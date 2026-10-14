@@ -2573,12 +2573,27 @@ async def upload_channel_files(
     files: list[UploadFile] = File(...),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Upload files for a channel message. Returns attachment metadata to include with the message."""
+    """Upload files for a channel message. Returns attachment metadata to include with the message.
+
+    In a private conversation with Espresso the files are the assistant's to
+    read, so they go to private storage instead (`agent_runtime/inputs.py`),
+    under its own limits, and come back as `espresso-input:` attachments.
+    """
+    async with get_connection() as conn:
+        access = await _require_channel_capability(conn, channel_id, current_user)
+        if access.scope is ChannelScope.ASSISTANT:
+            company_id = await conn.fetchval(
+                "SELECT company_id FROM channels WHERE id = $1 AND assistant_user_id = $2",
+                channel_id, current_user.id,
+            )
+            if company_id is None:
+                raise HTTPException(status_code=403, detail="Not your conversation")
+    if access.scope is ChannelScope.ASSISTANT:
+        return await _upload_assistant_inputs(channel_id, company_id, files, current_user)
     if len(files) > _MAX_CHANNEL_FILE_COUNT:
         raise HTTPException(status_code=400, detail=f"Maximum {_MAX_CHANNEL_FILE_COUNT} files per message")
 
     async with get_connection() as conn:
-        await _require_channel_capability(conn, channel_id, current_user)
         is_member = await conn.fetchval(
             "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
             channel_id, current_user.id,
@@ -2614,6 +2629,30 @@ async def upload_channel_files(
             "size": size,
         })
 
+    return {"attachments": attachments}
+
+
+async def _upload_assistant_inputs(channel_id: UUID, company_id: UUID, files: list[UploadFile],
+                                   current_user: CurrentUser) -> dict:
+    from ...matcha.services._shared.uploads import read_upload_capped
+    from ...matcha.services.matcha_work.agent_runtime import inputs as agent_inputs
+
+    if len(files) > agent_inputs.MAX_FILES:
+        raise HTTPException(status_code=400, detail=f"Espresso takes up to {agent_inputs.MAX_FILES} files at a time.")
+    uploads = []
+    for f in files:
+        # Refused at the cap, not after the whole body is in memory.
+        data = await read_upload_capped(f, agent_inputs.MAX_FILE_BYTES)
+        uploads.append(agent_inputs.Upload(filename=f.filename or "file", content_type=f.content_type, data=data))
+    try:
+        attachments = await agent_inputs.save(
+            user_id=current_user.id, company_id=company_id, channel_id=channel_id, uploads=uploads,
+        )
+    except agent_inputs.InputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError:
+        logger.exception("private storage unavailable for an Espresso upload")
+        raise HTTPException(status_code=503, detail="Files can't be stored right now. Try again in a moment.")
     return {"attachments": attachments}
 
 

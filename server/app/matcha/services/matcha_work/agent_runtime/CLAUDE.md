@@ -17,7 +17,8 @@ There is one loop in this package and no other: do not add a second.
 | Policy | `policy.py` | `evaluate_commit`: allow / confirm / deny. Pure: no I/O, no clock, no model |
 | Result | `result.py` | `agent_result.v2` (headline, summary, typed blocks); reads v1 as v2 |
 | Catalog | `catalog.py` | Every ability, and `abilities_for`: the only filter on what a run gets |
-| Abilities | `abilities/*.py` | `web`, `screenshots`, `shopping`, `flights`, `email`, `calendar`, `reservations`, `purchase`, `domains`, `sales`, `jobs` |
+| Abilities | `abilities/*.py` | `web`, `screenshots`, `shopping`, `files`, `flights`, `email`, `calendar`, `reservations`, `purchase`, `domains`, `sales`, `jobs` |
+| Files | `inputs.py` | Files the person gives Espresso: private storage, extracted text, what a run sees |
 | Chat entry | `chat_entry.py` | A chat message on its way to a run; answers to questions |
 | Enqueue | `enqueue.py`, `quota.py` | Gates, the daily allowance, one live run per person per conversation |
 | Models | `models.py` | The model menu and which model a run uses |
@@ -32,7 +33,7 @@ Browser: `../browser/`. Migrations: `agentrt01` (run kind, steps, prompts),
 `agentrt02` (channel scope), `agentrt03` (grants), `assistbuy01` (shipping
 addresses, card billing address, purchases without a project/task),
 `assistdom01` (domain registrations), `mwcal01` (the Espresso calendar and the
-person's timezone).
+person's timezone), `agentin01` (files the person gives Espresso).
 
 ## Adding an ability
 
@@ -176,6 +177,37 @@ it otherwise), and should declare `resolve`.
   rows with the scope as a literal, and chat posts go through the existing
   `project_agent/chat.py` bridge. The matcha → werk boundary stays at the two
   fan-out imports it has.
+
+## Files the person gives Espresso (`inputs.py`, `abilities/files.py`)
+
+- **Upload:** the ordinary channel upload (`POST /channels/{id}/upload`). In a
+  conversation whose scope is `assistant` it stores the files privately
+  (`upload_private_file`, `agent-inputs/<user>/…`) under Espresso's own limits
+  (5 files and 25 MB a message, 10 MB a file, 200 MB a person; PDF, Word,
+  text, Markdown, CSV, JSON, PNG, JPEG, WebP) and returns
+  `espresso-input:<id>` attachments. Nothing about them is public. Older app
+  builds get the same treatment, since the route decides, not the client.
+- **At upload, once:** images are re-encoded as JPEG ≤1568px with no EXIF, and
+  only that copy is kept; document text is extracted (30 s, ≤20k characters).
+- **Sending:** the socket keeps only `espresso-input:` attachments the sender
+  uploaded to this conversation and hasn't sent yet, described from our rows
+  (`claim_for_message`), then links them to the message.
+- **A run** gets the files on its own message, plus any sent on their own just
+  before (`seen_run_id IS NULL`, last 24 h), as one user message: the words,
+  then document text as marked data (≤6k a file, ≤12k a run), then ≤3 images.
+  It's also told the conversation's 10 newest files by id, and `read_file`
+  reads any of them a page at a time. File text never grounds an outward
+  action (it isn't the person's own words to Espresso).
+- **Files with no words** get "Got your file. What would you like me to do
+  with it?" and no run, unless Espresso just asked a question: then they
+  answer it ("Here's the file.").
+- **Links:** `GET /assistant/inputs/{id}/url` (five minutes, owner only);
+  `DELETE /assistant/inputs/{id}` removes the stored copy too.
+- **Résumés** (`/users/me/resume`) are stored privately as well; the response's
+  `resume_url` is a fifteen-minute link.
+- **Backfill:** `server/scripts/privatize_agent_inputs.py` moves résumés and
+  assistant-chat attachments uploaded before `agentin01` off the public CDN.
+  Dry run by default; `--apply` moves; rerunnable.
 
 ## Photos and screenshots
 

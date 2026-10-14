@@ -43,12 +43,53 @@ extension ChannelDetailView {
 
     /// Adapt a channel attachment to the shared in-app preview model. Lives at
     /// this level (not per-row) so the single hoisted sheet owns presentation.
-    func previewModel(_ att: ChannelAttachment) -> MWProjectFile {
+    func previewModel(_ att: ChannelAttachment, link: String? = nil) -> MWProjectFile {
         MWProjectFile(
             id: att.url, projectId: nil, taskId: nil, uploadedBy: nil,
-            filename: att.filename, storageUrl: att.url,
+            filename: att.filename, storageUrl: link ?? att.url,
             contentType: att.contentType, fileSize: att.size, createdAt: nil
         )
+    }
+
+    /// Preview an attachment. A private Espresso file is opened through a
+    /// short-lived link, fetched first.
+    func openAttachment(_ att: ChannelAttachment) {
+        guard let inputId = att.privateInputId else {
+            previewFile = previewModel(att)
+            return
+        }
+        Task {
+            do {
+                let link = try await MatchaWorkService.shared.assistantInputLink(inputId)
+                await MainActor.run { previewFile = previewModel(att, link: link.absoluteString) }
+            } catch {
+                await MainActor.run { attachmentNotice = "\(att.filename) isn't available any more." }
+            }
+        }
+    }
+
+    func attachmentNoticeBar(_ notice: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundColor(.orange)
+            Text(notice)
+                .font(.system(size: 11))
+                .foregroundColor(appState.themeText.opacity(0.8))
+                .lineLimit(2)
+            Spacer(minLength: 0)
+            Button { attachmentNotice = nil } label: {
+                Image(systemName: "xmark").font(.system(size: 9))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(appState.themeText.opacity(0.5))
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Color.orange.opacity(0.08))
+        .task(id: notice) {
+            try? await Task.sleep(for: .seconds(6))
+            if attachmentNotice == notice { attachmentNotice = nil }
+        }
     }
 
     func deleteMessage(_ msg: ChannelMessage) {
@@ -203,7 +244,8 @@ extension ChannelDetailView {
                 }
             } catch {
                 await MainActor.run {
-                    vm.errorMessage = "Upload failed: \(error.localizedDescription)"
+                    // The draft and its files stay, so a retry is one click.
+                    attachmentNotice = Self.uploadFailure(error)
                     isUploading = false
                 }
             }
@@ -265,27 +307,54 @@ extension ChannelDetailView {
     }
 
     func ingestFile(at url: URL) {
-        let ext = url.pathExtension.lowercased()
-        guard !blockedExtensions.contains(ext) else {
-            vm.errorMessage = "File type .\(ext) isn't allowed"
-            return
-        }
-        guard pendingAttachments.count < maxAttachments else {
-            vm.errorMessage = "Max \(maxAttachments) attachments per message"
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        if let refusal = attachmentRules.refusal(filename: url.lastPathComponent, size: size, pending: pendingAttachments) {
+            attachmentNotice = refusal
             return
         }
         guard let data = try? Data(contentsOf: url) else {
-            vm.errorMessage = "Could not read \(url.lastPathComponent)"
+            attachmentNotice = "Could not read \(url.lastPathComponent)"
             return
         }
-        guard data.count <= maxAttachmentBytes else {
-            vm.errorMessage = "\(url.lastPathComponent) is too large (max 50 MB)"
-            return
-        }
-        let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
-        pendingAttachments.append(
-            PendingChannelAttachment(data: data, filename: url.lastPathComponent, mimeType: mime)
+        var file = PendingChannelAttachment(
+            data: data, filename: url.lastPathComponent,
+            mimeType: UTType(filenameExtension: url.pathExtension.lowercased())?.preferredMIMEType
+                ?? "application/octet-stream"
         )
+        if isAssistant {
+            // Espresso reads JPEG, not HEIC: convert an iPhone photo here.
+            guard let converted = Self.convertingHEIC(file) else {
+                attachmentNotice = "Couldn't convert \(url.lastPathComponent) to JPEG"
+                return
+            }
+            file = converted
+        }
+        if let refusal = attachmentRules.refusal(filename: file.filename, size: file.size, pending: pendingAttachments) {
+            attachmentNotice = refusal
+            return
+        }
+        pendingAttachments.append(file)
+    }
+
+    /// A HEIC or HEIF photo as a JPEG; anything else unchanged; nil when the
+    /// photo can't be decoded.
+    nonisolated static func convertingHEIC(_ file: PendingChannelAttachment) -> PendingChannelAttachment? {
+        let ext = (file.filename as NSString).pathExtension.lowercased()
+        guard ext == "heic" || ext == "heif" else { return file }
+        guard let rep = NSBitmapImageRep(data: file.data),
+              let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85])
+        else { return nil }
+        let stem = (file.filename as NSString).deletingPathExtension
+        return PendingChannelAttachment(data: jpeg, filename: "\(stem).jpg", mimeType: "image/jpeg")
+    }
+
+    /// The server's own reason when it gave one ("Espresso takes up to 5
+    /// files at a time"), else a plain failure.
+    nonisolated static func uploadFailure(_ error: Error) -> String {
+        if case APIError.httpError(_, let message) = error, !message.isEmpty, !message.hasPrefix("{") {
+            return message
+        }
+        return "Upload failed: \(error.localizedDescription)"
     }
 
     /// Pull an image off the system clipboard and stage it as an attachment.
@@ -303,18 +372,14 @@ extension ChannelDetailView {
                   let png = rep.representation(using: .png, properties: [:]) {
             data = png
         } else {
-            vm.errorMessage = "No image on the clipboard — screenshot with ⌃⌘⇧4 first"
-            return
-        }
-        guard pendingAttachments.count < maxAttachments else {
-            vm.errorMessage = "Max \(maxAttachments) attachments per message"
-            return
-        }
-        guard data.count <= maxAttachmentBytes else {
-            vm.errorMessage = "Pasted image is too large (max 10 MB)"
+            attachmentNotice = "No image on the clipboard — screenshot with ⌃⌘⇧4 first"
             return
         }
         let stamp = Int(Date().timeIntervalSince1970)
+        if let refusal = attachmentRules.refusal(filename: "pasted-\(stamp).png", size: data.count, pending: pendingAttachments) {
+            attachmentNotice = refusal
+            return
+        }
         pendingAttachments.append(
             PendingChannelAttachment(data: data, filename: "pasted-\(stamp).png", mimeType: "image/png")
         )

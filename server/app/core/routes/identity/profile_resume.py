@@ -41,6 +41,16 @@ class ProfileResumeResponse(BaseModel):
     updated_at: str
 
 
+def _resume_link(stored: str | None) -> str:
+    """What the client gets for the stored file: a fifteen-minute link to a
+    private copy, or the old public URL until the backfill moves it."""
+    if not stored:
+        return ""
+    if stored.startswith("s3://"):
+        return get_storage().get_presigned_download_url(stored, expires_in=900) or ""
+    return stored
+
+
 def _row_to_response(row) -> ProfileResumeResponse:
     parsed = row["parsed_data"]
     if isinstance(parsed, str):
@@ -50,7 +60,7 @@ def _row_to_response(row) -> ProfileResumeResponse:
             parsed = {}
     return ProfileResumeResponse(
         filename=row["filename"],
-        resume_url=row["resume_url"],
+        resume_url=_resume_link(row["resume_url"]),
         parsed_data=parsed or {},
         updated_at=row["updated_at"].isoformat() if row["updated_at"] else "",
     )
@@ -89,20 +99,24 @@ async def upload_my_resume(
             detail="Could not parse resume. Please try a different file or format.",
         )
 
-    # Upload raw file to storage (best-effort). Failing the upload is not
-    # fatal — we still persist the parsed data so the user gets value.
+    # The raw file goes to private storage (best-effort). Failing the upload is
+    # not fatal: we still persist the parsed data so the user gets value. A
+    # résumé holds a home address and phone number; it is never public.
     try:
-        resume_url = await get_storage().upload_file(
+        resume_url = await get_storage().upload_private_file(
             raw,
             filename,
             prefix=f"profile_resumes/{current_user.id}",
             content_type=content_type,
         )
     except Exception as e:
-        logger.warning("Profile resume S3 upload failed for user %s: %s", current_user.id, e)
+        logger.warning("Profile resume private upload failed for user %s: %s", current_user.id, e)
         resume_url = ""
 
     async with get_connection() as conn:
+        previous = await conn.fetchval(
+            "SELECT resume_url FROM user_resumes WHERE user_id = $1", current_user.id,
+        )
         row = await conn.fetchrow(
             """
             INSERT INTO user_resumes (user_id, filename, resume_url, raw_text, parsed_data, updated_at)
@@ -122,7 +136,21 @@ async def upload_my_resume(
             json.dumps(parsed_data),
         )
 
+    if previous and previous != resume_url:
+        await _delete_stored(previous)
     return _row_to_response(row)
+
+
+async def _delete_stored(stored: str) -> None:
+    """Remove a replaced or deleted résumé file, private or (pre-backfill) public."""
+    storage = get_storage()
+    try:
+        if stored.startswith("s3://"):
+            await storage.delete_private_file(stored)
+        else:
+            await storage.delete_file(stored)
+    except Exception:
+        logger.warning("could not delete an old resume file", exc_info=True)
 
 
 @router.get("/me/resume", response_model=Optional[ProfileResumeResponse])
@@ -140,12 +168,14 @@ async def get_my_resume(current_user: CurrentUser = Depends(get_current_user)):
 
 @router.delete("/me/resume", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_my_resume(current_user: CurrentUser = Depends(get_current_user)):
-    """Delete the caller's profile resume."""
+    """Delete the caller's profile resume, the stored file included."""
     async with get_connection() as conn:
-        await conn.execute(
-            "DELETE FROM user_resumes WHERE user_id = $1",
+        stored = await conn.fetchval(
+            "DELETE FROM user_resumes WHERE user_id = $1 RETURNING resume_url",
             current_user.id,
         )
+    if stored:
+        await _delete_stored(stored)
     return None
 
 

@@ -66,6 +66,7 @@ def test_the_router_is_gated_and_mounted():
         ("DELETE", "/assistant/abilities/{key}"),
         ("GET", "/assistant/conversations"), ("POST", "/assistant/conversations"),
         ("PATCH", "/assistant/conversations/{channel_id}"),
+        ("GET", "/assistant/inputs/{input_id}/url"), ("DELETE", "/assistant/inputs/{input_id}"),
     }
     assert routes.router.prefix == "/assistant" and len(routes.router.dependencies) == 1
 
@@ -132,8 +133,8 @@ async def test_abilities_say_what_stands_in_the_way(wired, monkeypatch):
     }))
     out = await routes.list_abilities(current_user=_user())
     by_key = {a["key"]: a for a in out["abilities"]}
-    assert list(by_key) == ["web", "screenshots", "shopping", "flights", "email", "calendar", "sales", "jobs",
-                            "reservations"]
+    assert list(by_key) == ["web", "screenshots", "shopping", "files", "flights", "email", "calendar", "sales",
+                            "jobs", "reservations"]
     # The person's job searches: private, behind its own disclosure, never acting outward.
     jobs = by_key["jobs"]
     assert jobs["private_only"] and not jobs["acts"] and not jobs["enabled"]

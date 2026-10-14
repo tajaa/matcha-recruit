@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
 from .abilities import (
-    calendar, domains, email, flights, jobs, purchase, reservations, sales, screenshots, shopping, web,
+    calendar, domains, email, files, flights, jobs, purchase, reservations, sales, screenshots, shopping, web,
 )
 from .registry import Ability, validate_catalog
 
@@ -68,6 +68,8 @@ def build_catalog(*, fetch_page, max_fetches: int = 10, fetch_seconds: float = 2
         # Offered only where the browser queue exists (`enqueue.queue_for`).
         screenshots.build(),
         shopping.build(),
+        # The files the person attached in their private conversation.
+        files.build(),
         # Live fares when DUFFEL_ACCESS_TOKEN is set; read-only, so project
         # chats get it too.
         flights.build(),
