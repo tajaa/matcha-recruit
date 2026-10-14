@@ -1,26 +1,32 @@
 """Espresso job search: saved searches, ranked leads, and a run kind for their phases.
 
 Revision ID: mwjobs01
-Revises: mwsales02
-Depends on: assistthread01
+Revises: mwsales02, assistthread01 (a merge of the two heads)
 
 A search is a chain of short worker tasks (one phase each). Its model phases
 are ordinary agent-runtime runs of a new kind, `job_search`, which needs no
 project or channel: the run row points at its search instead.
 
-`depends_on` matters. `agentrt01` is the last migration that rewrites the two
-CHECKs widened here, and it is an ancestor of `assistthread01` but not of
-`mwsales02`. Without the dependency a fresh `upgrade heads` could run
-`agentrt01` after this one and silently drop `job_search` again.
+This merges the `mwsales02` and `assistthread01` heads. `agentrt01` is the
+last migration that rewrites the two CHECKs widened here; it is an ancestor
+of `assistthread01` but not of `mwsales02`, so without `assistthread01` as a
+parent a fresh `upgrade heads` could run `agentrt01` after this one and
+silently drop `job_search` again.
+
+A merge, not `depends_on`: with `depends_on`, Alembic drops
+`assistthread01` from `alembic_version` once this applies, and
+`scripts/alembic_graph.py` (the deploy gate in `update-ec2.sh` and the drift
+check), which follows `down_revision` only, then reports the whole
+`assistthread01` chain as pending and refuses the deploy.
 
 The downgrade deletes job-search runs, then the tables.
 """
 from alembic import op
 
 revision = "mwjobs01"
-down_revision = "mwsales02"
+down_revision = ("mwsales02", "assistthread01")
 branch_labels = None
-depends_on = "assistthread01"
+depends_on = None
 
 _LIVE = "'queued','planning','discovering','screening','enriching','approaching'"
 
