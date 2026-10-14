@@ -56,28 +56,22 @@ PLAN_QUOTAS: dict[str, tuple[int, int]] = {
     PLAN_BUSINESS: (500_000, 12),
 }
 
-# Agent cards (a card that runs Espresso's web agent) — monthly runs per user by
-# plan. Each run spends real money (hosted web searches + Luna tokens), so the
-# cap is per person, not per company. Plans absent here get no agent cards.
-AGENT_CARD_MONTHLY_RUNS: dict[str, int] = {
-    PLAN_PRO: 40,
-    PLAN_BUSINESS: 100,
+# Espresso's background work — agent-card runs, job searches and Espresso
+# tasks — shares one monthly allowance per person, in units; the weights are in
+# matcha_work/agent_tasks/allowance.py (a card run 1, a job search 5). Pro's 60
+# keep today's totals: 40 card runs + 4 job searches. Per person, not per
+# company: each unit spends real money. Plans absent here get none.
+AGENT_TASK_MONTHLY_UNITS: dict[str, int] = {
+    PLAN_PRO: 60,
+    PLAN_BUSINESS: 150,
 }
 
 # Plan ordering for ">= lite" style checks.
 # Espresso assistant runs per UTC day. Every chat message is a run, so this is
-# a daily allowance; the monthly agent-card allowance above is counted apart.
+# a daily allowance; the monthly task allowance above is counted apart.
 ASSISTANT_DAILY_RUNS: dict[str, int] = {
     PLAN_PRO: 30,
     PLAN_BUSINESS: 60,
-}
-
-# Espresso job searches per UTC month. One search is ~30 Google Jobs calls, up
-# to 60 page loads and a chain of model runs, so whole searches are counted;
-# re-ranking and redrafting a search are free. Plans absent here get none.
-JOB_SEARCH_MONTHLY_RUNS: dict[str, int] = {
-    PLAN_PRO: 4,
-    PLAN_BUSINESS: 10,
 }
 
 _PLAN_RANK = {PLAN_FREE: 0, PLAN_LITE: 1, PLAN_PRO: 2, PLAN_BUSINESS: 2}
@@ -243,9 +237,14 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
         pass
 
     try:
-        from ..matcha_work.agent_card.quota import card_agent_usage
+        from ..matcha_work.agent_tasks import allowance
 
-        quotas["agent_runs"] = await card_agent_usage(user_id, plan=plan)
+        tasks = await allowance.task_usage(user_id, plan=plan)
+        quotas["tasks"] = tasks
+        # The same allowance counted in card runs and in job searches, for the
+        # app builds and screens that predate `tasks`.
+        quotas["agent_runs"] = allowance.as_count(tasks, allowance.WEIGHTS["agent_card"])
+        quotas["job_searches"] = allowance.as_count(tasks, allowance.WEIGHTS["job_search"])
     except Exception:
         # Informational, like the token quota above.
         pass
@@ -254,13 +253,6 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
         from ..matcha_work.agent_runtime.quota import assistant_usage
 
         quotas["assistant_runs"] = await assistant_usage(user_id, plan=plan)
-    except Exception:
-        pass
-
-    try:
-        from ..matcha_work.job_search.quota import job_search_usage
-
-        quotas["job_searches"] = await job_search_usage(user_id, plan=plan)
     except Exception:
         pass
 

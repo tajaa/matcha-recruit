@@ -248,10 +248,11 @@ async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
 
     monkeypatch.setattr(entitlements_service, "resolve_plan_for_user", AsyncMock(return_value="pro"))
     monkeypatch.setattr(quota, "assistant_usage", AsyncMock(return_value={"limit": 30, "used": 2, "remaining": 28}))
-    from app.matcha.services.matcha_work.job_search import providers as job_providers, quota as job_quota
+    from app.matcha.services.matcha_work.agent_tasks import allowance
+    from app.matcha.services.matcha_work.job_search import providers as job_providers
 
     monkeypatch.setattr(job_providers, "configured", lambda: True)
-    monkeypatch.setattr(job_quota, "job_search_usage", AsyncMock(return_value={"limit": 4, "used": 1, "remaining": 3}))
+    monkeypatch.setattr(allowance, "task_usage", AsyncMock(return_value={"limit": 60, "used": 45, "remaining": 15}))
     enabled = AsyncMock(return_value=True)
     monkeypatch.setattr(enqueue, "workspace_enabled", enabled)
     company = uuid4()
@@ -265,7 +266,9 @@ async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
     assert out["features"]["assistant"] is True
     assert out["features"]["job_search"] is True
     assert out["quotas"]["assistant_runs"] == {"limit": 30, "used": 2, "remaining": 28}
-    assert out["quotas"]["job_searches"] == {"limit": 4, "used": 1, "remaining": 3}
+    # Job searches are the shared monthly allowance counted in searches (5 units each).
+    assert out["quotas"]["tasks"] == {"limit": 60, "used": 45, "remaining": 15}
+    assert out["quotas"]["job_searches"] == {"limit": 12, "used": 9, "remaining": 3}
     enabled.assert_awaited_once_with(company)
 
     # No workspace, or a lookup that fails: off, and the read still answers.

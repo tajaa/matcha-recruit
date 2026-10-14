@@ -135,7 +135,8 @@ async def test_create_inserts_then_dispatches(gates, conn):
     token = args[9]
     gates.dispatch.assert_awaited_once()
     assert gates.dispatch.await_args.args[1] == token
-    assert conn.ran("pg_advisory_xact_lock")[0][2] == (f"{USER}:job_search_cap",)
+    # The shared allowance's lock: a card run started at the same moment waits too.
+    assert conn.ran("pg_advisory_xact_lock")[0][2] == (f"{USER}:task_allowance",)
     assert conn.ran("updated_at < NOW() - INTERVAL '2 hours'")  # the stale sweep ran first
 
 
@@ -161,10 +162,13 @@ async def test_create_is_idempotent_and_capped(gates, conn):
     gates.dispatch.assert_not_awaited()
 
     conn.on("WHERE user_id = $1 AND request_id = $2", None)
-    conn.on("SELECT COUNT(*) FROM mw_job_searches", 4)
+    # 56 of Pro's 60 units used: a search (5) doesn't fit, so in searches the
+    # month reads 12 of 12 used.
+    conn.on("SELECT COUNT(*) FROM mw_job_searches", 56)
     with pytest.raises(HTTPException) as exc:
         await enqueue.create_search(CLIENT, COMPANY, body())
-    assert exc.value.status_code == 429 and exc.value.detail["used"] == 4
+    assert exc.value.status_code == 429 and exc.value.detail["code"] == "job_search_limit"
+    assert (exc.value.detail["limit"], exc.value.detail["used"], exc.value.detail["remaining"]) == (12, 12, 0)
 
 
 @pytest.mark.asyncio
@@ -198,14 +202,16 @@ async def test_dispatch_routes_to_the_configured_queue(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_quota_counts_everything_but_failed(monkeypatch):
+    """Job searches are the shared monthly allowance, counted in searches."""
+    from app.matcha.services.matcha_work.agent_tasks import allowance
     from app.matcha.services.matcha_work.job_search import quota
 
-    conn = FakeConn().on("FROM mw_job_searches", 3)
-    monkeypatch.setattr(quota, "connection_or_direct", connection(conn))
+    conn = FakeConn().on("FROM mw_job_searches", 23)  # units used, of Pro's 60
+    monkeypatch.setattr(allowance, "connection_or_direct", connection(conn))
     usage = await quota.job_search_usage(USER, plan="pro")
-    assert (usage["limit"], usage["used"], usage["remaining"]) == (4, 3, 1)
-    assert "status <> 'failed'" in conn.calls[0][1]
-    assert quota.limit_for_plan("lite") == 0 and quota.limit_for_plan("business") == 10
+    assert (usage["limit"], usage["used"], usage["remaining"]) == (12, 5, 7)
+    assert "s.status <> 'failed'" in conn.calls[0][1]
+    assert (await quota.job_search_usage(USER, plan="lite"))["limit"] == 0
 
 
 @pytest.mark.asyncio

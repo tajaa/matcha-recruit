@@ -323,11 +323,11 @@ async def reject_project_task_endpoint(
     if not note:
         raise HTTPException(status_code=400, detail="A note explaining what's incomplete is required")
 
-    # Sending an agent card back IS the redirect: it starts a paid run. So the
-    # editor check and every gate (plan, monthly cap, token budget, rate limit)
-    # run BEFORE the card moves — a refusal must leave it in Review with the
-    # reviewer's note unspent, not stuck in Changes requested with nothing
-    # working on it.
+    # Sending an agent card back IS the redirect: it starts a run. So the
+    # editor check and every gate (plan, monthly allowance, token budget, rate
+    # limit) run BEFORE the card moves — a refusal must leave it in Review with
+    # the reviewer's note unspent, not stuck in Changes requested with nothing
+    # working on it. Its first few send-backs are free (`allowance`).
     async with get_connection() as conn:
         card_category = await conn.fetchval(
             "SELECT category FROM mw_tasks WHERE id = $1 AND project_id = $2",
@@ -339,7 +339,7 @@ async def reject_project_task_endpoint(
 
         if not _can_edit_project(_role):
             raise HTTPException(status_code=403, detail="You have read-only access to this project.")
-        await agent_enqueue.preflight(current_user, project["company_id"])
+        await agent_enqueue.preflight(current_user, project["company_id"], task_id=task_id)
 
     try:
         result = await pt_svc.reject_project_task(

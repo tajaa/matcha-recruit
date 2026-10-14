@@ -20,7 +20,8 @@ from app.matcha.models.matcha_work.job_search import JobSearchCreate
 from app.matcha.services.billing.entitlements_service import PLAN_PRO, require_plan
 
 from . import providers, ranking
-from .quota import job_search_usage, limit_for_plan, usage_payload, used_this_month
+from ..agent_tasks import allowance
+from .quota import job_search_usage
 from .service import end_stale, find_by_request, search_view
 
 logger = logging.getLogger(__name__)
@@ -104,7 +105,7 @@ async def create_search(user, company_id: UUID, body: JobSearchCreate) -> dict:
     if existing is not None:
         return existing
     plan = await preflight(user, company_id, consent_version=body.consent_version)
-    limit = limit_for_plan(plan) if plan is not None else None
+    limit = allowance.limit_for_plan(plan) if plan is not None else None
     weights = ranking.clean_weights(body.weights.model_dump() if body.weights else None)
     token = uuid4()
     title = body.title or (body.criteria.titles[0] if body.criteria.titles else body.ask[:80])
@@ -114,11 +115,10 @@ async def create_search(user, company_id: UUID, body: JobSearchCreate) -> dict:
     model = await default_model()
     async with connection_or_direct() as conn:
         async with conn.transaction():
-            # Count-then-insert is atomic per person: two creates at once can't
-            # both slip under the cap.
-            await conn.execute(
-                "SELECT pg_advisory_xact_lock(hashtext($1))", f"{user.id}:job_search_cap",
-            )
+            # Count-then-insert is atomic per person, under the shared
+            # allowance's lock: two starts at once (of any kind) can't both
+            # slip under it.
+            await allowance.lock(conn, user.id)
             existing = await conn.fetchrow(
                 "SELECT * FROM mw_job_searches WHERE user_id = $1 AND request_id = $2",
                 user.id, body.request_id,
@@ -127,10 +127,10 @@ async def create_search(user, company_id: UUID, body: JobSearchCreate) -> dict:
                 return search_view(existing)
             # A chain that died long ago would hold the one-live-search index forever.
             await end_stale(conn, user.id)
-            if limit is not None:
-                used = await used_this_month(conn, user.id)
-                if used >= limit:
-                    raise _limit_error(usage_payload(limit, used))
+            cost = allowance.WEIGHTS["job_search"]
+            used = await allowance.used_units(conn, user.id) if limit is not None else 0
+            if allowance.over(limit, used, cost):
+                raise _limit_error(allowance.as_count(allowance.usage_payload(limit, used), cost))
             try:
                 row = await conn.fetchrow(
                     """INSERT INTO mw_job_searches

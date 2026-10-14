@@ -165,7 +165,7 @@ async def test_locks_are_user_then_card_then_stale_sweep_then_count_then_insert(
     task, user = _task(), _user()
     await enqueue.enqueue_card_agent(task=task, user=user, reason="rerun", skip_preflight=True)
     steps = [step[0] if step[0] != "lock" else f"lock:{step[1].split(':', 1)[1]}" for step in wired["conn"].executed]
-    assert steps == ["lock:card_agent_cap", "lock:card_agent", "sweep", "count", "insert", "close_prompts"]
+    assert steps == ["lock:task_allowance", "lock:card_agent", "sweep", "count", "insert", "close_prompts"]
     locks = [step[1] for step in wired["conn"].executed if step[0] == "lock"]
     assert locks[0].startswith(str(user.id)) and locks[1].startswith(str(task["id"]))
 
@@ -195,11 +195,11 @@ async def test_redirect_starts_next_round_on_configured_queue(wired, monkeypatch
 
 @pytest.mark.asyncio
 async def test_cap_is_enforced_atomically_even_when_preflight_was_skipped(wired):
-    wired["conn"].used = 40  # two cards created at once both passed the advisory preflight
+    wired["conn"].used = 60  # two cards created at once both passed the advisory preflight
     with pytest.raises(HTTPException) as exc:
         await enqueue.enqueue_card_agent(task=_task(), user=_user(), reason="created", skip_preflight=True)
     assert exc.value.status_code == 429 and exc.value.detail["code"] == "agent_run_limit"
-    assert exc.value.detail["limit"] == 40 and exc.value.detail["used"] == 40
+    assert exc.value.detail["limit"] == 60 and exc.value.detail["used"] == 60
     assert wired["conn"].inserted is None
     wired["dispatch"].assert_not_called()
 
@@ -303,25 +303,29 @@ async def test_only_open_agent_cards_run(wired, task, code):
 
 @pytest.mark.asyncio
 async def test_usage_counts_against_plan_limit(monkeypatch):
+    from app.matcha.services.matcha_work.agent_tasks import allowance
+
     class _C:
         async def fetchval(self, query, *args):
-            assert "status IN ('queued', 'running', 'done')" in query
+            assert "r.status IN ('queued', 'running', 'done')" in query
             return 7
 
     @asynccontextmanager
     async def cod():
         yield _C()
 
-    monkeypatch.setattr(quota, "connection_or_direct", cod)
+    monkeypatch.setattr(allowance, "connection_or_direct", cod)
     usage = await quota.card_agent_usage(uuid4(), plan="pro")
-    assert usage["limit"] == 40 and usage["used"] == 7 and usage["remaining"] == 33
+    assert usage["limit"] == 60 and usage["used"] == 7 and usage["remaining"] == 53
     free = await quota.card_agent_usage(uuid4(), plan="free")
     assert free["limit"] == 0 and free["remaining"] == 0
 
 
 def test_next_month_rollover():
-    assert quota._next_month_start(datetime(2026, 12, 15, tzinfo=timezone.utc)) == datetime(2027, 1, 1, tzinfo=timezone.utc)
-    assert quota._next_month_start(datetime(2026, 9, 28, tzinfo=timezone.utc)) == datetime(2026, 10, 1, tzinfo=timezone.utc)
+    from app.matcha.services.matcha_work.agent_tasks import allowance
+
+    assert allowance.next_month_start(datetime(2026, 12, 15, tzinfo=timezone.utc)) == datetime(2027, 1, 1, tzinfo=timezone.utc)
+    assert allowance.next_month_start(datetime(2026, 9, 28, tzinfo=timezone.utc)) == datetime(2026, 10, 1, tzinfo=timezone.utc)
 
 
 def test_agent_cards_feature_is_pro_and_up():
@@ -332,14 +336,20 @@ def test_agent_cards_feature_is_pro_and_up():
 
 
 @pytest.mark.asyncio
-async def test_entitlements_payload_reports_agent_runs(monkeypatch):
+async def test_entitlements_payload_reports_the_allowance_three_ways(monkeypatch):
+    from app.matcha.services.matcha_work.agent_tasks import allowance
+
     monkeypatch.setattr(entitlements_service, "resolve_plan_for_user", AsyncMock(return_value="pro"))
-    monkeypatch.setattr(quota, "card_agent_usage", AsyncMock(return_value={"limit": 40, "used": 1, "remaining": 39}))
+    monkeypatch.setattr(allowance, "task_usage", AsyncMock(return_value={
+        "limit": 60, "used": 21, "remaining": 39, "resets_at": "2026-11-01T00:00:00+00:00"}))
     from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 
     monkeypatch.setattr(doc_svc, "check_token_quota", AsyncMock(side_effect=RuntimeError("no db")))
     payload = await entitlements_service.resolve_entitlements(uuid4())
+    assert payload["quotas"]["tasks"]["remaining"] == 39
     assert payload["quotas"]["agent_runs"]["remaining"] == 39
+    assert payload["quotas"]["job_searches"] == {
+        "limit": 12, "used": 5, "remaining": 7, "resets_at": "2026-11-01T00:00:00+00:00"}
 
 
 # ── route hooks ────────────────────────────────────────────────────────────
@@ -447,7 +457,7 @@ def _reject_env(monkeypatch, *, category, role="owner", reject_result=None):
         return reject_result or {"id": str(uuid4()), "category": category, "board_column": "changes_requested"}
 
     monkeypatch.setattr(pt_svc, "reject_project_task", reject)
-    monkeypatch.setattr(enqueue, "preflight", AsyncMock(side_effect=lambda *_a: log.append("preflight")))
+    monkeypatch.setattr(enqueue, "preflight", AsyncMock(side_effect=lambda *_a, **_k: log.append("preflight")))
     queued = AsyncMock(side_effect=lambda **_k: log.append("enqueue") or {"run_id": "r", "round": 2, "status": "queued"})
     monkeypatch.setattr(enqueue, "enqueue_card_agent", queued)
     return tasks_routes, log, queued
@@ -456,8 +466,11 @@ def _reject_env(monkeypatch, *, category, role="owner", reject_result=None):
 @pytest.mark.asyncio
 async def test_reject_gates_before_the_card_moves_then_redirects(monkeypatch):
     tasks_routes, log, queued = _reject_env(monkeypatch, category="agent")
-    result = await tasks_routes.reject_project_task_endpoint(uuid4(), uuid4(), {"note": "Only vegan"}, _user())
+    task_id = uuid4()
+    result = await tasks_routes.reject_project_task_endpoint(uuid4(), task_id, {"note": "Only vegan"}, _user())
     assert log == ["preflight", "reject", "enqueue"]
+    # Priced by the card's next round: early send-backs are free.
+    assert enqueue.preflight.await_args.kwargs == {"task_id": task_id}
     assert queued.await_args.kwargs["reason"] == "redirect" and queued.await_args.kwargs["skip_preflight"] is True
     assert result["agent_run"]["round"] == 2
 
@@ -547,3 +560,50 @@ async def test_agent_runs_list_and_rerun_endpoints(monkeypatch):
     monkeypatch.setattr(agent_cards, "_verify_project_access", AsyncMock(return_value=({}, "viewer")))
     with pytest.raises(HTTPException):
         await agent_cards.rerun_agent_endpoint(uuid4(), uuid4(), _user())
+
+
+# ── free send-backs ─────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("done_round, counted", [(0, True), (1, False), (4, False), (5, True)])
+async def test_send_backs_two_to_five_are_free(wired, done_round, counted):
+    wired["conn"].done_round = done_round
+    wired["conn"].used = 60  # nothing left this month
+    task = _task(board_column="changes_requested")
+    if counted:
+        with pytest.raises(HTTPException) as exc:
+            await enqueue.enqueue_card_agent(task=task, user=_user(), reason="redirect", skip_preflight=True)
+        assert exc.value.status_code == 429
+    else:
+        out = await enqueue.enqueue_card_agent(task=task, user=_user(), reason="redirect", skip_preflight=True)
+        assert out["round"] == done_round + 1
+        assert not any(step[0] == "count" for step in wired["conn"].executed)
+
+
+@pytest.mark.asyncio
+async def test_preflight_lets_a_free_send_back_through_with_nothing_left(monkeypatch):
+    monkeypatch.setattr(entitlements_service, "resolve_plan_for_user", AsyncMock(return_value="pro"))
+    monkeypatch.setattr(enqueue, "card_agent_usage", AsyncMock(return_value={
+        "limit": 60, "used": 60, "remaining": 0, "resets_at": "2026-11-01T00:00:00+00:00"}))
+    monkeypatch.setattr(token_budget_service, "check_token_budget", AsyncMock())
+    monkeypatch.setattr(redis_cache, "check_rate_limit", AsyncMock())
+
+    class _C:
+        def __init__(self, done):
+            self.done = done
+
+        async def fetchval(self, query, *args):
+            assert "MAX(round)" in query
+            return self.done
+
+    for done, refused in ((1, False), (0, True)):
+        @asynccontextmanager
+        async def gc(done=done):
+            yield _C(done)
+
+        monkeypatch.setattr(enqueue, "get_connection", gc)
+        if refused:
+            with pytest.raises(HTTPException):
+                await enqueue.preflight(_user(), uuid4(), task_id=uuid4())
+        else:
+            await enqueue.preflight(_user(), uuid4(), task_id=uuid4())
