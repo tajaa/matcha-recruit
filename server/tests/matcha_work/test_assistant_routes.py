@@ -243,26 +243,36 @@ async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
 
     monkeypatch.setattr(entitlements_service, "resolve_plan_for_user", AsyncMock(return_value="pro"))
     monkeypatch.setattr(quota, "assistant_usage", AsyncMock(return_value={"limit": 30, "used": 2, "remaining": 28}))
+    from app.matcha.services.matcha_work.job_search import providers as job_providers, quota as job_quota
+
+    monkeypatch.setattr(job_providers, "configured", lambda: True)
+    monkeypatch.setattr(job_quota, "job_search_usage", AsyncMock(return_value={"limit": 4, "used": 1, "remaining": 3}))
     enabled = AsyncMock(return_value=True)
     monkeypatch.setattr(enqueue, "workspace_enabled", enabled)
     company = uuid4()
     out = await entitlements_service.resolve_entitlements(uuid4(), company)
     # The assistant's own menu rides along only when the workspace has it.
     assert out["workspace"] == {
-        "espresso_assistant": True, "claude_models": False, **_GEMINI_PICKER,
+        "espresso_assistant": True, "job_search": True, "claude_models": False, **_GEMINI_PICKER,
         "assistant_models": [{"id": "gpt-5.6-luna", "label": "OpenAI Luna"}],
         "default_assistant_model": "gpt-5.6-luna",
     }
     assert out["features"]["assistant"] is True
+    assert out["features"]["job_search"] is True
     assert out["quotas"]["assistant_runs"] == {"limit": 30, "used": 2, "remaining": 28}
+    assert out["quotas"]["job_searches"] == {"limit": 4, "used": 1, "remaining": 3}
     enabled.assert_awaited_once_with(company)
 
     # No workspace, or a lookup that fails: off, and the read still answers.
-    assert (await entitlements_service.resolve_entitlements(uuid4(), None))["workspace"] == {
-        "espresso_assistant": False, "claude_models": False, **_GEMINI_PICKER}
+    off = {"espresso_assistant": False, "job_search": False, "claude_models": False, **_GEMINI_PICKER}
+    assert (await entitlements_service.resolve_entitlements(uuid4(), None))["workspace"] == off
     enabled.side_effect = RuntimeError("db down")
-    assert (await entitlements_service.resolve_entitlements(uuid4(), company))["workspace"] == {
-        "espresso_assistant": False, "claude_models": False, **_GEMINI_PICKER}
+    assert (await entitlements_service.resolve_entitlements(uuid4(), company))["workspace"] == off
+
+    # A personal workspace on a server with no listings key: no job search.
+    enabled.side_effect = None
+    monkeypatch.setattr(job_providers, "configured", lambda: False)
+    assert (await entitlements_service.resolve_entitlements(uuid4(), company))["workspace"]["job_search"] is False
 
     # A menu that cannot be read leaves it out; the app falls back to no menu.
     from app.matcha.services.matcha_work.agent_runtime import models

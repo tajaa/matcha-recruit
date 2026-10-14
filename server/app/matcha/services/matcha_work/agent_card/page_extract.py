@@ -17,6 +17,11 @@ from bs4 import BeautifulSoup
 MAX_TEXT_CHARS = 8_000
 MAX_PRODUCTS = 3
 MAX_REVIEWS = 5
+MAX_JOBS = 2
+# In the general page view (the model's fetch_page output) a job description
+# stays short; `job_postings` gives the job search the whole thing.
+MAX_JOB_DESCRIPTION = 3_000
+MAX_FULL_JOB_DESCRIPTION = 20_000
 
 
 def _as_list(value: Any) -> list:
@@ -125,19 +130,84 @@ def _product(node: dict, base: str) -> dict:
     }
 
 
-def extract_page(html: bytes, final_url: str) -> dict:
-    """Compact, bounded page facts for the model."""
-    soup = BeautifulSoup(html, "lxml")
-    products: list[dict] = []
+def _plain(value: Any, limit: int) -> str:
+    """Text from a JSON-LD string field that may hold HTML."""
+    raw = str(value or "")
+    if "<" in raw:
+        raw = BeautifulSoup(raw, "lxml").get_text("\n", strip=True)
+    lines = [" ".join(line.split()) for line in raw.splitlines()]
+    return "\n".join(line for line in lines if line)[:limit]
+
+
+def _address(value: Any) -> str:
+    parts = []
+    for place in _as_list(value)[:3]:
+        if not isinstance(place, dict):
+            continue
+        address = place.get("address") if isinstance(place.get("address"), dict) else place
+        bits = [str(address.get(k) or "").strip() for k in
+                ("addressLocality", "addressRegion", "addressCountry")]
+        country = address.get("addressCountry")
+        if isinstance(country, dict):
+            bits[2] = str(country.get("name") or "").strip()
+        text = ", ".join(b for b in bits if b)
+        if text:
+            parts.append(text)
+    return "; ".join(parts)[:200]
+
+
+def _job_posting(node: dict, base: str, description_limit: int = MAX_JOB_DESCRIPTION) -> dict:
+    """schema.org JobPosting: the facts a job search needs, pay included."""
+    org = node.get("hiringOrganization")
+    salary = node.get("baseSalary") if isinstance(node.get("baseSalary"), dict) else None
+    location_type = " ".join(str(t) for t in _as_list(node.get("jobLocationType")))
+    url = node.get("url")
+    return {
+        "title": str(node.get("title") or "").strip()[:200],
+        "company": (org.get("name") if isinstance(org, dict) else org if isinstance(org, str) else "") or "",
+        "location": _address(node.get("jobLocation")),
+        "remote": "TELECOMMUTE" in location_type.upper(),
+        "base_salary": salary,
+        "date_posted": str(node.get("datePosted") or "")[:40] or None,
+        "valid_through": str(node.get("validThrough") or "")[:40] or None,
+        "employment_type": " ".join(str(t) for t in _as_list(node.get("employmentType")))[:80] or None,
+        "url": urljoin(base, url) if isinstance(url, str) else None,
+        "description": _plain(node.get("description"), description_limit),
+    }
+
+
+def _ld_nodes(soup: BeautifulSoup):
     for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
         raw = script.string or script.get_text() or ""
         try:
             blob = json.loads(raw)
         except (ValueError, TypeError, RecursionError):
             continue
-        for node in _walk_ld(blob):
-            if "Product" in _types(node) and len(products) < MAX_PRODUCTS:
-                products.append(_product(node, final_url))
+        yield from _walk_ld(blob)
+
+
+def job_postings(html: bytes, final_url: str) -> list[dict]:
+    """Every schema.org JobPosting on the page (up to MAX_JOBS), full description."""
+    soup = BeautifulSoup(html, "lxml")
+    jobs = []
+    for node in _ld_nodes(soup):
+        if "JobPosting" in _types(node):
+            jobs.append(_job_posting(node, final_url, MAX_FULL_JOB_DESCRIPTION))
+            if len(jobs) >= MAX_JOBS:
+                break
+    return jobs
+
+
+def extract_page(html: bytes, final_url: str) -> dict:
+    """Compact, bounded page facts for the model."""
+    soup = BeautifulSoup(html, "lxml")
+    products: list[dict] = []
+    jobs: list[dict] = []
+    for node in _ld_nodes(soup):
+        if "Product" in _types(node) and len(products) < MAX_PRODUCTS:
+            products.append(_product(node, final_url))
+        elif "JobPosting" in _types(node) and len(jobs) < MAX_JOBS:
+            jobs.append(_job_posting(node, final_url))
 
     def meta(*names: str) -> str | None:
         for name in names:
@@ -153,7 +223,7 @@ def extract_page(html: bytes, final_url: str) -> dict:
         tag.decompose()
     text = " ".join((soup.body or soup).get_text(" ", strip=True).split())
 
-    return {
+    page = {
         "url": final_url,
         "title": (title or "")[:200],
         "description": (meta("og:description", "description") or "")[:500],
@@ -162,6 +232,10 @@ def extract_page(html: bytes, final_url: str) -> dict:
         "text": text[:MAX_TEXT_CHARS],
         "text_truncated": len(text) > MAX_TEXT_CHARS,
     }
+    # Only when the page has one, so product pages keep their exact shape.
+    if jobs:
+        page["jobs"] = jobs
+    return page
 
 
 def page_urls(page: dict) -> set[str]:

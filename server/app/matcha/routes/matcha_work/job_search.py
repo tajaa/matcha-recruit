@@ -1,0 +1,106 @@
+"""Espresso Job search: saved searches, their ranked jobs, and what to do next.
+
+Personal Espresso accounts only (the assistant's rule), Pro and up, with a
+monthly allowance of whole searches. The search itself runs in the worker
+(`services/matcha_work/job_search/`); these routes start, read, re-rank and
+tidy it. Everything is scoped to the caller: another person's ids are 404.
+"""
+from __future__ import annotations
+
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.core.models.auth import CurrentUser
+from app.matcha.dependencies import get_client_company_id, require_admin_or_client
+from app.matcha.models.matcha_work.job_search import JobSearchCreate, JobWeights, LeadPatch
+from app.matcha.services.matcha_work.agent_runtime import consent
+from app.matcha.services.matcha_work.job_search import enqueue, providers, quota, service
+
+from .assistant import require_personal_workspace
+
+router = APIRouter(
+    prefix="/job-searches",
+    dependencies=[Depends(require_personal_workspace)],
+)
+
+
+async def _company(current_user: CurrentUser) -> UUID:
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No workspace is selected.")
+    return company_id
+
+
+async def _call(operation):
+    try:
+        return await operation
+    except service.JobSearchError as exc:
+        raise HTTPException(status_code=exc.code, detail=exc.detail or str(exc)) from exc
+
+
+@router.get("")
+async def list_job_searches(current_user: CurrentUser = Depends(require_admin_or_client)):
+    company_id = await _company(current_user)
+    return {
+        "searches": await service.list_searches(current_user.id, company_id),
+        "usage": await quota.job_search_usage(current_user.id),
+        "consent": {
+            "granted": await enqueue.consent_granted(current_user.id),
+            "disclosure": consent.disclosure_view(enqueue.ABILITY_KEY),
+        },
+        "available": providers.configured(),
+    }
+
+
+@router.post("", status_code=202)
+async def create_job_search(
+    body: JobSearchCreate,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await _company(current_user)
+    return await _call(enqueue.create_search(current_user, company_id, body))
+
+
+@router.get("/{search_id}")
+async def get_job_search(search_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
+    return await _call(service.get_search(search_id, current_user.id))
+
+
+@router.get("/{search_id}/status")
+async def job_search_status(search_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
+    return await _call(service.status_view(search_id, current_user.id))
+
+
+@router.get("/{search_id}/leads/{lead_id}")
+async def get_job_lead(
+    search_id: UUID, lead_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    return await _call(service.get_lead(search_id, lead_id, current_user.id))
+
+
+@router.patch("/{search_id}/leads/{lead_id}")
+async def update_job_lead(
+    search_id: UUID, lead_id: UUID, body: LeadPatch,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    return await _call(service.patch_lead(search_id, lead_id, current_user.id, body))
+
+
+@router.put("/{search_id}/weights")
+async def rerank_job_search(
+    search_id: UUID, body: JobWeights,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """New weights and an immediate re-rank. Free: no search is spent."""
+    return await _call(service.update_weights(search_id, current_user.id, body))
+
+
+@router.post("/{search_id}/cancel")
+async def cancel_job_search(search_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
+    return await _call(service.cancel_search(search_id, current_user.id))
+
+
+@router.delete("/{search_id}")
+async def delete_job_search(search_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
+    return await _call(service.delete_search(search_id, current_user.id))

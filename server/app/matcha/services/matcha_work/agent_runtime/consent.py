@@ -29,6 +29,21 @@ DISCLOSURES: dict[str, Disclosure] = {
             "Review recipients and messages in Sales before sending. Sales sends each approved message separately from your connected Gmail account, adds your opt-out footer, and never contacts someone you marked Do not contact.",
         ),
     ),
+    "jobs": Disclosure(
+        version="jobs-1",
+        title="Let Espresso run job searches for you",
+        body=(
+            "A job search sends your search terms and locations to Google Jobs (through our "
+            "listings provider) and reads public job boards like Greenhouse, Lever and Ashby. "
+            "Your résumé and your name are never sent to them.",
+            "To rank the jobs and draft how to approach each one, what you asked for, and your "
+            "résumé if you choose to use it, are sent to Espresso's AI model provider with "
+            "storage turned off.",
+            "Pay is only shown when a posting states it, with the text it came from. Outreach "
+            "emails, application answers and cover letters are drafts: Espresso never sends, "
+            "applies or submits anything for you.",
+        ),
+    ),
     "email": Disclosure(
         version="email-openai-1",
         title="Let Espresso work with your email",
