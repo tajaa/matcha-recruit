@@ -37,7 +37,7 @@ async def _run(run_id: UUID) -> None:
                SET status = 'running', started_at = NOW()
                WHERE id = $1 AND status = 'queued' AND kind = 'assistant'
                RETURNING id, company_id, project_id, channel_id, requested_by,
-                         trigger_message_id, prompt, surface, abilities, resume_prompt_id,
+                         trigger_message_id, prompt, surface, abilities, resume_prompt_id, model,
                          (SELECT role FROM users WHERE id = requested_by) AS requester_role,
                          (SELECT email FROM users WHERE id = requested_by) AS requester_email""",
             run_id,

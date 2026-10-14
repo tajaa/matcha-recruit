@@ -21,6 +21,7 @@ from app.database import get_connection
 from app.matcha.services.billing.entitlements_service import PLAN_PRO, require_plan
 from app.matcha.services.huume.routing import LUNA
 
+from . import models
 from .quota import assistant_usage, limit_for_plan, usage_payload, used_today
 
 logger = logging.getLogger(__name__)
@@ -113,10 +114,15 @@ async def enqueue_assistant_run(
     abilities: list[str],
     resume_prompt_id: UUID | None = None,
     skip_preflight: bool = False,
+    model: str | None = None,
 ) -> dict:
-    """Insert a queued `assistant` run and dispatch it. Returns `{run_id, status}`."""
+    """Insert a queued `assistant` run and dispatch it. Returns `{run_id, status}`.
+
+    `model` is the person's pick from the app's menu; the row stores the model
+    the run will use (`models.resolve`), which the worker reads back."""
     if not skip_preflight:
         await preflight(user, company_id)
+    run_model = await models.resolve(model)
     limit: int | None = None
     if not _is_admin(user):
         limit = limit_for_plan(await require_plan(user.id, PLAN_PRO, ENTITLEMENT))
@@ -155,7 +161,7 @@ async def enqueue_assistant_run(
                        ON CONFLICT (trigger_message_id, agent_key) DO NOTHING
                        RETURNING id""",
                     company_id, project_id, channel_id, user.id, trigger_message_id,
-                    prompt[:12_000], ASSISTANT_MODEL, surface, abilities, resume_prompt_id,
+                    prompt[:12_000], run_model, surface, abilities, resume_prompt_id,
                 )
             except asyncpg.UniqueViolationError:
                 raise HTTPException(status_code=409, detail=STILL_WORKING)

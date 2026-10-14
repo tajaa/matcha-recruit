@@ -15,7 +15,6 @@ from types import SimpleNamespace
 from uuid import UUID
 
 from app.database import connection_or_direct, decode_jsonb
-from app.core.services import agent_surfaces, anthropic_messages
 from app.matcha.services.huume.claude_client import get_claude_client
 from app.matcha.services.huume.luna_client import get_luna_client, text_item
 
@@ -24,10 +23,9 @@ from ..agent_card import agent as card_agent
 from ..agent_card import images
 from ..project_agent import store
 from ..project_agent.chat import broadcast_espresso_message, persist_espresso_message
-from . import catalog, chat_progress, conversation, grants, history, policy, prompts, result, runner
+from . import catalog, chat_progress, conversation, grants, history, models, policy, prompts, result, runner
 from .ask import ASK_USER
 from .context import FrozenAction, RunContext, RunLimits
-from .enqueue import ASSISTANT_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -172,17 +170,20 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
             "action_receipt": receipt_view(receipt),
         })
 
-    # Luna unless the admin "AI models" setting routes Espresso's assistant
-    # to Claude (personal accounts only, `eligibility.py`).
-    claude_model = await anthropic_messages.claude_override(agent_surfaces.ESPRESSO_ASSISTANT)
-    if claude_model:
-        await store.set_run_model(run_id, claude_model)
+    # Settled at enqueue (`models.resolve`): the person's pick from the menu,
+    # else the admin "AI models" setting, else Luna. A model this server no
+    # longer offers (the Anthropic key was removed since) runs the default.
+    model = run.get("model") or ""
+    if model not in models.offered():
+        model = await models.default_model()
+        await store.set_run_model(run_id, model)
+    claude_model = model if models.is_claude(model) else None
     ctx = RunContext(
         run_id=run_id, user_id=user_id, company_id=run["company_id"],
         role=run.get("requester_role") or "client", surface=surface, ask=run["prompt"],
         storage_prefix=f"matcha-work/{run['company_id']}/assistant/{channel_id}/{run_id}",
         progress=progress, limits=LIMITS, usage_feature=USAGE_FEATURE,
-        model=claude_model or ASSISTANT_MODEL,
+        model=model,
         channel_id=channel_id, project_id=run.get("project_id"),
         policy=policy.PolicyContext(
             surface=surface, private_conversation=private, counts=counts,

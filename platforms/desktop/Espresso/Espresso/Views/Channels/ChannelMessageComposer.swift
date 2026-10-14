@@ -4,8 +4,10 @@ import UniformTypeIdentifiers
 struct ChannelMessageComposer: View {
     @Environment(AppState.self) private var appState
     let channelId: String
-    let channelSlug: String
-    let userHandle: String
+    /// "you@channel", left of the input. Capped and truncated in the middle
+    /// so a long channel name never eats the space for typing.
+    let prompt: String
+    static let promptMaxWidth: CGFloat = 180
     let members: [ChannelMember]
     let currentUserId: String
     /// Project discussions expose a virtual @espresso mention even though the
@@ -185,10 +187,14 @@ struct ChannelMessageComposer: View {
 
             let canSend = (!text.trimmingCharacters(in: .whitespaces).isEmpty || !pendingAttachments.isEmpty) && !isUploading
             HStack(alignment: .bottom, spacing: 8) {
-                Text("\(userHandle)@\(channelSlug) ›")
+                Text(prompt + " ›")
                     .font(.system(size: 11))
                     .foregroundColor(appState.themeText.opacity(0.45))
-                    .fixedSize()
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: Self.promptMaxWidth, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .help(prompt)
 
                 Button(action: onOpenFilePicker) {
                     Image(systemName: "paperclip")

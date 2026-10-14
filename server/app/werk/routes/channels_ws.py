@@ -338,9 +338,11 @@ async def _bg_assistant_message(
     message_id: UUID,
     prompt_id: Optional[UUID],
     card_number_removed: bool,
+    model: Optional[str] = None,
 ) -> None:
     """One message in a private conversation with Espresso: a reply to one of
-    its questions, or a new request."""
+    its questions, or a new request. `model` is the app menu's pick; the
+    runtime keeps it only if this server offers it."""
     try:
         from app.matcha.services.matcha_work.agent_runtime import chat_entry
         from app.matcha.services.matcha_work.project_agent.chat import post_as_espresso
@@ -358,6 +360,7 @@ async def _bg_assistant_message(
         await chat_entry.handle_message(
             channel_id=channel_id, company_id=company_id, user=user, content=content,
             message_id=message_id, surface="assistant", reply_prompt_id=prompt_id,
+            model=model,
         )
     except Exception:
         logger.warning("Espresso assistant message failed", exc_info=True)
@@ -4051,6 +4054,11 @@ async def channel_websocket(
                 content = (data.get("content") or "").strip()
                 attachments = data.get("attachments") or []
                 reply_to_id = data.get("reply_to_id")
+                # Espresso's assistant menu: which model runs the request this
+                # message starts. Only read in a private assistant conversation.
+                assistant_model = data.get("assistant_model")
+                if not isinstance(assistant_model, str) or len(assistant_model) > 64:
+                    assistant_model = None
                 # Client-generated correlation ID for optimistic UI reconciliation.
                 # Clients append a pending message locally with this ID; on echo,
                 # they replace the pending entry instead of duplicating it.
@@ -4333,6 +4341,7 @@ async def channel_websocket(
                                     _spawn_bg(_bg_assistant_message(
                                         str(ch_uuid), user, row["content"], row["id"],
                                         agent_prompt_id, card_number_removed,
+                                        assistant_model,
                                     ))
                                 dispatch_new = False
                             else:

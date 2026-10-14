@@ -138,11 +138,52 @@ struct MWWorkspaceFlags: Codable {
     /// rule (`matcha_work_ai._models.picker_models`), not re-derived here.
     let chatModels: [MWChatModelRow]?
     let defaultChatModel: String?
+    /// The assistant's model menu and where it starts (`agent_runtime.models`).
+    /// Absent on servers that predate it, and when the assistant is off.
+    var assistantModels: [MWAssistantModelRow]? = nil
+    var defaultAssistantModel: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case espressoAssistant = "espresso_assistant"
         case chatModels = "chat_models"
         case defaultChatModel = "default_chat_model"
+        case assistantModels = "assistant_models"
+        case defaultAssistantModel = "default_assistant_model"
+    }
+}
+
+/// One row of the assistant's model menu: the id the server runs and its name.
+struct MWAssistantModelRow: Codable, Hashable {
+    let id: String
+    let label: String
+}
+
+/// The Espresso assistant's model menu for one person. The rows and where it
+/// starts are the server's; the pick is remembered on this Mac
+/// (`@AppStorage(storageKey)`) and sent with each message, and the server
+/// re-checks it (`models.resolve`), so a stale pick just runs the default.
+struct AssistantModelMenu {
+    static let storageKey = "espresso-assistant-model"
+
+    let rows: [MWAssistantModelRow]
+    let defaultModel: String?
+
+    init(workspace: MWWorkspaceFlags?) {
+        rows = workspace?.assistantModels ?? []
+        defaultModel = workspace?.defaultAssistantModel
+    }
+
+    /// Worth showing only when there is a choice to make.
+    var hasChoice: Bool { rows.count > 1 }
+
+    /// The row a stored pick runs on: the pick when offered, else the default.
+    func current(_ pick: String) -> MWAssistantModelRow? {
+        rows.first { $0.id == pick } ?? rows.first { $0.id == defaultModel }
+    }
+
+    /// What a message carries: the pick when offered, else nil (the default).
+    func value(for pick: String) -> String? {
+        rows.contains { $0.id == pick } ? pick : nil
     }
 }
 

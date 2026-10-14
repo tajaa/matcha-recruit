@@ -243,7 +243,12 @@ async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
     monkeypatch.setattr(enqueue, "workspace_enabled", enabled)
     company = uuid4()
     out = await entitlements_service.resolve_entitlements(uuid4(), company)
-    assert out["workspace"] == {"espresso_assistant": True, "claude_models": False, **_GEMINI_PICKER}
+    # The assistant's own menu rides along only when the workspace has it.
+    assert out["workspace"] == {
+        "espresso_assistant": True, "claude_models": False, **_GEMINI_PICKER,
+        "assistant_models": [{"id": "gpt-5.6-luna", "label": "OpenAI Luna"}],
+        "default_assistant_model": "gpt-5.6-luna",
+    }
     assert out["features"]["assistant"] is True
     assert out["quotas"]["assistant_runs"] == {"limit": 30, "used": 2, "remaining": 28}
     enabled.assert_awaited_once_with(company)
@@ -254,6 +259,14 @@ async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
     enabled.side_effect = RuntimeError("db down")
     assert (await entitlements_service.resolve_entitlements(uuid4(), company))["workspace"] == {
         "espresso_assistant": False, "claude_models": False, **_GEMINI_PICKER}
+
+    # A menu that cannot be read leaves it out; the app falls back to no menu.
+    from app.matcha.services.matcha_work.agent_runtime import models
+
+    enabled.side_effect = None
+    monkeypatch.setattr(models, "picker", AsyncMock(side_effect=RuntimeError("settings down")))
+    workspace_out = (await entitlements_service.resolve_entitlements(uuid4(), company))["workspace"]
+    assert workspace_out["espresso_assistant"] is True and "assistant_models" not in workspace_out
 
 
 @pytest.mark.asyncio
