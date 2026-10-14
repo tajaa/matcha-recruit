@@ -18,11 +18,12 @@ from uuid import UUID
 from app.database import connection_or_direct, decode_jsonb
 from app.matcha.services.matcha_work.agent_runtime import runner
 from app.matcha.services.matcha_work.agent_runtime.abilities import web
+from app.matcha.services.matcha_work.agent_runtime.chain import Guard
 from app.matcha.services.matcha_work.agent_runtime.context import RunLimits
 
 from . import contracts, prompts, ranking
 from .agent_phase import SearchProgress, run_model_phase
-from .phases import Deps, Guard, PhaseOutcome, plan_from_criteria
+from .phases import Deps, PhaseOutcome, plan_from_criteria
 from .service import load_resume_for_model, resting_status
 
 logger = logging.getLogger(__name__)

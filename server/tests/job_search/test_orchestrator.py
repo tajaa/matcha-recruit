@@ -1,10 +1,12 @@
 """The task chain: claims, new tokens per phase, retries, endings, restarts."""
 import json
+from dataclasses import replace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 
+from app.matcha.services.matcha_work.agent_runtime import chain
 from app.matcha.services.matcha_work.job_search import orchestrator
 from app.matcha.services.matcha_work.job_search.phases import PhaseFailed, PhaseOutcome
 from tests.agent_runtime.helpers import FakeConn, connection
@@ -17,8 +19,11 @@ def wired(monkeypatch):
     conn = FakeConn()
     dispatch = AsyncMock(return_value=None)
     rerank = AsyncMock(return_value=3)
+    # claim/advance/restart/reconcile run in agent_runtime.chain; `_ending` stays here.
+    monkeypatch.setattr(chain, "connection_or_direct", connection(conn))
     monkeypatch.setattr(orchestrator, "connection_or_direct", connection(conn))
-    monkeypatch.setattr(orchestrator, "dispatch", dispatch)
+    # The engine dispatches through the spec, so the fake goes on JOB_CHAIN.
+    monkeypatch.setattr(orchestrator, "JOB_CHAIN", replace(orchestrator.JOB_CHAIN, dispatch=dispatch))
     monkeypatch.setattr(orchestrator, "rerank", rerank)
     conn.on("UPDATE mw_job_searches\n               SET status = $3", {"id": SEARCH})
     return conn, dispatch, rerank
@@ -167,7 +172,7 @@ async def test_a_lost_dispatch_is_left_for_nudge(wired, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_nudge_and_reconcile(wired):
+async def test_nudge_and_reconcile(wired, monkeypatch):
     conn, dispatch, _ = wired
     assert await orchestrator.nudge(SEARCH) is False  # not idle: nothing returned
     conn.on("SET dispatch_token = $2, updated_at = NOW()", {"id": SEARCH})
@@ -186,8 +191,19 @@ async def test_nudge_and_reconcile(wired):
     assert out == {"ended": 1, "restarted": 1}
 
     broken = FakeConn().on("SET dispatch_token = $2", RuntimeError("db"))
-    orchestrator.connection_or_direct = connection(broken)
+    monkeypatch.setattr(chain, "connection_or_direct", connection(broken))  # the restart runs in chain
     assert await orchestrator.nudge(SEARCH) is False
+
+
+@pytest.mark.asyncio
+async def test_claim_and_advance_are_the_engines_bound_to_the_search(wired):
+    conn, _dispatch, _ = wired
+    assert await orchestrator.claim(SEARCH, TOKEN) is None
+    claim_sql = conn.calls[0][1]
+    assert claim_sql.startswith("UPDATE mw_job_searches") and "THEN 'planning'" in claim_sql
+    written, next_token = await orchestrator.advance(SEARCH, TOKEN, PhaseOutcome("discovering"))
+    assert written is True and next_token is not None
+    assert len(advance_args(conn)) == 9  # the status names the phase: no phase column
 
 
 def test_worker_tasks_run_the_orchestrator(monkeypatch):
