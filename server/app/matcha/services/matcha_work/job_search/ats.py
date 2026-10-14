@@ -40,8 +40,12 @@ _ASHBY_PATH = re.compile(rf"^/(?P<board>{_TOKEN})/(?P<job>{_UUID})(?:/applicatio
 _GH_HOSTS = {"boards.greenhouse.io", "job-boards.greenhouse.io"}
 _LEVER_HOSTS = {"jobs.lever.co": False, "jobs.eu.lever.co": True}
 
+# Personal legal status: answered by the person, never drafted. A security
+# clearance turns on citizenship and background, so it belongs here too.
 _AUTHORIZATION = re.compile(
-    r"authori[sz]ed to work|sponsor|visa|citizen|work permit|right to work|immigration", re.I,
+    r"authori[sz]ed to work|sponsor|visa|citizen|work permit|right to work|immigration|"
+    r"clearance|ts/sci|top secret",
+    re.I,
 )
 _DEMOGRAPHIC = re.compile(
     r"gender|race|racial|ethnic|veteran|disabilit|hispanic|latino|sexual orientation|pronoun|"

@@ -10,6 +10,11 @@ a 0..1 score per component; the rank is the weighted sum, inside a band:
      renormalized. Undisclosed pay is unknown, never $0.
   9  marked irrelevant by screening, or dismissed by the person
 
+A bonus is scored against the base it is paid on: its score is scaled by the
+job's base score, so "30% bonus" on $237K counts for less than "30% bonus" on
+$500K. Without that, a high bonus weight lifted a smaller package over a much
+larger one (seen on dev: $200-275K + 25-35% above $500K).
+
 Ties break on fit, then the newest posting, then id, so a re-rank of the same
 data gives the same order.
 """
@@ -126,6 +131,8 @@ def rank(leads: list[dict], weights: dict | None, *, floor: float | None = None,
             band = 0 if cur == currency else 1
         if lo is not None:
             components["base"] = base_pct.get(lead_id, 0.0)
+            # A bonus is a share of THIS base: worth what the base is worth.
+            components["bonus"] *= base_pct.get(lead_id, 0.0)
             if band == 0 and floor and hi is not None and float(hi) < float(floor):
                 components["base"] = 0.0
                 flags.append("below_floor")

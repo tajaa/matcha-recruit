@@ -59,6 +59,8 @@ GREENHOUSE = {
          "fields": [{"name": "question_2", "type": "multi_value_single_select",
                      "values": [{"label": "Yes", "value": 1}, {"label": "No", "value": 0}]}]},
         {"required": False, "label": "Gender", "fields": [{"name": "question_3", "type": "multi_value_single_select"}]},
+        {"required": True, "label": "Are you eligible for a Top Secret or TS/SCI security clearance?",
+         "fields": [{"name": "question_4", "type": "input_text"}]},
         {"required": False, "label": "hidden", "fields": [{"name": "h", "type": "input_hidden"}]},
         {"label": "", "fields": [{"name": "x", "type": "input_text"}]},
         {"label": "no fields", "fields": []},
@@ -72,7 +74,8 @@ def test_greenhouse_parse():
     assert "Lead ops." in posting.description and "<p>" not in posting.description
     kinds = {q["key"]: q["kind"] for q in posting.questions}
     assert kinds == {"first_name": "profile", "resume": "file", "question_1": "open",
-                     "question_2": "authorization", "question_3": "demographic"}
+                     "question_2": "authorization", "question_3": "demographic",
+                     "question_4": "authorization"}
     assert posting.questions[3]["options"] == ["Yes", "No"]
     best = {f["component"]: f for f in posting.findings}
     # The structured range comes first; the description's own range is also there.
