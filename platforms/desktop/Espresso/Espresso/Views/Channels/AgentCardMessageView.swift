@@ -28,6 +28,8 @@ struct AgentCardMessageView: View {
     let currentUserId: String
     /// Sends the reply; false when it couldn't go out (offline).
     let onQuickReply: ((String) -> Bool)?
+    /// The conversation it is in: a task form uploads its files there.
+    var channelId: String? = nil
 
     /// The label of a pressed button, until the server closes the question
     /// (live `agent_card_prompt_updated`) or `sendingWindow` passes. If the
@@ -44,6 +46,8 @@ struct AgentCardMessageView: View {
         Group {
             if let result = meta.result, meta.kind == "agent_card_result" {
                 resultCard(result)
+            } else if let view = meta.view, let form = view.form, meta.kind == "agent_card_prompt" {
+                formCard(view, form)
             } else if let view = meta.view, meta.kind == "agent_card_prompt" {
                 promptCard(view)
             } else if let receipt = meta.receipt, meta.kind == "agent_card_receipt" {
@@ -54,6 +58,8 @@ struct AgentCardMessageView: View {
                 resultV2Card(result)
             } else if let receipt = meta.actionReceipt, meta.kind == "agent_receipt" {
                 actionReceiptCard(receipt)
+            } else if let task = meta.task, meta.kind == "agent_task" {
+                taskCard(task)
             }
         }
         .frame(maxWidth: 540, alignment: .leading)

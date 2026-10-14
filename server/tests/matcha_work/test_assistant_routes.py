@@ -260,7 +260,7 @@ async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
     out = await entitlements_service.resolve_entitlements(uuid4(), company)
     # The assistant's own menu rides along only when the workspace has it.
     assert out["workspace"] == {
-        "espresso_assistant": True, "job_search": True, "claude_models": False, **_GEMINI_PICKER,
+        "espresso_assistant": True, "job_search": True, "agent_tasks": False, "claude_models": False, **_GEMINI_PICKER,
         "assistant_models": [{"id": "gpt-5.6-luna", "label": "OpenAI Luna"}],
         "default_assistant_model": "gpt-5.6-luna",
     }
@@ -273,7 +273,8 @@ async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
     enabled.assert_awaited_once_with(company)
 
     # No workspace, or a lookup that fails: off, and the read still answers.
-    off = {"espresso_assistant": False, "job_search": False, "claude_models": False, **_GEMINI_PICKER}
+    off = {"espresso_assistant": False, "job_search": False, "agent_tasks": False, "claude_models": False,
+           **_GEMINI_PICKER}
     assert (await entitlements_service.resolve_entitlements(uuid4(), None))["workspace"] == off
     enabled.side_effect = RuntimeError("db down")
     assert (await entitlements_service.resolve_entitlements(uuid4(), company))["workspace"] == off
@@ -282,6 +283,9 @@ async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
     enabled.side_effect = None
     monkeypatch.setattr(job_providers, "configured", lambda: False)
     assert (await entitlements_service.resolve_entitlements(uuid4(), company))["workspace"]["job_search"] is False
+    # Tasks: an admin always; anyone else once ESPRESSO_TASKS_ENABLED is set.
+    admin = await entitlements_service.resolve_entitlements(uuid4(), company, role="admin")
+    assert admin["workspace"]["agent_tasks"] is True
 
     # A menu that cannot be read leaves it out; the app falls back to no menu.
     from app.matcha.services.matcha_work.agent_runtime import models

@@ -424,6 +424,13 @@
 		JOBS0000000000000000A009 /* JobLeadDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = JOBS0000000000000000A00A /* JobLeadDetailView.swift */; };
 		JOBS0000000000000000A00B /* NewJobSearchSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = JOBS0000000000000000A00C /* NewJobSearchSheet.swift */; };
 		JOBS0000000000000000BT01 /* JobSearchLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = JOBS0000000000000000BT02 /* JobSearchLogicTests.swift */; };
+		TASK0000000000000000A001 /* AgentTaskModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000A002 /* AgentTaskModels.swift */; };
+		TASK0000000000000000A003 /* AgentTaskService.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000A004 /* AgentTaskService.swift */; };
+		TASK0000000000000000A005 /* TasksViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000A006 /* TasksViewModel.swift */; };
+		TASK0000000000000000A007 /* TasksWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000A008 /* TasksWorkspace.swift */; };
+		TASK0000000000000000A009 /* TaskItemDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000A00A /* TaskItemDetailView.swift */; };
+		TASK0000000000000000A00B /* TaskChatCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000A00C /* TaskChatCards.swift */; };
+		TASK0000000000000000BT01 /* TasksLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000BT02 /* TasksLogicTests.swift */; };
 		FILES00000000000000000T1 /* EspressoFilesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FILES00000000000000000T2 /* EspressoFilesTests.swift */; };
 		CALV000000000000000000A3 /* CalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CALV000000000000000000A4 /* CalendarService.swift */; };
 		CALV000000000000000000A5 /* CalendarViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CALV000000000000000000A6 /* CalendarViewModel.swift */; };
@@ -774,6 +781,13 @@
 		JOBS0000000000000000A00A /* JobLeadDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = JobLeadDetailView.swift; path = Espresso/Views/JobSearch/JobLeadDetailView.swift; sourceTree = SOURCE_ROOT; };
 		JOBS0000000000000000A00C /* NewJobSearchSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NewJobSearchSheet.swift; path = Espresso/Views/JobSearch/NewJobSearchSheet.swift; sourceTree = SOURCE_ROOT; };
 		JOBS0000000000000000BT02 /* JobSearchLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobSearchLogicTests.swift; sourceTree = "<group>"; };
+		TASK0000000000000000A002 /* AgentTaskModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AgentTaskModels.swift; path = Espresso/Models/MatchaWork/AgentTaskModels.swift; sourceTree = SOURCE_ROOT; };
+		TASK0000000000000000A004 /* AgentTaskService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AgentTaskService.swift; path = Espresso/Services/MatchaWork/AgentTaskService.swift; sourceTree = SOURCE_ROOT; };
+		TASK0000000000000000A006 /* TasksViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TasksViewModel.swift; path = Espresso/ViewModels/TasksViewModel.swift; sourceTree = SOURCE_ROOT; };
+		TASK0000000000000000A008 /* TasksWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TasksWorkspace.swift; path = Espresso/Views/Tasks/TasksWorkspace.swift; sourceTree = SOURCE_ROOT; };
+		TASK0000000000000000A00A /* TaskItemDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TaskItemDetailView.swift; path = Espresso/Views/Tasks/TaskItemDetailView.swift; sourceTree = SOURCE_ROOT; };
+		TASK0000000000000000A00C /* TaskChatCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TaskChatCards.swift; path = Espresso/Views/Tasks/TaskChatCards.swift; sourceTree = SOURCE_ROOT; };
+		TASK0000000000000000BT02 /* TasksLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksLogicTests.swift; sourceTree = "<group>"; };
 		FILES00000000000000000T2 /* EspressoFilesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EspressoFilesTests.swift; sourceTree = "<group>"; };
 		CALV000000000000000000A4 /* CalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CalendarService.swift; path = Espresso/Services/MatchaWork/CalendarService.swift; sourceTree = SOURCE_ROOT; };
 		CALV000000000000000000A6 /* CalendarViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CalendarViewModel.swift; path = Espresso/ViewModels/CalendarViewModel.swift; sourceTree = SOURCE_ROOT; };
@@ -1266,6 +1280,7 @@
 				BC01DD22EE33FF44551100B4 /* ChannelMergeTests.swift */,
 				CALV00000000000000000BT2 /* CalendarLogicTests.swift */,
 				JOBS0000000000000000BT02 /* JobSearchLogicTests.swift */,
+				TASK0000000000000000BT02 /* TasksLogicTests.swift */,
 				FILES00000000000000000T2 /* EspressoFilesTests.swift */,
 				FA11D0010000000000000002 /* JournalNavigationTests.swift */,
 				EAAF00000000000000000002 /* EmailWorkspaceTests.swift */,
@@ -1465,6 +1480,12 @@
 				JOBS0000000000000000A008 /* JobSearchWorkspace.swift */,
 				JOBS0000000000000000A00A /* JobLeadDetailView.swift */,
 				JOBS0000000000000000A00C /* NewJobSearchSheet.swift */,
+				TASK0000000000000000A002 /* AgentTaskModels.swift */,
+				TASK0000000000000000A004 /* AgentTaskService.swift */,
+				TASK0000000000000000A006 /* TasksViewModel.swift */,
+				TASK0000000000000000A008 /* TasksWorkspace.swift */,
+				TASK0000000000000000A00A /* TaskItemDetailView.swift */,
+				TASK0000000000000000A00C /* TaskChatCards.swift */,
 				D495ED9EB731DFE8E7E99AB7 /* Screenplay.swift */,
 				ACAA99DB31B29B0F6B72BB8E /* ScreenplayEditorView.swift */,
 				C8716FBE42A3D81F48ED44B1 /* ScreenplayPaginator.swift */,
@@ -1770,6 +1791,7 @@
 				BC01DD22EE33FF44551100C4 /* ChannelMergeTests.swift in Sources */,
 				CALV00000000000000000BT1 /* CalendarLogicTests.swift in Sources */,
 				JOBS0000000000000000BT01 /* JobSearchLogicTests.swift in Sources */,
+				TASK0000000000000000BT01 /* TasksLogicTests.swift in Sources */,
 				FILES00000000000000000T1 /* EspressoFilesTests.swift in Sources */,
 				FA11D0010000000000000001 /* JournalNavigationTests.swift in Sources */,
 				EAAF00000000000000000001 /* EmailWorkspaceTests.swift in Sources */,
@@ -1974,6 +1996,12 @@
 				JOBS0000000000000000A007 /* JobSearchWorkspace.swift in Sources */,
 				JOBS0000000000000000A009 /* JobLeadDetailView.swift in Sources */,
 				JOBS0000000000000000A00B /* NewJobSearchSheet.swift in Sources */,
+				TASK0000000000000000A001 /* AgentTaskModels.swift in Sources */,
+				TASK0000000000000000A003 /* AgentTaskService.swift in Sources */,
+				TASK0000000000000000A005 /* TasksViewModel.swift in Sources */,
+				TASK0000000000000000A007 /* TasksWorkspace.swift in Sources */,
+				TASK0000000000000000A009 /* TaskItemDetailView.swift in Sources */,
+				TASK0000000000000000A00B /* TaskChatCards.swift in Sources */,
 				CALV000000000000000000AB /* EmailCalendarSheet.swift in Sources */,
 				0F5C621C255ED1D1ED92354A /* CommonModels.swift in Sources */,
 				8E5D6EC70EEDBE08AE76BDEA /* ThreadModels.swift in Sources */,

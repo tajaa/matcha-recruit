@@ -848,7 +848,7 @@ async def get_entitlements(
 
     response.headers["Cache-Control"] = "private, max-age=60"
     company_id = await get_client_company_id(current_user)
-    return await entitlements_service.resolve_entitlements(current_user.id, company_id)
+    return await entitlements_service.resolve_entitlements(current_user.id, company_id, role=current_user.role)
 
 @router.get("/usage/summary", response_model=UsageSummaryResponse)
 async def get_usage_summary(

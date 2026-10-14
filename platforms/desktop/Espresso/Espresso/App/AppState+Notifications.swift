@@ -81,6 +81,11 @@ extension AppState {
             projectUnseenCounts[pid, default: 0] += 1
         }
 
+        // A task finished, stopped or needs the person: the Tasks row's counts move.
+        if type.hasPrefix("agent_task") {
+            await refreshTasksSummary()
+        }
+
         // "X joined the collab" → in-app toast when the user is looking
         // at Werk (the bell already ticked; the OS banner below covers
         // the not-frontmost case).
@@ -317,6 +322,11 @@ extension AppState {
         // Prefer metadata's `<thing>_id`, fall back to link's `<thing>`.
         func target(_ name: String) -> String? { meta("\(name)_id") ?? query(name) }
 
+        // An Espresso task (not a kanban card, which is `task_id` under a project).
+        if let agentTask = meta("agent_task_id") {
+            openTasks(taskId: agentTask)
+            return
+        }
         let project = target("project")
         let task = target("task")
         let thread = target("thread")
@@ -333,6 +343,7 @@ extension AppState {
             showAssistantHub = false
             showCalendarHub = false
             showJobSearchHub = false
+            showTasksHub = false
         }
 
         if let project {

@@ -144,10 +144,13 @@ struct MWWorkspaceFlags: Codable {
     var defaultAssistantModel: String? = nil
     /// Job search (a personal account on a server with a listings provider).
     var jobSearch: Bool? = nil
+    /// Espresso Tasks (switched on for this account: `agent_tasks.enqueue.tasks_enabled`).
+    var agentTasks: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case espressoAssistant = "espresso_assistant"
         case jobSearch = "job_search"
+        case agentTasks = "agent_tasks"
         case chatModels = "chat_models"
         case defaultChatModel = "default_chat_model"
         case assistantModels = "assistant_models"

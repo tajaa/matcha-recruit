@@ -106,6 +106,10 @@ extension AppState {
         showJobSearchHub = false
         jobSearchFocus = nil
         pendingAssistantJobContext = nil
+        showTasksHub = false
+        tasksFocus = nil
+        tasksSummary = nil
+        pendingAssistantTaskContext = nil
         calendarFocusDate = nil
         pendingEmailId = nil
         pendingAssistantEmailContext = nil
@@ -234,6 +238,7 @@ extension AppState {
     func refreshEntitlements() async {
         do {
             entitlements = try await MatchaWorkService.shared.getEntitlements()
+            await refreshTasksSummary()
         } catch {
             // Keep the last-known plan on transient failures; never lock the
             // UI on a fetch error (server gates enforce regardless).
