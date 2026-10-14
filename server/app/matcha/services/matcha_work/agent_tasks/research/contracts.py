@@ -456,16 +456,27 @@ def _shown(numbers: list[float]) -> str:
     return ", ".join(f"{n:,.0f}" if float(n).is_integer() else f"{n:,.2f}" for n in numbers[:3])
 
 
+_SHORT_ID = re.compile(r"\bF(\d{1,2})\b")
+
+
+def name_findings(text: str, titles: dict[str, str]) -> str:
+    """The batch's short ids ("F1") a model let slip, as the findings' names."""
+    return _SHORT_ID.sub(lambda m: titles.get(f"F{m.group(1)}", m.group(0)), text)
+
+
 def normalize_summary(args: dict, *, batch: dict[str, str], item_texts: dict[str, str],
-                      citable: set[str], context: str = "") -> tuple[dict, list[str]]:
+                      citable: set[str], context: str = "",
+                      titles: dict[str, str] | None = None) -> tuple[dict, list[str]]:
     """`batch`: short id -> item id; `item_texts`: item id -> what its fields
     and title say; `context`: what the person asked (their limits, the
-    counts). Every number must come from one of those."""
+    counts). Every number must come from one of those. `titles`: short id ->
+    the finding's name, for any short id the text uses."""
     result = _result(args)
+    titles = titles or {}
     everything = " ".join([*item_texts.values(), context])
     warnings: list[str] = []
-    headline = _text(result.get("headline"), 160)
-    summary = _text(result.get("summary"), 900)
+    headline = name_findings(_text(result.get("headline"), 160), titles)
+    summary = name_findings(_text(result.get("summary"), 900), titles)
     if not headline:
         raise ValueError("give a headline")
     for name, text in (("headline", headline), ("summary", summary)):
@@ -476,6 +487,7 @@ def normalize_summary(args: dict, *, batch: dict[str, str], item_texts: dict[str
     gate = schema.Gate(citable)
     sections = []
     for section in schema.gate_sections(result.get("sections"), gate):
+        section = {**section, "body_md": name_findings(section["body_md"], titles)}
         if unsupported_numbers(section["body_md"], everything):
             warnings.append(f"Dropped section {section['heading'][:40]!r}: a number no finding shows")
             continue
@@ -489,7 +501,7 @@ def normalize_summary(args: dict, *, batch: dict[str, str], item_texts: dict[str
         if item_id is None or item_id in seen:
             continue
         seen.add(item_id)
-        why = _text(pick.get("why"), 300)
+        why = name_findings(_text(pick.get("why"), 300), titles)
         if why and unsupported_numbers(why, f"{item_texts.get(item_id, '')} {context}"):
             warnings.append("Dropped a reason that stated a number its finding doesn't show")
             why = ""

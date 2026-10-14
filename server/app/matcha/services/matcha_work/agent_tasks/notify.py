@@ -53,7 +53,10 @@ async def task_stopped(conn, task_id: UUID) -> None:
         await notification_service.create_notification(
             user_id=task["user_id"], company_id=task["company_id"], type=kind, title=title, body=body,
             link=link_for(task_id),
-            metadata={"task_id": str(task_id), "playbook": task["playbook"], "status": task["status"]},
+            # Strings only (the Mac decodes metadata as [String: String]);
+            # `agent_task_id` because `task_id` is a kanban card there.
+            metadata={"agent_task_id": str(task_id), "task_id": str(task_id), "playbook": task["playbook"],
+                      "status": task["status"]},
             conn=conn,
         )
     except Exception:

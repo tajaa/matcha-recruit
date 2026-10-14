@@ -150,6 +150,13 @@ def test_summary_numbers_come_from_the_findings():
         C.normalize_summary({"result": {"headline": "", "summary": "", "sections": [], "top": []}},
                             batch=batch, item_texts=texts, citable=citable)
     assert C.unsupported_numbers("top 5 for 2 people", "") == []
+    named, _ = C.normalize_summary({"result": {"headline": "F1 is the pick", "summary": "F2 and F9 trail.",
+                                               "sections": [{"heading": "x", "body_md": "Only F1 has a price"}],
+                                               "top": [{"id": "F1", "why": "Beats F2"}]}},
+                                   batch=batch, item_texts=texts, citable=citable,
+                                   titles={"F1": "Sunny 1BR", "F2": "Loft"})
+    assert named["headline"] == "Sunny 1BR is the pick" and named["summary"] == "Loft and F9 trail."
+    assert named["sections"][0]["body_md"] == "Only Sunny 1BR has a price" and named["top"][0]["why"] == "Beats Loft"
 
 
 def test_refine_changes_limits_but_never_loses_one():
