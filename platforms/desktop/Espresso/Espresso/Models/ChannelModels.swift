@@ -270,6 +270,23 @@ struct AgentSource: Codable, Hashable {
     let url: String
 }
 
+/// A picture in an answer: a photo from a page the run loaded (`alt`), or a
+/// page screenshot (`caption`). Always our CDN copy; `pageUrl` is the page it
+/// came from.
+struct AgentImage: Codable, Hashable {
+    let url: String
+    let pageUrl: String?
+    let alt: String?
+    let caption: String?
+
+    enum CodingKeys: String, CodingKey {
+        case url, alt, caption
+        case pageUrl = "page_url"
+    }
+
+    var label: String? { [caption, alt].compactMap { $0 }.first { !$0.isEmpty } }
+}
+
 struct AgentEmailItem: Codable, Hashable {
     let messageId: String
     let from: String
@@ -337,6 +354,8 @@ enum AgentResultBlock: Codable, Hashable {
     case flights(AgentChatFlights)
     case sections([AgentSection])
     case sources([AgentSource])
+    case photos([AgentImage])
+    case screenshots([AgentImage])
     case emails([AgentEmailItem])
     case events([AgentEventItem])
     case reservation(AgentReservation)
@@ -344,7 +363,7 @@ enum AgentResultBlock: Codable, Hashable {
     case unknown(String)
 
     private enum CodingKeys: String, CodingKey {
-        case type, sections, sources, items, alternatives, flights
+        case type, sections, sources, items, alternatives, flights, photos, screenshots
         case topPick = "top_pick"
     }
 
@@ -367,6 +386,10 @@ enum AgentResultBlock: Codable, Hashable {
             self = .sections((try? c.decodeIfPresent([AgentSection].self, forKey: .sections)) ?? [])
         case "sources":
             self = .sources((try? c.decodeIfPresent([AgentSource].self, forKey: .sources)) ?? [])
+        case "photos":
+            self = .photos((try? c.decodeIfPresent([AgentImage].self, forKey: .photos)) ?? [])
+        case "screenshots":
+            self = .screenshots((try? c.decodeIfPresent([AgentImage].self, forKey: .screenshots)) ?? [])
         case "emails":
             self = .emails((try? c.decodeIfPresent([AgentEmailItem].self, forKey: .items)) ?? [])
         case "events":
@@ -405,6 +428,12 @@ enum AgentResultBlock: Codable, Hashable {
         case .sources(let sources):
             try c.encode("sources", forKey: .type)
             try c.encode(sources, forKey: .sources)
+        case .photos(let images):
+            try c.encode("photos", forKey: .type)
+            try c.encode(images, forKey: .photos)
+        case .screenshots(let images):
+            try c.encode("screenshots", forKey: .type)
+            try c.encode(images, forKey: .screenshots)
         case .emails(let items):
             try c.encode("emails", forKey: .type)
             try c.encode(items, forKey: .items)

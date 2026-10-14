@@ -64,13 +64,22 @@ async def _rehost_one(source_url: str, prefix: str) -> str | None:
         return None
     if fetched.status != 200 or fetched.truncated or not fetched.content_type.startswith("image/"):
         return None
+    return await store_image(fetched.body, prefix)
+
+
+async def store_image(data: bytes, prefix: str, filename: str = "photo.webp") -> str | None:
+    """Re-encode image bytes and upload them: a CDN URL, or None when the
+    bytes are not an image or the upload failed. Also used for the
+    assistant's page screenshots (`agent_runtime/abilities/screenshots.py`).
+
+    Raises StorageHasNoPublicUrl when storage hands back no loadable URL."""
     try:
-        webp = await asyncio.to_thread(_reencode, fetched.body)
+        webp = await asyncio.to_thread(_reencode, data)
     except Exception:
         return None
     try:
         url = await asyncio.wait_for(
-            get_storage().upload_file(webp, "photo.webp", prefix=prefix, content_type="image/webp"),
+            get_storage().upload_file(webp, filename, prefix=prefix, content_type="image/webp"),
             timeout=_PER_IMAGE_SECONDS,
         )
     except Exception:

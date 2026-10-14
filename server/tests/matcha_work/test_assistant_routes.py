@@ -132,7 +132,11 @@ async def test_abilities_say_what_stands_in_the_way(wired, monkeypatch):
     }))
     out = await routes.list_abilities(current_user=_user())
     by_key = {a["key"]: a for a in out["abilities"]}
-    assert list(by_key) == ["web", "shopping", "flights", "email", "calendar", "sales", "reservations"]
+    assert list(by_key) == ["web", "screenshots", "shopping", "flights", "email", "calendar", "sales", "reservations"]
+    # Read-only, no consent; listed as not set up until the browser worker exists.
+    shots = by_key["screenshots"]
+    assert shots["always_on"] and not shots["acts"] and not shots["private_only"]
+    assert not shots["available"] and shots["reason"] == "Not set up on this server yet."
     # Read-only, no consent needed; offered only where a Duffel token is set.
     assert by_key["flights"]["always_on"] and not by_key["flights"]["acts"]
     assert not by_key["flights"]["private_only"]

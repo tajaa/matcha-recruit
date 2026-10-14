@@ -31,6 +31,8 @@ ASSISTANT_MODEL = LUNA
 _QUEUE_ENV = "AGENT_ASSISTANT_QUEUE"
 _CARD_QUEUE_ENV = "AGENT_CARD_QUEUE"
 _BROWSER_QUEUE_ENV = "AGENT_BROWSER_QUEUE"
+# Abilities that open Chromium (`abilities/reservations.py`, `abilities/screenshots.py`).
+_BROWSER_ABILITIES = frozenset({"reservations", "screenshots"})
 # Celery's hard task limit is 600s, so a run still live well past that has
 # lost its worker. Older than this it stops blocking the next message.
 _STALE_RUN_INTERVAL = "11 minutes"
@@ -55,7 +57,7 @@ def _limit_error(usage: dict) -> HTTPException:
 
 def queue_for(abilities: list[str]) -> str | None:
     """A run that may open a browser goes to the browser worker; nothing else does."""
-    if "reservations" in abilities and os.getenv(_BROWSER_QUEUE_ENV):
+    if _BROWSER_ABILITIES & set(abilities) and os.getenv(_BROWSER_QUEUE_ENV):
         return os.getenv(_BROWSER_QUEUE_ENV)
     return os.getenv(_QUEUE_ENV) or os.getenv(_CARD_QUEUE_ENV) or None
 

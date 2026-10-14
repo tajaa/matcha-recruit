@@ -186,6 +186,10 @@ extension AgentCardMessageView {
             }
         case .flights(let flights):
             if !flights.options.isEmpty { flightRows(flights) }
+        case .photos(let images):
+            imageStrip(images, width: 96, height: 96, fill: true)
+        case .screenshots(let images):
+            imageStrip(images, width: 240, height: 150, fill: false)
         case .reservation(let booking):
             reservationView(booking)
         case .purchaseSetup(let setup):
@@ -193,6 +197,54 @@ extension AgentCardMessageView {
         case .unknown:
             EmptyView()
         }
+    }
+
+    /// Photos and page screenshots: thumbnails from our CDN (https only), each
+    /// opening the full image in the browser, with the page it came from on hover.
+    @ViewBuilder
+    private func imageStrip(_ images: [AgentImage], width: CGFloat, height: CGFloat, fill: Bool) -> some View {
+        let shown = images.compactMap { image in httpsURL(image.url).map { (image, $0) } }
+        if !shown.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 8) {
+                    ForEach(Array(shown.enumerated()), id: \.offset) { _, pair in
+                        Button {
+                            NSWorkspace.shared.open(pair.1)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                AsyncImage(url: pair.1) { phase in
+                                    if case .success(let image) = phase {
+                                        image.resizable().aspectRatio(contentMode: fill ? .fill : .fit)
+                                    } else {
+                                        ZStack {
+                                            appState.themeText.opacity(0.06)
+                                            Image(systemName: "photo").foregroundColor(appState.themeTextSecondary)
+                                        }
+                                    }
+                                }
+                                .frame(width: width, height: height)
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                if let label = pair.0.label {
+                                    Text(label)
+                                        .font(.system(size: 10))
+                                        .foregroundColor(appState.themeTextSecondary)
+                                        .lineLimit(2)
+                                        .frame(width: width, alignment: .leading)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .help(pair.0.pageUrl ?? "Open the full image")
+                    }
+                }
+            }
+        }
+    }
+
+    /// Images render only from https URLs, which means our CDN.
+    private func httpsURL(_ string: String) -> URL? {
+        guard let url = URL(string: string), url.scheme == "https", url.host != nil else { return nil }
+        return url
     }
 
     private func itemRow(icon: String, title: String, subtitle: String, detail: String?,

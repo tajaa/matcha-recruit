@@ -241,7 +241,8 @@ async def test_earlier_links_are_what_recent_runs_here_verified_newest_first():
     assert "requested_by" not in query and "status = 'done'" in query and "kind = 'assistant'" in query
     assert args == (channel, current, history.EARLIER_RUNS)
     step_query, step_args = conn.ran("FROM mw_project_agent_steps")[0][1:]
-    assert "tool = 'fetch_page'" in step_query and "status = 'ok'" in step_query and step_args == ([new, old],)
+    assert "tool IN ('fetch_page', 'view_page')" in step_query and "status = 'ok'" in step_query
+    assert step_args == ([new, old],)
     # Nothing earlier: no step lookup at all.
     empty = FakeConn()
     assert await history.earlier_links(empty, channel_id=channel) == frozenset()
@@ -258,3 +259,18 @@ async def test_the_cap_keeps_the_newest_runs_links(monkeypatch):
         {"run_id": new, "result": {"url": "https://zzz.example/loaded"}}])])
     assert await history.earlier_links(conn, channel_id=uuid4()) == {
         "https://zzz.example/new", "https://zzz.example/loaded"}
+
+
+@pytest.mark.asyncio
+async def test_photo_and_screenshot_pages_are_earlier_links_but_their_images_are_not():
+    run = uuid4()
+    runs = [{"id": run, "result": {"schema": "agent_result.v2", "blocks": [
+        {"type": "photos", "photos": [{"url": "https://cdn.example/1.webp", "page_url": "https://www.zillow.com/a/"},
+                                      "junk", {"page_url": "javascript:x"}]},
+        {"type": "screenshots", "screenshots": [{"url": "https://cdn.example/s1.webp",
+                                                 "page_url": "https://tower737.example/units"}]},
+        "junk",
+    ]}}]
+    conn = FakeConn([("FROM mw_project_agent_runs", runs), ("FROM mw_project_agent_steps", [])])
+    assert await history.earlier_links(conn, channel_id=uuid4()) == {
+        "https://www.zillow.com/a/", "https://tower737.example/units"}

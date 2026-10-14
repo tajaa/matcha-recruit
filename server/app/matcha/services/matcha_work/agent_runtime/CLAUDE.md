@@ -16,7 +16,7 @@ loop in this package and no other: do not add a second.
 | Policy | `policy.py` | `evaluate_commit`: allow / confirm / deny. Pure: no I/O, no clock, no model |
 | Result | `result.py` | `agent_result.v2` (headline, summary, typed blocks); reads v1 as v2 |
 | Catalog | `catalog.py` | Every ability, and `abilities_for`: the only filter on what a run gets |
-| Abilities | `abilities/*.py` | `web`, `shopping`, `flights`, `email`, `calendar`, `reservations`, `purchase`, `domains`, `sales` |
+| Abilities | `abilities/*.py` | `web`, `screenshots`, `shopping`, `flights`, `email`, `calendar`, `reservations`, `purchase`, `domains`, `sales` |
 | Chat entry | `chat_entry.py` | A chat message on its way to a run; answers to questions |
 | Enqueue | `enqueue.py`, `quota.py` | Gates, the daily allowance, one live run per person per conversation |
 | Models | `models.py` | The model menu and which model a run uses |
@@ -137,7 +137,8 @@ it otherwise), and should declare `resolve`.
   model wrapped as data with a note. The audit row for `read_email` keeps who
   and what, never the body.
 - **Result blocks are rebuilt, not trusted.** `emails` and `events` are built
-  from the run's session by id, and so is `flights` (each offer from the run's
+  from the run's session by id, and so is `screenshots` (each one the run took
+  with `view_page`, already on our CDN) and `flights` (each offer from the run's
   `FlightSession`, through `agent_card.schema.gate_flights`; the model's prices
   are ignored); `reservation` is written by the server and
   what the model put in the block is ignored; `picks`, `sections` and
@@ -174,6 +175,29 @@ it otherwise), and should declare `resolve`.
   rows with the scope as a literal, and chat posts go through the existing
   `project_agent/chat.py` bridge. The matcha → werk boundary stays at the two
   fan-out imports it has.
+
+## Photos and screenshots
+
+Two ways an answer shows pictures. Neither is ever a hotlink: the clients
+render https images only, which means our CDN.
+
+- **`photos`** (`abilities/web.py`). `fetch_page` notes every image a loaded
+  page returned (`og_image`, products' `images`) with the page it was on
+  (`remember_images`). A `photos` block may use only those; the page is taken
+  from that record, not from the model. Before the result is stored,
+  `assistant._deliver` rehosts each photo through `agent_card/images.py` (the
+  same SSRF-guarded fetch and Pillow re-encode as pick photos), and a photo
+  that cannot be rehosted is dropped. At most 6.
+- **`screenshots`** (`abilities/screenshots.py`, tool `view_page`). It opens
+  one page in the guarded browser (`../browser`, the main frame kept on the
+  page's own site), waits for it to settle, and returns the text as drawn.
+  That is the point for pages like a building's unit list, which only appears
+  with JavaScript and is invisible to `fetch_page`. The screenshot is stored
+  through `images.store_image` (WebP, at most 1200px) under the run's prefix.
+  The model gets only a `screenshot_id`, and the block is rebuilt from the
+  session by id. At most 4 views per run and 4 screenshots in an answer.
+  Offered only where `AGENT_BROWSER_QUEUE` is set (see Queues); read-only and
+  no consent, so it is listed as "Not set up on this server yet." until then.
 
 ## Buying (`abilities/purchase.py`)
 
@@ -266,7 +290,9 @@ What carries over from earlier runs, besides their words (`history.py`):
   5 latest finished runs in this conversation verified: links their stored
   results cite (`agent_card.schema.verified_links`, shared with card
   revisions: sources, buy links, review pages, price and rating sources, photo
-  pages, never an image URL) and pages they loaded, newest run first, capped
+  pages, never an image URL), the pages their `photos` and `screenshots` came
+  from, and pages they loaded (`fetch_page`) or viewed (`view_page`), newest
+  run first, capped
   at 60. Every run in the conversation counts: in a shared chat a coworker's
   answer is already on everyone's screen. They go to
   `RunState.earlier_links`, which only result blocks read
@@ -303,11 +329,12 @@ run, and to go by a record when it and an earlier answer's wording disagree.
 
 ## Queues
 
-`enqueue.queue_for`: a run that has the `reservations` ability goes to
-`$AGENT_BROWSER_QUEUE`; every other run goes to `$AGENT_ASSISTANT_QUEUE`, else
-`$AGENT_CARD_QUEUE`, else Celery's default. Chromium never runs on the main
-worker: without `AGENT_BROWSER_QUEUE` the reservations ability is not offered
-at all. The worker for it is the `matcha-agent-worker` compose service
+`enqueue.queue_for`: a run that has the `reservations` or `screenshots`
+ability goes to `$AGENT_BROWSER_QUEUE`; every other run goes to
+`$AGENT_ASSISTANT_QUEUE`, else `$AGENT_CARD_QUEUE`, else Celery's default.
+Chromium never runs on the main worker: without `AGENT_BROWSER_QUEUE` neither
+ability is offered at all. `screenshots` needs no consent, so once the queue
+exists every assistant run goes to the browser worker. The worker for it is the `matcha-agent-worker` compose service
 (profile `agent-worker`).
 
 ## The private conversation

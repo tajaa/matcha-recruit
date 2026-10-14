@@ -219,6 +219,36 @@ describe('Espresso assistant messages', () => {
     expect(screen.getByText('Done')).toBeTruthy()
   })
 
+  it('shows photos and screenshots from our CDN only, each opening full size', () => {
+    const meta: AgentChatMetadata = {
+      kind: 'agent_result',
+      run_id: 'r2',
+      result_v2: {
+        schema: 'agent_result.v2',
+        headline: 'Tower 737',
+        summary: 'The unit list and the lobby.',
+        blocks: [
+          { type: 'photos', photos: [
+            { url: 'https://cdn.example/lobby.webp', page_url: 'https://www.zillow.com/a/', alt: 'Lobby' },
+            { url: 'http://site.example/raw.jpg', alt: 'Hotlinked' },
+          ] },
+          { type: 'screenshots', screenshots: [
+            { url: 'https://cdn.example/units.webp', page_url: 'https://tower737.example/units', caption: 'The unit list' },
+          ] },
+        ],
+      },
+    }
+    render(<AgentCardMessage metadata={meta} content="" />)
+    const images = screen.getAllByRole('img').map((img) => img.getAttribute('src'))
+    expect(images).toEqual(['https://cdn.example/lobby.webp', 'https://cdn.example/units.webp'])
+    expect(screen.getByText('The unit list')).toBeTruthy()
+    expect(screen.queryByText('Hotlinked')).toBeNull()
+    const link = screen.getByText('Lobby').closest('a')
+    expect(link?.getAttribute('href')).toBe('https://cdn.example/lobby.webp')
+    expect(link?.getAttribute('rel')).toBe('noopener noreferrer nofollow')
+    expect(link?.getAttribute('title')).toBe('https://www.zillow.com/a/')
+  })
+
   it('renders an answer block by block and skips a block it does not know', () => {
     const meta: AgentChatMetadata = {
       kind: 'agent_result',

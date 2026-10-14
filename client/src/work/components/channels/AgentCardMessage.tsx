@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import type {
   AgentActionReceipt, AgentChatButton, AgentChatFlights, AgentChatMetadata, AgentChatPick, AgentChatPromptView,
-  AgentChatReceipt, AgentChatResult, AgentChatResultV2, AgentResultBlock, AgentRunProgress,
+  AgentChatReceipt, AgentChatResult, AgentChatResultV2, AgentResultBlock, AgentResultImage, AgentRunProgress,
 } from '../../types'
 import { dayOffset, flightClock, flightDay, flightDuration, stopsText } from '../../utils/flightFormat'
 import { isAssistantPrompt } from './agentCardMessageHelpers'
@@ -57,6 +57,33 @@ function Photo({ url, size, alt }: { url?: string | null; size: number; alt: str
       ) : (
         <ImageIcon className="text-w-faint" style={{ width: size / 4, height: size / 4 }} />
       )}
+    </div>
+  )
+}
+
+/** Photos and page screenshots. Only https images render (our CDN copies);
+ *  each opens full size in a new tab, with the page it came from on hover. */
+function ImageStrip({ images, width, height, fit }: {
+  images: AgentResultImage[]; width: number; height: number; fit: 'cover' | 'contain'
+}) {
+  const shown = images.filter((image) => image.url?.startsWith('https://'))
+  if (!shown.length) return null
+  return (
+    <div className="flex gap-2 overflow-x-auto pb-1">
+      {shown.map((image) => {
+        const label = image.caption || image.alt || ''
+        return (
+          <a key={image.url} href={image.url} {...EXTERNAL} title={image.page_url || undefined} className="shrink-0 space-y-1" style={{ width }}>
+            <img
+              src={image.url}
+              alt={label}
+              className={`rounded-lg border border-w-line bg-w-surface2 ${fit === 'cover' ? 'object-cover' : 'object-contain'}`}
+              style={{ width, height }}
+            />
+            {label && <p className="line-clamp-2 text-[10px] text-w-dim">{label}</p>}
+          </a>
+        )
+      })}
     </div>
   )
 }
@@ -273,7 +300,7 @@ const RESERVATION_TEXT: Record<string, string> = {
 }
 
 function isKnownBlock(block: { type: string }): block is AgentResultBlock {
-  return ['picks', 'flights', 'sections', 'sources', 'emails', 'events', 'reservation', 'purchase_setup'].includes(block.type)
+  return ['picks', 'flights', 'sections', 'sources', 'photos', 'screenshots', 'emails', 'events', 'reservation', 'purchase_setup'].includes(block.type)
 }
 
 const SETUP_ANCHOR = { payment_card: 'payment-cards', shipping_address: 'shipping-addresses' } as const
@@ -360,6 +387,10 @@ function Block({ block }: { block: AgentResultBlock }) {
           })}
         </div>
       )
+    case 'photos':
+      return <ImageStrip images={block.photos} width={96} height={96} fit="cover" />
+    case 'screenshots':
+      return <ImageStrip images={block.screenshots} width={240} height={150} fit="contain" />
     case 'emails':
       return (
         <ul className="space-y-1.5">

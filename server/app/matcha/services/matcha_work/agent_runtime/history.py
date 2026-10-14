@@ -202,7 +202,8 @@ async def run_record(conn, run_ids: list) -> dict[str, str]:
 async def earlier_links(conn, *, channel_id: UUID, exclude_run: UUID | None = None,
                         runs: int = EARLIER_RUNS) -> frozenset[str]:
     """Links recent finished runs in this conversation verified: what their
-    stored results cite (`verified_links`) and the pages they loaded. Newest
+    stored results cite (`verified_links`, plus the pages their photos and
+    screenshots came from) and the pages they loaded or viewed. Newest
     run first, so the cap drops the oldest.
 
     Every run in the conversation counts, not only the requester's: in a shared
@@ -222,7 +223,7 @@ async def earlier_links(conn, *, channel_id: UUID, exclude_run: UUID | None = No
     if ids:
         for step in await conn.fetch(
             """SELECT run_id, result FROM mw_project_agent_steps
-               WHERE run_id = ANY($1::uuid[]) AND tool = 'fetch_page' AND status = 'ok'
+               WHERE run_id = ANY($1::uuid[]) AND tool IN ('fetch_page', 'view_page') AND status = 'ok'
                ORDER BY seq""",
             ids,
         ):
@@ -234,7 +235,15 @@ async def earlier_links(conn, *, channel_id: UUID, exclude_run: UUID | None = No
     for row in rows:
         stored = read_result(decode_jsonb(row["result"], {})) or {}
         for block in stored.get("blocks") or []:
-            if isinstance(block, dict) and block.get("type") in ("sources", "picks"):
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") in ("sources", "picks"):
                 found.update(dict.fromkeys(verified_links(block)))
+            elif block.get("type") in ("photos", "screenshots"):
+                # The page each picture came from, never the picture (our CDN copy).
+                for image in block.get(block["type"]) or []:
+                    page = image.get("page_url") if isinstance(image, dict) else None
+                    if isinstance(page, str) and page.startswith(("https://", "http://")):
+                        found[page] = None
         found.update(dict.fromkeys(loaded.get(str(row["id"]), [])))
     return frozenset(list(found)[:_MAX_EARLIER_LINKS])

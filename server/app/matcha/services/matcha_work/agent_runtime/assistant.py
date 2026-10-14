@@ -244,6 +244,20 @@ async def _deliver(run: dict, ctx: RunContext, outcome: runner.RunOutcome,
                 picks, company_id=run["company_id"], project_id=run["channel_id"], task_id=run_id,
                 total_seconds=_PHOTO_SECONDS,
             )
+        photos = next((b for b in stored.get("blocks") or [] if b.get("type") == "photos"), None)
+        if photos is not None:
+            await progress.note("Collecting photos…", force=True)
+            # The rehoster walks picks; the photos ride in one and come back
+            # out as CDN URLs. One that cannot be rehosted is dropped, never
+            # shown from the site it came from.
+            holder = {"top_pick": {"name": "Photo", "images": photos["photos"]}}
+            image_warnings += await images.rehost_images(
+                holder, company_id=run["company_id"], project_id=run["channel_id"], task_id=run_id,
+                total_seconds=_PHOTO_SECONDS,
+            )
+            photos["photos"] = holder["top_pick"]["images"]
+            if not photos["photos"]:
+                stored["blocks"] = [b for b in stored["blocks"] if b is not photos]
         stored["warnings"] = (outcome.warnings + image_warnings)[:30]
         await store.mark_run(run_id, status="done", result=stored, **usage)
         await progress.finish("done")
