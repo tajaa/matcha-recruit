@@ -112,7 +112,8 @@ async def test_phase_failed_and_unknown_steps_end_at_once(wired, monkeypatch):
 
     conn.calls.clear()
     conn.on("attempts = attempts + 1", search_row(status="screening", attempts=1))
-    await orchestrator.run_phase(SEARCH, TOKEN)  # no screening phase in this build
+    monkeypatch.delitem(orchestrator.PHASES, "screening")  # a status with no phase
+    await orchestrator.run_phase(SEARCH, TOKEN)
     assert advance_args(conn)[2] == "failed"
     dispatch.assert_not_awaited()
 
@@ -123,6 +124,7 @@ async def test_a_lost_dispatch_is_left_for_nudge(wired, monkeypatch):
     conn.on("attempts = attempts + 1", search_row(status="planning", attempts=1))
     monkeypatch.setitem(orchestrator.PHASES, "planning", AsyncMock(return_value=PhaseOutcome("discovering")))
     dispatch.side_effect = RuntimeError("broker down")
+    assert set(orchestrator.PHASES) == {"planning", "discovering", "screening", "enriching", "approaching"}
     await orchestrator.run_phase(SEARCH, TOKEN)  # does not raise
 
 

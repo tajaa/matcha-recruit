@@ -1,0 +1,316 @@
+"""What each model phase must hand back, and how it is checked. Pure: no I/O.
+
+The model never writes to the database. Each phase ends with one `finish`
+call; its arguments go through a `normalize_*` here, and the orchestrator
+persists only what survives. A ValueError gets the model one repair.
+
+  plan       queries and what to rank on, from the ask (and résumé)
+  screen     relevant or not, and a 0-5 fit, for a batch of jobs by short id
+  approach   per job: how to approach, drafts, answers to the real questions
+
+Checks that matter:
+  * ids must be ones the batch showed (short ids like J3, mapped back here)
+  * a contact must be named on a page fetched in this run
+  * an email must be printed on a fetched page or typed by the person
+  * an answer must be to one of the posting's open questions; file,
+    authorization and demographic questions are never answered
+  * every link must be one this run's searches or page loads returned
+"""
+from __future__ import annotations
+
+import re
+from typing import Any
+
+from app.matcha.services.matcha_work.agent_runtime import registry
+
+from . import ats
+
+MAX_QUERIES = 8
+APPROACH_CHANNELS = ("referral", "hiring_manager", "recruiter", "apply_portal", "search_firm")
+_EMAIL = re.compile(r"^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$")
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _text(value: Any, limit: int) -> str:
+    return _CONTROL.sub("", str(value or "")).strip()[:limit]
+
+
+def _texts(values: Any, *, items: int, limit: int) -> list[str]:
+    out = []
+    for value in values if isinstance(values, list) else []:
+        text = _text(value, limit)
+        if text:
+            out.append(text)
+        if len(out) >= items:
+            break
+    return out
+
+
+def _finish(name_hint: str, description: str, schema: dict) -> registry.AgentTool:
+    return registry.AgentTool(
+        name="finish",
+        effect="finish",
+        description=description,
+        parameters={"type": "object", "properties": {"result": schema}, "required": ["result"]},
+        step_kind="finish",
+        describe=lambda _args: name_hint,
+    )
+
+
+def _result(args: dict) -> dict:
+    result = args.get("result") if isinstance(args, dict) else None
+    if not isinstance(result, dict):
+        raise ValueError("`result` must be an object")
+    return result
+
+
+# ── plan ─────────────────────────────────────────────────────────────────────
+
+PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "queries": {
+            "type": "array", "maxItems": MAX_QUERIES,
+            "items": {"type": "object", "properties": {
+                "q": {"type": "string", "description": "Google Jobs query text, e.g. 'Chief Operating Officer Austin TX'"},
+                "location": {"type": ["string", "null"], "enum": ["United States", None],
+                             "description": "'United States' for a nationwide query, else null (put a city in q)"},
+            }, "required": ["q", "location"]},
+        },
+        "titles": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
+        "deal_breakers": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
+        "profile_summary": {"type": "string", "description": "Two or three sentences on who is looking, from the ask and résumé"},
+        "weights": {
+            "type": ["object", "null"],
+            "description": "How much base, bonus, equity and fit matter to this person (0-1 each), from the ask",
+            "properties": {k: {"type": "number"} for k in ("base", "bonus", "equity", "fit")},
+        },
+    },
+    "required": ["queries", "titles", "deal_breakers", "profile_summary", "weights"],
+}
+PLAN_FINISH = _finish("Planned the search", "Finish with the search plan.", PLAN_SCHEMA)
+
+
+def normalize_plan(args: dict, _state=None) -> tuple[dict, list[str]]:
+    result = _result(args)
+    queries, seen = [], set()
+    for item in result.get("queries") or []:
+        if not isinstance(item, dict):
+            continue
+        q = " ".join(_text(item.get("q"), 160).split())
+        location = item.get("location")
+        location = "United States" if location == "United States" else None
+        key = (q.lower(), location)
+        if len(q) >= 2 and key not in seen:
+            seen.add(key)
+            queries.append({"q": q, "location": location})
+    if not queries:
+        raise ValueError("give at least one query")
+    weights = result.get("weights") if isinstance(result.get("weights"), dict) else None
+    plan = {
+        "queries": queries[:MAX_QUERIES],
+        "titles": _texts(result.get("titles"), items=10, limit=80),
+        "deal_breakers": _texts(result.get("deal_breakers"), items=10, limit=160),
+        "profile_summary": _text(result.get("profile_summary"), 800),
+        "source": "model",
+    }
+    if weights:
+        plan["weights"] = {k: weights[k] for k in ("base", "bonus", "equity", "fit")
+                           if isinstance(weights.get(k), (int, float))}
+    return plan, []
+
+
+# ── screen ───────────────────────────────────────────────────────────────────
+
+SCREEN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdicts": {
+            "type": "array",
+            "items": {"type": "object", "properties": {
+                "id": {"type": "string", "description": "The job's short id, e.g. J3"},
+                "relevant": {"type": "boolean"},
+                "fit": {"type": "integer", "minimum": 0, "maximum": 5},
+                "reasons": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
+                "deal_breaker": {"type": ["string", "null"]},
+            }, "required": ["id", "relevant", "fit", "reasons", "deal_breaker"]},
+        },
+    },
+    "required": ["verdicts"],
+}
+SCREEN_FINISH = _finish("Screened the jobs", "Finish with one verdict per job shown.", SCREEN_SCHEMA)
+SCREEN_MISSING_TOLERANCE = 0.2
+
+
+def normalize_screen(args: dict, batch: dict[str, str]) -> tuple[dict[str, dict], list[str]]:
+    """`batch`: short id -> lead id. Returns lead id -> verdict."""
+    result = _result(args)
+    verdicts: dict[str, dict] = {}
+    warnings = []
+    for item in result.get("verdicts") or []:
+        if not isinstance(item, dict):
+            continue
+        short = str(item.get("id") or "").strip().upper()
+        lead_id = batch.get(short)
+        if lead_id is None:
+            warnings.append(f"Ignored a verdict for an unknown job {short[:12]!r}")
+            continue
+        fit = item.get("fit")
+        fit = max(0, min(5, int(fit))) if isinstance(fit, (int, float)) and not isinstance(fit, bool) else None
+        breaker = _text(item.get("deal_breaker"), 160) or None
+        relevant = bool(item.get("relevant")) and breaker is None
+        verdicts[lead_id] = {
+            "relevant": relevant,
+            "fit": fit,
+            "reasons": _texts(item.get("reasons"), items=3, limit=200),
+            "reason": breaker or ("" if relevant else "; ".join(_texts(item.get("reasons"), items=1, limit=200))),
+        }
+    missing = len(batch) - len(verdicts)
+    if batch and missing > len(batch) * SCREEN_MISSING_TOLERANCE:
+        raise ValueError(f"give a verdict for every job: {missing} of {len(batch)} are missing")
+    return verdicts, warnings
+
+
+# ── approach ─────────────────────────────────────────────────────────────────
+
+APPROACH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "approaches": {
+            "type": "array",
+            "items": {"type": "object", "properties": {
+                "id": {"type": "string", "description": "The job's short id, e.g. J1"},
+                "summary": {"type": "string", "description": "Two sentences: the best way in and why"},
+                "channel": {"type": "string", "enum": list(APPROACH_CHANNELS)},
+                "steps": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
+                "talking_points": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
+                "negotiation": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+                "contacts": {"type": "array", "maxItems": 4, "items": {"type": "object", "properties": {
+                    "name": {"type": "string"},
+                    "role": {"type": "string"},
+                    "source_url": {"type": "string", "description": "A page you loaded with fetch_page that names them"},
+                }, "required": ["name", "role", "source_url"]}},
+                "outreach": {"type": "object", "properties": {
+                    "to_email": {"type": ["string", "null"],
+                                 "description": "Only an address printed on a page you loaded, else null"},
+                    "subject": {"type": "string"},
+                    "body": {"type": "string"},
+                }, "required": ["to_email", "subject", "body"]},
+                "answers": {"type": "array", "maxItems": 12, "items": {"type": "object", "properties": {
+                    "question_key": {"type": ["string", "null"],
+                                     "description": "The key of one of the posting's questions, or null for a likely question"},
+                    "question": {"type": "string"},
+                    "answer": {"type": "string"},
+                }, "required": ["question_key", "question", "answer"]}},
+                "cover_letter": {"type": "string"},
+                "sources": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
+            }, "required": ["id", "summary", "channel", "steps", "talking_points", "negotiation",
+                            "contacts", "outreach", "answers", "cover_letter", "sources"]},
+        },
+    },
+    "required": ["approaches"],
+}
+APPROACH_FINISH = _finish("Drafted approaches", "Finish with one approach per job shown.", APPROACH_SCHEMA)
+MAX_LIKELY_ANSWERS = 4
+
+
+def _name_on_page(name: str, page_text: str) -> bool:
+    words = [w for w in re.split(r"\s+", name.strip()) if len(w) > 1]
+    if not words:
+        return False
+    hay = page_text.casefold()
+    return all(w.casefold() in hay for w in words)
+
+
+def _answerable(question: dict) -> bool:
+    return question.get("kind") == "open"
+
+
+def normalize_approaches(
+    args: dict,
+    *,
+    batch: dict[str, str],
+    questions: dict[str, list[dict]],
+    citable: set[str],
+    pages: dict[str, str],
+    observed_emails: set[str],
+    user_text: str,
+) -> tuple[dict[str, dict], list[str]]:
+    """`batch`: short id -> lead id; `questions`: lead id -> its ATS questions;
+    `citable`: links this run may cite; `pages`: url -> text fetched this run."""
+    result = _result(args)
+    out: dict[str, dict] = {}
+    warnings: list[str] = []
+    user_lower = (user_text or "").lower()
+    for item in result.get("approaches") or []:
+        if not isinstance(item, dict):
+            continue
+        lead_id = batch.get(str(item.get("id") or "").strip().upper())
+        if lead_id is None or lead_id in out:
+            continue
+        contacts = []
+        for contact in item.get("contacts") or []:
+            if not isinstance(contact, dict):
+                continue
+            name = _text(contact.get("name"), 120)
+            url = str(contact.get("source_url") or "").strip()
+            page = pages.get(url)
+            if name and page is not None and _name_on_page(name, page):
+                contacts.append({"name": name, "role": _text(contact.get("role"), 120), "source_url": url})
+            elif name:
+                warnings.append(f"Dropped contact {name[:40]!r}: not named on a page loaded in this run")
+        outreach = item.get("outreach") if isinstance(item.get("outreach"), dict) else {}
+        to_email = str(outreach.get("to_email") or "").strip().lower() or None
+        if to_email and not (_EMAIL.match(to_email) and (to_email in observed_emails or to_email in user_lower)):
+            warnings.append(f"Dropped address {to_email[:60]!r}: not printed on a page loaded in this run")
+            to_email = None
+        posting_questions = {q["key"]: q for q in questions.get(lead_id, []) if isinstance(q, dict) and q.get("key")}
+        answers, likely = [], 0
+        for answer in item.get("answers") or []:
+            if not isinstance(answer, dict):
+                continue
+            text = _text(answer.get("answer"), 3000)
+            if not text:
+                continue
+            key = answer.get("question_key")
+            if key:
+                question = posting_questions.get(str(key))
+                if question is None or not _answerable(question):
+                    continue
+                answers.append({"question_key": question["key"], "question": question["label"],
+                                "answer": text, "likely": False})
+                continue
+            label = _text(answer.get("question"), 300)
+            if posting_questions or not label or likely >= MAX_LIKELY_ANSWERS:
+                continue  # with the real questions known, only those are answered
+            if ats._AUTHORIZATION.search(label) or ats._DEMOGRAPHIC.search(label):
+                continue
+            likely += 1
+            answers.append({"question_key": None, "question": label, "answer": text, "likely": True})
+        sources = []
+        for url in item.get("sources") or []:
+            url = str(url or "").strip()
+            if url in citable and url not in sources:
+                sources.append(url)
+        channel = item.get("channel") if item.get("channel") in APPROACH_CHANNELS else "apply_portal"
+        out[lead_id] = {
+            "summary": _text(item.get("summary"), 600),
+            "channel": channel,
+            "steps": _texts(item.get("steps"), items=6, limit=300),
+            "talking_points": _texts(item.get("talking_points"), items=6, limit=300),
+            "negotiation": _texts(item.get("negotiation"), items=4, limit=300),
+            "contacts": contacts,
+            "outreach": {"to_email": to_email, "subject": _text(outreach.get("subject"), 200),
+                         "body": _text(outreach.get("body"), 4000)},
+            "answers": answers,
+            "unanswered": [
+                {"question_key": q["key"], "question": q["label"], "kind": q.get("kind")}
+                for q in posting_questions.values()
+                if q.get("kind") in ("file", "authorization", "demographic")
+            ],
+            "cover_letter": _text(item.get("cover_letter"), 6000),
+            "sources": sources[:8],
+        }
+    if not out:
+        raise ValueError("give an approach for each job shown, by its short id")
+    return out, warnings

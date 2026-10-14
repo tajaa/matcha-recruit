@@ -42,14 +42,6 @@ def guard():
     return phases.Guard(SEARCH, TOKEN)
 
 
-@pytest.mark.asyncio
-async def test_plan_phase_writes_under_the_token(conn):
-    out = await phases.plan(search_row(criteria=json.dumps({"titles": ["COO"]})), phases.Deps(), guard())
-    assert out.status == "discovering"
-    [write] = conn.ran("SET plan = $3::jsonb")
-    assert write[2][:2] == (SEARCH, TOKEN) and json.loads(write[2][2])["queries"][0]["q"] == "COO"
-
-
 def posting(title, company, **over):
     return providers.Posting(title=title, company=company, location=over.pop("location", "Austin, TX"), **over)
 
@@ -94,7 +86,7 @@ async def test_discover_dedupes_filters_and_counts_calls(conn):
     search = discover_search(["COO", "Chief Operating Officer"],
                              criteria=json.dumps({"exclude_companies": ["excluded co"]}))
     out = await phases.discover(search, phases.Deps(provider=lambda: provider), guard())
-    assert out.status == "enriching" and out.progress["found"] == 2
+    assert out.status == "screening" and out.progress["found"] == 2
     assert len(provider.calls) == 3
     [counter] = conn.ran("provider_calls = provider_calls + $2")
     assert counter[2] == (SEARCH, 3)

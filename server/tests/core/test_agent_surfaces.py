@@ -66,6 +66,7 @@ def test_registry_payload_lists_every_app_and_its_rows_in_order():
         assert rows, f"{app.key} has no product rows"
     assert [s["key"] for s in payload[reg.ESPRESSO]["surfaces"]] == [
         reg.ESPRESSO_CHAT, reg.ESPRESSO_AGENT_CARDS, reg.ESPRESSO_ASSISTANT, reg.ESPRESSO_PROJECTS,
+        reg.ESPRESSO_JOB_SEARCH,
     ]
     assert all({"key", "label", "description", "builtin"} <= set(s) for s in payload[reg.MATCHA]["surfaces"])
 

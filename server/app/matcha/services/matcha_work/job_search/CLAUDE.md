@@ -1,9 +1,11 @@
 # Espresso Job search
 
 A person describes the job they want ("COO roles across the US — I care most
-about salary, bonus and equity"). A search finds postings, reads each one for
-pay and application details, and ranks them by what the person weighs. Later
-phases (screening, approach drafts) run model calls on the agent runtime.
+about salary, bonus and equity"). A search plans its queries, finds postings,
+screens them for fit, reads each one for pay and application details, ranks
+them by what the person weighs, and drafts how to approach the top ones:
+route in, contacts, outreach, answers to the application's own questions and
+a cover letter. Nothing is sent, applied for or submitted.
 
 Personal Espresso accounts only (the assistant's rule,
 `agent_runtime.eligibility`), Pro and up (`features_for_plan()["job_search"]`),
@@ -23,7 +25,11 @@ Business 10), and the `jobs-1` consent (`agent_runtime/consent.py`).
 | Allowance | `quota.py` | The monthly count |
 | Start | `enqueue.py` | `preflight`, `create_search`, `dispatch`, `queue_for` |
 | Chain | `orchestrator.py` | `claim` / `advance` / `run_phase`, `nudge`, `reconcile` |
-| Phases | `phases.py` | `plan`, `discover`, `enrich` (+ ranking) |
+| Phases | `phases.py` | `discover`, `enrich` (+ ranking, + queue the top 8 for approaches); `plan_from_criteria` |
+| Model phases | `model_phases.py` | `plan`, `screen`, `approach` |
+| One model run | `agent_phase.py` | A run row of kind `job_search`, the runner, `mark_run`, token charge |
+| Model contracts | `contracts.py` (pure) | Finish tools + `normalize_plan` / `normalize_screen` / `normalize_approaches` |
+| Prompts | `prompts.py` | Phase instructions and user turns |
 
 REST: `routes/matcha_work/job_search.py` (`/matcha-work/job-searches`).
 Worker: `workers/tasks/job_search.py`. Migration: `mwjobs01`
@@ -87,16 +93,46 @@ fetches.
 
 | Status | Phase | Notes |
 |---|---|---|
-| `queued` → `planning` | `plan` | Queries from criteria. Google's `location` only takes Google place names, so a city goes in the query text |
+| `queued` → `planning` | `model_phases.plan` | Model: queries (≤8), titles, deal-breakers, profile summary, weights (applied only while `weights_source='default'`). Falls back to `plan_from_criteria`; what the person typed is always searched. Google's `location` only takes Google place names, so a city goes in the query text |
 | `discovering` | `discover` | Up to 3 pages per query, 3 at a time; dedupe on company + title + city; exclusions and remote preference applied |
-| `enriching` | `enrich` | Batches of 24: ATS API first, then the company page's JSON-LD `JobPosting` (a careers page that redirects into an ATS reads the ATS). Then `service.rerank` |
+| `screening` | `model_phases.screen` | Model, batches of 40 by short id (J1…): relevant, fit 0-5, reasons, deal-breaker. A failed batch stays in (unranked fit) |
+| `enriching` | `enrich` | Batches of 24: ATS API first, then the company page's JSON-LD `JobPosting` (a careers page that redirects into an ATS reads the ATS). Then `service.rerank` and the top 8 are queued (`phase_cursor.approach_queue`) |
+| `approaching` | `model_phases.approach` | Model with web search + `fetch_page`, 2 jobs per task. A failed batch is `approach_status='failed'`; the person can redraft |
 | `done` / `failed` / `cancelled` | | |
 
-`screening` and `approaching` are reserved statuses for the model phases.
+## Model phases
 
-## Not here (yet)
+Each is one ordinary agent-runtime run (`agent_phase.run_model_phase`): the
+search is a third caller of `runner.run_agent`, after the chat assistant and
+agent cards. There is still one loop. The run row is `kind='job_search'`,
+`surface='job_search'`, `job_search_id` set, no project or channel. Runs are
+not stored by the provider (`store_responses=False`): the ask and, when the
+person chose "use my résumé", their résumé (`user_resumes`, ≤6k chars) are in
+the input. The model is settled at create (`agent_surfaces.ESPRESSO_JOB_SEARCH`,
+Admin → AI models; else Luna) and re-checked against `models.offered()`.
 
-Model phases (plan expansion, screening/fit, comp research, approach drafts),
-the chat ability, and the macOS UI. Those reuse `agent_runtime.runner` as a
-caller (no second loop), and run rows of kind `job_search` point at their
-search through `mw_project_agent_runs.job_search_id`.
+The output of each phase is its **finish contract**, not draft tools (a finish
+next to a write is refused by the runner, and the last turn forces finish).
+`contracts.py` checks it; the orchestrator writes what survives:
+
+- ids must be the batch's short ids;
+- a contact must be named on a page `fetch_page` loaded in this run, with that
+  page as its source;
+- `outreach.to_email` must be printed on a loaded page or typed in the ask;
+- answers only to the posting's `open` questions; file, authorization and
+  demographic questions are listed as `unanswered`, never answered; with no
+  known questions, at most four "likely" ones;
+- sources must be links this run's searches or loads returned.
+
+Redraft: `POST …/leads/{lead}/approach` puts a `done` search back into
+`approaching` for that one job (free; ≤20 per search, 10/hour). The pay-law
+hint (`service.PAY_LAW_STATES`: the employer-side list plus MA) is set at
+re-rank for unposted pay and given to the approach phase.
+
+## In the assistant
+
+`agent_runtime/abilities/jobs.py` (`private_only`, `jobs-1`): list and read
+searches and jobs, keep the person's status and notes (`update_job_lead`),
+re-rank (`rank_job_search`). The `jobs` block is rebuilt from the jobs the run
+read, so pay in chat is always the posting's own. Starting a search from chat
+is not there yet: searches start in the Job search section.

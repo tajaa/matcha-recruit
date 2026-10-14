@@ -78,6 +78,7 @@ ESPRESSO_CHAT = "espresso.chat"
 ESPRESSO_AGENT_CARDS = "espresso.agent_cards"
 ESPRESSO_ASSISTANT = "espresso.assistant"
 ESPRESSO_PROJECTS = "espresso.projects"
+ESPRESSO_JOB_SEARCH = "espresso.job_search"
 
 # ── Gummfit (Cappe) ──
 GUMMFIT_MERLIN = "gummfit.merlin"
@@ -141,6 +142,9 @@ SURFACES: tuple[SurfaceDef, ...] = (
                "The assistant you start from chat: flights, browsing, purchases.", _LUNA),
     SurfaceDef(ESPRESSO_PROJECTS, ESPRESSO, "Projects",
                "@espresso repository questions and task drafts in personal projects.", _LUNA),
+    SurfaceDef(ESPRESSO_JOB_SEARCH, ESPRESSO, "Job search",
+               "Planning the search, screening jobs and drafting how to approach each one. "
+               "Applies to searches started after the change.", _LUNA),
     SurfaceDef(
         GUMMFIT_MERLIN, GUMMFIT, "Merlin (single-step edits)",
         "Every Lite turn and other one-shot edits. The tier still sets how hard it thinks "
