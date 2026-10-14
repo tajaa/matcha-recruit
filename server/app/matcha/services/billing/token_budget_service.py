@@ -12,7 +12,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
-from ....database import get_connection
+from ....database import connection_or_direct, get_connection
 from . import entitlements_service
 
 logger = logging.getLogger(__name__)
@@ -114,7 +114,8 @@ async def get_token_budget(company_id: UUID, *, conn=None) -> dict[str, Any]:
 
     if conn:
         return await _query(conn)
-    async with get_connection() as c:
+    # Pool-free: a task started from chat checks the budget in the worker.
+    async with connection_or_direct() as c:
         return await _query(c)
 
 

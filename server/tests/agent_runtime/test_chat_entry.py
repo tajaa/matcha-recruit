@@ -415,7 +415,7 @@ async def test_files_with_no_words_are_kept_without_spending_a_request(wired):
 
 @pytest.mark.asyncio
 async def test_files_answer_the_question_espresso_asked(wired):
-    wired.conn.on("owner_user_id = $2 AND kind = 'ask_user'", {"id": uuid4()})
+    wired.conn.on("owner_user_id = $2 AND kind IN ('ask_user', 'ask_form')", {"id": uuid4()})
     await chat_entry.handle_message(**_message(_user(), content="", files=1))
     assert wired.queued.await_args.kwargs["prompt"] == "Here's the file."
     # The question it answered is closed as answered.
@@ -434,3 +434,16 @@ async def test_files_sent_as_a_reply_to_a_question_answer_it(wired, monkeypatch)
     await chat_entry.handle_message(**_message(_user(), content="", files=2, reply_prompt_id=uuid4()))
     assert seen["content"] == "Here are the files."
     wired.queued.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_typed_reply_answers_a_form_like_a_question(wired):
+    user = _user()
+    form = _prompt(user.id, kind="ask_form", payload={"kind": "ask_form", "playbook": "research"})
+    _script(wired, form)
+    await chat_entry.handle_message(**_message(
+        user, content="the Mission, up to 3500", reply_prompt_id=form["id"], channel_id=form["channel_id"]))
+    assert wired.queued.await_args.kwargs["prompt"] == "the Mission, up to 3500"
+    event = wired.broadcast.await_args.args[0][0]
+    assert event["answer"] == "text" and event["answer_text"] == "Answered"
+    assert prompts.answer_text("ask_form", "form") == "Started"

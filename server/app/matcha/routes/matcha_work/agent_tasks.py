@@ -15,8 +15,8 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.models.auth import CurrentUser
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
-from app.matcha.models.matcha_work.agent_tasks import AgentTaskCreate, ItemPatch, RoundCreate
-from app.matcha.services.matcha_work.agent_tasks import allowance, enqueue, playbooks, service
+from app.matcha.models.matcha_work.agent_tasks import AgentTaskCreate, FormAnswer, ItemPatch, RoundCreate
+from app.matcha.services.matcha_work.agent_tasks import allowance, enqueue, intake, playbooks, service
 
 from .assistant import require_personal_workspace
 
@@ -75,6 +75,15 @@ async def list_agent_tasks(current_user: CurrentUser = Depends(require_admin_or_
 async def create_agent_task(body: AgentTaskCreate, current_user: CurrentUser = Depends(require_admin_or_client)):
     company_id = await _company(current_user)
     return await _call(enqueue.create_task(current_user, company_id, body))
+
+
+@router.post("/prompts/{prompt_id}/answer", status_code=202)
+async def answer_agent_task_form(
+    prompt_id: UUID, body: FormAnswer, current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Submit a form Espresso asked in chat: the task starts, with no model run
+    (so no daily request). A retry gets the same task."""
+    return await _call(intake.answer_form(current_user, prompt_id, body))
 
 
 @router.get("/{task_id}")

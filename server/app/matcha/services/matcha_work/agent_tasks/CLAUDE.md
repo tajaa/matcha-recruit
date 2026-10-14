@@ -14,7 +14,7 @@ Personal Espresso accounts (`agent_runtime.eligibility`), Pro and up
 
 Server names avoid "task" alone: `mw_tasks` is kanban cards. Tables are
 `mw_agent_tasks`, `mw_agent_task_rounds`, `mw_agent_task_items` (migration
-`agenttask01`), routes are `/matcha-work/agent-tasks`.
+`agenttask01`; forms `agenttask02`), routes are `/matcha-work/agent-tasks`.
 
 ## The shape
 
@@ -30,11 +30,31 @@ Server names avoid "task" alone: `mw_tasks` is kanban cards. Tables are
 | Model runs | `model_run.py` | The task as a `phase_run.RunOwner` (kind `agent_task`, usage `matcha.espresso.tasks.<playbook>`) |
 | Document | `document.py` | Fixed Markdown (no model) saved as a journal note via `journal_service.create_note_direct` |
 | Telling | `notify.py` | Bell + live push when a task finishes, stops or needs the person |
+| Intake | `intake.py` | Field values, the `ask_form` form (built from the playbook only), submitting it (`answer_form`) |
+| Chat cards | `chat.py` | The `agent_task` card posted where a task started, and when it ends |
+| From chat | `../agent_runtime/abilities/tasks.py` | The `tasks` ability: list, read, start, follow up, cancel, mark findings; the `task` block |
 | Research | `research/` | The first playbook: see below |
 
 REST: `routes/matcha_work/agent_tasks.py`. Worker: `workers/tasks/agent_tasks.py`
 (`run_agent_task_phase` 500/560s, `reconcile_agent_tasks` at worker start).
 Queue: `AGENT_TASKS_QUEUE`, else `AGENT_CARD_QUEUE`, else the default.
+
+## From chat
+
+In the person's private conversation (`tasks` ability, allowance
+`agent_tasks` = `tasks_enabled`), Espresso picks a playbook and calls
+`start_task` with what they said, by intake field key. When something that
+matters is missing it calls `ask_form` instead: the model names the playbook
+and field keys; the form (labels, types, files, consent) comes from the
+playbook's `intake` alone. Submitting it (`POST /agent-tasks/prompts/{id}/answer`)
+checks the values and files against the same fields and starts the task with
+no model run, so no daily request; the prompt id is the task's request id. A
+typed reply answers the form like any question and the next run carries on.
+A task started from a conversation posts a card there (`chat.py`) when it
+starts and when it ends. `create_task`'s `origin` is server-only.
+
+`start_task` runs in the worker, so the gates it goes through are pool-free
+(`workspace_enabled`, `resolve_plan_for_user`, `get_token_budget`).
 
 ## Statuses and rounds
 
@@ -97,6 +117,6 @@ refine starts at `refine`, "search more" at `providers`.
 
 ## Not yet (later PRs)
 
-Intake forms and the `tasks` ability (start from chat), the Mac Tasks tab,
-agent cards and job searches as tasks (`engine` `board` / `job_search`; the
+The Mac Tasks tab and the chat's form and task cards, agent cards and job
+searches as tasks (`engine` `board` / `job_search`; the
 columns exist), reservations.

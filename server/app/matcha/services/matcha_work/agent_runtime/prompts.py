@@ -1,4 +1,4 @@
-"""Questions the assistant asks in chat: `ask_user` and `confirm_action`.
+"""Questions the assistant asks in chat: `ask_user`, `confirm_action` and `ask_form`.
 
 They live in `mw_agent_card_prompts`, next to the agent-card questions, and
 are posted as the same kind of message, so both apps render them with the
@@ -9,6 +9,9 @@ reply. What differs is what an answer does:
                   starts the next run (the conversation is replayed to it)
   confirm_action  yes runs the frozen action, exactly as it was shown; no
                   drops it. Anything else is not an answer.
+  ask_form        a task's missing details (`agent_tasks/intake.py`): the
+                  submitted form starts the task; a typed reply answers it
+                  the way it answers `ask_user`.
 
 Only the person who was asked can answer either.
 """
@@ -29,7 +32,10 @@ logger = logging.getLogger(__name__)
 
 ASK_USER = "ask_user"
 CONFIRM_ACTION = "confirm_action"
-KINDS = (ASK_USER, CONFIRM_ACTION)
+ASK_FORM = "ask_form"
+KINDS = (ASK_USER, CONFIRM_ACTION, ASK_FORM)
+# Answered by any reply from the person asked.
+OPEN_ENDED = (ASK_USER, ASK_FORM)
 ASK_TTL = timedelta(days=2)
 CONFIRM_TTL = timedelta(hours=12)
 YES_LABEL = "Yes, go ahead"
@@ -136,6 +142,8 @@ def answer_text(kind: str, answer: str | None) -> str | None:
         return None
     if kind == CONFIRM_ACTION:
         return "Went ahead" if answer == "yes" else "Cancelled"
+    if kind == ASK_FORM and answer == "form":
+        return "Started"
     return "Answered"
 
 
@@ -158,12 +166,12 @@ async def close_open(conn, *, channel_id: UUID, owner_user_id: UUID,
     after the transaction commits."""
     rows = await conn.fetch(
         """UPDATE mw_agent_card_prompts
-           SET status = CASE WHEN kind = 'ask_user' AND $3 THEN 'answered' ELSE 'superseded' END,
-               answer = CASE WHEN kind = 'ask_user' AND $3 THEN 'text' ELSE answer END,
-               answered_by = CASE WHEN kind = 'ask_user' AND $3 THEN $2 ELSE answered_by END,
-               answered_at = CASE WHEN kind = 'ask_user' AND $3 THEN NOW() ELSE answered_at END
+           SET status = CASE WHEN kind IN ('ask_user', 'ask_form') AND $3 THEN 'answered' ELSE 'superseded' END,
+               answer = CASE WHEN kind IN ('ask_user', 'ask_form') AND $3 THEN 'text' ELSE answer END,
+               answered_by = CASE WHEN kind IN ('ask_user', 'ask_form') AND $3 THEN $2 ELSE answered_by END,
+               answered_at = CASE WHEN kind IN ('ask_user', 'ask_form') AND $3 THEN NOW() ELSE answered_at END
            WHERE channel_id = $1 AND owner_user_id = $2 AND status = 'open'
-             AND kind IN ('ask_user', 'confirm_action')
+             AND kind IN ('ask_user', 'confirm_action', 'ask_form')
            RETURNING id, channel_id, kind, status""",
         channel_id, owner_user_id, as_answered,
     )
@@ -177,7 +185,7 @@ async def load(conn, *, prompt_id: UUID, channel_id: UUID) -> dict | None:
     row = await conn.fetchrow(
         """SELECT *, (status = 'open' AND expires_at > NOW()) AS live
            FROM mw_agent_card_prompts
-           WHERE id = $1 AND channel_id = $2 AND kind IN ('ask_user', 'confirm_action')""",
+           WHERE id = $1 AND channel_id = $2 AND kind IN ('ask_user', 'confirm_action', 'ask_form')""",
         prompt_id, channel_id,
     )
     if not row:
@@ -208,7 +216,7 @@ async def open_question(conn, *, channel_id: UUID, owner_user_id: UUID) -> dict 
     the answer to it."""
     row = await conn.fetchrow(
         """SELECT id FROM mw_agent_card_prompts
-           WHERE channel_id = $1 AND owner_user_id = $2 AND kind = 'ask_user'
+           WHERE channel_id = $1 AND owner_user_id = $2 AND kind IN ('ask_user', 'ask_form')
              AND status = 'open' AND expires_at > NOW()
            ORDER BY created_at DESC LIMIT 1""",
         channel_id, owner_user_id,

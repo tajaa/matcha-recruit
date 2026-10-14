@@ -30,7 +30,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
-from ....database import get_connection
+from ....database import connection_or_direct
 
 PLAN_FREE = "free"
 PLAN_LITE = "lite"
@@ -121,7 +121,7 @@ async def resolve_plan_for_user(user_id: UUID | str) -> str:
     if cached and now - cached[0] < _PLAN_CACHE_TTL_SECONDS:
         return cached[1]
 
-    async with get_connection() as conn:
+    async with connection_or_direct() as conn:
         row = await conn.fetchrow(
             """
             SELECT u.role,

@@ -17,7 +17,7 @@ from uuid import UUID
 import asyncpg
 from fastapi import HTTPException
 
-from app.database import get_connection
+from app.database import connection_or_direct, get_connection
 from app.matcha.services.billing.entitlements_service import PLAN_PRO, require_plan
 from app.matcha.services.huume.routing import LUNA
 
@@ -70,7 +70,8 @@ async def workspace_enabled(company_id: UUID) -> bool:
 
     from .eligibility import assistant_available
 
-    async with get_connection() as conn:
+    # Pool-free: a task started from chat checks this in the worker.
+    async with connection_or_direct() as conn:
         row = await conn.fetchrow(
             """SELECT enabled_features, signup_source, COALESCE(is_personal, false) AS is_personal
                FROM companies WHERE id = $1""",
