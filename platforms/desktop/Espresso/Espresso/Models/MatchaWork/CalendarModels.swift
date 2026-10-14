@@ -73,6 +73,17 @@ struct MWGoogleCalendarFeed: Codable, Hashable {
     /// ok | partial (more than it could load) | not_connected | needs_permission | error | skipped
     let status: String
     let events: [MWGoogleCalendarEvent]
+    var reason: String? = nil
+    var message: String? = nil
+
+    var needsServerSetup: Bool { reason == "api_disabled" }
+    var connectionTitle: String {
+        if needsServerSetup { return "Google Calendar needs setup" }
+        return status == "not_connected" ? "Connect Google Calendar…" : "Reconnect Google Calendar…"
+    }
+    var connectionHelp: String {
+        message ?? "Choose the Google account whose calendar you want to use with Espresso."
+    }
 }
 
 struct MWCalendarFeed: Codable {

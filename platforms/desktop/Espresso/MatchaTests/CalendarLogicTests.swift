@@ -72,6 +72,36 @@ final class CalendarLogicTests: XCTestCase {
         XCTAssertNil(feed.apple)
     }
 
+    func testGoogleRecoveryDecodesOldFeedsAndDistinguishesOperatorSetup() throws {
+        let legacy = try JSONDecoder().decode(MWGoogleCalendarFeed.self,
+            from: Data(#"{"status":"error","events":[]}"#.utf8))
+        XCTAssertNil(legacy.message)
+        XCTAssertEqual(legacy.connectionTitle, "Reconnect Google Calendar…")
+        XCTAssertFalse(legacy.needsServerSetup)
+        let setup = try JSONDecoder().decode(MWGoogleCalendarFeed.self,
+            from: Data(#"{"status":"error","events":[],"reason":"api_disabled","message":"Contact support"}"#.utf8))
+        XCTAssertTrue(setup.needsServerSetup)
+        XCTAssertEqual(setup.connectionTitle, "Google Calendar needs setup")
+        XCTAssertEqual(setup.connectionHelp, "Contact support")
+        let disconnected = MWGoogleCalendarFeed(status: "not_connected", events: [])
+        XCTAssertEqual(disconnected.connectionTitle, "Connect Google Calendar…")
+    }
+
+    func testGoogleFailureDetailsReachTheCalendarWithoutDiscardingAppleEvents() async {
+        let backend = FakeCalendarBackend()
+        backend.googleFeedOverride = MWGoogleCalendarFeed(status: "needs_permission", events: [],
+            reason: "calendar_permission", message: "Choose an account")
+        backend.apple = AppleCalendarFeed(status: "ok", events: [
+            AppleCalendarEvent(id: "a1", calendar_id: "home", title: "Focus", start: "2026-10-15", end: "2026-10-15",
+                all_day: true, notes: nil, location: nil, modified: "v1", editable: true)
+        ], synced_at: nil)
+        let vm = CalendarViewModel(backend: backend, calendar: la, now: date(2026, 10, 15))
+        await vm.load()
+        XCTAssertEqual(vm.googleStatus, "needs_permission")
+        XCTAssertEqual(vm.googleFeed.connectionHelp, "Choose an account")
+        XCTAssertEqual(vm.entries(on: date(2026, 10, 15)).map(\.title), ["Focus"])
+    }
+
     // MARK: - Email batch (review #1)
 
     func testABatchStopsOnceTheAccountThatStartedItIsGone() async {
@@ -239,6 +269,7 @@ final class CalendarLogicTests: XCTestCase {
 private final class FakeCalendarBackend: CalendarBackend {
     var feedRequests: [(Date, Date)] = []
     var google: [MWGoogleCalendarEvent] = []
+    var googleFeedOverride: MWGoogleCalendarFeed?
     var apple: AppleCalendarFeed?
     var created: [CalendarService.EventFields] = []
     var updated: [(id: String, fields: CalendarService.EventFields)] = []
@@ -249,7 +280,7 @@ private final class FakeCalendarBackend: CalendarBackend {
     func feed(from start: Date, to end: Date) async throws -> MWCalendarFeed {
         feedRequests.append((start, end))
         return MWCalendarFeed(timezone: "America/Los_Angeles", events: [], todos: [],
-                              google: MWGoogleCalendarFeed(status: "ok", events: google), apple: apple)
+                              google: googleFeedOverride ?? MWGoogleCalendarFeed(status: "ok", events: google), apple: apple)
     }
 
     func createEvent(_ fields: CalendarService.EventFields, sourceKind: String,

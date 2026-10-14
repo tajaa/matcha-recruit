@@ -220,3 +220,42 @@ def test_feed_includes_selected_apple_events_and_sync_status(svc, monkeypatch):
         body = client.get("/calendar/feed", params=WINDOW).json()
     assert body["apple"] == feed
     assert routes.apple.feed.await_args.args[0] == USER.id
+
+
+@pytest.mark.parametrize("code,payload,status,reason", [
+    (403, {"error": {"errors": [{"reason": "accessNotConfigured"}]}}, "error", "api_disabled"),
+    (403, {"error": {"details": [{"reason": "SERVICE_DISABLED"}]}}, "error", "api_disabled"),
+    (403, {"error": {"errors": [{"reason": "insufficientPermissions"}]}}, "needs_permission", "calendar_permission"),
+    (403, {"error": {"details": [{"reason": "ACCESS_TOKEN_SCOPE_INSUFFICIENT"}]}}, "needs_permission", "calendar_permission"),
+    (401, {}, "needs_permission", "reconnect_required"),
+    (400, {"error": "invalid_grant"}, "needs_permission", "reconnect_required"),
+    (429, {}, "error", "rate_limited"),
+    (403, {"error": {"errors": [{"reason": "rateLimitExceeded"}]}}, "error", "rate_limited"),
+    (503, {}, "error", "provider_unavailable"),
+    (403, {"error": {"message": "PRIVATE_EVENT", "errors": [{"reason": "unknown"}]}}, "error", "access_denied"),
+    (403, {"error": {"errors": None, "details": [{"reason": []}, None]}}, "error", "access_denied"),
+    (403, {"error": {"errors": {"reason": "anything"}, "details": "wrong"}}, "error", "access_denied"),
+    (403, [], "error", "access_denied"),
+    (403, {"error": 7}, "error", "access_denied"),
+])
+def test_google_refusals_offer_the_right_recovery_without_disclosing_provider_text(svc, monkeypatch, caplog, code, payload, status, reason):
+    request = httpx.Request("GET", "https://www.googleapis.com/calendar/v3/calendars/primary/events")
+    error = httpx.HTTPStatusError("PRIVATE_EVENT", request=request, response=httpx.Response(code, json=payload, request=request))
+    _google(monkeypatch, error=error)
+    with _client() as client:
+        body = client.get("/calendar/feed", params=WINDOW).json()
+    assert body["google"]["status"] == status and body["google"]["reason"] == reason
+    assert body["google"]["events"] == [] and body["events"] == [EVENT]
+    assert "PRIVATE_EVENT" not in str(body) and "PRIVATE_EVENT" not in caplog.text
+    assert reason in caplog.text
+    if reason == "api_disabled":
+        assert "reconnecting your account will not fix this" in body["google"]["message"]
+
+
+def test_malformed_google_error_body_is_safe(svc, monkeypatch):
+    request = httpx.Request("GET", "https://www.googleapis.com/calendar/v3/calendars/primary/events")
+    _google(monkeypatch, error=httpx.HTTPStatusError("bad", request=request,
+        response=httpx.Response(503, content=b"<html>PRIVATE_EVENT</html>", request=request)))
+    with _client() as client:
+        body = client.get("/calendar/feed", params=WINDOW).json()
+    assert body["google"]["reason"] == "provider_unavailable" and "PRIVATE_EVENT" not in str(body)

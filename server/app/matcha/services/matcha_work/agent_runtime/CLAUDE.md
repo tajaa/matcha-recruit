@@ -375,7 +375,15 @@ Email and calendar ride the person's existing Gmail connection
 send. `gmail.modify` (archive, label) and `calendar.events` are asked for only
 when the person switches that on: `POST /agent/email/connect` takes
 `abilities` and requests the union with `include_granted_scopes=true`. The
-callback stores what Google granted, not what was asked for.
+callback stores what Google granted, not what was asked for. OAuth requests
+`consent select_account`, so an existing browser session never silently chooses
+the account. Calendar settings shows the connected email address and explains
+that selecting a different account replaces the shared Email/Calendar connection.
+The calendar feed keeps its existing `error` / `needs_permission` statuses and
+adds optional controlled `reason` / `message` fields for reconnection, missing
+scope, a disabled Calendar API, throttling and provider failures. Raw Google
+error text is never returned. A disabled API requires operator setup; reconnecting
+an account cannot enable it.
 
 
 ## Desktop email workspace
