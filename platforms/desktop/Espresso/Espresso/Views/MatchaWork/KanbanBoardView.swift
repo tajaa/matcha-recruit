@@ -25,7 +25,6 @@ struct KanbanBoardView: View {
     /// `+` button on the column header; cleared by Esc / blur / submit.
     @State var inlineAddColumn: String?
     @State var inlineAddTitle: String = ""
-    @State var hoveredEmptyColumn: String?
     @State private var searchText = ""
     /// Number of completed cards rendered in Done. The backlog can contain
     /// hundreds of tasks, so reveal it in small batches instead of mounting
@@ -65,6 +64,13 @@ struct KanbanBoardView: View {
     /// Sales-pipeline: which stage column's "New Deal" form is open (set by the
     /// `+` button; nil = closed).
     @State var dealComposeColumn: String?
+    /// Pipeline mode shows sales campaigns or the manual deal board. The choice
+    /// is remembered; before one is made, a project with deals opens on them.
+    @AppStorage("mw-pipeline-view") var pipelineViewChoice = ""
+    var showManualDeals: Bool {
+        get { pipelineViewChoice.isEmpty ? viewModel.tasks.contains(where: \.isSalesDeal) : pipelineViewChoice == "deals" }
+        nonmutating set { pipelineViewChoice = newValue ? "deals" : "campaigns" }
+    }
     /// Bumped every 60s so card header aging tints (orange >6h / red >12h)
     /// advance on a board left open, not just on task events / reloads.
     @State private var agingClock = Date()
@@ -223,7 +229,7 @@ struct KanbanBoardView: View {
                 ProgressView().tint(.secondary)
                 Spacer()
             } else {
-                if !viewModel.tasks.isEmpty {
+                if !viewModel.tasks.isEmpty && (!isPipeline || showManualDeals) {
                     searchRow
                     TaskProgressBar(tasks: viewModel.tasks, compact: true)
                         .padding(.horizontal, 12)
@@ -231,29 +237,34 @@ struct KanbanBoardView: View {
                         .padding(.bottom, 4)
                 }
                 boardPipelinePicker
-                if isPipeline {
-                    pipelineSummaryBar
+                if isPipeline && !showManualDeals, let projectId = viewModel.project?.id {
+                    SalesWorkspaceView(projectId: projectId)
+                        .id("\(projectId).\(appState.currentUser?.id ?? "")")
                 } else {
-                    AIComposeBar(
-                        isDrafting: aiDrafting,
-                        error: aiError,
-                        onCancel: cancelAIDraft,
-                        onDraft: { submitAIDraft(prompt: $0) }
-                    )
-                }
-                if showListView {
-                    KanbanListView(
-                        viewModel: viewModel,
-                        isPipeline: isPipeline,
-                        searchText: searchText,
-                        myUserId: appState.currentUser?.id ?? "",
-                        onOpen: { task in
-                            acknowledge(task.id)
-                            viewingTask = task
-                        }
-                    )
-                } else {
-                    boardColumns
+                    if isPipeline {
+                        pipelineSummaryBar
+                    } else {
+                        AIComposeBar(
+                            isDrafting: aiDrafting,
+                            error: aiError,
+                            onCancel: cancelAIDraft,
+                            onDraft: { submitAIDraft(prompt: $0) }
+                        )
+                    }
+                    if showListView {
+                        KanbanListView(
+                            viewModel: viewModel,
+                            isPipeline: isPipeline,
+                            searchText: searchText,
+                            myUserId: appState.currentUser?.id ?? "",
+                            onOpen: { task in
+                                acknowledge(task.id)
+                                viewingTask = task
+                            }
+                        )
+                    } else {
+                        boardColumns
+                    }
                 }
             }
         }

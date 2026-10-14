@@ -175,4 +175,28 @@ final class AssistantOperationQueue {
             } catch { report(error) }
         }
     }
+    func takeSales(
+        pending: @escaping () -> AssistantSalesContext?,
+        create: @escaping (AssistantSalesContext) async throws -> String,
+        select: @escaping (String, String) -> Void,
+        consume: @escaping (UUID) -> Void,
+        report: @escaping (Error) -> Void
+    ) async {
+        guard let request = pending() else { return }
+        let again = { await self.takeSales(pending: pending, create: create, select: select,
+                                           consume: consume, report: report) }
+        guard !loading else { queuedHandoff = again; return }
+        await run {
+            do {
+                let id = try await create(request)
+                guard pending()?.id == request.id else {
+                    if pending() != nil { queuedHandoff = again }
+                    return
+                }
+                select(id, request.prompt)
+                consume(request.id)
+            } catch { report(error) }
+        }
+    }
+
 }

@@ -1,10 +1,12 @@
 """Reading the public web: provider-hosted search plus our SSRF-guarded page load."""
 from __future__ import annotations
 
+import json
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit
 
 from app.core.services.openai_responses import cited_urls, web_search_calls
+from app.matcha.services.matcha_work.gmail_service import addresses_in
 
 from ..context import RunContext, RunState
 from ..registry import Ability, AgentTool, HostedObservation, ToolOutput
@@ -72,6 +74,9 @@ def fetch_tool(*, fetch_page: FetchPage, max_fetches: int, fetch_seconds: float,
         url = str(args.get("url") or "").strip()
         await ctx.progress.note(f"Reading {host_of(url)}…")
         out, vouched = await fetch_page(url)
+        if vouched:
+            # Whole payload: text, links and JSON-LD all came from the page.
+            state.observed_emails.update(addresses_in(json.dumps(out, default=str)))
         return ToolOutput(payload=out, provenance=frozenset(u for u in vouched if u))
 
     return AgentTool(

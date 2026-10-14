@@ -43,6 +43,10 @@ from .sections import router as _sections_router
 
 router.include_router(_sections_router)
 
+from .sales import router as _sales_router
+
+router.include_router(_sales_router)
+
 from .tasks import router as _tasks_router
 
 router.include_router(_tasks_router)

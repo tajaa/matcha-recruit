@@ -451,7 +451,7 @@ struct PipelineSummary {
     }
 
     init(tasks: [MWProjectTask]) {
-        for t in tasks {
+        for t in tasks where t.isSalesDeal {
             let value = t.dealValue ?? 0
             switch t.dealOutcome {
             case "won":

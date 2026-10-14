@@ -434,6 +434,11 @@
 		MWAS070000000000000000BF /* ThreadDetailView+Chrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = MWAS070000000000000000FR /* ThreadDetailView+Chrome.swift */; };
 		MWAST00000000000000000BF /* AssetInferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = MWAST00000000000000000FR /* AssetInferenceTests.swift */; };
 		MWAS080000000000000000BF /* AssetTabSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = MWAS080000000000000000FR /* AssetTabSwitch.swift */; };
+		5A1E5000000000000000B000 /* SalesModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1E50000000000000000F00 /* SalesModels.swift */; };
+		5A1E5000000000000000B001 /* SalesModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1E50000000000000000F00 /* SalesModels.swift */; };
+		5A1E5000000000000000B010 /* SalesWorkspaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1E50000000000000000F01 /* SalesWorkspaceModel.swift */; };
+		5A1E5000000000000000B020 /* SalesWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1E50000000000000000F02 /* SalesWorkspaceView.swift */; };
+		5A1E5000000000000000B030 /* SalesWorkflowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1E50000000000000000F03 /* SalesWorkflowTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -769,6 +774,10 @@
 		MWAS070000000000000000FR /* ThreadDetailView+Chrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "ThreadDetailView+Chrome.swift"; path = "Espresso/Views/MatchaWork/ThreadDetailView+Chrome.swift"; sourceTree = SOURCE_ROOT; };
 		MWAST00000000000000000FR /* AssetInferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetInferenceTests.swift; sourceTree = "<group>"; };
 		MWAS080000000000000000FR /* AssetTabSwitch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "AssetTabSwitch.swift"; path = "Espresso/Views/MatchaWork/Assets/AssetTabSwitch.swift"; sourceTree = SOURCE_ROOT; };
+		5A1E50000000000000000F00 /* SalesModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SalesModels.swift; sourceTree = "<group>"; };
+		5A1E50000000000000000F01 /* SalesWorkspaceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SalesWorkspaceModel.swift; sourceTree = "<group>"; };
+		5A1E50000000000000000F02 /* SalesWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SalesWorkspaceView.swift; sourceTree = "<group>"; };
+		5A1E50000000000000000F03 /* SalesWorkflowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SalesWorkflowTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -883,6 +892,7 @@
 				AA11BB22CC33DD44EE660008 /* InboxService.swift */,
 				DD00EE11FF22334455770002 /* ChannelsService.swift */,
 				E2A1B0C0D0E0F00100000002 /* EmailService.swift */,
+				5A1E50000000000000000F01 /* SalesWorkspaceModel.swift */,
 				DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */,
 				DD00EE11FF22334455770099 /* ChannelNotificationManager.swift */,
 				BC01DD22EE33FF445566BB02 /* BroadcastService.swift */,
@@ -933,6 +943,7 @@
 				AA11BB22CC33DD44EE660002 /* ProjectListView.swift */,
 				AA11BB22CC33DD44EE660003 /* ProjectDetailView.swift */,
 				A5515700000000000000F003 /* AssistantView.swift */,
+				5A1E50000000000000000F02 /* SalesWorkspaceView.swift */,
 				AA11BB22CC33DD44EE660DBB /* DisciplineWorkflowBar.swift */,
 				AA11BB22CC33DD44EE660DBC /* NotificationsPopoverView.swift */,
 				AA11BB22CC33DD44EE660004 /* SectionEditorView.swift */,
@@ -1164,6 +1175,7 @@
 				E489FA155C69897ED38F5DF8 /* ProjectTaskModels.swift */,
 				AC0D0000000000000000F001 /* AgentRunModels.swift */,
 				A5515700000000000000F001 /* AssistantModels.swift */,
+				5A1E50000000000000000F00 /* SalesModels.swift */,
 				BADA5500000000000000F001 /* ReplayModels.swift */,
 				86F9C67C0E32966EBAB0BD94 /* ProjectElementModels.swift */,
 				5C6EEE903BD7EDAD4CB23C91 /* ProjectBizModels.swift */,
@@ -1234,6 +1246,7 @@
 				CALV00000000000000000BT2 /* CalendarLogicTests.swift */,
 				FA11D0010000000000000002 /* JournalNavigationTests.swift */,
 				EAAF00000000000000000002 /* EmailWorkspaceTests.swift */,
+				5A1E50000000000000000F03 /* SalesWorkflowTests.swift */,
 				MWAST00000000000000000FR /* AssetInferenceTests.swift */,
 				BC01DD22EE33FF44551100B5 /* ModelPickerTests.swift */,
 			);
@@ -1630,6 +1643,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A5515700000000000000B001 /* AssistantModels.swift in Sources */,
+				5A1E5000000000000000B000 /* SalesModels.swift in Sources */,
 				4090F1F074C34D2ED1A08C91 /* ChannelModels.swift in Sources */,
 				678728862C31434E06B5C7AA /* AuthModels.swift in Sources */,
 				A44CAE7C8DF3D9C8A64B4D8E /* CallModels.swift in Sources */,
@@ -1726,6 +1740,7 @@
 				CALV00000000000000000BT1 /* CalendarLogicTests.swift in Sources */,
 				FA11D0010000000000000001 /* JournalNavigationTests.swift in Sources */,
 				EAAF00000000000000000001 /* EmailWorkspaceTests.swift in Sources */,
+				5A1E5000000000000000B030 /* SalesWorkflowTests.swift in Sources */,
 				MWAST00000000000000000BF /* AssetInferenceTests.swift in Sources */,
 				BC01DD22EE33FF44551100C5 /* ModelPickerTests.swift in Sources */,
 			);
@@ -1736,8 +1751,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				A5515700000000000000B004 /* AssistantView.swift in Sources */,
+				5A1E5000000000000000B020 /* SalesWorkspaceView.swift in Sources */,
 				A5515700000000000000B003 /* AgentAssistantCards.swift in Sources */,
 				A5515700000000000000B002 /* AssistantModels.swift in Sources */,
+				5A1E5000000000000000B001 /* SalesModels.swift in Sources */,
 				CD260926000000000000B004 /* CodexControls.swift in Sources */,
 				CD260926000000000000B003 /* CodexResearchCoordinator.swift in Sources */,
 				CD260926000000000000B002 /* CodexBridge.swift in Sources */,
@@ -1838,6 +1855,7 @@
 				DD00EE11FF22334455660001 /* ChannelModels.swift in Sources */,
 				DD00EE11FF22334455660002 /* ChannelsService.swift in Sources */,
 				E2A1B0C0D0E0F00100000001 /* EmailService.swift in Sources */,
+				5A1E5000000000000000B010 /* SalesWorkspaceModel.swift in Sources */,
 				E2A1B0C0D0E0F00100000003 /* EmailViewModel.swift in Sources */,
 				E2A1B0C0D0E0F00100000005 /* EmailView.swift in Sources */,
 				E2A1B0C0D0E0F00100000007 /* EmailAIActions.swift in Sources */,

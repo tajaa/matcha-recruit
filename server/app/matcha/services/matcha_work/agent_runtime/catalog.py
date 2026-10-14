@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
-from .abilities import calendar, domains, email, flights, purchase, reservations, shopping, web
+from .abilities import calendar, domains, email, flights, purchase, reservations, sales, shopping, web
 from .registry import Ability, validate_catalog
 
 ALWAYS_ON = ("web", "shopping")
@@ -70,6 +70,7 @@ def build_catalog(*, fetch_page, max_fetches: int = 10, fetch_seconds: float = 2
         calendar.build(calendar_factory=(
             (lambda ctx: GoogleCalendarService(ctx.user_id, gmail=gmail)) if gmail is not None else None
         )),
+        sales.build(),
         reservations.build(),
         purchase.build(),
         # Needs PORKBUN_API_KEY/PORKBUN_SECRET_KEY; not offered without them.

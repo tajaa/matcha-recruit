@@ -16,7 +16,7 @@ loop in this package and no other: do not add a second.
 | Policy | `policy.py` | `evaluate_commit`: allow / confirm / deny. Pure: no I/O, no clock, no model |
 | Result | `result.py` | `agent_result.v2` (headline, summary, typed blocks); reads v1 as v2 |
 | Catalog | `catalog.py` | Every ability, and `abilities_for`: the only filter on what a run gets |
-| Abilities | `abilities/*.py` | `web`, `shopping`, `flights`, `email`, `calendar`, `reservations`, `purchase`, `domains` |
+| Abilities | `abilities/*.py` | `web`, `shopping`, `flights`, `email`, `calendar`, `reservations`, `purchase`, `domains`, `sales` |
 | Chat entry | `chat_entry.py` | A chat message on its way to a run; answers to questions |
 | Enqueue | `enqueue.py`, `quota.py` | Gates, the daily allowance, one live run per person per conversation |
 | The run | `assistant.py` | Builds the context, runs the loop, posts what came of it |
@@ -418,3 +418,24 @@ Apply `assistthread01` before the new API/app. It drops no conversation data.
 Rollback refuses if any owner has multiple conversations; reconcile those
 explicitly rather than deleting or merging histories automatically. Neither
 migration direction is automatically applied by this change.
+
+## Sales campaigns
+
+`sales` is private-only and requires `sales-1` consent. Tools use
+`../sales_service.py` to discover/import contacts, save source-backed research,
+organize stages and persist drafts. The existing web tools provide research;
+there is no second agent loop. Reads page up to 25 prospects inside the runtime
+output budget and return `next_offset`; large text is explicitly marked partial.
+
+- **Addresses are grounded.** An email the agent saves (add *or* update) must be
+  typed by the person, printed on a page `fetch_page` loaded this run
+  (`RunState.observed_emails`, filled by the web ability), or on mail read this
+  run (`ref_participants`). A source URL alone does not vouch for an address.
+- **Templates only on request.** `draft_sales_template` refuses unless the
+  person's own text mentions a template, and runs with `overwrite=False`: it fills
+  prospects with no draft and never replaces one.
+- **No sales tool sends mail.** Human review in the desktop Pipeline freezes
+  recipient, subject, body and the campaign footer under a server fingerprint,
+  in batches of at most 50, before a durable worker sends each message
+  separately. Opt-outs (`mw_sales_suppressions`) are honoured at import,
+  approval and claim. Details and recovery: `docs/ESPRESSO_SALES.md`.

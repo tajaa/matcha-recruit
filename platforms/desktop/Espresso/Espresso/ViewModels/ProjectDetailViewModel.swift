@@ -133,7 +133,7 @@ class ProjectDetailViewModel {
         for t in tasks { created[t.id] = PacificDateFormatter.parse(t.createdAt) ?? .distantFuture }
 
         var out: [String: [MWProjectTask]] = [:]
-        for t in tasks where KanbanSearch.matches(t, tokens: tokens) {
+        for t in tasks where (!pipeline || t.isSalesDeal) && KanbanSearch.matches(t, tokens: tokens) {
             let raw = pipeline ? (t.pipelineColumn ?? "lead") : t.boardColumn
             let key = colKeys.contains(raw) ? raw : (firstKey ?? raw)
             out[key, default: []].append(t)

@@ -85,6 +85,8 @@ class RunState:
     # Thread or event id -> the addresses on it, filled by read tools. Only the
     # refs the user pointed at ever ground a target (see policy.is_grounded).
     ref_participants: dict[str, frozenset[str]] = field(default_factory=dict)
+    # Addresses printed on pages fetch_page loaded: what a saved contact can cite.
+    observed_emails: set[str] = field(default_factory=set)
     warnings: list[str] = field(default_factory=list)
     receipts: list[dict] = field(default_factory=list)
     seq: int = 0
