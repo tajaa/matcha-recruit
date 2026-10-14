@@ -115,8 +115,16 @@ refine starts at `refine`, "search more" at `providers`.
 - The model never writes: phases store what the contracts let through, under
   the chain's token.
 
+## The Mac app
+
+`platforms/desktop/Espresso`: the Tasks section (`Views/Tasks/`,
+`TasksViewModel`, `AgentTaskService`, `AgentTaskModels`), the `ask_form` and
+`agent_task` chat cards (`Views/Tasks/TaskChatCards.swift`), and the sidebar
+row, shown when entitlements carry `workspace.agent_tasks`. Notification
+metadata is strings only and carries `agent_task_id` (the app decodes
+metadata as `[String: String]`; `task_id` is a kanban card there).
+
 ## Not yet (later PRs)
 
-The Mac Tasks tab and the chat's form and task cards, agent cards and job
-searches as tasks (`engine` `board` / `job_search`; the
+Agent cards and job searches as tasks (`engine` `board` / `job_search`; the
 columns exist), reservations.
