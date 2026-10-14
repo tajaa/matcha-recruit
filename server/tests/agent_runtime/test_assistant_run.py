@@ -555,8 +555,7 @@ async def test_links_earlier_runs_verified_survive_the_result_gate(wired, monkey
     await assistant.run_assistant(run)
     assert client.calls
     kwargs = earlier.await_args.kwargs
-    assert kwargs["channel_id"] == run["channel_id"] and kwargs["requester_id"] == run["requested_by"]
-    assert kwargs["exclude_run"] == run["id"]
+    assert kwargs == {"channel_id": run["channel_id"], "exclude_run": run["id"]}
     stored = wired.mark.await_args.kwargs["result"]
     sources = [b for b in stored["blocks"] if b["type"] == "sources"][0]["sources"]
     assert [s["url"] for s in sources] == ["https://www.zillow.com/a/"]
@@ -574,6 +573,26 @@ def test_the_prompt_says_to_go_to_the_source_ask_when_unsure_and_report_only_wha
     assert "find that place with web_search and load it with fetch_page" in text
     assert "When you are not sure what they want, ask before you work" in text
     assert "Never say a page could not be reached unless fetch_page failed on it in this run" in text
-    assert "Trust that record over the earlier answer's wording" in text
+    assert "When it and the earlier answer's wording disagree, go by the record" in text
+    assert "a step it lists as skipped was never tried" in text
+    assert "never contradict" not in text
+    # Effort stays bounded in words, not only by the hard limits.
+    assert "most requests need a few searches and page loads" in text
     assert "is not the source" in text and "earlier run of yours in this conversation" in text
-    assert "a few tool calls, then finish" not in text
+
+
+def test_earlier_links_may_be_cited_but_never_book():
+    """A booking page must be one this run found; an earlier run's link is
+    for the answer only."""
+    from app.matcha.services.matcha_work.agent_runtime.abilities import reservations, web
+    from app.matcha.services.matcha_work.agent_runtime.context import RunState
+
+    state = RunState(started=0.0, earlier_links={"https://resy.example/nopa"})
+    block, _ = web.gate_block("sources", {"sources": [{"title": "Nopa", "url": "https://resy.example/nopa"}]}, state)
+    assert block["sources"][0]["url"] == "https://resy.example/nopa"
+    args = {"venue_name": "Nopa", "party_size": 4, "date": "2026-11-02", "time": "19:00",
+            "url": "https://resy.example/nopa"}
+    with pytest.raises(ValueError, match="booking page must be one"):
+        reservations.resolve_booking(args, state)
+    state.provenance.add("https://resy.example/nopa")
+    assert reservations.resolve_booking(args, state)["url"] == "https://resy.example/nopa"

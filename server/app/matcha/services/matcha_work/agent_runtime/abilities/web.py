@@ -152,7 +152,7 @@ def gate_block(block_type: str, raw: Any, state: RunState) -> tuple[dict | None,
 
     if not isinstance(raw, dict):
         return None, [f"Dropped a {block_type} block: not an object"]
-    gate = schema.Gate(state.provenance)
+    gate = schema.Gate(state.citable())
     if block_type == "sections":
         sections = schema.gate_sections(raw.get("sections"), gate)
         return ({"type": "sections", "sections": sections} if sections else None), gate.warnings

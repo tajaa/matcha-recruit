@@ -182,3 +182,19 @@ async def test_out_of_time_still_leaves_every_pick_with_only_rehosted_images(mon
     await images.rehost_images(result, company_id=uuid4(), project_id=uuid4(), task_id=uuid4(), total_seconds=0)
     for pick in [result["top_pick"], *result["alternatives"]]:
         assert pick["images"] == []
+
+
+def test_verified_links_are_what_a_stored_result_cites_never_an_image():
+    from app.matcha.services.matcha_work.agent_card import schema
+
+    pick = {"buy_links": [{"url": "https://shop.example/a"}, {"url": "javascript:x"}],
+            "reviews": [{"url": "https://reviews.example/a"}, "junk"],
+            "price": {"source_url": "https://shop.example/price"}, "rating": {"source_url": None},
+            "images": [{"url": "https://cdn.example/a.webp", "page_url": "https://shop.example/a"}]}
+    result = {"sources": [{"url": "https://src.example/"}, {"url": "https://src.example/"}],
+              "top_pick": pick, "alternatives": [None, {"buy_links": [{"url": "https://shop.example/b"}]}]}
+    assert schema.verified_links(result) == [
+        "https://src.example/", "https://shop.example/a", "https://reviews.example/a",
+        "https://shop.example/price", "https://shop.example/b",
+    ]
+    assert schema.verified_links(None) == [] and schema.verified_links({"sources": "x"}) == []

@@ -126,15 +126,20 @@ async def run_agent(
     seed_provenance: frozenset[str] | set[str] = frozenset(),
     extra_tools: Sequence[AgentTool] = (),
     stats: dict | None = None,
+    earlier_links: frozenset[str] | set[str] = frozenset(),
 ) -> RunOutcome:
     """Run the loop to a result, a question for the user, or a held action.
+
+    `seed_provenance` counts as seen in this run (a card's previous round).
+    `earlier_links` may only be cited in the result (`RunState.citable`).
 
     `stats` (if given) is kept current after every model call, so a caller can
     still account for the spend of a run that raised.
     """
     stats = stats if stats is not None else {}
     limits = ctx.limits
-    state = RunState(started=time.monotonic(), provenance=set(seed_provenance))
+    state = RunState(started=time.monotonic(), provenance=set(seed_provenance),
+                     earlier_links=set(earlier_links))
     for ability in abilities:
         if ability.session_factory is not None:
             state.sessions[ability.key] = ability.session_factory(ctx)

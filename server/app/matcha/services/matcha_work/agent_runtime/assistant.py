@@ -151,11 +151,9 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         )
         if run["prompt"] not in own_texts:
             own_texts = (*own_texts, run["prompt"])
-        # Links this person's earlier runs here already verified: a follow-up
-        # ("send me those links") may give them back without re-finding them.
-        earlier = await history.earlier_links(
-            conn, channel_id=channel_id, requester_id=user_id, exclude_run=run_id,
-        )
+        # Links earlier runs here already verified: a follow-up ("send me
+        # those links") may cite them again without re-finding them.
+        earlier = await history.earlier_links(conn, channel_id=channel_id, exclude_run=run_id)
         counts = await load_counts(conn, user_id, abilities)
         timezone_name = await calendar_service.get_timezone(user_id, conn)
         own = await _own_addresses(conn, user_id, gmail if active else None)
@@ -221,7 +219,7 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         first_note="Working on it…",
         extra_tools=[ASK_USER],
         stats=stats,
-        seed_provenance=earlier,
+        earlier_links=earlier,
     )
     await _deliver(run, ctx, outcome, progress)
     return outcome

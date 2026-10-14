@@ -38,7 +38,7 @@ from . import board, flights, images  # noqa: F401
 from .page_extract import extract_page, page_urls
 from .progress import CardProgress
 from .prompt import build_system_prompt
-from .schema import normalize_result
+from .schema import normalize_result, verified_links
 from .tools import FINISH_TOOL
 
 logger = logging.getLogger(__name__)
@@ -130,22 +130,8 @@ async def run_card_agent(
     a run that raised.
     """
     stats = stats if stats is not None else {}
-    provenance: set[str] = set()
-    if previous_result:
-        # Links a previous round already verified stay usable in a revision.
-        for key in ("sources",):
-            provenance.update(s.get("url") for s in previous_result.get(key) or [] if s.get("url"))
-        for pick in [previous_result.get("top_pick"), *(previous_result.get("alternatives") or [])]:
-            if not pick:
-                continue
-            for link in pick.get("buy_links") or []:
-                provenance.add(link.get("url"))
-            for review in pick.get("reviews") or []:
-                provenance.add(review.get("url"))
-            for field in ("price", "rating"):
-                if pick.get(field):
-                    provenance.add(pick[field].get("source_url"))
-        provenance.discard(None)
+    # Links a previous round already verified stay usable in a revision.
+    provenance = set(verified_links(previous_result))
 
     # Luna unless the admin "AI models" setting routes agent cards to Claude
     # (Matcha Work for a business account, Espresso's purchase agent for a personal one).

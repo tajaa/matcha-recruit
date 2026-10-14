@@ -235,33 +235,39 @@ message and starts the next run.
 
 What carries over from earlier runs, besides their words (`history.py`):
 
-- **A run record.** Each replayed `agent_result` gets a line the server writes
-  from that run's own `fetch`/`search` steps ("loaded …; searched …; tried to
-  load …, which failed"), for the 5 newest answers. Without it a follow-up run
-  had only the earlier answer's wording and "corrected" a page load that had
-  happened. The prompt says to trust the record over the wording.
-- **Verified links.** `earlier_links` seeds the run's provenance with the URLs
-  the requester's own 5 latest finished runs in this conversation verified:
-  pages they loaded and `url`/`page_url` values in their stored (already
-  gated) results. So "send me those links" can be answered. A coworker's run
-  in a shared chat seeds nothing. Commit targets are unaffected: grounding
-  still comes only from the person's words (`policy`).
+- **A run record.** Each replayed `agent_result` (the 5 newest) ends with a
+  line the server writes from that run's own steps of kind `fetch`, `search`
+  and `browse`: "loaded …", "searched the web for …", "tried to load …, which
+  failed", "did not try … (the run's page budget or time ran out)", and the
+  server's own label for flights, bookings and later tools, with ", which
+  failed" / ", outcome unknown". A `skipped` step was never tried and is never
+  reported as a failed load. Mail and calendar steps are left out. Without the
+  record a follow-up run had only the earlier answer's wording and "corrected"
+  a page load that had happened.
+- **Only the server writes one.** `[system record` in any replayed message
+  (a person's, or an answer a page talked a model into) is defused to
+  `(system record` before the real line is appended. A separate system item
+  would not do: the Claude client turns every non-assistant item into user
+  text.
+- **Bounded.** Each record is at most 600 characters and counts toward the
+  replay's `max_chars`; the oldest messages go first when it does not fit.
+- **Verified links, for the answer only.** `earlier_links` collects what the
+  5 latest finished runs in this conversation verified: links their stored
+  results cite (`agent_card.schema.verified_links`, shared with card
+  revisions: sources, buy links, review pages, price and rating sources, photo
+  pages, never an image URL) and pages they loaded, newest run first, capped
+  at 60. Every run in the conversation counts: in a shared chat a coworker's
+  answer is already on everyone's screen. They go to
+  `RunState.earlier_links`, which only result blocks read
+  (`RunState.citable`). Run provenance, and so `resolve_booking`'s check that
+  this run found the booking page, never includes them.
 
 The base prompt tells the model to go to the source the person named (the
-building's own site, not just the listing), to ask one short question when the
-request is ambiguous or a choice is theirs, and never to say a page could not
-be reached unless `fetch_page` failed on it in this run.
-
-Entry points:
-
-| Where | How a message gets here | Abilities |
-|---|---|---|
-| Private conversation | every message, no mention (`channels_ws._bg_assistant_message`) | all the person has |
-| Project chat | `@espresso …` that is not code talk and not a shopping errand (`chat_entry.assistant_request`) | `web`, `shopping` only |
-
-In a project chat a shopping errand still becomes an agent card, and a question
-about the code still goes to the repository agent. The mention dispatcher tries
-them in that order: card, assistant, repository agent.
+building's own site, not just the listing), to keep the work in proportion
+(a few searches and page loads, more only when the request needs it), to ask
+one short question when the request is ambiguous or a choice is theirs, never
+to say a page could not be reached unless `fetch_page` failed on it in this
+run, and to go by a record when it and an earlier answer's wording disagree.
 
 ## Limits and gating
 

@@ -383,6 +383,44 @@ def _sources(raw: Any, gate: _Gate) -> list[dict]:
     return sources[:MAX_SOURCES]
 
 
+def verified_links(result: Any) -> list[str]:
+    """Every link a stored result already passed through the gate, in order
+    and without repeats: its sources, then each pick's buy links, review
+    pages, the pages its price and rating came from, and the pages its photos
+    were on. Never an image URL itself (once rehosted that is our own CDN
+    copy, not something a page vouched for).
+
+    Takes a v1 card result, or a v2 `sources` or `picks` block (same keys). A
+    later round, or a later assistant run, may give these back."""
+    found: list[str] = []
+    if not isinstance(result, dict):
+        return found
+
+    def add(url: Any) -> None:
+        if _is_http_url(url) and url not in found:
+            found.append(url)
+
+    for source in _list(result.get("sources")):
+        if isinstance(source, dict):
+            add(source.get("url"))
+    for pick in [result.get("top_pick"), *_list(result.get("alternatives"))]:
+        if not isinstance(pick, dict):
+            continue
+        for link in _list(pick.get("buy_links")):
+            if isinstance(link, dict):
+                add(link.get("url"))
+        for review in _list(pick.get("reviews")):
+            if isinstance(review, dict):
+                add(review.get("url"))
+        for field in ("price", "rating"):
+            if isinstance(pick.get(field), dict):
+                add(pick[field].get("source_url"))
+        for image in _list(pick.get("images")):
+            if isinstance(image, dict):
+                add(image.get("page_url"))
+    return found
+
+
 def _criteria(raw: Any) -> list[dict]:
     return [
         {"name": _text(c.get("name"), 80), "why": _text(c.get("why"), 240)}
