@@ -33,7 +33,7 @@ from app.database import connection_or_direct
 from . import model_phases, phases
 from .enqueue import dispatch
 from .phases import Deps, Guard, PhaseFailed, PhaseOutcome
-from .service import LIVE, STALE_INTERVAL, rerank
+from .service import LIVE, STALE_INTERVAL, release_drafts, rerank
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +105,8 @@ async def advance(search_id: UUID, token: UUID, outcome: PhaseOutcome, *,
             json.dumps(outcome.cursor) if outcome.cursor is not None else None,
             error, terminal,
         )
+        if row is not None and terminal:
+            await release_drafts(conn, search_id)
     if row is None:
         return False, None
     return True, next_token

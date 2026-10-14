@@ -145,6 +145,10 @@ next to a write is refused by the runner, and the last turn forces finish).
   known questions, at most four "likely" ones;
 - sources must be links this run's searches or loads returned.
 
+A search that ends any other way (cancelled, past `MAX_ATTEMPTS`, swept as
+stale) drafts nothing more: `service.release_drafts` marks its still-queued
+jobs `approach_status='failed'`, so they show Redraft, never "drafting" forever.
+
 Redraft: `POST …/leads/{lead}/approach` puts a `done` search back into
 `approaching` for that one job (free; ≤20 per search, 10/hour). The pay-law
 hint (`service.PAY_LAW_STATES`: the employer-side list plus MA) is set at

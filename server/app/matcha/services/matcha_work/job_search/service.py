@@ -259,6 +259,17 @@ async def update_weights(search_id: UUID, user_id: UUID, weights: JobWeights) ->
     return await get_search(search_id, user_id)
 
 
+async def release_drafts(conn, search_id: UUID) -> None:
+    """A search that ended (finished early, cancelled, stalled) drafts nothing
+    more: jobs still waiting for an approach become `failed`, which the person
+    can redraft, instead of showing "drafting" forever."""
+    await conn.execute(
+        """UPDATE mw_job_leads SET approach_status = 'failed', updated_at = NOW()
+           WHERE search_id = $1 AND approach_status IN ('queued', 'drafting')""",
+        search_id,
+    )
+
+
 async def cancel_search(search_id: UUID, user_id: UUID) -> dict:
     async with connection_or_direct() as conn, conn.transaction():
         search = await owned_search(conn, search_id, user_id, lock=True)
@@ -273,6 +284,7 @@ async def cancel_search(search_id: UUID, user_id: UUID) -> dict:
             )
             # What was found so far stays useful, ranked.
             await rerank(conn, search)
+            await release_drafts(conn, search_id)
     return await get_search(search_id, user_id)
 
 
@@ -324,6 +336,7 @@ async def end_stale(conn, user_id: UUID) -> int:
                WHERE id = $1""",
             row["id"], "done" if found else "failed",
         )
+        await release_drafts(conn, row["id"])
     return len(rows)
 
 
