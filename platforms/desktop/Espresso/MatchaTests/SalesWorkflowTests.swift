@@ -20,6 +20,36 @@ final class SalesWorkflowTests: XCTestCase {
             XCTAssertThrowsError(try SalesCSV.parse(text), text)
         }
     }
+    func testCRMExportsMapCommonColumnsAndIgnoreTheRest() throws {
+        let rows = try SalesCSV.parse("First Name,Last Name,Email Address,Phone,Company Name,Website URL,Owner\nAna,Ruiz,ANA@clinic.test,555-0100,Dental Co,clinic.test,Sam\n")
+        XCTAssertEqual(rows, [SalesContact(email: "ana@clinic.test", name: "Ana Ruiz", company: "Dental Co", website: "https://clinic.test", notes: "")])
+        XCTAssertEqual(try SalesCSV.parse("full_name\tE-mail\nBea Kim\tbea@clinic.test")[0].name, "Bea Kim")
+        XCTAssertEqual(try SalesCSV.parse("Email,Last Name\nc@clinic.test,Lee")[0].name, "Lee")
+        // Two columns for one field, or full name alongside first/last, is ambiguous.
+        XCTAssertThrowsError(try SalesCSV.parse("Email,Email Address\na@clinic.test,b@clinic.test"))
+        XCTAssertThrowsError(try SalesCSV.parse("Name,First Name\nAna,Ana"))
+        // Unknown columns still count toward the row's shape.
+        XCTAssertThrowsError(try SalesCSV.parse("Email,Phone\na@clinic.test"))
+    }
+    func testFooterNeedsRealContentBeforeSending() {
+        XCTAssertTrue(SalesFooter.isMissing(""))
+        XCTAssertTrue(SalesFooter.isMissing("  \n"))
+        XCTAssertTrue(SalesFooter.isMissing(SalesFooter.suggestion))
+        XCTAssertFalse(SalesFooter.isMissing("Reply unsubscribe to stop.\nAcme, 1 Main St, Springfield"))
+    }
+    func testPollReloadsOnlyWhenSomethingChanged() throws {
+        let campaign = #"{"id":"c","title":"T","target":"","offer":"","footer":"F","status":"sending","sender":null,"error":null,"next_attempt_at":null}"#
+        let prospect = #"{"id":"p","email":"a@clinic.test","name":"","company":"","website":"","notes":"","research":"","sources":[],"subject":"S","body":"B","stage":"lead","status":"approved","error":null,"review_token":"t1"}"#
+        let snapshot = try JSONDecoder().decode(SalesSnapshot.self, from: Data(#"{"campaign":\#(campaign),"prospects":[\#(prospect)],"counts":{"approved":1}}"#.utf8))
+        func status(_ item: String, counts: String = #"{"approved":1}"#, campaign: String = campaign) throws -> SalesStatus {
+            try JSONDecoder().decode(SalesStatus.self, from: Data(#"{"campaign":\#(campaign),"counts":\#(counts),"prospects":[\#(item)]}"#.utf8))
+        }
+        XCTAssertFalse(SalesWorkspaceModel.changed(snapshot, try status(#"{"id":"p","status":"approved","error":null,"review_token":"t1"}"#)))
+        XCTAssertTrue(SalesWorkspaceModel.changed(snapshot, try status(#"{"id":"p","status":"sent","error":null,"review_token":"t1"}"#, counts: #"{"sent":1}"#)))
+        XCTAssertTrue(SalesWorkspaceModel.changed(snapshot, try status(#"{"id":"p","status":"approved","error":null,"review_token":"t2"}"#)))
+        let paused = campaign.replacingOccurrences(of: #""status":"sending""#, with: #""status":"paused""#)
+        XCTAssertTrue(SalesWorkspaceModel.changed(snapshot, try status(#"{"id":"p","status":"approved","error":null,"review_token":"t1"}"#, campaign: paused)))
+    }
     func testImportBounds() {
         XCTAssertThrowsError(try SalesCSV.parse(String(repeating: "a@example.test\n", count: 1001)))
         XCTAssertThrowsError(try SalesCSV.parse(String(repeating: "a", count: 1_000_001)))

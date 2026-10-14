@@ -64,7 +64,13 @@ struct KanbanBoardView: View {
     /// Sales-pipeline: which stage column's "New Deal" form is open (set by the
     /// `+` button; nil = closed).
     @State var dealComposeColumn: String?
-    @State var showManualDeals = false
+    /// Pipeline mode shows sales campaigns or the manual deal board. The choice
+    /// is remembered; before one is made, a project with deals opens on them.
+    @AppStorage("mw-pipeline-view") var pipelineViewChoice = ""
+    var showManualDeals: Bool {
+        get { pipelineViewChoice.isEmpty ? viewModel.tasks.contains(where: \.isSalesDeal) : pipelineViewChoice == "deals" }
+        nonmutating set { pipelineViewChoice = newValue ? "deals" : "campaigns" }
+    }
     /// Bumped every 60s so card header aging tints (orange >6h / red >12h)
     /// advance on a board left open, not just on task events / reloads.
     @State private var agingClock = Date()

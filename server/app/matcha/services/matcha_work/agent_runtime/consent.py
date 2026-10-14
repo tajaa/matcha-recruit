@@ -19,12 +19,14 @@ class Disclosure:
 
 DISCLOSURES: dict[str, Disclosure] = {
     "sales": Disclosure(
-        version="sales-openai-1",
+        version="sales-1",
         title="Let Espresso research and draft sales outreach",
         body=(
-            "When you ask Espresso to work on a sales campaign, the contacts, notes, research and drafts it reads are sent to OpenAI with storage turned off.",
-            "Espresso can discover prospects from public sites, save source links, organize your private pipeline and create personalized drafts.",
-            "Review recipients and messages in Sales before sending. Sales sends each approved message separately from your connected Gmail account and shows its delivery status.",
+            # The assistant's model is chosen in Admin -> AI models, so this
+            # names the role rather than one provider.
+            "When you ask Espresso to work on a sales campaign, the contacts, notes, research and drafts it reads are sent to Espresso's AI model provider to do the work.",
+            "Espresso can discover prospects from public sites, save source links, organize your private pipeline and create personalized drafts. It only saves email addresses you typed or that it found on a page it read.",
+            "Review recipients and messages in Sales before sending. Sales sends each approved message separately from your connected Gmail account, adds your opt-out footer, and never contacts someone you marked Do not contact.",
         ),
     ),
     "email": Disclosure(

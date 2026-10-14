@@ -286,6 +286,13 @@ def on_worker_ready(sender=None, **kwargs):
     except Exception:
         logger.exception("[Worker] Failed to enqueue project-agent reconciliation")
     try:
+        # Sales sends chain one task to the next; a chain killed with the old
+        # worker would leave the campaign showing Sending forever.
+        from app.workers.tasks.sales_campaign import reconcile_sales_campaigns
+        reconcile_sales_campaigns.delay()
+    except Exception:
+        logger.exception("[Worker] Failed to enqueue sales-campaign reconciliation")
+    try:
         from app.workers.tasks.schedule_break_refresh import recover_stale_employee_schedule_breaks
         recover_stale_employee_schedule_breaks.delay()
     except Exception:

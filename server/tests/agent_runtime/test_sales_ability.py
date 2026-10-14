@@ -109,12 +109,14 @@ async def test_tools_save_discovery_research_and_drafts_in_a_reopenable_campaign
         },
         s,
     )
+    template = {"campaign_id": CAMPAIGN, "subject": "Hi {{name}}", "body": "An offer"}
+    # Only when the person asks for a template, and never over an existing draft.
+    assert (await invoke("draft_sales_template", template, s)).status == "error"
     out = await invoke(
-        "draft_sales_template",
-        {"campaign_id": CAMPAIGN, "subject": "Hi {{name}}", "body": "An offer"},
-        s,
+        "draft_sales_template", template, s, context(ask="Use a template for the rest")
     )
     assert out.payload == {"drafted": 100} and wired["patch_prospect"].await_count == 2
+    assert wired["draft_template"].call_args.kwargs == {"overwrite": False}
 
 
 @pytest.mark.asyncio
@@ -177,3 +179,58 @@ async def test_large_research_pages_stay_valid_and_continue_at_actual_offset(wir
     assert result.payload["next_offset"] == 1
     assert result.payload["prospects"][0]["text_truncated"]
     assert len(s.sessions["sales"].prospects) == 1
+
+
+@pytest.mark.asyncio
+async def test_saved_addresses_must_be_typed_or_seen_on_a_fetched_page(wired):
+    s = state()
+    wired["read_campaign"].return_value = {
+        "campaign": {"id": CAMPAIGN},
+        "prospects": [{"id": ITEM, "email": "kept@example.test"}],
+    }
+    await invoke("read_sales_campaign", {"campaign_id": CAMPAIGN}, s)
+    s.provenance.add("https://clinic.test")
+    sourced = {
+        "campaign_id": CAMPAIGN,
+        "prospects": [
+            {"name": "Clinic", "email": "guess@clinic.test", "sources": ["https://clinic.test"]}
+        ],
+    }
+    # A real source URL does not vouch for an address the page never showed.
+    out = await invoke("add_sales_prospects", sourced, s)
+    assert out.status == "error" and "Never guess" in out.payload["error"]
+    s.observed_emails.add("guess@clinic.test")
+    assert (await invoke("add_sales_prospects", sourced, s)).status == "ok"
+
+    update = {"campaign_id": CAMPAIGN, "prospect_id": ITEM, "changes": {"email": "made-up@clinic.test"}}
+    # The old bypass: save a lead with no email, then set one through update.
+    assert (await invoke("update_sales_prospect", update, s)).status == "error"
+    assert (
+        await invoke("update_sales_prospect", update, s, context(ask="Her email is made-up@clinic.test"))
+    ).status == "ok"
+    s.ref_participants["thread-1"] = frozenset({"replied@clinic.test"})
+    update["changes"] = {"email": "replied@clinic.test"}
+    assert (await invoke("update_sales_prospect", update, s)).status == "ok"
+    # Keeping the address the prospect already had is not a new contact.
+    update["changes"] = {"email": "kept@example.test", "body": "Hi"}
+    assert (await invoke("update_sales_prospect", update, s)).status == "ok"
+    assert wired["patch_prospect"].await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_fetched_pages_record_the_addresses_they_show():
+    from app.matcha.services.matcha_work.agent_runtime.abilities import web
+
+    async def fetch(_url):
+        return {"text": "Write to Front Desk <desk@clinic.test>", "links": ["mailto:owner@clinic.test"]}, {"https://clinic.test"}
+
+    async def failed(_url):
+        return {"error": "HTTP 404", "text": "nobody@clinic.test"}, set()
+
+    s = state()
+    tool = web.fetch_tool(fetch_page=fetch, max_fetches=3, fetch_seconds=5)
+    await tool.handler(context(), s, {"url": "https://clinic.test"}, 60)
+    assert s.observed_emails == {"desk@clinic.test", "owner@clinic.test"}
+    tool = web.fetch_tool(fetch_page=failed, max_fetches=3, fetch_seconds=5)
+    await tool.handler(context(), s, {"url": "https://clinic.test/missing"}, 60)
+    assert "nobody@clinic.test" not in s.observed_emails

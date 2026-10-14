@@ -13,11 +13,24 @@ class Body(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
+MAX_BATCH = 50
+FOOTER_PLACEHOLDER = "[Your business name and postal address]"
+
+
 class CampaignCreate(Body):
     request_id: UUID
     title: str = Field(min_length=1, max_length=100)
     target: str = Field(default="", max_length=2000)
     offer: str = Field(default="", max_length=4000)
+    footer: str = Field(default="", max_length=1000)
+
+
+class CampaignPatch(Body):
+    title: str | None = Field(default=None, min_length=1, max_length=100)
+    target: str | None = Field(default=None, max_length=2000)
+    offer: str | None = Field(default=None, max_length=4000)
+    # The opt-out line and postal address every commercial message carries.
+    footer: str | None = Field(default=None, max_length=1000)
 
 
 class Prospect(Body):
@@ -109,8 +122,15 @@ class ApprovedDraft(Body):
 class SendBatch(Body):
     request_id: UUID
     sender: str = Field(min_length=1, max_length=254)
-    drafts: list[ApprovedDraft] = Field(min_length=1, max_length=1000)
+    # Small enough that a person can read every message they approve.
+    drafts: list[ApprovedDraft] = Field(min_length=1, max_length=MAX_BATCH)
 
 
 class CampaignAction(Body):
     action: Literal["pause", "resume", "release_pending", "retry_failed"]
+
+
+class ResolveUnknown(Body):
+    """The person checked Gmail Sent for an unconfirmed message."""
+
+    outcome: Literal["sent", "not_sent"]

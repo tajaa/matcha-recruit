@@ -17,7 +17,7 @@ extension KanbanBoardView {
             listModeButton
             if isPipeline {
                 modeChip(showManualDeals ? "Campaigns" : "Manual deals", icon: "person.3", active: false) {
-                    showManualDeals.toggle(); showListView = false
+                    showManualDeals = !showManualDeals; showListView = false
                 }
             }
             Spacer()

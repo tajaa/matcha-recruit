@@ -8,7 +8,9 @@ import httpx
 import pytest
 from pydantic import ValidationError
 from app.matcha.models.matcha_work.sales import (
+    FOOTER_PLACEHOLDER,
     CampaignCreate,
+    CampaignPatch,
     Prospect,
     ProspectImport,
     ProspectPatch,
@@ -21,6 +23,7 @@ from app.matcha.services.matcha_work.gmail_service import GmailSendRateLimited
 from tests.agent_runtime.helpers import FakeConn, connection
 
 USER, PROJECT, CAMPAIGN, ITEM, TOKEN = (uuid4() for _ in range(5))
+FOOTER = "Reply unsubscribe and I won't email you again.\nAcme Video, 1 Main St, Springfield"
 
 
 def access_row(role="owner", **over):
@@ -45,6 +48,7 @@ def campaign(**over):
             title="Dental",
             target="SF",
             offer="Video",
+            footer=FOOTER,
             status="idle",
             sender="owner@example.test",
             dispatch_token=TOKEN,
@@ -76,6 +80,10 @@ def prospect(**over):
         )
         | over
     )
+
+
+def token(row=None):
+    return sales.review_token(row or prospect(), FOOTER)
 
 
 @pytest.fixture
@@ -110,6 +118,13 @@ def test_validation_templates_and_review_fingerprints():
     for values in [[], [Prospect(email="a@example.test")] * 1001]:
         with pytest.raises(ValidationError):
             ProspectImport(prospects=values)
+    # A person can read a batch of 50; 51 is refused before any check runs.
+    with pytest.raises(ValidationError):
+        SendBatch(
+            request_id=uuid4(),
+            sender="owner@example.test",
+            drafts=[{"id": uuid4(), "review_token": "a" * 64} for _ in range(51)],
+        )
     assert (
         sales.render_template("Hi {{name}} at {{company}}", prospect(name="Zoë 👋"))
         == "Hi Zoë 👋 at Dental"
@@ -128,6 +143,16 @@ def test_validation_templates_and_review_fingerprints():
     assert "dispatch_token" not in sales.view(campaign())
 
 
+def test_footer_is_part_of_the_review_and_of_the_sent_body():
+    assert token() != sales.review_token(prospect(), "Another footer")
+    assert sales.view(prospect(), FOOTER)["review_token"] == token()
+    assert sales.compose_body("Hi Ana\n", FOOTER) == f"Hi Ana\n\n{FOOTER}"
+    assert sales.compose_body("Hi Ana", " ") == "Hi Ana"
+    assert sales.footer_problem(FOOTER) is None
+    assert sales.footer_problem("")
+    assert sales.footer_problem(f"Reply stop.\n{FOOTER_PLACEHOLDER}")
+
+
 @pytest.mark.asyncio
 async def test_access_rechecks_account_and_collaborator_permissions(wired):
     await sales.project_access(wired, PROJECT, USER, edit=True)
@@ -136,6 +161,7 @@ async def test_access_rechecks_account_and_collaborator_permissions(wired):
         "u.is_active" in query
         and "is_suspended" in query
         and "status = 'active'" in query
+        and "p.project_type = 'collab'" in query
     )
     assert "u.role IN ('client','individual') AND cl.company_id = p.company_id" in query
     wired.on("FROM mw_projects p JOIN users", access_row("viewer"))
@@ -161,23 +187,40 @@ async def test_revoked_feature_and_platform_visibility_pause_delivery_access(wir
 
 
 @pytest.mark.asyncio
+async def test_workspace_list_uses_the_same_access_and_feature_rule(wired):
+    wired.on(
+        "SELECT DISTINCT",
+        [
+            access_row() | {"id": PROJECT, "title": "Work"},
+            access_row(home_features={}) | {"id": uuid4(), "title": "Disabled"},
+        ],
+    )
+    assert await sales.list_projects(USER) == [{"id": str(PROJECT), "title": "Work"}]
+    access_query = wired.ran("SELECT DISTINCT")[0][1]
+    assert "p.project_type = 'collab'" in access_query and "is_suspended" in access_query
+
+
+@pytest.mark.asyncio
 async def test_campaign_reads_creation_and_pages_are_owner_scoped(wired):
-    wired.on("SELECT DISTINCT p.id", [{"id": PROJECT, "title": "Work"}])
-    assert (await sales.list_projects(USER))[0]["id"] == str(PROJECT)
     wired.on("ORDER BY updated_at DESC", [campaign()])
     assert (await sales.list_campaigns(PROJECT, USER))[0]["title"] == "Dental"
     wired.on("INSERT INTO mw_sales_campaigns", campaign())
     assert (
         await sales.create_campaign(
-            PROJECT, USER, CampaignCreate(request_id=uuid4(), title="Dental")
+            PROJECT,
+            USER,
+            CampaignCreate(request_id=uuid4(), title="Dental", footer=FOOTER),
         )
     )["id"] == str(CAMPAIGN)
+    assert wired.ran("INSERT INTO mw_sales_campaigns")[0][2][-1] == FOOTER
     wired.on("ORDER BY created_at,id OFFSET", [prospect()]).on(
         "GROUP BY status", [{"status": "draft", "count": 1}]
     )
     data = await sales.read_campaign(CAMPAIGN, USER, offset=25, limit=25)
     assert data["counts"] == {"draft": 1} and data["offset"] == 25
-    assert wired.ran("FOR UPDATE")[0][2] == (CAMPAIGN, USER)
+    assert data["prospects"][0]["review_token"] == token()
+    # Reads (polled every 15 s) never take the campaign row lock.
+    assert not wired.ran("FOR UPDATE")
     for offset, limit in [(-1, 25), (0, 0), (1001, 25), (0, 1001)]:
         with pytest.raises(sales.SalesError):
             await sales.read_campaign(CAMPAIGN, USER, offset=offset, limit=limit)
@@ -192,8 +235,106 @@ async def test_campaign_reads_creation_and_pages_are_owner_scoped(wired):
 
 
 @pytest.mark.asyncio
-async def test_import_dedupes_and_enforces_campaign_total(wired):
-    wired.on("array_agg(dedupe_key)", ["email:existing@example.test"])
+async def test_status_poll_carries_tokens_but_no_message_text(wired):
+    wired.on("SELECT id, email, subject, body, status, error", [prospect()]).on(
+        "GROUP BY status", [{"status": "draft", "count": 1}]
+    )
+    data = await sales.campaign_status(CAMPAIGN, USER)
+    assert data["prospects"] == [
+        {"id": str(ITEM), "status": "draft", "error": None, "review_token": token()}
+    ]
+    assert data["counts"] == {"draft": 1} and not wired.ran("FOR UPDATE")
+
+
+@pytest.mark.asyncio
+async def test_other_editors_see_campaign_summaries_without_contacts(wired):
+    summary = {"id": uuid4(), "title": "Clinics", "status": "sending", "creator": "b@example.test", "prospects": 3, "sent": 1, "problems": 0}
+    wired.on("COUNT(p.id) FILTER", [summary])
+    rows = await sales.workspace_campaigns(PROJECT, USER)
+    assert rows[0]["creator"] == "b@example.test" and "email" not in rows[0]
+    assert "c.user_id <> $2" in wired.ran("COUNT(p.id) FILTER")[0][1]
+    wired.on("FROM mw_projects p JOIN users", access_row("viewer"))
+    assert await sales.workspace_campaigns(PROJECT, USER) == []
+
+
+@pytest.mark.asyncio
+async def test_campaign_edits_freeze_the_footer_while_messages_are_pending(wired):
+    wired.on("UPDATE mw_sales_campaigns SET title", campaign(title="Clinics"))
+    assert (
+        await sales.update_campaign(CAMPAIGN, USER, CampaignPatch(title="Clinics"))
+    )["title"] == "Clinics"
+    wired.on("UPDATE mw_sales_campaigns SET footer", campaign(footer="New"))
+    wired.on("SELECT COUNT(*)", 0)
+    await sales.update_campaign(CAMPAIGN, USER, CampaignPatch(footer="New"))
+    wired.on("SELECT COUNT(*)", 2)
+    with pytest.raises(sales.SalesError, match="footer"):
+        await sales.update_campaign(CAMPAIGN, USER, CampaignPatch(footer="New"))
+    # The same footer is not a change, and an empty patch writes nothing.
+    await sales.update_campaign(CAMPAIGN, USER, CampaignPatch(footer=FOOTER))
+    wired.calls.clear()
+    await sales.update_campaign(CAMPAIGN, USER, CampaignPatch())
+    assert not wired.ran("UPDATE mw_sales_campaigns SET")
+
+
+@pytest.mark.asyncio
+async def test_deletes_wait_for_in_flight_messages(wired):
+    wired.on("status = 'claimed'", 0)
+    assert await sales.delete_campaign(CAMPAIGN, USER) == {"deleted": True}
+    assert wired.ran("DELETE FROM mw_sales_campaigns")
+    wired.on("status = 'claimed'", 1)
+    with pytest.raises(sales.SalesError, match="in-progress"):
+        await sales.delete_campaign(CAMPAIGN, USER)
+    wired.on("status = 'claimed'", 0).on(
+        "FROM mw_sales_campaigns", campaign(status="sending")
+    )
+    with pytest.raises(sales.SalesError, match="Pause"):
+        await sales.delete_campaign(CAMPAIGN, USER)
+    wired.on("FROM mw_sales_prospects WHERE campaign_id", prospect())
+    assert await sales.delete_prospect(CAMPAIGN, ITEM, USER) == {"deleted": True}
+    for status in ("approved", "claimed"):
+        wired.on("FROM mw_sales_prospects WHERE campaign_id", prospect(status=status))
+        with pytest.raises(sales.SalesError, match="Release"):
+            await sales.delete_prospect(CAMPAIGN, ITEM, USER)
+
+
+@pytest.mark.asyncio
+async def test_opt_out_suppresses_the_address_in_every_campaign(wired):
+    wired.on("FROM mw_sales_prospects WHERE campaign_id", prospect(status="sent")).on(
+        "SET status = 'opted_out', error = NULL WHERE id", prospect(status="opted_out")
+    )
+    out = await sales.opt_out(CAMPAIGN, ITEM, USER)
+    assert out["status"] == "opted_out"
+    assert wired.ran("INSERT INTO mw_sales_suppressions")[0][2] == (USER, "a@example.test")
+    everywhere = wired.ran("FROM mw_sales_campaigns c WHERE p.campaign_id")[0]
+    assert everywhere[2] == (USER, "a@example.test") and "<> 'claimed'" in everywhere[1]
+    wired.calls.clear()
+    wired.on("FROM mw_sales_prospects WHERE campaign_id", prospect(email="", status="prospect"))
+    await sales.opt_out(CAMPAIGN, ITEM, USER)
+    assert not wired.ran("INSERT INTO mw_sales_suppressions")
+    wired.on("FROM mw_sales_prospects WHERE campaign_id", prospect(status="claimed"))
+    with pytest.raises(sales.SalesError, match="being sent"):
+        await sales.opt_out(CAMPAIGN, ITEM, USER)
+
+
+@pytest.mark.asyncio
+async def test_resolving_an_unconfirmed_message(wired):
+    wired.on("FROM mw_sales_prospects WHERE campaign_id", prospect())
+    with pytest.raises(sales.SalesError, match="unconfirmed"):
+        await sales.resolve_unknown(CAMPAIGN, ITEM, USER, "sent")
+    wired.on("FROM mw_sales_prospects WHERE campaign_id", prospect(status="unknown"))
+    wired.on("SET status = 'sent'", prospect(status="sent")).on(
+        "SET error = NULL, claimed_at = NULL", prospect(status="draft")
+    )
+    assert (await sales.resolve_unknown(CAMPAIGN, ITEM, USER, "sent"))["status"] == "sent"
+    assert (await sales.resolve_unknown(CAMPAIGN, ITEM, USER, "not_sent"))["status"] == "draft"
+    assert "THEN 'draft' ELSE 'prospect'" in wired.ran("claimed_at = NULL")[0][1]
+
+
+@pytest.mark.asyncio
+async def test_import_dedupes_skips_opted_out_people_and_enforces_campaign_total(wired):
+    wired.on("array_agg(dedupe_key)", ["email:existing@example.test"]).on(
+        "FROM mw_sales_suppressions", [{"email": "stop@example.test"}]
+    )
     out = await sales.import_prospects(
         CAMPAIGN,
         USER,
@@ -204,14 +345,14 @@ async def test_import_dedupes_and_enforces_campaign_total(wired):
                     "new@example.test",
                     "NEW@example.test",
                     "existing@example.test",
+                    "stop@example.test",
                 ]
             ]
         ),
     )
-    assert (
-        out == {"added": 1, "duplicates": 2}
-        and len(wired.ran("INSERT INTO mw_sales_prospects")) == 1
-    )
+    assert out == {"added": 1, "duplicates": 2, "suppressed": 1}
+    inserted = json.loads(wired.ran("INSERT INTO mw_sales_prospects")[0][2][1])
+    assert [p["email"] for p in inserted] == ["new@example.test"]
     wired.on("array_agg(dedupe_key)", [f"email:{i}@example.test" for i in range(1000)])
     with pytest.raises(sales.SalesError, match="1,000"):
         await sales.import_prospects(
@@ -232,7 +373,7 @@ async def test_edits_compare_review_token_and_preserve_frozen_messages(wired):
             CAMPAIGN,
             ITEM,
             USER,
-            ProspectPatch(body="edited", review_token=sales.review_token(row)),
+            ProspectPatch(body="edited", review_token=token(row)),
         )
     )["body"] == "edited"
     with pytest.raises(sales.SalesError, match="draft changed"):
@@ -251,12 +392,22 @@ async def test_edits_compare_review_token_and_preserve_frozen_messages(wired):
         USER,
         ProspectPatch(email="other@example.test", sources=["https://example.test"]),
     )
-    await sales.patch_prospect(CAMPAIGN, ITEM, USER, ProspectPatch())
-    wired.on("FROM mw_sales_prospects WHERE campaign_id", prospect(status="approved"))
-    with pytest.raises(sales.SalesError, match="frozen"):
+    wired.on("FROM mw_sales_suppressions", [{"email": "stop@example.test"}])
+    with pytest.raises(sales.SalesError, match="asked not to be contacted"):
         await sales.patch_prospect(
-            CAMPAIGN, ITEM, USER, ProspectPatch(body="late edit")
+            CAMPAIGN, ITEM, USER, ProspectPatch(email="stop@example.test")
         )
+    # Re-saving the address it already has is not a new contact.
+    await sales.patch_prospect(
+        CAMPAIGN, ITEM, USER, ProspectPatch(email="a@example.test")
+    )
+    await sales.patch_prospect(CAMPAIGN, ITEM, USER, ProspectPatch())
+    for status in ("approved", "opted_out"):
+        wired.on("FROM mw_sales_prospects WHERE campaign_id", prospect(status=status))
+        with pytest.raises(sales.SalesError, match="frozen"):
+            await sales.patch_prospect(
+                CAMPAIGN, ITEM, USER, ProspectPatch(body="late edit")
+            )
     await sales.patch_prospect(CAMPAIGN, ITEM, USER, ProspectPatch(stage="qualified"))
     wired.on("FROM mw_sales_prospects WHERE campaign_id", None)
     with pytest.raises(sales.SalesError, match="not found"):
@@ -276,15 +427,24 @@ async def test_template_validates_all_rows_before_writing(wired):
             CAMPAIGN, USER, Template(subject="Hi {{name}}", body="About {{company}}")
         )
     )["drafted"] == 2
+    select = wired.ran("status IN ('prospect','draft','failed')")[0]
+    assert select[2] == (CAMPAIGN, True)
     calls = wired.ran("UPDATE mw_sales_prospects SET subject")
     rendered = json.loads(calls[0][2][-1])
     assert rendered[0]["status"] == "draft" and rendered[1]["status"] == "prospect"
     wired.calls.clear()
+    # The agent's path only fills prospects that have no draft yet.
+    await sales.draft_template(
+        CAMPAIGN, USER, Template(subject="Hi", body="Hi"), overwrite=False
+    )
+    select = wired.ran("status IN ('prospect','draft','failed')")[0]
+    assert select[2] == (CAMPAIGN, False) and "subject = ''" in select[1]
+    wired.calls.clear()
     wired.on(
         "status IN ('prospect','draft','failed')",
-        [prospect(), prospect(name="a\nBcc: b")],
+        [prospect(), prospect(name="Bea\nBcc: b")],
     )
-    with pytest.raises(sales.SalesError, match="multiline"):
+    with pytest.raises(sales.SalesError, match="message for Bea"):
         await sales.draft_template(
             CAMPAIGN, USER, Template(subject="Hi {{name}}", body="Hi")
         )
@@ -295,12 +455,12 @@ def batch():
     return SendBatch(
         request_id=uuid4(),
         sender="owner@example.test",
-        drafts=[{"id": ITEM, "review_token": sales.review_token(prospect())}],
+        drafts=[{"id": ITEM, "review_token": token()}],
     )
 
 
-@pytest.mark.asyncio
-async def test_approval_is_exact_idempotent_and_sender_scoped(wired, monkeypatch):
+@pytest.fixture
+def approvals(wired, monkeypatch):
     gmail = type(
         "Gmail",
         (),
@@ -312,7 +472,15 @@ async def test_approval_is_exact_idempotent_and_sender_scoped(wired, monkeypatch
     )()
     dispatch = AsyncMock()
     monkeypatch.setattr(sales, "dispatch", dispatch)
+    # Fixtures use example.test; the reserved-domain refusal is tested on its own.
+    monkeypatch.setattr(sales, "_is_reserved_test_domain", lambda _email: False)
     wired.on("id = ANY", [prospect()]).on("SELECT COUNT(*)", 0)
+    return gmail, dispatch
+
+
+@pytest.mark.asyncio
+async def test_approval_is_exact_idempotent_and_sender_scoped(wired, approvals):
+    gmail, dispatch = approvals
     data = batch()
     await sales.approve_batch(CAMPAIGN, USER, data, gmail)
     assert wired.ran("SET status = 'approved'") and dispatch.await_count == 1
@@ -345,6 +513,34 @@ async def test_approval_is_exact_idempotent_and_sender_scoped(wired, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_approval_needs_a_footer_and_contactable_real_recipients(
+    wired, approvals, monkeypatch
+):
+    gmail, dispatch = approvals
+    for footer in ("", f"Reply stop.\n{FOOTER_PLACEHOLDER}"):
+        wired.on("FROM mw_sales_campaigns", campaign(footer=footer))
+        with pytest.raises(sales.SalesError, match="footer"):
+            await sales.approve_batch(CAMPAIGN, USER, batch(), gmail)
+    wired.on("FROM mw_sales_campaigns", campaign())
+    # A token computed before the footer existed no longer matches.
+    stale = SendBatch(
+        request_id=uuid4(),
+        sender="owner@example.test",
+        drafts=[{"id": ITEM, "review_token": sales.review_token(prospect())}],
+    )
+    with pytest.raises(sales.SalesError, match="changed"):
+        await sales.approve_batch(CAMPAIGN, USER, stale, gmail)
+    monkeypatch.setattr(sales, "_is_reserved_test_domain", lambda _email: True)
+    with pytest.raises(sales.SalesError, match="Reserved"):
+        await sales.approve_batch(CAMPAIGN, USER, batch(), gmail)
+    monkeypatch.setattr(sales, "_is_reserved_test_domain", lambda _email: False)
+    wired.on("FROM mw_sales_suppressions", [{"email": "a@example.test"}])
+    with pytest.raises(sales.SalesError, match="asked not to be contacted"):
+        await sales.approve_batch(CAMPAIGN, USER, batch(), gmail)
+    assert not dispatch.called and not wired.ran("SET status = 'approved'")
+
+
+@pytest.mark.asyncio
 async def test_actions_recover_pending_and_only_retry_definite_failures(
     wired, monkeypatch
 ):
@@ -367,6 +563,14 @@ async def test_actions_recover_pending_and_only_retry_definite_failures(
 
 
 @pytest.mark.asyncio
+async def test_stale_claims_report_how_many_expired(wired):
+    wired.on("SET status = 'unknown'", "UPDATE 2")
+    assert await sales._stale(wired, CAMPAIGN) == 2
+    wired.on("SET status = 'unknown'", "UPDATE 0")
+    assert await sales._stale(wired, CAMPAIGN) == 0
+
+
+@pytest.mark.asyncio
 async def test_broker_failure_pauses_without_losing_approval(wired, monkeypatch):
     monkeypatch.setattr(
         worker.send_sales_campaign,
@@ -385,6 +589,7 @@ def delivery(wired, monkeypatch):
         "SELECT EXISTS", False
     ).on("status = 'approved' ORDER", prospect(status="approved"))
     monkeypatch.setattr(worker, "_is_reserved_test_domain", lambda _email: False)
+    monkeypatch.setattr(worker, "_campaign_wait", AsyncMock(return_value=0))
     dispatch = AsyncMock()
     monkeypatch.setattr(sales, "dispatch", dispatch)
     gmail = type(
@@ -400,51 +605,77 @@ def delivery(wired, monkeypatch):
     return gmail, dispatch
 
 
+def refused(code, reason=None):
+    body = {"error": {"errors": [{"reason": reason}]}} if reason else {}
+    response = httpx.Response(
+        code, json=body, request=httpx.Request("POST", "https://example.test/send")
+    )
+    return httpx.HTTPStatusError("refused", request=response.request, response=response)
+
+
+# (Gmail behaviour, recipient outcome, campaign paused?, next countdown)
+OUTCOMES = [
+    ("none", "sent", False, 15),
+    ("quota", "approved", False, worker.MAX_COUNTDOWN),
+    ("minute", "approved", False, 60),
+    ("429", "approved", False, worker.MAX_COUNTDOWN),
+    ("403-daily", "approved", False, worker.MAX_COUNTDOWN),
+    ("403", "approved", True, None),
+    ("401", "approved", True, None),
+    ("400", "failed", False, 15),
+    ("invalid", "failed", False, 15),
+    ("transport", "unknown", True, None),
+    ("500", "unknown", True, None),
+    ("no_id", "unknown", True, None),
+]
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "failure,outcome",
-    [
-        ("none", "sent"),
-        ("quota", "approved"),
-        ("transport", "unknown"),
-        ("500", "unknown"),
-        ("400", "failed"),
-        ("invalid", "failed"),
-        ("no_id", "unknown"),
-    ],
-)
-async def test_delivery_claims_before_send_and_keeps_uncertain_outcomes(
-    wired, delivery, failure, outcome
+@pytest.mark.parametrize("failure,outcome,paused,countdown", OUTCOMES)
+async def test_delivery_classifies_every_outcome_and_pauses_when_uncertain(
+    wired, delivery, failure, outcome, paused, countdown
 ):
     gmail, dispatch = delivery
-    if failure == "quota":
-        gmail.send_email.side_effect = GmailSendRateLimited("50 emails per hour")
-    if failure == "transport":
-        gmail.send_email.side_effect = httpx.ReadTimeout("lost ack")
-    if failure in ("500", "400"):
-        response = httpx.Response(
-            int(failure), request=httpx.Request("POST", "https://example.test/send")
-        )
-        gmail.send_email.side_effect = httpx.HTTPStatusError(
-            "refused", request=response.request, response=response
-        )
-    if failure == "invalid":
-        gmail.send_email.side_effect = ValueError("invalid")
+    effects = {
+        "quota": GmailSendRateLimited("Send rate limit: max 50 emails per hour"),
+        "minute": GmailSendRateLimited("Send rate limit: max 5 emails per minute"),
+        "429": refused(429),
+        "403-daily": refused(403, "dailyLimitExceeded"),
+        "403": refused(403, "insufficientPermissions"),
+        "401": refused(401),
+        "400": refused(400, "invalidArgument"),
+        "invalid": ValueError("invalid"),
+        "transport": httpx.ReadTimeout("lost ack"),
+        "500": refused(500),
+    }
+    if failure in effects:
+        gmail.send_email.side_effect = effects[failure]
     if failure == "no_id":
         gmail.send_email.return_value = {}
     await worker.deliver_one(CAMPAIGN, TOKEN, gmail_factory=lambda _id: gmail)
-    assert (
-        wired.ran("SET status = 'claimed'")
-        and wired.ran("SET status = $2")[0][2][1] == outcome
-    )
+    assert wired.ran("SET status = 'claimed'")
+    assert wired.ran("SET status = $2::text")[0][2][1] == outcome
+    # The reviewed footer goes out with the reviewed body.
     assert gmail.send_email.call_args.kwargs == {
         "to": "a@example.test",
         "subject": "Hello Ana",
-        "body": "Hi Ana",
+        "body": f"Hi Ana\n\n{FOOTER}",
     }
-    assert dispatch.call_args.kwargs["countdown"] == (
-        3600 if failure == "quota" else 15
-    )
+    assert bool(wired.ran("SET status = 'paused'")) == paused
+    if paused:
+        assert not dispatch.called
+    else:
+        assert dispatch.call_args.kwargs["countdown"] == countdown
+
+
+def test_refusals_are_classified_by_reason():
+    assert worker._refusal(refused(429).response) == "quota"
+    assert worker._refusal(refused(403, "userRateLimitExceeded").response) == "quota"
+    assert worker._refusal(refused(403).response) == "account"
+    assert worker._refusal(refused(401).response) == "account"
+    assert worker._refusal(refused(400).response) == "message"
+    broken = httpx.Response(403, content=b"<html>", request=httpx.Request("POST", "https://example.test"))
+    assert worker._refusal(broken) == "account"
 
 
 @pytest.mark.asyncio
@@ -454,7 +685,9 @@ async def test_worker_stale_token_revoked_access_and_mailbox_switch(wired, deliv
     assert not gmail.send_email.called and not dispatch.called
     wired.on("FROM mw_projects p JOIN users", None)
     await worker.deliver_one(CAMPAIGN, TOKEN, gmail_factory=lambda _id: gmail)
-    assert wired.ran("Workspace access changed") and not gmail.send_email.called
+    assert "Workspace access changed" in wired.ran("SET status = 'paused'")[0][2][1]
+    assert not gmail.send_email.called
+    wired.calls.clear()
     wired.on("FROM mw_projects p JOIN users", access_row())
     gmail.get_status.return_value = {"connected": True, "email": "other@example.test"}
     await worker.deliver_one(CAMPAIGN, TOKEN, gmail_factory=lambda _id: gmail)
@@ -462,6 +695,29 @@ async def test_worker_stale_token_revoked_access_and_mailbox_switch(wired, deliv
         wired.ran("SET status = 'approved', claimed_at = NULL")
         and not gmail.send_email.called
     )
+    wired.calls.clear()
+    gmail.get_status.side_effect = RuntimeError("network")
+    await worker.deliver_one(CAMPAIGN, TOKEN, gmail_factory=lambda _id: gmail)
+    assert "Gmail is unavailable" in wired.ran("SET status = 'paused'")[0][2][1]
+
+
+@pytest.mark.asyncio
+async def test_an_interrupted_claim_pauses_the_queue(wired, delivery):
+    gmail, dispatch = delivery
+    wired.on("SET status = 'unknown'", "UPDATE 1")
+    await worker.deliver_one(CAMPAIGN, TOKEN, gmail_factory=lambda _id: gmail)
+    assert wired.ran("SET status = 'paused'") and not gmail.send_email.called
+    assert not wired.ran("SET status = 'claimed'") and not dispatch.called
+
+
+@pytest.mark.asyncio
+async def test_opted_out_recipients_are_dropped_before_any_claim(wired, delivery):
+    gmail, _ = delivery
+    await worker.deliver_one(CAMPAIGN, TOKEN, gmail_factory=lambda _id: gmail)
+    drop = wired.ran("FROM mw_sales_suppressions s")[0]
+    assert drop[2] == (CAMPAIGN, USER) and "SET status = 'opted_out'" in drop[1]
+    calls = [c[1] for c in wired.calls]
+    assert calls.index(drop[1]) < calls.index(wired.ran("SET status = 'claimed'")[0][1])
 
 
 @pytest.mark.asyncio
@@ -476,6 +732,16 @@ async def test_duplicate_jobs_wait_for_pacing_and_claims_then_finish(wired, deli
     )
     await worker.deliver_one(CAMPAIGN, TOKEN, gmail_factory=lambda _id: gmail)
     assert not gmail.send_email.called and dispatch.call_args.kwargs["countdown"] >= 59
+    # A long wait is split into countdowns below the broker's visibility timeout.
+    wired.on(
+        "FROM mw_sales_campaigns",
+        campaign(
+            status="sending",
+            next_attempt_at=datetime.now(timezone.utc) + timedelta(hours=2),
+        ),
+    )
+    await worker.deliver_one(CAMPAIGN, TOKEN, gmail_factory=lambda _id: gmail)
+    assert dispatch.call_args.kwargs["countdown"] == worker.MAX_COUNTDOWN
     wired.on("FROM mw_sales_campaigns", campaign(status="sending")).on(
         "SELECT EXISTS", True
     )
@@ -487,10 +753,96 @@ async def test_duplicate_jobs_wait_for_pacing_and_claims_then_finish(wired, deli
 
 
 @pytest.mark.asyncio
-async def test_reserved_test_addresses_are_never_delivered(
+async def test_campaigns_leave_gmail_room_for_the_persons_own_email(
     wired, delivery, monkeypatch
 ):
-    gmail, _ = delivery
+    gmail, dispatch = delivery
+    monkeypatch.setattr(worker, "_campaign_wait", AsyncMock(return_value=900))
+    await worker.deliver_one(CAMPAIGN, TOKEN, gmail_factory=lambda _id: gmail)
+    assert not gmail.send_email.called and not wired.ran("SET status = 'claimed'")
+    waiting = wired.ran("make_interval")[0]
+    assert waiting[2] == (CAMPAIGN, 900.0, worker.WAITING_FOR_CAPACITY)
+    assert dispatch.call_args.kwargs["countdown"] == 901
+
+
+@pytest.mark.asyncio
+async def test_campaign_share_reads_the_shared_counters(monkeypatch):
+    from app.core.services import redis_cache
+
+    states = {
+        "gmail_send_3600s": {"used": 35, "resets_in_seconds": 600},
+        "gmail_recipients_86400s": {"used": 10, "resets_in_seconds": 80000},
+    }
+
+    async def state(_key, action, _limit, _window):
+        return states[action]
+
+    monkeypatch.setattr(redis_cache, "get_rate_limit_state", state)
+    assert await worker._campaign_wait(USER) == 600
+    states["gmail_send_3600s"]["used"] = 34
+    assert await worker._campaign_wait(USER) == 0
+    states["gmail_recipients_86400s"] = {"used": 150, "resets_in_seconds": 0}
+    assert await worker._campaign_wait(USER) == 86400
+
+    async def unavailable(*_args):
+        raise RuntimeError("redis")
+
+    monkeypatch.setattr(redis_cache, "get_rate_limit_state", unavailable)
+    assert await worker._campaign_wait(USER) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_reserved_recipient_fails_alone_and_the_batch_continues(
+    wired, delivery, monkeypatch
+):
+    gmail, dispatch = delivery
     monkeypatch.setattr(worker, "_is_reserved_test_domain", lambda _email: True)
     await worker.deliver_one(CAMPAIGN, TOKEN, gmail_factory=lambda _id: gmail)
-    assert not gmail.send_email.called and wired.ran("status = 'paused'")
+    assert not gmail.send_email.called and wired.ran("Reserved test address")
+    assert not wired.ran("status = 'paused'") and not wired.ran("SET status = 'claimed'")
+    assert dispatch.call_args.kwargs["countdown"] == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_start_restarts_sending_queues_under_a_new_token(
+    wired, monkeypatch
+):
+    dispatch = AsyncMock()
+    monkeypatch.setattr(sales, "dispatch", dispatch)
+    other = uuid4()
+    wired.on("WHERE status = 'sending'", [{"id": CAMPAIGN}, {"id": other}]).on(
+        "SELECT status FROM mw_sales_campaigns", {"status": "sending"}
+    )
+    await worker.reconcile()
+    rotated = wired.ran("SET dispatch_token = $2")
+    assert [c[2][0] for c in rotated] == [CAMPAIGN, other]
+    assert [c.args[1] for c in dispatch.await_args_list] == [c[2][1] for c in rotated]
+    # An interrupted claim pauses instead of restarting.
+    wired.calls.clear()
+    dispatch.reset_mock()
+    wired.on("SET status = 'unknown'", "UPDATE 1")
+    await worker.reconcile()
+    assert len(wired.ran("SET status = 'paused'")) == 2 and not dispatch.called
+    # Campaigns that stopped sending meanwhile, and a dead broker, are skipped.
+    wired.on("SET status = 'unknown'", "UPDATE 0").on(
+        "SELECT status FROM mw_sales_campaigns", {"status": "paused"}
+    )
+    await worker.reconcile()
+    assert not dispatch.called
+    wired.on("SELECT status FROM mw_sales_campaigns", {"status": "sending"})
+    dispatch.side_effect = sales.SalesError("queue down", 503)
+    await worker.reconcile()
+    assert dispatch.await_count == 2
+
+
+def test_worker_start_queues_the_sales_reconcile():
+    import inspect
+    from app.workers import celery_app as app_module
+
+    assert "reconcile_sales_campaigns.delay()" in inspect.getsource(
+        app_module.on_worker_ready
+    )
+    assert (
+        worker.reconcile_sales_campaigns.name
+        == "app.workers.tasks.sales_campaign.reconcile_sales_campaigns"
+    )
