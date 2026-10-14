@@ -116,6 +116,7 @@ async def test_cancel_ranks_what_was_found(conn, monkeypatch):
     conn.on("SET status = 'cancelled'", search_row(status="cancelled"))
     await service.cancel_search(SEARCH, USER)
     assert conn.ran("SET status = 'cancelled'") and rerank.await_count == 1
+    assert conn.ran("SET approach_status = 'failed'")
     conn.on("FOR UPDATE", search_row(status="done"))
     await service.cancel_search(SEARCH, USER)
     assert len(conn.ran("SET status = 'cancelled'")) == 1

@@ -87,6 +87,14 @@ async def update_job_lead(
     return await _call(service.patch_lead(search_id, lead_id, current_user.id, body))
 
 
+@router.post("/{search_id}/leads/{lead_id}/approach", status_code=202)
+async def redraft_job_approach(
+    search_id: UUID, lead_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Draft how to approach this job (again). Free; capped per search."""
+    return await _call(enqueue.redraft_approach(current_user, search_id, lead_id))
+
+
 @router.put("/{search_id}/weights")
 async def rerank_job_search(
     search_id: UUID, body: JobWeights,

@@ -4,8 +4,9 @@ One bounded agent loop, and a registry of abilities it can use. A person asks
 Espresso in chat ("reply to the landlord and say Friday works", "book Nopa for
 four on Friday at 7"); each message is one run.
 
-Agent cards (`../agent_card/`) are a caller of this same loop. There is one
-loop in this package and no other: do not add a second.
+Agent cards (`../agent_card/`) are a caller of this same loop, and so are Job
+search's model phases (`../job_search/agent_phase.py`, run kind `job_search`).
+There is one loop in this package and no other: do not add a second.
 
 ## The shape
 
@@ -16,7 +17,7 @@ loop in this package and no other: do not add a second.
 | Policy | `policy.py` | `evaluate_commit`: allow / confirm / deny. Pure: no I/O, no clock, no model |
 | Result | `result.py` | `agent_result.v2` (headline, summary, typed blocks); reads v1 as v2 |
 | Catalog | `catalog.py` | Every ability, and `abilities_for`: the only filter on what a run gets |
-| Abilities | `abilities/*.py` | `web`, `screenshots`, `shopping`, `flights`, `email`, `calendar`, `reservations`, `purchase`, `domains`, `sales` |
+| Abilities | `abilities/*.py` | `web`, `screenshots`, `shopping`, `flights`, `email`, `calendar`, `reservations`, `purchase`, `domains`, `sales`, `jobs` |
 | Chat entry | `chat_entry.py` | A chat message on its way to a run; answers to questions |
 | Enqueue | `enqueue.py`, `quota.py` | Gates, the daily allowance, one live run per person per conversation |
 | Models | `models.py` | The model menu and which model a run uses |

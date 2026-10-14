@@ -1,9 +1,12 @@
-"""The phases of one job search. Each runs inside one worker task.
+"""The deterministic phases of one job search. Each runs inside one worker task.
 
-  plan      the ask and criteria become search queries
   discover  Google Jobs, page by page, deduped into leads (no model)
   enrich    each lead's ATS API or the company's posting page: full text, pay
             with evidence, application questions; then the ranking (no model)
+
+`plan_from_criteria` is the plan when the model plan fails. The model phases
+(plan, screen, approach) are in `model_phases.py`; the order is in
+`orchestrator.PHASES`.
 
 Every write checks the search's dispatch token (`Guard`), so a cancelled
 search, or a chain a reconcile replaced, stops writing at the next check.
@@ -65,11 +68,26 @@ class PhaseOutcome:
     countdown: int = 0
 
 
+def _default_client(model: str) -> Any:
+    from .agent_phase import default_client
+
+    return default_client(model)
+
+
+async def _default_fetch_page(url: str) -> tuple[dict, set[str]]:
+    from app.matcha.services.matcha_work.agent_card.agent import fetch_page_tool
+
+    return await fetch_page_tool(url)
+
+
 @dataclass
 class Deps:
     provider: Callable[[], Any] = providers.choose_provider
     ats_fetch: Callable[..., Awaitable[Any]] = ats.fetch
     page_fetch: Callable[..., Awaitable[Any]] = fetch_public
+    # Model phases: the model client for a model id, and the model's fetch_page.
+    client: Callable[[str], Any] = _default_client
+    fetch_page: Callable[[str], Awaitable[tuple[dict, set[str]]]] = _default_fetch_page
 
 
 _BUDGET_COLUMNS = {"provider_calls", "fetch_calls"}
@@ -174,20 +192,6 @@ def plan_from_criteria(ask: str, criteria: dict) -> dict:
             seen.add(key)
             unique.append(query)
     return {"queries": unique[:MAX_QUERIES], "source": "criteria"}
-
-
-async def plan(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
-    criteria = decode_jsonb(search.get("criteria"), {}) or {}
-    planned = plan_from_criteria(search.get("ask") or "", criteria)
-    async with connection_or_direct() as conn:
-        await conn.execute(
-            "UPDATE mw_job_searches SET plan = $3::jsonb WHERE id = $1 AND dispatch_token = $2",
-            search["id"], guard.token, json.dumps(planned),
-        )
-    return PhaseOutcome(
-        status="discovering",
-        progress={"note": f"Searching {len(planned['queries'])} ways…", "queries": len(planned["queries"])},
-    )
 
 
 # ── discover ─────────────────────────────────────────────────────────────────
@@ -334,7 +338,7 @@ async def discover(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     )
 
 
-NEXT_AFTER_DISCOVER = "enriching"
+NEXT_AFTER_DISCOVER = "screening"
 
 
 # ── enrich ───────────────────────────────────────────────────────────────────
@@ -513,19 +517,26 @@ async def enrich(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     async with connection_or_direct() as conn:
         fresh = await conn.fetchrow("SELECT * FROM mw_job_searches WHERE id = $1", search["id"])
         await rerank(conn, fresh)
+        top = await conn.fetch(
+            f"""UPDATE mw_job_leads SET approach_status = 'queued', updated_at = NOW()
+                WHERE id IN (SELECT id FROM mw_job_leads
+                             WHERE search_id = $1 AND rank_band < 9
+                             ORDER BY rank LIMIT {APPROACH_TOP})
+                RETURNING id, rank""",
+            search["id"],
+        )
+    queue = [str(row["id"]) for row in sorted(top, key=lambda r: r["rank"] or 0)]
+    ranked = {"found": counts["total"], "posted_pay": counts["posted"], "ranked": True}
+    if not queue:
+        return PhaseOutcome(status="done", progress={
+            "note": f"Ranked {counts['total']} jobs; {counts['posted']} post their pay.", **ranked})
     return PhaseOutcome(
-        status=NEXT_AFTER_ENRICH,
-        progress={
-            "note": f"Ranked {counts['total']} jobs; {counts['posted']} post their pay.",
-            "found": counts["total"], "posted_pay": counts["posted"], "ranked": True,
-        },
+        status="approaching",
+        cursor={"approach_queue": queue},
+        progress={"note": f"Ranked {counts['total']} jobs ({counts['posted']} post their pay). "
+                          f"Drafting how to approach the top {len(queue)}…", **ranked},
     )
 
 
-NEXT_AFTER_ENRICH = "done"
-
-PHASES: dict[str, Callable[[dict, Deps, Guard], Awaitable[PhaseOutcome]]] = {
-    "planning": plan,
-    "discovering": discover,
-    "enriching": enrich,
-}
+# How many of the top-ranked jobs get an approach drafted.
+APPROACH_TOP = 8

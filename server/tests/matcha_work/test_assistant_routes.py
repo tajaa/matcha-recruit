@@ -132,7 +132,12 @@ async def test_abilities_say_what_stands_in_the_way(wired, monkeypatch):
     }))
     out = await routes.list_abilities(current_user=_user())
     by_key = {a["key"]: a for a in out["abilities"]}
-    assert list(by_key) == ["web", "screenshots", "shopping", "flights", "email", "calendar", "sales", "reservations"]
+    assert list(by_key) == ["web", "screenshots", "shopping", "flights", "email", "calendar", "sales", "jobs",
+                            "reservations"]
+    # The person's job searches: private, behind its own disclosure, never acting outward.
+    jobs = by_key["jobs"]
+    assert jobs["private_only"] and not jobs["acts"] and not jobs["enabled"]
+    assert jobs["disclosure"]["version"] == "jobs-1"
     # Read-only, no consent; listed as not set up until the browser worker exists.
     shots = by_key["screenshots"]
     assert shots["always_on"] and not shots["acts"] and not shots["private_only"]

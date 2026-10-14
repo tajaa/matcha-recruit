@@ -108,6 +108,10 @@ async def create_search(user, company_id: UUID, body: JobSearchCreate) -> dict:
     weights = ranking.clean_weights(body.weights.model_dump() if body.weights else None)
     token = uuid4()
     title = body.title or (body.criteria.titles[0] if body.criteria.titles else body.ask[:80])
+    from .agent_phase import default_model
+
+    # Settled now, like the assistant's: a later admin change applies to new searches.
+    model = await default_model()
     async with connection_or_direct() as conn:
         async with conn.transaction():
             # Count-then-insert is atomic per person: two creates at once can't
@@ -131,13 +135,13 @@ async def create_search(user, company_id: UUID, body: JobSearchCreate) -> dict:
                 row = await conn.fetchrow(
                     """INSERT INTO mw_job_searches
                            (request_id, user_id, company_id, title, ask, criteria, weights,
-                            weights_source, use_resume, status, dispatch_token, progress)
+                            weights_source, use_resume, status, dispatch_token, progress, model)
                        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, 'queued', $10,
-                               '{"note": "Queued."}'::jsonb)
+                               '{"note": "Queued."}'::jsonb, $11)
                        RETURNING *""",
                     body.request_id, user.id, company_id, title[:120], body.ask,
                     json.dumps(body.criteria.model_dump()), json.dumps(weights),
-                    "user" if body.weights else "default", body.use_resume, token,
+                    "user" if body.weights else "default", body.use_resume, token, model,
                 )
             except asyncpg.UniqueViolationError:
                 raise HTTPException(status_code=409, detail={
@@ -161,3 +165,20 @@ async def create_search(user, company_id: UUID, body: JobSearchCreate) -> dict:
         raise HTTPException(status_code=503, detail="Couldn't start the search right now. Try again in a moment.")
     logger.info("job search queued search=%s user=%s", row["id"], user.id)
     return search_view(row)
+
+
+async def redraft_approach(user, search_id: UUID, lead_id: UUID) -> dict:
+    """Draft (or redraft) the approach for one job of a finished search."""
+    from app.core.services.redis_cache import check_rate_limit
+
+    from .service import get_search, requeue_approach
+
+    if not _is_admin(user):
+        await check_rate_limit(str(user.id), "espresso_job_search_redraft", 10, 3600)
+    _search, token = await requeue_approach(search_id, lead_id, user.id)
+    try:
+        await dispatch(search_id, token)
+    except Exception:
+        # The search stays `approaching`; a status poll restarts it.
+        logger.exception("job search redraft dispatch failed search=%s", search_id)
+    return await get_search(search_id, user.id)

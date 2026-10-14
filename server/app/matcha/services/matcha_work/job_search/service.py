@@ -9,7 +9,9 @@ from __future__ import annotations
 import hashlib
 import json
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
+
+import asyncpg
 
 from app.database import connection_or_direct, decode_jsonb
 from app.matcha.models.matcha_work.job_search import JobWeights, LeadPatch
@@ -23,6 +25,14 @@ _LIVE_SQL = ", ".join(f"'{status}'" for status in LIVE)
 # A live search that has not moved in this long has lost its chain for good.
 STALE_INTERVAL = "2 hours"
 MAX_LIST = 50
+MAX_REDRAFTS = 20
+RESUME_CHARS = 6_000
+# States with a pay-range law (in postings or on request): where "ask for the
+# range" is backed by law. The employer-side list in workforce_compliance, plus
+# Massachusetts (posting law in effect since October 2025).
+PAY_LAW_STATES = sorted({
+    "CA", "CO", "WA", "NY", "IL", "HI", "MN", "NJ", "VT", "DC", "MD", "CT", "NV", "RI", "MA",
+})
 
 
 class JobSearchError(ValueError):
@@ -249,6 +259,17 @@ async def update_weights(search_id: UUID, user_id: UUID, weights: JobWeights) ->
     return await get_search(search_id, user_id)
 
 
+async def release_drafts(conn, search_id: UUID) -> None:
+    """A search that ended (finished early, cancelled, stalled) drafts nothing
+    more: jobs still waiting for an approach become `failed`, which the person
+    can redraft, instead of showing "drafting" forever."""
+    await conn.execute(
+        """UPDATE mw_job_leads SET approach_status = 'failed', updated_at = NOW()
+           WHERE search_id = $1 AND approach_status IN ('queued', 'drafting')""",
+        search_id,
+    )
+
+
 async def cancel_search(search_id: UUID, user_id: UUID) -> dict:
     async with connection_or_direct() as conn, conn.transaction():
         search = await owned_search(conn, search_id, user_id, lock=True)
@@ -263,6 +284,7 @@ async def cancel_search(search_id: UUID, user_id: UUID) -> dict:
             )
             # What was found so far stays useful, ranked.
             await rerank(conn, search)
+            await release_drafts(conn, search_id)
     return await get_search(search_id, user_id)
 
 
@@ -314,6 +336,7 @@ async def end_stale(conn, user_id: UUID) -> int:
                WHERE id = $1""",
             row["id"], "done" if found else "failed",
         )
+        await release_drafts(conn, row["id"])
     return len(rows)
 
 
@@ -359,7 +382,11 @@ async def rerank(conn, search) -> int:
     await conn.execute(
         """UPDATE mw_job_leads AS l
            SET rank_score = v.score, rank = v.rank, rank_band = v.band,
-               rank_explain = v.explain::jsonb, updated_at = NOW()
+               rank_explain = v.explain::jsonb,
+               pay_law_hint = CASE WHEN l.comp_status <> 'posted' AND l.state_code = ANY($7::text[])
+                                   THEN l.state_code || ' has a pay-range law: ask for the range.'
+                                   ELSE NULL END,
+               updated_at = NOW()
            FROM unnest($2::uuid[], $3::float8[], $4::int[], $5::int[], $6::text[])
                 AS v(id, score, rank, band, explain)
            WHERE l.id = v.id AND l.search_id = $1""",
@@ -369,5 +396,70 @@ async def rerank(conn, search) -> int:
         [r.rank for r in ranked],
         [r.band for r in ranked],
         [json.dumps(r.explain) for r in ranked],
+        PAY_LAW_STATES,
     )
     return len(ranked)
+
+
+async def load_resume_for_model(user_id: UUID) -> str | None:
+    """The person's saved résumé as text for a model, or None. Only read when
+    the search was started with "use my résumé" (covered by `jobs-1`)."""
+    async with connection_or_direct() as conn:
+        row = await conn.fetchrow(
+            "SELECT raw_text, parsed_data FROM user_resumes WHERE user_id = $1", user_id,
+        )
+    if row is None:
+        return None
+    parsed = decode_jsonb(row["parsed_data"], {}) or {}
+    head = []
+    for key, label in (("current_title", "Current title"), ("experience_years", "Years of experience"),
+                       ("location", "Location"), ("summary", "Summary")):
+        if parsed.get(key):
+            head.append(f"{label}: {parsed[key]}")
+    if parsed.get("skills"):
+        head.append("Skills: " + ", ".join(str(s) for s in parsed["skills"][:30]))
+    text = "\n".join(head)
+    raw = (row["raw_text"] or "").strip()
+    if raw:
+        text = f"{text}\n\n{raw}" if text else raw
+    return text[:RESUME_CHARS] or None
+
+
+async def requeue_approach(search_id: UUID, lead_id: UUID, user_id: UUID):
+    """Put a finished search back into `approaching` for one job.
+
+    Returns (search row, new token) for the caller to dispatch. Free: it is
+    not a new search, but capped per search.
+    """
+    token = uuid4()
+    async with connection_or_direct() as conn, conn.transaction():
+        search = await owned_search(conn, search_id, user_id, lock=True)
+        if search["status"] in LIVE:
+            raise JobSearchError("This search is still running. Try again when it finishes.", 409)
+        if search["status"] != "done":
+            raise JobSearchError("Only a finished search can draft more approaches.", 409)
+        if int(search["redrafts"] or 0) >= MAX_REDRAFTS:
+            raise JobSearchError("This search has used its redrafts.", 429)
+        lead = await conn.fetchrow(
+            "SELECT id, approach_status FROM mw_job_leads WHERE id = $1 AND search_id = $2 FOR UPDATE",
+            lead_id, search_id,
+        )
+        if lead is None:
+            raise JobSearchError("Job not found.", 404)
+        await conn.execute(
+            "UPDATE mw_job_leads SET approach_status = 'queued', updated_at = NOW() WHERE id = $1",
+            lead_id,
+        )
+        try:
+            search = await conn.fetchrow(
+                """UPDATE mw_job_searches
+                   SET status = 'approaching', dispatch_token = $2, lease_until = NULL, attempts = 0,
+                       phase_cursor = $3::jsonb, redrafts = redrafts + 1, completed_at = NULL,
+                       progress = progress || '{"note": "Drafting the approach…"}'::jsonb,
+                       updated_at = NOW()
+                   WHERE id = $1 RETURNING *""",
+                search_id, token, json.dumps({"approach_queue": [str(lead_id)]}),
+            )
+        except asyncpg.UniqueViolationError as exc:
+            raise JobSearchError("Another job search is running. Try again when it finishes.", 409) from exc
+    return search, token

@@ -87,8 +87,8 @@ def test_every_acting_ability_is_private_only_and_has_a_disclosure():
             assert ability.private_only, ability.key
             assert ability.consent_version == consent.current_version(ability.key)
             assert consent.disclosure_view(ability.key)["body"]
-        elif ability.key == "sales":
-            assert ability.private_only and ability.consent_version == consent.current_version("sales")
+        elif ability.key in ("sales", "jobs"):
+            assert ability.private_only and ability.consent_version == consent.current_version(ability.key)
         else:
             assert ability.consent_version is None
     assert consent.current_version("web") is None and consent.disclosure_view("web") is None

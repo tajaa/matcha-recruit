@@ -30,9 +30,10 @@ from uuid import UUID, uuid4
 
 from app.database import connection_or_direct
 
+from . import model_phases, phases
 from .enqueue import dispatch
-from .phases import PHASES, Deps, Guard, PhaseFailed, PhaseOutcome
-from .service import LIVE, STALE_INTERVAL, rerank
+from .phases import Deps, Guard, PhaseFailed, PhaseOutcome
+from .service import LIVE, STALE_INTERVAL, release_drafts, rerank
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,15 @@ RETRY_COUNTDOWN = 30
 IDLE_INTERVAL = "2 minutes"
 
 _LIVE_SQL = ", ".join(f"'{status}'" for status in LIVE)
+
+# The order a search goes through: each status names the phase that runs in it.
+PHASES = {
+    "planning": model_phases.plan,
+    "discovering": phases.discover,
+    "screening": model_phases.screen,
+    "enriching": phases.enrich,
+    "approaching": model_phases.approach,
+}
 
 
 async def claim(search_id: UUID, token: UUID) -> dict | None:
@@ -95,6 +105,8 @@ async def advance(search_id: UUID, token: UUID, outcome: PhaseOutcome, *,
             json.dumps(outcome.cursor) if outcome.cursor is not None else None,
             error, terminal,
         )
+        if row is not None and terminal:
+            await release_drafts(conn, search_id)
     if row is None:
         return False, None
     return True, next_token
