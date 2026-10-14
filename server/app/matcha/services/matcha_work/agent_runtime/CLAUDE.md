@@ -233,6 +233,25 @@ There is no long-lived model session: the last 20 channel messages are replayed
 as context. `ask_user` ends a run with a question card; the reply is the next
 message and starts the next run.
 
+What carries over from earlier runs, besides their words (`history.py`):
+
+- **A run record.** Each replayed `agent_result` gets a line the server writes
+  from that run's own `fetch`/`search` steps ("loaded …; searched …; tried to
+  load …, which failed"), for the 5 newest answers. Without it a follow-up run
+  had only the earlier answer's wording and "corrected" a page load that had
+  happened. The prompt says to trust the record over the wording.
+- **Verified links.** `earlier_links` seeds the run's provenance with the URLs
+  the requester's own 5 latest finished runs in this conversation verified:
+  pages they loaded and `url`/`page_url` values in their stored (already
+  gated) results. So "send me those links" can be answered. A coworker's run
+  in a shared chat seeds nothing. Commit targets are unaffected: grounding
+  still comes only from the person's words (`policy`).
+
+The base prompt tells the model to go to the source the person named (the
+building's own site, not just the listing), to ask one short question when the
+request is ambiguous or a choice is theirs, and never to say a page could not
+be reached unless `fetch_page` failed on it in this run.
+
 Entry points:
 
 | Where | How a message gets here | Abilities |

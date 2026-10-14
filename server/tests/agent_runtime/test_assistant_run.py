@@ -539,3 +539,41 @@ async def test_native_calendar_capability_requires_current_private_consent(wired
     await assistant.run_assistant(_run(surface="project_chat"))
     assert "list_apple_events" not in [t.get("name") for t in client.calls[0]["tools"]]
     connected.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_links_earlier_runs_verified_survive_the_result_gate(wired, monkeypatch):
+    """"Send me those links": the run may give back what an earlier run here
+    verified, and still nothing else."""
+    earlier = AsyncMock(return_value=frozenset({"https://www.zillow.com/a/"}))
+    monkeypatch.setattr(history, "earlier_links", earlier)
+    client = wired.client(response(call("finish", {**FINISH, "blocks": [{"type": "sources", "sources": [
+        {"title": "Zillow", "url": "https://www.zillow.com/a/"},
+        {"title": "Made up", "url": "https://tower737.example.com/"},
+    ]}]})))
+    run = _run()
+    await assistant.run_assistant(run)
+    assert client.calls
+    kwargs = earlier.await_args.kwargs
+    assert kwargs["channel_id"] == run["channel_id"] and kwargs["requester_id"] == run["requested_by"]
+    assert kwargs["exclude_run"] == run["id"]
+    stored = wired.mark.await_args.kwargs["result"]
+    sources = [b for b in stored["blocks"] if b["type"] == "sources"][0]["sources"]
+    assert [s["url"] for s in sources] == ["https://www.zillow.com/a/"]
+
+
+def test_the_prompt_says_to_go_to_the_source_ask_when_unsure_and_report_only_what_ran():
+    from app.matcha.services.matcha_work.agent_runtime import catalog
+    from app.matcha.services.matcha_work.agent_runtime.prompt import build_system_prompt
+
+    async def no_fetch(_url):
+        return {}, set()
+
+    web = next(a for a in catalog.build_catalog(fetch_page=no_fetch) if a.key == "web")
+    text = build_system_prompt(SimpleNamespace(timezone=None, surface="assistant", resume=None), [web])
+    assert "find that place with web_search and load it with fetch_page" in text
+    assert "When you are not sure what they want, ask before you work" in text
+    assert "Never say a page could not be reached unless fetch_page failed on it in this run" in text
+    assert "Trust that record over the earlier answer's wording" in text
+    assert "is not the source" in text and "earlier run of yours in this conversation" in text
+    assert "a few tool calls, then finish" not in text
