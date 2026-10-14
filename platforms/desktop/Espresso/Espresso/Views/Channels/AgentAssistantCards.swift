@@ -194,6 +194,24 @@ extension AgentCardMessageView {
             reservationView(booking)
         case .purchaseSetup(let setup):
             if !setup.steps.isEmpty { PurchaseSetupView(setup: setup) }
+        case .jobs(let block):
+            ForEach(block.jobs, id: \.id) { job in
+                // Every job opens in Job search, with its pay evidence and drafts.
+                Button {
+                    appState.openJobSearch(searchId: block.searchId, leadId: job.id)
+                } label: {
+                    itemRow(icon: "briefcase",
+                            title: [job.rank.map { "#\($0)" }, job.title].compactMap { $0 }.joined(separator: " "),
+                            subtitle: [job.company, job.location].compactMap { $0 }.filter { !$0.isEmpty }
+                                .joined(separator: " \u{00B7} "),
+                            detail: [job.compLine, job.fitScore.map { "fit \($0)/5" },
+                                     job.userState.flatMap { $0 == "new" ? nil : $0.capitalized }]
+                                .compactMap { $0 }.joined(separator: " \u{00B7} "),
+                            trailing: "chevron.right")
+                }
+                .buttonStyle(.plain)
+                .help("Open in Job search")
+            }
         case .unknown:
             EmptyView()
         }

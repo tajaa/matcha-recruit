@@ -142,9 +142,12 @@ struct MWWorkspaceFlags: Codable {
     /// Absent on servers that predate it, and when the assistant is off.
     var assistantModels: [MWAssistantModelRow]? = nil
     var defaultAssistantModel: String? = nil
+    /// Job search (a personal account on a server with a listings provider).
+    var jobSearch: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case espressoAssistant = "espresso_assistant"
+        case jobSearch = "job_search"
         case chatModels = "chat_models"
         case defaultChatModel = "default_chat_model"
         case assistantModels = "assistant_models"
@@ -217,6 +220,8 @@ struct MWEntitlementQuotas: Codable {
     let agentRuns: MWRunQuota?
     /// Espresso assistant requests this UTC day.
     let assistantRuns: MWRunQuota?
+    /// Job searches this UTC month.
+    var jobSearches: MWRunQuota? = nil
 
     enum CodingKeys: String, CodingKey {
         case tokenLimit = "token_limit"
@@ -225,5 +230,6 @@ struct MWEntitlementQuotas: Codable {
         case resetsAt = "resets_at"
         case agentRuns = "agent_runs"
         case assistantRuns = "assistant_runs"
+        case jobSearches = "job_searches"
     }
 }

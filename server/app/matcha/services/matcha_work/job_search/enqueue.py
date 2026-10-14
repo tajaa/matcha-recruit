@@ -168,7 +168,7 @@ async def create_search(user, company_id: UUID, body: JobSearchCreate) -> dict:
 
 
 async def redraft_approach(user, search_id: UUID, lead_id: UUID) -> dict:
-    """Draft (or redraft) the approach for one job of a finished search."""
+    """Draft (or redraft) the approach for one job of a finished or cancelled search."""
     from app.core.services.redis_cache import check_rate_limit
 
     from .service import get_search, requeue_approach

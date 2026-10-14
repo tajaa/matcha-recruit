@@ -23,7 +23,7 @@ from app.matcha.services.matcha_work.agent_runtime.context import RunLimits
 from . import contracts, prompts, ranking
 from .agent_phase import SearchProgress, run_model_phase
 from .phases import Deps, Guard, PhaseOutcome, plan_from_criteria
-from .service import load_resume_for_model
+from .service import load_resume_for_model, resting_status
 
 logger = logging.getLogger(__name__)
 
@@ -199,11 +199,19 @@ def _queue(search: dict) -> list[str]:
     return [str(i) for i in cursor.get("approach_queue") or []]
 
 
+def _finished(search: dict, note: str) -> PhaseOutcome:
+    """The queue is drafted: `done`, or back to `cancelled` for a cancelled
+    search that drafted one approach on request."""
+    if resting_status(search) == "cancelled":
+        return PhaseOutcome(status="cancelled", cursor={}, progress={"note": "Cancelled. The approach you asked for is drafted."})
+    return PhaseOutcome(status="done", cursor={}, progress={"note": note})
+
+
 async def approach(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     queue = _queue(search)
     take, rest = queue[:APPROACH_BATCH], queue[APPROACH_BATCH:]
     if not take:
-        return PhaseOutcome(status="done", cursor={}, progress={"note": "Done."})
+        return _finished(search, "Done.")
     async with connection_or_direct() as conn:
         rows = await conn.fetch(
             """SELECT id, title, company, location, remote, source_url, comp, ats, description, pay_law_hint
@@ -270,9 +278,11 @@ async def approach(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
             [json.dumps(drafted[str(i)]) if str(i) in drafted else None for i in ids],
         )
     if rest:
-        return PhaseOutcome(status="approaching", cursor={"approach_queue": rest},
+        after = (decode_jsonb(search.get("phase_cursor"), {}) or {}).get("after")
+        return PhaseOutcome(status="approaching",
+                            cursor={"approach_queue": rest, **({"after": after} if after else {})},
                             progress={"note": f"Drafted approaches; {len(rest)} jobs to go…"})
-    return PhaseOutcome(status="done", cursor={}, progress={"note": "Done: ranked, with approaches drafted."})
+    return _finished(search, "Done: ranked, with approaches drafted.")
 
 
 def approach_queue_for_top(rows: list[Any]) -> list[str]:

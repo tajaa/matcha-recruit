@@ -33,7 +33,7 @@ from app.database import connection_or_direct
 from . import model_phases, phases
 from .enqueue import dispatch
 from .phases import Deps, Guard, PhaseFailed, PhaseOutcome
-from .service import LIVE, STALE_INTERVAL, release_drafts, rerank
+from .service import LIVE, STALE_INTERVAL, release_drafts, rerank, resting_status
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,10 @@ async def advance(search_id: UUID, token: UUID, outcome: PhaseOutcome, *,
 
 async def _ending(search: dict, message: str) -> PhaseOutcome:
     """A search that cannot go on: `done` (counted) if it has ranked jobs to
-    show, else `failed` (free)."""
+    show, else `failed` (free). A cancelled search that was drafting a
+    requested approach goes back to `cancelled`."""
+    if resting_status(search) == "cancelled":
+        return PhaseOutcome(status="cancelled", progress={"note": f"Cancelled. Couldn't draft the approach: {message}"})
     async with connection_or_direct() as conn:
         leads = int(await conn.fetchval(
             "SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1", search["id"],

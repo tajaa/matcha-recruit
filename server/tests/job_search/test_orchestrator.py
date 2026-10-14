@@ -1,4 +1,5 @@
 """The task chain: claims, new tokens per phase, retries, endings, restarts."""
+import json
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -8,7 +9,7 @@ from app.matcha.services.matcha_work.job_search import orchestrator
 from app.matcha.services.matcha_work.job_search.phases import PhaseFailed, PhaseOutcome
 from tests.agent_runtime.helpers import FakeConn, connection
 
-from ._fixtures import SEARCH, TOKEN, search_row
+from ._fixtures import LEAD, SEARCH, TOKEN, search_row
 
 
 @pytest.fixture
@@ -118,6 +119,22 @@ async def test_a_phase_whose_task_keeps_getting_killed_ends(wired, monkeypatch):
     rerank.assert_awaited_once()
     dispatch.assert_not_awaited()
     assert "'10 minutes'" in conn.ran("attempts = attempts + 1")[0][1]
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_search_that_cannot_draft_stays_cancelled(wired, monkeypatch):
+    """A redraft on a cancelled search that keeps dying ends `cancelled`,
+    not `done`: it was never a finished search."""
+    conn, dispatch, rerank = wired
+    monkeypatch.setitem(orchestrator.PHASES, "approaching", AsyncMock())
+    cursor = json.dumps({"approach_queue": [str(LEAD)], "after": "cancelled"})
+    conn.on("attempts = attempts + 1", search_row(status="approaching", phase_cursor=cursor,
+                                                  attempts=orchestrator.MAX_ATTEMPTS + 1))
+    await orchestrator.run_phase(SEARCH, TOKEN)
+    args = advance_args(conn)
+    assert args[2] == "cancelled" and "Couldn't draft the approach" in args[5]
+    rerank.assert_not_awaited()
+    dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio

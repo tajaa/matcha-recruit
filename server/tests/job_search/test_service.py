@@ -164,6 +164,18 @@ async def test_a_stale_search_that_found_jobs_ends_done(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_stale_redraft_on_a_cancelled_search_ends_cancelled(monkeypatch):
+    monkeypatch.setattr(service, "rerank", AsyncMock(return_value=3))
+    cursor = json.dumps({"approach_queue": ["x"], "after": "cancelled"})
+    conn = (FakeConn()
+            .on("FOR UPDATE", [search_row(status="approaching", phase_cursor=cursor)])
+            .on("SELECT EXISTS (SELECT 1 FROM mw_job_leads", True))
+    assert await service.end_stale(conn, USER) == 1
+    [end] = conn.ran("error = COALESCE(error, 'Stopped:")
+    assert end[2][1] == "cancelled"
+
+
+@pytest.mark.asyncio
 async def test_find_by_request(conn):
     assert await service.find_by_request(USER, uuid4()) is None
     conn.on("AND request_id = $2", search_row(status="discovering"))

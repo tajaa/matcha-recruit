@@ -185,6 +185,27 @@ async def test_approach_drafts_a_batch_and_queues_the_rest(conn, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_cancelled_search_goes_back_to_cancelled_after_its_draft(conn):
+    """A redraft on a cancelled search ends `cancelled`, not `done`, and a
+    longer queue carries that through each task."""
+    def failing():
+        return deps(*[response(text="?")] * 10)[0]
+
+    conn.on("source_url, comp, ats, description, pay_law_hint", [lead_row(1), lead_row(2)])
+    ids = [str(UUID(int=i)) for i in (1, 2, 3)]
+    cursor = json.dumps({"approach_queue": ids, "after": "cancelled"})
+    out = await model_phases.approach(search_row(status="approaching", phase_cursor=cursor), failing(), guard())
+    assert out.status == "approaching" and out.cursor == {"approach_queue": ids[2:], "after": "cancelled"}
+    last = json.dumps({"approach_queue": ids[2:], "after": "cancelled"})
+    out = await model_phases.approach(search_row(status="approaching", phase_cursor=last), failing(), guard())
+    assert out.status == "cancelled" and out.cursor == {}
+    empty = json.dumps({"approach_queue": [], "after": "cancelled"})
+    assert (await model_phases.approach(search_row(phase_cursor=empty), failing(), guard())).status == "cancelled"
+    done = json.dumps({"approach_queue": [], "after": "done"})
+    assert (await model_phases.approach(search_row(phase_cursor=done), failing(), guard())).status == "done"
+
+
+@pytest.mark.asyncio
 async def test_approach_failure_marks_the_batch_failed(conn):
     conn.on("source_url, comp, ats, description, pay_law_hint", [lead_row(1)])
     d, _ = deps(*[response(text="?")] * 10)

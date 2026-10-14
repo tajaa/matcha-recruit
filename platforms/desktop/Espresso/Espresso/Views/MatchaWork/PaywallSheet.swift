@@ -23,6 +23,7 @@ struct PaywallSheet: View {
         case "ai_quota": return "You've used your free AI for now"
         case "agent_cards": return "Agent cards need Pro"
         case "assistant": return "The Espresso assistant needs Pro"
+        case "job_search": return "Job search needs Pro"
         default: return "Upgrade Werk"
         }
     }

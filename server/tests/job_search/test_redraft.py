@@ -1,4 +1,4 @@
-"""Redrafting one job's approach: finished searches only, capped, free."""
+"""Redrafting one job's approach: finished or cancelled searches, capped, free."""
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -21,14 +21,17 @@ def conn(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_requeue_puts_one_job_back_in_the_chain(conn):
-    conn.on("FOR UPDATE", search_row(status="done", redrafts=0))
+@pytest.mark.parametrize("status", ["done", "cancelled"])
+async def test_requeue_puts_one_job_back_in_the_chain(conn, status):
+    """A cancelled search can draft too, and remembers to go back to cancelled."""
+    conn.on("FOR UPDATE", search_row(status=status, redrafts=0))
     conn.on("FROM mw_job_leads WHERE id = $1 AND search_id = $2 FOR UPDATE", lead_row())
     conn.on("SET status = 'approaching'", search_row(status="approaching"))
     search, token = await service.requeue_approach(SEARCH, LEAD, USER)
     assert search["status"] == "approaching"
     [update] = conn.ran("SET status = 'approaching'")
-    assert update[2][1] == token and json.loads(update[2][2]) == {"approach_queue": [str(LEAD)]}
+    assert update[2][1] == token
+    assert json.loads(update[2][2]) == {"approach_queue": [str(LEAD)], "after": status}
     assert "redrafts = redrafts + 1" in update[1]
     assert conn.ran("SET approach_status = 'queued'")
 

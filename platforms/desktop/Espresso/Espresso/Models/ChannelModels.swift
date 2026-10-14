@@ -317,6 +317,40 @@ struct AgentEventItem: Codable, Hashable {
     }
 }
 
+/// Jobs from one of the person's job searches, as the server rebuilt them
+/// from what the run read (`abilities/jobs.py`): pay is the posting's own.
+struct AgentJobItem: Codable, Hashable {
+    let id: String
+    let rank: Int?
+    let title: String
+    let company: String
+    let location: String?
+    let compLine: String?
+    let compStatus: String?
+    let fitScore: Int?
+    let userState: String?
+    let applyUrl: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, rank, title, company, location
+        case compLine = "comp_line"
+        case compStatus = "comp_status"
+        case fitScore = "fit_score"
+        case userState = "user_state"
+        case applyUrl = "apply_url"
+    }
+}
+
+struct AgentJobsBlock: Codable, Hashable {
+    let searchId: String
+    let jobs: [AgentJobItem]
+
+    enum CodingKeys: String, CodingKey {
+        case jobs
+        case searchId = "search_id"
+    }
+}
+
 struct AgentReservation: Codable, Hashable {
     let venue: String
     let when: String
@@ -360,6 +394,7 @@ enum AgentResultBlock: Codable, Hashable {
     case events([AgentEventItem])
     case reservation(AgentReservation)
     case purchaseSetup(AgentPurchaseSetup)
+    case jobs(AgentJobsBlock)
     case unknown(String)
 
     private enum CodingKeys: String, CodingKey {
@@ -406,6 +441,12 @@ enum AgentResultBlock: Codable, Hashable {
             } else {
                 self = .unknown(type)
             }
+        case "jobs":
+            if let block = try? AgentJobsBlock(from: decoder) {
+                self = .jobs(block)
+            } else {
+                self = .unknown(type)
+            }
         default:
             self = .unknown(type)
         }
@@ -446,6 +487,9 @@ enum AgentResultBlock: Codable, Hashable {
         case .purchaseSetup(let setup):
             try setup.encode(to: encoder)
             try c.encode("purchase_setup", forKey: .type)
+        case .jobs(let block):
+            try block.encode(to: encoder)
+            try c.encode("jobs", forKey: .type)
         case .unknown(let type):
             try c.encode(type, forKey: .type)
         }

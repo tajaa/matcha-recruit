@@ -94,6 +94,13 @@ class AppState {
     var showAssistantHub: Bool = false
     var pendingAssistantEmailContext: AssistantEmailContext?
     var pendingAssistantSalesContext: AssistantSalesContext?
+    var pendingAssistantJobContext: AssistantJobContext?
+    /// Full-pane Job search (the person's searches, ranked jobs and drafted
+    /// approaches). Same nav-only model.
+    var showJobSearchHub: Bool = false
+    /// A search or job for Job search to open next (`openJobSearch`); the
+    /// section consumes and clears it.
+    var jobSearchFocus: JobSearchFocus? = nil
     /// Full-pane Calendar (the person's Espresso calendar, dated to-dos and
     /// Google Calendar). Same nav-only model.
     var showCalendarHub: Bool = false
@@ -140,6 +147,14 @@ class AppState {
         showEmailHub = false
         showAssistantHub = false
         showCalendarHub = false
+        showJobSearchHub = false
+    }
+
+    /// Open Job search, on one search (and one of its jobs) when given.
+    func openJobSearch(searchId: String? = nil, leadId: String? = nil) {
+        clearPrimaryNav()
+        jobSearchFocus = searchId.map { JobSearchFocus(searchId: $0, leadId: leadId) }
+        showJobSearchHub = true
     }
 
     /// Open the Calendar, on `date`'s month or week when given.
@@ -160,7 +175,7 @@ class AppState {
         guard !emails.isEmpty else { return }
         guard canAssistant else { presentPaywall(for: "assistant"); return }
         clearPrimaryNav()
-        pendingAssistantSalesContext = nil
+        clearAssistantHandoffs()
         pendingAssistantEmailContext = AssistantEmailContext(emails: Array(emails.prefix(25)))
         showAssistantHub = true
     }
@@ -169,10 +184,28 @@ class AppState {
         guard let owner = currentUser?.id else { return }
         guard canAssistant else { presentPaywall(for: "assistant"); return }
         clearPrimaryNav()
-        pendingAssistantEmailContext = nil
+        clearAssistantHandoffs()
         pendingAssistantSalesContext = AssistantSalesContext(owner: owner, campaignId: campaign.id,
                                                              projectId: projectId, title: campaign.title)
         showAssistantHub = true
+    }
+
+    /// A new Espresso conversation about one job, opened with a draft prompt.
+    func workOnJobSearch(searchId: String, jobId: String, title: String) {
+        guard let owner = currentUser?.id else { return }
+        guard canAssistant else { presentPaywall(for: "assistant"); return }
+        clearPrimaryNav()
+        clearAssistantHandoffs()
+        pendingAssistantJobContext = AssistantJobContext(owner: owner, searchId: searchId, jobId: jobId, title: title)
+        showAssistantHub = true
+    }
+
+    /// The newest hand-off wins: one left over from a failed attempt must
+    /// never open in place of what the person just picked.
+    private func clearAssistantHandoffs() {
+        pendingAssistantEmailContext = nil
+        pendingAssistantSalesContext = nil
+        pendingAssistantJobContext = nil
     }
 
     var onlineUsers: [MWOnlineUser] = []
@@ -206,6 +239,11 @@ class AppState {
     var canPaidChannels: Bool { can("paid_channels") }
     var canAgentCards: Bool { can("agent_cards") }
     var canAssistant: Bool { can("assistant") }
+    var canJobSearch: Bool { can("job_search") }
+    /// Whether this workspace has Job search: a personal account on a server
+    /// with a listings provider. Defaults CLOSED while unknown, like the
+    /// assistant's row.
+    var jobSearchEnabled: Bool { entitlements?.workspace?.jobSearch == true }
     /// Whether the WORKSPACE has the assistant switched on. Unlike the plan
     /// gates above this defaults CLOSED while unknown: the row is a whole
     /// surface, and one that appears and then vanishes is worse than one that
