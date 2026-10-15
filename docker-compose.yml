@@ -125,14 +125,16 @@ services:
     healthcheck:
       disable: true
 
-  # Agent worker: agent-card runs, Espresso assistant runs, and the guarded
-  # browser that books reservations and takes page screenshots. Kept apart from matcha-worker because a
-  # Chromium does not fit in its 768M, and a multi-minute run would block its
-  # single slot.
+  # Agent worker: the guarded browser that takes page screenshots and books
+  # reservations, and agent-card / Espresso assistant runs if they are moved
+  # here. Kept apart from matcha-worker because a Chromium does not fit in its
+  # 768M, and a multi-minute run would block its single slot.
   # Start with: docker-compose --profile agent-worker up -d
   # Then set on the API (.env.backend):
-  #   AGENT_CARD_QUEUE=agent_cards  AGENT_BROWSER_QUEUE=agent_browser
-  # Until both are set, runs share matcha-worker and reservations are not offered.
+  #   AGENT_BROWSER_QUEUE=agent_browser  screenshots + reservations (prod since 2026-10-15)
+  #   AGENT_CARD_QUEUE=agent_cards       optional: card + assistant runs here too
+  # Without AGENT_BROWSER_QUEUE neither browser ability is offered; without
+  # AGENT_CARD_QUEUE the runs stay on matcha-worker and send each page view here.
   matcha-agent-worker:
     image: ${MATCHA_BACKEND_IMAGE:-010438494410.dkr.ecr.us-west-1.amazonaws.com/matcha-backend:latest}
     container_name: matcha-agent-worker
@@ -155,10 +157,15 @@ services:
     command: python -m celery -A app.workers.celery_app worker --loglevel=info -Q agent_cards,agent_browser --concurrency=1 --max-tasks-per-child=1
     # Chromium's shared memory. Docker's 64M default crashes tabs on real pages.
     shm_size: 256m
+    # The app host has 1.8 GB in all, with the backend near 600M (two of them
+    # during a blue/green swap). 800M holds one Chromium view at a time (the
+    # worker's one slot) and keeps a heavy page from pushing the host into
+    # the backend's memory. Moving card runs here (AGENT_CARD_QUEUE) needs a
+    # bigger host first.
     deploy:
       resources:
         limits:
-          memory: 1536M
+          memory: 800M
     logging:
       driver: "json-file"
       options:
