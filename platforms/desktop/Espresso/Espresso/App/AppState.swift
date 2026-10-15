@@ -160,6 +160,15 @@ class AppState {
         showTasksHub = true
     }
 
+    /// Open the person's conversation with Espresso (⌘J, the sidebar card);
+    /// the paywall on a plan without it.
+    func openAssistant() {
+        guard assistantEnabled else { return }
+        guard canAssistant else { presentPaywall(for: "assistant"); return }
+        clearPrimaryNav()
+        showAssistantHub = true
+    }
+
     /// A new Espresso conversation: a directive to start a task with (Espresso
     /// asks for anything missing), or a question about an existing task.
     func workOnTask(directive: String, taskId: String? = nil, itemId: String? = nil) {

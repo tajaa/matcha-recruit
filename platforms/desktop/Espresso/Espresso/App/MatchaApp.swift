@@ -102,11 +102,17 @@ struct MatchaApp: App {
             // open into main/right/bottom pane, star to sidebar). ContentView
             // presents the sheet off this flag.
             CommandGroup(after: .textEditing) {
-                Button("Find in Werk…") {
+                Button("Find Anything…") {
                     appState.showFinderPalette = true
                 }
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(!appState.isAuthenticated)
+                // Cmd+J — the person's conversation with Espresso (the sidebar card).
+                Button("Ask Espresso") {
+                    appState.openAssistant()
+                }
+                .keyboardShortcut("j", modifiers: .command)
+                .disabled(!appState.isAuthenticated || !appState.assistantEnabled)
             }
             // View ▸ side pane: keep a second surface beside whatever is open.
             CommandGroup(after: .sidebar) {

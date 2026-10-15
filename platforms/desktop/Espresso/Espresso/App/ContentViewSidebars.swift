@@ -222,43 +222,103 @@ struct ArchiveView: View {
     }
 }
 
-// MARK: - Sidebar "Starred" pins
+// MARK: - Sidebar "Pinned" list
 
-/// The only place the sidebar surfaces specific items: a compact strip of
-/// pinned projects + starred channels + pinned threads + starred journals +
-/// starred files for quick access. Everything else lives in the per-surface
-/// hubs. Tapping a pin opens that item directly (file pins open the shared
-/// preview sheet). Hidden entirely when nothing is pinned/starred.
-struct SidebarStarredView: View {
+/// The only place the sidebar surfaces specific items: one list of what the
+/// person pinned. Tabs (pinned with "+", closed with "×") and starred items
+/// (pinned workspaces and threads, starred channels, journals and files) are
+/// merged, an item that is both showing once, as its tab. Each row is a
+/// coloured letter tile and a name. Hidden entirely when nothing is pinned
+/// and nothing can be.
+struct SidebarPinnedView: View {
     @Environment(AppState.self) private var appState
-    @State private var pins: [Pin] = []
+    @State private var stars: [Star] = []
+    @State private var hoveredId: String?
 
-    struct Pin: Identifiable {
-        let id: String
+    /// A starred item, by the same key a tab uses (`<kind>:<id>`).
+    struct Star: Identifiable, Equatable {
+        let entityId: String
         let name: String
-        let icon: String
         let kind: Kind
-        enum Kind { case project, channel, thread, journal, file }
+        enum Kind: String { case project, channel, thread, journal, file }
+        var id: String { "\(kind.rawValue):\(entityId)" }
     }
 
+    /// One row: a tab, a star, or both (shown as the tab).
+    struct Row: Identifiable, Equatable {
+        let id: String
+        let name: String
+        let tab: WorkTab?
+        let star: Star?
+    }
+
+    /// Tabs in their order, then stars that aren't already a tab.
+    nonisolated static func rows(tabs: [WorkTab], stars: [Star]) -> [Row] {
+        var out = tabs.filter { $0.kind != .home }.map { Row(id: $0.id, name: $0.title, tab: $0, star: nil) }
+        var seen = Set(out.map(\.id))
+        for star in stars where !seen.contains(star.id) {
+            seen.insert(star.id)
+            out.append(Row(id: star.id, name: star.name, tab: nil, star: star))
+        }
+        return out
+    }
+
+    /// The tile's letter: the name's first letter or digit ("#general" → "G").
+    nonisolated static func tileLetter(_ name: String) -> String {
+        guard let first = name.first(where: { $0.isLetter || $0.isNumber }) else { return "•" }
+        return String(first).uppercased()
+    }
+
+    /// A stable colour for an item: the same on every launch (Swift's
+    /// `hashValue` is not), spread across the palette.
+    nonisolated static func tileColorIndex(_ id: String, count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        var hash: UInt32 = 5381
+        for byte in id.utf8 { hash = (hash &* 33) &+ UInt32(byte) }
+        return Int(hash % UInt32(count))
+    }
+
+    private static let palette: [Color] = [
+        Color(red: 0.36, green: 0.55, blue: 0.95), Color(red: 0.27, green: 0.68, blue: 0.55),
+        Color(red: 0.90, green: 0.55, blue: 0.25), Color(red: 0.72, green: 0.45, blue: 0.90),
+        Color(red: 0.88, green: 0.38, blue: 0.48), Color(red: 0.30, green: 0.65, blue: 0.80),
+        Color(red: 0.62, green: 0.58, blue: 0.30), Color(red: 0.55, green: 0.50, blue: 0.75),
+    ]
+
     var body: some View {
-        // Observe the client-side star stores so the strip reloads when a
+        // Observe the client-side star stores so the list reloads when a
         // channel/journal/file is (un)starred — those bump their OWN
         // generation, not the list generations.
         let _ = ChannelStarStore.shared.generation
         let _ = JournalStarStore.shared.generation
         let _ = FileStarStore.shared.generation
+        let rows = Self.rows(tabs: appState.openTabs, stars: stars)
         return Group {
-            if !pins.isEmpty {
+            if !rows.isEmpty || appState.canPinActiveTab {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Starred")
-                        .font(.espresso(size: 11))
-                        .foregroundColor(appState.themeSidebarTextSecondary)
-                        .padding(.horizontal, 12)
-                        .padding(.top, 6)
-                        .padding(.bottom, 3)
-                    ForEach(pins) { pin in row(pin) }
-                    Spacer().frame(height: 6)
+                    HStack(spacing: 6) {
+                        Text("PINNED")
+                            .font(.espresso(size: 10, weight: .semibold))
+                            .tracking(0.6)
+                            .foregroundColor(appState.themeSidebarTextSecondary.opacity(0.8))
+                        Spacer(minLength: 0)
+                        Button { appState.pinActiveTab() } label: {
+                            Image(systemName: "plus")
+                                .font(.espresso(size: 10))
+                                .foregroundColor(appState.themeSidebarTextSecondary)
+                                .frame(width: 18, height: 18)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!appState.canPinActiveTab)
+                        .opacity(appState.canPinActiveTab ? 1 : 0.3)
+                        .help(pinHelp)
+                    }
+                    .padding(.leading, 16)
+                    .padding(.trailing, 10)
+                    .padding(.top, 8)
+                    .padding(.bottom, 2)
+                    ForEach(rows) { row in rowView(row) }
                 }
             }
         }
@@ -274,22 +334,53 @@ struct SidebarStarredView: View {
         }
     }
 
-    private func row(_ pin: Pin) -> some View {
-        let active = isActive(pin)
-        return Button { open(pin) } label: {
+    private var pinHelp: String {
+        if appState.activeTab.kind == .home { return "Home is always open" }
+        if appState.openTabs.contains(where: { $0.id == appState.activeTab.id }) { return "Already pinned" }
+        if appState.pinnedTabCount >= AppState.maxPinnedTabs { return "Tab limit reached" }
+        return "Pin \u{201C}\(appState.activeTab.title)\u{201D} as a tab"
+    }
+
+    private func rowView(_ row: Row) -> some View {
+        let active = isActive(row)
+        let hovered = hoveredId == row.id
+        let unseen = row.tab.map { appState.tabUnread($0) } ?? 0
+        let color = Self.palette[Self.tileColorIndex(row.id, count: Self.palette.count)]
+        return Button { open(row) } label: {
             HStack(spacing: 8) {
-                Image(systemName: pin.icon)
-                    .font(.espresso(size: 11))
-                    .foregroundColor(pin.kind == .channel ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
-                    .frame(width: 16)
-                Text(pin.name)
+                Text(Self.tileLetter(row.name))
+                    .font(.espresso(size: 10, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 18, height: 18)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(color))
+                Text(row.name)
                     .font(.espresso(size: 12, weight: active ? .medium : .regular))
-                    .foregroundColor(appState.themeSidebarText.opacity(0.9))
+                    .foregroundColor(appState.themeSidebarText.opacity(active ? 1 : 0.85))
                     .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: 0)
+                if unseen > 0 && !hovered {
+                    Text(unseen > 10 ? "10+" : "\(unseen)")
+                        .font(.espresso(size: 9, weight: .medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(appState.themeSidebarAccent))
+                }
+                if hovered, let tab = row.tab {
+                    Button { appState.closeTab(tab) } label: {
+                        Image(systemName: "xmark")
+                            .font(.espresso(size: 9))
+                            .foregroundColor(appState.themeSidebarText.opacity(0.5))
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Close tab")
+                }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 6)
                     .fill(active ? appState.themeSidebarAccent.opacity(0.075) : Color.clear)
@@ -302,48 +393,83 @@ struct SidebarStarredView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .padding(.horizontal, 6)
+        .onHover { hoveredId = $0 ? row.id : (hoveredId == row.id ? nil : hoveredId) }
+        .help(kindName(row))
         .contextMenu {
-            if let target = paneTarget(pin) {
+            if let target = paneTarget(row) {
                 AuxOpenMenuButtons(target: target)
+            }
+            if let tab = row.tab {
+                Divider()
+                Button("Close tab") { appState.closeTab(tab) }
             }
         }
     }
 
-    private func paneTarget(_ pin: Pin) -> AuxWindowTarget? {
-        switch pin.kind {
-        case .project: return .project(pin.id)
-        case .channel: return .channel(pin.id)
-        case .thread:  return .thread(pin.id)
-        case .journal: return .journal(pin.id)
-        case .file:    return FileStarStore.shared.ref(for: pin.id).map { .file($0) }
+    private func kindName(_ row: Row) -> String {
+        switch row.star?.kind.rawValue ?? row.tab?.kind.rawValue {
+        case "project": return "Workspace"
+        case "channel": return "Channel"
+        case "thread": return "Thread"
+        case "journal": return "Journal"
+        case "file": return "File"
+        default: return ""
         }
     }
 
-    private func isActive(_ pin: Pin) -> Bool {
-        switch pin.kind {
-        case .project: return appState.selectedProjectId == pin.id
-        case .channel: return appState.selectedChannelId == pin.id
-        case .thread:  return appState.selectedThreadId == pin.id
-        case .journal: return appState.selectedJournalId == pin.id
+    private func paneTarget(_ row: Row) -> AuxWindowTarget? {
+        if let tab = row.tab {
+            switch tab.kind {
+            case .project: return .project(tab.entityId)
+            case .channel: return .channel(tab.entityId)
+            case .thread:  return .thread(tab.entityId)
+            case .journal: return .journal(tab.entityId)
+            case .home:    return nil
+            }
+        }
+        guard let star = row.star else { return nil }
+        switch star.kind {
+        case .project: return .project(star.entityId)
+        case .channel: return .channel(star.entityId)
+        case .thread:  return .thread(star.entityId)
+        case .journal: return .journal(star.entityId)
+        case .file:    return FileStarStore.shared.ref(for: star.entityId).map { .file($0) }
+        }
+    }
+
+    private func isActive(_ row: Row) -> Bool {
+        if let tab = row.tab { return appState.activeTab.id == tab.id }
+        guard let star = row.star else { return false }
+        switch star.kind {
+        case .project: return appState.selectedProjectId == star.entityId
+        case .channel: return appState.selectedChannelId == star.entityId
+        case .thread:  return appState.selectedThreadId == star.entityId
+        case .journal: return appState.selectedJournalId == star.entityId
         case .file:    return false
         }
     }
 
-    private func open(_ pin: Pin) {
-        if pin.kind == .file {
+    private func open(_ row: Row) {
+        if let tab = row.tab {
+            appState.selectTab(tab)
+            return
+        }
+        guard let star = row.star else { return }
+        if star.kind == .file {
             // Files aren't a primary-pane surface — open the shared preview
             // sheet (presented by ContentView) without touching nav state.
-            if let ref = FileStarStore.shared.ref(for: pin.id) {
+            if let ref = FileStarStore.shared.ref(for: star.entityId) {
                 appState.globalPreviewFile = ref.asProjectFile
             }
             return
         }
         appState.clearPrimaryNav()
-        switch pin.kind {
-        case .project: appState.selectedProjectId = pin.id
-        case .channel: appState.selectedChannelId = pin.id
-        case .thread:  appState.selectedThreadId = pin.id
-        case .journal: appState.selectedJournalId = pin.id
+        switch star.kind {
+        case .project: appState.selectedProjectId = star.entityId
+        case .channel: appState.selectedChannelId = star.entityId
+        case .thread:  appState.selectedThreadId = star.entityId
+        case .journal: appState.selectedJournalId = star.entityId
         case .file:    break
         }
     }
@@ -356,18 +482,18 @@ struct SidebarStarredView: View {
         let projects = await pj, threads = await th, channels = await ch, journals = await jr
         let cStars = ChannelStarStore.shared
         let jStars = JournalStarStore.shared
-        var out: [Pin] = []
+        var out: [Star] = []
         out += projects.filter { $0.isPinned ?? false }
-            .map { Pin(id: $0.id, name: $0.title, icon: $0.icon ?? "folder", kind: .project) }
+            .map { Star(entityId: $0.id, name: $0.title, kind: .project) }
         out += channels.filter { $0.isMember && cStars.isStarred($0.id) }
-            .map { Pin(id: $0.id, name: $0.name, icon: "star.fill", kind: .channel) }
+            .map { Star(entityId: $0.id, name: $0.name, kind: .channel) }
         out += journals.filter { jStars.isStarred($0.id) }
-            .map { Pin(id: $0.id, name: $0.title, icon: $0.icon ?? "book.closed", kind: .journal) }
+            .map { Star(entityId: $0.id, name: $0.title, kind: .journal) }
         out += threads.filter { $0.isPinned }
-            .map { Pin(id: $0.id, name: $0.displayName, icon: "bubble.left.and.bubble.right", kind: .thread) }
+            .map { Star(entityId: $0.id, name: $0.displayName, kind: .thread) }
         out += FileStarStore.shared.pins
-            .map { Pin(id: $0.id, name: $0.filename, icon: "doc", kind: .file) }
-        await MainActor.run { pins = out }
+            .map { Star(entityId: $0.id, name: $0.filename, kind: .file) }
+        await MainActor.run { stars = out }
     }
 }
 

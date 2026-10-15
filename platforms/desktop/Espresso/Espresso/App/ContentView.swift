@@ -20,7 +20,6 @@ struct ContentView: View {
     @State private var orderStore = SidebarSectionOrderStore.shared
 
     // Search state
-    @State private var searchText = ""
 
     /// Force the sidebar visible on every launch (lands on Home with the
     /// sidebar open). @State re-inits to .all each cold start, so a mid-session
@@ -219,14 +218,18 @@ struct ContentView: View {
             .padding(.top, 14)
             .padding(.bottom, 10)
 
+            // Espresso first, then what it is doing for you, then the way
+            // around: Home, Find anything, what you pinned, and the groups.
             ScrollView {
                 VStack(spacing: 0) {
+                    espressoCard
+                    tasksSidebarSection
                     sidebarHomeButton
-                    sidebarSearchBar
-                    WorkTabsSidebarSection()
-                    SidebarStarredView()
-                    sidebarOrderedSections
+                    findAnythingRow
+                    SidebarPinnedView()
+                    sidebarGroups
                 }
+                .padding(.top, 2)
             }
 
             Divider().opacity(0.45)
@@ -285,86 +288,71 @@ struct ContentView: View {
             !appState.showSkills &&
             !appState.showChannelBrowse
         ))
-        sidebarFooterButton(icon: "house", label: "Home", badge: 0, isActive: isHomeActive) {
+        sidebarNavRow(title: "Home", icon: "house", isActive: isHomeActive) {
             appState.clearPrimaryNav()
             appState.showHome = true
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 8)
+    }
+
+    /// The find-anything palette (⌘F): surfaces, items and files, opened in
+    /// the main pane or beside it.
+    @ViewBuilder
+    private var findAnythingRow: some View {
+        sidebarNavRow(title: "Find anything", icon: "magnifyingglass", isActive: false,
+                      shortcut: "⌘F") {
+            appState.showFinderPalette = true
+        }
         .padding(.bottom, 4)
     }
 
+    /// WORK and PERSONAL, each a header over its sections. A section drags
+    /// (or moves from its context menu) only within its group.
     @ViewBuilder
-    private var sidebarSearchBar: some View {
-        HStack {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(appState.themeSidebarTextSecondary)
-                .font(.espresso(size: 11))
-            TextField(
-                "",
-                text: $searchText,
-                prompt: Text("Filter sidebar...")
-                    .foregroundColor(appState.themeSidebarTextSecondary.opacity(0.72))
-            )
-                .textFieldStyle(.plain)
-                .font(.espresso(size: 12))
-                .foregroundColor(appState.themeSidebarText)
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(appState.themeSidebarTextSecondary)
-                        .font(.espresso(size: 11))
+    private var sidebarGroups: some View {
+        let _ = orderStore.generation
+        ForEach(SidebarSectionOrderStore.Group.allCases) { group in
+            let sections = orderStore.order(group)
+            VStack(spacing: 2) {
+                Text(group.title)
+                    .font(.espresso(size: 10, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundColor(appState.themeSidebarTextSecondary.opacity(0.8))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    .padding(.bottom, 2)
+                ForEach(Array(sections.enumerated()), id: \.element) { idx, section in
+                    sidebarSectionView(for: section)
+                        .draggable(section.rawValue) {
+                            sectionDragPreview(section)
+                        }
+                        .dropDestination(for: String.self) { items, _ in
+                            guard let raw = items.first,
+                                  let dragged = SidebarSectionOrderStore.Section(rawValue: raw),
+                                  dragged != section, dragged.group == section.group else {
+                                return false
+                            }
+                            orderStore.move(dragged, before: section)
+                            return true
+                        }
+                        .contextMenu {
+                            Button("Move up") { orderStore.moveUp(section) }
+                                .disabled(idx == 0)
+                            Button("Move down") { orderStore.moveDown(section) }
+                                .disabled(idx == sections.count - 1)
+                            Divider()
+                            Button("\(section.displayName) Guide") {
+                                appState.showFeatureGuide(section.guide)
+                            }
+                            Divider()
+                            Button("Reset sidebar order") {
+                                orderStore.resetToDefault()
+                            }
+                        }
                 }
-                .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(RoundedRectangle(cornerRadius: 7).fill(appState.themeSidebarCard.opacity(0.65)))
-        .padding(.horizontal, 10)
-        .padding(.bottom, 10)
-    }
-
-    @ViewBuilder
-    private var sidebarOrderedSections: some View {
-        let _ = orderStore.generation
-        // All sections always visible — locked ones (by plan) render a lock
-        // affordance that raises the paywall instead of hiding (conversion).
-        // The old admin-set beta-flag filter is folded into the server-resolved
-        // plan (beta_full → pro-equivalent, beta_lite → lite-equivalent).
-        let visibleSections = orderStore.order
-        ForEach(Array(visibleSections.enumerated()), id: \.element) { idx, section in
-            sidebarSectionView(for: section)
-                .draggable(section.rawValue) {
-                    sectionDragPreview(section)
-                }
-                .dropDestination(for: String.self) { items, _ in
-                    guard let raw = items.first,
-                          let dragged = SidebarSectionOrderStore.Section(rawValue: raw),
-                          dragged != section else {
-                        return false
-                    }
-                    orderStore.move(dragged, before: section)
-                    return true
-                }
-                .contextMenu {
-                    Button("Move up") { orderStore.moveUp(section) }
-                        .disabled(idx == 0)
-                    Button("Move down") { orderStore.moveDown(section) }
-                        .disabled(idx == visibleSections.count - 1)
-                    Divider()
-                    Button("\(section.displayName) Guide") {
-                        appState.showFeatureGuide(section.guide)
-                    }
-                    Divider()
-                    Button("Reset sidebar order") {
-                        orderStore.resetToDefault()
-                    }
-                }
-            if idx < visibleSections.count - 1 { Spacer().frame(height: 2) }
-        }
+        Spacer().frame(height: 8)
     }
 
     // MARK: - Sidebar sections (drag-droppable)
@@ -379,8 +367,6 @@ struct ContentView: View {
         case .calendar: calendarSidebarSection
         case .threads:  threadsSidebarSection
         case .email:    emailSidebarSection
-        case .assistant: assistantSidebarSection
-        case .tasks: tasksSidebarSection
         }
     }
 
@@ -414,6 +400,11 @@ struct ContentView: View {
         // that wants the person (a task waiting, or finished and unseen).
         badge: Int? = nil,
         attention: Bool = false,
+        // A keyboard shortcut shown at the right ("⌘F").
+        shortcut: String? = nil,
+        // The feature's guide, in the row's context menu (rows outside the
+        // groups, whose menus carry the guide otherwise).
+        guide: FeatureGuideID? = nil,
         onOpen: @escaping () -> Void
     ) -> some View {
         Button(action: {
@@ -447,6 +438,11 @@ struct ContentView: View {
                 if attention {
                     Circle().fill(appState.themeSidebarAccent).frame(width: 6, height: 6)
                 }
+                if let shortcut {
+                    Text(shortcut)
+                        .font(.espresso(size: 10))
+                        .foregroundColor(appState.themeSidebarTextSecondary.opacity(0.7))
+                }
                 if let isExpanded {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.espresso(size: 9))
@@ -471,6 +467,10 @@ struct ContentView: View {
         .contextMenu {
             if let paneTarget, lockedFeature == nil {
                 AuxOpenMenuButtons(target: paneTarget)
+            }
+            if let guide {
+                if paneTarget != nil && lockedFeature == nil { Divider() }
+                Button("\(FeatureGuide.guide(for: guide).name) Guide") { appState.showFeatureGuide(guide) }
             }
         }
         .help(paneTarget != nil && lockedFeature == nil ? "⌥-click to open beside" : "")
@@ -508,7 +508,6 @@ struct ContentView: View {
     private func openChannelsHub()  { appState.clearPrimaryNav(); appState.showChannelsHub = true }
     private func openProductivityHub() { appState.clearPrimaryNav(); appState.showProductivityHub = true }
     private func openEmailHub()     { appState.clearPrimaryNav(); appState.showEmailHub = true }
-    private func openAssistantHub() { appState.clearPrimaryNav(); appState.showAssistantHub = true }
 
     /// Clicking Journals opens its workspace and reveals the same folder tree
     /// in the app sidebar. A second click folds it without leaving Journals.
@@ -556,17 +555,78 @@ struct ContentView: View {
                       paneTarget: .email, onOpen: openEmailHub)
     }
 
-    /// Nav-only row — opens the person's private conversation with Espresso.
-    /// Shown only when the workspace has the assistant switched on; on a plan
-    /// without it the row opens the paywall instead.
+    /// Espresso, at the top: the person's private conversation with it (⌘J),
+    /// with how many requests are left today. Shown only when the workspace
+    /// has the assistant; on a plan without it the card opens the paywall.
     @ViewBuilder
-    private var assistantSidebarSection: some View {
+    private var espressoCard: some View {
         if appState.assistantEnabled {
-            sidebarNavRow(title: "Espresso", icon: "sparkles",
-                          isActive: appState.showAssistantHub,
-                          lockedFeature: appState.canAssistant ? nil : "assistant",
-                          paneTarget: .assistant, onOpen: openAssistantHub)
+            let active = appState.showAssistantHub
+            let locked = !appState.canAssistant
+            Button {
+                if NSEvent.modifierFlags.contains(.option), !locked {
+                    appState.openBeside(.assistant)
+                } else {
+                    appState.openAssistant()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkles")
+                        .font(.espresso(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(appState.themeSidebarAccent))
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 5) {
+                            Text("Ask Espresso")
+                                .font(.espresso(size: 13, weight: .medium))
+                                .foregroundColor(appState.themeSidebarText)
+                            if locked {
+                                Image(systemName: "lock.fill")
+                                    .font(.espresso(size: 9))
+                                    .foregroundColor(appState.themeSidebarTextSecondary.opacity(0.7))
+                            }
+                        }
+                        Text(Self.espressoCardLine(appState.entitlements?.quotas?.assistantRuns, locked: locked))
+                            .font(.espresso(size: 10))
+                            .foregroundColor(appState.themeSidebarTextSecondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Text("⌘J")
+                        .font(.espresso(size: 10))
+                        .foregroundColor(appState.themeSidebarTextSecondary.opacity(0.7))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(appState.themeSidebarAccent.opacity(active ? 0.16 : 0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(appState.themeSidebarAccent.opacity(active ? 0.45 : 0.2), lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .padding(.top, 6)
+            .padding(.bottom, 6)
+            .contextMenu {
+                if !locked { AuxOpenMenuButtons(target: .assistant) }
+                Divider()
+                Button("Espresso Guide") { appState.showFeatureGuide(.assistant) }
+            }
+            .help(locked ? "Espresso comes with Pro" : "⌥-click to open beside")
         }
+    }
+
+    /// The card's second line: requests left today when known.
+    nonisolated static func espressoCardLine(_ runs: MWRunQuota?, locked: Bool) -> String {
+        if locked { return "Your private assistant, on Pro" }
+        guard let runs, runs.limit > 0 else { return "Your private assistant" }
+        return runs.remaining == 1 ? "1 request left today" : "\(runs.remaining) requests left today"
     }
 
     /// Nav-only row — opens Tasks, with how many are running and a dot when
@@ -578,7 +638,7 @@ struct ContentView: View {
             let badge = TasksViewModel.badge(appState.tasksSummary)
             sidebarNavRow(title: "Tasks", icon: "list.bullet.clipboard",
                           isActive: appState.showTasksHub,
-                          badge: badge.count, attention: badge.attention,
+                          badge: badge.count, attention: badge.attention, guide: .tasks,
                           onOpen: { appState.openTasks() })
         }
     }

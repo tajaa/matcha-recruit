@@ -273,9 +273,10 @@ final class TasksLogicTests: XCTestCase {
         XCTAssertEqual(TasksFocus(taskId: "t1", itemId: "i1"), TasksFocus(taskId: "t1", itemId: "i1", jobSearchId: nil))
     }
 
-    func testSidebarAppendsTasksToASavedOrder() {
-        XCTAssertTrue(SidebarSectionOrderStore.Section.allCases.contains(.tasks))
-        XCTAssertEqual(SidebarSectionOrderStore.Section.tasks.displayName, "Tasks")
+    func testTasksIsAFixedRow() {
+        // Tasks is a fixed row under the Espresso card, not a section that moves.
+        XCTAssertNil(SidebarSectionOrderStore.Section(rawValue: "tasks"))
+        XCTAssertEqual(FeatureGuide.guide(for: .tasks).name, "Tasks")
     }
 
     func testAHandoffDraftsTheDirectiveOrAQuestion() {
