@@ -79,6 +79,14 @@ async def test_items_and_dismissing_reranks(conn, monkeypatch):
     conn.on("WHERE t.id = $1 AND t.user_id = $2", task_row())
     conn.on("FROM mw_agent_task_items WHERE id = $1 AND task_id = $2", item_row())
     assert (await service.get_item(TASK, ITEM, USER))["fields"]["price"]["evidence"]["origin"] == "page_text"
+    # A product carries what it can do (Buy) and what was done with it.
+    conn.on("FROM mw_agent_task_items WHERE id = $1 AND task_id = $2",
+            item_row(kind="product", url="https://shop.test/products/balm"))
+    conn.on("FROM mw_agent_task_actions", [{"id": ITEM, "item_id": ITEM, "action": "buy", "status": "done",
+                                            "preview": "{}", "result": '{"url": "u"}', "error": None}])
+    detail = await service.get_item(TASK, ITEM, USER, user=None)
+    assert [a["key"] for a in detail["actions"]] == ["buy"] and detail["action_history"][0]["status"] == "done"
+    conn.on("FROM mw_agent_task_items WHERE id = $1 AND task_id = $2", item_row())
     conn.on("deleted_at IS NULL FOR UPDATE", task_row())
     conn.on("UPDATE mw_agent_task_items SET user_state", item_row(user_state="dismissed"))
     called = AsyncMock()

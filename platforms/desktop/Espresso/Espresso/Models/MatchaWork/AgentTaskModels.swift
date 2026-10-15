@@ -101,13 +101,19 @@ struct AgentTaskItem: Decodable, Identifiable, Hashable {
     var violations: [AgentTaskViolation]
     var fitReasons: [String]
     var notes: String
+    /// What it can do in the world (buy it, book it), as its playbook says.
+    var actions: [AgentTaskAction]
+    /// What was done with it, newest first.
+    var actionHistory: [AgentTaskActionRun]
 
     enum CodingKeys: String, CodingKey {
         case id, kind, title, subtitle, url, origin, provider, fields, images, status, rank, flags, violations, notes
+        case actions
         case fitScore = "fit_score"
         case rankBand = "rank_band"
         case userState = "user_state"
         case fitReasons = "fit_reasons"
+        case actionHistory = "action_history"
     }
 
     init(id: String, title: String, subtitle: String = "", url: String? = nil, fields: [String: AgentTaskField] = [:],
@@ -116,6 +122,7 @@ struct AgentTaskItem: Decodable, Identifiable, Hashable {
         self.origin = nil; self.provider = nil; self.fields = fields; self.images = []; self.status = status
         self.fitScore = nil; self.rank = rank; self.rankBand = rankBand; self.flags = flags; self.userState = userState
         self.violations = []; self.fitReasons = []; self.notes = ""
+        self.actions = []; self.actionHistory = []
     }
 
     init(from decoder: Decoder) throws {
@@ -138,6 +145,8 @@ struct AgentTaskItem: Decodable, Identifiable, Hashable {
         violations = c.list(.violations)
         fitReasons = c.list(.fitReasons)
         notes = c.value(.notes) ?? ""
+        actions = c.list(.actions)
+        actionHistory = c.list(.actionHistory)
     }
 
     /// Hidden from the list unless asked: it breaks a limit, didn't fit,
@@ -498,6 +507,11 @@ struct AgentTaskRoundRequest: Encodable {
     }
 }
 
+/// An action's own fields (quantity, a date...), as typed.
+struct AgentTaskActionRequest: Encodable {
+    let params: [String: String]
+}
+
 struct AgentTaskItemPatch: Encodable {
     var userState: String?
     var notes: String?
@@ -566,6 +580,123 @@ struct AgentTaskCard: Codable, Hashable {
 }
 
 /// A field on a form Espresso asked in chat (`prompt_kind == "ask_form"`).
+/// Something a finding can do (buy it, book it), as the server declares it:
+/// the app draws whatever it is sent, so a new action needs no app change.
+struct AgentTaskAction: Decodable, Hashable, Identifiable {
+    var key: String
+    var label: String
+    /// cart, calendar, envelope, link, phone.
+    var icon: String
+    var description: String
+    var confirmLabel: String
+    var params: [IntakeFormField]
+    var available: Bool
+    /// Why it can't be done for this finding.
+    var reason: String?
+
+    var id: String { key }
+
+    enum CodingKeys: String, CodingKey {
+        case key, label, icon, description, params, available, reason
+        case confirmLabel = "confirm_label"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        key = try c.decode(String.self, forKey: .key)
+        label = c.value(.label) ?? key
+        icon = c.value(.icon) ?? "link"
+        description = c.value(.description) ?? ""
+        confirmLabel = c.value(.confirmLabel) ?? "Go ahead"
+        params = c.list(.params)
+        available = c.value(.available) ?? false
+        reason = c.value(.reason)
+    }
+
+    var systemImage: String { AgentTaskAction.systemImage(icon) }
+
+    static func systemImage(_ icon: String) -> String {
+        switch icon {
+        case "cart": return "cart"
+        case "calendar": return "calendar.badge.plus"
+        case "envelope": return "envelope"
+        case "phone": return "phone"
+        default: return "arrow.up.right.square"
+        }
+    }
+}
+
+struct AgentTaskActionLine: Decodable, Hashable {
+    var label: String
+    var value: String
+}
+
+/// What an action would do (before), or what came of it (after).
+struct AgentTaskActionPreview: Decodable, Hashable {
+    var title: String
+    var lines: [AgentTaskActionLine]
+    var note: String
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = c.value(.title) ?? ""
+        lines = c.list(.lines)
+        note = c.value(.note) ?? ""
+    }
+
+    enum CodingKeys: String, CodingKey { case title, lines, note }
+}
+
+struct AgentTaskActionOutcome: Decodable, Hashable {
+    var headline: String
+    var lines: [AgentTaskActionLine]
+    var url: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        headline = c.value(.headline) ?? ""
+        lines = c.list(.lines)
+        url = c.value(.url)
+    }
+
+    enum CodingKeys: String, CodingKey { case headline, lines, url }
+}
+
+/// One proposal: proposed, then running and done or failed (or cancelled).
+struct AgentTaskActionRun: Decodable, Hashable, Identifiable {
+    var id: String
+    var action: String
+    var label: String
+    var status: String
+    var preview: AgentTaskActionPreview?
+    var confirmLabel: String
+    var result: AgentTaskActionOutcome?
+    var error: String?
+    var finishedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id, action, label, status, preview, result, error
+        case confirmLabel = "confirm_label"
+        case finishedAt = "finished_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        action = c.value(.action) ?? ""
+        label = c.value(.label) ?? action
+        status = c.value(.status) ?? "proposed"
+        preview = c.value(.preview)
+        confirmLabel = c.value(.confirmLabel) ?? "Go ahead"
+        result = c.value(.result)
+        error = c.value(.error)
+        finishedAt = (c.value(.finishedAt) as String?).flatMap { parseMWDate($0) }
+    }
+
+    var isProposed: Bool { status == "proposed" }
+    var isFinished: Bool { status == "done" || status == "failed" }
+}
+
 struct IntakeFormField: Codable, Hashable, Identifiable {
     var key: String
     var label: String

@@ -14,7 +14,8 @@ Personal Espresso accounts (`agent_runtime.eligibility`), Pro and up
 
 Server names avoid "task" alone: `mw_tasks` is kanban cards. Tables are
 `mw_agent_tasks`, `mw_agent_task_rounds`, `mw_agent_task_items` (migration
-`agenttask01`; forms `agenttask02`), routes are `/matcha-work/agent-tasks`.
+`agenttask01`; forms `agenttask02`), `mw_agent_task_actions` (`agenttask04`),
+routes are `/matcha-work/agent-tasks`.
 
 ## The shape
 
@@ -33,6 +34,7 @@ Server names avoid "task" alone: `mw_tasks` is kanban cards. Tables are
 | Intake | `intake.py` | Field values, the `ask_form` form (built from the playbook only), submitting it (`answer_form`) |
 | Chat cards | `chat.py` | The `agent_task` card posted where a task started, and when it ends |
 | From chat | `../agent_runtime/abilities/tasks.py` | The `tasks` ability: list, read, start, follow up, cancel, mark findings; the `task` block |
+| Actions on findings | `actions/` | `ItemAction` (`base.py`), `ACTIONS` + `validate` (`__init__.py`), propose / confirm / cancel / history (`service.py`); Buy (`buy.py`) |
 | Research | `research/` | The first playbook: see below |
 | Job searches | `job_tasks.py` | Job search as a task: pointer rows, `overlay` (the search's state), `lead_item`, the `job_search` playbook, `start`, `search_stopped` |
 
@@ -79,6 +81,52 @@ marks that the person was told.
 - Who sees them: job search isn't behind the Tasks switch. Someone with job
   search but not Tasks gets the routes, reads and manages their searches, and
   starts nothing else (`routes._engines`).
+
+## Actions on findings (`actions/`)
+
+A playbook names what its findings can do in the world (`Playbook.actions`,
+keys into `actions.ACTIONS`); `item_actions` stay the person's own marks
+(save, dismiss, a note). An action is an `ItemAction`: a label, an icon key
+(`cart`, `calendar`, `envelope`, `link`, `phone`), the item kinds it fits, its
+own fields (`params`, intake fields), a daily limit, and three functions:
+
+- `available(ctx)`: why not, for this finding (shown on the button), or None.
+- `prepare(ctx, params)`: a `Proposal`: `frozen` (all `perform` gets) plus how
+  it reads (title, lines, note, and the button's words if not the default).
+  Built from the stored finding and the person's own saved details only,
+  never from a model.
+- `perform(ctx, frozen)`: carry it out; returns `outcome(headline, lines, url)`.
+
+`service.py` owns the rest. Propose (`POST /{task}/items/{item}/actions/{key}`)
+checks the action is the playbook's for that kind, available, under its daily
+limit, then stores the proposal (30 minutes; an older one for the same finding
+expires). Confirm (`POST /actions/{id}/confirm`) claims it `proposed ->
+running` only while fresh, so a second confirm never runs it twice and a retry
+returns what came of it; a deleted task's proposal is cancelled, not run.
+`GET`/`PATCH` of a finding return `actions` (checked for the person) and
+`action_history`. The Mac draws whatever it is sent (`TaskActionSheet`).
+Actions are deterministic: no model run and no assistant hold/resume (that
+machinery is bound to a chat run).
+
+**Buy** (`buy.py`, products): Espresso never pays or orders. A Shopify store
+(its `/products/<handle>.js` answers) gets a cart permalink
+`https://<store>/cart/<variant>:<qty>` that opens checkout with it in the
+cart, the person's email and default saved shipping address filled in
+(`checkout[email]`, `checkout[shipping_address][...]`), the store's price now,
+and refused when the variant is out of stock. Any other store: its product
+page. A finding with only Google's page can't be bought.
+
+## Adding a kind of task, or an action
+
+- **An action**: a module in `actions/` with an `ACTION`, added to `ACTIONS`;
+  name its key in the playbooks whose findings take it. Nothing else changes
+  (`test_adding_an_action_needs_nothing_else`).
+- **A kind of task**: a `Playbook` (`playbook.py`) in `playbooks.PLAYBOOKS`
+  and a cost in `allowance.WEIGHTS`. Its intake builds the chat's form, its
+  `description` is how Espresso picks it, its field library the facts its
+  findings may carry. The chain runs its `phases`; an engine of its own (like
+  job search) is a pointer row read through an adapter (`job_tasks.py`).
+- Every Espresso feature ships its feature guide (`FeatureGuides.swift`).
 
 ## Statuses and rounds
 
@@ -163,4 +211,6 @@ metadata as `[String: String]`; `task_id` is a kanban card there).
 
 ## Not yet (later PRs)
 
-Agent cards as tasks (`engine` `board`; the columns exist), reservations.
+Agent cards as tasks (`engine` `board`; the columns exist). Kinds of search as
+their own playbooks (products, apartments, places) over the research toolkit;
+Book (places) and Email-about-it (apartments) actions; a travel playbook.

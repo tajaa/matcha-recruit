@@ -45,3 +45,9 @@ class FormAnswer(Body):
     values: dict[str, Any] = Field(default_factory=dict)
     input_ids: list[UUID] = Field(default_factory=list, max_length=5)
     consent_version: str | None = Field(default=None, max_length=40)
+
+
+class ActionRequest(Body):
+    """The action's own fields (`ItemAction.params`), checked by the action."""
+
+    params: dict[str, Any] = Field(default_factory=dict)

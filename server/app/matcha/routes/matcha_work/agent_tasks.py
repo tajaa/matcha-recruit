@@ -19,8 +19,11 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.models.auth import CurrentUser
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
-from app.matcha.models.matcha_work.agent_tasks import AgentTaskCreate, FormAnswer, ItemPatch, RoundCreate
+from app.matcha.models.matcha_work.agent_tasks import (
+    ActionRequest, AgentTaskCreate, FormAnswer, ItemPatch, RoundCreate,
+)
 from app.matcha.services.matcha_work.agent_tasks import allowance, enqueue, intake, job_tasks, playbooks, service
+from app.matcha.services.matcha_work.agent_tasks.actions import service as task_actions
 
 from .assistant import require_personal_workspace
 
@@ -111,7 +114,7 @@ async def agent_task_status(task_id: UUID, current_user: CurrentUser = Depends(r
 async def get_agent_task_item(
     task_id: UUID, item_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    return await _call(service.get_item(task_id, item_id, current_user.id))
+    return await _call(service.get_item(task_id, item_id, current_user.id, user=current_user))
 
 
 @router.patch("/{task_id}/items/{item_id}")
@@ -120,7 +123,28 @@ async def update_agent_task_item(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     return await _call(service.patch_item(task_id, item_id, current_user.id,
-                                          user_state=body.user_state, notes=body.notes))
+                                          user_state=body.user_state, notes=body.notes, user=current_user))
+
+
+@router.post("/{task_id}/items/{item_id}/actions/{action}", status_code=201)
+async def propose_agent_task_action(
+    task_id: UUID, item_id: UUID, action: str, body: ActionRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Show what an action (buy, book...) would do for this finding. Nothing
+    happens until it is confirmed."""
+    return await _call(task_actions.propose(current_user, task_id, item_id, action, body.params))
+
+
+@router.post("/actions/{action_id}/confirm")
+async def confirm_agent_task_action(action_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
+    """Carry out a proposed action, once. A retry returns what came of it."""
+    return await _call(task_actions.confirm(current_user, action_id))
+
+
+@router.post("/actions/{action_id}/cancel")
+async def cancel_agent_task_action(action_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
+    return await _call(task_actions.cancel(current_user, action_id))
 
 
 @router.post("/{task_id}/rounds", status_code=202)

@@ -10,6 +10,7 @@ struct TaskItemDetailView: View {
     let onClose: () -> Void
     @State private var notes = ""
     @State private var notesItemId: String?
+    @State private var flow: TaskActionFlow?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,6 +29,7 @@ struct TaskItemDetailView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         heading(item)
                         if !item.images.isEmpty { photos(item) }
+                        doneSection(item)
                         facts(item)
                         fitSection(item)
                         notesSection(item)
@@ -42,6 +44,10 @@ struct TaskItemDetailView: View {
             }
         }
         .background(appState.themeBg.opacity(0.4))
+        .sheet(item: $flow) { flow in
+            TaskActionSheet(flow: flow) { Task { await vm.reloadItem() } }
+                .environment(appState)
+        }
     }
 
     private func syncNotes(_ item: AgentTaskItem) {
@@ -75,6 +81,61 @@ struct TaskItemDetailView: View {
                 stateButton("Dismiss", state: "dismissed", icon: "eye.slash", item: item)
             }
             .padding(.top, 2)
+            if !item.actions.isEmpty { doRow(item) }
+        }
+    }
+
+    /// What the finding can do in the world, as the server says: each opens
+    /// a sheet that shows exactly what will happen before it does.
+    private func doRow(_ item: AgentTaskItem) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                ForEach(item.actions) { action in
+                    Button {
+                        if let taskId = vm.selectedTaskId {
+                            flow = TaskActionFlow(taskId: taskId, itemId: item.id, itemTitle: item.title, action: action)
+                        }
+                    } label: {
+                        Label(action.label, systemImage: action.systemImage).font(.system(size: 11, weight: .semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(appState.themeAccent)
+                    .controlSize(.small)
+                    .disabled(!action.available)
+                    .help(action.available ? action.description : (action.reason ?? ""))
+                }
+            }
+            ForEach(item.actions.filter { !$0.available }) { action in
+                if let reason = action.reason {
+                    Text("\(action.label): \(reason)").font(.system(size: 10)).foregroundColor(appState.themeTextSecondary)
+                }
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    /// What was done with it: a checkout opened, a table booked.
+    @ViewBuilder
+    private func doneSection(_ item: AgentTaskItem) -> some View {
+        let done = item.actionHistory.filter(\.isFinished)
+        if !done.isEmpty {
+            section("Done") {
+                ForEach(done) { run in
+                    HStack(spacing: 6) {
+                        Image(systemName: run.status == "done" ? "checkmark.circle.fill" : "xmark.octagon")
+                            .font(.system(size: 11))
+                            .foregroundColor(run.status == "done" ? .green : .orange)
+                        Text(TaskItemDetailView.doneLine(run))
+                            .font(.system(size: 11))
+                            .foregroundColor(appState.themeText)
+                            .lineLimit(2)
+                        Spacer(minLength: 4)
+                        if run.status == "done", let url = TasksViewModel.webURL(run.result?.url) {
+                            Link("Open", destination: url).font(.system(size: 11))
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -210,6 +271,12 @@ struct TaskItemDetailView: View {
 
     nonisolated static func label(for key: String) -> String {
         key.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    /// "Checkout opened at drbronner.com", or why it didn't go through.
+    nonisolated static func doneLine(_ run: AgentTaskActionRun) -> String {
+        if run.status == "done" { return run.result?.headline.isEmpty == false ? run.result!.headline : run.label }
+        return "\(run.label) didn't go through" + (run.error.map { ": \($0)" } ?? ".")
     }
 }
 

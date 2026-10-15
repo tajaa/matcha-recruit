@@ -283,13 +283,14 @@ extension FeatureGuide {
              points: [
                 "Open a finding to see its facts. Verified ones show the quote and the page they came from.",
                 "Save, Choose or Dismiss findings, add notes, or Ask Espresso about one.",
+                "Buy on a product shows exactly what will happen first, then opens the store's checkout with it in the cart (your saved shipping address filled in, if you have one). Done lists what you did with it.",
                 "Refine changes what it's looking for. Search more looks for more like these. Make document writes it all into a note in Journals.",
              ]),
         Page(stage: .expect, icon: "clock.fill",
              title: "What to expect",
              points: [
                 "A task takes a few minutes. You can leave: you'll get a notification when it's done or needs you.",
-                "It only researches. It doesn't buy, book, sign up or contact anyone.",
+                "It never pays, orders, books or contacts anyone on its own. Buy takes you to the store's checkout; you review and pay there.",
                 "Only a fact it verified can rule a finding out. One it couldn't check is marked Unconfirmed and ranked after the confirmed ones.",
                 "Up to \(tasksRunningAtOnce) tasks run at once.",
              ]),

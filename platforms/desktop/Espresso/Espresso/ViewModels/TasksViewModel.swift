@@ -145,6 +145,11 @@ final class TasksViewModel {
         await refreshItem(itemId)
     }
 
+    /// The open finding again, after something was done with it.
+    func reloadItem() async {
+        if let itemId = selectedItemId { await refreshItem(itemId) }
+    }
+
     private func refreshItem(_ itemId: String) async {
         guard let taskId = selectedTaskId else { return }
         itemLoading = true

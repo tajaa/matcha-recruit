@@ -45,7 +45,7 @@ async def test_routes_pass_the_caller(monkeypatch):
     await routes.delete_agent_task(TID, USER)
     for name in ("get_task", "status_view", "cancel_task", "delete_task"):
         assert getattr(routes.service, name).await_args.args == (TID, USER.id)
-    assert routes.service.patch_item.await_args.kwargs == {"user_state": "saved", "notes": None}
+    assert routes.service.patch_item.await_args.kwargs == {"user_state": "saved", "notes": None, "user": USER}
 
 
 @pytest.mark.asyncio
@@ -95,3 +95,25 @@ async def test_a_form_is_submitted_through_intake(monkeypatch):
     body = FormAnswer(values={"location": "SF"})
     assert await routes.answer_agent_task_form(TID, body, USER) == {"id": "task"}
     assert answer.await_args.args == (USER, TID, body)
+
+
+@pytest.mark.asyncio
+async def test_actions_on_a_finding_go_through_the_service(monkeypatch):
+    from app.matcha.models.matcha_work.agent_tasks import ActionRequest
+
+    for name in ("propose", "confirm", "cancel"):
+        monkeypatch.setattr(routes.task_actions, name, AsyncMock(return_value={"ok": name}))
+    monkeypatch.setattr(routes.service, "get_item", AsyncMock(return_value={"ok": "item"}))
+    body = ActionRequest(params={"quantity": 2})
+    assert await routes.propose_agent_task_action(TID, IID, "buy", body, USER) == {"ok": "propose"}
+    assert routes.task_actions.propose.await_args.args == (USER, TID, IID, "buy", {"quantity": 2})
+    aid = uuid4()
+    assert await routes.confirm_agent_task_action(aid, USER) == {"ok": "confirm"}
+    assert routes.task_actions.confirm.await_args.args == (USER, aid)
+    assert await routes.cancel_agent_task_action(aid, USER) == {"ok": "cancel"}
+    # A finding is read with the person, so its actions are checked for them.
+    await routes.get_agent_task_item(TID, IID, USER)
+    assert routes.service.get_item.await_args.kwargs == {"user": USER}
+    paths = {r.path for r in routes.router.routes}
+    assert {"/agent-tasks/{task_id}/items/{item_id}/actions/{action}",
+            "/agent-tasks/actions/{action_id}/confirm", "/agent-tasks/actions/{action_id}/cancel"} <= paths
