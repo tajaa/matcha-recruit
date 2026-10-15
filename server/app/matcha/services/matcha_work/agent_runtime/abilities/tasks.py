@@ -126,7 +126,7 @@ async def _start(ctx: RunContext, state: RunState, args: dict) -> ToolOutput:
     from app.matcha.services.matcha_work.agent_tasks import enqueue, intake, playbooks
 
     playbook = playbooks.get(str(args.get("playbook") or ""))
-    if playbook is None or playbook.engine != "chain":
+    if not playbooks.startable(playbook):
         raise ValueError("Use one of the playbooks listed.")
     directive = " ".join(str(args.get("directive") or "").split())
     brief_raw = args.get("brief") if isinstance(args.get("brief"), dict) else {}
@@ -220,26 +220,33 @@ _IDS = {"type": "array", "items": {"type": "string"}}
 def _prompt(_ctx: RunContext) -> str:
     from app.matcha.services.matcha_work.agent_tasks import allowance, playbooks
 
+    def field(f) -> str:
+        # A choice field names its choices, so a value is one of them.
+        choices = f": one of {' | '.join(f.options)}" if f.options else ""
+        return f"{f.key} ({f.label}{choices}{', required' if f.required else ''})"
+
     books = "\n".join(
         f"  - {p.key} ({allowance.WEIGHTS[p.key]} units): {p.description} Fields: "
-        + ", ".join(f"{f.key} ({f.label}{', required' if f.required else ''})" for f in p.intake if f.type != "consent")
-        for p in playbooks.PLAYBOOKS.values() if p.engine == "chain" and p.env_ready()
+        + ", ".join(field(f) for f in p.intake if f.type != "consent")
+        for p in playbooks.PLAYBOOKS.values() if playbooks.startable(p)
     )
     return f"""Tasks (background work):
 - Start a task with start_task for work that means finding and comparing many options and takes \
-minutes: a home to rent, a product across stores, places that fit, a service. It runs in the \
-background, keeps what it finds with the evidence for each fact, and posts here when it is done. \
-Answer quick questions yourself instead.
+minutes: a home to rent, a product across stores, places that fit, a service, jobs to apply for \
+(the job_search playbook). It runs in the background, keeps what it finds with the evidence for each \
+fact, and posts here when it is done. Answer quick questions yourself instead.
 - Playbooks:
 {books}
-- Put what they told you in `brief` by field key. If something that would change the results a lot \
+- Put what they told you in `brief` by field key: a list field as an array, a choice field as one of \
+its choices exactly. If something that would change the results a lot \
 is missing (where, the budget, dates), call ask_form first, naming those field keys as missing and \
 the rest as known. Never ask for a task's details in prose. If nothing important is missing, start it.
 - Files they attached (by file id) can go in `input_ids`.
 - Starting a task uses units from their monthly allowance: say so when you start one. A refine is \
 free, search more costs 1 unit, a document is free.
 - list_tasks and read_task show their tasks and what each found; follow_up_task refines ("only the \
-Mission"), searches for more, or writes the findings into a document; update_task_item saves or \
+Mission"), searches for more, or writes the findings into a document (not a job search: those are \
+re-ranked and redrafted with the job search tools); update_task_item saves or \
 dismisses a finding; cancel_task stops one. To show findings, add a `task` block with the task id and \
 up to 5 finding ids you read."""
 

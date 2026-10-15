@@ -28,6 +28,17 @@ def test_clean_value_by_type():
     assert c(F("a", "multi_select", options=("x", "y")), ["y", "y"]) == ["y"]
     assert c(F("a", "boolean"), "Yes") is True and c(F("a", "boolean"), False) is False
     assert c(F("a", "list"), "dogs, Dogs, parking") == ["dogs", "parking"] and c(F("a", "list"), [" "]) is None
+    # Semicolons (or new lines) separate items when there are any, so a place
+    # keeps its comma; an array's items are kept whole unless they hold one.
+    assert c(F("a", "list"), "New York, NY; Remote") == ["New York, NY", "Remote"]
+    assert c(F("a", "list"), ["VP of Operations; COO"]) == ["VP of Operations", "COO"]
+    assert c(F("a", "list"), ["New York, NY", "Remote"]) == ["New York, NY", "Remote"]
+    assert c(F("a", "list"), "Austin\nDenver") == ["Austin", "Denver"]
+    # A wrong choice names the right ones, so the model can fix it.
+    with pytest.raises(ValueError, match="should be one of: Any, Remote only"):
+        c(F("a", "select", options=("Any", "Remote only")), "Either")
+    with pytest.raises(ValueError, match="takes only: x"):
+        c(F("a", "multi_select", options=("x",)), ["z"])
     for spec, bad in ((F("a", "text"), {"x": 1}), (F("a", "money"), True), (F("a", "money"), "lots"),
                       (F("a", "money"), -1), (F("a", "date"), "soon"), (F("a", "time"), "25:00"),
                       (F("a", "select", options=("x",)), "z"), (F("a", "multi_select", options=("x",)), ["z"]),
@@ -79,7 +90,7 @@ def test_views_show_fields_known_values_and_consent():
 
 def test_the_ask_form_tool_checks_what_the_model_sent():
     tool = intake.ask_form_tool()
-    assert tool.effect == "ask" and tool.parameters["properties"]["playbook"]["enum"] == ["research"]
+    assert tool.effect == "ask" and tool.parameters["properties"]["playbook"]["enum"] == ["job_search", "research"]
     ctx = SimpleNamespace(grants={})
     with pytest.raises(ValueError):
         tool.parse_ask(ctx, None, {"playbook": "nope", "directive": "find it"})

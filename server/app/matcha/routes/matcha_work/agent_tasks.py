@@ -6,6 +6,10 @@ Personal Espresso accounts, Pro and up, from the shared monthly allowance
 worker (`services/matcha_work/agent_tasks/`); these routes start it, read
 it, and take follow-ups. Everything is scoped to the caller: another
 person's ids are 404.
+
+Job searches live here too (`agent_tasks/job_tasks.py`), and job search isn't
+behind the Tasks switch: someone who has job search but not yet Tasks reads,
+cancels and deletes their searches here, and starts nothing else.
 """
 from __future__ import annotations
 
@@ -16,13 +20,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.core.models.auth import CurrentUser
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
 from app.matcha.models.matcha_work.agent_tasks import AgentTaskCreate, FormAnswer, ItemPatch, RoundCreate
-from app.matcha.services.matcha_work.agent_tasks import allowance, enqueue, intake, playbooks, service
+from app.matcha.services.matcha_work.agent_tasks import allowance, enqueue, intake, job_tasks, playbooks, service
 
 from .assistant import require_personal_workspace
 
 
+def _engines(current_user: CurrentUser) -> tuple[str, ...]:
+    """The kinds of task this person sees."""
+    if enqueue.tasks_enabled(current_user):
+        return service.ENGINES
+    return (job_tasks.ENGINE,) if job_tasks.PLAYBOOK.env_ready() else ()
+
+
 async def require_tasks(current_user: CurrentUser = Depends(require_personal_workspace)):
-    if not enqueue.tasks_enabled(current_user):
+    if not _engines(current_user):
         raise HTTPException(status_code=403, detail={
             "code": "feature_disabled", "message": "Tasks aren't available yet.",
         })
@@ -50,7 +61,7 @@ async def _call(operation):
 async def list_playbooks(current_user: CurrentUser = Depends(require_admin_or_client)):
     """The kinds of task Espresso can start here, with what each may ask for."""
     return {
-        "playbooks": [p.view() for p in playbooks.PLAYBOOKS.values() if p.engine == "chain"],
+        "playbooks": [p.view() for p in playbooks.PLAYBOOKS.values() if p.engine in playbooks.STARTABLE_ENGINES],
         "units": {**allowance.WEIGHTS, "rounds": allowance.ROUND_UNITS},
     }
 
@@ -59,14 +70,14 @@ async def list_playbooks(current_user: CurrentUser = Depends(require_admin_or_cl
 async def tasks_summary(current_user: CurrentUser = Depends(require_admin_or_client)):
     """The sidebar's counts: running, waiting for you, finished and unseen."""
     company_id = await _company(current_user)
-    return await service.summary(current_user.id, company_id)
+    return await service.summary(current_user.id, company_id, engines=_engines(current_user))
 
 
 @router.get("")
 async def list_agent_tasks(current_user: CurrentUser = Depends(require_admin_or_client)):
     company_id = await _company(current_user)
     return {
-        "tasks": await service.list_tasks(current_user.id, company_id),
+        "tasks": await service.list_tasks(current_user.id, company_id, engines=_engines(current_user)),
         "usage": await allowance.task_usage(current_user.id),
     }
 

@@ -236,6 +236,43 @@ final class TasksLogicTests: XCTestCase {
         XCTAssertNil(try decode(MWWorkspaceFlags.self, #"{"espresso_assistant": true}"#).agentTasks)
     }
 
+    func testAJobSearchIsATask() throws {
+        let json = """
+        {"id": "t9", "playbook": "job_search", "engine": "job_search", "job_search_id": "s1",
+         "title": "COO", "directive": "COO roles", "status": "running", "phase": "discovering",
+         "progress": {"note": "Searching"}, "current_round": 0, "item_count": 12, "shown_count": 9,
+         "unseen": false, "created_at": "2026-10-15T01:00:00+00:00", "fingerprint": "fp",
+         "plan": {"columns": [], "constraints": [], "preferences": [], "summary": ""}, "rounds": [],
+         "items": [], "job_search": {"id": "s1"}}
+        """
+        let detail = try decode(AgentTaskDetail.self, json)
+        XCTAssertTrue(detail.task.isJobSearch)
+        XCTAssertEqual(detail.task.jobSearchId, "s1")
+        XCTAssertEqual(detail.task.statusLabel, "Searching…")
+        // Refined and redrafted on its own page, not with Tasks' rounds.
+        XCTAssertFalse(detail.canFollowUp)
+        XCTAssertFalse(try decode(AgentTaskDetail.self, detailJSON).task.isJobSearch)
+
+        var search = AgentTask(id: "t9", title: "COO", status: "done")
+        XCTAssertNil(TasksViewModel.task(forSearch: "s1", in: [search]))
+        search.engine = "job_search"; search.jobSearchId = "s1"
+        XCTAssertEqual(TasksViewModel.task(forSearch: "s1", in: [AgentTask(id: "t1", title: "x", status: "done"), search])?.id,
+                       "t9")
+        XCTAssertNil(TasksViewModel.task(forSearch: "s2", in: [search]))
+        for (phase, label) in [("planning", "Planning…"), ("screening", "Checking what fits…"),
+                               ("enriching", "Reading postings…"), ("approaching", "Drafting approaches…")] {
+            var task = search; task.status = "running"; task.phase = phase
+            XCTAssertEqual(task.statusLabel, label)
+        }
+    }
+
+    func testAJobSearchOpensInTasks() {
+        let focus = TasksFocus(taskId: nil, jobSearchId: "s1", leadId: "l1")
+        XCTAssertNil(focus.taskId)
+        XCTAssertEqual(focus.leadId, "l1")
+        XCTAssertEqual(TasksFocus(taskId: "t1", itemId: "i1"), TasksFocus(taskId: "t1", itemId: "i1", jobSearchId: nil))
+    }
+
     func testSidebarAppendsTasksToASavedOrder() {
         XCTAssertTrue(SidebarSectionOrderStore.Section.allCases.contains(.tasks))
         XCTAssertEqual(SidebarSectionOrderStore.Section.tasks.displayName, "Tasks")

@@ -20,7 +20,7 @@ from fastapi import HTTPException
 from app.database import connection_or_direct
 from app.matcha.services.billing.entitlements_service import PLAN_PRO, require_plan
 
-from . import allowance, document, model_run, playbooks, service
+from . import allowance, document, job_tasks, model_run, playbooks, service
 from .playbook import Playbook
 
 logger = logging.getLogger(__name__)
@@ -166,6 +166,13 @@ async def create_task(user, company_id: UUID, body, *,
     if playbook is None:
         raise HTTPException(status_code=400, detail="Espresso doesn't know that kind of task.")
     brief = _brief(playbook, body.brief)
+    if playbook.engine == job_tasks.ENGINE:
+        # A job search runs on its own engine, with its own gates (plan,
+        # allowance, consent, one at a time); Tasks only has to be on.
+        if not tasks_enabled(user):
+            raise HTTPException(status_code=403, detail={"code": "feature_disabled",
+                                                         "message": "Tasks aren't available yet."})
+        return await job_tasks.start(user, company_id, body, brief, origin=origin)
     plan = await preflight(user, company_id, playbook, consent_version=body.consent_version)
     limit = allowance.limit_for_plan(plan) if plan is not None else None
     cost = allowance.WEIGHTS[playbook.key]
@@ -259,6 +266,10 @@ async def start_round(user, task_id: UUID, body) -> dict:
         async with conn.transaction():
             await allowance.lock(conn, user.id)
             task = dict(await service.owned_task(conn, task_id, user.id, lock=True))
+            if task["engine"] == job_tasks.ENGINE:
+                raise HTTPException(status_code=409, detail=(
+                    "A job search is changed on its own page: re-rank it with What matters, or redraft a job."
+                ))
             if body.request_id is not None and await conn.fetchval(
                 "SELECT 1 FROM mw_agent_task_rounds WHERE task_id = $1 AND request_id = $2",
                 task_id, body.request_id,

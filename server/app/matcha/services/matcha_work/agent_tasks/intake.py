@@ -76,12 +76,12 @@ def clean_value(spec: IntakeField, raw: Any) -> Any:
         return f"{int(match.group(1)):02d}:{match.group(2)}"
     if kind == "select":
         if raw not in spec.options:
-            raise ValueError("isn't one of the choices")
+            raise ValueError(f"should be one of: {', '.join(spec.options)}")
         return raw
     if kind == "multi_select":
         values = raw if isinstance(raw, list) else [raw]
         if any(v not in spec.options for v in values):
-            raise ValueError("has a choice that isn't offered")
+            raise ValueError(f"takes only: {', '.join(spec.options)}")
         return list(dict.fromkeys(values))
     if kind == "boolean":
         if isinstance(raw, bool):
@@ -91,14 +91,27 @@ def clean_value(spec: IntakeField, raw: Any) -> Any:
             return text in _YES
         raise ValueError("should be yes or no")
     if kind == "list":
-        values = raw if isinstance(raw, list) else str(raw).split(",")
         out = []
-        for value in values:
+        for value in _list_parts(raw):
             text = " ".join(str(value).split())[:120]
             if text and text.casefold() not in {o.casefold() for o in out}:
                 out.append(text)
         return out[:MAX_LIST] or None
     raise ValueError("isn't a field it can take")
+
+
+def _list_parts(raw: Any) -> list[str]:
+    """A list as given: an array, or text. Semicolons and new lines separate
+    items when there are any, so "New York, NY; Remote" stays two places;
+    otherwise commas do ("COO, VP Ops"). The model sometimes sends a list as
+    one string, or an array of such strings."""
+    parts: list[str] = []
+    for value in raw if isinstance(raw, list) else [raw]:
+        text = str(value)
+        parts += re.split(r"[;\n]", text) if re.search(r"[;\n]", text) else (
+            text.split(",") if not isinstance(raw, list) else [text]
+        )
+    return parts
 
 
 def clean_values(playbook: Playbook, raw: dict) -> tuple[dict, dict[str, str]]:
@@ -213,7 +226,7 @@ def _parse(ctx, state, args: dict) -> dict:
     """`ask_form`'s arguments as the run's question. Raises ValueError (told
     to the model) for a playbook or ask it can't use."""
     playbook = playbooks.get(str(args.get("playbook") or ""))
-    if playbook is None or playbook.engine != "chain" or not playbook.env_ready():
+    if not playbooks.startable(playbook):
         raise ValueError("Use one of the playbooks start_task accepts.")
     directive = " ".join(str(args.get("directive") or "").split())
     if len(directive) < 3:
@@ -240,11 +253,11 @@ def ask_form_tool():
         parameters={
             "type": "object",
             "properties": {
-                "playbook": {"type": "string", "enum": sorted(k for k, p in playbooks.PLAYBOOKS.items()
-                                                              if p.engine == "chain")},
+                "playbook": {"type": "string", "enum": playbooks.startable_keys()},
                 "directive": {"type": "string", "description": "What they asked for, in their words"},
                 "title": {"type": "string", "description": "A short name for the task"},
-                "known": {"type": "object", "description": "Field key -> what they already said"},
+                "known": {"type": "object",
+                          "description": "Field key -> what they already said; a list field as an array of strings"},
                 "missing": {"type": "array", "items": {"type": "string"}, "description": "Field keys to ask"},
                 "note": {"type": "string", "description": "One short line above the form"},
             },

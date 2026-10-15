@@ -58,6 +58,15 @@ async def _ending(search: dict, message: str) -> PhaseOutcome:
     return PhaseOutcome(status="failed", progress={"note": message})
 
 
+async def _stopped(conn, search_id: UUID) -> None:
+    """Whatever ends a search (finished early, cancelled, stalled) drafts
+    nothing more; and the person hears it finished, once, through Tasks."""
+    from app.matcha.services.matcha_work.agent_tasks import job_tasks
+
+    await release_drafts(conn, search_id)
+    await job_tasks.search_stopped(conn, search_id)
+
+
 JOB_CHAIN = chain.ChainSpec(
     table="mw_job_searches",
     live=LIVE,
@@ -65,8 +74,7 @@ JOB_CHAIN = chain.ChainSpec(
     phases=PHASES,
     dispatch=dispatch,
     ending=_ending,
-    # Whatever ends a search (finished early, cancelled, stalled) drafts nothing more.
-    on_terminal=release_drafts,
+    on_terminal=_stopped,
     budget_columns=phases.BUDGET_COLUMNS,
     name="job search",
     noun="search",

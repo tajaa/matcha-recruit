@@ -13,7 +13,7 @@ from app.matcha.services.matcha_work.agent_runtime import enqueue as assistant_e
 from app.matcha.services.matcha_work.job_search import enqueue
 from tests.agent_runtime.helpers import FakeConn, connection
 
-from ._fixtures import COMPANY, USER, search_row
+from ._fixtures import COMPANY, SEARCH, USER, search_row
 
 CLIENT = SimpleNamespace(id=USER, role="client")
 ADMIN = SimpleNamespace(id=USER, role="admin")
@@ -138,6 +138,10 @@ async def test_create_inserts_then_dispatches(gates, conn):
     # The shared allowance's lock: a card run started at the same moment waits too.
     assert conn.ran("pg_advisory_xact_lock")[0][2] == (f"{USER}:task_allowance",)
     assert conn.ran("updated_at < NOW() - INTERVAL '2 hours'")  # the stale sweep ran first
+    # Its row in Tasks, in the same transaction: the search's id is its request id.
+    [pointer] = conn.ran("INSERT INTO mw_agent_tasks")
+    assert pointer[2][0] == SEARCH and pointer[2][3:5] == ("job_search", "job_search")
+    assert pointer[2][7:9] == (None, None)  # not started from a conversation
 
 
 @pytest.mark.asyncio

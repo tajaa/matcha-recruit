@@ -2,8 +2,9 @@
 
 Read the searches (`job_search/`), talk through the ranked jobs and their
 drafted approaches, and keep the person's own notes and status on a job
-("saved", "applied", "dismissed"). A search itself is started from the Job
-search section of the app; nothing here sends, applies or submits.
+("saved", "applied", "dismissed"). A search itself is started as a task (the
+`tasks` ability's `start_task`, playbook `job_search`) or from Tasks in the
+app; nothing here sends, applies or submits.
 
 The `jobs` block is rebuilt from the jobs this run read, by id: pay shown in
 chat is always the posting's own, never the model's restatement of it.
@@ -141,9 +142,10 @@ _ID = {"type": "string"}
 _WEIGHT = {"type": "number", "minimum": 0, "maximum": 1}
 
 _PROMPT = """Job searches:
-- The person's job searches are saved in Espresso's Job search section, which is where a search \
-is started. list_job_searches, then read_job_search for the ranked jobs and read_job_lead for one \
-job's posting, pay evidence and drafted approach (outreach, answers, cover letter).
+- The person's job searches are saved in Espresso's Tasks section. Start a new one with start_task \
+(playbook job_search) if you have it; otherwise they start it from Tasks in the app. \
+list_job_searches, then read_job_search for the ranked jobs and read_job_lead for one job's posting, \
+pay evidence and drafted approach (outreach, answers, cover letter).
 - Pay is only what the posting states, with the text it came from; "Pay not posted" means unknown, \
 never zero. Never estimate a salary as if it were posted.
 - update_job_lead keeps the person's status (saved, applied, dismissed) and notes on a job you read. \

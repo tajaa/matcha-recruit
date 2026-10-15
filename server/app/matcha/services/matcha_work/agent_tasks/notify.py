@@ -34,6 +34,27 @@ def message_for(task: dict) -> tuple[str, str, str] | None:
     return None
 
 
+async def tell(conn, task: dict) -> None:
+    """The notification for a task that just stopped, as Tasks shows it (a job
+    search's pointer already carries its search's state). Raises."""
+    message = message_for(task)
+    if message is None:
+        return
+    kind, title, body = message
+    from app.matcha.services import notification_service
+
+    task_id = task["id"]
+    await notification_service.create_notification(
+        user_id=task["user_id"], company_id=task["company_id"], type=kind, title=title, body=body,
+        link=link_for(task_id),
+        # Strings only (the Mac decodes metadata as [String: String]);
+        # `agent_task_id` because `task_id` is a kanban card there.
+        metadata={"agent_task_id": str(task_id), "task_id": str(task_id), "playbook": task["playbook"],
+                  "status": task["status"]},
+        conn=conn,
+    )
+
+
 async def task_stopped(conn, task_id: UUID) -> None:
     try:
         row = await conn.fetchrow(
@@ -41,23 +62,7 @@ async def task_stopped(conn, task_id: UUID) -> None:
                FROM mw_agent_tasks WHERE id = $1 AND deleted_at IS NULL""",
             task_id,
         )
-        if row is None:
-            return
-        task = dict(row)
-        message = message_for(task)
-        if message is None:
-            return
-        kind, title, body = message
-        from app.matcha.services import notification_service
-
-        await notification_service.create_notification(
-            user_id=task["user_id"], company_id=task["company_id"], type=kind, title=title, body=body,
-            link=link_for(task_id),
-            # Strings only (the Mac decodes metadata as [String: String]);
-            # `agent_task_id` because `task_id` is a kanban card there.
-            metadata={"agent_task_id": str(task_id), "task_id": str(task_id), "playbook": task["playbook"],
-                      "status": task["status"]},
-            conn=conn,
-        )
+        if row is not None:
+            await tell(conn, dict(row))
     except Exception:
         logger.warning("task notification failed task=%s", task_id, exc_info=True)

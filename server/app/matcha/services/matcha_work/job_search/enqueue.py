@@ -98,7 +98,13 @@ async def dispatch(search_id: UUID, token: UUID, *, countdown: int = 0) -> None:
     )
 
 
-async def create_search(user, company_id: UUID, body: JobSearchCreate) -> dict:
+async def create_search(user, company_id: UUID, body: JobSearchCreate, *,
+                        origin: tuple[UUID | None, UUID | None] | None = None) -> dict:
+    """Start a search, and its row in Tasks (`agent_tasks/job_tasks.py`).
+    `origin`: the conversation (and message) a task started it from, where its
+    card is posted when it finishes; only server code passes one."""
+    from app.matcha.services.matcha_work.agent_tasks import job_tasks
+
     # A retried create (the first answer was lost) gets the search it already
     # started, before any cap or rate limit could refuse it.
     existing = await find_by_request(user.id, body.request_id)
@@ -148,6 +154,7 @@ async def create_search(user, company_id: UUID, body: JobSearchCreate) -> dict:
                     "code": "job_search_running",
                     "message": "A job search is already running. Cancel it or wait for it to finish.",
                 })
+            await job_tasks.insert_pointer(conn, row, origin=origin)
     try:
         await dispatch(row["id"], token)
     except Exception:
