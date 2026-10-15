@@ -5,7 +5,8 @@ Espresso in chat ("reply to the landlord and say Friday works", "book Nopa for
 four on Friday at 7"); each message is one run.
 
 Agent cards (`../agent_card/`) are a caller of this same loop, and so are Job
-search's model phases (`../job_search/agent_phase.py`, run kind `job_search`).
+search's model phases (`../job_search/agent_phase.py` over `phase_run.py`, run
+kind `job_search`).
 There is one loop in this package and no other: do not add a second.
 
 ## The shape
@@ -27,6 +28,7 @@ There is one loop in this package and no other: do not add a second.
 | Progress | `chat_progress.py` | One progress message per run + `agent_run_progress` events |
 | Grants | `grants.py`, `consent.py` | Which abilities a person switched on, and what they agreed to |
 | Conversation | `conversation.py` | The private conversation (`channel_scope='assistant'`) |
+| Chains | `chain.py`, `phase_run.py` | Long jobs as a chain of short worker tasks (`ChainSpec`), and a chain's model phase as a run (`RunOwner`). See "Chains" |
 
 Worker: `workers/tasks/assistant.py`. REST: `routes/matcha_work/assistant.py`.
 Browser: `../browser/`. Migrations: `agentrt01` (run kind, steps, prompts),
@@ -61,6 +63,36 @@ Every tool declares one. The rest of the runtime keys on it.
 
 A commit tool must declare `targets` and `preview` (`validate_catalog` refuses
 it otherwise), and should declare `resolve`.
+
+## Chains
+
+A job too long for one worker task (prod's main worker has one slot) runs as
+a chain of short tasks, one phase each. Job search is the first owner
+(`../job_search/orchestrator.py`, `JOB_CHAIN`).
+
+- **`chain.ChainSpec`** describes one kind of row: its table (a whitelist,
+  `ChainTable`: `mw_job_searches`, `mw_agent_tasks`), its live statuses and
+  the claim's first transition, its phases (by status, or by `phase_column`
+  when it has one), the paid-call counters `grant`/`refund` may touch, the
+  callbacks (`dispatch`, `ending`, `on_terminal`) and its timings. Every name
+  that reaches SQL is checked when the spec is built. `claim`, `advance`,
+  `run_phase`, `nudge`, `reconcile`, `grant`, `refund` and `Guard` all take
+  the spec; an owner binds them once. The token/lease/attempts rules are in
+  `chain.py`'s docstring.
+- **`phase_run.RunOwner`** is whose model run it is: run kind and the run
+  row's pointer column (whitelists `RunKind` / `OwnerColumn`), user, company,
+  model, usage feature, storage prefix, surface, and `account(stats)` for the
+  owner's own counters. `phase_run.run_model_phase` writes the
+  `mw_project_agent_runs` row, runs `runner.run_agent` with
+  `store_responses=False`, marks the run and charges the workspace's token
+  budget. Optional pass-throughs (`first_input`, `seed_provenance`, `policy`,
+  `grants`, `commit_modes`, `on_receipt`, `timezone`) default to job search's
+  behaviour.
+- A model phase is still a call to `runner.run_agent`: the one loop. A chain
+  adds durability around runs, not a second loop.
+- Pool-free: both modules go through `connection_or_direct`. A test that
+  fakes the database patches `chain.connection_or_direct` /
+  `phase_run.connection_or_direct`, not the owner's module.
 
 ## Invariants
 

@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from app.matcha.services.matcha_work.agent_runtime import runner
+from app.matcha.services.matcha_work.agent_runtime import chain, phase_run, runner
 from app.matcha.services.matcha_work.job_search import agent_phase, model_phases, phases
 from tests.agent_runtime.helpers import FakeClient, FakeConn, call, connection, response, wire_store
 
@@ -15,13 +15,15 @@ from ._fixtures import SEARCH, TOKEN, search_row
 @pytest.fixture
 def conn(monkeypatch):
     conn = FakeConn()
-    for module in (model_phases, agent_phase, phases):
+    # The run row, mark_run and the token charge are agent_runtime.phase_run's;
+    # the guard's writes are agent_runtime.chain's. Patch where they run.
+    for module in (model_phases, agent_phase, phases, phase_run, chain):
         monkeypatch.setattr(module, "connection_or_direct", connection(conn))
     from app.matcha.services.matcha_work.job_search import service
 
     monkeypatch.setattr(service, "connection_or_direct", connection(conn))
     wire_store(monkeypatch)
-    monkeypatch.setattr(agent_phase.store, "mark_run", AsyncMock())
+    monkeypatch.setattr(phase_run.store, "mark_run", AsyncMock())
     from app.matcha.services.billing import token_budget_service
 
     monkeypatch.setattr(token_budget_service, "deduct_tokens", AsyncMock())
@@ -52,8 +54,8 @@ async def test_run_model_phase_audits_and_charges(conn):
     assert "'job_search'" in insert[1] and insert[2][-1] == SEARCH and insert[2][2] == f"plan:{SEARCH}"
     assert client.calls[0]["feature"] == agent_phase.USAGE_FEATURE
     assert client.calls[0]["store"] is False  # the ask and résumé are not stored by the provider
-    agent_phase.store.mark_run.assert_awaited_once()
-    assert agent_phase.store.mark_run.await_args.kwargs["status"] == "done"
+    phase_run.store.mark_run.assert_awaited_once()
+    assert phase_run.store.mark_run.await_args.kwargs["status"] == "done"
     assert conn.ran("model_runs = model_runs + 1")[0][2] == (SEARCH, 12)
 
 
@@ -68,7 +70,7 @@ async def test_a_failed_run_is_marked_and_raised(conn):
             instructions="x", user_text="y", limits=model_phases.PLAN_LIMITS,
             progress=agent_phase.SearchProgress(note_fn=AsyncMock()), client_factory=d.client,
         )
-    assert agent_phase.store.mark_run.await_args.kwargs["status"] == "failed"
+    assert phase_run.store.mark_run.await_args.kwargs["status"] == "failed"
 
 
 def test_models_and_progress(monkeypatch):

@@ -26,10 +26,10 @@ costs 5 units of Pro's 60 / Business's 150, so 12 searches with nothing else;
 | Data | `service.py` | Owner-scoped reads/writes, re-rank, cancel, tombstone delete |
 | Allowance | `quota.py` | The monthly count |
 | Start | `enqueue.py` | `preflight`, `create_search`, `dispatch`, `queue_for` |
-| Chain | `orchestrator.py` | `claim` / `advance` / `run_phase`, `nudge`, `reconcile` |
-| Phases | `phases.py` | `discover`, `enrich` (+ ranking, + queue the top 8 for approaches); `plan_from_criteria` |
+| Chain | `orchestrator.py` | `PHASES`, `_ending`, `JOB_CHAIN` (the search's `ChainSpec`); `claim` / `advance` / `run_phase`, `nudge`, `reconcile` are the engine's (`agent_runtime/chain.py`) bound to it |
+| Phases | `phases.py` | `discover`, `enrich` (+ ranking, + queue the top 8 for approaches); `plan_from_criteria`; `Guard`, `grant`, `refund` bound to the search row |
 | Model phases | `model_phases.py` | `plan`, `screen`, `approach` |
-| One model run | `agent_phase.py` | A run row of kind `job_search`, the runner, `mark_run`, token charge |
+| One model run | `agent_phase.py` | The search as a `phase_run.RunOwner` (kind `job_search`, counted on the search row); the run itself is `agent_runtime/phase_run.py` |
 | Model contracts | `contracts.py` (pure) | Finish tools + `normalize_plan` / `normalize_screen` / `normalize_approaches` |
 | Prompts | `prompts.py` | Phase instructions and user turns |
 
@@ -85,6 +85,16 @@ One search is a chain of short Celery tasks, one phase each, because prod has
 no `AGENT_*_QUEUE` and every task shares the single-slot main worker. Route it
 elsewhere with `AGENT_JOBS_QUEUE` (else `AGENT_CARD_QUEUE`).
 
+The engine lives in `agent_runtime/chain.py` so other owners can reuse it
+(see that package's CLAUDE.md, "Chains"). Job search is its first spec,
+`orchestrator.JOB_CHAIN`: table `mw_job_searches`, the status names the phase
+(no phase column), budget columns `provider_calls` / `fetch_calls`,
+`release_drafts` on terminal, `_ending` for a search that cannot go on. The
+SQL it runs is the same as before the move. Tests that fake the database
+patch `chain.connection_or_direct` for the engine's statements (claim,
+advance, restart, reconcile, `Guard`, `grant`, `refund`), and fake dispatch by
+replacing `JOB_CHAIN` (`dataclasses.replace(..., dispatch=...)`).
+
 - `claim`: one UPDATE that succeeds only for the current `dispatch_token`, a
   live status and an expired lease (10 min, longer than the task's 560s hard
   limit, so a restart can never run beside a task still alive). Duplicates and
@@ -107,7 +117,7 @@ elsewhere with `AGENT_JOBS_QUEUE` (else `AGENT_CARD_QUEUE`).
 
 Budgets per search, across retries: 30 provider calls, 120 leads, 60 page/API
 fetches. Calls are reserved on the search row before they are made
-(`phases.grant`, one statement under a row lock) and only the unused part is
+(`phases.grant` → `chain.grant`, one statement under a row lock) and only the unused part is
 given back (`refund`). A task killed mid-phase gives nothing back, so a retry
 works from what is left: it can never buy a second budget. A lead the budget
 ran out before is left unread (`NOT_TRIED`), not marked read.
@@ -125,8 +135,9 @@ ran out before is left unread (`NOT_TRIED`), not marked read.
 
 ## Model phases
 
-Each is one ordinary agent-runtime run (`agent_phase.run_model_phase`): the
-search is a third caller of `runner.run_agent`, after the chat assistant and
+Each is one ordinary agent-runtime run (`agent_phase.run_model_phase`, over
+`agent_runtime/phase_run.run_model_phase` with the search as its `RunOwner`):
+the search is a third caller of `runner.run_agent`, after the chat assistant and
 agent cards. There is still one loop. The run row is `kind='job_search'`,
 `surface='job_search'`, `job_search_id` set, no project or channel. Runs are
 not stored by the provider (`store_responses=False`): the ask and, when the

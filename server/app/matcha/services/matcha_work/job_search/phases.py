@@ -15,19 +15,25 @@ Paid calls (Google Jobs, page and ATS fetches) are reserved on the search row
 BEFORE they are made (`grant`), and only what went unused is given back
 (`refund`). A task killed mid-phase gives nothing back, so its retry works
 from what is left and can never spend a second budget.
+
+`Guard`, `grant`, `refund`, `Budget`, `PhaseOutcome` and `PhaseFailed` are the
+chain engine's (`agent_runtime/chain.py`); the first three are bound here to
+the search row (`orchestrator.JOB_CHAIN`).
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 from uuid import UUID
 
 from app.core.services.safe_fetch import UnsafeURL, fetch_public
 from app.database import connection_or_direct, decode_jsonb
 from app.matcha.services.matcha_work.agent_card.page_extract import job_postings
+from app.matcha.services.matcha_work.agent_runtime import chain
+from app.matcha.services.matcha_work.agent_runtime.chain import Budget, PhaseFailed, PhaseOutcome
 
 from . import ats, normalize, providers
 from . import comp as comp_mod
@@ -56,18 +62,6 @@ _NATIONWIDE = {"united states", "us", "usa", "u.s.", "nationwide", "anywhere",
                "across the country", "across the us", "the us", "america"}
 
 
-class PhaseFailed(Exception):
-    """The search cannot go on; the message is shown to the person."""
-
-
-@dataclass
-class PhaseOutcome:
-    status: str
-    progress: dict = field(default_factory=dict)
-    cursor: dict | None = None
-    countdown: int = 0
-
-
 def _default_client(model: str) -> Any:
     from .agent_phase import default_client
 
@@ -90,75 +84,32 @@ class Deps:
     fetch_page: Callable[[str], Awaitable[tuple[dict, set[str]]]] = _default_fetch_page
 
 
-_BUDGET_COLUMNS = {"provider_calls", "fetch_calls"}
+# The paid-call counters on the search row: `grant` and `refund` touch nothing else.
+BUDGET_COLUMNS = frozenset({"provider_calls", "fetch_calls"})
+
+
+def _chain() -> chain.ChainSpec:
+    from .orchestrator import JOB_CHAIN  # orchestrator imports this module
+
+    return JOB_CHAIN
 
 
 async def grant(search_id: UUID, column: str, want: int, limit: int) -> int:
     """Reserve up to `want` calls against the search's lifetime `limit`; the
     number granted (0 when spent)."""
-    assert column in _BUDGET_COLUMNS
-    if want <= 0:
-        return 0
-    async with connection_or_direct() as conn:
-        granted = await conn.fetchval(
-            f"""WITH cur AS (SELECT id, {column} AS before FROM mw_job_searches WHERE id = $1 FOR UPDATE)
-                UPDATE mw_job_searches s
-                SET {column} = cur.before + GREATEST(LEAST($2, $3 - cur.before), 0)
-                FROM cur WHERE s.id = cur.id
-                RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)""",
-            search_id, want, limit,
-        )
-    return int(granted or 0)
+    return await chain.grant(_chain(), search_id, column, want, limit)
 
 
 async def refund(search_id: UUID, column: str, unused: int) -> None:
-    assert column in _BUDGET_COLUMNS
-    if unused <= 0:
-        return
-    async with connection_or_direct() as conn:
-        await conn.execute(
-            f"UPDATE mw_job_searches SET {column} = GREATEST({column} - $2, 0) WHERE id = $1",
-            search_id, unused,
-        )
+    await chain.refund(_chain(), search_id, column, unused)
 
 
-@dataclass
-class Budget:
-    """Calls this phase was granted; `exhausted` once one was refused."""
+class Guard(chain.Guard):
+    """The chain's guard on one search, built by hand: `Guard(search_id, token)`.
+    Phases get theirs from `chain.run_phase`, so annotate with `chain.Guard`."""
 
-    left: int
-    used: int = 0
-    exhausted: bool = False
-
-    def take(self) -> bool:
-        if self.left <= 0:
-            self.exhausted = True
-            return False
-        self.left -= 1
-        self.used += 1
-        return True
-
-
-@dataclass
-class Guard:
-    search_id: UUID
-    token: UUID
-
-    async def current(self) -> bool:
-        async with connection_or_direct() as conn:
-            return bool(await conn.fetchval(
-                "SELECT 1 FROM mw_job_searches WHERE id = $1 AND dispatch_token = $2",
-                self.search_id, self.token,
-            ))
-
-    async def note(self, text: str, **counts: Any) -> None:
-        progress = {"note": text[:200], **counts}
-        async with connection_or_direct() as conn:
-            await conn.execute(
-                """UPDATE mw_job_searches SET progress = progress || $3::jsonb, updated_at = NOW()
-                   WHERE id = $1 AND dispatch_token = $2""",
-                self.search_id, self.token, json.dumps(progress),
-            )
+    def __init__(self, search_id: UUID, token: UUID) -> None:
+        super().__init__(_chain(), search_id, token)
 
 
 # ── plan ─────────────────────────────────────────────────────────────────────
@@ -270,7 +221,7 @@ async def _insert_leads(search: dict, token: UUID, records: list[dict]) -> int:
     return int(inserted or 0)
 
 
-async def discover(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
+async def discover(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
     provider = deps.provider()
     if provider is None:
         raise PhaseFailed("Job search isn't set up on this server.")
@@ -465,7 +416,7 @@ async def _save_enrichment(conn, search_id: UUID, token: UUID, lead_id, update: 
     )
 
 
-async def enrich(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
+async def enrich(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
     async with connection_or_direct() as conn:
         leads = await conn.fetch(
             f"""SELECT id, title, apply_links, comp, description FROM mw_job_leads
