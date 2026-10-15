@@ -334,12 +334,15 @@ struct AssistantView: View {
 
 enum AssistantText {
     /// What the server said went wrong, as one line. FastAPI puts it in
-    /// `detail`, either as a string or as `{ message }`.
+    /// `detail`, either as a string or as `{ message }`. `APIClient` already
+    /// unwraps a string `detail` (the error then carries that text, not
+    /// JSON), so plain text is the server's own words; a page of HTML or an
+    /// empty body is not, and gets the fallback.
     static func message(for error: APIError, fallback: String = "Something went wrong. Please try again.") -> String {
-        guard case let .httpError(_, body) = error,
-              let data = body.data(using: .utf8),
+        guard case let .httpError(_, body) = error else { return fallback }
+        guard let data = body.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return fallback
+            return readable(body) ?? fallback
         }
         if let detail = json["detail"] as? String, !detail.isEmpty { return detail }
         if let detail = json["detail"] as? [String: Any],
@@ -347,6 +350,13 @@ enum AssistantText {
             return text
         }
         return fallback
+    }
+
+    /// Plain text a person can read: not empty, not a page, not too long.
+    static func readable(_ text: String) -> String? {
+        let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty, line.count <= 400, !line.hasPrefix("<"), line != "Unknown error" else { return nil }
+        return line
     }
 }
 

@@ -390,4 +390,19 @@ final class TasksLogicTests: XCTestCase {
         XCTAssertNil(flow.values["quantity"])
         XCTAssertEqual(TaskActionFlow.params(flow.values, fields: action.params), ["fill_in": "yes"])
     }
+
+    func testTheServersOwnWordsReachThePerson() {
+        // APIClient unwraps a string `detail`: the error then carries the text itself.
+        XCTAssertEqual(AssistantText.message(for: .httpError(409, "Espresso only has Google's page for this one.")),
+                       "Espresso only has Google's page for this one.")
+        XCTAssertEqual(AssistantText.message(for: .httpError(409, #"{"detail": {"code": "x", "message": "Out of stock."}}"#)),
+                       "Out of stock.")
+        XCTAssertEqual(AssistantText.message(for: .httpError(400, #"{"detail": "Bad input."}"#)), "Bad input.")
+        // Not words for a person: the fallback.
+        XCTAssertEqual(AssistantText.message(for: .httpError(502, "<html><body>Bad gateway</body></html>"), fallback: "F"), "F")
+        XCTAssertEqual(AssistantText.message(for: .httpError(500, "Unknown error"), fallback: "F"), "F")
+        XCTAssertEqual(AssistantText.message(for: .httpError(500, String(repeating: "x", count: 500)), fallback: "F"), "F")
+        XCTAssertEqual(AssistantText.message(for: .httpError(500, #"{"other": 1}"#), fallback: "F"), "F")
+        XCTAssertEqual(AssistantText.message(for: .unauthorized, fallback: "F"), "F")
+    }
 }
