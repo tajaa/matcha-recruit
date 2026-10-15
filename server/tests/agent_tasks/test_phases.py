@@ -149,6 +149,22 @@ async def test_shopping_findings_are_kept_at_their_stores_page(conn, monkeypatch
     provider.stores.assert_not_awaited()
 
 
+def test_shopping_results_are_ranked_before_the_lookups():
+    """The lookups go to what the person will see first, not to whatever the
+    search listed first."""
+    def rated(title, rating, n):
+        item = _shop(title, "Shop", n=n)
+        return replace(item, fields={"rating": {"value": rating, "status": "verified",
+                                                "evidence": {"quote": f"rating {rating}", "url": item.url,
+                                                             "origin": "provider"}}})
+
+    found = [rated("Okay", 3.9, 1), rated("Best", 4.9, 2), rated("Good", 4.4, 3)]
+    plan = {"constraints": [], "preferences": [{"field": "rating", "weight": 1.0}], "fit_weight": 0}
+    assert [i.title for i in phases.prerank(found, plan)] == ["Best", "Good", "Okay"]
+    assert phases.prerank(found[:1], plan) == found[:1]
+    assert phases.STORE_LOOKUPS == 20
+
+
 @pytest.mark.asyncio
 async def test_store_lookups_are_only_paid_for_findings_there_is_room_for(conn, monkeypatch):
     provider = AsyncMock()
