@@ -175,5 +175,22 @@ re-rank for unposted pay and given to the approach phase.
 `agent_runtime/abilities/jobs.py` (`private_only`, `jobs-1`): list and read
 searches and jobs, keep the person's status and notes (`update_job_lead`),
 re-rank (`rank_job_search`). The `jobs` block is rebuilt from the jobs the run
-read, so pay in chat is always the posting's own. Starting a search from chat
-is not there yet: searches start in the Job search section.
+read, so pay in chat is always the posting's own.
+
+## In Tasks
+
+Searches live in Espresso's Tasks section; the separate Job search section is
+gone. Each search has a pointer row in `mw_agent_tasks` (`engine =
+'job_search'`), written in `create_search`'s transaction
+(`agent_tasks/job_tasks.insert_pointer`; `agenttask03` for older searches) and
+tombstoned by `delete_search`. Tasks reads the search's own state through it,
+cancels and deletes through this service, and refuses refine / more /
+document (a search is re-ranked and redrafted here).
+
+Started from chat as a task: the `tasks` ability's `start_task` or a submitted
+form with playbook `job_search` (`job_tasks.PLAYBOOK`: titles, places, remote,
+minimum base, saved résumé, the `jobs` disclosure) goes through
+`create_search` with the conversation as `origin`. When a search first ends
+`done` or `failed`, the chain's `on_terminal` (`orchestrator._stopped`) tells
+the person (bell + push, `agent_task_id` metadata) and posts the task card in
+that conversation; a redraft that ends later doesn't tell them again.

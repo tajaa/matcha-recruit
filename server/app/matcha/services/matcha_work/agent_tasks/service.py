@@ -9,6 +9,10 @@ Statuses: `queued` and `running` are a live chain; `waiting` needs the person
 (a form, a confirmation) and holds no worker, so it doesn't count toward the
 live limit; `done`, `failed` and `cancelled` are resting. A task left waiting
 for `WAIT_DAYS` is cancelled, and that round is free.
+
+A job search is a task too (`engine = 'job_search'`): a pointer row whose
+state is read from the search (`job_tasks`). Reading, cancelling and deleting
+one goes through the job search's own service.
 """
 from __future__ import annotations
 
@@ -20,7 +24,7 @@ from uuid import UUID
 from app.database import connection_or_direct, decode_jsonb
 
 from . import items as items_mod
-from . import playbooks
+from . import job_tasks, playbooks
 
 LIVE = ("queued", "running")
 OPEN = (*LIVE, "waiting")
@@ -32,6 +36,9 @@ STALE_INTERVAL = "2 hours"
 WAIT_DAYS = 7
 MAX_LIST = 50
 MAX_ITEMS_SHOWN = 200
+# Which kinds of task a person sees: everyone with Tasks sees both; someone
+# who has job search but not yet Tasks sees their searches.
+ENGINES = ("chain", "job_search")
 
 
 class AgentTaskError(ValueError):
@@ -51,7 +58,7 @@ def phase_name(row: dict) -> str | None:
 
 
 def task_view(row) -> dict:
-    row = dict(row)
+    row = job_tasks.overlay(dict(row))
     completed, seen = row.get("completed_at"), row.get("seen_at")
     return {
         "id": str(row["id"]),
@@ -70,6 +77,7 @@ def task_view(row) -> dict:
         "item_count": int(row.get("item_count") or 0),
         "shown_count": int(row.get("shown_count") or 0),
         "input_ids": [str(i) for i in row.get("input_ids") or []],
+        "job_search_id": str(row["job_search_id"]) if row.get("job_search_id") else None,
         "unseen": bool(completed and (seen is None or seen < completed)),
         "created_at": _iso(row.get("created_at")),
         "updated_at": _iso(row.get("updated_at")),
@@ -114,7 +122,7 @@ def plan_view(task: dict) -> dict:
 
 
 def fingerprint(row) -> str:
-    row = dict(row)
+    row = job_tasks.overlay(dict(row))
     raw = json.dumps(
         [row.get("status"), row.get("phase"), _iso(row.get("updated_at")),
          decode_jsonb(row.get("progress"), {}), row.get("current_round")],
@@ -123,34 +131,45 @@ def fingerprint(row) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
-_COUNTS = """(SELECT COUNT(*) FROM mw_agent_task_items i WHERE i.task_id = t.id) AS item_count,
+_COUNTS = f"""(SELECT COUNT(*) FROM mw_agent_task_items i WHERE i.task_id = t.id) AS item_count,
              (SELECT COUNT(*) FROM mw_agent_task_items i WHERE i.task_id = t.id
-                AND i.rank_band < 9) AS shown_count"""
+                AND i.rank_band < 9) AS shown_count,
+             {job_tasks.COLUMNS}"""
+# Every read of a task row: its own counts, and its search's state when it is one.
+_SELECT = f"SELECT t.*, {_COUNTS} FROM mw_agent_tasks t {job_tasks.JOIN}"
 
 
-async def list_tasks(user_id: UUID, company_id: UUID) -> list[dict]:
+async def list_tasks(user_id: UUID, company_id: UUID, *, engines: tuple[str, ...] = ENGINES) -> list[dict]:
     async with connection_or_direct() as conn:
         rows = await conn.fetch(
-            f"""SELECT t.*, {_COUNTS} FROM mw_agent_tasks t
+            f"""{_SELECT}
                 WHERE t.user_id = $1 AND t.company_id = $2 AND t.deleted_at IS NULL
-                  AND t.engine = 'chain'
+                  AND t.engine = ANY($3::text[]) AND {job_tasks.VISIBLE}
                 ORDER BY t.created_at DESC LIMIT {MAX_LIST}""",
-            user_id, company_id,
+            user_id, company_id, list(engines),
         )
     return [task_view(row) for row in rows]
 
 
-async def summary(user_id: UUID, company_id: UUID) -> dict:
+async def summary(user_id: UUID, company_id: UUID, *, engines: tuple[str, ...] = ENGINES) -> dict:
     """What the sidebar row shows: running, waiting for the person, finished unseen."""
     async with connection_or_direct() as conn:
         row = await conn.fetchrow(
-            f"""SELECT COUNT(*) FILTER (WHERE status IN ({_LIVE_SQL})) AS running,
+            f"""WITH v AS (
+                    SELECT CASE WHEN t.engine = 'job_search' THEN {job_tasks.STATUS_SQL} ELSE t.status END AS status,
+                           CASE WHEN t.engine = 'job_search' THEN s.completed_at ELSE t.completed_at END
+                               AS completed_at,
+                           t.seen_at
+                    FROM mw_agent_tasks t {job_tasks.JOIN}
+                    WHERE t.user_id = $1 AND t.company_id = $2 AND t.deleted_at IS NULL
+                      AND t.engine = ANY($3::text[]) AND {job_tasks.VISIBLE}
+                )
+                SELECT COUNT(*) FILTER (WHERE status IN ({_LIVE_SQL})) AS running,
                        COUNT(*) FILTER (WHERE status = 'waiting') AS waiting,
                        COUNT(*) FILTER (WHERE status IN ('done', 'failed') AND completed_at IS NOT NULL
                                           AND (seen_at IS NULL OR seen_at < completed_at)) AS unseen
-                FROM mw_agent_tasks
-                WHERE user_id = $1 AND company_id = $2 AND deleted_at IS NULL AND engine = 'chain'""",
-            user_id, company_id,
+                FROM v""",
+            user_id, company_id, list(engines),
         )
     row = dict(row or {})
     return {k: int(row.get(k) or 0) for k in ("running", "waiting", "unseen")}
@@ -158,7 +177,7 @@ async def summary(user_id: UUID, company_id: UUID) -> dict:
 
 async def owned_task(conn, task_id: UUID, user_id: UUID, *, lock: bool = False):
     row = await conn.fetchrow(
-        f"""SELECT t.*, {_COUNTS} FROM mw_agent_tasks t
+        f"""{_SELECT}
             WHERE t.id = $1 AND t.user_id = $2 AND t.deleted_at IS NULL"""
         if not lock else
         """SELECT * FROM mw_agent_tasks
@@ -173,9 +192,44 @@ async def owned_task(conn, task_id: UUID, user_id: UUID, *, lock: bool = False):
 _ITEM_ORDER = "ORDER BY rank NULLS LAST, created_at, id"
 
 
+def _search_id(task) -> UUID | None:
+    return task["job_search_id"] if task["engine"] == job_tasks.ENGINE else None
+
+
+async def _job_call(operation):
+    """A job search operation, its errors as a task's."""
+    from app.matcha.services.matcha_work.job_search.service import JobSearchError
+
+    try:
+        return await operation
+    except JobSearchError as exc:
+        raise AgentTaskError(str(exc), exc.code, exc.detail) from exc
+
+
+async def _job_task(conn, task, user_id: UUID, *, mark_seen: bool) -> dict:
+    """A job search's task: its jobs as findings, and the search itself."""
+    from app.matcha.services.matcha_work.job_search import service as job_service
+
+    search = await _job_call(job_service.get_search(task["job_search_id"], user_id))
+    view = task_view(task)
+    if mark_seen and view["completed_at"] is not None and view["status"] in RESTING:
+        await conn.execute("UPDATE mw_agent_tasks SET seen_at = NOW() WHERE id = $1", task["id"])
+        view["unseen"] = False
+    return {
+        **view,
+        "fingerprint": search["fingerprint"],
+        "plan": plan_view({}),
+        "rounds": [],
+        "items": [job_tasks.lead_item(lead) for lead in search["leads"][:MAX_ITEMS_SHOWN]],
+        "job_search": {k: v for k, v in search.items() if k != "leads"},
+    }
+
+
 async def get_task(task_id: UUID, user_id: UUID, *, mark_seen: bool = True) -> dict:
     async with connection_or_direct() as conn:
         task = await owned_task(conn, task_id, user_id)
+        if _search_id(task) is not None:
+            return await _job_task(conn, task, user_id, mark_seen=mark_seen)
         rows = await conn.fetch(
             f"SELECT * FROM mw_agent_task_items WHERE task_id = $1 {_ITEM_ORDER} LIMIT {MAX_ITEMS_SHOWN}",
             task_id,
@@ -197,6 +251,17 @@ async def get_task(task_id: UUID, user_id: UUID, *, mark_seen: bool = True) -> d
 async def status_view(task_id: UUID, user_id: UUID) -> dict:
     async with connection_or_direct() as conn:
         task = await owned_task(conn, task_id, user_id)
+    if (search_id := _search_id(task)) is not None:
+        from app.matcha.services.matcha_work.job_search import service as job_service
+
+        # The search's own status read nudges its chain when it has stalled.
+        status = await _job_call(job_service.status_view(search_id, user_id))
+        shown = task_view(task)
+        return {
+            "id": shown["id"], "status": job_tasks.task_status(status["status"]), "phase": status["status"],
+            "progress": status["progress"], "error": status["error"], "item_count": status["lead_count"],
+            "current_round": 0, "updated_at": status["updated_at"], "fingerprint": status["fingerprint"],
+        }
     view = {
         "id": str(task["id"]),
         "status": task["status"],
@@ -216,9 +281,14 @@ async def status_view(task_id: UUID, user_id: UUID) -> dict:
     return view
 
 
+_JOB_ITEMS = "A job search's jobs are opened and marked on the search itself."
+
+
 async def get_item(task_id: UUID, item_id: UUID, user_id: UUID) -> dict:
     async with connection_or_direct() as conn:
-        await owned_task(conn, task_id, user_id)
+        task = await owned_task(conn, task_id, user_id)
+        if _search_id(task) is not None:
+            raise AgentTaskError(_JOB_ITEMS, 409)
         row = await conn.fetchrow(
             "SELECT * FROM mw_agent_task_items WHERE id = $1 AND task_id = $2", item_id, task_id,
         )
@@ -237,6 +307,8 @@ async def patch_item(task_id: UUID, item_id: UUID, user_id: UUID, *, user_state:
                      notes: str | None) -> dict:
     async with connection_or_direct() as conn, conn.transaction():
         task = await owned_task(conn, task_id, user_id, lock=True)
+        if _search_id(task) is not None:
+            raise AgentTaskError(_JOB_ITEMS, 409)
         row = await conn.fetchrow(
             "SELECT * FROM mw_agent_task_items WHERE id = $1 AND task_id = $2 FOR UPDATE", item_id, task_id,
         )
@@ -290,6 +362,13 @@ async def close_round(conn, task_id: UUID) -> None:
 
 
 async def cancel_task(task_id: UUID, user_id: UUID) -> dict:
+    async with connection_or_direct() as conn:
+        search_id = _search_id(await owned_task(conn, task_id, user_id))
+    if search_id is not None:
+        from app.matcha.services.matcha_work.job_search import service as job_service
+
+        await _job_call(job_service.cancel_search(search_id, user_id))
+        return await get_task(task_id, user_id, mark_seen=False)
     async with connection_or_direct() as conn, conn.transaction():
         task = await owned_task(conn, task_id, user_id, lock=True)
         if task["status"] in OPEN and task["engine"] == "chain":
@@ -310,7 +389,14 @@ async def cancel_task(task_id: UUID, user_id: UUID) -> dict:
 
 async def delete_task(task_id: UUID, user_id: UUID) -> dict:
     """Blank the task and drop its findings and runs; the row and its rounds
-    stay as a tombstone so a deleted task still counts toward this month."""
+    stay as a tombstone so a deleted task still counts toward this month. A
+    job search is deleted by its own service, which tombstones this row too."""
+    async with connection_or_direct() as conn:
+        search_id = _search_id(await owned_task(conn, task_id, user_id))
+    if search_id is not None:
+        from app.matcha.services.matcha_work.job_search import service as job_service
+
+        return await _job_call(job_service.delete_search(search_id, user_id))
     async with connection_or_direct() as conn, conn.transaction():
         await owned_task(conn, task_id, user_id, lock=True)
         await conn.execute(
@@ -397,6 +483,27 @@ async def find_by_request(user_id: UUID, request_id: UUID) -> dict | None:
     """A task this person already started with this request id (a retry)."""
     async with connection_or_direct() as conn:
         row = await conn.fetchrow(
-            "SELECT * FROM mw_agent_tasks WHERE user_id = $1 AND request_id = $2", user_id, request_id,
+            f"{_SELECT} WHERE t.user_id = $1 AND t.request_id = $2", user_id, request_id,
         )
     return task_view(row) if row else None
+
+
+async def task_for_search(user_id: UUID, search_id: UUID) -> dict:
+    """A job search's task. A search older than its pointer (one an older app
+    made between deploy and agenttask04) gets one now."""
+    async with connection_or_direct() as conn:
+        row = await conn.fetchrow(
+            f"{_SELECT} WHERE t.user_id = $1 AND t.job_search_id = $2 AND t.deleted_at IS NULL",
+            user_id, search_id,
+        )
+        if row is None:
+            search = await conn.fetchrow(
+                "SELECT * FROM mw_job_searches WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL",
+                search_id, user_id,
+            )
+            if search is None:
+                raise AgentTaskError("Job search not found.", 404)
+            await job_tasks.insert_pointer(conn, search)
+            row = await conn.fetchrow(f"{_SELECT} WHERE t.user_id = $1 AND t.job_search_id = $2",
+                                      user_id, search_id)
+    return task_view(row)

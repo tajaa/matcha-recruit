@@ -7,14 +7,27 @@ from __future__ import annotations
 
 from typing import Mapping
 
+from .job_tasks import PLAYBOOK as JOB_SEARCH
 from .playbook import PhaseFn, Playbook
 from .research import PLAYBOOK as RESEARCH
 
-PLAYBOOKS: Mapping[str, Playbook] = {p.key: p for p in (RESEARCH,)}
+PLAYBOOKS: Mapping[str, Playbook] = {p.key: p for p in (RESEARCH, JOB_SEARCH)}
+# What Espresso can start from chat or a form: its own chains, and job
+# searches (which run on their own engine).
+STARTABLE_ENGINES = ("chain", "job_search")
 
 
 def get(key: str | None) -> Playbook | None:
     return PLAYBOOKS.get(key or "")
+
+
+def startable(playbook: Playbook | None) -> bool:
+    return playbook is not None and playbook.engine in STARTABLE_ENGINES and bool(playbook.env_ready())
+
+
+def startable_keys() -> list[str]:
+    """For a tool's enum: every playbook that can be started, ready here or not."""
+    return sorted(k for k, p in PLAYBOOKS.items() if p.engine in STARTABLE_ENGINES)
 
 
 def chain_phases() -> dict[str, PhaseFn]:

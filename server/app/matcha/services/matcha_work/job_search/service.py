@@ -293,7 +293,8 @@ async def cancel_search(search_id: UUID, user_id: UUID) -> dict:
 
 async def delete_search(search_id: UUID, user_id: UUID) -> dict:
     """Blank the search and drop its leads and runs; the row stays as a tombstone
-    so a deleted search still counts toward this month's allowance."""
+    so a deleted search still counts toward this month's allowance. Its row in
+    Tasks goes too."""
     async with connection_or_direct() as conn, conn.transaction():
         await owned_search(conn, search_id, user_id, lock=True)
         await conn.execute("DELETE FROM mw_job_leads WHERE search_id = $1", search_id)
@@ -309,6 +310,11 @@ async def delete_search(search_id: UUID, user_id: UUID) -> dict:
                    status = CASE WHEN status IN ({_LIVE_SQL}) THEN 'cancelled' ELSE status END,
                    completed_at = COALESCE(completed_at, NOW()), updated_at = NOW()
                WHERE id = $1""",
+            search_id,
+        )
+        await conn.execute(
+            """UPDATE mw_agent_tasks SET deleted_at = NOW(), title = '', directive = '', updated_at = NOW()
+               WHERE job_search_id = $1 AND deleted_at IS NULL""",
             search_id,
         )
     return {"deleted": True}

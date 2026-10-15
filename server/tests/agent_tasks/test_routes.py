@@ -22,12 +22,16 @@ async def test_routes_pass_the_caller(monkeypatch):
     monkeypatch.setattr(routes.enqueue, "create_task", AsyncMock(return_value={"id": "new"}))
     monkeypatch.setattr(routes.enqueue, "start_round", AsyncMock(return_value={"id": "round"}))
     monkeypatch.setattr(routes.allowance, "task_usage", AsyncMock(return_value={"limit": 60}))
+    monkeypatch.setattr(routes.enqueue, "tasks_enabled", lambda user: True)
 
     listed = await routes.list_agent_tasks(USER)
     assert listed == {"tasks": {"ok": "list_tasks"}, "usage": {"limit": 60}}
+    assert routes.service.list_tasks.await_args.kwargs == {"engines": ("chain", "job_search")}
     assert await routes.tasks_summary(USER) == {"ok": "summary"}
+    assert routes.service.summary.await_args.kwargs == {"engines": ("chain", "job_search")}
     books = await routes.list_playbooks(USER)
-    assert [p["key"] for p in books["playbooks"]] == ["research"] and books["units"]["rounds"]["more"] == 1
+    assert [p["key"] for p in books["playbooks"]] == ["research", "job_search"]
+    assert books["units"]["rounds"]["more"] == 1
     body = AgentTaskCreate(request_id=uuid4(), directive="find me a lamp")
     assert await routes.create_agent_task(body, USER) == {"id": "new"}
     assert routes.enqueue.create_task.await_args.args == (USER, CID, body)
@@ -55,12 +59,20 @@ async def test_errors_and_gates(monkeypatch):
     monkeypatch.setattr(routes, "get_client_company_id", AsyncMock(return_value=None))
     with pytest.raises(HTTPException):
         await routes.list_agent_tasks(USER)
+    from app.matcha.services.matcha_work.job_search import providers
+
     monkeypatch.setattr(routes.enqueue, "tasks_enabled", lambda user: False)
+    monkeypatch.setattr(providers, "configured", lambda: False)
     with pytest.raises(HTTPException) as exc:
         await routes.require_tasks(USER)
     assert exc.value.detail["code"] == "feature_disabled"
+    # Job search isn't behind the Tasks switch: its searches are here either way.
+    monkeypatch.setattr(providers, "configured", lambda: True)
+    assert await routes.require_tasks(USER) is USER
+    assert routes._engines(USER) == ("job_search",)
     monkeypatch.setattr(routes.enqueue, "tasks_enabled", lambda user: True)
     assert await routes.require_tasks(USER) is USER
+    assert routes._engines(USER) == ("chain", "job_search")
 
 
 def test_the_router_is_mounted_behind_the_gates():

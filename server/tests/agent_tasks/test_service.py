@@ -36,8 +36,12 @@ async def test_list_summary_and_get(conn):
     conn.on("FROM mw_agent_tasks t", [task_row()])
     conn.on("COUNT(*) FILTER", {"running": 1, "waiting": 2, "unseen": None})
     assert (await service.list_tasks(USER, COMPANY))[0]["id"] == str(TASK)
-    assert conn.calls[-1][2] == (USER, COMPANY) and "engine = 'chain'" in conn.calls[-1][1]
+    assert conn.calls[-1][2] == (USER, COMPANY, ["chain", "job_search"])
+    assert "t.engine = ANY($3::text[])" in conn.calls[-1][1]
+    await service.list_tasks(USER, COMPANY, engines=("job_search",))
+    assert conn.calls[-1][2][2] == ["job_search"]
     assert await service.summary(USER, COMPANY) == {"running": 1, "waiting": 2, "unseen": 0}
+    assert "CASE WHEN t.engine = 'job_search'" in conn.calls[-1][1]
 
     conn.on("WHERE t.id = $1 AND t.user_id = $2", task_row())
     conn.on("FROM mw_agent_task_items WHERE task_id", [item_row()])
@@ -113,6 +117,7 @@ async def test_close_round_rules():
 async def test_cancel_and_delete(conn, monkeypatch):
     monkeypatch.setattr(service, "_rerank", AsyncMock())
     monkeypatch.setattr(service, "get_task", AsyncMock(return_value={"status": "cancelled"}))
+    conn.on("WHERE t.id = $1 AND t.user_id = $2", task_row(status="running"))
     conn.on("deleted_at IS NULL FOR UPDATE", task_row(status="running"))
     conn.on("SET status = 'cancelled', dispatch_token = NULL", task_row(status="cancelled"))
     assert (await service.cancel_task(TASK, USER))["status"] == "cancelled"
