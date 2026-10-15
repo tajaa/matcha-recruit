@@ -322,11 +322,34 @@ def _overlap(a: str, b: str) -> float:
 
 def _the_one(nodes: list[dict], title: str) -> dict | None:
     """The page's one node about this item: the only one, or the one whose
-    name matches the title. A results page about many is no item's evidence."""
-    if len(nodes) == 1:
-        return nodes[0]
-    named = [n for n in nodes if _overlap(str(n.get("name") or ""), title) >= 0.6]
+    name matches the title. A results page about many is no item's evidence.
+    A page that says the same thing twice (many store themes print their
+    product's schema.org block twice) is about one item."""
+    unique: list[dict] = []
+    for node in nodes:
+        twin = next((n for n, kept in enumerate(unique) if _same_node(node, kept)), None)
+        if twin is None:
+            unique.append(node)
+        elif len(node.get("offers") or []) > len(unique[twin].get("offers") or []):
+            unique[twin] = node  # keep the fuller one
+    if len(unique) == 1:
+        return unique[0]
+    named = [n for n in unique if _overlap(str(n.get("name") or ""), title) >= 0.6]
     return named[0] if len(named) == 1 else None
+
+
+def _same_node(a: dict, b: dict) -> bool:
+    """Two nodes about one item: one name, and one's offers all among the
+    other's (a theme prints every variant's offer once and the current
+    variant's again)."""
+    def offers(node: dict) -> set:
+        return {(_number(o.get("price")), str(o.get("currency") or ""), str(o.get("availability") or ""),
+                 str(o.get("url") or "")) for o in node.get("offers") or [] if isinstance(o, dict)}
+
+    if _norm(str(a.get("name") or "")) != _norm(str(b.get("name") or "")):
+        return False
+    oa, ob = offers(a), offers(b)
+    return oa <= ob or ob <= oa
 
 
 def _set(out: dict, key: str, raw: Any, *, url: str, quote: str, today: date, origin: str = "jsonld",
