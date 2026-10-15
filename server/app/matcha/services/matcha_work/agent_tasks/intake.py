@@ -91,14 +91,27 @@ def clean_value(spec: IntakeField, raw: Any) -> Any:
             return text in _YES
         raise ValueError("should be yes or no")
     if kind == "list":
-        values = raw if isinstance(raw, list) else str(raw).split(",")
         out = []
-        for value in values:
+        for value in _list_parts(raw):
             text = " ".join(str(value).split())[:120]
             if text and text.casefold() not in {o.casefold() for o in out}:
                 out.append(text)
         return out[:MAX_LIST] or None
     raise ValueError("isn't a field it can take")
+
+
+def _list_parts(raw: Any) -> list[str]:
+    """A list as given: an array, or text. Semicolons and new lines separate
+    items when there are any, so "New York, NY; Remote" stays two places;
+    otherwise commas do ("COO, VP Ops"). The model sometimes sends a list as
+    one string, or an array of such strings."""
+    parts: list[str] = []
+    for value in raw if isinstance(raw, list) else [raw]:
+        text = str(value)
+        parts += re.split(r"[;\n]", text) if re.search(r"[;\n]", text) else (
+            text.split(",") if not isinstance(raw, list) else [text]
+        )
+    return parts
 
 
 def clean_values(playbook: Playbook, raw: dict) -> tuple[dict, dict[str, str]]:
@@ -243,7 +256,8 @@ def ask_form_tool():
                 "playbook": {"type": "string", "enum": playbooks.startable_keys()},
                 "directive": {"type": "string", "description": "What they asked for, in their words"},
                 "title": {"type": "string", "description": "A short name for the task"},
-                "known": {"type": "object", "description": "Field key -> what they already said"},
+                "known": {"type": "object",
+                          "description": "Field key -> what they already said; a list field as an array of strings"},
                 "missing": {"type": "array", "items": {"type": "string"}, "description": "Field keys to ask"},
                 "note": {"type": "string", "description": "One short line above the form"},
             },

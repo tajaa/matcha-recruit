@@ -28,6 +28,12 @@ def test_clean_value_by_type():
     assert c(F("a", "multi_select", options=("x", "y")), ["y", "y"]) == ["y"]
     assert c(F("a", "boolean"), "Yes") is True and c(F("a", "boolean"), False) is False
     assert c(F("a", "list"), "dogs, Dogs, parking") == ["dogs", "parking"] and c(F("a", "list"), [" "]) is None
+    # Semicolons (or new lines) separate items when there are any, so a place
+    # keeps its comma; an array's items are kept whole unless they hold one.
+    assert c(F("a", "list"), "New York, NY; Remote") == ["New York, NY", "Remote"]
+    assert c(F("a", "list"), ["VP of Operations; COO"]) == ["VP of Operations", "COO"]
+    assert c(F("a", "list"), ["New York, NY", "Remote"]) == ["New York, NY", "Remote"]
+    assert c(F("a", "list"), "Austin\nDenver") == ["Austin", "Denver"]
     for spec, bad in ((F("a", "text"), {"x": 1}), (F("a", "money"), True), (F("a", "money"), "lots"),
                       (F("a", "money"), -1), (F("a", "date"), "soon"), (F("a", "time"), "25:00"),
                       (F("a", "select", options=("x",)), "z"), (F("a", "multi_select", options=("x",)), ["z"]),
