@@ -40,6 +40,8 @@ class SearchKind:
     limit_keys: tuple[str, ...] = ()
     plan_hint: str = ""
     actions: tuple[str, ...] = ()
+    # The budget's unit, when it has one (rent is a month).
+    budget_unit: str | None = None
 
     def labels(self) -> dict[str, str]:
         return {f.key: f.label for f in self.intake}
@@ -110,6 +112,7 @@ APARTMENTS = SearchKind(
         *_intake("must_haves", "avoid"),
     ),
     brief_model=ApartmentBrief,
+    budget_unit="month",
     limits=apartment_limits,
     limit_keys=("beds_min", "baths_min", "pets", "move_in"),
     plan_hint=(

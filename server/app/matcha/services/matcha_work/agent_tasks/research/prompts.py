@@ -94,6 +94,15 @@ def plan_instructions(today: date, kind=None) -> str:
     return text
 
 
+def refine_instructions(today: date, kind=None) -> str:
+    """The refiner's instructions, with the kind of search when it is one."""
+    text = REFINE.format(today=today.isoformat())
+    if kind is not None:
+        text += (f"\n\nKind of search: {kind.label}. Its item_kind and source are fixed "
+                 f"({kind.item_kind}, {kind.source}). {kind.plan_hint}")
+    return text
+
+
 def plan_turn(directive: str, brief: dict, files_text: str | None, *, labels: dict[str, str] | None = None) -> str:
     lines = ["----", *_brief_lines(directive, brief, labels)]
     lines.append("Fields allowed: " + ", ".join(f"{k} ({s.label})" for k, s in F.LIBRARY.items()))

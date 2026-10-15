@@ -20,6 +20,9 @@ def test_each_kind_is_a_playbook_on_researchs_phases():
         assert playbook.label == kind.label and playbook.item_kinds == (kind.item_kind,)
         assert playbook.phase_key(playbook.first_phase) == "research.plan"
         assert playbook.phases is RESEARCH.phases and kind.key in allowance.WEIGHTS
+        # Built from research's playbook: what research has, the kinds have.
+        assert (playbook.round_phases, playbook.budgets, playbook.max_rounds, playbook.env_ready) == (
+            RESEARCH.round_phases, RESEARCH.budgets, RESEARCH.max_rounds, RESEARCH.env_ready)
         assert playbooks.startable(playbook) and set(kind.fields) <= set(playbook.field_library)
     assert playbooks.get("products").actions == ("buy",)
     assert kinds.of(task_row(playbook="apartments")) is kinds.APARTMENTS
@@ -81,6 +84,8 @@ def test_a_refine_can_change_the_persons_own_limit():
 
 
 def test_the_planner_is_told_the_kind_and_the_answers():
+    assert "Kind of search: Apartments." in prompts.refine_instructions(TODAY, kinds.APARTMENTS)
+    assert "Kind of search" not in prompts.refine_instructions(TODAY)
     text = prompts.plan_instructions(TODAY, kinds.PRODUCTS)
     assert "Kind of search: Products. Its item_kind and source are fixed (product, shopping)." in text
     assert "Kind of search" not in prompts.plan_instructions(TODAY)

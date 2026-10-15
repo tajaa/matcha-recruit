@@ -9,6 +9,8 @@ See `../CLAUDE.md` for the evidence rules and budgets.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 from app.core.services import agent_surfaces
 
 from ..playbook import Playbook
@@ -55,27 +57,18 @@ PLAYBOOK = Playbook(
 
 
 def kind_playbook(kind: kinds.SearchKind) -> Playbook:
-    """A kind of search as a playbook: research's phases, under research's phase
-    names, with the kind's own questions, check, facts and actions."""
-    return Playbook(
+    """A kind of search as a playbook: research's, under research's phase
+    names, with the kind's own questions, check, facts and actions. Built
+    from research's playbook, so whatever research gains, the kinds have."""
+    return replace(
+        PLAYBOOK,
         key=kind.key,
         label=kind.label,
         description=kind.description,
-        engine="chain",
         item_kinds=(kind.item_kind,),
         intake=kind.intake,
         validate_brief=validator(kind.brief_model),
-        field_library=LIBRARY,
-        phases=PHASES,
-        first_phase="plan",
-        round_phases=PLAYBOOK.round_phases,
-        rerank=phases.rerank,
-        describe_constraint=ranking.describe,
-        item_actions=PLAYBOOK.item_actions,
         actions=kind.actions,
-        budgets=phases.BUDGETS,
-        model_surface=agent_surfaces.ESPRESSO_TASKS,
-        personal_only=True,
         phase_prefix=PLAYBOOK.key,
     )
 

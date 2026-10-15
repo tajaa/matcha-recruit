@@ -392,7 +392,7 @@ async def refine(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
                 normalize=lambda args, _state: contracts.normalize_refine(args, plan=plan_, brief=brief, today=today,
                                                                           kind=kinds.of(task)),
             ),
-            instructions=prompts.REFINE.format(today=today.isoformat()),
+            instructions=prompts.refine_instructions(today, kinds.of(task)),
             user_text=prompts.refine_turn(task.get("directive") or "", plan_, change),
             limits=REFINE_LIMITS, progress=_progress(guard), client_factory=deps.client,
             first_note="Reading your change…",

@@ -33,8 +33,13 @@ def test_plan_keeps_the_persons_limits():
     assert plan["queries"][0] == "1 bedroom apartment dogs San Francisco"
     assert plan["queries"][-1] == "1br Mission San Francisco" and len(plan["queries"]) == 2
     price = [c for c in plan["constraints"] if c["field"] == "price"]
-    assert price == [{"field": "price", "op": "lte", "value": 3500.0, "currency": "USD", "source": "brief",
-                      "unit": "month"}]
+    # Generic research: the budget has no unit, so it compares with a price in
+    # any unit (a home to buy isn't read as a monthly rent). Apartments say month.
+    assert price == [{"field": "price", "op": "lte", "value": 3500.0, "currency": "USD", "source": "brief"}]
+    from app.matcha.services.matcha_work.agent_tasks.research import kinds
+
+    rent, _ = C.normalize_plan(_plan_args(), brief=BRIEF, today=TODAY, kind=kinds.APARTMENTS)
+    assert [c.get("unit") for c in rent["constraints"] if c["field"] == "price"] == ["month"]
     assert any(c["field"] == "available_date" and c["op"] == "before" for c in plan["constraints"])
     assert any(c == {"field": "in_stock", "op": "is_true", "value": True} for c in plan["constraints"])
     assert len(warnings) == 3  # beds/includes, empty text, junk

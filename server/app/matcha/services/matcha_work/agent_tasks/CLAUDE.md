@@ -192,7 +192,10 @@ A kind's answers become constraints with `source: brief`, like a typed
 budget: the plan can't drop them, a refine may change them (its
 `limit_keys` are left out when the refined plan is finalized). The planner
 is told the kind (`prompts.plan_instructions`) and gets every answer by the
-kind's own labels. `research` stays the catch-all. A task row's
+kind's own labels (refine too). A budget has a unit only when the kind
+says so (`budget_unit`: apartments' rent is a month); generic research's
+has none, so it compares with a price in any unit and a home to buy isn't
+read as a monthly rent. `research` stays the catch-all. A task row's
 `playbook_label` names its kind for the app.
 
 ## Invariants

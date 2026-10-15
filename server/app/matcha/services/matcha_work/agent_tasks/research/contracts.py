@@ -159,14 +159,17 @@ def _unique(items: list[dict], key) -> list[dict]:
     return out
 
 
-def brief_constraints(brief: dict, *, item_kind: str, today: date) -> list[dict]:
-    """The hard limits the person typed, as constraints. They always win."""
+def brief_constraints(brief: dict, *, item_kind: str, today: date, budget_unit: str | None = None) -> list[dict]:
+    """The hard limits the person typed, as constraints. They always win. A
+    budget has a unit only when the kind of search says so (rent is a month);
+    with none it compares with a price in any unit, so a home to buy isn't
+    read as a monthly rent."""
     out = []
     if brief.get("budget_max"):
         constraint = {"field": "price", "op": "lte", "value": float(brief["budget_max"]),
                       "currency": brief.get("currency") or "USD", "source": "brief"}
-        if item_kind == "listing":
-            constraint["unit"] = "month"
+        if budget_unit:
+            constraint["unit"] = budget_unit
         out.append(constraint)
     if brief.get("needed_by") and item_kind == "listing":
         made = clean_constraint({"field": "available_date", "op": "before", "value": brief["needed_by"]}, today=today)
@@ -181,7 +184,8 @@ def finalize_plan(plan: dict, brief: dict, *, today: date, kind: SearchKind | No
     A kind of search fixes what a finding is, where the search starts, the
     facts shown first, and adds its own limits from the brief."""
     item_kind = kind.item_kind if kind else (plan.get("item_kind") if plan.get("item_kind") in ITEM_KINDS else "other")
-    typed = brief_constraints(brief, item_kind=item_kind, today=today)
+    typed = brief_constraints(brief, item_kind=item_kind, today=today,
+                              budget_unit=kind.budget_unit if kind else None)
     if kind is not None:
         typed += [{**c, "source": "brief"}
                   for c in (clean_constraint(raw, today=today) for raw in kind.limits(brief)) if c]
