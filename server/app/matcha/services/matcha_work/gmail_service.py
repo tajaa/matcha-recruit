@@ -292,6 +292,13 @@ class GmailService:
                 return {}
             return resp.json()
 
+    async def _gmail_put(self, path: str, body: dict) -> dict:
+        headers = await self._get_headers()
+        async with httpx.AsyncClient() as client:
+            resp = await client.put(f"{GMAIL_API_BASE}{path}", headers=headers, json=body, timeout=30.0)
+            resp.raise_for_status()
+            return resp.json() if resp.content.strip() else {}
+
     async def _gmail_delete(self, path: str) -> None:
         headers = await self._get_headers()
         async with httpx.AsyncClient() as client:
@@ -546,6 +553,79 @@ class GmailService:
         if thread:
             send_body["threadId"] = thread
         return await self._gmail_post("/users/me/messages/send", send_body)
+
+    # ── drafts: listed, read, edited and sent from Espresso's Email ─────────
+    # gmail.compose (every connection has it) covers all of these.
+
+    @staticmethod
+    def _draft_id(draft_id: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", draft_id or ""):
+            raise ValueError("Invalid draft id")
+        return draft_id
+
+    def _draft_view(self, data: dict, *, with_body: bool) -> dict:
+        message = data.get("message") or {}
+        payload = message.get("payload") or {}
+        headers = {h["name"].lower(): h["value"] for h in payload.get("headers", [])}
+        out = {
+            "id": data.get("id"),
+            "message_id": message.get("id"),
+            "thread_id": message.get("threadId"),
+            "to": _decode_header(headers.get("to", "")),
+            "subject": _decode_header(headers.get("subject", "")),
+            "date": headers.get("date", ""),
+            "snippet": html.unescape(message.get("snippet") or ""),
+            "updated_ms": int(message["internalDate"]) if str(message.get("internalDate") or "").isdigit() else None,
+        }
+        if with_body:
+            out["body"] = self._extract_body(payload)
+        return out
+
+    async def list_drafts(self, max_results: int = 25) -> list[dict]:
+        """The person's drafts, newest first: who to, subject, a preview."""
+        import asyncio
+
+        await self.load_token()
+        data = await self._gmail_get("/users/me/drafts", params={"maxResults": str(max_results)})
+
+        async def one(stub: dict) -> dict | None:
+            try:
+                return self._draft_view(await self._gmail_get(
+                    f"/users/me/drafts/{self._draft_id(stub.get('id') or '')}", params={"format": "full"},
+                ), with_body=False)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 404:
+                    return None  # sent or deleted between listing and reading
+                raise
+
+        drafts = [d for d in await asyncio.gather(*(one(s) for s in data.get("drafts", []))) if d]
+        return sorted(drafts, key=lambda d: d.get("updated_ms") or 0, reverse=True)
+
+    async def get_draft(self, draft_id: str) -> dict:
+        """One draft with its body. Raises httpx.HTTPStatusError (404) when it
+        was sent or deleted."""
+        await self.load_token()
+        return self._draft_view(await self._gmail_get(
+            f"/users/me/drafts/{self._draft_id(draft_id)}", params={"format": "full"},
+        ), with_body=True)
+
+    async def update_draft(self, draft_id: str, *, to: str, subject: str, body: str,
+                           thread_id: str | None = None) -> dict:
+        """Replace a draft's recipients, subject and text, keeping its thread."""
+        raw = self._build_raw(to, subject, body, None)
+        message: dict = {"raw": raw}
+        if thread_id:
+            message["threadId"] = thread_id
+        draft_id = self._draft_id(draft_id)
+        return await self._gmail_put(f"/users/me/drafts/{draft_id}", {"id": draft_id, "message": message})
+
+    async def send_draft(self, draft_id: str, *, recipients: int) -> dict:
+        """Send a saved draft as it is in Gmail. Same per-person ceilings as
+        `send_email`; `recipients` is how many addresses it goes to."""
+        draft_id = self._draft_id(draft_id)
+        await self._check_send_rate()
+        await self._check_recipient_rate(recipients)
+        return await self._gmail_post("/users/me/drafts/send", {"id": draft_id})
 
     async def delete_draft(self, draft_id: str) -> None:
         """Remove a saved draft (gmail.compose covers drafts.delete). Used after

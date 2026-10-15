@@ -40,6 +40,15 @@ enum APIError: Error, LocalizedError {
         return PlanRequirement(requiredPlan: requiredPlan, currentPlan: currentPlan, feature: feature)
     }
 
+    /// The server's `detail.code` on a structured refusal ("email_not_connected").
+    var detailCode: String? {
+        guard case let .httpError(_, message) = self,
+              let data = message.data(using: .utf8),
+              let response = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let detail = response["detail"] as? [String: Any] else { return nil }
+        return detail["code"] as? String
+    }
+
     var errorDescription: String? {
         switch self {
         case .httpError(let code, let message):

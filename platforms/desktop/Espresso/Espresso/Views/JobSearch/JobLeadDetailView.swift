@@ -3,7 +3,8 @@ import AppKit
 
 /// One job: pay with the text it came from, how to approach it, and the
 /// drafts (outreach, answers to the application's own questions, cover
-/// letter). Every draft has Copy; nothing here sends or submits.
+/// letter). Every draft has Copy, and the first message can go to the
+/// person's Gmail drafts ("Draft email"); nothing here sends or submits.
 struct JobLeadDetailView: View {
     @Environment(AppState.self) private var appState
     let vm: JobSearchViewModel
@@ -64,14 +65,16 @@ struct JobLeadDetailView: View {
                 .font(.system(size: 11))
                 .foregroundColor(appState.themeTextSecondary)
             if !lead.fitReasons.isEmpty || job.fitScore != nil {
-                HStack(alignment: .top, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text("Fit \(JobSearchViewModel.fitText(job.fitScore))")
                         .font(.system(size: 10, weight: .semibold))
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(Capsule().fill(appState.themeAccent.opacity(0.12)))
+                        .fixedSize()
                     Text(lead.fitReasons.joined(separator: " \u{00B7} "))
                         .font(.system(size: 11))
                         .foregroundColor(appState.themeTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             if job.isIrrelevant, let reason = lead.screenReason, !reason.isEmpty {
@@ -85,6 +88,22 @@ struct JobLeadDetailView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(appState.themeAccent)
                 }
+                emailButton(lead)
+            }
+            .font(.system(size: 11))
+            .padding(.top, 2)
+            if vm.emailNotConnected {
+                HStack(spacing: 6) {
+                    Image(systemName: "envelope.badge").foregroundColor(.orange)
+                    Text("Connect Gmail in Email first, then Draft email again.")
+                        .foregroundColor(appState.themeTextSecondary)
+                    Button("Open Email") { appState.openEmailDrafts() }
+                        .buttonStyle(.plain)
+                        .foregroundColor(appState.themeAccent)
+                }
+                .font(.system(size: 11))
+            }
+            HStack(spacing: 8) {
                 Menu {
                     Button("Saved") { Task { await vm.setState("saved", leadId: job.id) } }
                     Button("Applied") { Task { await vm.setState("applied", leadId: job.id) } }
@@ -113,6 +132,36 @@ struct JobLeadDetailView: View {
             }
             .font(.system(size: 11))
             .padding(.top, 2)
+        }
+    }
+
+    /// The first message, into Gmail drafts: Draft email, then a way to it
+    /// while it waits there, then that it was sent.
+    @ViewBuilder
+    private func emailButton(_ lead: JobLeadDetail) -> some View {
+        let job = lead.summary
+        if !(lead.approach?.outreach?.body ?? "").isEmpty {
+            if let draftId = job.emailDraftId, job.emailSentAt == nil {
+                Button { appState.openEmailDrafts(draftId: draftId) } label: {
+                    Label("Edit draft in Email", systemImage: "envelope.open")
+                }
+                .buttonStyle(.bordered)
+                .help("It's in your Gmail drafts: edit it and send it from Email")
+            } else if job.emailSentAt != nil {
+                Label("Email sent", systemImage: "checkmark.circle")
+                    .foregroundColor(appState.themeTextSecondary)
+            } else {
+                Button {
+                    Task {
+                        if let id = await vm.draftEmail(leadId: job.id) { appState.openEmailDrafts(draftId: id) }
+                    }
+                } label: {
+                    Label("Draft email", systemImage: "envelope")
+                }
+                .buttonStyle(.bordered)
+                .disabled(vm.busy)
+                .help("Puts the first message in your Gmail drafts, to edit and send from Email. Nothing is sent.")
+            }
         }
     }
 
@@ -195,12 +244,18 @@ struct JobLeadDetailView: View {
 
     @ViewBuilder
     private func approachBody(_ approach: JobApproach) -> some View {
-        HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(approach.channelLabel)
                 .font(.system(size: 10, weight: .semibold))
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(Capsule().fill(appState.themeAccent.opacity(0.12)))
-            if let summary = approach.summary { Text(summary).font(.system(size: 12)) }
+            if let summary = approach.summary {
+                Text(summary)
+                    .font(.system(size: 12))
+                    .foregroundColor(appState.themeText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
         }
         bullets("Steps", approach.steps, numbered: true)
         bullets("What to lead with", approach.talkingPoints)
@@ -228,10 +283,15 @@ struct JobLeadDetailView: View {
                     .compactMap { $0 }.joined(separator: "\n"),
                 text: outreach.body ?? "",
                 copyText: [outreach.subject.map { "Subject: \($0)\n\n" } ?? "", outreach.body ?? ""].joined(),
-                extra: JobSearchViewModel.mailtoURL(outreach).map { url in
-                    AnyView(Button("Open in Mail") { NSWorkspace.shared.open(url) }.buttonStyle(.plain))
-                }
+                extra: nil
             )
+            let placeholders = EmailDraftsViewModel.placeholders(in: (outreach.subject ?? "") + "\n" + (outreach.body ?? ""))
+            if !placeholders.isEmpty {
+                Text("Fill in \(placeholders.joined(separator: ", ")) before you send it. Draft email puts it in Gmail, where you can.")
+                    .font(.system(size: 11))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         if !approach.answers.isEmpty {
             subheading("Application answers")
@@ -288,7 +348,7 @@ struct JobLeadDetailView: View {
 
     private func descriptionSection(_ text: String) -> some View {
         section("The posting") {
-            Text(text)
+            Text(JobSearchViewModel.tidyPosting(text))
                 .font(.system(size: 11))
                 .foregroundColor(appState.themeText)
                 .textSelection(.enabled)

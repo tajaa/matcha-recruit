@@ -219,6 +219,10 @@ struct JobLeadSummary: Decodable, Identifiable, Hashable {
     var flags: [String]
     /// `new`, `saved`, `applied` or `dismissed`.
     var userState: String
+    /// Its first message, saved in the person's Gmail drafts ("Draft email").
+    var emailDraftId: String?
+    var emailDraftedAt: Date?
+    var emailSentAt: Date?
     /// `none`, `queued`, `drafting`, `done` or `failed`.
     var approachStatus: String
 
@@ -239,6 +243,9 @@ struct JobLeadSummary: Decodable, Identifiable, Hashable {
         case rankBand = "rank_band"
         case userState = "user_state"
         case approachStatus = "approach_status"
+        case emailDraftId = "email_draft_id"
+        case emailDraftedAt = "email_drafted_at"
+        case emailSentAt = "email_sent_at"
     }
 
     init(from decoder: Decoder) throws {
@@ -265,10 +272,16 @@ struct JobLeadSummary: Decodable, Identifiable, Hashable {
         flags = c.list(.flags)
         userState = c.value(.userState) ?? "new"
         approachStatus = c.value(.approachStatus) ?? "none"
+        emailDraftId = c.value(.emailDraftId)
+        emailDraftedAt = (c.value(.emailDraftedAt) as String?).flatMap { parseMWDate($0) }
+        emailSentAt = (c.value(.emailSentAt) as String?).flatMap { parseMWDate($0) }
     }
 
     var isIrrelevant: Bool { screenStatus == "irrelevant" }
     var isDrafting: Bool { approachStatus == "queued" || approachStatus == "drafting" }
+    var hasApproach: Bool { approachStatus == "done" }
+    /// In Gmail drafts, waiting to be edited and sent.
+    var emailWaiting: Bool { emailDraftId != nil && emailSentAt == nil }
 }
 
 struct JobSearchDetail: Decodable {
@@ -467,6 +480,20 @@ struct JobLeadAts: Decodable, Hashable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         provider = c.value(.provider)
         questions = c.list(.questions)
+    }
+}
+
+/// `POST …/leads/{id}/email-draft`: the Gmail draft, and the job as it is now.
+struct JobEmailDraftResult: Decodable {
+    var draftId: String
+    var to: String
+    var subject: String
+    var created: Bool
+    var lead: JobLeadDetail?
+
+    enum CodingKeys: String, CodingKey {
+        case to, subject, created, lead
+        case draftId = "draft_id"
     }
 }
 

@@ -358,6 +358,7 @@ extension FeatureGuide {
              title: "Drafts you send yourself",
              points: [
                 "The top \(jobSearchDraftedJobs) jobs get an approach plan, an outreach email, answers to the application's questions and a cover letter.",
+                "Draft email puts a job's outreach email in your Gmail drafts. Fill in anything in [brackets], then send it from Email ▸ Drafts. The job shows when it's sent.",
                 "Nothing is ever sent, applied for or submitted for you.",
                 "Work authorization, sponsorship, clearance, demographic and upload questions are left for you to answer.",
                 "Once a search finishes, Draft or Redraft any job from its page, up to \(jobSearchRedrafts) a search. Re-ranking and redrafting don't use up a search.",
@@ -470,12 +471,14 @@ extension FeatureGuide {
                 "Pick Unread, Read or All mail, search, and click a message. ⌘-click or ⇧-click selects several.",
                 "In a message, choose Summarize, Add to calendar, or Draft reply. You can add instructions for the reply.",
                 "Send to board turns emails into a card on a shared board. Work in Espresso hands them to the assistant.",
+                "Drafts lists your Gmail drafts, including a job's Draft email. Edit, Save, Send or delete one there.",
              ]),
         Page(stage: .expect, icon: "hand.raised.fill",
              title: "Nothing happens behind your back",
              points: [
                 "This screen never labels, moves, archives or marks mail as read in Gmail.",
                 "Draft reply saves the draft to your Gmail Drafts right away. Nothing is sent until you press Send now.",
+                "Saving a draft updates it in Gmail too. Send asks first if it still has parts in [brackets].",
                 "Add to calendar shows the events first. Nothing is added until you press Add, and only to your Espresso calendar.",
                 "Remote images stay blocked until you click Show images.",
              ]),

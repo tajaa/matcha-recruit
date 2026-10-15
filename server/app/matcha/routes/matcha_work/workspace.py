@@ -752,6 +752,96 @@ async def agent_email_send(
             logger.warning("Gmail draft cleanup failed after send", exc_info=True)
     return {"message_id": result.get("id"), "to": to, "subject": subject}
 
+# ── Drafts: list, open, edit, send and delete the person's Gmail drafts ─────
+# Free like reading and sending (no AI). A draft a job search made for a job
+# (`job_search/service.draft_email`) is one of these; sending or deleting it
+# here is noted on that job.
+
+
+def _require_draft_id(value: str) -> str:
+    if not _is_message_id(value):
+        raise HTTPException(status_code=400, detail="Not a Gmail draft id")
+    return value
+
+
+async def _get_draft_or_404(gmail, draft_id: str) -> dict:
+    try:
+        return await gmail.get_draft(draft_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (400, 404):
+            raise HTTPException(status_code=404, detail="That draft was sent or deleted.") from exc
+        raise
+
+
+@router.get("/agent/email/drafts")
+async def agent_email_drafts(current_user: CurrentUser = Depends(require_admin_or_client)):
+    """The caller's Gmail drafts, newest first (no bodies)."""
+    gmail = await _connected_gmail(current_user)
+    return {"drafts": await gmail.list_drafts()}
+
+
+@router.get("/agent/email/drafts/{draft_id}")
+async def agent_email_draft_get(draft_id: str, current_user: CurrentUser = Depends(require_admin_or_client)):
+    _require_draft_id(draft_id)
+    gmail = await _connected_gmail(current_user)
+    return await _get_draft_or_404(gmail, draft_id)
+
+
+@router.put("/agent/email/drafts/{draft_id}")
+async def agent_email_draft_update(
+    draft_id: str, body: dict, current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Save an edited draft: `to` (may be empty), `subject`, `body`. It stays
+    in its thread."""
+    _require_draft_id(draft_id)
+    values = {key: body.get(key) if body.get(key) is not None else "" for key in ("to", "subject", "body")}
+    if not all(isinstance(v, str) for v in values.values()):
+        raise HTTPException(status_code=400, detail="to, subject and body must be text")
+    gmail = await _connected_gmail(current_user)
+    current = await _get_draft_or_404(gmail, draft_id)
+    try:
+        await gmail.update_draft(draft_id, to=values["to"].strip(), subject=values["subject"].strip(),
+                                 body=values["body"], thread_id=current.get("thread_id"))
+    except ValueError as exc:  # a header carrying CR/LF
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await _get_draft_or_404(gmail, draft_id)
+
+
+@router.post("/agent/email/drafts/{draft_id}/send")
+async def agent_email_draft_send(draft_id: str, current_user: CurrentUser = Depends(require_admin_or_client)):
+    """Send a draft exactly as it is saved in Gmail."""
+    from app.matcha.services.matcha_work.gmail_service import GmailSendRateLimited, addresses_in
+    from app.matcha.services.matcha_work.job_search import service as job_service
+
+    _require_draft_id(draft_id)
+    gmail = await _connected_gmail(current_user)
+    draft = await _get_draft_or_404(gmail, draft_id)
+    recipients = len(addresses_in(draft.get("to")))
+    if not recipients:
+        raise HTTPException(status_code=422, detail="Add who it goes to before sending.")
+    try:
+        result = await gmail.send_draft(draft_id, recipients=recipients)
+    except GmailSendRateLimited as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    await job_service.note_email_draft(current_user.id, draft_id, sent=True)
+    return {"message_id": result.get("id"), "to": draft.get("to"), "subject": draft.get("subject")}
+
+
+@router.delete("/agent/email/drafts/{draft_id}")
+async def agent_email_draft_delete(draft_id: str, current_user: CurrentUser = Depends(require_admin_or_client)):
+    from app.matcha.services.matcha_work.job_search import service as job_service
+
+    _require_draft_id(draft_id)
+    gmail = await _connected_gmail(current_user)
+    try:
+        await gmail.delete_draft(draft_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code not in (400, 404):
+            raise
+    await job_service.note_email_draft(current_user.id, draft_id, sent=False)
+    return {"deleted": True}
+
+
 SNAPSHOT_MAX_EMAILS = 10
 
 

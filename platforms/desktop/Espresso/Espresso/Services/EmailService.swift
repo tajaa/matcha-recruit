@@ -72,6 +72,58 @@ enum EmailMailbox: String, CaseIterable {
     }
 }
 
+/// A Gmail draft in the Drafts list (no body).
+struct EmailDraftSummary: Decodable, Identifiable, Equatable {
+    let id: String
+    var to: String
+    var subject: String
+    var snippet: String
+    var updatedMs: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id, to, subject, snippet
+        case updatedMs = "updated_ms"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        to = (try? c.decodeIfPresent(String.self, forKey: .to)) ?? ""
+        subject = (try? c.decodeIfPresent(String.self, forKey: .subject)) ?? ""
+        snippet = (try? c.decodeIfPresent(String.self, forKey: .snippet)) ?? ""
+        updatedMs = try? c.decodeIfPresent(Double.self, forKey: .updatedMs)
+    }
+
+    var updated: Date? { updatedMs.map { Date(timeIntervalSince1970: $0 / 1000) } }
+}
+
+/// One draft, to edit and send.
+struct EmailDraft: Decodable, Equatable {
+    let id: String
+    var to: String
+    var subject: String
+    var body: String
+    var threadId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, to, subject, body
+        case threadId = "thread_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        to = (try? c.decodeIfPresent(String.self, forKey: .to)) ?? ""
+        subject = (try? c.decodeIfPresent(String.self, forKey: .subject)) ?? ""
+        body = (try? c.decodeIfPresent(String.self, forKey: .body)) ?? ""
+        threadId = try? c.decodeIfPresent(String.self, forKey: .threadId)
+    }
+}
+
+struct EmailDraftList: Decodable {
+    let drafts: [EmailDraftSummary]
+}
+
 struct EmailFetchResponse: Decodable {
     let emails: [EmailMessage]
     var nextPageToken: String? = nil
@@ -257,6 +309,37 @@ final class EmailService {
 
     func triage(emailIds: [String]) async throws -> EmailTriageResponse {
         try await client.request(method: "POST", path: "\(basePath)/triage", body: EmailTriageBody(emailIds: emailIds))
+    }
+
+    // MARK: Drafts
+
+    func drafts() async throws -> [EmailDraftSummary] {
+        let list: EmailDraftList = try await client.request(method: "GET", path: "\(basePath)/drafts")
+        return list.drafts
+    }
+
+    func draft(id: String) async throws -> EmailDraft {
+        try await client.request(method: "GET", path: "\(basePath)/drafts/\(Self.pathId(id))")
+    }
+
+    func saveDraft(id: String, to: String, subject: String, body: String) async throws -> EmailDraft {
+        struct Body: Encodable { let to: String; let subject: String; let body: String }
+        return try await client.request(method: "PUT", path: "\(basePath)/drafts/\(Self.pathId(id))",
+                                        body: Body(to: to, subject: subject, body: body))
+    }
+
+    func sendDraft(id: String) async throws {
+        let _: EmailSendResponse = try await client.request(method: "POST", path: "\(basePath)/drafts/\(Self.pathId(id))/send")
+    }
+
+    func deleteDraft(id: String) async throws {
+        let _: [String: Bool] = try await client.request(method: "DELETE", path: "\(basePath)/drafts/\(Self.pathId(id))")
+    }
+
+    /// Gmail ids are url-safe already (letters, digits, `-`, `_`); anything
+    /// else is escaped, so it can never reach a different path.
+    nonisolated static func pathId(_ id: String) -> String {
+        id.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-_"))) ?? ""
     }
 
     func disconnect() async throws {

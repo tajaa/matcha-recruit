@@ -65,6 +65,61 @@ final class JobSearchLogicTests: XCTestCase {
         XCTAssertTrue(JobSearchViewModel.filtered(leads, filter: .applied, showIrrelevant: true).isEmpty)
     }
 
+    func testDraftedShowsTheJobsWithAnApproach() throws {
+        var leads = try decode(JobSearchDetail.self, detailJSON).leads
+        XCTAssertEqual(JobSearchViewModel.filtered(leads, filter: .drafted, showIrrelevant: false).map(\.id), ["l1"])
+        leads[0].userState = "dismissed"
+        XCTAssertTrue(JobSearchViewModel.filtered(leads, filter: .drafted, showIrrelevant: false).isEmpty)
+        XCTAssertEqual(JobSearchViewModel.Filter.allCases.first, .all)
+        XCTAssertEqual(JobSearchViewModel.Filter.drafted.rawValue, "Drafted")
+    }
+
+    func testAJobsEmailStateAndTheSearchsProgress() throws {
+        let json = """
+        {"id": "s1", "status": "done", "fingerprint": "f", "leads": [
+          {"id": "a", "approach_status": "done", "user_state": "saved", "email_draft_id": "r-1",
+           "email_drafted_at": "2026-10-15T03:00:00+00:00", "email_sent_at": null},
+          {"id": "b", "approach_status": "done", "user_state": "applied", "email_draft_id": "r-2",
+           "email_sent_at": "2026-10-15T04:00:00+00:00"},
+          {"id": "c", "approach_status": "done", "user_state": "dismissed", "email_draft_id": "r-3"},
+          {"id": "d", "approach_status": "done", "screen_status": "irrelevant"},
+          {"id": "e", "approach_status": "none"}
+        ]}
+        """
+        let leads = try decode(JobSearchDetail.self, json).leads
+        XCTAssertTrue(leads[0].emailWaiting)
+        XCTAssertNotNil(leads[0].emailDraftedAt)
+        XCTAssertFalse(leads[1].emailWaiting)
+        XCTAssertNotNil(leads[1].emailSentAt)
+        XCTAssertNil(leads[4].emailDraftId)
+        let progress = JobSearchViewModel.progress(leads)
+        // Dismissed jobs don't count; a screened-out job with an approach isn't one to read.
+        XCTAssertEqual(progress, JobSearchViewModel.Progress(drafted: 2, saved: 1, emailsWaiting: 1, emailsSent: 1, applied: 1))
+        XCTAssertEqual(progress.line, "1 saved · 1 email in drafts · 1 sent · 1 applied")
+        XCTAssertNil(JobSearchViewModel.Progress().line)
+        XCTAssertEqual(JobSearchViewModel.Progress(emailsWaiting: 2).line, "2 emails in drafts")
+
+        XCTAssertEqual(JobSearchDetailView.statusText(leads[0]), "In drafts")
+        XCTAssertEqual(JobSearchDetailView.statusText(leads[1]), "Applied")
+        XCTAssertEqual(JobSearchDetailView.statusText(leads[3]), "Screened out")
+        XCTAssertEqual(JobSearchDetailView.statusText(leads[4]), "")
+        var sent = leads[0]
+        sent.emailSentAt = Date()
+        XCTAssertEqual(JobSearchDetailView.statusText(sent), "Emailed")
+
+        let result = try decode(JobEmailDraftResult.self, #"{"draft_id": "r-9", "to": "", "subject": "COO at Acme", "created": true}"#)
+        XCTAssertEqual(result.draftId, "r-9")
+        XCTAssertTrue(result.created)
+        XCTAssertNil(result.lead)
+    }
+
+    func testAPostingReadsCleanly() {
+        let raw = "Chief Operating Officer (COFO)\n  Backpack Healthcare | Hybrid\n\n\n\u{00A0} Build the  engine\r\n\n\n  We are   growing.\n\n"
+        XCTAssertEqual(JobSearchViewModel.tidyPosting(raw),
+                       "Chief Operating Officer (COFO)\nBackpack Healthcare | Hybrid\n\nBuild the engine\n\nWe are growing.")
+        XCTAssertEqual(JobSearchViewModel.tidyPosting("\n\n  \n"), "")
+    }
+
     func testJobsYouSavedOrAppliedToStayInThoseTabsEvenIfScreenedOut() throws {
         var leads = try decode(JobSearchDetail.self, detailJSON).leads
         leads[1].userState = "applied"  // l2 is screened out
@@ -178,11 +233,6 @@ final class JobSearchLogicTests: XCTestCase {
         XCTAssertNil(JobSearchViewModel.webURL("javascript:alert(1)"))
         XCTAssertNil(JobSearchViewModel.webURL("file:///etc/passwd"))
         XCTAssertNil(JobSearchViewModel.webURL(nil))
-        let mail = JobSearchViewModel.mailtoURL(JobOutreach(toEmail: "dana@acme.test", subject: "COO role", body: "Hi & hello"))
-        XCTAssertEqual(mail?.scheme, "mailto")
-        XCTAssertTrue(mail?.absoluteString.contains("dana@acme.test") ?? false)
-        XCTAssertNil(JobSearchViewModel.mailtoURL(JobOutreach(toEmail: nil, subject: "x", body: "y")))
-        XCTAssertNil(JobSearchViewModel.mailtoURL(JobOutreach(toEmail: "a@b.test?cc=evil@x.test", subject: "", body: "")))
     }
 
     func testCriteriaAndPhases() {

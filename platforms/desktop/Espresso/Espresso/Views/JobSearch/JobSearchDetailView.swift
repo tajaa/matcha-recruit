@@ -12,14 +12,19 @@ struct JobSearchDetailView: View {
     var focusLeadId: String? = nil
     @State private var vm = JobSearchViewModel()
     @State private var showWeights = false
+    /// Next steps folded to one line (everywhere, once someone knows them).
+    @AppStorage("jobs.nextSteps.collapsed") private var stepsCollapsed = false
 
     var body: some View {
-        HStack(spacing: 0) {
-            content.frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
-            if vm.selectedLeadId != nil {
-                Divider().opacity(0.2)
-                JobLeadDetailView(vm: vm, onClose: { Task { await vm.selectLead(nil) } })
-                    .frame(width: 440)
+        GeometryReader { geo in
+            HStack(spacing: 0) {
+                content.frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
+                if vm.selectedLeadId != nil {
+                    ResizableTrailingPane(storageKey: "jobs.leadPaneWidth", defaultWidth: 440,
+                                          maxWidth: geo.size.width - 380) {
+                        JobLeadDetailView(vm: vm, onClose: { Task { await vm.selectLead(nil) } })
+                    }
+                }
             }
         }
         .featureGuideOnFirstVisit(.jobSearch)
@@ -48,6 +53,10 @@ struct JobSearchDetailView: View {
                 header(detail.search)
                 Divider().opacity(0.2)
                 if let error = vm.errorMessage { errorBanner(error) }
+                if !detail.search.isLive && !detail.leads.isEmpty {
+                    nextSteps(detail)
+                    Divider().opacity(0.2)
+                }
                 filters(detail)
                 leadsTable
             }
@@ -71,6 +80,69 @@ struct JobSearchDetailView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// The person's own state first, then where its first message is.
+    nonisolated static func statusText(_ lead: JobLeadSummary) -> String {
+        if lead.isIrrelevant { return "Screened out" }
+        if lead.userState == "applied" { return "Applied" }
+        if lead.emailSentAt != nil { return "Emailed" }
+        if lead.emailWaiting { return "In drafts" }
+        return lead.userState == "new" ? "" : lead.userState.capitalized
+    }
+
+    // MARK: Next steps
+
+    /// What to do with a finished search, in order, and how far along it is.
+    private func nextSteps(_ detail: JobSearchDetail) -> some View {
+        let progress = JobSearchViewModel.progress(detail.leads)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("NEXT STEPS")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundColor(appState.themeTextSecondary)
+                if let line = progress.line {
+                    Text(line).font(.system(size: 11)).foregroundColor(appState.themeAccent)
+                }
+                Spacer()
+                Button(stepsCollapsed ? "Show" : "Hide") { stepsCollapsed.toggle() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundColor(appState.themeTextSecondary)
+            }
+            if !stepsCollapsed {
+                step(1, progress.drafted > 0
+                     ? "Read your best matches. \(progress.drafted) have a drafted approach: how to get in, a first message, answers and a cover letter."
+                     : "Read your best matches, and draft an approach for any you like from its page.",
+                     action: progress.drafted > 0 && vm.filter != .drafted ? ("Show them", { vm.filter = .drafted }) : nil)
+                step(2, "Open one you want and click Draft email. It goes to your Gmail drafts, to edit and send from Email.",
+                     action: progress.emailsWaiting > 0 ? ("Open drafts", { appState.openEmailDrafts() }) : nil)
+                step(3, "Apply through the posting, then mark the job Applied so you can keep track.", action: nil)
+            }
+        }
+        .padding(.horizontal, 18).padding(.vertical, 10)
+        .background(appState.themeAccent.opacity(0.04))
+    }
+
+    private func step(_ n: Int, _ text: String, action: (String, () -> Void)?) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(n)")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 16, height: 16)
+                .background(Circle().fill(appState.themeAccent))
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundColor(appState.themeText)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            if let action {
+                Button(action.0, action: action.1)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
         }
     }
 
@@ -197,11 +269,11 @@ struct JobSearchDetailView: View {
             }
             .width(40)
             TableColumn("Status") { lead in
-                Text(lead.isIrrelevant ? "Screened out" : lead.userState == "new" ? "" : lead.userState.capitalized)
+                Text(Self.statusText(lead))
                     .font(.system(size: 11))
-                    .foregroundColor(appState.themeTextSecondary)
+                    .foregroundColor(lead.emailWaiting ? appState.themeAccent : appState.themeTextSecondary)
             }
-            .width(80)
+            .width(90)
         }
         .tableStyle(.inset(alternatesRowBackgrounds: false))
         .scrollContentBackground(.hidden)

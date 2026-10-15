@@ -92,6 +92,25 @@ final class EmailWorkspaceTests: XCTestCase {
         XCTAssertNotEqual(request.id, AssistantEmailContext(emails: [original]).id)
     }
 
+    func testDraftsDecodeAndBracketedPartsAreFound() throws {
+        let list = try JSONDecoder().decode(EmailDraftList.self, from: Data("""
+        {"drafts": [{"id": "r-1", "to": "ceo@example.com", "subject": "COFO role", "snippet": "Hi",
+                     "updated_ms": 1792000000000, "thread_id": null},
+                    {"id": "r-2"}]}
+        """.utf8))
+        XCTAssertEqual(list.drafts.map(\.id), ["r-1", "r-2"])
+        XCTAssertEqual(list.drafts[0].updated, Date(timeIntervalSince1970: 1_792_000_000))
+        XCTAssertEqual(list.drafts[1].subject, "")
+        XCTAssertNil(list.drafts[1].updated)
+        let draft = try JSONDecoder().decode(EmailDraft.self, from: Data(
+            #"{"id": "r-1", "to": "", "subject": "Hi", "body": "Dear [Hiring manager],\nThanks,\n[Your name]\n[Your name]", "thread_id": "t1"}"#.utf8))
+        XCTAssertEqual(draft.threadId, "t1")
+        XCTAssertEqual(EmailDraftsViewModel.placeholders(in: draft.body), ["[Hiring manager]", "[Your name]"])
+        XCTAssertEqual(EmailDraftsViewModel.placeholders(in: "No brackets [x] here, or []"), [])
+        XCTAssertEqual(EmailService.pathId("r-1_A"), "r-1_A")
+        XCTAssertEqual(EmailService.pathId("../x"), "%2E%2E%2Fx")
+    }
+
     func testMailboxDecodingSupportsLegacyAndPaginatedResponses() throws {
         let legacy = try JSONDecoder().decode(EmailFetchResponse.self, from: Data("{\"emails\":[]}".utf8))
         XCTAssertNil(legacy.nextPageToken)

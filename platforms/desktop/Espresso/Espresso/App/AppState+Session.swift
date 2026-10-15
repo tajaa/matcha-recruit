@@ -110,6 +110,9 @@ extension AppState {
         pendingAssistantTaskContext = nil
         calendarFocusDate = nil
         pendingEmailId = nil
+        pendingEmailDraftId = nil
+        pendingEmailDrafts = false
+        EmailDraftsViewModel.shared.reset()
         pendingAssistantEmailContext = nil
         pendingAssistantSalesContext = nil
         EmailViewModel.shared.resetSession()
